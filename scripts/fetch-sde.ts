@@ -1,10 +1,11 @@
-import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdtemp, rename, rm } from "node:fs/promises";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtemp, readdir, rename, rm } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execFile } from "node:child_process";
+import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -58,6 +59,22 @@ async function downloadAndExtract(destination: string, localArchive?: string) {
   await rm(archivePath, { force: true });
 }
 
+async function validateJsonlFiles(directory: string) {
+  const files = (await readdir(directory)).filter((file) => file.endsWith(".jsonl"));
+  for (const file of files) {
+    const lines = createInterface({ input: createReadStream(join(directory, file)), crlfDelay: Infinity });
+    let lineNumber = 0;
+    for await (const line of lines) {
+      lineNumber += 1;
+      if (!line.trim()) continue;
+      try { JSON.parse(line); }
+      catch (error) {
+        throw new Error(`Downloaded SDE file is invalid: ${file} line ${lineNumber}: ${error instanceof Error ? error.message : error}`);
+      }
+    }
+  }
+}
+
 async function main() {
   const manifest = await fetchManifest();
   const currentBuild = readLocalBuildNumber();
@@ -67,17 +84,25 @@ async function main() {
   }
 
   mkdirSync(resolve("sde"), { recursive: true });
-  const stagingDir = await mkdtemp(join(resolve("sde"), ".assemblyline-sde-"));
-  try {
-    await downloadAndExtract(stagingDir, process.env.SDE_ARCHIVE);
-    await rm(rawDir, { recursive: true, force: true });
-    await rename(stagingDir, rawDir);
-    writeFileSync(join(rawDir, "version.json"), JSON.stringify({ buildNumber: manifest.buildNumber, releaseDate: manifest.releaseDate, manifestUrl, archiveUrl }, null, 2));
-    console.log(`SDE build ${manifest.buildNumber} extracted to ${rawDir}`);
-  } catch (error) {
-    await rm(stagingDir, { recursive: true, force: true });
-    throw error;
+  const attempts = process.env.SDE_ARCHIVE ? 1 : 3;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const stagingDir = await mkdtemp(join(resolve("sde"), ".assemblyline-sde-"));
+    try {
+      await downloadAndExtract(stagingDir, process.env.SDE_ARCHIVE);
+      await validateJsonlFiles(stagingDir);
+      await rm(rawDir, { recursive: true, force: true });
+      await rename(stagingDir, rawDir);
+      writeFileSync(join(rawDir, "version.json"), JSON.stringify({ buildNumber: manifest.buildNumber, releaseDate: manifest.releaseDate, manifestUrl, archiveUrl }, null, 2));
+      console.log(`SDE build ${manifest.buildNumber} extracted to ${rawDir}`);
+      return;
+    } catch (error) {
+      lastError = error;
+      await rm(stagingDir, { recursive: true, force: true });
+      if (attempt < attempts) console.warn(`SDE download attempt ${attempt} failed; retrying.`);
+    }
   }
+  throw lastError;
 }
 
 main().catch((error) => { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; });
