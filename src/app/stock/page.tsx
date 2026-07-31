@@ -74,7 +74,11 @@ export default function StockPage() {
   useEffect(() => {
     async function loadPageData() {
       try {
-        const [records, structures] = await Promise.all([loadStockRecords(), loadStructures()]);
+        const [records, structures] = await Promise.all([
+          loadStockRecords().catch(() => []),
+          loadStructures().catch(() => []),
+        ]);
+        setKnownStructures(structures);
         const correctedRecords = records.map((record) => {
           const structure = structures.find((entry) => entry.id === record.structureId);
           if (!structure) return record;
@@ -91,7 +95,6 @@ export default function StockPage() {
             left.systemName.localeCompare(right.systemName),
           ),
         );
-        setKnownStructures(structures);
         await Promise.all(
           hydratedRecords.flatMap((record, index) => {
             const previous = records[index];
