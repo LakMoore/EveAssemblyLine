@@ -66,10 +66,10 @@ async function main() {
     return;
   }
 
-  const stagingDir = await mkdtemp(join(tmpdir(), "assemblyline-sde-"));
+  mkdirSync(resolve("sde"), { recursive: true });
+  const stagingDir = await mkdtemp(join(resolve("sde"), ".assemblyline-sde-"));
   try {
     await downloadAndExtract(stagingDir, process.env.SDE_ARCHIVE);
-    mkdirSync(resolve("sde"), { recursive: true });
     await rm(rawDir, { recursive: true, force: true });
     await rename(stagingDir, rawDir);
     writeFileSync(join(rawDir, "version.json"), JSON.stringify({ buildNumber: manifest.buildNumber, releaseDate: manifest.releaseDate, manifestUrl, archiveUrl }, null, 2));
