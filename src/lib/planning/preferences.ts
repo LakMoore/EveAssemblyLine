@@ -1,0 +1,40 @@
+export type PlannerLocations = {
+  manufacturing: number;
+  reactions: number;
+  market: number;
+  structures: KnownStructure[];
+};
+
+export type KnownStructure = {
+  id: string;
+  systemId: number;
+  systemName: string;
+  type: string;
+  size: "Small" | "Medium" | "Large" | "Extra Large";
+  name: string;
+  rigs: string[];
+};
+
+export type PlannerSettings = {
+  includeCorporationAssets: boolean;
+  respectActiveJobs: boolean;
+  defaultMe: number;
+  defaultTe: number;
+};
+
+export const defaultLocations: PlannerLocations = {
+  manufacturing: 60003760,
+  reactions: 30000142,
+  market: 60008494,
+  structures: [],
+};
+
+export const defaultSettings: PlannerSettings = {
+  includeCorporationAssets: true,
+  respectActiveJobs: true,
+  defaultMe: 10,
+  defaultTe: 20,
+};
+
+export const locationsStorageKey = "assembly-line-locations";
+export const settingsStorageKey = "assembly-line-settings";

@@ -1,0 +1,35 @@
+{
+  "name": "eveassemblyline",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "fetch-sde": "tsx scripts/fetch-sde.ts",
+    "parse-sde": "tsx scripts/parse-sde.ts",
+    "generate-types": "tsx scripts/generate-types.ts",
+    "sde:prepare": "npm run fetch-sde && npm run parse-sde && npm run generate-types"
+  },
+  "dependencies": {
+    "next": "16.2.12",
+    "node-persist": "^4.0.4",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.12",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.1",
+    "typescript": "^5"
+  }
+}
