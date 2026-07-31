@@ -2,6 +2,7 @@ import { createReadStream, existsSync } from "node:fs";
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
+import { jsonrepair } from "jsonrepair";
 
 const rawDir = resolve("sde/raw");
 const processedDir = resolve("sde/processed");
@@ -11,8 +12,12 @@ async function parseJsonl(filePath: string) {
   const lines = createInterface({ input: createReadStream(filePath), crlfDelay: Infinity });
   for await (const line of lines) {
     if (!line.trim()) continue;
-    try { records.push(JSON.parse(line)); }
-    catch (error) { throw new Error(`Invalid JSONL in ${filePath}: ${error instanceof Error ? error.message : error}`); }
+    try {
+      records.push(JSON.parse(line));
+    } catch {
+      try { records.push(JSON.parse(jsonrepair(line))); }
+      catch (error) { throw new Error(`Invalid JSONL in ${filePath}: ${error instanceof Error ? error.message : error}`); }
+    }
   }
   return records;
 }

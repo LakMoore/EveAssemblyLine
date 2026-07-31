@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
+import { jsonrepair } from "jsonrepair";
 
 const execFileAsync = promisify(execFile);
 const rawDir = resolve("sde/raw");
@@ -67,9 +68,13 @@ async function validateJsonlFiles(directory: string) {
     for await (const line of lines) {
       lineNumber += 1;
       if (!line.trim()) continue;
-      try { JSON.parse(line); }
-      catch (error) {
-        throw new Error(`Downloaded SDE file is invalid: ${file} line ${lineNumber}: ${error instanceof Error ? error.message : error}`);
+      try {
+        JSON.parse(line);
+      } catch {
+        try { JSON.parse(jsonrepair(line)); }
+        catch (error) {
+          throw new Error(`Downloaded SDE file is invalid: ${file} line ${lineNumber}: ${error instanceof Error ? error.message : error}`);
+        }
       }
     }
   }
