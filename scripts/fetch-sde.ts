@@ -64,19 +64,26 @@ async function validateJsonlFiles(directory: string) {
   const files = (await readdir(directory)).filter((file) => file.endsWith(".jsonl"));
   for (const file of files) {
     const lines = createInterface({ input: createReadStream(join(directory, file)), crlfDelay: Infinity });
+    let pending = "";
+    let startLine = 0;
     let lineNumber = 0;
     for await (const line of lines) {
       lineNumber += 1;
-      if (!line.trim()) continue;
+      if (!line.trim() && !pending) continue;
+      if (!pending) startLine = lineNumber;
+      pending += line;
+      if (!line.trimEnd().endsWith("}")) continue;
       try {
-        JSON.parse(line);
+        JSON.parse(pending);
       } catch {
-        try { JSON.parse(jsonrepair(line)); }
+        try { JSON.parse(jsonrepair(pending)); }
         catch (error) {
-          throw new Error(`Downloaded SDE file is invalid: ${file} line ${lineNumber}: ${error instanceof Error ? error.message : error}`);
+          throw new Error(`Downloaded SDE file is invalid: ${file} line ${startLine}: ${error instanceof Error ? error.message : error}`);
         }
       }
+      pending = "";
     }
+    if (pending.trim()) throw new Error(`Downloaded SDE file is invalid: ${file} line ${startLine}: record was not terminated`);
   }
 }
 

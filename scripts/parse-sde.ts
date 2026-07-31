@@ -10,15 +10,24 @@ const processedDir = resolve("sde/processed");
 async function parseJsonl(filePath: string) {
   const records: unknown[] = [];
   const lines = createInterface({ input: createReadStream(filePath), crlfDelay: Infinity });
+  let pending = "";
+  let startLine = 0;
+  let lineNumber = 0;
   for await (const line of lines) {
-    if (!line.trim()) continue;
+    lineNumber += 1;
+    if (!line.trim() && !pending) continue;
+    if (!pending) startLine = lineNumber;
+    pending += line;
+    if (!line.trimEnd().endsWith("}")) continue;
     try {
-      records.push(JSON.parse(line));
+      records.push(JSON.parse(pending));
     } catch {
-      try { records.push(JSON.parse(jsonrepair(line))); }
-      catch (error) { throw new Error(`Invalid JSONL in ${filePath}: ${error instanceof Error ? error.message : error}`); }
+      try { records.push(JSON.parse(jsonrepair(pending))); }
+      catch (error) { throw new Error(`Invalid JSONL in ${filePath} line ${startLine}: ${error instanceof Error ? error.message : error}`); }
     }
+    pending = "";
   }
+  if (pending.trim()) throw new Error(`Invalid JSONL in ${filePath} line ${startLine}: record was not terminated`);
   return records;
 }
 
