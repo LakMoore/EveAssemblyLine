@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
 import type { TypesRecordName } from "@/lib/sde/generated";
-import {
-  getBonusDogmaAttributes,
-  getRigDogma,
-  getTypes,
-} from "@/lib/sde/loader";
+import { getBonusDogmaAttributes, getRigDogma, getTypes } from "@/cache/services/sdeCache";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 
 const rigSizeAttribute = 1547;

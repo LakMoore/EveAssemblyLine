@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSystems } from "@/lib/sde/loader";
+import { getSystems } from "@/cache/services/sdeCache";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 
 const resultLimit = 12;

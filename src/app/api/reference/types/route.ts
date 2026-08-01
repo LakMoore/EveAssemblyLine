@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getMarketGroups, getTypes } from "@/lib/sde/loader";
+import { getMarketGroups, getTypes } from "@/cache/services/sdeCache";
 import type { MarketGroupsRecord } from "@/lib/sde/generated";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 
@@ -16,8 +16,7 @@ function marketCategory(
   while (current?.parentGroupID !== undefined) {
     const parent = marketGroupById.get(current.parentGroupID);
     if (!parent) break;
-    if (parent.parentGroupID === undefined)
-      return child?.name[language] ?? child?.name.en;
+    if (parent.parentGroupID === undefined) return child?.name[language] ?? child?.name.en;
     child = current;
     current = parent;
   }
@@ -49,17 +48,19 @@ export async function GET(request: Request) {
       const items = requestedTypeIds.flatMap((typeId) => {
         const item = typeById.get(typeId);
         if (!item || !item.published) return [];
-        return [{
-          typeId: item._key,
-          volume: item.volume ?? 0,
-          category: itemCategory(item.name.en),
-          marketCategory: marketCategory(item.marketGroupID, language, marketGroupById),
-          name:
-            item.name[language] ??
-            item.name.en ??
-            Object.values(item.name).find(Boolean) ??
-            `Type ${item._key}`,
-        }];
+        return [
+          {
+            typeId: item._key,
+            volume: item.volume ?? 0,
+            category: itemCategory(item.name.en),
+            marketCategory: marketCategory(item.marketGroupID, language, marketGroupById),
+            name:
+              item.name[language] ??
+              item.name.en ??
+              Object.values(item.name).find(Boolean) ??
+              `Type ${item._key}`,
+          },
+        ];
       });
       return NextResponse.json({
         items,
@@ -122,7 +123,13 @@ export async function POST(request: Request) {
     const [typeById, marketGroupById] = await Promise.all([getTypes(), getMarketGroups()]);
     const byName = new Map<
       string,
-      { typeId: number; name: string; volume: number; category: ItemCategory; marketCategory?: string }
+      {
+        typeId: number;
+        name: string;
+        volume: number;
+        category: ItemCategory;
+        marketCategory?: string;
+      }
     >();
     for (const item of typeById.values()) {
       if (!item.published) continue;
@@ -141,8 +148,7 @@ export async function POST(request: Request) {
       const name = item.name?.trim() ?? "";
       const quantity = item.quantity;
       const match = byName.get(name.toLocaleLowerCase(language));
-      const validQuantity =
-        quantity === undefined || (Number.isInteger(quantity) && quantity > 0);
+      const validQuantity = quantity === undefined || (Number.isInteger(quantity) && quantity > 0);
       if (!match || !validQuantity)
         return {
           name,

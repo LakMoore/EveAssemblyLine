@@ -18,8 +18,10 @@ const processedDir = resolve("sde/processed");
 let sdeBuildNumber = "unknown";
 const typeById = new Map<number, TypesRecord>();
 const marketGroupById = new Map<number, MarketGroupsRecord>();
-const blueprintByProductTypeId = new Map<number, BlueprintsRecord[]>();
-const blueprintByReactionProductTypeId = new Map<number, BlueprintsRecord[]>();
+const blueprintByBuildProductTypeId = new Map<
+  number,
+  { activity: "manufacturing" | "reaction"; blueprint: BlueprintsRecord }
+>();
 const blueprintByInventionProductId = new Map<number, BlueprintsRecord[]>();
 const productByTypeId = new Map<number, BlueprintsRecordActivitiesManufacturingProductsItem[]>();
 const materialsByBlueprintId = new Map<
@@ -88,10 +90,10 @@ export function getBlueprints() {
         materialsByBlueprintId.set(record._key, manufacturing.materials);
       if (manufacturing?.products) {
         for (const product of manufacturing.products) {
-          blueprintByProductTypeId.set(product.typeID, [
-            ...(blueprintByProductTypeId.get(product.typeID) ?? []),
-            record,
-          ]);
+          blueprintByBuildProductTypeId.set(product.typeID, {
+            activity: "manufacturing",
+            blueprint: record,
+          });
         }
         for (const product of manufacturing.products) {
           productByTypeId.set(product.typeID, [
@@ -104,10 +106,10 @@ export function getBlueprints() {
       if (reaction?.materials) reactionMaterialsByBlueprintId.set(record._key, reaction.materials);
       if (reaction?.products) {
         for (const product of reaction.products) {
-          blueprintByReactionProductTypeId.set(product.typeID, [
-            ...(blueprintByReactionProductTypeId.get(product.typeID) ?? []),
-            record,
-          ]);
+          blueprintByBuildProductTypeId.set(product.typeID, {
+            activity: "reaction",
+            blueprint: record,
+          });
           reactionProductByTypeId.set(product.typeID, [
             ...(reactionProductByTypeId.get(product.typeID) ?? []),
             product,
@@ -123,9 +125,12 @@ export function getBlueprints() {
       }
     }
     return {
-      byProductTypeId: blueprintByProductTypeId,
-      byReactionProductTypeId: blueprintByReactionProductTypeId,
+      byBuildProductTypeId: blueprintByBuildProductTypeId,
       byInventionProductId: blueprintByInventionProductId,
+      productByTypeId,
+      materialsByBlueprintId,
+      reactionMaterialsByBlueprintId,
+      reactionProductByTypeId,
     };
   });
 }

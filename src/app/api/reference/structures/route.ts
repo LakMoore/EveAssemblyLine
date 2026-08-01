@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSdeBuildNumber, getStations } from "@/lib/sde/loader";
+import { getSdeBuildNumber, getStations } from "@/cache/services/sdeCache";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 
 const stationNameCache = new Map<string, string>();
