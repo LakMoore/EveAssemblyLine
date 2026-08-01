@@ -11,6 +11,7 @@ import { jsonrepair } from "jsonrepair";
 
 const execFileAsync = promisify(execFile);
 const rawDir = resolve(".next/cache/assemblyline-sde/raw");
+const sdeCacheDir = resolve(".next/cache/assemblyline-sde");
 const archivePath = join(tmpdir(), "assemblyline-sde.zip");
 const manifestUrl = "https://developers.eveonline.com/static-data/tranquility/latest.jsonl";
 const archiveUrl = "https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip";
@@ -95,11 +96,11 @@ async function main() {
     return;
   }
 
-  mkdirSync(resolve(".next/cache/assemblyline-sde"), { recursive: true });
+  mkdirSync(sdeCacheDir, { recursive: true });
   const attempts = process.env.SDE_ARCHIVE ? 1 : 3;
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const stagingDir = await mkdtemp(join(resolve("sde"), ".assemblyline-sde-"));
+    const stagingDir = await mkdtemp(join(sdeCacheDir, ".assemblyline-sde-"));
     try {
       await downloadAndExtract(stagingDir, process.env.SDE_ARCHIVE);
       await validateJsonlFiles(stagingDir);
