@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 import { jsonrepair } from "jsonrepair";
 
 const execFileAsync = promisify(execFile);
-const rawDir = resolve("sde/raw");
+const rawDir = resolve(".next/cache/assemblyline-sde/raw");
 const archivePath = join(tmpdir(), "assemblyline-sde.zip");
 const manifestUrl = "https://developers.eveonline.com/static-data/tranquility/latest.jsonl";
 const archiveUrl = "https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip";
@@ -95,7 +95,7 @@ async function main() {
     return;
   }
 
-  mkdirSync(resolve("sde"), { recursive: true });
+  mkdirSync(resolve(".next/cache/assemblyline-sde"), { recursive: true });
   const attempts = process.env.SDE_ARCHIVE ? 1 : 3;
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {

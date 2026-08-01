@@ -4,7 +4,7 @@ import { basename, extname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { jsonrepair } from "jsonrepair";
 
-const rawDir = resolve("sde/raw");
+const rawDir = resolve(".next/cache/assemblyline-sde/raw");
 const processedDir = resolve("sde/processed");
 
 async function parseJsonl(filePath: string) {
@@ -35,7 +35,7 @@ async function main() {
   if (!existsSync(rawDir)) throw new Error("SDE raw directory is missing. Run npm run fetch-sde first.");
   await mkdir(processedDir, { recursive: true });
   const files = (await readdir(rawDir)).filter((file) => extname(file) === ".jsonl");
-  if (files.length === 0) throw new Error("No .jsonl files found in sde/raw. Run npm run fetch-sde first.");
+  if (files.length === 0) throw new Error("No .jsonl files found in .next/cache/assemblyline-sde/raw. Run npm run fetch-sde first.");
   for (const file of files) {
     await writeFile(join(processedDir, `${basename(file, ".jsonl")}.json`), JSON.stringify(await parseJsonl(join(rawDir, file))));
     console.log(`Parsed ${file}`);
