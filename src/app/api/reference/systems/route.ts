@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ensureSdeLoaded, systemById } from "@/lib/sde/loader";
+import { getSystems } from "@/lib/sde/loader";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 
 const resultLimit = 12;
@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
 
   try {
-    ensureSdeLoaded();
+    const systemById = await getSystems();
     if (query.length < 2) return NextResponse.json({ items: [] });
 
     const normalizedQuery = query.toLocaleLowerCase(language);

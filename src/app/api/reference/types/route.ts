@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
-import { ensureSdeLoaded, marketGroupById, typeById } from "@/lib/sde/loader";
+import { getMarketGroups, getTypes } from "@/lib/sde/loader";
+import type { MarketGroupsRecord } from "@/lib/sde/generated";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 
 const resultLimit = 12;
 type ItemCategory = "bpo" | "bpc" | "reaction" | "item";
 
-function marketCategory(marketGroupId: number | undefined, language: SdeLanguage) {
+function marketCategory(
+  marketGroupId: number | undefined,
+  language: SdeLanguage,
+  marketGroupById: Map<number, MarketGroupsRecord>,
+) {
   let current = marketGroupId === undefined ? undefined : marketGroupById.get(marketGroupId);
   let child = current;
   while (current?.parentGroupID !== undefined) {
@@ -35,7 +40,7 @@ export async function GET(request: Request) {
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
 
   try {
-    ensureSdeLoaded();
+    const [typeById, marketGroupById] = await Promise.all([getTypes(), getMarketGroups()]);
     if (typeIdValues.length > 0) {
       const requestedTypeIds = typeIds
         .filter((value) => /^\d+$/.test(value))
@@ -48,7 +53,7 @@ export async function GET(request: Request) {
           typeId: item._key,
           volume: item.volume ?? 0,
           category: itemCategory(item.name.en),
-          marketCategory: marketCategory(item.marketGroupID, language),
+          marketCategory: marketCategory(item.marketGroupID, language, marketGroupById),
           name:
             item.name[language] ??
             item.name.en ??
@@ -114,7 +119,7 @@ export async function POST(request: Request) {
         { status: 400 },
       );
 
-    ensureSdeLoaded();
+    const [typeById, marketGroupById] = await Promise.all([getTypes(), getMarketGroups()]);
     const byName = new Map<
       string,
       { typeId: number; name: string; volume: number; category: ItemCategory; marketCategory?: string }
@@ -128,7 +133,7 @@ export async function POST(request: Request) {
           name,
           volume: item.volume ?? 0,
           category: itemCategory(name),
-          marketCategory: marketCategory(item.marketGroupID, language),
+          marketCategory: marketCategory(item.marketGroupID, language, marketGroupById),
         });
     }
 

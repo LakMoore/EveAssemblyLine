@@ -1,9 +1,6 @@
 import {
-  blueprintByProductTypeId,
-  blueprintByReactionProductTypeId,
-  blueprintByInventionProductId,
-  ensureSdeLoaded,
-  typeById,
+  getBlueprints,
+  getTypes,
 } from "@/lib/sde/loader";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import { PlanRequest, PlanResult } from "./types";
@@ -15,13 +12,17 @@ function clampEfficiency(value: number, maximum: number) {
   return Math.min(maximum, Math.max(0, Number.isFinite(value) ? value : 0));
 }
 
-function typeName(typeId: number, fallback: string, language: SdeLanguage) {
-  const name = typeById.get(typeId)?.name;
-  return name?.[language] ?? name?.en ?? fallback;
-}
-
-export function calculatePlan(request: PlanRequest): PlanResult {
-  ensureSdeLoaded();
+export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
+  const [blueprints, typeById] = await Promise.all([getBlueprints(), getTypes()]);
+  const {
+    byProductTypeId: blueprintByProductTypeId,
+    byReactionProductTypeId: blueprintByReactionProductTypeId,
+    byInventionProductId: blueprintByInventionProductId,
+  } = blueprints;
+  function typeName(typeId: number, fallback: string, language: SdeLanguage) {
+    const name = typeById.get(typeId)?.name;
+    return name?.[language] ?? name?.en ?? fallback;
+  }
   const language = request.language ?? "en";
   const materials = new Map<number, Material>();
   const bpcs = new Map<number, PlanResult["lists"]["bpcsNeeded"][number]>();

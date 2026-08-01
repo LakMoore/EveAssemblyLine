@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import type { TypesRecordName } from "@/lib/sde/generated";
 import {
-  bonusDogmaAttributesById,
-  ensureSdeLoaded,
-  rigDogmaByTypeId,
-  typeById,
+  getBonusDogmaAttributes,
+  getRigDogma,
+  getTypes,
 } from "@/lib/sde/loader";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 
@@ -28,7 +27,11 @@ export async function GET(request: Request) {
   const requestedLanguage = new URL(request.url).searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
   try {
-    ensureSdeLoaded();
+    const [bonusDogmaAttributesById, rigDogmaByTypeId, typeById] = await Promise.all([
+      getBonusDogmaAttributes(),
+      getRigDogma(),
+      getTypes(),
+    ]);
     if (!cachedRigs) {
       const bonusAttributes = new Set([
         rigSizeAttribute,

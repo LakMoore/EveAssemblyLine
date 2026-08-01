@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { ensureSdeLoaded, sdeBuildNumber, stationById } from "@/lib/sde/loader";
+import { getSdeBuildNumber, getStations } from "@/lib/sde/loader";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 
 const stationNameCache = new Map<string, string>();
 const stationNameCacheSeconds = 60 * 60 * 24 * 365;
 
-async function stationName(stationId: number, language: SdeLanguage) {
+async function stationName(stationId: number, language: SdeLanguage, sdeBuildNumber: string) {
   const cacheKey = `${sdeBuildNumber}:${stationId}:${language}`;
   const cachedName = stationNameCache.get(cacheKey);
   if (cachedName) return cachedName;
@@ -36,14 +36,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "A valid system ID is required." }, { status: 400 });
 
   try {
-    ensureSdeLoaded();
+    const [sdeBuildNumber, stationById] = await Promise.all([getSdeBuildNumber(), getStations()]);
     const stations = [...stationById.values()]
       .filter((station) => station.solarSystemID === systemId)
       .sort((left, right) => left._key - right._key);
     const items = await Promise.all(
       stations.map(async (station) => ({
         structureId: station._key,
-        name: await stationName(station._key, language),
+        name: await stationName(station._key, language, sdeBuildNumber),
       })),
     );
     return NextResponse.json({ items });
