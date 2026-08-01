@@ -1,30 +1,8 @@
 import type { KnownStructure } from "./preferences";
+import { getPlanningDatabase, structureStoreName } from "./planningDatabase";
 
-const databaseName = "assembly-line";
-const databaseVersion = 3;
-const buildStoreName = "build-lists";
-const stockStoreName = "stock";
-const structureStoreName = "structures";
 const structureKey = "known";
 const localStorageKey = "assembly-line-known-structures";
-
-function openDatabase() {
-  return new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(databaseName, databaseVersion);
-    request.onupgradeneeded = () => {
-      const database = request.result;
-      if (!database.objectStoreNames.contains(buildStoreName))
-        database.createObjectStore(buildStoreName);
-      if (!database.objectStoreNames.contains(stockStoreName))
-        database.createObjectStore(stockStoreName);
-      if (!database.objectStoreNames.contains(structureStoreName))
-        database.createObjectStore(structureStoreName);
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () =>
-      reject(request.error ?? new Error("Could not open the browser database."));
-  });
-}
 
 function isKnownStructure(value: unknown): value is KnownStructure {
   if (!value || typeof value !== "object") return false;
@@ -62,18 +40,16 @@ export async function loadStructures() {
     return loadLocalStructures();
   }
   try {
-    const database = await openDatabase();
+    const database = await getPlanningDatabase();
     const structures = await new Promise<KnownStructure[]>((resolve, reject) => {
       const request = database
         .transaction(structureStoreName, "readonly")
         .objectStore(structureStoreName)
         .get(structureKey);
       request.onsuccess = () => {
-        database.close();
         resolve(Array.isArray(request.result) ? request.result.filter(isKnownStructure) : []);
       };
       request.onerror = () => {
-        database.close();
         reject(request.error ?? new Error("Could not load known structures."));
       };
     });
@@ -88,16 +64,14 @@ export async function loadStructures() {
 export async function saveStructures(structures: KnownStructure[]) {
   saveLocalStructures(structures);
   try {
-    const database = await openDatabase();
+    const database = await getPlanningDatabase();
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(structureStoreName, "readwrite");
       transaction.objectStore(structureStoreName).put(structures, structureKey);
       transaction.oncomplete = () => {
-        database.close();
         resolve();
       };
       transaction.onerror = () => {
-        database.close();
         reject(transaction.error ?? new Error("Could not save known structures."));
       };
     });
