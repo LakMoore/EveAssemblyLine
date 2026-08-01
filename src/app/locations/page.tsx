@@ -9,6 +9,7 @@ import {
   type PlannerLocations,
 } from "@/lib/planning/preferences";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
+import { fetchRigs } from "@/lib/reference/rigs";
 import { loadStructures, saveStructures } from "@/lib/planning/structureStore";
 import styles from "../page.module.css";
 
@@ -191,11 +192,6 @@ const fallbackRigOptionsBySize: Record<StructureSize, string[]> = {
   ],
 };
 
-type SdeRig = {
-  name: string;
-  size: Exclude<StructureSize, "Small">;
-};
-
 function typeForName(name: string) {
   return structureTypes.find((structure) => structure.name === name) ?? structureTypes[0];
 }
@@ -259,20 +255,17 @@ export default function LocationsPage() {
   }, []);
 
   useEffect(() => {
-    fetch(`/api/reference/rigs?language=${language}`)
-      .then((response) => response.json() as Promise<{ items?: SdeRig[] }>)
-      .then((data) => {
-        if (!data.items?.length) return;
-        const options: Record<StructureSize, string[]> = {
-          Small: ["No Rig"],
-          Medium: ["No Rig"],
-          Large: ["No Rig"],
-          "Extra Large": ["No Rig"],
-        };
-        for (const rig of data.items ?? []) options[rig.size].push(rig.name);
-        setRigOptionsBySize(options);
-      })
-      .catch(() => undefined);
+    fetchRigs(language).then((rigs) => {
+      if (!rigs.length) return;
+      const options: Record<StructureSize, string[]> = {
+        Small: ["No Rig"],
+        Medium: ["No Rig"],
+        Large: ["No Rig"],
+        "Extra Large": ["No Rig"],
+      };
+      for (const rig of rigs) options[rig.size].push(rig.name);
+      setRigOptionsBySize(options);
+    }).catch(() => undefined);
   }, [language]);
 
   function openAddDialog() {

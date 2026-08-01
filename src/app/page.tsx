@@ -16,6 +16,7 @@ import {
   type PlannerSettings,
 } from "@/lib/planning/preferences";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
+import { fetchTypeMetadata } from "@/lib/reference/types";
 import styles from "./page.module.css";
 
 const tabs = ["Materials", "BPCs", "Invention", "Reactions", "Manufacturing"];
@@ -37,20 +38,19 @@ function formatDuration(totalSeconds: number) {
 }
 
 async function localizeItems(buildItems: BuildItem[], targetLanguage: SdeLanguage) {
-  return Promise.all(
-    buildItems.map(async (item) => {
-      try {
-        const response = await fetch(
-          `/api/reference/types?typeId=${item.typeId}&language=${targetLanguage}`,
-        );
-        const data = (await response.json()) as { items?: TypeResult[] };
-        const localizedItem = data.items?.[0];
-        return localizedItem ? { ...item, name: localizedItem.name } : item;
-      } catch {
-        return item;
-      }
-    }),
-  );
+  try {
+    const metadata = await fetchTypeMetadata(
+      buildItems.map((item) => item.typeId),
+      targetLanguage,
+    );
+    const metadataByTypeId = new Map(metadata.map((item) => [item.typeId, item]));
+    return buildItems.map((item) => {
+      const localizedItem = metadataByTypeId.get(item.typeId);
+      return localizedItem ? { ...item, name: localizedItem.name } : item;
+    });
+  } catch {
+    return buildItems;
+  }
 }
 
 export default function Home() {

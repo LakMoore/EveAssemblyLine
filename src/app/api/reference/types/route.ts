@@ -29,30 +29,35 @@ function itemCategory(name: string): ItemCategory {
 export async function GET(request: Request) {
   const searchParams = new URL(request.url).searchParams;
   const query = searchParams.get("query")?.trim() ?? "";
-  const typeIdValue = searchParams.get("typeId");
-  const typeId = typeIdValue && /^\d+$/.test(typeIdValue) ? Number(typeIdValue) : null;
+  const typeIdValues = searchParams.getAll("typeId");
+  const typeIds = typeIdValues.flatMap((value) => value.split(",")).map((value) => value.trim());
   const requestedLanguage = searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
 
   try {
     ensureSdeLoaded();
-    if (typeId !== null) {
-      const item = typeById.get(typeId);
-      if (!item || !item.published) return NextResponse.json({ items: [] });
+    if (typeIdValues.length > 0) {
+      const requestedTypeIds = typeIds
+        .filter((value) => /^\d+$/.test(value))
+        .map(Number)
+        .filter((typeId) => Number.isSafeInteger(typeId));
+      const items = requestedTypeIds.flatMap((typeId) => {
+        const item = typeById.get(typeId);
+        if (!item || !item.published) return [];
+        return [{
+          typeId: item._key,
+          volume: item.volume ?? 0,
+          category: itemCategory(item.name.en),
+          marketCategory: marketCategory(item.marketGroupID, language),
+          name:
+            item.name[language] ??
+            item.name.en ??
+            Object.values(item.name).find(Boolean) ??
+            `Type ${item._key}`,
+        }];
+      });
       return NextResponse.json({
-        items: [
-          {
-            typeId: item._key,
-              volume: item.volume ?? 0,
-            category: itemCategory(item.name.en),
-            marketCategory: marketCategory(item.marketGroupID, language),
-            name:
-              item.name[language] ??
-              item.name.en ??
-              Object.values(item.name).find(Boolean) ??
-              `Type ${item._key}`,
-          },
-        ],
+        items,
       });
     }
     if (query.length < 2) return NextResponse.json({ items: [] });

@@ -14,6 +14,7 @@ import {
 } from "@/lib/planning/stockStore";
 import { loadStructures } from "@/lib/planning/structureStore";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
+import { fetchTypeMetadata } from "@/lib/reference/types";
 import type { KnownStructure } from "@/lib/planning/preferences";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import styles from "../page.module.css";
@@ -737,33 +738,29 @@ function mergeItems(existing: StockItem[], imported: StockItem[]) {
 }
 
 async function hydrateVolumes(records: StockRecord[], language: SdeLanguage) {
+  let metadata: Awaited<ReturnType<typeof fetchTypeMetadata>> = [];
+  try {
+    metadata = await fetchTypeMetadata(
+      records.flatMap((record) => record.items.map((item) => item.typeId)),
+      language,
+    );
+  } catch {
+    return records;
+  }
+  const metadataByTypeId = new Map(metadata.map((item) => [item.typeId, item]));
   const hydrated = await Promise.all(
     records.map(async (record) => {
-      const items = await Promise.all(
-        record.items.map(async (item) => {
-          try {
-            const response = await fetch(
-              `/api/reference/types?typeId=${item.typeId}&language=${language}`,
-            );
-            const data = (await response.json()) as {
-              items?: Array<{
-                volume?: number;
-                category?: StockItem["category"];
-                marketCategory?: string;
-              }>;
-            };
-            const metadata = data.items?.[0];
-            return {
+      const items = record.items.map((item) => {
+        const itemMetadata = metadataByTypeId.get(item.typeId);
+        return itemMetadata
+          ? {
               ...item,
-              volume: metadata?.volume ?? 0,
-              category: metadata?.category ?? "item",
-              marketCategory: metadata?.marketCategory,
-            };
-          } catch {
-            return item;
-          }
-        }),
-      );
+              volume: itemMetadata.volume ?? 0,
+              category: itemMetadata.category ?? "item",
+              marketCategory: itemMetadata.marketCategory,
+            }
+          : item;
+      });
       return items.every((item, index) => item === record.items[index])
         ? record
         : { ...record, items };
