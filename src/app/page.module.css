@@ -110,6 +110,9 @@
 }
 
 .sidebarToggle {
+    position: absolute;
+    top: 12px;
+    right: 12px;
     border: 1px solid #315863;
     background: transparent;
     color: #a7c1c8;
@@ -129,6 +132,12 @@
 .layoutCollapsed .sidebar {
     padding-left: 8px;
     padding-right: 8px
+}
+
+.layoutCollapsed .sidebarToggle {
+    right: 8px;
+    padding-left: 6px;
+    padding-right: 6px
 }
 
 .layoutCollapsed .sectionLabel,
@@ -165,6 +174,10 @@
 .layoutCollapsed .addButton:after {
     content: "+";
     font-size: 16px
+}
+
+.layoutCollapsed .sidebarFooter .addButton {
+    display: block
 }
 
 .tableHead {
@@ -240,6 +253,16 @@
     .layout .addButton:after {
         content: "+";
         font-size: 16px
+    }
+
+    .layout .sidebarFooter .addButton {
+        display: block
+    }
+
+    .sidebarFooter {
+        width: 64px;
+        padding-left: 8px;
+        padding-right: 8px
     }
 
     .sidebarToggle {
@@ -1007,6 +1030,11 @@
     box-shadow: 0 0 9px #5ed8ef
 }
 
+.offlineDot {
+    background: #e77b68;
+    box-shadow: 0 0 9px #e77b68
+}
+
 .avatar {
     margin-left: 18px;
     width: 34px;
@@ -1015,7 +1043,12 @@
     background: transparent;
     color: #d8e8ec;
     border-radius: 50%;
-    font-size: 11px
+    font-size: 18px;
+    line-height: 1;
+    display: grid;
+    place-items: center;
+    text-decoration: none;
+    cursor: pointer
 }
 
 .layout {
@@ -1025,6 +1058,7 @@
 }
 
 .sidebar {
+    position: relative;
     background: #0a1a21;
     border-right: 1px solid var(--line);
     padding: 38px 17px 24px;
@@ -1079,7 +1113,12 @@
 }
 
 .sidebarBottom {
-    margin-top: auto
+    display: flex;
+    flex-direction: column
+}
+
+.pilotList {
+    min-height: 0
 }
 
 .pilot {
@@ -1133,7 +1172,79 @@
     font-size: 11px;
     padding: 10px;
     width: 100%;
-    margin-top: 10px
+    margin-top: 10px;
+    flex-shrink: 0;
+    text-decoration: none
+}
+
+.sidebarFooter {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 230px;
+    z-index: 1;
+    padding: 10px 17px 24px;
+    background: #0a1a21;
+    border-right: 1px solid var(--line);
+    border-top: 1px solid #1d4652;
+    display: flex;
+    align-items: center;
+    gap: 8px
+}
+
+.sidebarCount {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    border: 1px solid #356777;
+    border-radius: 50%;
+    color: #8aa4ad;
+    text-align: center;
+    font: 11px 'DM Mono';
+    cursor: help
+}
+
+.sidebarCount::after {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 8px);
+    padding: 6px 8px;
+    border: 1px solid #356777;
+    background: #06181f;
+    color: #d8e8ec;
+    content: attr(data-tooltip);
+    font: 10px 'DM Mono';
+    letter-spacing: 0;
+    line-height: 1.2;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(4px);
+    transition: opacity .15s ease, transform .15s ease
+}
+
+.sidebarCount:hover::after,
+.sidebarCount:focus-visible::after {
+    opacity: 1;
+    transform: translateY(0)
+}
+
+.sidebarFooter .addButton {
+    flex: 1;
+    margin-top: 0
+}
+
+.layoutCollapsed .sidebarFooter {
+    width: 64px;
+    padding-left: 8px;
+    padding-right: 8px
+}
+
+.layoutCollapsed .sidebarCount {
+    display: none
 }
 
 .content {

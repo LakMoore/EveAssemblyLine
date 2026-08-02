@@ -13,6 +13,7 @@ export type KnownStructure = {
   size: "Small" | "Medium" | "Large" | "Extra Large";
   name: string;
   rigs: string[];
+  esiStructureId?: number;
 };
 
 export type PlannerSettings = {

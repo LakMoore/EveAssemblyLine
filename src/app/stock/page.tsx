@@ -71,9 +71,11 @@ export default function StockPage() {
   const [viewing, setViewing] = useState<StockRecord | null>(null);
   const [viewingFilter, setViewingFilter] = useState<StockFilter>({ kind: "all" });
   const [pasting, setPasting] = useState<StockRecord | null>(null);
+  const [isHydratingVolumes, setIsHydratingVolumes] = useState(false);
 
   useEffect(() => {
     async function loadPageData() {
+      setIsHydratingVolumes(true);
       try {
         const [records, structures] = await Promise.all([
           loadStockRecords().catch(() => []),
@@ -90,6 +92,11 @@ export default function StockPage() {
             structureName: structure.name,
           };
         });
+        setLocations(
+          [...correctedRecords].sort((left, right) =>
+            left.systemName.localeCompare(right.systemName),
+          ),
+        );
         const hydratedRecords = await hydrateVolumes(correctedRecords, language);
         setLocations(
           [...hydratedRecords].sort((left, right) =>
@@ -107,6 +114,8 @@ export default function StockPage() {
         );
       } catch {
         setLocations([]);
+      } finally {
+        setIsHydratingVolumes(false);
       }
     }
     void loadPageData();
@@ -187,6 +196,7 @@ export default function StockPage() {
                 <StockLocationCard
                   key={locationKey(location)}
                   location={location}
+                  isVolumesLoading={isHydratingVolumes}
                   onView={openItems}
                   onPaste={() => setPasting(location)}
                   onRemove={() => removeLocation(location)}
@@ -432,11 +442,13 @@ const stockCategories: Array<{ id: NonNullable<StockItem["category"]>; label: st
 
 function StockLocationCard({
   location,
+  isVolumesLoading,
   onView,
   onPaste,
   onRemove,
 }: {
   location: StockRecord;
+  isVolumesLoading: boolean;
   onView: (location: StockRecord, filter?: StockFilter) => void;
   onPaste: () => void;
   onRemove: () => void;
@@ -462,7 +474,7 @@ function StockLocationCard({
             <button type="button" className={styles.stockMetric} key={category.id} onClick={() => onView(location, { kind: "category", value: category.id })}>
               <span>{category.label}</span>
               <strong>{items.length.toLocaleString()}</strong>
-              <small>{formatVolume(volume)}</small>
+              <small>{isVolumesLoading ? "Calculating..." : formatVolume(volume)}</small>
             </button>
           );
         })}

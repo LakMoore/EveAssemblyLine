@@ -92,6 +92,7 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
   const inventionJobs = new Map<number, PlanResult["lists"]["inventionJobs"][number]>();
   const producedParts = new Map<number, number>();
   const availableStock = new Map<number, number>();
+  const consumedStock = new Map<number, number>();
   const buildBlacklist = new Set(request.settings.buildBlacklist);
   const buyBlacklist = new Set(request.settings.buyBlacklist);
   const buildBlueprintsByTypeId = new Map<
@@ -112,6 +113,7 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
     return profiler.measure("addMaterial", async () => {
       const stockAvailable = availableStock.get(typeId) ?? 0;
       const stockConsumed = Math.min(stockAvailable, quantity);
+      if (stockConsumed > 0) consumedStock.set(typeId, (consumedStock.get(typeId) ?? 0) + stockConsumed);
       const remainingStock = stockAvailable - stockConsumed;
       if (remainingStock > 0) availableStock.set(typeId, remainingStock);
       else if (stockConsumed > 0) availableStock.delete(typeId);
@@ -142,6 +144,7 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
 
     const stockAvailable = availableStock.get(typeId) ?? 0;
     const stockConsumed = Math.min(stockAvailable, quantity);
+      if (stockConsumed > 0) consumedStock.set(typeId, (consumedStock.get(typeId) ?? 0) + stockConsumed);
       if (stockConsumed > 0) {
       const remaining = stockAvailable - stockConsumed;
       if (remaining > 0) availableStock.set(typeId, remaining);
@@ -326,11 +329,34 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
   for (const job of inventionJobs.values()) job.name = resolvedName(job.typeId);
 
   const materialsToBuy = [...materials.values()];
+  const haulingTasks: PlanResult["lists"]["haulingTasks"] = [];
+  const remainingConsumption = new Map(consumedStock);
+  const planningStock = request.stock ?? [];
+  for (const stock of planningStock) {
+    if (!stock.sourceLocationId || stock.locationResolved === false) continue;
+    const quantity = Math.min(stock.quantity, remainingConsumption.get(stock.typeId) ?? 0);
+    if (quantity <= 0 || !request.locations || stock.sourceLocationId === request.locations.manufacturing) continue;
+    remainingConsumption.set(stock.typeId, (remainingConsumption.get(stock.typeId) ?? 0) - quantity);
+    haulingTasks.push({
+      itemTypeId: stock.typeId,
+      name: resolvedName(stock.typeId),
+      quantity,
+      volume: 0,
+      fromLocationId: stock.sourceLocationId,
+      toLocationId: request.locations.manufacturing,
+      fromLocationName: stock.sourceLocationName,
+      ownerType: stock.ownerType,
+      ownerId: stock.ownerId,
+      locationResolved: true,
+    });
+  }
   const result = {
     metadata: {
       generatedAt: new Date().toISOString(),
       assetsLastUpdated: null,
       jobsLastUpdated: null,
+      unresolvedAssetCount: planningStock.filter((stock) => stock.locationResolved === false).length,
+      corporationAssetSources: [...new Set(planningStock.filter((stock) => stock.ownerType === "corporation").map((stock) => stock.ownerId).filter((id): id is number => id !== undefined))],
     },
     lists: {
       materialsToBuy,
@@ -338,7 +364,7 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
       inventionJobs: [...inventionJobs.values()],
       reactionJobs: [...reactionJobs.values()],
       manufacturingJobs: [...manufacturingJobs.values()],
-      haulingTasks: [],
+      haulingTasks,
     },
   };
   if (profiler.isEnabled) {

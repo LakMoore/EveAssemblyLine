@@ -12,13 +12,18 @@ export interface PlanStockItem {
   typeId: number;
   name: string;
   quantity: number;
+  sourceLocationId?: number;
+  sourceLocationName?: string;
+  ownerType?: "character" | "corporation";
+  ownerId?: number;
+  locationResolved?: boolean;
 }
 
 export interface PlanRequest {
   language?: SdeLanguage;
-  characterIds: number[];
   items: BuildItem[];
-  stock: PlanStockItem[];
+  stock?: PlanStockItem[];
+  assets?: PlanStockItem[];
   locations?: { manufacturing: number; reactions: number; market: number };
   settings: {
     includeCorporationAssets: boolean;
@@ -34,6 +39,8 @@ export interface PlanResult {
     generatedAt: string;
     assetsLastUpdated: string | null;
     jobsLastUpdated: string | null;
+    unresolvedAssetCount?: number;
+    corporationAssetSources?: number[];
   };
   lists: {
     materialsToBuy: Array<{
@@ -68,6 +75,11 @@ export interface PlanResult {
       volume: number;
       fromLocationId: number;
       toLocationId: number;
+      fromLocationName?: string;
+      toLocationName?: string;
+      ownerType?: "character" | "corporation";
+      ownerId?: number;
+      locationResolved?: boolean;
     }>;
   };
 }

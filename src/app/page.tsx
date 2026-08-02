@@ -23,7 +23,6 @@ const tabs = ["Materials", "BPCs", "Invention", "Reactions", "Manufacturing"];
 type BuildItem = { name: string; typeId: number; quantity: number; me: number; te: number };
 type TypeResult = { name: string; typeId: number };
 type PasteResult = { name: string; quantity?: number; typeId?: number; error?: string };
-
 function formatDuration(totalSeconds: number) {
   const totalMinutes = Math.ceil(totalSeconds / 60);
   const days = Math.floor(totalMinutes / 1440);
@@ -113,10 +112,9 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          characterIds: [90000001],
           language,
           items,
-          stock,
+          assets: stock,
           locations,
           settings: {
             includeCorporationAssets: settings.includeCorporationAssets,
@@ -160,15 +158,12 @@ export default function Home() {
     <AppShell activePage="planner" language={language} onLanguageChange={setLanguage}>
       <div className={styles.pageIntro}>
         <div>
-          <p className={styles.eyebrow}>PRODUCTION CONTROL / JITA CLUSTER</p>
+          <p className={styles.eyebrow}>PRODUCTION CONTROL</p>
           <h1>Build queue</h1>
           <p className={styles.subtitle}>
             Turn your project requirements into a clean, actionable production plan.
           </p>
         </div>
-        <button className={styles.refresh}>
-          ↻ <span>Refresh data</span>
-        </button>
       </div>
       <form onSubmit={calculatePlan}>
         <div className={styles.workspaceGrid}>
@@ -627,9 +622,7 @@ function PlanList({ activeTab, plan }: { activeTab: string; plan: PlanResult }) 
       activeTab === "Materials"
         ? list.filter(
             (entry) =>
-              "quantity" in entry &&
-              typeof entry.quantity === "number" &&
-              entry.quantity > 0,
+              "quantity" in entry && typeof entry.quantity === "number" && entry.quantity > 0,
           )
         : list;
     const lines = entriesToCopy.map((entry) => {
@@ -685,10 +678,9 @@ function PlanList({ activeTab, plan }: { activeTab: string; plan: PlanResult }) 
             activeTab === "Materials"
               ? (entry as PlanResult["lists"]["materialsToBuy"][number])
               : null;
-          const materialDetail =
-            materialEntry
-              ? `${materialEntry.requiredQuantity.toLocaleString()} needed | ${materialEntry.stockQuantity.toLocaleString()} from stock | ${materialEntry.quantity.toLocaleString()} to buy | ${materialEntry.remainingStockQuantity.toLocaleString()} left`
-              : null;
+          const materialDetail = materialEntry
+            ? `${materialEntry.requiredQuantity.toLocaleString()} needed | ${materialEntry.stockQuantity.toLocaleString()} from stock | ${materialEntry.quantity.toLocaleString()} to buy | ${materialEntry.remainingStockQuantity.toLocaleString()} left`
+            : null;
           const imageVariation = activeTab === "BPCs" || activeTab === "Invention" ? "bpc" : "icon";
           return (
             <div className={styles.planRow} key={`${activeTab}-${index}`}>

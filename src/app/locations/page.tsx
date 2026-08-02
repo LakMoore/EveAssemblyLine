@@ -197,6 +197,36 @@ function typeForName(name: string) {
 }
 
 type SystemMatch = { systemId: number; name: string };
+type EsiStructure = {
+  structureId: number;
+  name: string;
+  systemId?: number;
+  systemName?: string;
+  locationType: "structure" | "station";
+  assetCount: number;
+  personalAssetCount: number;
+  corporationAssetCount: number;
+  resolved: boolean;
+  ownedByCorporation: boolean;
+  type?: string;
+  size?: StructureSize;
+  rigs: string[];
+  services?: Array<{ name: string; state: string }>;
+  state?: string;
+  fuelExpires?: string;
+};
+
+function structureMatchKey(systemName: string | undefined, structureName: string) {
+  const prefix = systemName ? `${systemName} - ` : "";
+  const normalizedName = structureName.toLocaleLowerCase().startsWith(prefix.toLocaleLowerCase())
+    ? structureName.slice(prefix.length)
+    : structureName;
+  return `${systemName ?? ""}::${normalizedName}`.trim().toLocaleLowerCase();
+}
+
+function normalizedStructureName(name: string) {
+  return name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
 
 function readLegacyStructures() {
   if (typeof window === "undefined") return [];
@@ -227,6 +257,8 @@ export default function LocationsPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingStructure, setEditingStructure] = useState<KnownStructure | null>(null);
   const [rigOptionsBySize, setRigOptionsBySize] = useState(fallbackRigOptionsBySize);
+  const [esiStructures, setEsiStructures] = useState<EsiStructure[]>([]);
+  const [esiRateLimitedUntil, setEsiRateLimitedUntil] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -255,21 +287,112 @@ export default function LocationsPage() {
   }, []);
 
   useEffect(() => {
-    fetchRigs(language).then((rigs) => {
-      if (!rigs.length) return;
-      const options: Record<StructureSize, string[]> = {
-        Small: ["No Rig"],
-        Medium: ["No Rig"],
-        Large: ["No Rig"],
-        "Extra Large": ["No Rig"],
-      };
-      for (const rig of rigs) options[rig.size].push(rig.name);
-      setRigOptionsBySize(options);
-    }).catch(() => undefined);
+    let cancelled = false;
+
+    async function loadEsiStructures(refresh: boolean) {
+      try {
+        if (refresh) {
+          const refreshResponse = await fetch("/api/state/refresh", { method: "POST" });
+          const refreshData = (await refreshResponse.json()) as {
+            rateLimitedUntil?: string | null;
+          };
+          if (!cancelled) setEsiRateLimitedUntil(refreshData.rateLimitedUntil ?? null);
+        }
+        const response = await fetch("/api/state/structures");
+        const data = (await response.json()) as { structures?: EsiStructure[] };
+        if (!cancelled) setEsiStructures(data.structures ?? []);
+      } catch {
+        if (!cancelled) setEsiStructures([]);
+      }
+    }
+
+    const handleRefresh = (event: Event) => {
+      const detail = (event as CustomEvent<{ rateLimitedUntil?: string | null }>).detail;
+      setEsiRateLimitedUntil(detail?.rateLimitedUntil ?? null);
+      void loadEsiStructures(false);
+    };
+    window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
+    void loadEsiStructures(true);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
+    };
+  }, []);
+
+  useEffect(() => {
+    fetchRigs(language)
+      .then((rigs) => {
+        if (!rigs.length) return;
+        const options: Record<StructureSize, string[]> = {
+          Small: ["No Rig"],
+          Medium: ["No Rig"],
+          Large: ["No Rig"],
+          "Extra Large": ["No Rig"],
+        };
+        for (const rig of rigs) options[rig.size].push(rig.name);
+        setRigOptionsBySize(options);
+      })
+      .catch(() => undefined);
   }, [language]);
+
+  const knownStructuresByKey = new Map<string, KnownStructure>();
+  for (const structure of locations.structures) {
+    knownStructuresByKey.set(structureMatchKey(structure.systemName, structure.name), structure);
+    knownStructuresByKey.set(structureMatchKey(undefined, structure.name), structure);
+  }
+
+  function findLocalOverride(esiStructure: EsiStructure) {
+    return (
+      locations.structures.find((known) => known.esiStructureId === esiStructure.structureId) ??
+      knownStructuresByKey.get(structureMatchKey(esiStructure.systemName, esiStructure.name)) ??
+      knownStructuresByKey.get(structureMatchKey(undefined, esiStructure.name)) ??
+      locations.structures.find((known) => {
+        const esiName = normalizedStructureName(esiStructure.name);
+        const localNames = [
+          known.name,
+          known.systemName ? `${known.systemName} - ${known.name}` : "",
+        ];
+        return localNames.some((name) => name && normalizedStructureName(name) === esiName);
+      })
+    );
+  }
+
+  const displayedEsiStructures = esiStructures.map((structure) => {
+    if (structure.locationType !== "structure") return structure;
+    const localOverride = findLocalOverride(structure);
+    return localOverride ? { ...structure, rigs: localOverride.rigs } : structure;
+  });
+  const matchedKnownStructureIds = new Set(
+    esiStructures
+      .filter((structure) => structure.locationType === "structure")
+      .map(findLocalOverride)
+      .filter((structure): structure is KnownStructure => Boolean(structure))
+      .map((structure) => structure.id),
+  );
+  const unmatchedKnownStructures = locations.structures.filter(
+    (structure) => !matchedKnownStructureIds.has(structure.id),
+  );
 
   function openAddDialog() {
     setEditingStructure(null);
+    setIsDialogOpen(true);
+  }
+
+  function openEsiEditDialog(esiStructure: EsiStructure) {
+    if (esiStructure.locationType !== "structure") return;
+    const localOverride = findLocalOverride(esiStructure);
+    const type = typeForName(localOverride?.type ?? esiStructure.type ?? structureTypes[0].name);
+    setEditingStructure({
+      id: localOverride?.id ?? `esi:${esiStructure.structureId}`,
+      esiStructureId: esiStructure.structureId,
+      systemId: localOverride?.systemId || esiStructure.systemId || 0,
+      systemName: localOverride?.systemName || esiStructure.systemName || "",
+      type: type.name,
+      size: esiStructure.size ?? type.size,
+      name: localOverride?.name ?? esiStructure.name,
+      rigs: localOverride?.rigs ??
+        (esiStructure.rigs.length > 0 ? esiStructure.rigs : ["No Rig", "No Rig", "No Rig"]),
+    });
     setIsDialogOpen(true);
   }
 
@@ -296,6 +419,61 @@ export default function LocationsPage() {
       <div className={styles.panel}>
         <div className={styles.panelHeader}>
           <div>
+            <p className={styles.panelKicker}>02 / ESI INVENTORY</p>
+            <h2>Locations with assets</h2>
+          </div>
+          <span className={styles.panelDescription}>{displayedEsiStructures.length} found</span>
+        </div>
+        {displayedEsiStructures.length === 0 ? (
+          <div className={styles.emptyBuildList}>
+            {esiRateLimitedUntil
+              ? `ESI rate limit active until ${new Date(esiRateLimitedUntil).toLocaleTimeString()}.`
+              : "No structure assets found in the current ESI cache. Refresh ESI data to update this list."}
+          </div>
+        ) : (
+          <div className={styles.knownStructureList}>
+            {displayedEsiStructures.map((structure) => (
+              <div className={styles.knownStructure} key={structure.structureId}>
+                <span>
+                  <strong>{structure.name}</strong>
+                  <small>
+                    {structure.locationType === "station"
+                      ? "Station"
+                      : structure.type ?? "Structure"}
+                      {" · "}
+                    {structure.assetCount.toLocaleString()} total ·{" "}
+                    {structure.personalAssetCount.toLocaleString()} character ·{" "}
+                    {structure.corporationAssetCount.toLocaleString()} corp
+                    {structure.locationType === "structure"
+                      ? ` · ${structure.rigs.filter((rig) => rig !== "No Rig").length} rig${structure.rigs.filter((rig) => rig !== "No Rig").length === 1 ? "" : "s"}`
+                      : ""}
+                    {structure.state ? ` · ${structure.state}` : ""}
+                    {structure.services?.length
+                      ? ` · ${structure.services.filter((service) => service.state === "online").length} services online`
+                      : ""}
+                    {structure.fuelExpires
+                      ? ` · Fuel expires ${new Date(structure.fuelExpires).toLocaleDateString()}`
+                      : ""}
+                    {!structure.resolved ? " · Name or metadata unavailable" : ""}
+                  </small>
+                </span>
+                {structure.locationType === "structure" && (
+                  <button
+                    type="button"
+                    className={styles.importButton}
+                    onClick={() => openEsiEditDialog(structure)}
+                  >
+                    Edit
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <div>
             <p className={styles.panelKicker}>01 / STRUCTURES</p>
             <h2>Known structures</h2>
           </div>
@@ -303,18 +481,21 @@ export default function LocationsPage() {
             Add structure
           </button>
         </div>
-        {locations.structures.length === 0 ? (
+        {unmatchedKnownStructures.length === 0 ? (
           <div className={styles.emptyBuildList}>
-            No structures added yet. Add a structure to make it available in Stock.
+            All known structures with assets are listed above. Add a structure to make it available
+            in Stock.
           </div>
         ) : (
           <div className={styles.knownStructureList}>
-            {locations.structures.map((structure) => (
+            {unmatchedKnownStructures.map((structure) => (
               <div className={styles.knownStructure} key={structure.id}>
                 <span>
-                  <strong>{structure.name}</strong>
+                  <strong>
+                    {structure.systemName} - {structure.name}
+                  </strong>
                   <small>
-                    {structure.type} · {structure.size} · {structure.systemName}
+                    {structure.type} · {structure.size}
                     {structure.rigs.length
                       ? ` · ${structure.rigs.filter((rig) => rig !== "No Rig").length} rig${structure.rigs.filter((rig) => rig !== "No Rig").length === 1 ? "" : "s"}`
                       : ""}
@@ -350,7 +531,8 @@ export default function LocationsPage() {
           rigOptionsBySize={rigOptionsBySize}
           onCancel={() => setIsDialogOpen(false)}
           onSave={(structure) => {
-            const structures = editingStructure
+            const existing = locations.structures.some((current) => current.id === structure.id);
+            const structures = existing
               ? locations.structures.map((current) =>
                   current.id === structure.id ? structure : current,
                 )
@@ -384,7 +566,9 @@ function StructureDialog({
 }) {
   const [systemName, setSystemName] = useState(structure?.systemName ?? "");
   const [system, setSystem] = useState<SystemMatch | null>(
-    structure ? { systemId: structure.systemId, name: structure.systemName } : null,
+    structure && structure.systemId > 0
+      ? { systemId: structure.systemId, name: structure.systemName }
+      : null,
   );
   const [suggestions, setSuggestions] = useState<SystemMatch[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -426,6 +610,7 @@ function StructureDialog({
       size: selectedType.size,
       name: name.trim(),
       rigs,
+      ...(structure?.esiStructureId ? { esiStructureId: structure.esiStructureId } : {}),
     });
   }
 
@@ -546,9 +731,7 @@ function StructureDialog({
             }))}
             onChange={(value) =>
               setRigs((current) =>
-                current.map((currentRig, rigIndex) =>
-                  rigIndex === index ? value : currentRig,
-                ),
+                current.map((currentRig, rigIndex) => (rigIndex === index ? value : currentRig)),
               )
             }
           />

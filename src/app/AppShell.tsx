@@ -7,6 +7,12 @@ import styles from "./page.module.css";
 
 const languageStorageKey = "assembly-line-language";
 type ActivePage = "planner" | "stock" | "locations" | "settings";
+type CharacterSummary = {
+  characterId: number;
+  characterName: string;
+  hasDirectorRole: boolean;
+  corpAuthCompleted: boolean;
+};
 
 export default function AppShell({
   children,
@@ -25,7 +31,23 @@ export default function AppShell({
     return isSdeLanguage(savedLanguage) ? savedLanguage : "en";
   });
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [characters, setCharacters] = useState<CharacterSummary[]>([]);
+  const [isRefreshingData, setIsRefreshingData] = useState(false);
   const language = controlledLanguage ?? localLanguage;
+
+  useEffect(() => {
+    fetch("/api/auth/session")
+      .then((response) => response.json())
+      .then((data: { authenticated?: boolean; characters?: CharacterSummary[] }) => {
+        setAuthenticated(Boolean(data.authenticated));
+        setCharacters(data.characters ?? []);
+      })
+      .catch(() => {
+        setAuthenticated(false);
+        setCharacters([]);
+      });
+  }, []);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 900px)");
@@ -39,6 +61,27 @@ export default function AppShell({
     setLocalLanguage(nextLanguage);
     window.localStorage.setItem(languageStorageKey, nextLanguage);
     onLanguageChange?.(nextLanguage);
+  }
+
+  async function refreshData() {
+    if (isRefreshingData || !authenticated || characters.length === 0) return;
+    setIsRefreshingData(true);
+    try {
+      const response = await fetch("/api/state/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = (await response.json()) as { rateLimitedUntil?: string | null };
+      window.dispatchEvent(
+        new CustomEvent("assembly-line-esi-refreshed", {
+          detail: { rateLimitedUntil: data.rateLimitedUntil ?? null },
+        }),
+      );
+    } catch {
+    } finally {
+      setIsRefreshingData(false);
+    }
   }
 
   return (
@@ -68,8 +111,22 @@ export default function AppShell({
               <option value="zh">中文</option>
             </select>
           </label>
-          <span className={styles.onlineDot} /> ESI CONNECTED{" "}
-          <button className={styles.avatar}>ST</button>
+          <span className={`${styles.onlineDot} ${authenticated ? "" : styles.offlineDot}`} />{" "}
+          {authenticated ? "ESI CONNECTED" : "NOT CONNECTED"}
+          {authenticated && (
+            <button
+              type="button"
+              className={styles.refresh}
+              onClick={() => void refreshData()}
+              disabled={isRefreshingData}
+            >
+              ↻ <span>{isRefreshingData ? "Refreshing..." : "Refresh data"}</span>
+            </button>
+          )}
+        </div>
+      </header>
+      <div className={`${styles.layout} ${isSidebarCollapsed ? styles.layoutCollapsed : ""}`}>
+        <aside className={styles.sidebar}>
           <button
             type="button"
             className={styles.sidebarToggle}
@@ -78,10 +135,6 @@ export default function AppShell({
           >
             {isSidebarCollapsed ? "→" : "←"}
           </button>
-        </div>
-      </header>
-      <div className={`${styles.layout} ${isSidebarCollapsed ? styles.layoutCollapsed : ""}`}>
-        <aside className={styles.sidebar}>
           <div className={styles.sectionLabel}>WORKSPACE</div>
           <Link
             className={`${styles.navItem} ${activePage === "planner" ? styles.navActive : ""}`}
@@ -112,34 +165,48 @@ export default function AppShell({
             <span>⚙</span>
             <span className={styles.navText}>Settings</span>
           </Link>
-          <button className={styles.navItem}>
+          <button type="button" className={styles.navItem}>
             <span>◌</span>
             <span className={styles.navText}>Characters</span>
-            <b>2</b>
+            <b>{characters.length}</b>
           </button>
-          <button className={styles.navItem}>
+          <button type="button" className={styles.navItem}>
             <span>⌁</span>
             <span className={styles.navText}>Data status</span>
           </button>
           <div className={styles.sidebarBottom}>
             <div className={styles.sectionLabel}>CONNECTED PILOTS</div>
-            <div className={styles.pilot}>
-              <span className={styles.pilotDot}>SC</span>
-              <span className={styles.navText}>
-                <strong>Stuart Clarke</strong>
-                <small>Director access</small>
-              </span>
-              <i />
+            <div className={styles.pilotList}>
+              {characters.map((character, index) => (
+                <div className={styles.pilot} key={character.characterId}>
+                  <span className={`${styles.pilotDot} ${index > 0 ? styles.pilotAlt : ""}`}>
+                    {character.characterName.slice(0, 2).toUpperCase()}
+                  </span>
+                  <span className={styles.navText}>
+                    <strong>{character.characterName}</strong>
+                    <small>
+                      {character.corpAuthCompleted && character.hasDirectorRole
+                        ? "Director access"
+                        : "Character access"}
+                    </small>
+                  </span>
+                  <i />
+                </div>
+              ))}
             </div>
-            <div className={styles.pilot}>
-              <span className={`${styles.pilotDot} ${styles.pilotAlt}`}>AS</span>
-              <span className={styles.navText}>
-                <strong>Assembly Scout</strong>
-                <small>Character access</small>
+            <div className={styles.sidebarFooter}>
+              <span
+                className={`${styles.sidebarCount} ${styles.navText}`}
+                aria-label={`${characters.length} connected characters`}
+                data-tooltip={`${characters.length} connected character${characters.length === 1 ? "" : "s"}`}
+                tabIndex={0}
+              >
+                {characters.length}
               </span>
-              <i />
+              <a className={`${styles.addButton} ${styles.navText}`} href="/api/auth/eve/start">
+                + Add character
+              </a>
             </div>
-            <button className={`${styles.addButton} ${styles.navText}`}>+ Add character</button>
           </div>
         </aside>
         <section className={styles.content}>{children}</section>
