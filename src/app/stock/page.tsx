@@ -15,17 +15,34 @@ import {
 import { loadStructures } from "@/lib/planning/structureStore";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
-import type { KnownStructure } from "@/lib/planning/preferences";
+import {
+  defaultSettings,
+  settingsStorageKey,
+  type KnownStructure,
+} from "@/lib/planning/preferences";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import styles from "../page.module.css";
 
 type StructureOption = { id: string; name: string };
 type SystemOption = { id: number; name: string };
+type EsiStockLocation = {
+  structureId: number;
+  name: string;
+  systemId?: number;
+  systemName?: string;
+  locationType: "structure" | "station";
+  items: StockItem[];
+};
+type EsiStockResponse = {
+  structures?: EsiStockLocation[];
+  filteredLocationIds?: number[];
+};
 type PasteResult = {
   name: string;
   quantity?: number;
   typeId?: number;
-  volume?: number;
+  assembledVolume?: number;
+  packagedVolume?: number;
   category?: StockItem["category"];
   marketCategory?: string;
   error?: string;
@@ -72,15 +89,32 @@ export default function StockPage() {
   const [viewingFilter, setViewingFilter] = useState<StockFilter>({ kind: "all" });
   const [pasting, setPasting] = useState<StockRecord | null>(null);
   const [isHydratingVolumes, setIsHydratingVolumes] = useState(false);
+  const [settings] = useState(() => {
+    if (typeof window === "undefined") return defaultSettings;
+    try {
+      const stored = window.localStorage.getItem(settingsStorageKey);
+      return stored ? { ...defaultSettings, ...JSON.parse(stored) } : defaultSettings;
+    } catch {
+      return defaultSettings;
+    }
+  });
 
   useEffect(() => {
     async function loadPageData() {
       setIsHydratingVolumes(true);
       try {
-        const [records, structures] = await Promise.all([
+        const [records, structures, esiResponse] = await Promise.all([
           loadStockRecords().catch(() => []),
           loadStructures().catch(() => []),
+          fetch(`/api/state/structures?${new URLSearchParams({
+            language,
+            includeAssembledContainers: String(settings.includeAssembledContainers),
+            includeAssembledShips: String(settings.includeAssembledShips),
+            stockOnly: "true",
+          }).toString()}`),
         ]);
+        const esiData = (await esiResponse.json()) as EsiStockResponse;
+        const esiLocations = esiResponse.ok ? (esiData.structures ?? []) : [];
         setKnownStructures(structures);
         const correctedRecords = records.map((record) => {
           const structure = structures.find((entry) => entry.id === record.structureId);
@@ -92,25 +126,70 @@ export default function StockPage() {
             structureName: structure.name,
           };
         });
+        const esiRecords = esiLocations
+          .map((location) => {
+            const knownStructure = structures.find(
+              (structure) => structure.esiStructureId === location.structureId,
+            );
+            return {
+              systemId: location.systemId ?? knownStructure?.systemId ?? 0,
+              systemName: location.systemName ?? knownStructure?.systemName ?? "Unknown system",
+              structureId: String(location.structureId),
+              structureName: knownStructure?.name ?? location.name,
+              items: location.items,
+            };
+          });
+        const esiKeys = new Set(esiRecords.map((record) => locationKey(record)));
+        const esiLocationIds = new Set(esiLocations.map((location) => String(location.structureId)));
+        const filteredEsiLocationIds = new Set(esiData.filteredLocationIds ?? []);
+        const esiStructureIds = new Set(
+          structures
+            .map((structure) => structure.esiStructureId)
+            .filter((structureId): structureId is number => structureId !== undefined),
+        );
+        const combinedRecords = [
+          ...esiRecords,
+          ...correctedRecords.filter(
+            (record) =>
+              !esiKeys.has(locationKey(record)) &&
+              !esiLocationIds.has(record.structureId ?? "") &&
+              !filteredEsiLocationIds.has(Number(record.structureId)) &&
+              !esiStructureIds.has(Number(record.structureId)),
+          ),
+        ];
+        const combinedKeys = new Set(combinedRecords.map((record) => locationKey(record)));
+        const staleRecords = records.filter((record) => {
+          if (combinedKeys.has(locationKey(record))) return false;
+          const structureId = record.structureId ?? "";
+          return (
+            esiLocationIds.has(structureId) ||
+            filteredEsiLocationIds.has(Number(structureId)) ||
+            esiStructureIds.has(Number(structureId))
+          );
+        });
         setLocations(
-          [...correctedRecords].sort((left, right) =>
+          [...combinedRecords].sort((left, right) =>
             left.systemName.localeCompare(right.systemName),
           ),
         );
-        const hydratedRecords = await hydrateVolumes(correctedRecords, language);
+        const hydratedRecords = await hydrateVolumes(combinedRecords, language);
         setLocations(
           [...hydratedRecords].sort((left, right) =>
             left.systemName.localeCompare(right.systemName),
           ),
         );
+        const previousByLocation = new Map(records.map((record) => [locationKey(record), record]));
         await Promise.all(
-          hydratedRecords.flatMap((record, index) => {
-            const previous = records[index];
-            const writes = record !== previous ? [saveStock(record)] : [];
-            if (previous && locationKey(previous) !== locationKey(record))
-              writes.push(deleteStock(previous));
-            return writes;
-          }),
+          [
+            ...hydratedRecords.flatMap((record) => {
+              const previous = previousByLocation.get(locationKey(record));
+              const writes = record !== previous ? [saveStock(record)] : [];
+              if (previous && locationKey(previous) !== locationKey(record))
+                writes.push(deleteStock(previous));
+              return writes;
+            }),
+            ...staleRecords.map((record) => deleteStock(record)),
+          ],
         );
       } catch {
         setLocations([]);
@@ -119,7 +198,14 @@ export default function StockPage() {
       }
     }
     void loadPageData();
-  }, [language]);
+    const handleRefresh = (event: Event) => {
+      const detail = (event as CustomEvent<{ rateLimitedUntil?: string | null }>).detail;
+      if (detail?.rateLimitedUntil) return;
+      void loadPageData();
+    };
+    window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
+    return () => window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
+  }, [language, settings.includeAssembledContainers, settings.includeAssembledShips]);
 
   async function addLocation(location: StockRecord) {
     if (locations.some((current) => locationKey(current) === locationKey(location))) {
@@ -434,8 +520,7 @@ function AddLocationModal({
 }
 
 const stockCategories: Array<{ id: NonNullable<StockItem["category"]>; label: string }> = [
-  { id: "bpo", label: "BPOs" },
-  { id: "bpc", label: "BPCs" },
+  { id: "bpc", label: "Blueprints" },
   { id: "reaction", label: "Reaction formulas" },
   { id: "item", label: "Items" },
 ];
@@ -453,7 +538,13 @@ function StockLocationCard({
   onPaste: () => void;
   onRemove: () => void;
 }) {
-  const marketCategories = [...new Set(location.items.map((item) => item.marketCategory).filter(Boolean))] as string[];
+  const marketCategories = [
+    ...new Set(
+      location.items
+        .map((item) => item.marketCategory)
+        .filter(Boolean),
+    ),
+  ] as string[];
   return (
     <article className={styles.stockCard}>
       <div className={styles.stockCardHeading}>
@@ -468,13 +559,22 @@ function StockLocationCard({
       </div>
       <div className={styles.stockCardTotals}>
         {stockCategories.map((category) => {
-          const items = location.items.filter((item) => (item.category ?? "item") === category.id);
-          const volume = items.reduce((total, item) => total + item.quantity * (item.volume ?? 0), 0);
+          const items = location.items.filter((item) =>
+            category.id === "bpc"
+              ? item.category === "bpo" || item.category === "bpc"
+              : (item.category ?? "item") === category.id,
+          );
+          const volume = items.reduce(
+            (total, item) => total + item.quantity * (item.isPackaged
+              ? item.packagedVolume ?? item.assembledVolume ?? 0
+              : item.assembledVolume ?? 0),
+            0,
+          );
           return (
             <button type="button" className={styles.stockMetric} key={category.id} onClick={() => onView(location, { kind: "category", value: category.id })}>
               <span>{category.label}</span>
               <strong>{items.length.toLocaleString()}</strong>
-              <small>{isVolumesLoading ? "Calculating..." : formatVolume(volume)}</small>
+              <small>{isVolumesLoading ? "Calculating..." : `${formatVolume(volume)} Volume`}</small>
             </button>
           );
         })}
@@ -503,7 +603,9 @@ function ViewItemsModal({
   const filteredItems = location.items.filter((item) => {
     if (filter.kind === "all") return true;
     if (filter.kind === "market") return item.marketCategory === filter.value;
-    return (item.category ?? "item") === filter.value;
+    return filter.value === "bpc"
+      ? item.category === "bpo" || item.category === "bpc"
+      : (item.category ?? "item") === filter.value;
   });
   const title = filter.kind === "all" ? "All items" : filter.kind === "market" ? filter.value : stockCategories.find((category) => category.id === filter.value)?.label;
   return (
@@ -544,12 +646,19 @@ function ViewItemsModal({
         ) : (
           <div className={styles.stockList}>
             {filteredItems.map((item) => (
-              <div className={styles.stockRow} key={item.typeId}>
+              <div
+                className={styles.stockRow}
+                key={`${item.typeId}:${item.category ?? "item"}:${item.isPackaged ? "packaged" : "assembled"}`}
+              >
                 <Image
                   className={styles.stockItemImage}
                   src={eveTypeImageUrl(
                     item.typeId,
-                    item.category === "bpo" || item.category === "bpc" || item.category === "reaction" ? "bpc" : "icon",
+                    item.category === "bpo"
+                      ? "bp"
+                      : item.category === "bpc" || item.category === "reaction"
+                        ? "bpc"
+                        : "icon",
                   )}
                   alt=""
                   width={40}
@@ -558,10 +667,17 @@ function ViewItemsModal({
                 <span>
                   <strong>{item.name}</strong>
                   <small>
-                    Type ID {item.typeId} · {formatVolume(item.quantity * (item.volume ?? 0))}
+                    Type ID {item.typeId} · Volume {formatVolume(item.quantity * (item.isPackaged
+                      ? item.packagedVolume ?? item.assembledVolume ?? 0
+                      : item.assembledVolume ?? 0))}
                   </small>
                 </span>
-                <strong>{item.quantity.toLocaleString()}</strong>
+                <strong>
+                  {item.quantity.toLocaleString()}
+                  {item.runCount !== undefined && item.category === "bpc"
+                    ? ` · ${item.runCount.toLocaleString()} runs`
+                    : ""}
+                </strong>
               </div>
             ))}
           </div>
@@ -619,7 +735,8 @@ function StockPasteModal({
           typeId: item.typeId!,
           name: item.name,
           quantity: item.quantity!,
-          volume: item.volume ?? 0,
+          assembledVolume: item.assembledVolume ?? 0,
+          packagedVolume: item.packagedVolume,
           category: item.category ?? "item",
           marketCategory: item.marketCategory,
         }));
@@ -738,10 +855,27 @@ function StockPasteModal({
 function mergeItems(existing: StockItem[], imported: StockItem[]) {
   const items = existing.map((item) => ({ ...item }));
   for (const item of imported) {
-    const current = items.find((entry) => entry.typeId === item.typeId);
+    const current = items.find(
+      (entry) =>
+        entry.typeId === item.typeId &&
+        entry.isPackaged === item.isPackaged &&
+        (entry.category ?? "item") === (item.category ?? "item"),
+    );
     if (current) {
       current.quantity += item.quantity;
-      current.volume = item.volume;
+      if (item.runCount !== undefined) {
+        current.runCount = (current.runCount ?? 0) + item.runCount;
+      }
+          current.me ??= item.me;
+          current.te ??= item.te;
+          if (item.blueprintPrints) {
+            current.blueprintPrints = [
+              ...(current.blueprintPrints ?? []),
+              ...item.blueprintPrints,
+            ];
+          }
+      current.assembledVolume = item.assembledVolume;
+      current.packagedVolume = item.packagedVolume;
     } else {
       items.push(item);
     }
@@ -767,8 +901,9 @@ async function hydrateVolumes(records: StockRecord[], language: SdeLanguage) {
         return itemMetadata
           ? {
               ...item,
-              volume: itemMetadata.volume ?? 0,
-              category: itemMetadata.category ?? "item",
+              assembledVolume: itemMetadata.assembledVolume ?? 0,
+              packagedVolume: itemMetadata.packagedVolume,
+              category: item.category ?? itemMetadata.category ?? "item",
               marketCategory: itemMetadata.marketCategory,
             }
           : item;

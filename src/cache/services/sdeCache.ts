@@ -2,7 +2,11 @@ import { cache } from "../cache";
 import { sdeKey } from "../keys";
 import {
   getBonusDogmaAttributes as loadBonusDogmaAttributes,
+  getDogmaEffects as loadDogmaEffects,
+  getGroups as loadGroups,
+  getTypeBonuses as loadTypeBonuses,
   getBlueprints as loadBlueprints,
+  getActivityInputTypeIds as loadActivityInputTypeIds,
   getMarketGroups as loadMarketGroups,
   getRigDogma as loadRigDogma,
   getSdeBuildNumber as loadSdeBuildNumber,
@@ -20,11 +24,13 @@ import type {
   MapSolarSystemsRecord,
   MarketGroupsRecord,
   NpcStationsRecord,
+  GroupsRecord,
   TypeDogmaRecord,
   TypesRecord,
 } from "@/lib/sde/generated";
 
-export type SdeType = TypesRecord;
+export type SdeType = TypesRecord & { packagedVolume?: number };
+export type SdeGroup = GroupsRecord;
 
 export type SdeBlueprintIndexes = Awaited<ReturnType<typeof loadBlueprints>>;
 export type SdeBuildBlueprint = {
@@ -81,7 +87,15 @@ export function getTypes() {
   return getMap(loadTypes);
 }
 
-export function getType(typeId: number): Promise<TypesRecord | null> {
+export function getGroups() {
+  return getMap(loadGroups);
+}
+
+export function getMarketGroups() {
+  return getMap(loadMarketGroups);
+}
+
+export function getType(typeId: number): Promise<SdeType | null> {
   return getMapValue("type", typeId, loadTypes);
 }
 
@@ -116,16 +130,16 @@ export async function getTypesByIds(typeIds: readonly number[]): Promise<Map<num
   return new Map(resolvedEntries);
 }
 
-export function getMarketGroups() {
-  return getMap(loadMarketGroups);
-}
-
 export function getMarketGroup(marketGroupId: number): Promise<MarketGroupsRecord | null> {
   return getMapValue("marketGroup", marketGroupId, loadMarketGroups);
 }
 
 export async function getBlueprintIndexes(): Promise<SdeBlueprintIndexes> {
   return loadBlueprints();
+}
+
+export async function getActivityInputTypeIds(): Promise<Set<number>> {
+  return loadActivityInputTypeIds();
 }
 
 export async function getBuildBlueprintByProductTypeId(
@@ -222,6 +236,14 @@ export function getRigDogmaByTypeId(typeId: number): Promise<TypeDogmaRecord | n
 
 export function getBonusDogmaAttributes() {
   return getMap(loadBonusDogmaAttributes);
+}
+
+export function getDogmaEffects() {
+  return getMap(loadDogmaEffects);
+}
+
+export function getTypeBonuses() {
+  return getMap(loadTypeBonuses);
 }
 
 export function getBonusDogmaAttribute(attributeId: number): Promise<DogmaAttributesRecord | null> {

@@ -11,12 +11,22 @@ export interface BuildItem {
 export interface PlanStockItem {
   typeId: number;
   name: string;
-  quantity: number;
+  quantity: number;  // this is the number of items in the stack (not the number of runs)
+  runCount?: number;
+  blueprintPrints?: BlueprintPrint[];
   sourceLocationId?: number;
   sourceLocationName?: string;
   ownerType?: "character" | "corporation";
   ownerId?: number;
   locationResolved?: boolean;
+  category?: "bpo" | "bpc" | "reaction" | "item";
+}
+
+export interface BlueprintPrint {
+  itemId: number;
+  runs: number;
+  me?: number;
+  te?: number;
 }
 
 export interface PlanRequest {
@@ -43,16 +53,48 @@ export interface PlanResult {
     corporationAssetSources?: number[];
   };
   lists: {
+    planItems: Array<
+      | ({ kind: "material" } & PlanResult["lists"]["materialsToBuy"][number])
+      | {
+          kind: "bpc";
+          typeId: number;
+          name: string;
+          neededQuantity: number;
+          stockQuantity: number;
+          stockRuns: number;
+          buyQuantity: number;
+          bpoCount: number;
+        }
+      | {
+          kind: "reaction";
+          typeId: number;
+          name: string;
+          runsNeeded: number;
+          availableQuantity: number;
+        }
+    >;
     materialsToBuy: Array<{
       typeId: number;
       name: string;
       quantity: number;
       requiredQuantity: number;
       stockQuantity: number;
+      buildQuantity: number;
+      buyQuantity: number;
       remainingStockQuantity: number;
+      imageVariation?: "icon" | "bp" | "bpc";
       locationId?: number;
     }>;
-    bpcsNeeded: Array<{ typeId: number; name: string; quantity: number }>;
+    bpcsNeeded: Array<{
+      typeId: number;
+      name: string;
+      quantity: number;
+      neededQuantity: number;
+      stockQuantity: number;
+      stockRuns: number;
+      buyQuantity: number;
+      bpoCount: number;
+    }>;
     inventionJobs: Array<{ typeId: number; name: string; runs: number; locationId?: number }>;
     reactionJobs: Array<{
       typeId: number;

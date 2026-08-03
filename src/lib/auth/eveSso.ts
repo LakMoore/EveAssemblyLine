@@ -7,13 +7,18 @@ const issuer = "https://login.eveonline.com";
 const pendingAuthPrefix = "pending-auth:";
 const pendingAuthTtlMs = 10 * 60 * 1000;
 
-export const personalScopes = ["esi-assets.read_assets.v1", "esi-industry.read_character_jobs.v1"];
+export const personalScopes = [
+  "esi-assets.read_assets.v1",
+  "esi-industry.read_character_jobs.v1",
+  "esi-characters.read_blueprints.v1",
+];
 
 export const corporationScopes = [
   ...personalScopes,
   "esi-assets.read_corporation_assets.v1",
   "esi-characters.read_corporation_roles.v1",
-  "esi-corporations.read_structures.v1",
+  "esi-corporations.read_blueprints.v1",
+  "esi-industry.read_corporation_jobs.v1",
   "esi-universe.read_structures.v1",
 ];
 

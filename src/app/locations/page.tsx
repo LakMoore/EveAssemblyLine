@@ -4,7 +4,9 @@ import { FormEvent, useEffect, useState } from "react";
 import AppShell, { languageStorageKey } from "../AppShell";
 import {
   defaultLocations,
+  defaultSettings,
   locationsStorageKey,
+  settingsStorageKey,
   type KnownStructure,
   type PlannerLocations,
 } from "@/lib/planning/preferences";
@@ -214,7 +216,58 @@ type EsiStructure = {
   services?: Array<{ name: string; state: string }>;
   state?: string;
   fuelExpires?: string;
+  totalCount: number;
+  totalVolume: number;
+  bonuses: Record<"manufacturing" | "research" | "reactions" | "invention", { me: number; te: number; cost: number }>;
 };
+type LocationSort =
+  | "alphabetical"
+  | "totalVolume"
+  | "totalCount"
+  | `${"manufacturing" | "research" | "reactions" | "invention"}-${"me" | "te" | "cost"}`;
+
+const locationSortOptions: Array<{ value: LocationSort; label: string }> = [
+  { value: "alphabetical", label: "Alphabetical" },
+  { value: "totalVolume", label: "Total volume" },
+  { value: "totalCount", label: "Total count" },
+  { value: "manufacturing-me", label: "Manufacturing ME" },
+  { value: "manufacturing-te", label: "Manufacturing TE" },
+  { value: "manufacturing-cost", label: "Manufacturing job cost" },
+  { value: "research-me", label: "Research ME" },
+  { value: "research-te", label: "Research TE" },
+  { value: "research-cost", label: "Research job cost" },
+  { value: "reactions-me", label: "Reactions ME" },
+  { value: "reactions-te", label: "Reactions TE" },
+  { value: "reactions-cost", label: "Reactions job cost" },
+  { value: "invention-me", label: "Invention ME" },
+  { value: "invention-te", label: "Invention TE" },
+  { value: "invention-cost", label: "Invention job cost" },
+];
+
+function formatPercent(value: number) {
+  return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
+}
+
+function formatBonusSummary(
+  label: string,
+  bonuses: { me: number; te: number; cost: number },
+) {
+  return `${label} ME ${formatPercent(bonuses.me)} / TE ${formatPercent(bonuses.te)} / Cost ${formatPercent(bonuses.cost)}`;
+}
+
+function hasBonus(bonuses: { me: number; te: number; cost: number }) {
+  return bonuses.me !== 0 || bonuses.te !== 0 || bonuses.cost !== 0;
+}
+
+function visibleBonusSummaries(bonuses: EsiStructure["bonuses"]) {
+  const summaries: Array<[string, EsiStructure["bonuses"][keyof EsiStructure["bonuses"]]]> = [
+    ["MFG", bonuses.manufacturing],
+    ["RES", bonuses.research],
+    ["REA", bonuses.reactions],
+    ["INV", bonuses.invention],
+  ];
+  return summaries.filter(([, activityBonuses]) => hasBonus(activityBonuses));
+}
 
 function structureMatchKey(systemName: string | undefined, structureName: string) {
   const prefix = systemName ? `${systemName} - ` : "";
@@ -259,6 +312,16 @@ export default function LocationsPage() {
   const [rigOptionsBySize, setRigOptionsBySize] = useState(fallbackRigOptionsBySize);
   const [esiStructures, setEsiStructures] = useState<EsiStructure[]>([]);
   const [esiRateLimitedUntil, setEsiRateLimitedUntil] = useState<string | null>(null);
+  const [locationSort, setLocationSort] = useState<LocationSort>("alphabetical");
+  const [settings] = useState(() => {
+    if (typeof window === "undefined") return defaultSettings;
+    try {
+      const stored = window.localStorage.getItem(settingsStorageKey);
+      return stored ? { ...defaultSettings, ...JSON.parse(stored) } : defaultSettings;
+    } catch {
+      return defaultSettings;
+    }
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -298,7 +361,14 @@ export default function LocationsPage() {
           };
           if (!cancelled) setEsiRateLimitedUntil(refreshData.rateLimitedUntil ?? null);
         }
-        const response = await fetch("/api/state/structures");
+        const params = new URLSearchParams({
+          language,
+          includeAssembledContainers: String(settings.includeAssembledContainers),
+          includeAssembledShips: String(settings.includeAssembledShips),
+        });
+        const response = await fetch(`/api/state/structures?${params.toString()}`, {
+          cache: "no-store",
+        });
         const data = (await response.json()) as { structures?: EsiStructure[] };
         if (!cancelled) setEsiStructures(data.structures ?? []);
       } catch {
@@ -317,7 +387,7 @@ export default function LocationsPage() {
       cancelled = true;
       window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
     };
-  }, []);
+  }, [language, settings.includeAssembledContainers, settings.includeAssembledShips]);
 
   useEffect(() => {
     fetchRigs(language)
@@ -372,6 +442,16 @@ export default function LocationsPage() {
   const unmatchedKnownStructures = locations.structures.filter(
     (structure) => !matchedKnownStructureIds.has(structure.id),
   );
+  const sortedEsiStructures = [...displayedEsiStructures].sort((left, right) => {
+    if (locationSort === "alphabetical") return left.name.localeCompare(right.name);
+    if (locationSort === "totalVolume") return right.totalVolume - left.totalVolume;
+    if (locationSort === "totalCount") return right.totalCount - left.totalCount;
+    const [activity, metric] = locationSort.split("-") as [
+      "manufacturing" | "research" | "reactions" | "invention",
+      "me" | "te" | "cost",
+    ];
+    return right.bonuses[activity][metric] - left.bonuses[activity][metric];
+  });
 
   function openAddDialog() {
     setEditingStructure(null);
@@ -422,7 +502,23 @@ export default function LocationsPage() {
             <p className={styles.panelKicker}>02 / ESI INVENTORY</p>
             <h2>Locations with assets</h2>
           </div>
-          <span className={styles.panelDescription}>{displayedEsiStructures.length} found</span>
+            <div className={styles.locationControls}>
+              <label>
+                <span>SORT</span>
+                <select
+                  aria-label="Sort locations"
+                  value={locationSort}
+                  onChange={(event) => setLocationSort(event.target.value as LocationSort)}
+                >
+                  {locationSortOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span className={styles.panelDescription}>{displayedEsiStructures.length} found</span>
+            </div>
         </div>
         {displayedEsiStructures.length === 0 ? (
           <div className={styles.emptyBuildList}>
@@ -432,7 +528,7 @@ export default function LocationsPage() {
           </div>
         ) : (
           <div className={styles.knownStructureList}>
-            {displayedEsiStructures.map((structure) => (
+            {sortedEsiStructures.map((structure) => (
               <div className={styles.knownStructure} key={structure.structureId}>
                 <span>
                   <strong>{structure.name}</strong>
@@ -441,7 +537,8 @@ export default function LocationsPage() {
                       ? "Station"
                       : structure.type ?? "Structure"}
                       {" · "}
-                    {structure.assetCount.toLocaleString()} total ·{" "}
+                    {structure.assetCount.toLocaleString()} records · {structure.totalCount.toLocaleString()} quantity ·{" "}
+                    {structure.totalVolume.toLocaleString(undefined, { maximumFractionDigits: 2 })} m³ Volume ·{" "}
                     {structure.personalAssetCount.toLocaleString()} character ·{" "}
                     {structure.corporationAssetCount.toLocaleString()} corp
                     {structure.locationType === "structure"
@@ -456,6 +553,16 @@ export default function LocationsPage() {
                       : ""}
                     {!structure.resolved ? " · Name or metadata unavailable" : ""}
                   </small>
+                  {visibleBonusSummaries(structure.bonuses).length > 0 && (
+                    <small className={styles.locationBonusLine}>
+                      {visibleBonusSummaries(structure.bonuses).map(([label, bonuses], index) => (
+                          <span key={label}>
+                            {index > 0 ? " · " : ""}
+                            {formatBonusSummary(label, bonuses)}
+                          </span>
+                        ))}
+                    </small>
+                  )}
                 </span>
                 {structure.locationType === "structure" && (
                   <button

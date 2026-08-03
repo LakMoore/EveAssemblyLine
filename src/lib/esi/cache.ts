@@ -5,6 +5,7 @@ import {
   fetchCharacterAssets,
   fetchLocationMetadata,
   fetchCorporationAssets,
+  applyBlueprintMetadata,
   requestEsi,
   getUsableToken,
 } from "./client";
@@ -297,11 +298,16 @@ export async function refreshCharacterState(
         const result = await fetchCharacterAssets(record, cache.assets?.etag);
         personalToken = result.token;
         if (result.notModified && cache.assets) {
-          cache.assets = setFresh(cache.assets.lastBody, result.headers, cache.assets);
+          const assets = result.blueprints.length > 0
+            ? applyBlueprintMetadata(cache.assets.lastBody as AssetRecord[], result.blueprints)
+            : cache.assets.lastBody;
+          cache.assets = setFresh(assets, result.headers, cache.assets);
           cache.assets.status = "cached";
-          cache.assetLocations = cache.assetLocations
-            ? setFresh(cache.assetLocations.lastBody, result.headers, cache.assetLocations)
-            : undefined;
+          cache.resolvedAssets = await resolveAssets(assets as AssetRecord[], result.token);
+          cache.unresolvedAssetCount = cache.resolvedAssets.filter(
+            (asset) => !asset.location.resolved,
+          ).length;
+          cache.assetLocations = setFresh(cache.resolvedAssets, result.headers, cache.assetLocations);
         } else if (result.assets) {
           cache.assets = setFresh(result.assets, result.headers, cache.assets);
           cache.resolvedAssets = await resolveAssets(result.assets, result.token);
@@ -352,19 +358,24 @@ export async function refreshCharacterState(
         } else {
           const result = await fetchCorporationAssets(record, corpCache.assets?.etag);
           if (result.notModified && corpCache.assets) {
+            const assets = result.blueprints.length > 0
+              ? applyBlueprintMetadata(corpCache.assets.lastBody as AssetRecord[], result.blueprints)
+              : corpCache.assets.lastBody;
             corpCache.assets = setFresh(
-              corpCache.assets.lastBody,
+              assets,
               result.headers,
               corpCache.assets,
             );
             corpCache.assets.status = "cached";
-            corpCache.assetLocations = corpCache.assetLocations
-              ? setFresh(
-                  corpCache.assetLocations.lastBody,
-                  result.headers,
-                  corpCache.assetLocations,
-                )
-              : undefined;
+            corpCache.resolvedAssets = await resolveAssets(assets as AssetRecord[], result.token);
+            corpCache.unresolvedAssetCount = corpCache.resolvedAssets.filter(
+              (asset) => !asset.location.resolved,
+            ).length;
+            corpCache.assetLocations = setFresh(
+              corpCache.resolvedAssets,
+              result.headers,
+              corpCache.assetLocations,
+            );
           } else if (result.assets) {
             corpCache.assets = setFresh(result.assets, result.headers, corpCache.assets);
             corpCache.resolvedAssets = await resolveAssets(result.assets, result.token);

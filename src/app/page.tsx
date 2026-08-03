@@ -6,7 +6,7 @@ import AppShell, { languageStorageKey } from "./AppShell";
 import type { PlanResult } from "@/lib/planning/types";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
-import { loadStockRecords } from "@/lib/planning/stockStore";
+import { loadStockRecords, type StockItem } from "@/lib/planning/stockStore";
 import {
   defaultLocations,
   defaultSettings,
@@ -19,7 +19,7 @@ import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import styles from "./page.module.css";
 
-const tabs = ["Materials", "BPCs", "Invention", "Reactions", "Manufacturing"];
+const tabs = ["Plan", "Shopping", "BPCs", "Invention", "Reactions", "Manufacturing"];
 type BuildItem = { name: string; typeId: number; quantity: number; me: number; te: number };
 type TypeResult = { name: string; typeId: number };
 type PasteResult = { name: string; quantity?: number; typeId?: number; error?: string };
@@ -54,14 +54,14 @@ async function localizeItems(buildItems: BuildItem[], targetLanguage: SdeLanguag
 
 export default function Home() {
   const [items, setItems] = useState<BuildItem[]>([]);
-  const [stock, setStock] = useState<Array<{ typeId: number; name: string; quantity: number }>>([]);
+  const [stock, setStock] = useState<StockItem[]>([]);
   const [language, setLanguage] = useState<SdeLanguage>(() => {
     if (typeof window === "undefined") return "en";
     const savedLanguage = window.localStorage.getItem(languageStorageKey);
     return isSdeLanguage(savedLanguage) ? savedLanguage : "en";
   });
   const [isBuildListLoaded, setIsBuildListLoaded] = useState(false);
-  const [activeTab, setActiveTab] = useState("Materials");
+  const [activeTab, setActiveTab] = useState("Plan");
   const [planStatus, setPlanStatus] = useState("Ready to calculate");
   const [isPlanLoading, setIsPlanLoading] = useState(false);
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
@@ -606,10 +606,12 @@ function TypeSearch({
 function PlanList({ activeTab, plan }: { activeTab: string; plan: PlanResult }) {
   const [copyStatus, setCopyStatus] = useState("");
   const list =
-    activeTab === "Materials"
-      ? plan.lists.materialsToBuy
-      : activeTab === "BPCs"
-        ? plan.lists.bpcsNeeded
+    activeTab === "Plan"
+      ? plan.lists.planItems
+      : activeTab === "Shopping"
+        ? plan.lists.materialsToBuy.filter((entry) => entry.buyQuantity > 0)
+        : activeTab === "BPCs"
+        ? plan.lists.bpcsNeeded.filter((entry) => entry.buyQuantity > 0)
         : activeTab === "Invention"
           ? plan.lists.inventionJobs
           : activeTab === "Reactions"
@@ -618,16 +620,17 @@ function PlanList({ activeTab, plan }: { activeTab: string; plan: PlanResult }) 
               ? plan.lists.manufacturingJobs
               : plan.lists.haulingTasks;
   async function copyList() {
-    const entriesToCopy =
-      activeTab === "Materials"
-        ? list.filter(
-            (entry) =>
-              "quantity" in entry && typeof entry.quantity === "number" && entry.quantity > 0,
-          )
-        : list;
+    const entriesToCopy = list;
     const lines = entriesToCopy.map((entry) => {
       const name = entry.name;
-      const amount = "runs" in entry ? entry.runs : entry.quantity;
+      const amount =
+        "runsNeeded" in entry
+          ? entry.runsNeeded
+          : "runs" in entry
+            ? entry.runs
+            : "buyQuantity" in entry
+              ? entry.buyQuantity
+              : entry.quantity;
       return `${name}\t${amount}`;
     });
     try {
@@ -658,6 +661,8 @@ function PlanList({ activeTab, plan }: { activeTab: string; plan: PlanResult }) 
         {list.map((entry, index) => {
           const typeId = "itemTypeId" in entry ? entry.itemTypeId : entry.typeId;
           const name = entry.name;
+          const isPlanBpc = "kind" in entry && entry.kind === "bpc";
+          const isPlanReaction = "kind" in entry && entry.kind === "reaction";
           const detail =
             "fromLocationId" in entry
               ? `From ${entry.fromLocationId} to ${entry.toLocationId}`
@@ -666,22 +671,39 @@ function PlanList({ activeTab, plan }: { activeTab: string; plan: PlanResult }) 
                 : "";
           const totalTime =
             "totalTime" in entry && typeof entry.totalTime === "number" ? entry.totalTime : null;
+          const materialEntry =
+            activeTab === "Shopping" || (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
+              ? (entry as PlanResult["lists"]["materialsToBuy"][number])
+              : null;
           const amount =
             "volume" in entry
               ? `${entry.quantity.toLocaleString()} units | ${Math.ceil(entry.volume).toLocaleString()} m3`
+              : isPlanBpc
+                ? `${entry.neededQuantity.toLocaleString()} needed`
+                : isPlanReaction
+                  ? `${entry.runsNeeded.toLocaleString()} runs`
+                  : materialEntry
+                    ? `${(materialEntry.buildQuantity || materialEntry.buyQuantity).toLocaleString()} units`
               : "quantity" in entry
                 ? `${entry.quantity.toLocaleString()} ${activeTab === "BPCs" ? "runs" : "units"}`
                 : "runs" in entry
                   ? `${entry.runs.toLocaleString()} runs${totalTime !== null ? ` | ${formatDuration(totalTime)}` : ""}`
                   : "";
-          const materialEntry =
-            activeTab === "Materials"
-              ? (entry as PlanResult["lists"]["materialsToBuy"][number])
-              : null;
-          const materialDetail = materialEntry
-            ? `${materialEntry.requiredQuantity.toLocaleString()} needed | ${materialEntry.stockQuantity.toLocaleString()} from stock | ${materialEntry.quantity.toLocaleString()} to buy | ${materialEntry.remainingStockQuantity.toLocaleString()} left`
-            : null;
-          const imageVariation = activeTab === "BPCs" || activeTab === "Invention" ? "bpc" : "icon";
+          const planDetail = isPlanBpc
+            ? `${entry.neededQuantity.toLocaleString()} needed | ${entry.stockRuns.toLocaleString()} runs on ${entry.stockQuantity.toLocaleString()} prints available | ${Math.max(0, entry.neededQuantity - entry.stockRuns).toLocaleString()} runs to buy/copy${entry.bpoCount > 0 ? ` | ${entry.bpoCount.toLocaleString()} BPOs owned` : ""}`
+            : isPlanReaction
+              ? `${entry.runsNeeded.toLocaleString()} runs needed | ${entry.availableQuantity.toLocaleString()} prints available | ${entry.availableQuantity > 0 ? Math.ceil(entry.runsNeeded / entry.availableQuantity).toLocaleString() : 0} runs per install`
+              : materialEntry
+                ? `${materialEntry.requiredQuantity.toLocaleString()} needed | ${materialEntry.stockQuantity.toLocaleString()} from stock | ${materialEntry.buildQuantity.toLocaleString()} to build | ${materialEntry.buyQuantity.toLocaleString()} to buy | ${materialEntry.remainingStockQuantity.toLocaleString()} left`
+                : null;
+          const imageVariation =
+            "imageVariation" in entry && entry.imageVariation
+              ? entry.imageVariation
+              : isPlanBpc && entry.bpoCount > 0
+                ? "bp"
+                : isPlanBpc || isPlanReaction || activeTab === "BPCs" || activeTab === "Invention"
+                ? "bpc"
+                : "icon";
           return (
             <div className={styles.planRow} key={`${activeTab}-${index}`}>
               <Image
@@ -693,7 +715,7 @@ function PlanList({ activeTab, plan }: { activeTab: string; plan: PlanResult }) 
               />
               <span className={styles.planRowMain}>
                 <strong>{name}</strong>
-                <small>{materialDetail || detail || `Type ID ${typeId}`}</small>
+                {activeTab !== "Shopping" && <small>{planDetail || detail || `Type ID ${typeId}`}</small>}
               </span>
               <span className={styles.planRowAmount}>
                 <strong>{amount}</strong>

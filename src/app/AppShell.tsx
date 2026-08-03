@@ -70,12 +70,20 @@ export default function AppShell({
       const response = await fetch("/api/state/refresh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ force: true }),
       });
-      const data = (await response.json()) as { rateLimitedUntil?: string | null };
+      const data = (await response.json()) as {
+        success?: boolean;
+        refreshedAt?: string;
+        rateLimitedUntil?: string | null;
+      };
+      if (!response.ok || data.success !== true) return;
       window.dispatchEvent(
         new CustomEvent("assembly-line-esi-refreshed", {
-          detail: { rateLimitedUntil: data.rateLimitedUntil ?? null },
+          detail: {
+            refreshedAt: data.refreshedAt ?? null,
+            rateLimitedUntil: data.rateLimitedUntil ?? null,
+          },
         }),
       );
     } catch {

@@ -3,7 +3,8 @@ import type { SdeLanguage } from "./languages";
 export type TypeMetadata = {
   typeId: number;
   name: string;
-  volume?: number;
+  assembledVolume?: number;
+  packagedVolume?: number;
   category?: "bpo" | "bpc" | "reaction" | "item";
   marketCategory?: string;
 };

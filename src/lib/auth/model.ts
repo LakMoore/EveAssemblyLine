@@ -28,6 +28,9 @@ export interface AssetRecord {
   itemId: number;
   typeId: number;
   quantity: number;
+  runCount?: number;
+  me?: number;
+  te?: number;
   locationId: number;
   locationType: "station" | "solar_system" | "item" | "structure" | "other";
   locationFlag: string;

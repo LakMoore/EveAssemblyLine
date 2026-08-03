@@ -7,16 +7,20 @@ import {
   BlueprintsRecordActivitiesReactionMaterialsItem,
   BlueprintsRecordActivitiesReactionProductsItem,
   DogmaAttributesRecord,
+  DogmaEffectsRecord,
+  GroupsRecord,
   MapSolarSystemsRecord,
   MarketGroupsRecord,
   NpcStationsRecord,
   TypeDogmaRecord,
+  TypeBonusRecord,
   TypesRecord,
 } from "./generated";
 
 const processedDir = resolve("sde/processed");
+export type LoadedType = TypesRecord & { packagedVolume?: number };
 let sdeBuildNumber = "unknown";
-const typeById = new Map<number, TypesRecord>();
+const typeById = new Map<number, LoadedType>();
 const marketGroupById = new Map<number, MarketGroupsRecord>();
 const blueprintByBuildProductTypeId = new Map<
   number,
@@ -32,7 +36,11 @@ const reactionMaterialsByBlueprintId = new Map<
   number,
   BlueprintsRecordActivitiesReactionMaterialsItem[]
 >();
+const activityInputTypeIds = new Set<number>();
 const reactionProductByTypeId = new Map<number, BlueprintsRecordActivitiesReactionProductsItem[]>();
+const dogmaEffectById = new Map<number, DogmaEffectsRecord>();
+const groupById = new Map<number, GroupsRecord>();
+const typeBonusById = new Map<number, TypeBonusRecord>();
 const systemById = new Map<number, MapSolarSystemsRecord>();
 const stationById = new Map<number, NpcStationsRecord>();
 const rigDogmaByTypeId = new Map<number, TypeDogmaRecord>();
@@ -44,6 +52,20 @@ function records<T>(file: string) {
   if (!existsSync(path)) return [] as T[];
   const value: unknown = JSON.parse(readFileSync(path, "utf8"));
   return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function packagedVolumes() {
+  const path = join(processedDir, "repackagedvolumes.json");
+  if (!existsSync(path)) return new Map<number, number>();
+  const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+  if (!value || typeof value !== "object" || Array.isArray(value)) return new Map<number, number>();
+  return new Map(
+    Object.entries(value).flatMap(([typeId, volume]) =>
+      /^\d+$/.test(typeId) && typeof volume === "number" && Number.isFinite(volume) && volume >= 0
+        ? [[Number(typeId), volume] as const]
+        : [],
+    ),
+  );
 }
 
 function requireProcessedSde() {
@@ -69,7 +91,11 @@ function getOnce<T>(name: string, get: () => T) {
 
 export function getTypes() {
   return getOnce("types", () => {
-    for (const record of records<TypesRecord>("types.json")) typeById.set(record._key, record);
+    const packagedVolumeByTypeId = packagedVolumes();
+    for (const record of records<TypesRecord>("types.json")) {
+      const packagedVolume = packagedVolumeByTypeId.get(record._key);
+      typeById.set(record._key, packagedVolume === undefined ? record : { ...record, packagedVolume });
+    }
     return typeById;
   });
 }
@@ -135,6 +161,23 @@ export function getBlueprints() {
   });
 }
 
+export function getActivityInputTypeIds() {
+  return getOnce("activityInputTypeIds", async () => {
+    const indexes = await getBlueprints();
+    for (const materials of indexes.materialsByBlueprintId.values()) {
+      for (const material of materials) activityInputTypeIds.add(material.typeID);
+    }
+    for (const materials of indexes.reactionMaterialsByBlueprintId.values()) {
+      for (const material of materials) activityInputTypeIds.add(material.typeID);
+    }
+    for (const blueprint of records<BlueprintsRecord>("blueprints.json")) {
+      for (const material of blueprint.activities.invention?.materials ?? [])
+        activityInputTypeIds.add(material.typeID);
+    }
+    return activityInputTypeIds;
+  });
+}
+
 export function getSystems() {
   return getOnce("systems", () => {
     for (const record of records<MapSolarSystemsRecord>("mapSolarSystems.json"))
@@ -164,6 +207,29 @@ export function getBonusDogmaAttributes() {
     for (const record of records<DogmaAttributesRecord>("dogmaAttributes.json"))
       if (record.attributeCategoryID === 37) bonusDogmaAttributesById.set(record._key, record);
     return bonusDogmaAttributesById;
+  });
+}
+
+export function getDogmaEffects() {
+  return getOnce("dogmaEffects", () => {
+    for (const record of records<DogmaEffectsRecord>("dogmaEffects.json"))
+      dogmaEffectById.set(record._key, record);
+    return dogmaEffectById;
+  });
+}
+
+export function getGroups() {
+  return getOnce("groups", () => {
+    for (const record of records<GroupsRecord>("groups.json")) groupById.set(record._key, record);
+    return groupById;
+  });
+}
+
+export function getTypeBonuses() {
+  return getOnce("typeBonuses", () => {
+    for (const record of records<TypeBonusRecord>("typeBonus.json"))
+      typeBonusById.set(record._key, record);
+    return typeBonusById;
   });
 }
 

@@ -46,6 +46,12 @@ SDE files are build/runtime inputs, not source files checked into the repository
 
 Do not assume one SDE schema without checking the actual downloaded data. Normalize field naming and activity structure at the loader boundary. Model products-per-run, activity type, blueprint relationships, invention outputs, reaction inputs, and locations explicitly rather than encoding them in plan-engine conditionals.
 
+HoboLeaks provides supplemental EVE static data at [sde.hoboleaks.space](https://sde.hoboleaks.space/). Use it when CCP's official SDE or ESI does not expose a needed value, while keeping the official CCP SDE as the primary source. In particular, `https://sde.hoboleaks.space/tq/repackagedvolumes.json` is a JSON object mapping type IDs to packaged volumes in cubic meters; use it for packaged/unassembled volumes when the official `types.json` `volume` field represents assembled volume. Keep these concepts separate in application names and DTOs, for example `assembledVolume` and `packagedVolume`.
+
+Before consuming a HoboLeaks file, inspect `https://sde.hoboleaks.space/tq/meta.json`. Check the file's `deprecated` and `stale` flags, record its `revision`, and use its `md5` hash for change detection. Do not silently use a stale or deprecated file as current data; surface the condition or fall back to the official source when possible. HoboLeaks updates automatically after TQ patches and may briefly lag or have schema changes, so validate its shape at the loader boundary and keep the source URL, revision, and freshness status observable.
+
+HoboLeaks data is a conversion of CCP-owned data, not an independent authority. Do not commit downloaded HoboLeaks files or hard-code values copied from them. Keep supplemental downloads/cache data outside source control, pin or record the revision used by reproducible builds, and document any HoboLeaks-specific fallback or precedence rule in the relevant loader and README.
+
 ### EVE image server
 
 Use CCP's official EVE Image Server directly for EVE artwork; do not download or commit image assets. The base URL is `https://images.evetech.net/{category}/{id}/{variation}`. For type artwork use `https://images.evetech.net/types/{typeId}/icon?size=64`; other supported type variations include `render`, `bpo`, `bpc`, and `relic`. Supported sizes are powers of two from 32 through 1024. The server returns PNGs for these images and is intended to be used as a CDN. Keep the host allowlisted in Next image configuration when using `next/image`.

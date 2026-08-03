@@ -1,34 +1,9 @@
 import { NextResponse } from "next/server";
-import { getMarketGroups, getTypes } from "@/cache/services/sdeCache";
-import type { MarketGroupsRecord } from "@/lib/sde/generated";
+import { getGroups, getMarketGroups, getTypes } from "@/cache/services/sdeCache";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
+import { categorizeType, type ItemCategory } from "@/lib/reference/category";
 
 const resultLimit = 12;
-type ItemCategory = "bpo" | "bpc" | "reaction" | "item";
-
-function marketCategory(
-  marketGroupId: number | undefined,
-  language: SdeLanguage,
-  marketGroupById: Map<number, MarketGroupsRecord>,
-) {
-  let current = marketGroupId === undefined ? undefined : marketGroupById.get(marketGroupId);
-  let child = current;
-  while (current?.parentGroupID !== undefined) {
-    const parent = marketGroupById.get(current.parentGroupID);
-    if (!parent) break;
-    if (parent.parentGroupID === undefined) return child?.name[language] ?? child?.name.en;
-    child = current;
-    current = parent;
-  }
-  return current?.name[language] ?? current?.name.en;
-}
-
-function itemCategory(name: string): ItemCategory {
-  const normalized = name.toLocaleLowerCase();
-  if (normalized.includes("reaction formula")) return "reaction";
-  if (normalized.includes("blueprint") || normalized.includes("bpc")) return "bpc";
-  return "item";
-}
 
 export async function GET(request: Request) {
   const searchParams = new URL(request.url).searchParams;
@@ -39,7 +14,7 @@ export async function GET(request: Request) {
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
 
   try {
-    const [typeById, marketGroupById] = await Promise.all([getTypes(), getMarketGroups()]);
+    const [typeById, marketGroupById, groupById] = await Promise.all([getTypes(), getMarketGroups(), getGroups()]);
     if (typeIdValues.length > 0) {
       const requestedTypeIds = typeIds
         .filter((value) => /^\d+$/.test(value))
@@ -48,19 +23,17 @@ export async function GET(request: Request) {
       const items = requestedTypeIds.flatMap((typeId) => {
         const item = typeById.get(typeId);
         if (!item || !item.published) return [];
-        return [
-          {
-            typeId: item._key,
-            volume: item.volume ?? 0,
-            category: itemCategory(item.name.en),
-            marketCategory: marketCategory(item.marketGroupID, language, marketGroupById),
-            name:
-              item.name[language] ??
-              item.name.en ??
-              Object.values(item.name).find(Boolean) ??
-              `Type ${item._key}`,
-          },
-        ];
+        return [{
+          typeId: item._key,
+          assembledVolume: item.volume ?? 0,
+          packagedVolume: item.packagedVolume,
+          ...categorizeType(item, language, marketGroupById, groupById),
+          name:
+            item.name[language] ??
+            item.name.en ??
+            Object.values(item.name).find(Boolean) ??
+            `Type ${item._key}`,
+        }];
       });
       return NextResponse.json({
         items,
@@ -120,13 +93,14 @@ export async function POST(request: Request) {
         { status: 400 },
       );
 
-    const [typeById, marketGroupById] = await Promise.all([getTypes(), getMarketGroups()]);
+    const [typeById, marketGroupById, groupById] = await Promise.all([getTypes(), getMarketGroups(), getGroups()]);
     const byName = new Map<
       string,
       {
         typeId: number;
         name: string;
-        volume: number;
+        assembledVolume: number;
+        packagedVolume?: number;
         category: ItemCategory;
         marketCategory?: string;
       }
@@ -138,9 +112,9 @@ export async function POST(request: Request) {
         byName.set(name.toLocaleLowerCase(language), {
           typeId: item._key,
           name,
-          volume: item.volume ?? 0,
-          category: itemCategory(name),
-          marketCategory: marketCategory(item.marketGroupID, language, marketGroupById),
+          assembledVolume: item.volume ?? 0,
+          packagedVolume: item.packagedVolume,
+          ...categorizeType(item, language, marketGroupById, groupById),
         });
     }
 

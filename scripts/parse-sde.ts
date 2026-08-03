@@ -1,4 +1,4 @@
-import { createReadStream, existsSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -40,6 +40,14 @@ async function main() {
     await writeFile(join(processedDir, `${basename(file, ".jsonl")}.json`), JSON.stringify(await parseJsonl(join(rawDir, file))));
     console.log(`Parsed ${file}`);
   }
+  const repackagedVolumesPath = join(rawDir, "repackagedvolumes.json");
+  if (!existsSync(repackagedVolumesPath))
+    throw new Error("HoboLeaks repackaged volumes are missing. Run npm run fetch-sde first.");
+  const repackagedVolumes: unknown = JSON.parse(readFileSync(repackagedVolumesPath, "utf8"));
+  if (!repackagedVolumes || typeof repackagedVolumes !== "object" || Array.isArray(repackagedVolumes))
+    throw new Error("HoboLeaks repackaged volumes must be a JSON object.");
+  await writeFile(join(processedDir, "repackagedvolumes.json"), JSON.stringify(repackagedVolumes));
+  console.log("Parsed HoboLeaks repackaged volumes.");
 }
 
 main().catch((error) => { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; });

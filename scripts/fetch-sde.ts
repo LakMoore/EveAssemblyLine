@@ -15,6 +15,7 @@ const sdeCacheDir = resolve(".next/cache/assemblyline-sde");
 const archivePath = join(tmpdir(), "assemblyline-sde.zip");
 const manifestUrl = "https://developers.eveonline.com/static-data/tranquility/latest.jsonl";
 const archiveUrl = "https://developers.eveonline.com/static-data/eve-online-static-data-latest-jsonl.zip";
+const hoboLeaksBaseUrl = "https://sde.hoboleaks.space/tq";
 const requestHeaders = {
   Accept: "application/json, application/zip, application/octet-stream",
   "User-Agent": "AssemblyLine/0.1 (EVE Online SDE client)",
@@ -88,15 +89,47 @@ async function validateJsonlFiles(directory: string) {
   }
 }
 
+async function fetchRepackagedVolumes() {
+  const metadataResponse = await fetch(`${hoboLeaksBaseUrl}/meta.json`, { headers: requestHeaders });
+  if (!metadataResponse.ok)
+    throw new Error(`HoboLeaks metadata failed: HTTP ${metadataResponse.status}`);
+  const metadata = (await metadataResponse.json()) as {
+    files?: Record<string, { deprecated?: boolean; stale?: boolean; md5?: string; revision?: number }>;
+  };
+  const fileMetadata = metadata.files?.["repackagedvolumes.json"];
+  if (!fileMetadata) throw new Error("HoboLeaks metadata does not describe repackagedvolumes.json.");
+  if (fileMetadata.deprecated || fileMetadata.stale)
+    throw new Error("HoboLeaks repackagedvolumes.json is marked deprecated or stale.");
+
+  const response = await fetch(`${hoboLeaksBaseUrl}/repackagedvolumes.json`, { headers: requestHeaders });
+  if (!response.ok)
+    throw new Error(`HoboLeaks repackaged volumes failed: HTTP ${response.status}`);
+  const value: unknown = await response.json();
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("HoboLeaks repackagedvolumes.json must be an object.");
+  for (const [typeId, volume] of Object.entries(value)) {
+    if (!/^\d+$/.test(typeId) || typeof volume !== "number" || !Number.isFinite(volume) || volume < 0)
+      throw new Error(`HoboLeaks repackagedvolumes.json contains an invalid entry for ${typeId}.`);
+  }
+
+  writeFileSync(join(rawDir, "repackagedvolumes.json"), JSON.stringify(value));
+  writeFileSync(
+    join(rawDir, "hoboleaks-meta.json"),
+    JSON.stringify({ source: `${hoboLeaksBaseUrl}/repackagedvolumes.json`, ...fileMetadata }, null, 2),
+  );
+  console.log(`Captured HoboLeaks repackaged volumes revision ${fileMetadata.revision ?? "unknown"}.`);
+}
+
 async function main() {
   const manifest = await fetchManifest();
   const currentBuild = readLocalBuildNumber();
+  mkdirSync(sdeCacheDir, { recursive: true });
   if (!process.env.SDE_ARCHIVE && currentBuild === manifest.buildNumber) {
+    await fetchRepackagedVolumes();
     console.log(`SDE build ${manifest.buildNumber} is already present; nothing to download.`);
     return;
   }
 
-  mkdirSync(sdeCacheDir, { recursive: true });
   const attempts = process.env.SDE_ARCHIVE ? 1 : 3;
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -107,6 +140,7 @@ async function main() {
       await rm(rawDir, { recursive: true, force: true });
       await rename(stagingDir, rawDir);
       writeFileSync(join(rawDir, "version.json"), JSON.stringify({ buildNumber: manifest.buildNumber, releaseDate: manifest.releaseDate, manifestUrl, archiveUrl }, null, 2));
+      await fetchRepackagedVolumes();
       console.log(`SDE build ${manifest.buildNumber} extracted to ${rawDir}`);
       return;
     } catch (error) {

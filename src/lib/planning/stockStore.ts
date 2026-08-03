@@ -1,4 +1,4 @@
-import type { BuildItem } from "./types";
+import type { BlueprintPrint, BuildItem } from "./types";
 import { getPlanningDatabase, stockStoreName } from "./planningDatabase";
 
 export type StockLocation = {
@@ -9,7 +9,13 @@ export type StockLocation = {
 };
 
 export type StockItem = Pick<BuildItem, "typeId" | "name" | "quantity"> & {
-  volume?: number;
+  isPackaged?: boolean;
+  runCount?: number;
+  me?: number;
+  te?: number;
+  blueprintPrints?: BlueprintPrint[];
+  assembledVolume?: number;
+  packagedVolume?: number;
   category?: "bpo" | "bpc" | "reaction" | "item";
   marketCategory?: string;
 };

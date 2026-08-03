@@ -14,7 +14,11 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as { force?: boolean };
   const rateLimitedUntil = getEsiRateLimitUntil();
   if (rateLimitedUntil) {
-    return NextResponse.json({ characters: [], rateLimitedUntil });
+    return NextResponse.json({
+      success: false,
+      characters: [],
+      rateLimitedUntil,
+    });
   }
   const key = session.characterIds
     .slice()
@@ -22,15 +26,21 @@ export async function POST(request: Request) {
     .join(",");
   const activeRefresh = activeRefreshes.get(key);
   if (activeRefresh) {
+    const result = await activeRefresh;
     return NextResponse.json({
-      ...(await activeRefresh),
+      ...result,
+      success: true,
+      refreshedAt: new Date().toISOString(),
       rateLimitedUntil: getEsiRateLimitUntil(),
     });
   }
   const refresh = refreshCharacterState(session.characterIds, { force: body.force === true });
   activeRefreshes.set(key, refresh);
+  const result = await refresh.finally(() => activeRefreshes.delete(key));
   return NextResponse.json({
-    ...(await refresh.finally(() => activeRefreshes.delete(key))),
+    ...result,
+    success: true,
+    refreshedAt: new Date().toISOString(),
     rateLimitedUntil: getEsiRateLimitUntil(),
   });
 }

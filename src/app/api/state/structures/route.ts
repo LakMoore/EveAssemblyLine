@@ -3,9 +3,104 @@ import { getSessionFromRequest } from "@/lib/auth/session";
 import { getResolvedAssets } from "@/lib/esi/cache";
 import { fetchCorporationStructures } from "@/lib/esi/client";
 import { getCharacter } from "@/lib/auth/tokensStore";
-import { getSystems, getTypesByIds } from "@/cache/services/sdeCache";
+import {
+  getDogmaEffects,
+  getActivityInputTypeIds,
+  getGroups,
+  getMarketGroups,
+  getRigDogma,
+  getSystems,
+  getTypeBonuses,
+  getTypesByIds,
+} from "@/cache/services/sdeCache";
+import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
+import { categorizeType } from "@/lib/reference/category";
 
 type StructureSize = "Small" | "Medium" | "Large" | "Extra Large";
+type Activity = "manufacturing" | "research" | "reactions" | "invention";
+type ActivityBonuses = Record<Activity, { me: number; te: number; cost: number }>;
+const shipCategoryId = 6;
+const containerCategoryId = 2;
+const bonusAttributeIds = { me: 2594, te: 2593, cost: 2595 } as const;
+
+function emptyBonuses(): ActivityBonuses {
+  return {
+    manufacturing: { me: 0, te: 0, cost: 0 },
+    research: { me: 0, te: 0, cost: 0 },
+    reactions: { me: 0, te: 0, cost: 0 },
+    invention: { me: 0, te: 0, cost: 0 },
+  };
+}
+
+function activityForEffect(name: string): Activity | null {
+  const normalized = name.toLocaleLowerCase();
+  if (normalized.includes("manufacture")) return "manufacturing";
+  if (normalized.includes("reaction")) return "reactions";
+  if (normalized.includes("invention")) return "invention";
+  if (normalized.includes("research") || normalized.includes("copy")) return "research";
+  return null;
+}
+
+function rigBonuses(
+  rigIds: number[],
+  rigDogma: Awaited<ReturnType<typeof getRigDogma>>,
+  dogmaEffects: Awaited<ReturnType<typeof getDogmaEffects>>,
+): ActivityBonuses {
+  const bonuses = emptyBonuses();
+  for (const rigId of rigIds) {
+    const rig = rigDogma.get(rigId);
+    if (!rig) continue;
+    for (const effectRef of rig?.dogmaEffects ?? []) {
+      const effect = dogmaEffects.get(effectRef.effectID);
+      const activity = effect ? activityForEffect(effect.name) : null;
+      if (!activity) continue;
+      for (const modifier of effect?.modifierInfo ?? []) {
+        const bonus = modifier.modifyingAttributeID;
+        const key =
+          bonus === bonusAttributeIds.me ? "me" : bonus === bonusAttributeIds.te ? "te" : bonus === bonusAttributeIds.cost ? "cost" : null;
+        if (!key) continue;
+        const value = rig.dogmaAttributes.find((attribute) => attribute.attributeID === bonus)?.value ?? 0;
+        bonuses[activity][key] += Math.max(0, -value);
+      }
+    }
+  }
+  return bonuses;
+}
+
+function structureBonuses(
+  typeId: number | undefined,
+  typeBonuses: Awaited<ReturnType<typeof getTypeBonuses>>,
+): ActivityBonuses {
+  const bonuses = emptyBonuses();
+  const record = typeId ? typeBonuses.get(typeId) : undefined;
+  for (const entry of [...(record?.miscBonuses ?? []), ...(record?.roleBonuses ?? [])]) {
+    const amount = Math.max(0, entry.bonus ?? 0);
+    const text = entry.bonusText.en.toLocaleLowerCase();
+    const activities: Activity[] = [];
+    if (text.includes("manufacturing")) activities.push("manufacturing");
+    if (text.includes("science")) activities.push("research", "invention");
+    if (text.includes("reaction")) activities.push("reactions");
+    if (activities.length === 0) continue;
+    const metric = text.includes("material")
+      ? "me"
+      : text.includes("time")
+        ? "te"
+        : text.includes("isk")
+          ? "cost"
+          : null;
+    if (!metric) continue;
+    for (const activity of activities) bonuses[activity][metric] += amount;
+  }
+  return bonuses;
+}
+
+function addBonuses(target: ActivityBonuses, source: ActivityBonuses) {
+  for (const activity of ["manufacturing", "research", "reactions", "invention"] as const) {
+    target[activity].me += source[activity].me;
+    target[activity].te += source[activity].te;
+    target[activity].cost += source[activity].cost;
+  }
+}
 
 function structureSize(type: string): StructureSize | undefined {
   if (["Athanor", "Raitaru", "Astrahus", "Tatara"].includes(type)) return "Medium";
@@ -14,11 +109,68 @@ function structureSize(type: string): StructureSize | undefined {
   return undefined;
 }
 
+function isCargoContainerType(
+  typeId: number,
+  types: Awaited<ReturnType<typeof getTypesByIds>>,
+  groups: Awaited<ReturnType<typeof getGroups>>,
+  marketGroups: Awaited<ReturnType<typeof getMarketGroups>>,
+) {
+  const type = types.get(typeId);
+  const group = groups.get(type?.groupID ?? -1);
+  if (group?.categoryID === containerCategoryId) return true;
+  let marketGroup = type?.marketGroupID === undefined ? undefined : marketGroups.get(type.marketGroupID);
+  while (marketGroup) {
+    if (marketGroup.name.en === "Cargo Containers") return true;
+    marketGroup = marketGroup.parentGroupID === undefined
+      ? undefined
+      : marketGroups.get(marketGroup.parentGroupID);
+  }
+  return false;
+}
+
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  const requestedLanguage = new URL(request.url).searchParams.get("language");
+  const url = new URL(request.url);
+  const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
+  const includeAssembledContainers = url.searchParams.get("includeAssembledContainers") === "true";
+  const includeAssembledShips = url.searchParams.get("includeAssembledShips") === "true";
+  const stockOnly = url.searchParams.get("stockOnly") === "true";
 
-  const assets = await getResolvedAssets(session.characterIds, true);
+  const [assets, activityInputTypeIds, rigDogma, dogmaEffects, typeBonuses, marketGroups] = await Promise.all([
+    getResolvedAssets(session.characterIds, true),
+    getActivityInputTypeIds(),
+    getRigDogma(),
+    getDogmaEffects(),
+    getTypeBonuses(),
+    getMarketGroups(),
+  ]);
+  const assetTypes = await getTypesByIds([...new Set(assets.map((asset) => asset.typeId))]);
+  const groups = await getGroups();
+  const includedAssets = assets.filter((asset) => {
+    const type = assetTypes.get(asset.typeId);
+    const category = type ? categorizeType(type, language, marketGroups, groups).category : "item";
+    if (
+      stockOnly &&
+      !activityInputTypeIds.has(asset.typeId) &&
+      category !== "bpo" &&
+      category !== "reaction"
+    ) return false;
+    const categoryId = groups.get(assetTypes.get(asset.typeId)?.groupID ?? -1)?.categoryID;
+    const isCargoContainer =
+      categoryId === containerCategoryId ||
+      isCargoContainerType(asset.typeId, assetTypes, groups, marketGroups);
+    if (isCargoContainer) return includeAssembledContainers || !asset.isSingleton;
+    if (!asset.isSingleton) return true;
+    if (categoryId === shipCategoryId) return includeAssembledShips;
+    return true;
+  });
+  const filteredLocationIds = new Set(
+    assets
+      .filter((asset) => !includedAssets.includes(asset))
+      .map((asset) => asset.location.locationId),
+  );
   const structures = new Map<
     number,
     {
@@ -39,10 +191,20 @@ export async function GET(request: Request) {
       state?: string;
       fuelExpires?: string;
       ownedByCorporation: boolean;
+      items: Map<string, {
+        typeId: number;
+        quantity: number;
+        isPackaged: boolean;
+        runCount?: number;
+        me?: number;
+        te?: number;
+        blueprintPrints?: Array<{ itemId: number; runs: number; me?: number; te?: number }>;
+      }>;
+      bonuses: ActivityBonuses;
     }
   >();
 
-  for (const asset of assets) {
+  for (const asset of includedAssets) {
     if (asset.location.kind !== "structure" && asset.location.kind !== "station") continue;
     const existing = structures.get(asset.location.locationId);
     if (existing) {
@@ -57,6 +219,40 @@ export async function GET(request: Request) {
       if (asset.ownerType === "corporation" && asset.location.kind === "structure" && asset.locationFlag.startsWith("RigSlot")) {
         existing.rigs.push(String(asset.typeId));
       }
+      const isPackaged = !asset.isSingleton;
+      const assetType = assetTypes.get(asset.typeId);
+      const assetCategory = assetType
+        ? categorizeType(assetType, language, marketGroups, groups).category
+        : "item";
+      const blueprintKind = assetCategory === "bpo"
+        ? asset.runCount === -1
+          ? "bpo"
+          : asset.runCount !== undefined
+            ? "bpc"
+            : isPackaged
+              ? "bpc"
+              : "bpc"
+        : null;
+      const itemKey = `${asset.typeId}:${blueprintKind ?? (isPackaged ? "packaged" : "assembled")}`;
+      const item = existing.items.get(itemKey) ?? { typeId: asset.typeId, quantity: 0, isPackaged };
+      const assetQuantity = asset.quantity > 0 ? asset.quantity : 1;
+      item.quantity += assetQuantity;
+      if (asset.runCount !== undefined) {
+        item.runCount = item.runCount === -1 || asset.runCount === -1
+          ? -1
+          : (item.runCount ?? 0) + asset.runCount * assetQuantity;
+        item.me ??= asset.me;
+        item.te ??= asset.te;
+        const blueprintPrints = item.blueprintPrints ?? [];
+        blueprintPrints.push({
+          itemId: asset.itemId,
+          runs: asset.runCount * assetQuantity,
+          ...(asset.me !== undefined ? { me: asset.me } : {}),
+          ...(asset.te !== undefined ? { te: asset.te } : {}),
+        });
+        item.blueprintPrints = blueprintPrints;
+      }
+      existing.items.set(itemKey, item);
       continue;
     }
     structures.set(asset.location.locationId, {
@@ -76,6 +272,27 @@ export async function GET(request: Request) {
           ? [String(asset.typeId)]
           : [],
       ownedByCorporation: false,
+      items: new Map([[`${asset.typeId}:${asset.runCount !== undefined ? (asset.runCount === -1 ? "bpo" : "bpc") : (asset.isSingleton ? "assembled" : "packaged")}`, {
+        typeId: asset.typeId,
+        quantity: asset.quantity > 0 ? asset.quantity : 1,
+        ...(asset.runCount !== undefined
+          ? { runCount: asset.runCount === -1 ? -1 : asset.runCount * (asset.quantity > 0 ? asset.quantity : 1) }
+          : {}),
+        ...(asset.me !== undefined ? { me: asset.me } : {}),
+        ...(asset.te !== undefined ? { te: asset.te } : {}),
+        ...(asset.runCount !== undefined
+          ? {
+              blueprintPrints: [{
+                itemId: asset.itemId,
+                runs: asset.runCount * (asset.quantity > 0 ? asset.quantity : 1),
+                ...(asset.me !== undefined ? { me: asset.me } : {}),
+                ...(asset.te !== undefined ? { te: asset.te } : {}),
+              }],
+            }
+          : {}),
+        isPackaged: !asset.isSingleton,
+      }]]),
+      bonuses: emptyBonuses(),
     });
   }
 
@@ -97,6 +314,7 @@ export async function GET(request: Request) {
   const systems = await getSystems();
   const types = await getTypesByIds(typeIds);
   for (const structure of structures.values()) {
+    const fittedRigIds = structure.rigs.map(Number);
     const metadata = corporationStructures.get(structure.structureId);
     const typeId = metadata?.type_id ?? structure.typeId;
     const type = typeId ? types.get(typeId)?.name.en : undefined;
@@ -120,9 +338,61 @@ export async function GET(request: Request) {
       structure.systemName = system?.name.en;
     }
     structure.rigs = corporationRigs;
+    structure.bonuses = structureBonuses(structure.typeId, typeBonuses);
+    addBonuses(structure.bonuses, rigBonuses(
+      fittedRigIds,
+      rigDogma,
+      dogmaEffects,
+    ));
   }
 
+  const itemTypeIds = [...structures.values()].flatMap((structure) =>
+    [...structure.items.values()].map((item) => item.typeId),
+  );
+  const itemTypes = await getTypesByIds(itemTypeIds);
+
   return NextResponse.json({
-    structures: [...structures.values()].sort((left, right) => left.name.localeCompare(right.name)),
+    filteredLocationIds: [...filteredLocationIds],
+    structures: [...structures.values()]
+      .map((structure) => ({
+        ...structure,
+        totalCount: [...structure.items.values()].reduce((total, item) => total + item.quantity, 0),
+        totalVolume: [...structure.items.values()].reduce(
+          (total, item) => total + item.quantity * (item.isPackaged
+            ? itemTypes.get(item.typeId)?.packagedVolume ?? itemTypes.get(item.typeId)?.volume ?? 0
+            : itemTypes.get(item.typeId)?.volume ?? 0),
+          0,
+        ),
+        items: [...structure.items.values()].flatMap((item) => {
+          const type = itemTypes.get(item.typeId);
+          if (!type?.published) return [];
+          const categorized = categorizeType(type, language, marketGroups, groups);
+          const category =
+            categorized.category === "bpo"
+              ? item.runCount !== undefined
+                ? item.runCount === -1
+                  ? "bpo"
+                  : "bpc"
+                : item.isPackaged
+                  ? "bpc"
+                  : "bpc"
+              : categorized.category;
+          return [{
+            typeId: item.typeId,
+            name: type.name[language] ?? type.name.en ?? `Type ${item.typeId}`,
+            quantity: item.quantity,
+            ...(item.runCount !== undefined ? { runCount: item.runCount } : {}),
+            ...(item.me !== undefined ? { me: item.me } : {}),
+            ...(item.te !== undefined ? { te: item.te } : {}),
+            ...(item.blueprintPrints ? { blueprintPrints: item.blueprintPrints } : {}),
+            isPackaged: item.isPackaged,
+            assembledVolume: type.volume ?? 0,
+            packagedVolume: type.packagedVolume,
+            ...categorized,
+            category,
+          }];
+        }),
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name)),
   });
 }

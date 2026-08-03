@@ -25,6 +25,13 @@ export type EsiAsset = {
   is_singleton: boolean;
 };
 
+export type EsiBlueprint = {
+  item_id: number;
+  runs: number;
+  material_efficiency: number;
+  time_efficiency: number;
+};
+
 export type EsiCorporationStructure = {
   structure_id: number;
   type_id: number;
@@ -167,11 +174,20 @@ function mapAsset(
   asset: EsiAsset,
   ownerType: "character" | "corporation",
   ownerId: number,
+  blueprintsByItemId?: Map<number, EsiBlueprint>,
 ): AssetRecord {
+  const blueprint = blueprintsByItemId?.get(asset.item_id);
   return {
     itemId: asset.item_id,
     typeId: asset.type_id,
     quantity: asset.quantity,
+    ...(blueprint
+      ? {
+          runCount: blueprint.runs,
+          me: blueprint.material_efficiency,
+          te: blueprint.time_efficiency,
+        }
+      : {}),
     locationId: asset.location_id,
     locationType:
       asset.location_type === "station" ||
@@ -187,6 +203,28 @@ function mapAsset(
   };
 }
 
+async function fetchBlueprints(path: string, token: TokenSet) {
+  const result = await fetchPages<EsiBlueprint>(path, token);
+  return {
+    data: result.data ?? [],
+    byItemId: new Map((result.data ?? []).map((blueprint) => [blueprint.item_id, blueprint])),
+  };
+}
+
+export function applyBlueprintMetadata(assets: AssetRecord[], blueprints: EsiBlueprint[]) {
+  const byItemId = new Map(blueprints.map((blueprint) => [blueprint.item_id, blueprint]));
+  return assets.map((asset) => {
+    const blueprint = byItemId.get(asset.itemId);
+    if (!blueprint) return asset;
+    return {
+      ...asset,
+      runCount: blueprint.runs,
+      me: blueprint.material_efficiency,
+      te: blueprint.time_efficiency,
+    };
+  });
+}
+
 export async function fetchCharacterAssets(record: CharacterTokenRecord, etag?: string) {
   const token = await getUsableToken(record, "personal");
   const result = await fetchPages<EsiAsset>(
@@ -194,9 +232,19 @@ export async function fetchCharacterAssets(record: CharacterTokenRecord, etag?: 
     token,
     etag,
   );
+  let blueprintsByItemId = new Map<number, EsiBlueprint>();
+  let blueprints: EsiBlueprint[] = [];
+  try {
+    const result = await fetchBlueprints(`/characters/${record.characterId}/blueprints/`, token);
+    blueprintsByItemId = result.byItemId;
+    blueprints = result.data;
+  } catch {}
   return {
-    assets: result.data?.map((asset) => mapAsset(asset, "character", record.characterId)) ?? null,
+    assets:
+      result.data?.map((asset) => mapAsset(asset, "character", record.characterId, blueprintsByItemId)) ??
+      null,
     token,
+    blueprints,
     headers: result.headers,
     notModified: result.notModified,
   };
@@ -212,9 +260,19 @@ export async function fetchCorporationAssets(record: CharacterTokenRecord, etag?
     token,
     etag,
   );
+  let blueprintsByItemId = new Map<number, EsiBlueprint>();
+  let blueprints: EsiBlueprint[] = [];
+  try {
+    const result = await fetchBlueprints(`/corporations/${record.corporationId}/blueprints/`, token);
+    blueprintsByItemId = result.byItemId;
+    blueprints = result.data;
+  } catch {}
   return {
     assets:
-      result.data?.map((asset) => mapAsset(asset, "corporation", record.corporationId!)) ?? null,
+      result.data?.map((asset) =>
+        mapAsset(asset, "corporation", record.corporationId!, blueprintsByItemId),
+      ) ?? null,
+    blueprints,
     token,
     headers: result.headers,
     notModified: result.notModified,

@@ -18,6 +18,8 @@ export type KnownStructure = {
 
 export type PlannerSettings = {
   includeCorporationAssets: boolean;
+  includeAssembledContainers: boolean;
+  includeAssembledShips: boolean;
   respectActiveJobs: boolean;
   defaultMe: number;
   defaultTe: number;
@@ -32,6 +34,8 @@ export const defaultLocations: PlannerLocations = {
 
 export const defaultSettings: PlannerSettings = {
   includeCorporationAssets: true,
+  includeAssembledContainers: false,
+  includeAssembledShips: false,
   respectActiveJobs: true,
   defaultMe: 10,
   defaultTe: 20,
