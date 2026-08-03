@@ -557,10 +557,15 @@
     font: 10px 'DM Mono'
 }
 
-.stockHeader,
-.stockRow {
+.stockHeader {
     display: grid;
     grid-template-columns: 40px minmax(0, 1fr) 110px;
+    gap: 18px;
+    align-items: center
+}
+
+.stockRow {
+    display: flex;
     gap: 18px;
     align-items: center
 }
@@ -601,9 +606,20 @@
 }
 
 .stockRow > strong {
+    flex: 0 0 auto;
     color: #d4e6e9;
     font: 12px 'DM Mono';
     text-align: right
+}
+
+.stockRow > span {
+    flex: 1 1 auto;
+    min-width: 0
+}
+
+.stockSummaryLine {
+    display: block;
+    white-space: nowrap
 }
 
 .stockLocationList {

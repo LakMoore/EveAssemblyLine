@@ -1,12 +1,18 @@
-import type { AssetLocation, AssetRecord, ResolvedAssetRecord } from "@/lib/auth/model";
+import type {
+  AssetLocation,
+  AssetRecord,
+  IndustryJobRecord,
+  ResolvedAssetRecord,
+} from "@/lib/auth/model";
 import { getCharacter, getCharacters } from "@/lib/auth/tokensStore";
 import {
   fetchAssetLocations,
   fetchCharacterAssets,
   fetchLocationMetadata,
   fetchCorporationAssets,
+  fetchCharacterIndustryJobs,
+  fetchCorporationIndustryJobs,
   applyBlueprintMetadata,
-  requestEsi,
   getUsableToken,
 } from "./client";
 
@@ -235,11 +241,6 @@ async function resolveAssets(
   });
 }
 
-async function refreshJobs(characterId: number, token: Parameters<typeof fetchAssetLocations>[3]) {
-  const result = await requestEsi<unknown[]>(`/characters/${characterId}/industry/jobs/`, token);
-  return result;
-}
-
 async function rebuildResolvedAssets(
   cache: OwnerCache,
   record: Awaited<ReturnType<typeof getCharacter>>,
@@ -319,8 +320,8 @@ export async function refreshCharacterState(
         characterSummary.assets = cache.assets;
         characterSummary.assetLocations = cache.assetLocations;
       }
-      const jobs = await refreshJobs(characterId, personalToken);
-      cache.jobs = setFresh(jobs);
+      const jobs = await fetchCharacterIndustryJobs(record);
+      cache.jobs = setFresh(jobs.jobs, jobs.headers);
       characterSummary.jobs = cache.jobs;
     } catch (error) {
       await rebuildResolvedAssets(cache, record, "personal");
@@ -336,6 +337,7 @@ export async function refreshCharacterState(
         corporationId: number;
         assets?: EndpointCache;
         assetLocations?: EndpointCache;
+        jobs?: EndpointCache;
       } = { corporationId: record.corporationId };
       try {
         if (
@@ -394,11 +396,51 @@ export async function refreshCharacterState(
           ...endpointStatus(error),
         };
       }
+      try {
+        const jobs = await fetchCorporationIndustryJobs(record);
+        corpCache.jobs = setFresh(jobs.jobs, jobs.headers);
+        corpSummary.jobs = corpCache.jobs;
+      } catch (error) {
+        corpSummary.jobs = {
+          ...(corpCache.jobs ?? { lastBody: null }),
+          ...endpointStatus(error),
+        };
+      }
       characterSummary.corporations = [corpSummary];
     }
     summary.push(characterSummary);
   }
   return { characters: summary };
+}
+
+export async function getRunningIndustryJobs(
+  characterIds: number[],
+  includeCorporationJobs: boolean,
+) {
+  const jobs = characterIds.flatMap((id) => {
+    const body = getCache(characterCaches, id).jobs?.lastBody;
+    return Array.isArray(body) ? (body as IndustryJobRecord[]) : [];
+  });
+  if (!includeCorporationJobs) return jobs.filter((job) => job.ownerType === "character");
+  const characters = await getCharacters();
+  const corporationIds = new Set(
+    characters
+      .filter(
+        (character) =>
+          characterIds.includes(character.characterId) &&
+          character.corpAuthCompleted &&
+          character.hasDirectorRole &&
+          character.corporationId,
+      )
+      .map((character) => character.corporationId!),
+  );
+  return [
+    ...jobs,
+    ...[...corporationIds].flatMap((id) => {
+      const body = getCache(corporationCaches, id).jobs?.lastBody;
+      return Array.isArray(body) ? (body as IndustryJobRecord[]) : [];
+    }),
+  ];
 }
 
 export async function getResolvedAssets(characterIds: number[], includeCorporationAssets: boolean) {

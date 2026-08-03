@@ -25,6 +25,7 @@ export async function GET(request: Request) {
         if (!item || !item.published) return [];
         return [{
           typeId: item._key,
+          techLevel: item.techLevel,
           assembledVolume: item.volume ?? 0,
           packagedVolume: item.packagedVolume,
           ...categorizeType(item, language, marketGroupById, groupById),

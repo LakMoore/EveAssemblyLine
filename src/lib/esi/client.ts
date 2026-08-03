@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { AssetRecord, CharacterTokenRecord, TokenSet } from "@/lib/auth/model";
+import type { AssetRecord, CharacterTokenRecord, IndustryJobRecord, TokenSet } from "@/lib/auth/model";
 import { getCachedEsiResponse, setCachedEsiResponse } from "@/cache/services/esiCache";
 import { refreshTokenSet } from "@/lib/auth/eveSso";
 import { getCharacter, upsertCharacter } from "@/lib/auth/tokensStore";
@@ -30,6 +30,25 @@ export type EsiBlueprint = {
   runs: number;
   material_efficiency: number;
   time_efficiency: number;
+};
+
+type EsiIndustryJob = {
+  job_id: number;
+  installer_id: number;
+  facility_id: number;
+  location_id: number;
+  output_location_id: number;
+  activity_id: number;
+  blueprint_id: number;
+  blueprint_type_id: number;
+  blueprint_location_id: number;
+  runs: number;
+  licensed_runs?: number;
+  product_type_id?: number;
+  status: string;
+  successful_runs?: number;
+  start_date: string;
+  end_date: string;
 };
 
 export type EsiCorporationStructure = {
@@ -276,6 +295,64 @@ export async function fetchCorporationAssets(record: CharacterTokenRecord, etag?
     token,
     headers: result.headers,
     notModified: result.notModified,
+  };
+}
+
+function mapIndustryJob(
+  job: EsiIndustryJob,
+  ownerType: IndustryJobRecord["ownerType"],
+  ownerId: number,
+): IndustryJobRecord {
+  return {
+    jobId: job.job_id,
+    installerId: job.installer_id,
+    facilityId: job.facility_id,
+    locationId: job.location_id,
+    outputLocationId: job.output_location_id,
+    activityId: job.activity_id,
+    blueprintId: job.blueprint_id,
+    blueprintTypeId: job.blueprint_type_id,
+    blueprintLocationId: job.blueprint_location_id,
+    runs: job.runs,
+    ...(job.licensed_runs !== undefined ? { licensedRuns: job.licensed_runs } : {}),
+    ...(job.product_type_id !== undefined ? { productTypeId: job.product_type_id } : {}),
+    status: job.status,
+    ...(job.successful_runs !== undefined ? { successfulRuns: job.successful_runs } : {}),
+    startDate: job.start_date,
+    endDate: job.end_date,
+    ownerType,
+    ownerId,
+  };
+}
+
+export async function fetchCharacterIndustryJobs(record: CharacterTokenRecord) {
+  const token = await getUsableToken(record, "personal");
+  const result = await requestEsi<EsiIndustryJob[]>(
+    `/characters/${record.characterId}/industry/jobs/`,
+    token,
+  );
+  return {
+    jobs: (result.data ?? [])
+      .filter((job) => job.status !== "cancelled" && job.status !== "delivered")
+      .map((job) => mapIndustryJob(job, "character", record.characterId)),
+    headers: result.headers,
+  };
+}
+
+export async function fetchCorporationIndustryJobs(record: CharacterTokenRecord) {
+  if (!record.corporationId || !record.hasDirectorRole || !record.corpAuthCompleted) {
+    throw new Error("Corporation authorization is incomplete");
+  }
+  const token = await getUsableToken(record, "corp");
+  const result = await requestEsi<EsiIndustryJob[]>(
+    `/corporations/${record.corporationId}/industry/jobs/`,
+    token,
+  );
+  return {
+    jobs: (result.data ?? [])
+      .filter((job) => job.status !== "cancelled" && job.status !== "delivered")
+      .map((job) => mapIndustryJob(job, "corporation", record.corporationId!)),
+    headers: result.headers,
   };
 }
 

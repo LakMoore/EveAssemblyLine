@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth/session";
-import { getResolvedAssets } from "@/lib/esi/cache";
+import { getResolvedAssets, getRunningIndustryJobs } from "@/lib/esi/cache";
 import { fetchCorporationStructures } from "@/lib/esi/client";
 import { getCharacter } from "@/lib/auth/tokensStore";
 import {
@@ -138,15 +138,19 @@ export async function GET(request: Request) {
   const includeAssembledShips = url.searchParams.get("includeAssembledShips") === "true";
   const stockOnly = url.searchParams.get("stockOnly") === "true";
 
-  const [assets, activityInputTypeIds, rigDogma, dogmaEffects, typeBonuses, marketGroups] = await Promise.all([
+  const [assets, jobs, activityInputTypeIds, rigDogma, dogmaEffects, typeBonuses, marketGroups] = await Promise.all([
     getResolvedAssets(session.characterIds, true),
+    getRunningIndustryJobs(session.characterIds, true),
     getActivityInputTypeIds(),
     getRigDogma(),
     getDogmaEffects(),
     getTypeBonuses(),
     getMarketGroups(),
   ]);
-  const assetTypes = await getTypesByIds([...new Set(assets.map((asset) => asset.typeId))]);
+  const assetTypes = await getTypesByIds([...new Set([
+    ...assets.map((asset) => asset.typeId),
+    ...jobs.flatMap((job) => [job.productTypeId ?? job.blueprintTypeId, job.blueprintTypeId]),
+  ])]);
   const groups = await getGroups();
   const includedAssets = assets.filter((asset) => {
     const type = assetTypes.get(asset.typeId);
@@ -199,6 +203,19 @@ export async function GET(request: Request) {
         me?: number;
         te?: number;
         blueprintPrints?: Array<{ itemId: number; runs: number; me?: number; te?: number }>;
+        inBuild?: boolean;
+        inUse?: boolean;
+        jobId?: number;
+        installerId?: number;
+        facilityId?: number;
+        outputLocationId?: number;
+        blueprintId?: number;
+        blueprintTypeId?: number;
+        blueprintIsOriginal?: boolean;
+        blueprintRunsAtInstall?: number;
+        blueprintRunsUsed?: number;
+        blueprintRunsRemaining?: number;
+        endDate?: string;
       }>;
       bonuses: ActivityBonuses;
     }
@@ -292,6 +309,95 @@ export async function GET(request: Request) {
           : {}),
         isPackaged: !asset.isSingleton,
       }]]),
+      bonuses: emptyBonuses(),
+    });
+  }
+
+  for (const job of jobs) {
+    if (job.status === "cancelled" || job.status === "delivered") continue;
+    const typeId = job.productTypeId ?? job.blueprintTypeId;
+    const quantity = job.successfulRuns ?? job.runs;
+    const remainingRuns = job.licensedRuns;
+    const isOriginal = remainingRuns === undefined || remainingRuns < 0;
+    if (isOriginal || (remainingRuns ?? 0) > 0) {
+      const blueprintItem = {
+        typeId: job.blueprintTypeId,
+        quantity: 1,
+        isPackaged: true,
+        inBuild: true,
+        inUse: true,
+        jobId: job.jobId,
+        installerId: job.installerId,
+        facilityId: job.facilityId,
+        outputLocationId: job.outputLocationId,
+        blueprintId: job.blueprintId,
+        blueprintTypeId: job.blueprintTypeId,
+        blueprintIsOriginal: isOriginal,
+        blueprintRunsAtInstall: isOriginal ? -1 : remainingRuns + job.runs,
+        blueprintRunsUsed: job.runs,
+        blueprintRunsRemaining: isOriginal ? -1 : remainingRuns,
+        runCount: isOriginal ? -1 : remainingRuns,
+        blueprintPrints: [{ itemId: job.blueprintId, runs: isOriginal ? -1 : remainingRuns }],
+        endDate: job.endDate,
+      };
+      const blueprintStructure = structures.get(job.blueprintLocationId);
+      if (blueprintStructure) {
+        blueprintStructure.assetCount += 1;
+        if (job.ownerType === "corporation") blueprintStructure.corporationAssetCount += 1;
+        else blueprintStructure.personalAssetCount += 1;
+        blueprintStructure.items.set(`job-blueprint:${job.jobId}`, blueprintItem);
+      } else {
+        structures.set(job.blueprintLocationId, {
+          structureId: job.blueprintLocationId,
+          name: `Location ${job.blueprintLocationId}`,
+          locationType: "structure",
+          assetCount: 1,
+          personalAssetCount: job.ownerType === "character" ? 1 : 0,
+          corporationAssetCount: job.ownerType === "corporation" ? 1 : 0,
+          resolved: false,
+          ownedByCorporation: job.ownerType === "corporation",
+          rigs: [],
+          items: new Map([[`job-blueprint:${job.jobId}`, blueprintItem]]),
+          bonuses: emptyBonuses(),
+        });
+      }
+    }
+    const existing = structures.get(job.outputLocationId);
+    const item = {
+      typeId,
+      quantity,
+      isPackaged: false,
+      inBuild: true,
+      jobId: job.jobId,
+      installerId: job.installerId,
+      facilityId: job.facilityId,
+      outputLocationId: job.outputLocationId,
+      blueprintId: job.blueprintId,
+      blueprintTypeId: job.blueprintTypeId,
+      blueprintIsOriginal: isOriginal,
+      blueprintRunsAtInstall: isOriginal ? -1 : remainingRuns + job.runs,
+      blueprintRunsUsed: job.runs,
+      blueprintRunsRemaining: isOriginal ? -1 : remainingRuns,
+      endDate: job.endDate,
+    };
+    if (existing) {
+      existing.assetCount += 1;
+      if (job.ownerType === "corporation") existing.corporationAssetCount += 1;
+      else existing.personalAssetCount += 1;
+      existing.items.set(`job:${job.jobId}`, item);
+      continue;
+    }
+    structures.set(job.outputLocationId, {
+      structureId: job.outputLocationId,
+      name: `Location ${job.outputLocationId}`,
+      locationType: "structure",
+      assetCount: 1,
+      personalAssetCount: job.ownerType === "character" ? 1 : 0,
+      corporationAssetCount: job.ownerType === "corporation" ? 1 : 0,
+      resolved: false,
+      ownedByCorporation: job.ownerType === "corporation",
+      rigs: [],
+      items: new Map([[`job:${job.jobId}`, item]]),
       bonuses: emptyBonuses(),
     });
   }
@@ -390,6 +496,23 @@ export async function GET(request: Request) {
             packagedVolume: type.packagedVolume,
             ...categorized,
             category,
+            ...(item.inBuild
+              ? {
+                  inBuild: true,
+                  inUse: item.inUse,
+                  jobId: item.jobId,
+                  installerId: item.installerId,
+                  facilityId: item.facilityId,
+                  outputLocationId: item.outputLocationId,
+                  blueprintId: item.blueprintId,
+                  blueprintTypeId: item.blueprintTypeId,
+                  blueprintIsOriginal: item.blueprintIsOriginal,
+                  blueprintRunsAtInstall: item.blueprintRunsAtInstall,
+                  blueprintRunsUsed: item.blueprintRunsUsed,
+                  blueprintRunsRemaining: item.blueprintRunsRemaining,
+                  endDate: item.endDate,
+                }
+              : {}),
           }];
         }),
       }))

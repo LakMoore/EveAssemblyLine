@@ -6,7 +6,7 @@ import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import styles from "./page.module.css";
 
 const languageStorageKey = "assembly-line-language";
-type ActivePage = "planner" | "stock" | "locations" | "settings";
+type ActivePage = "planner" | "stock" | "locations" | "settings" | "imagechecker";
 type CharacterSummary = {
   characterId: number;
   characterName: string;
@@ -70,7 +70,7 @@ export default function AppShell({
       const response = await fetch("/api/state/refresh", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ force: true }),
+        body: JSON.stringify({}),
       });
       const data = (await response.json()) as {
         success?: boolean;
@@ -172,6 +172,13 @@ export default function AppShell({
           >
             <span>⚙</span>
             <span className={styles.navText}>Settings</span>
+          </Link>
+          <Link
+            className={`${styles.navItem} ${activePage === "imagechecker" ? styles.navActive : ""}`}
+            href="/imagechecker"
+          >
+            <span>▧</span>
+            <span className={styles.navText}>Image checker</span>
           </Link>
           <button type="button" className={styles.navItem}>
             <span>◌</span>

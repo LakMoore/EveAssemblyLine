@@ -3,6 +3,7 @@ import type { SdeLanguage } from "./languages";
 export type TypeMetadata = {
   typeId: number;
   name: string;
+  techLevel?: number;
   assembledVolume?: number;
   packagedVolume?: number;
   category?: "bpo" | "bpc" | "reaction" | "item";

@@ -16,8 +16,22 @@ export type StockItem = Pick<BuildItem, "typeId" | "name" | "quantity"> & {
   blueprintPrints?: BlueprintPrint[];
   assembledVolume?: number;
   packagedVolume?: number;
+  techLevel?: number;
   category?: "bpo" | "bpc" | "reaction" | "item";
   marketCategory?: string;
+  inBuild?: boolean;
+  inUse?: boolean;
+  jobId?: number;
+  installerId?: number;
+  facilityId?: number;
+  outputLocationId?: number;
+  blueprintId?: number;
+  blueprintTypeId?: number;
+  blueprintIsOriginal?: boolean;
+  blueprintRunsAtInstall?: number;
+  blueprintRunsUsed?: number;
+  blueprintRunsRemaining?: number;
+  endDate?: string;
 };
 
 export type StockRecord = StockLocation & {

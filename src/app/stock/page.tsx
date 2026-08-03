@@ -62,6 +62,30 @@ function formatVolume(volume: number) {
   return `${volume.toLocaleString(undefined, { maximumFractionDigits: 2 })} m³`;
 }
 
+function StockItemImage({
+  typeId,
+  variation,
+}: {
+  typeId: number;
+  variation: "icon" | "render" | "bp" | "bpc";
+}) {
+  const [useFallback, setUseFallback] = useState(false);
+  const activeVariation = useFallback ? "icon" : variation;
+
+  return (
+    <Image
+      className={styles.stockItemImage}
+      src={eveTypeImageUrl(typeId, activeVariation)}
+      alt=""
+      width={40}
+      height={40}
+      onError={() => {
+        if (variation === "render") setUseFallback(true);
+      }}
+    />
+  );
+}
+
 function emptyLocation(system: SystemOption, structure: StructureOption | null): StockRecord {
   return {
     systemId: system.id,
@@ -83,6 +107,7 @@ export default function StockPage() {
     return isSdeLanguage(saved) ? saved : "en";
   });
   const [locations, setLocations] = useState<StockRecord[]>([]);
+  const [esiLocationIds, setEsiLocationIds] = useState<Set<string>>(new Set());
   const [knownStructures, setKnownStructures] = useState<KnownStructure[]>([]);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [viewing, setViewing] = useState<StockRecord | null>(null);
@@ -115,6 +140,7 @@ export default function StockPage() {
         ]);
         const esiData = (await esiResponse.json()) as EsiStockResponse;
         const esiLocations = esiResponse.ok ? (esiData.structures ?? []) : [];
+        setEsiLocationIds(new Set(esiLocations.map((location) => String(location.structureId))));
         setKnownStructures(structures);
         const correctedRecords = records.map((record) => {
           const structure = structures.find((entry) => entry.id === record.structureId);
@@ -173,11 +199,16 @@ export default function StockPage() {
           ),
         );
         const hydratedRecords = await hydrateVolumes(combinedRecords, language);
-        setLocations(
-          [...hydratedRecords].sort((left, right) =>
-            left.systemName.localeCompare(right.systemName),
-          ),
+        const sortedHydratedRecords = [...hydratedRecords].sort((left, right) =>
+          left.systemName.localeCompare(right.systemName),
         );
+        setLocations(sortedHydratedRecords);
+        setViewing((current) => {
+          if (!current) return current;
+          return sortedHydratedRecords.find(
+            (record) => locationKey(record) === locationKey(current),
+          ) ?? current;
+        });
         const previousByLocation = new Map(records.map((record) => [locationKey(record), record]));
         await Promise.all(
           [
@@ -192,6 +223,7 @@ export default function StockPage() {
           ],
         );
       } catch {
+        setEsiLocationIds(new Set());
         setLocations([]);
       } finally {
         setIsHydratingVolumes(false);
@@ -282,6 +314,7 @@ export default function StockPage() {
                 <StockLocationCard
                   key={locationKey(location)}
                   location={location}
+                  isEsiLocation={esiLocationIds.has(location.structureId ?? "")}
                   isVolumesLoading={isHydratingVolumes}
                   onView={openItems}
                   onPaste={() => setPasting(location)}
@@ -527,12 +560,14 @@ const stockCategories: Array<{ id: NonNullable<StockItem["category"]>; label: st
 
 function StockLocationCard({
   location,
+  isEsiLocation,
   isVolumesLoading,
   onView,
   onPaste,
   onRemove,
 }: {
   location: StockRecord;
+  isEsiLocation: boolean;
   isVolumesLoading: boolean;
   onView: (location: StockRecord, filter?: StockFilter) => void;
   onPaste: () => void;
@@ -552,10 +587,12 @@ function StockLocationCard({
           <p className={styles.panelKicker}>{location.systemName}</p>
           <h3>{location.structureName}</h3>
         </div>
-        <div className={styles.stockCardActions}>
-          <button type="button" className={styles.iconButton} aria-label={`Paste items at ${location.structureName}`} title="Paste items" onClick={onPaste}>⇩</button>
-          <button type="button" className={styles.stockRemoveButton} aria-label={`Remove stock at ${location.structureName}`} title="Remove stock location" onClick={onRemove}>×</button>
-        </div>
+        {!isEsiLocation && (
+          <div className={styles.stockCardActions}>
+            <button type="button" className={styles.iconButton} aria-label={`Paste items at ${location.structureName}`} title="Paste items" onClick={onPaste}>⇩</button>
+            <button type="button" className={styles.stockRemoveButton} aria-label={`Remove stock at ${location.structureName}`} title="Remove stock location" onClick={onRemove}>×</button>
+          </div>
+        )}
       </div>
       <div className={styles.stockCardTotals}>
         {stockCategories.map((category) => {
@@ -600,7 +637,21 @@ function ViewItemsModal({
   onFilterChange: (filter: StockFilter) => void;
   onCancel: () => void;
 }) {
+  const blueprintCounts = new Map<number, { bpo: number; bpc: number; runs: number }>();
+  for (const item of location.items) {
+    if (item.category !== "bpo" && item.category !== "bpc") continue;
+    const counts = blueprintCounts.get(item.typeId) ?? { bpo: 0, bpc: 0, runs: 0 };
+    if (item.category === "bpo") counts.bpo += item.quantity;
+    else {
+      counts.bpc += item.quantity;
+      if (item.runCount !== undefined && item.runCount >= 0) counts.runs += item.runCount;
+    }
+    blueprintCounts.set(item.typeId, counts);
+  }
   const filteredItems = location.items.filter((item) => {
+    if (item.category === "bpo" && (blueprintCounts.get(item.typeId)?.bpc ?? 0) > 0) {
+      return false;
+    }
     if (filter.kind === "all") return true;
     if (filter.kind === "market") return item.marketCategory === filter.value;
     return filter.value === "bpc"
@@ -648,21 +699,21 @@ function ViewItemsModal({
             {filteredItems.map((item) => (
               <div
                 className={styles.stockRow}
-                key={`${item.typeId}:${item.category ?? "item"}:${item.isPackaged ? "packaged" : "assembled"}`}
+                key={`${item.typeId}:${item.category ?? "item"}:${item.isPackaged ? "packaged" : "assembled"}:${item.jobId ?? "asset"}`}
               >
-                <Image
-                  className={styles.stockItemImage}
-                  src={eveTypeImageUrl(
-                    item.typeId,
-                    item.category === "bpo"
+                <StockItemImage
+                  typeId={item.typeId}
+                  variation={
+                    blueprintCounts.get(item.typeId)?.bpo
                       ? "bp"
-                      : item.category === "bpc" || item.category === "reaction"
-                        ? "bpc"
-                        : "icon",
-                  )}
-                  alt=""
-                  width={40}
-                  height={40}
+                      : item.category === "bpo"
+                        ? "bp"
+                        : item.category === "bpc" || item.category === "reaction"
+                          ? "bpc"
+                          : item.techLevel === 1
+                            ? "render"
+                            : "icon"
+                  }
                 />
                 <span>
                   <strong>{item.name}</strong>
@@ -673,11 +724,41 @@ function ViewItemsModal({
                   </small>
                 </span>
                 <strong>
-                  {item.quantity.toLocaleString()}
-                  {item.runCount !== undefined && item.category === "bpc"
-                    ? ` · ${item.runCount.toLocaleString()} runs`
-                    : ""}
+                  {(() => {
+                    const counts = blueprintCounts.get(item.typeId);
+                    const showBlueprintSummary =
+                      counts &&
+                      counts.bpo > 0 &&
+                      (item.category === "bpc" || counts.bpc === 0);
+                    if (showBlueprintSummary) {
+                      return (
+                        <>
+                          <span className={styles.stockSummaryLine}>
+                            {counts.bpo.toLocaleString()} BPO
+                          </span>
+                          <span className={styles.stockSummaryLine}>
+                            {counts.runs > 0
+                              ? `${counts.runs.toLocaleString()} Runs on ${counts.bpc.toLocaleString()} BPC`
+                              : `${counts.bpc.toLocaleString()} BPC`}
+                          </span>
+                        </>
+                      );
+                    }
+                    if (counts && item.category === "bpc") {
+                      return (
+                        <span className={styles.stockSummaryLine}>
+                          {counts.runs > 0
+                            ? `${counts.runs.toLocaleString()} Runs on ${counts.bpc.toLocaleString()} BPC`
+                            : `${counts.bpc.toLocaleString()} BPC`}
+                        </span>
+                      );
+                    }
+                    return `${item.quantity.toLocaleString()}${item.inBuild ? " · In Build" : ""}${item.inUse ? " · In Use" : ""}${item.runCount !== undefined && item.category === "bpc" ? ` · ${item.runCount.toLocaleString()} runs` : ""}`;
+                  })()}
                 </strong>
+                {item.inBuild && item.endDate && (
+                  <small>Completes {new Date(item.endDate).toLocaleString()}</small>
+                )}
               </div>
             ))}
           </div>
@@ -903,6 +984,7 @@ async function hydrateVolumes(records: StockRecord[], language: SdeLanguage) {
               ...item,
               assembledVolume: itemMetadata.assembledVolume ?? 0,
               packagedVolume: itemMetadata.packagedVolume,
+              techLevel: itemMetadata.techLevel,
               category: item.category ?? itemMetadata.category ?? "item",
               marketCategory: itemMetadata.marketCategory,
             }

@@ -39,6 +39,27 @@ export interface AssetRecord {
   ownerId: number;
 }
 
+export interface IndustryJobRecord {
+  jobId: number;
+  installerId: number;
+  facilityId: number;
+  locationId: number;
+  outputLocationId: number;
+  activityId: number;
+  blueprintId: number;
+  blueprintTypeId: number;
+  blueprintLocationId: number;
+  runs: number;
+  licensedRuns?: number;
+  productTypeId?: number;
+  status: string;
+  successfulRuns?: number;
+  startDate: string;
+  endDate: string;
+  ownerType: "character" | "corporation";
+  ownerId: number;
+}
+
 export interface AssetLocation {
   locationId: number;
   kind: "station" | "solar_system" | "structure" | "container" | "unknown";
