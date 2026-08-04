@@ -644,8 +644,10 @@ function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult
       return {
         Required: entry.requiredQuantity.toLocaleString(),
         Available: entry.availableStockQuantity.toLocaleString(),
-        "Buy/Build": (entry.buildQuantity + entry.buyQuantity).toLocaleString(),
-        Surplus: entry.remainingStockQuantity.toLocaleString(),
+        "Buy/Build": (entry.productionQuantity + entry.buyQuantity).toLocaleString(),
+        Surplus: (
+          entry.remainingStockQuantity + entry.remainingProductionQuantity
+        ).toLocaleString(),
       };
     }
     if (entry.kind === "bpc") {

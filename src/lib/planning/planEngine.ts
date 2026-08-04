@@ -159,9 +159,11 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
       requiredQuantity: existing?.requiredQuantity ?? 0,
       stockQuantity: existing?.stockQuantity ?? 0,
       availableStockQuantity: existing?.availableStockQuantity ?? totalStock.get(typeId) ?? 0,
+      productionQuantity: existing?.productionQuantity ?? 0,
       buildQuantity: existing?.buildQuantity ?? 0,
       buyQuantity: existing?.buyQuantity ?? 0,
       remainingStockQuantity: existing?.remainingStockQuantity ?? 0,
+      remainingProductionQuantity: existing?.remainingProductionQuantity ?? 0,
       ...update,
       ...(request.locations ? { locationId: request.locations.market } : {}),
     });
@@ -274,6 +276,10 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
           )!.quantity;
       const runsNeeded = Math.ceil(quantity / productQuantity);
       const producedQuantity = runsNeeded * productQuantity;
+      updateMaterial(typeId, fallbackName, {
+        productionQuantity:
+          (materials.get(typeId)?.productionQuantity ?? 0) + producedQuantity,
+      });
       const surplus = producedQuantity - quantity;
       if (surplus > 0) producedParts.set(typeId, (producedParts.get(typeId) ?? 0) + surplus);
       const nextStack = new Set(stack).add(typeId);
@@ -423,6 +429,10 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
       }
     }
   });
+
+  for (const material of materials.values()) {
+    material.remainingProductionQuantity = producedParts.get(material.typeId) ?? 0;
+  }
 
   const typeRecords = await profiler.measure("typeNameBatch", () => getTypes());
   const resolvedName = (typeId: number) => {

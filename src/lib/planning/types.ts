@@ -80,9 +80,11 @@ export interface PlanResult {
       requiredQuantity: number;
       stockQuantity: number;
       availableStockQuantity: number;
+      productionQuantity: number;
       buildQuantity: number;
       buyQuantity: number;
       remainingStockQuantity: number;
+      remainingProductionQuantity: number;
       imageVariation?: "icon" | "bp" | "bpc";
       locationId?: number;
     }>;
