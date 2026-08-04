@@ -2,7 +2,6 @@
 
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import AppShell, { languageStorageKey } from "./AppShell";
 import type { PlanResult } from "@/lib/planning/types";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
@@ -17,12 +16,15 @@ import {
 } from "@/lib/planning/preferences";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
+import AppShell, { languageStorageKey } from "./AppShell";
 import styles from "./page.module.css";
 
-const tabs = ["Plan", "Shopping", "BPCs", "Invention", "Reactions", "Manufacturing"];
+type PlannerTab = "Plan" | "Buy" | "Copy" | "Invent" | "React" | "Manufacture";
+const tabs: PlannerTab[] = ["Plan", "Buy", "Copy", "Invent", "React", "Manufacture"];
 type BuildItem = { name: string; typeId: number; quantity: number; me: number; te: number };
 type TypeResult = { name: string; typeId: number };
 type PasteResult = { name: string; quantity?: number; typeId?: number; error?: string };
+type EsiStockResponse = { structures?: Array<{ items?: StockItem[] }> };
 function formatDuration(totalSeconds: number) {
   const totalMinutes = Math.ceil(totalSeconds / 60);
   const days = Math.floor(totalMinutes / 1440);
@@ -61,7 +63,7 @@ export default function Home() {
     return isSdeLanguage(savedLanguage) ? savedLanguage : "en";
   });
   const [isBuildListLoaded, setIsBuildListLoaded] = useState(false);
-  const [activeTab, setActiveTab] = useState("Plan");
+  const [activeTab, setActiveTab] = useState<PlannerTab>("Plan");
   const [planStatus, setPlanStatus] = useState("Ready to calculate");
   const [isPlanLoading, setIsPlanLoading] = useState(false);
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
@@ -108,13 +110,29 @@ export default function Home() {
     setIsPlanLoading(true);
     setPlanStatus("Calculating...");
     try {
+      let requestedStock = stock;
+      try {
+        const stockResponse = await fetch(`/api/state/structures?${new URLSearchParams({
+          language,
+          includeAssembledContainers: String(settings.includeAssembledContainers),
+          includeAssembledShips: String(settings.includeAssembledShips),
+          stockOnly: "true",
+        }).toString()}`);
+        if (stockResponse.ok) {
+          const liveStock = (await stockResponse.json() as EsiStockResponse).structures?.flatMap(
+            (structure) => structure.items ?? [],
+          ) ?? [];
+          requestedStock = [...stock, ...liveStock];
+        }
+      } catch {
+      }
       const response = await fetch("/api/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           language,
           items,
-          assets: stock,
+          assets: requestedStock,
           locations,
           settings: {
             includeCorporationAssets: settings.includeCorporationAssets,
@@ -159,7 +177,7 @@ export default function Home() {
       <div className={styles.pageIntro}>
         <div>
           <p className={styles.eyebrow}>PRODUCTION CONTROL</p>
-          <h1>Build queue</h1>
+          <h1>Build plan</h1>
           <p className={styles.subtitle}>
             Turn your project requirements into a clean, actionable production plan.
           </p>
@@ -603,36 +621,72 @@ function TypeSearch({
   );
 }
 
-function PlanList({ activeTab, plan }: { activeTab: string; plan: PlanResult }) {
+function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult }) {
   const [copyStatus, setCopyStatus] = useState("");
   const list =
     activeTab === "Plan"
       ? plan.lists.planItems
-      : activeTab === "Shopping"
-        ? plan.lists.materialsToBuy.filter((entry) => entry.buyQuantity > 0)
-        : activeTab === "BPCs"
+      : activeTab === "Buy"
+      ? [...plan.lists.materialsToBuy.filter((entry) => entry.buyQuantity > 0), ...plan.lists.bpcsToBuy.filter((entry) => entry.buyQuantity > 0)]
+      : activeTab === "Copy"
         ? plan.lists.bpcsNeeded.filter((entry) => entry.buyQuantity > 0)
-        : activeTab === "Invention"
+        : activeTab === "Invent"
           ? plan.lists.inventionJobs
-          : activeTab === "Reactions"
+          : activeTab === "React"
             ? plan.lists.reactionJobs
-            : activeTab === "Manufacturing"
+            : activeTab === "Manufacture"
               ? plan.lists.manufacturingJobs
               : plan.lists.haulingTasks;
+  const planColumns = ["Required", "Available", "Buy/Build", "Surplus"] as const;
+
+  function getPlanCells(entry: PlanResult["lists"]["planItems"][number]): Partial<Record<(typeof planColumns)[number], string>> {
+    if (entry.kind === "material") {
+      return {
+        Required: entry.requiredQuantity.toLocaleString(),
+        Available: entry.availableStockQuantity.toLocaleString(),
+        "Buy/Build": (entry.buildQuantity + entry.buyQuantity).toLocaleString(),
+        Surplus: entry.remainingStockQuantity.toLocaleString(),
+      };
+    }
+    if (entry.kind === "bpc") {
+      return {
+        Required: entry.neededQuantity.toLocaleString(),
+        Available: entry.stockRuns.toLocaleString(),
+        "Buy/Build": entry.buyQuantity.toLocaleString(),
+        Surplus: "0",
+      };
+    }
+    return {
+      Required: `${entry.runsNeeded.toLocaleString()} runs`,
+      Available: entry.availableQuantity.toLocaleString(),
+      "Buy/Build": Math.max(0, entry.runsNeeded - entry.availableQuantity).toLocaleString(),
+      Surplus: "0",
+    };
+  }
+
   async function copyList() {
-    const entriesToCopy = list;
-    const lines = entriesToCopy.map((entry) => {
-      const name = entry.name;
-      const amount =
-        "runsNeeded" in entry
-          ? entry.runsNeeded
-          : "runs" in entry
-            ? entry.runs
-            : "buyQuantity" in entry
-              ? entry.buyQuantity
-              : entry.quantity;
-      return `${name}\t${amount}`;
-    });
+    const lines =
+      activeTab === "Plan"
+        ? [
+            ["Type", ...planColumns].join("\t"),
+            ...plan.lists.planItems.map((entry) => {
+              const cells = getPlanCells(entry);
+              return [entry.name, ...planColumns.map((column) => cells[column] || "")].join("\t");
+            }),
+          ]
+        : list.map((entry) => {
+            const amount =
+              activeTab === "Copy" && "quantity" in entry
+                ? entry.quantity
+                : "runsNeeded" in entry
+                ? entry.runsNeeded
+                : "runs" in entry
+                  ? entry.runs
+                  : "buyQuantity" in entry
+                    ? entry.buyQuantity
+                    : entry.quantity;
+            return `${entry.name}\t${amount}`;
+          });
     try {
       await navigator.clipboard.writeText(lines.join("\n"));
       setCopyStatus("Copied");
@@ -654,58 +708,65 @@ function PlanList({ activeTab, plan }: { activeTab: string; plan: PlanResult }) 
     <>
       <div className={styles.planActions}>
         <button type="button" className={styles.copyButton} onClick={copyList}>
-          {copyStatus || "Copy list"}
+          {copyStatus || (activeTab === "Plan" ? "Copy table" : "Copy list")}
         </button>
       </div>
-      <div className={styles.planList}>
+      {activeTab === "Plan" && (
+        <div className={styles.planTableHeader}>
+          <span aria-hidden="true" />
+          <span aria-hidden="true" />
+          {planColumns.map((column) => <span key={column}>{column}</span>)}
+        </div>
+      )}
+      <div className={activeTab === "Plan" ? styles.planTable : styles.planList}>
         {list.map((entry, index) => {
           const typeId = "itemTypeId" in entry ? entry.itemTypeId : entry.typeId;
           const name = entry.name;
           const isPlanBpc = "kind" in entry && entry.kind === "bpc";
+          const isBpcPurchase = activeTab === "Buy" && "bpoCount" in entry;
           const isPlanReaction = "kind" in entry && entry.kind === "reaction";
           const detail =
-            "fromLocationId" in entry
+            "fromLocationId" in entry && activeTab !== "Buy"
               ? `From ${entry.fromLocationId} to ${entry.toLocationId}`
-              : "locationId" in entry
+              : "locationId" in entry && activeTab !== "Buy"
                 ? `Location ${entry.locationId}`
                 : "";
           const totalTime =
             "totalTime" in entry && typeof entry.totalTime === "number" ? entry.totalTime : null;
           const materialEntry =
-            activeTab === "Shopping" || (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
+            (activeTab === "Buy" && !isBpcPurchase && "quantity" in entry) || (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
               ? (entry as PlanResult["lists"]["materialsToBuy"][number])
               : null;
           const amount =
             "volume" in entry
               ? `${entry.quantity.toLocaleString()} units | ${Math.ceil(entry.volume).toLocaleString()} m3`
-              : isPlanBpc
+              : isBpcPurchase
+                ? `${entry.buyQuantity.toLocaleString()} runs`
+                : isPlanBpc
                 ? `${entry.neededQuantity.toLocaleString()} needed`
                 : isPlanReaction
                   ? `${entry.runsNeeded.toLocaleString()} runs`
                   : materialEntry
                     ? `${(materialEntry.buildQuantity || materialEntry.buyQuantity).toLocaleString()} units`
               : "quantity" in entry
-                ? `${entry.quantity.toLocaleString()} ${activeTab === "BPCs" ? "runs" : "units"}`
+                ? `${entry.quantity.toLocaleString()} ${activeTab === "Copy" ? "runs" : "units"}`
                 : "runs" in entry
-                  ? `${entry.runs.toLocaleString()} runs${totalTime !== null ? ` | ${formatDuration(totalTime)}` : ""}`
+                  ? `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} runs`
                   : "";
-          const planDetail = isPlanBpc
-            ? `${entry.neededQuantity.toLocaleString()} needed | ${entry.stockRuns.toLocaleString()} runs on ${entry.stockQuantity.toLocaleString()} prints available | ${Math.max(0, entry.neededQuantity - entry.stockRuns).toLocaleString()} runs to buy/copy${entry.bpoCount > 0 ? ` | ${entry.bpoCount.toLocaleString()} BPOs owned` : ""}`
-            : isPlanReaction
-              ? `${entry.runsNeeded.toLocaleString()} runs needed | ${entry.availableQuantity.toLocaleString()} prints available | ${entry.availableQuantity > 0 ? Math.ceil(entry.runsNeeded / entry.availableQuantity).toLocaleString() : 0} runs per install`
-              : materialEntry
-                ? `${materialEntry.requiredQuantity.toLocaleString()} needed | ${materialEntry.stockQuantity.toLocaleString()} from stock | ${materialEntry.buildQuantity.toLocaleString()} to build | ${materialEntry.buyQuantity.toLocaleString()} to buy | ${materialEntry.remainingStockQuantity.toLocaleString()} left`
-                : null;
           const imageVariation =
             "imageVariation" in entry && entry.imageVariation
               ? entry.imageVariation
               : isPlanBpc && entry.bpoCount > 0
                 ? "bp"
-                : isPlanBpc || isPlanReaction || activeTab === "BPCs" || activeTab === "Invention"
-                ? "bpc"
-                : "icon";
+                : activeTab === "Manufacture" || activeTab === "React" || isPlanBpc || isBpcPurchase || isPlanReaction || activeTab === "Copy" || activeTab === "Invent"
+                  ? "bpc"
+                  : "icon";
+          const planCells =
+            activeTab === "Plan"
+              ? getPlanCells(entry as PlanResult["lists"]["planItems"][number])
+              : null;
           return (
-            <div className={styles.planRow} key={`${activeTab}-${index}`}>
+            <div className={activeTab === "Plan" ? styles.planTableRow : styles.planRow} key={`${activeTab}-${index}`}>
               <Image
                 className={styles.typeImage}
                 src={eveTypeImageUrl(typeId, imageVariation)}
@@ -713,14 +774,21 @@ function PlanList({ activeTab, plan }: { activeTab: string; plan: PlanResult }) 
                 width={40}
                 height={40}
               />
-              <span className={styles.planRowMain}>
+              <span className={styles.planRowMain} data-label="Type">
                 <strong>{name}</strong>
-                {activeTab !== "Shopping" && <small>{planDetail || detail || `Type ID ${typeId}`}</small>}
               </span>
-              <span className={styles.planRowAmount}>
-                <strong>{amount}</strong>
-                {detail && <small>{detail}</small>}
-              </span>
+              {activeTab === "Plan"
+                ? planColumns.map((column) => (
+                    planCells?.[column] ? (
+                      <span className={styles.planTableCell} data-label={column} key={column}>
+                        {planCells[column]}
+                      </span>
+                    ) : <span className={styles.planTableCellEmpty} key={column} />
+                  ))
+                : <span className={styles.planRowAmount}>
+                    <strong>{amount}</strong>
+                    {detail && <small>{detail}</small>}
+                  </span>}
             </div>
           );
         })}

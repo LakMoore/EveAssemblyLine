@@ -311,6 +311,7 @@ export default function LocationsPage() {
   const [editingStructure, setEditingStructure] = useState<KnownStructure | null>(null);
   const [rigOptionsBySize, setRigOptionsBySize] = useState(fallbackRigOptionsBySize);
   const [esiStructures, setEsiStructures] = useState<EsiStructure[]>([]);
+  const [esiConnected, setEsiConnected] = useState(false);
   const [esiRateLimitedUntil, setEsiRateLimitedUntil] = useState<string | null>(null);
   const [locationSort, setLocationSort] = useState<LocationSort>("alphabetical");
   const [settings] = useState(() => {
@@ -352,6 +353,24 @@ export default function LocationsPage() {
   useEffect(() => {
     let cancelled = false;
 
+    fetch("/api/auth/session")
+      .then((response) => response.json())
+      .then((data: { authenticated?: boolean; characters?: unknown[] }) => {
+        if (!cancelled) setEsiConnected(Boolean(data.authenticated && data.characters?.length));
+      })
+      .catch(() => {
+        if (!cancelled) setEsiConnected(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!esiConnected) return;
+    let cancelled = false;
+
     async function loadEsiStructures(refresh: boolean) {
       try {
         if (refresh) {
@@ -387,7 +406,7 @@ export default function LocationsPage() {
       cancelled = true;
       window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
     };
-  }, [language, settings.includeAssembledContainers, settings.includeAssembledShips]);
+  }, [esiConnected, language, settings.includeAssembledContainers, settings.includeAssembledShips]);
 
   useEffect(() => {
     fetchRigs(language)

@@ -9,10 +9,19 @@ import {
 } from "@/lib/auth/eveSso";
 import { getRequestCookie, sessionCookieName } from "@/lib/auth/session";
 
+function getPublicOrigin(request: Request) {
+  const configuredCallback = process.env.EVE_CALLBACK_URL;
+  if (configuredCallback) return new URL(configuredCallback).origin;
+  const forwardedHost = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  const forwardedProtocol = request.headers.get("x-forwarded-proto") ?? new URL(request.url).protocol.slice(0, -1);
+  return `${forwardedProtocol}://${forwardedHost}`;
+}
+
 export async function GET(request: Request) {
   const state = randomUUID();
   const codeVerifier = createCodeVerifier();
-  const redirectUri = process.env.EVE_CALLBACK_URL ?? new URL("/api/auth/eve/callback", request.url).toString();
+  const redirectUri =
+    process.env.EVE_CALLBACK_URL ?? `${getPublicOrigin(request)}/api/auth/eve/callback`;
   const sessionId = getRequestCookie(request, sessionCookieName);
   await savePendingAuth(state, {
     scopes: authorizationScopes,

@@ -31,6 +31,7 @@ export type StockItem = Pick<BuildItem, "typeId" | "name" | "quantity"> & {
   blueprintRunsAtInstall?: number;
   blueprintRunsUsed?: number;
   blueprintRunsRemaining?: number;
+  activityName?: string;
   endDate?: string;
 };
 

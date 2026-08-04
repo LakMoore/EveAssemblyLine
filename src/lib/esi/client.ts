@@ -36,7 +36,8 @@ type EsiIndustryJob = {
   job_id: number;
   installer_id: number;
   facility_id: number;
-  location_id: number;
+  location_id?: number;
+  station_id?: number;
   output_location_id: number;
   activity_id: number;
   blueprint_id: number;
@@ -65,6 +66,12 @@ export type EsiCorporationStructure = {
   unanchors_at?: string;
   reinforce_hour?: number;
   services?: Array<{ name: string; state: "online" | "offline" | "cleanup" }>;
+};
+
+type EsiUniverseName = {
+  id: number;
+  name: string;
+  category: string;
 };
 
 async function getUsableToken(record: CharacterTokenRecord, purpose: "personal" | "corp") {
@@ -307,7 +314,7 @@ function mapIndustryJob(
     jobId: job.job_id,
     installerId: job.installer_id,
     facilityId: job.facility_id,
-    locationId: job.location_id,
+    locationId: job.location_id ?? job.station_id ?? job.facility_id,
     outputLocationId: job.output_location_id,
     activityId: job.activity_id,
     blueprintId: job.blueprint_id,
@@ -404,6 +411,17 @@ export async function fetchCharacterCorporationId(characterId: number) {
   const result = await requestEsi<{ corporation_id: number }>(`/characters/${characterId}/`);
   if (!result.data) throw new Error("Missing corporation verification response");
   return result.data.corporation_id;
+}
+
+export async function fetchUniverseNames(ids: number[]) {
+  const uniqueIds = [...new Set(ids)];
+  if (uniqueIds.length === 0) return new Map<number, string>();
+  const result = await requestEsi<EsiUniverseName[]>("/universe/names/", undefined, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(uniqueIds),
+  });
+  return new Map((result.data ?? []).map((entry) => [entry.id, entry.name]));
 }
 
 export async function fetchCharacterRoles(characterId: number, token: TokenSet) {

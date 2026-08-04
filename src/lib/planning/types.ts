@@ -79,6 +79,7 @@ export interface PlanResult {
       quantity: number;
       requiredQuantity: number;
       stockQuantity: number;
+      availableStockQuantity: number;
       buildQuantity: number;
       buyQuantity: number;
       remainingStockQuantity: number;
@@ -86,6 +87,16 @@ export interface PlanResult {
       locationId?: number;
     }>;
     bpcsNeeded: Array<{
+      typeId: number;
+      name: string;
+      quantity: number;
+      neededQuantity: number;
+      stockQuantity: number;
+      stockRuns: number;
+      buyQuantity: number;
+      bpoCount: number;
+    }>;
+    bpcsToBuy: Array<{
       typeId: number;
       name: string;
       quantity: number;

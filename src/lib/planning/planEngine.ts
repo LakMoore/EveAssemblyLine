@@ -91,12 +91,14 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
   const manufacturingJobs = new Map<number, PlanResult["lists"]["manufacturingJobs"][number]>();
   const reactionJobs = new Map<number, PlanResult["lists"]["reactionJobs"][number]>();
   const inventionJobs = new Map<number, PlanResult["lists"]["inventionJobs"][number]>();
+  const inventedBpcTypeIds = new Set<number>();
   const producedParts = new Map<number, number>();
   const availableStock = request.stock
     ?.filter((item) => item.category === "item")
     .reduce((map, item) => 
       map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity), new Map<number, number>()
     ) ?? new Map<number, number>() ;
+  const totalStock = new Map(availableStock);
   const availableBlueprintCopies = request.stock
     ?.filter((item) => item.category === "bpc" && (item.runCount === undefined || item.runCount >= 0)
     ) ?? [];
@@ -156,6 +158,7 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
       quantity: existing?.quantity ?? 0,
       requiredQuantity: existing?.requiredQuantity ?? 0,
       stockQuantity: existing?.stockQuantity ?? 0,
+      availableStockQuantity: existing?.availableStockQuantity ?? totalStock.get(typeId) ?? 0,
       buildQuantity: existing?.buildQuantity ?? 0,
       buyQuantity: existing?.buyQuantity ?? 0,
       remainingStockQuantity: existing?.remainingStockQuantity ?? 0,
@@ -284,9 +287,9 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
       usedRunsByBlueprint.set(blueprint._key, alreadyUsedRuns + runsFromStock);
 
       if (activity === "manufacturing") {
-        const existing = manufacturingJobs.get(typeId);
-        manufacturingJobs.set(typeId, {
-          typeId,
+        const existing = manufacturingJobs.get(blueprint._key);
+        manufacturingJobs.set(blueprint._key, {
+          typeId: blueprint._key,
           name: typeName(blueprint._key, `${fallbackName} Blueprint`),
           runs: (existing?.runs ?? 0) + runsNeeded,
           totalTime:
@@ -307,6 +310,10 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
             );
           }
         });
+        const bpoCount = blueprintOriginalCounts.get(blueprint._key) ?? 0;
+        const bpcBuyQuantity = bpoCount > 0
+          ? Math.ceil(Math.max(0, remainingRuns) / blueprint.maxProductionLimit)
+          : Math.max(0, remainingRuns);
         bpcs.set(blueprint._key, {
           typeId: blueprint._key,
           name: typeName(blueprint._key, `${fallbackName} Blueprint`),
@@ -314,15 +321,15 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
           neededQuantity: (bpcs.get(blueprint._key)?.neededQuantity ?? 0) + runsNeeded,
           stockQuantity: copyStock?.copies ?? 0,
           stockRuns: copyStock?.runs ?? 0,
-          bpoCount: blueprintOriginalCounts.get(blueprint._key) ?? 0,
-          buyQuantity: (bpcs.get(blueprint._key)?.buyQuantity ?? 0) + Math.ceil(Math.max(0, remainingRuns) / blueprint.maxProductionLimit),
+          bpoCount,
+          buyQuantity: (bpcs.get(blueprint._key)?.buyQuantity ?? 0) + bpcBuyQuantity,
         });
         return;
       }
 
-      const existing = reactionJobs.get(typeId);
-      reactionJobs.set(typeId, {
-        typeId,
+      const existing = reactionJobs.get(blueprint._key);
+      reactionJobs.set(blueprint._key, {
+        typeId: blueprint._key,
         name: typeName(blueprint._key, `${fallbackName} Blueprint`),
         runs: (existing?.runs ?? 0) + runsNeeded,
         totalTime:
@@ -375,32 +382,42 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
       const inventionProduct = invention?.products?.find((product) => product.typeID === bpc.typeId);
       if (!inventingBlueprint || !invention || !inventionProduct) continue;
 
+      inventedBpcTypeIds.add(bpc.typeId);
+
       const successProbability = inventionProduct.probability ?? 1;
-      const inventionRuns = Math.ceil(
-        bpc.quantity / (inventionProduct.quantity * successProbability),
-      );
+      const successfulBpcQuantity = Math.ceil(bpc.quantity / inventionProduct.quantity);
+      const inventionAttempts = Math.ceil(successfulBpcQuantity / successProbability);
       const existing = inventionJobs.get(inventingBlueprint._key);
       inventionJobs.set(inventingBlueprint._key, {
         typeId: inventingBlueprint._key,
         name: typeName(inventingBlueprint._key, "Blueprint Copy"),
-        runs: (existing?.runs ?? 0) + inventionRuns,
+        runs: (existing?.runs ?? 0) + inventionAttempts,
         ...(request.locations ? { locationId: request.locations.manufacturing } : {}),
       });
       const sourceBpc = bpcs.get(inventingBlueprint._key);
+      const sourceBpoCount = blueprintOriginalCounts.get(inventingBlueprint._key) ?? 0;
+      const sourceCopyStock = blueprintCopyStock.get(inventingBlueprint._key);
+      const sourceNeededQuantity = (sourceBpc?.neededQuantity ?? 0) + inventionAttempts;
+      const sourceRemainingRuns = Math.max(
+        0,
+        sourceNeededQuantity - (sourceCopyStock?.runs ?? 0),
+      );
       bpcs.set(inventingBlueprint._key, {
         typeId: inventingBlueprint._key,
         name: typeName(inventingBlueprint._key, "Blueprint Copy"),
-        quantity: (sourceBpc?.quantity ?? 0) + inventionRuns,
-        neededQuantity: (sourceBpc?.neededQuantity ?? 0) + inventionRuns,
+        quantity: (sourceBpc?.quantity ?? 0) + inventionAttempts,
+        neededQuantity: sourceNeededQuantity,
         stockQuantity: sourceBpc?.stockQuantity ?? 0,
         stockRuns: sourceBpc?.stockRuns ?? 0,
-        bpoCount: sourceBpc?.bpoCount ?? 0,
-        buyQuantity: sourceBpc?.buyQuantity ?? 0,
+        bpoCount: sourceBpoCount,
+        buyQuantity: sourceBpoCount > 0
+          ? Math.ceil(sourceRemainingRuns / inventingBlueprint.maxProductionLimit)
+          : sourceRemainingRuns,
       });
       for (const material of invention.materials ?? []) {
         await addMaterial(
           material.typeID,
-          material.quantity * inventionRuns,
+          material.quantity * inventionAttempts,
           typeName(material.typeID, `Type ${material.typeID}`),
         );
       }
@@ -421,6 +438,13 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
   for (const formula of reactionFormulas.values()) formula.name = resolvedName(formula.typeId);
 
   const materialsToBuy = [...materials.values()];
+  const bpcRequirements = [...bpcs.values()];
+  const bpcsNeeded = bpcRequirements.filter(
+    (bpc) => !inventedBpcTypeIds.has(bpc.typeId) && bpc.bpoCount > 0,
+  );
+  const bpcsToBuy = bpcRequirements.filter(
+    (bpc) => !inventedBpcTypeIds.has(bpc.typeId) && bpc.bpoCount === 0,
+  );
   const planItems: PlanResult["lists"]["planItems"] = [
     ...materialsToBuy.map((material) => ({ kind: "material" as const, ...material })),
     ...[...bpcs.values()].map((bpc) => ({ kind: "bpc" as const, ...bpc })),
@@ -458,7 +482,8 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
     lists: {
       planItems,
       materialsToBuy,
-      bpcsNeeded: [...bpcs.values()],
+      bpcsNeeded,
+      bpcsToBuy,
       inventionJobs: [...inventionJobs.values()],
       reactionJobs: [...reactionJobs.values()],
       manufacturingJobs: [...manufacturingJobs.values()],

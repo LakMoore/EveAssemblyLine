@@ -4,6 +4,15 @@ import { consumePendingAuth, exchangeCodeForTokens, sameState, validateToken } f
 import { fetchCharacterCorporationId, fetchCharacterRoles } from "@/lib/esi/client";
 import { createAccount, getAccount, getAccountForCharacter, getCharacter, getSession, upsertCharacter } from "@/lib/auth/tokensStore";
 
+function getPublicOrigin(request: Request, callbackUrl: string) {
+  const configuredCallback = process.env.EVE_CALLBACK_URL;
+  if (configuredCallback) return new URL(configuredCallback).origin;
+  if (callbackUrl) return new URL(callbackUrl).origin;
+  const forwardedHost = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+  const forwardedProtocol = request.headers.get("x-forwarded-proto") ?? new URL(request.url).protocol.slice(0, -1);
+  return `${forwardedProtocol}://${forwardedHost}`;
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
@@ -47,7 +56,7 @@ export async function GET(request: Request) {
     for (const characterId of account?.characterIds ?? [identity.characterId]) {
       await attachCharacter(session.sessionId, characterId);
     }
-    const response = NextResponse.redirect(new URL("/", request.url));
+    const response = NextResponse.redirect(`${getPublicOrigin(request, pending.redirectUri)}/`);
     setSessionCookie(response, session.sessionId);
     response.cookies.set("assembly_line_sso_state", "", { httpOnly: true, path: "/", maxAge: 0 });
     return response;

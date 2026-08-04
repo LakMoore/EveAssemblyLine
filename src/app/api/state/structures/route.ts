@@ -1,13 +1,19 @@
 import { NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth/session";
-import { getResolvedAssets, getRunningIndustryJobs } from "@/lib/esi/cache";
-import { fetchCorporationStructures } from "@/lib/esi/client";
+import {
+  getAssembledContainerAssets,
+  getResolvedAssetIndex,
+  getResolvedAssets,
+  getRunningIndustryJobs,
+} from "@/lib/esi/cache";
+import { fetchCorporationStructures, fetchLocationMetadata } from "@/lib/esi/client";
 import { getCharacter } from "@/lib/auth/tokensStore";
 import {
   getDogmaEffects,
   getActivityInputTypeIds,
   getGroups,
   getMarketGroups,
+  getBlueprintsByInventionProductId,
   getRigDogma,
   getSystems,
   getTypeBonuses,
@@ -39,6 +45,17 @@ function activityForEffect(name: string): Activity | null {
   if (normalized.includes("invention")) return "invention";
   if (normalized.includes("research") || normalized.includes("copy")) return "research";
   return null;
+}
+
+function activityName(activityId: number) {
+  return ({
+    1: "Manufacturing",
+    3: "Time research",
+    4: "Material research",
+    5: "Copying",
+    8: "Invention",
+    9: "Reactions",
+  } as Record<number, string>)[activityId] ?? "Industry job";
 }
 
 function rigBonuses(
@@ -138,8 +155,9 @@ export async function GET(request: Request) {
   const includeAssembledShips = url.searchParams.get("includeAssembledShips") === "true";
   const stockOnly = url.searchParams.get("stockOnly") === "true";
 
-  const [assets, jobs, activityInputTypeIds, rigDogma, dogmaEffects, typeBonuses, marketGroups] = await Promise.all([
+  const [productionAssets, assembledContainers, jobs, activityInputTypeIds, rigDogma, dogmaEffects, typeBonuses, marketGroups] = await Promise.all([
     getResolvedAssets(session.characterIds, true),
+    getAssembledContainerAssets(session.characterIds, true),
     getRunningIndustryJobs(session.characterIds, true),
     getActivityInputTypeIds(),
     getRigDogma(),
@@ -147,6 +165,9 @@ export async function GET(request: Request) {
     getTypeBonuses(),
     getMarketGroups(),
   ]);
+  const assets = stockOnly || !includeAssembledContainers
+    ? productionAssets
+    : [...productionAssets, ...assembledContainers];
   const assetTypes = await getTypesByIds([...new Set([
     ...assets.map((asset) => asset.typeId),
     ...jobs.flatMap((job) => [job.productTypeId ?? job.blueprintTypeId, job.blueprintTypeId]),
@@ -175,6 +196,57 @@ export async function GET(request: Request) {
       .filter((asset) => !includedAssets.includes(asset))
       .map((asset) => asset.location.locationId),
   );
+  const assetsByItemId = await getResolvedAssetIndex(session.characterIds, true);
+  const records = await Promise.all(session.characterIds.map((characterId) => getCharacter(characterId)));
+  const corporationStructures = new Map<number, Awaited<ReturnType<typeof fetchCorporationStructures>>[number]>();
+  for (const record of records) {
+    if (!record) continue;
+    try {
+      for (const structure of await fetchCorporationStructures(record)) {
+        corporationStructures.set(structure.structure_id, structure);
+      }
+    } catch {}
+  }
+  const jobLocationCandidates = [
+    ...jobs.map((job) => job.locationId),
+    ...jobs.map((job) => job.blueprintLocationId),
+    ...jobs.flatMap((job) => {
+      const locations: number[] = [];
+      const visited = new Set<number>();
+      let asset = assetsByItemId.get(job.blueprintLocationId);
+      while (asset && !visited.has(asset.itemId)) {
+        visited.add(asset.itemId);
+        locations.push(asset.location.locationId);
+        if (asset.location.kind !== "container" && asset.locationType !== "item") break;
+        asset = assetsByItemId.get(asset.location.locationId);
+      }
+      return locations;
+    }),
+  ];
+  const stationLocations = new Map<number, NonNullable<Awaited<ReturnType<typeof fetchLocationMetadata>>["data"]>>();
+  await Promise.all(
+    [...new Set(jobLocationCandidates)].map(async (locationId) => {
+      try {
+        const result = await fetchLocationMetadata(locationId, "station");
+        if (result.data) stationLocations.set(locationId, result.data);
+      } catch {}
+    }),
+  );
+  function findTerminalAssetLocation(itemId: number) {
+    const visited = new Set<number>();
+    let asset = assetsByItemId.get(itemId);
+    while (asset && !visited.has(asset.itemId)) {
+      visited.add(asset.itemId);
+      if (
+        asset.location.kind === "station" || asset.location.kind === "structure"
+      ) return asset.location;
+      const parentId = asset.location.kind === "container" || asset.locationType === "item"
+        ? asset.location.locationId
+        : undefined;
+      asset = parentId === undefined ? undefined : assetsByItemId.get(parentId);
+    }
+    return undefined;
+  }
   const structures = new Map<
     number,
     {
@@ -215,6 +287,7 @@ export async function GET(request: Request) {
         blueprintRunsAtInstall?: number;
         blueprintRunsUsed?: number;
         blueprintRunsRemaining?: number;
+        activityName?: string;
         endDate?: string;
       }>;
       bonuses: ActivityBonuses;
@@ -316,10 +389,58 @@ export async function GET(request: Request) {
   for (const job of jobs) {
     if (job.status === "cancelled" || job.status === "delivered") continue;
     const typeId = job.productTypeId ?? job.blueprintTypeId;
-    const quantity = job.successfulRuns ?? job.runs;
+    const jobActivityName = activityName(job.activityId);
+    const inventionProducts = job.activityId === 8 && job.productTypeId
+      ? (await getBlueprintsByInventionProductId(job.productTypeId)).flatMap(
+          (blueprint) => blueprint.activities?.invention?.products ?? [],
+        )
+      : [];
+    const inventionProduct = inventionProducts.find(
+      (product) => product.typeID === job.productTypeId,
+    );
+    const inventionSuccesses = inventionProduct
+      ? Math.floor(job.runs * (inventionProduct.probability ?? 1))
+      : undefined;
+    const quantity = inventionSuccesses ?? job.successfulRuns ?? job.runs;
     const remainingRuns = job.licensedRuns;
-    const isOriginal = remainingRuns === undefined || remainingRuns < 0;
-    if (isOriginal || (remainingRuns ?? 0) > 0) {
+    const isManufacturingJob = job.activityId === 1;
+    const isInventionJob = job.activityId === 8;
+    const completedInventionCopies = job.successfulRuns ?? inventionSuccesses;
+    const installedBlueprintAsset = assetsByItemId.get(job.blueprintId);
+    let installedRunsAtStart = installedBlueprintAsset?.runCount !== undefined && installedBlueprintAsset.runCount >= 0
+      ? installedBlueprintAsset.runCount
+      : undefined;
+    let installedRunsRemaining = installedRunsAtStart === undefined
+      ? undefined
+      : Math.max(0, installedRunsAtStart - job.runs);
+    for (const structure of structures.values()) {
+      for (const item of structure.items.values()) {
+        const print = item.blueprintPrints?.find((entry) => entry.itemId === job.blueprintId);
+        if (!print || item.runCount === undefined || item.runCount < 0) continue;
+        installedRunsAtStart ??= print.runs;
+        const runsUsed = Math.min(print.runs, job.runs);
+        print.runs -= runsUsed;
+        item.runCount -= runsUsed;
+        installedRunsRemaining = print.runs;
+      }
+    }
+    const isOriginal = installedRunsAtStart === undefined && (remainingRuns === undefined || remainingRuns < 0);
+    if (isManufacturingJob && !isOriginal) {
+      installedRunsAtStart = job.runs;
+      installedRunsRemaining = 0;
+    } else if (
+      isInventionJob &&
+      remainingRuns !== undefined &&
+      remainingRuns >= 0 &&
+      completedInventionCopies !== undefined
+    ) {
+      installedRunsAtStart = Math.max(0, remainingRuns - completedInventionCopies);
+      installedRunsRemaining = Math.max(0, installedRunsAtStart - job.runs);
+    }
+    const displayRemainingRuns = installedRunsRemaining ?? remainingRuns;
+    const displayRuns = displayRemainingRuns ?? 0;
+    const runsAtInstall = isOriginal ? -1 : (installedRunsAtStart ?? displayRuns + job.runs);
+    if (isOriginal || installedRunsAtStart !== undefined || (displayRemainingRuns ?? 0) > 0) {
       const blueprintItem = {
         typeId: job.blueprintTypeId,
         quantity: 1,
@@ -333,28 +454,45 @@ export async function GET(request: Request) {
         blueprintId: job.blueprintId,
         blueprintTypeId: job.blueprintTypeId,
         blueprintIsOriginal: isOriginal,
-        blueprintRunsAtInstall: isOriginal ? -1 : remainingRuns + job.runs,
+        blueprintRunsAtInstall: runsAtInstall,
         blueprintRunsUsed: job.runs,
-        blueprintRunsRemaining: isOriginal ? -1 : remainingRuns,
-        runCount: isOriginal ? -1 : remainingRuns,
-        blueprintPrints: [{ itemId: job.blueprintId, runs: isOriginal ? -1 : remainingRuns }],
+        blueprintRunsRemaining: isOriginal ? -1 : displayRuns,
+        runCount: isOriginal ? -1 : displayRuns,
+        blueprintPrints: [{ itemId: job.blueprintId, runs: isOriginal ? -1 : displayRuns }],
+        activityName: jobActivityName,
         endDate: job.endDate,
       };
-      const blueprintStructure = structures.get(job.blueprintLocationId);
+      const blueprintLocation = findTerminalAssetLocation(job.blueprintLocationId);
+      const blueprintStructureId =
+        blueprintLocation?.locationId ??
+        (stationLocations.has(job.blueprintLocationId) || corporationStructures.has(job.blueprintLocationId)
+          ? job.blueprintLocationId
+          : job.locationId);
+      const blueprintStructure = structures.get(blueprintStructureId);
       if (blueprintStructure) {
         blueprintStructure.assetCount += 1;
         if (job.ownerType === "corporation") blueprintStructure.corporationAssetCount += 1;
         else blueprintStructure.personalAssetCount += 1;
         blueprintStructure.items.set(`job-blueprint:${job.jobId}`, blueprintItem);
       } else {
-        structures.set(job.blueprintLocationId, {
-          structureId: job.blueprintLocationId,
-          name: `Location ${job.blueprintLocationId}`,
-          locationType: "structure",
+        structures.set(blueprintStructureId, {
+          structureId: blueprintStructureId,
+          name: blueprintLocation?.name ?? stationLocations.get(blueprintStructureId)?.name ?? `Location ${blueprintStructureId}`,
+          locationType: stationLocations.has(blueprintStructureId) ? "station" : "structure",
           assetCount: 1,
           personalAssetCount: job.ownerType === "character" ? 1 : 0,
           corporationAssetCount: job.ownerType === "corporation" ? 1 : 0,
-          resolved: false,
+          resolved: Boolean(
+            blueprintLocation?.resolved ||
+            stationLocations.has(blueprintStructureId) ||
+            corporationStructures.has(blueprintStructureId),
+          ),
+          ...(stationLocations.get(blueprintStructureId)?.type_id
+            ? { typeId: stationLocations.get(blueprintStructureId)?.type_id }
+            : {}),
+          ...(stationLocations.get(blueprintStructureId)?.system_id
+            ? { systemId: stationLocations.get(blueprintStructureId)?.system_id }
+            : {}),
           ownedByCorporation: job.ownerType === "corporation",
           rigs: [],
           items: new Map([[`job-blueprint:${job.jobId}`, blueprintItem]]),
@@ -362,7 +500,7 @@ export async function GET(request: Request) {
         });
       }
     }
-    const existing = structures.get(job.outputLocationId);
+    const existing = structures.get(job.locationId);
     const item = {
       typeId,
       quantity,
@@ -375,9 +513,11 @@ export async function GET(request: Request) {
       blueprintId: job.blueprintId,
       blueprintTypeId: job.blueprintTypeId,
       blueprintIsOriginal: isOriginal,
-      blueprintRunsAtInstall: isOriginal ? -1 : remainingRuns + job.runs,
+      blueprintRunsAtInstall: runsAtInstall,
       blueprintRunsUsed: job.runs,
-      blueprintRunsRemaining: isOriginal ? -1 : remainingRuns,
+      blueprintRunsRemaining: isOriginal ? -1 : displayRuns,
+      ...(inventionProduct ? { runCount: inventionProduct.quantity * quantity } : {}),
+      activityName: jobActivityName,
       endDate: job.endDate,
     };
     if (existing) {
@@ -387,30 +527,25 @@ export async function GET(request: Request) {
       existing.items.set(`job:${job.jobId}`, item);
       continue;
     }
-    structures.set(job.outputLocationId, {
-      structureId: job.outputLocationId,
-      name: `Location ${job.outputLocationId}`,
-      locationType: "structure",
+    structures.set(job.locationId, {
+      structureId: job.locationId,
+      name: stationLocations.get(job.locationId)?.name ?? `Location ${job.locationId}`,
+      locationType: stationLocations.has(job.locationId) ? "station" : "structure",
       assetCount: 1,
       personalAssetCount: job.ownerType === "character" ? 1 : 0,
       corporationAssetCount: job.ownerType === "corporation" ? 1 : 0,
-      resolved: false,
+      resolved: stationLocations.has(job.locationId),
+      ...(stationLocations.get(job.locationId)?.type_id
+        ? { typeId: stationLocations.get(job.locationId)?.type_id }
+        : {}),
+      ...(stationLocations.get(job.locationId)?.system_id
+        ? { systemId: stationLocations.get(job.locationId)?.system_id }
+        : {}),
       ownedByCorporation: job.ownerType === "corporation",
       rigs: [],
       items: new Map([[`job:${job.jobId}`, item]]),
       bonuses: emptyBonuses(),
     });
-  }
-
-  const records = await Promise.all(session.characterIds.map((characterId) => getCharacter(characterId)));
-  const corporationStructures = new Map<number, Awaited<ReturnType<typeof fetchCorporationStructures>>[number]>();
-  for (const record of records) {
-    if (!record) continue;
-    try {
-      for (const structure of await fetchCorporationStructures(record)) {
-        corporationStructures.set(structure.structure_id, structure);
-      }
-    } catch {}
   }
 
   const typeIds = [...structures.values()].flatMap((structure) => [
@@ -510,6 +645,7 @@ export async function GET(request: Request) {
                   blueprintRunsAtInstall: item.blueprintRunsAtInstall,
                   blueprintRunsUsed: item.blueprintRunsUsed,
                   blueprintRunsRemaining: item.blueprintRunsRemaining,
+                  activityName: item.activityName,
                   endDate: item.endDate,
                 }
               : {}),

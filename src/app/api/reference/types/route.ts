@@ -14,8 +14,9 @@ export async function GET(request: Request) {
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
 
   try {
-    const [typeById, marketGroupById, groupById] = await Promise.all([getTypes(), getMarketGroups(), getGroups()]);
+    const typeById = await getTypes();
     if (typeIdValues.length > 0) {
+      const [marketGroupById, groupById] = await Promise.all([getMarketGroups(), getGroups()]);
       const requestedTypeIds = typeIds
         .filter((value) => /^\d+$/.test(value))
         .map(Number)

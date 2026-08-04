@@ -6,7 +6,7 @@ import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import styles from "./page.module.css";
 
 const languageStorageKey = "assembly-line-language";
-type ActivePage = "planner" | "stock" | "locations" | "settings" | "imagechecker";
+type ActivePage = "planner" | "stock" | "locations" | "settings" | "imagechecker" | "characters";
 type CharacterSummary = {
   characterId: number;
   characterName: string;
@@ -180,11 +180,14 @@ export default function AppShell({
             <span>▧</span>
             <span className={styles.navText}>Image checker</span>
           </Link>
-          <button type="button" className={styles.navItem}>
-            <span>◌</span>
+          <Link
+            className={`${styles.navItem} ${activePage === "characters" ? styles.navActive : ""}`}
+            href="/characters"
+          >
+            <span className={styles.characterGlyph} aria-hidden="true" />
             <span className={styles.navText}>Characters</span>
             <b>{characters.length}</b>
-          </button>
+          </Link>
           <button type="button" className={styles.navItem}>
             <span>⌁</span>
             <span className={styles.navText}>Data status</span>

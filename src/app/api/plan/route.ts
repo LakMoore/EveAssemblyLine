@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { calculatePlan } from "@/lib/planning/planEngine";
+import { hydrateStockCategories } from "@/lib/planning/stockHydration";
 import { PlanRequest } from "@/lib/planning/types";
 
 export async function POST(request: Request) {
@@ -9,10 +10,13 @@ export async function POST(request: Request) {
     if (input.items.some((item) => !Number.isInteger(item.typeId) || !Number.isFinite(item.quantity) || item.quantity <= 0)) {
       return NextResponse.json({ error: "Every item needs a positive quantity and integer type ID." }, { status: 400 });
     }
-    const assets = input.assets ?? [];
+    const [stock, assets] = await Promise.all([
+      hydrateStockCategories(input.stock ?? []),
+      hydrateStockCategories(input.assets ?? []),
+    ]);
     const result = await calculatePlan({
       ...input,
-      stock: [...(input.stock ?? []), ...assets],
+      stock: [...stock, ...assets],
     });
     result.metadata.unresolvedAssetCount = assets.filter((asset) => asset.locationResolved === false).length;
     result.metadata.corporationAssetSources = [...new Set(
