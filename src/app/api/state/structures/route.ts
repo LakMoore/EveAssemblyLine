@@ -154,6 +154,12 @@ export async function GET(request: Request) {
   const includeAssembledContainers = url.searchParams.get("includeAssembledContainers") === "true";
   const includeAssembledShips = url.searchParams.get("includeAssembledShips") === "true";
   const stockOnly = url.searchParams.get("stockOnly") === "true";
+  const requestedTypeIds = new Set(
+    (url.searchParams.get("typeIds") ?? "")
+      .split(",")
+      .map(Number)
+      .filter((typeId) => Number.isInteger(typeId)),
+  );
 
   const [productionAssets, assembledContainers, jobs, activityInputTypeIds, rigDogma, dogmaEffects, typeBonuses, marketGroups] = await Promise.all([
     getResolvedAssets(session.characterIds, true),
@@ -178,6 +184,7 @@ export async function GET(request: Request) {
     const category = type ? categorizeType(type, language, marketGroups, groups).category : "item";
     if (
       stockOnly &&
+      !requestedTypeIds.has(asset.typeId) &&
       !activityInputTypeIds.has(asset.typeId) &&
       category !== "bpo" &&
       category !== "reaction"

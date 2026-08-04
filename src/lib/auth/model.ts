@@ -12,7 +12,10 @@ export interface CharacterTokenRecord {
   personalAuth: TokenSet;
   corpAuth?: TokenSet;
   corporationId?: number;
+  corporationRoles?: string[];
   hasDirectorRole?: boolean;
+  hasAccountantRole?: boolean;
+  hasTraderRole?: boolean;
   hasStationManagerRole?: boolean;
   corpAuthCompleted?: boolean;
 }
@@ -56,6 +59,19 @@ export interface IndustryJobRecord {
   successfulRuns?: number;
   startDate: string;
   endDate: string;
+  ownerType: "character" | "corporation";
+  ownerId: number;
+}
+
+export interface MarketOrderRecord {
+  orderId: number;
+  typeId: number;
+  locationId: number;
+  volumeRemain: number;
+  volumeTotal: number;
+  isBuyOrder: boolean;
+  isCorporation?: boolean;
+  issuedBy?: number;
   ownerType: "character" | "corporation";
   ownerId: number;
 }

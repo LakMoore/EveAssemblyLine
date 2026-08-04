@@ -37,6 +37,9 @@ export interface PlanRequest {
   locations?: { manufacturing: number; reactions: number; market: number };
   settings: {
     includeCorporationAssets: boolean;
+    personalSellOrdersAsStock: boolean;
+    allCorporationSellOrdersAsStock: boolean;
+    myCorporationSellOrdersAsStock: boolean;
     buildBlacklist: number[];
     buyBlacklist: number[];
     defaultMe: number;

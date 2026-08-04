@@ -8,11 +8,14 @@ export async function GET(request: Request) {
   const records = await getCharacters();
   return NextResponse.json(records
     .filter((record) => session.characterIds.includes(record.characterId))
-    .map(({ characterId, characterName, corporationId, hasDirectorRole, corpAuthCompleted }) => ({
+    .map(({ characterId, characterName, corporationId, corporationRoles, hasDirectorRole, hasAccountantRole, hasTraderRole, corpAuthCompleted }) => ({
       characterId,
       characterName,
       corporationId,
+      corporationRoles: corporationRoles ?? [],
       hasDirectorRole: Boolean(hasDirectorRole),
+      hasAccountantRole: Boolean(hasAccountantRole),
+      hasTraderRole: Boolean(hasTraderRole),
       corpAuthCompleted: Boolean(corpAuthCompleted),
     })));
 }

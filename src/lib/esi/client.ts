@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import type { AssetRecord, CharacterTokenRecord, IndustryJobRecord, TokenSet } from "@/lib/auth/model";
+import type {
+  AssetRecord,
+  CharacterTokenRecord,
+  IndustryJobRecord,
+  MarketOrderRecord,
+  TokenSet,
+} from "@/lib/auth/model";
 import { getCachedEsiResponse, setCachedEsiResponse } from "@/cache/services/esiCache";
 import { refreshTokenSet } from "@/lib/auth/eveSso";
 import { getCharacter, upsertCharacter } from "@/lib/auth/tokensStore";
@@ -50,6 +56,17 @@ type EsiIndustryJob = {
   successful_runs?: number;
   start_date: string;
   end_date: string;
+};
+
+type EsiMarketOrder = {
+  order_id: number;
+  type_id: number;
+  location_id: number;
+  volume_remain: number;
+  volume_total: number;
+  is_buy_order: boolean;
+  is_corporation?: boolean;
+  issued_by?: number;
 };
 
 export type EsiCorporationStructure = {
@@ -360,6 +377,58 @@ export async function fetchCorporationIndustryJobs(record: CharacterTokenRecord)
       .filter((job) => job.status !== "cancelled" && job.status !== "delivered")
       .map((job) => mapIndustryJob(job, "corporation", record.corporationId!)),
     headers: result.headers,
+  };
+}
+
+function mapMarketOrder(
+  order: EsiMarketOrder,
+  ownerType: MarketOrderRecord["ownerType"],
+  ownerId: number,
+): MarketOrderRecord {
+  return {
+    orderId: order.order_id,
+    typeId: order.type_id,
+    locationId: order.location_id,
+    volumeRemain: order.volume_remain,
+    volumeTotal: order.volume_total,
+    isBuyOrder: order.is_buy_order,
+    ...(order.is_corporation !== undefined ? { isCorporation: order.is_corporation } : {}),
+    ...(order.issued_by !== undefined ? { issuedBy: order.issued_by } : {}),
+    ownerType,
+    ownerId,
+  };
+}
+
+export async function fetchCharacterMarketOrders(record: CharacterTokenRecord, etag?: string) {
+  const token = await getUsableToken(record, "personal");
+  const result = await fetchPages<EsiMarketOrder>(
+    `/characters/${record.characterId}/orders`,
+    token,
+    etag,
+  );
+  return {
+    orders: result.data?.map((order) => mapMarketOrder(order, "character", record.characterId)) ?? null,
+    token,
+    headers: result.headers,
+    notModified: result.notModified,
+  };
+}
+
+export async function fetchCorporationMarketOrders(record: CharacterTokenRecord, etag?: string) {
+  if (!record.corporationId || !record.hasDirectorRole || !record.corpAuthCompleted) {
+    throw new Error("Corporation authorization is incomplete");
+  }
+  const token = await getUsableToken(record, "corp");
+  const result = await fetchPages<EsiMarketOrder>(
+    `/corporations/${record.corporationId}/orders`,
+    token,
+    etag,
+  );
+  return {
+    orders: result.data?.map((order) => mapMarketOrder(order, "corporation", record.corporationId!)) ?? null,
+    token,
+    headers: result.headers,
+    notModified: result.notModified,
   };
 }
 

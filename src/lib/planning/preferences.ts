@@ -18,6 +18,9 @@ export type KnownStructure = {
 
 export type PlannerSettings = {
   includeCorporationAssets: boolean;
+  personalSellOrdersAsStock: boolean;
+  allCorporationSellOrdersAsStock: boolean;
+  myCorporationSellOrdersAsStock: boolean;
   includeAssembledContainers: boolean;
   includeAssembledShips: boolean;
   respectActiveJobs: boolean;
@@ -34,6 +37,9 @@ export const defaultLocations: PlannerLocations = {
 
 export const defaultSettings: PlannerSettings = {
   includeCorporationAssets: true,
+  personalSellOrdersAsStock: true,
+  allCorporationSellOrdersAsStock: true,
+  myCorporationSellOrdersAsStock: true,
   includeAssembledContainers: false,
   includeAssembledShips: false,
   respectActiveJobs: true,

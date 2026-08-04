@@ -2,8 +2,10 @@ import type {
   AssetLocation,
   AssetRecord,
   IndustryJobRecord,
+  MarketOrderRecord,
   ResolvedAssetRecord,
 } from "@/lib/auth/model";
+import type { PlanStockItem } from "@/lib/planning/types";
 import { getCharacter, getCharacters } from "@/lib/auth/tokensStore";
 import {
   fetchAssetLocations,
@@ -12,6 +14,8 @@ import {
   fetchCorporationAssets,
   fetchCharacterIndustryJobs,
   fetchCorporationIndustryJobs,
+  fetchCharacterMarketOrders,
+  fetchCorporationMarketOrders,
   applyBlueprintMetadata,
   getUsableToken,
 } from "./client";
@@ -31,6 +35,7 @@ type OwnerCache = {
   assets?: EndpointCache;
   assetLocations?: EndpointCache;
   jobs?: EndpointCache;
+  orders?: EndpointCache;
   resolvedAssets: ResolvedAssetRecord[];
   assetsByItemId: Map<number, ResolvedAssetRecord>;
   assembledContainersByItemId: Map<number, ResolvedAssetRecord>;
@@ -291,6 +296,7 @@ export async function refreshCharacterState(
     assets?: EndpointCache;
     assetLocations?: EndpointCache;
     jobs?: EndpointCache;
+    orders?: EndpointCache;
     corporations?: Array<{
       corporationId: number;
       assets?: EndpointCache;
@@ -302,7 +308,6 @@ export async function refreshCharacterState(
     if (!record) continue;
     const cache = getCache(characterCaches, characterId);
     const characterSummary: (typeof summary)[number] = { characterId };
-    let personalToken = record.personalAuth;
     try {
       if (
         !options.force &&
@@ -320,7 +325,6 @@ export async function refreshCharacterState(
         }
       } else {
         const result = await fetchCharacterAssets(record, cache.assets?.etag);
-        personalToken = result.token;
         if (result.notModified && cache.assets) {
           const assets = result.blueprints.length > 0
             ? applyBlueprintMetadata(cache.assets.lastBody as AssetRecord[], result.blueprints)
@@ -353,6 +357,21 @@ export async function refreshCharacterState(
         ...endpointStatus(error),
       };
     }
+    try {
+      const orders = await fetchCharacterMarketOrders(record, cache.orders?.etag);
+      if (orders.notModified && cache.orders) {
+        cache.orders = setFresh(cache.orders.lastBody, orders.headers, cache.orders);
+        cache.orders.status = "cached";
+      } else if (orders.orders) {
+        cache.orders = setFresh(orders.orders, orders.headers, cache.orders);
+      }
+      characterSummary.orders = cache.orders;
+    } catch (error) {
+      characterSummary.orders = {
+        ...(cache.orders ?? { lastBody: null }),
+        ...endpointStatus(error),
+      };
+    }
 
     if (record.corpAuthCompleted && record.hasDirectorRole && record.corporationId) {
       const corpCache = getCache(corporationCaches, record.corporationId);
@@ -361,6 +380,7 @@ export async function refreshCharacterState(
         assets?: EndpointCache;
         assetLocations?: EndpointCache;
         jobs?: EndpointCache;
+        orders?: EndpointCache;
       } = { corporationId: record.corporationId };
       try {
         if (
@@ -426,6 +446,21 @@ export async function refreshCharacterState(
       } catch (error) {
         corpSummary.jobs = {
           ...(corpCache.jobs ?? { lastBody: null }),
+          ...endpointStatus(error),
+        };
+      }
+      try {
+        const orders = await fetchCorporationMarketOrders(record, corpCache.orders?.etag);
+        if (orders.notModified && corpCache.orders) {
+          corpCache.orders = setFresh(corpCache.orders.lastBody, orders.headers, corpCache.orders);
+          corpCache.orders.status = "cached";
+        } else if (orders.orders) {
+          corpCache.orders = setFresh(orders.orders, orders.headers, corpCache.orders);
+        }
+        corpSummary.orders = corpCache.orders;
+      } catch (error) {
+        corpSummary.orders = {
+          ...(corpCache.orders ?? { lastBody: null }),
           ...endpointStatus(error),
         };
       }
@@ -588,6 +623,72 @@ export async function getAssetCacheMetadata(
   };
 }
 
+export async function getMarketOrderStock(
+  characterIds: number[],
+  options: {
+    personalSellOrdersAsStock: boolean;
+    allCorporationSellOrdersAsStock: boolean;
+    myCorporationSellOrdersAsStock: boolean;
+  },
+): Promise<PlanStockItem[]> {
+  const stock: PlanStockItem[] = [];
+  if (options.personalSellOrdersAsStock) {
+    for (const characterId of characterIds) {
+      const orders = getCache(characterCaches, characterId).orders?.lastBody;
+      if (!Array.isArray(orders)) continue;
+      for (const order of orders as MarketOrderRecord[]) {
+        if (order.isBuyOrder || order.isCorporation || order.volumeRemain <= 0) continue;
+        stock.push({
+          typeId: order.typeId,
+          name: `Type ${order.typeId}`,
+          quantity: order.volumeRemain,
+          sourceLocationId: order.locationId,
+          ownerType: order.ownerType,
+          ownerId: order.ownerId,
+          locationResolved: true,
+          category: "item",
+        });
+      }
+    }
+  }
+
+  if (!options.allCorporationSellOrdersAsStock && !options.myCorporationSellOrdersAsStock) {
+    return stock;
+  }
+  const characters = await getCharacters();
+  const selectedCharacters = characters.filter((character) => characterIds.includes(character.characterId));
+  const corporationIds = new Set(
+    selectedCharacters
+      .filter(
+        (character) =>
+          character.corpAuthCompleted && character.hasDirectorRole && character.corporationId,
+      )
+      .map((character) => character.corporationId!),
+  );
+  for (const corporationId of corporationIds) {
+    const orders = getCache(corporationCaches, corporationId).orders?.lastBody;
+    if (!Array.isArray(orders)) continue;
+    for (const order of orders as MarketOrderRecord[]) {
+      if (order.isBuyOrder || order.volumeRemain <= 0) continue;
+      const isMyCorporationOrder = order.issuedBy !== undefined && selectedCharacters.some(
+        (character) => character.characterId === order.issuedBy && character.corporationId === corporationId,
+      );
+      if (!options.allCorporationSellOrdersAsStock && !isMyCorporationOrder) continue;
+      stock.push({
+        typeId: order.typeId,
+        name: `Type ${order.typeId}`,
+        quantity: order.volumeRemain,
+        sourceLocationId: order.locationId,
+        ownerType: order.ownerType,
+        ownerId: order.ownerId,
+        locationResolved: true,
+        category: "item",
+      });
+    }
+  }
+  return stock;
+}
+
 export async function getStateStatus(characterIds: number[]) {
   const characters = await getCharacters();
   const corporationsByCharacter = new Map<number, number[]>();
@@ -612,9 +713,17 @@ export async function getStateStatus(characterIds: number[]) {
         status: "cached" as const,
         lastBody: null,
       },
+      orders: getCache(characterCaches, characterId).orders ?? {
+        status: "cached" as const,
+        lastBody: null,
+      },
       corporations: (corporationsByCharacter.get(characterId) ?? []).map((corporationId) => ({
         corporationId,
         assets: getCache(corporationCaches, corporationId).assets ?? {
+          status: "cached" as const,
+          lastBody: null,
+        },
+        orders: getCache(corporationCaches, corporationId).orders ?? {
           status: "cached" as const,
           lastBody: null,
         },

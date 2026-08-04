@@ -16,12 +16,15 @@ export async function GET(request: Request) {
   } catch {}
   return NextResponse.json(
     sessionRecords
-      .map(({ characterId, characterName, corporationId, hasDirectorRole, corpAuthCompleted }) => ({
+      .map(({ characterId, characterName, corporationId, corporationRoles, hasDirectorRole, hasAccountantRole, hasTraderRole, corpAuthCompleted }) => ({
         characterId,
         characterName,
         corporationId,
         corporationName: corporationId ? corporationNames.get(corporationId) : undefined,
+        corporationRoles: corporationRoles ?? [],
         hasDirectorRole: Boolean(hasDirectorRole),
+        hasAccountantRole: Boolean(hasAccountantRole),
+        hasTraderRole: Boolean(hasTraderRole),
         corpAuthCompleted: Boolean(corpAuthCompleted),
       })),
   );

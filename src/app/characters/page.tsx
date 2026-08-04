@@ -10,7 +10,10 @@ type Character = {
   characterName: string;
   corporationId?: number;
   corporationName?: string;
+  corporationRoles: string[];
   hasDirectorRole: boolean;
+  hasAccountantRole: boolean;
+  hasTraderRole: boolean;
   corpAuthCompleted: boolean;
 };
 
@@ -43,6 +46,10 @@ function statusClass(status?: EndpointStatus) {
   if (status?.status === "fresh") return styles.statusFresh;
   if (status?.status === "rate_limited" || status?.status === "error") return styles.statusError;
   return styles.statusCached;
+}
+
+function roleLabel(hasRole: boolean) {
+  return hasRole ? "Yes" : "No";
 }
 
 export default function CharactersPage() {
@@ -128,7 +135,14 @@ export default function CharactersPage() {
               const status = statuses.find((entry) => entry.characterId === character.characterId);
               const hasCorpAccess = character.corpAuthCompleted && character.hasDirectorRole;
               return <div className={styles.characterRow} key={character.characterId}>
-                <span className={styles.characterIdentity}><strong>{character.characterName}</strong><small>{character.corporationName ?? (character.corporationId ? `Corporation ${character.corporationId}` : "Corporation unavailable")} / {hasCorpAccess ? "Director access" : "Character access only"}</small></span>
+                <span className={styles.characterIdentity}>
+                  <strong>{character.characterName}</strong>
+                  <small>{character.corporationName ?? (character.corporationId ? `Corporation ${character.corporationId}` : "Corporation unavailable")} / {hasCorpAccess ? "Director access" : "Character access only"}</small>
+                  <small>Director: {roleLabel(character.hasDirectorRole)} · Accountant: {roleLabel(character.hasAccountantRole)} · Trader: {roleLabel(character.hasTraderRole)}</small>
+                  {character.corporationRoles.filter((role) => !["Director", "Accountant", "Trader"].includes(role)).length > 0 && (
+                    <small>Other roles: {character.corporationRoles.filter((role) => !["Director", "Accountant", "Trader"].includes(role)).join(", ")}</small>
+                  )}
+                </span>
                 <span className={styles.statusCell} data-label="Assets" title={`Assets: ${statusLabel(status?.assets)}${status?.assets?.lastUpdated ? `, ${formatDate(status.assets.lastUpdated)}` : ""}`}><span className={`${styles.statusDot} ${statusClass(status?.assets)}`} /><small>{statusLabel(status?.assets)}</small><small className={styles.statusDate}>{formatDate(status?.assets?.lastUpdated)}</small></span>
                 <span className={styles.statusCell} data-label="Jobs" title={`Jobs: ${statusLabel(status?.jobs)}${status?.jobs?.lastUpdated ? `, ${formatDate(status.jobs.lastUpdated)}` : ""}`}><span className={`${styles.statusDot} ${statusClass(status?.jobs)}`} /><small>{statusLabel(status?.jobs)}</small><small className={styles.statusDate}>{formatDate(status?.jobs?.lastUpdated)}</small></span>
                 <button type="button" className={styles.remove} onClick={() => void removeCharacter(character)} disabled={removingId === character.characterId}>{removingId === character.characterId ? "Removing..." : "Remove"}</button>

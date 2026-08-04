@@ -24,7 +24,10 @@ const tabs: PlannerTab[] = ["Plan", "Buy", "Copy", "Invent", "React", "Manufactu
 type BuildItem = { name: string; typeId: number; quantity: number; me: number; te: number };
 type TypeResult = { name: string; typeId: number };
 type PasteResult = { name: string; quantity?: number; typeId?: number; error?: string };
-type EsiStockResponse = { structures?: Array<{ items?: StockItem[] }> };
+type EsiStockResponse = {
+  structures?: Array<{ items?: StockItem[] }>;
+  marketOrderStock?: StockItem[];
+};
 function formatDuration(totalSeconds: number) {
   const totalMinutes = Math.ceil(totalSeconds / 60);
   const days = Math.floor(totalMinutes / 1440);
@@ -117,12 +120,25 @@ export default function Home() {
           includeAssembledContainers: String(settings.includeAssembledContainers),
           includeAssembledShips: String(settings.includeAssembledShips),
           stockOnly: "true",
+          typeIds: items.map((item) => item.typeId).join(","),
         }).toString()}`);
         if (stockResponse.ok) {
           const liveStock = (await stockResponse.json() as EsiStockResponse).structures?.flatMap(
             (structure) => structure.items ?? [],
           ) ?? [];
           requestedStock = [...stock, ...liveStock];
+        }
+      } catch {
+      }
+      try {
+        const orderResponse = await fetch(`/api/state/assets?${new URLSearchParams({
+          personalSellOrdersAsStock: String(settings.personalSellOrdersAsStock),
+          allCorporationSellOrdersAsStock: String(settings.allCorporationSellOrdersAsStock),
+          myCorporationSellOrdersAsStock: String(settings.myCorporationSellOrdersAsStock),
+        }).toString()}`);
+        if (orderResponse.ok) {
+          const orderData = await orderResponse.json() as EsiStockResponse;
+          requestedStock = [...requestedStock, ...(orderData.marketOrderStock ?? [])];
         }
       } catch {
       }
@@ -136,6 +152,9 @@ export default function Home() {
           locations,
           settings: {
             includeCorporationAssets: settings.includeCorporationAssets,
+            personalSellOrdersAsStock: settings.personalSellOrdersAsStock,
+            allCorporationSellOrdersAsStock: settings.allCorporationSellOrdersAsStock,
+            myCorporationSellOrdersAsStock: settings.myCorporationSellOrdersAsStock,
             buildBlacklist: [],
             buyBlacklist: [],
             defaultMe: settings.defaultMe,

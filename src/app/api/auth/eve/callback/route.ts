@@ -47,7 +47,10 @@ export async function GET(request: Request) {
       accountId: resolvedAccountId,
       personalAuth: tokenSet,
       corporationId,
+      corporationRoles: roles,
       hasDirectorRole: roles.includes("Director"),
+      hasAccountantRole: roles.includes("Accountant"),
+      hasTraderRole: roles.includes("Trader"),
       hasStationManagerRole: roles.includes("Station_Manager"),
       corpAuthCompleted: roles.includes("Director") || roles.includes("Station_Manager"),
     });

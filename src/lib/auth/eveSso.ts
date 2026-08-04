@@ -11,6 +11,7 @@ export const personalScopes = [
   "esi-assets.read_assets.v1",
   "esi-industry.read_character_jobs.v1",
   "esi-characters.read_blueprints.v1",
+  "esi-markets.read_character_orders.v1",
 ];
 
 export const corporationScopes = [
@@ -19,6 +20,7 @@ export const corporationScopes = [
   "esi-characters.read_corporation_roles.v1",
   "esi-corporations.read_blueprints.v1",
   "esi-industry.read_corporation_jobs.v1",
+  "esi-markets.read_corporation_orders.v1",
   "esi-universe.read_structures.v1",
 ];
 
