@@ -6,6 +6,12 @@ import type {
   ResolvedAssetRecord,
 } from "@/lib/auth/model";
 import type { PlanStockItem } from "@/lib/planning/types";
+import {
+  getGroups,
+  getMarketGroups,
+  getTypesByIds,
+} from "@/cache/services/sdeCache";
+import { categorizeType } from "@/lib/reference/category";
 import { getCharacter, getCharacters } from "@/lib/auth/tokensStore";
 import {
   fetchAssetLocations,
@@ -94,20 +100,88 @@ function setFresh(body: unknown, headers?: Headers, previous?: EndpointCache): E
   };
 }
 
-function indexResolvedAssets(cache: OwnerCache, assets: ResolvedAssetRecord[]) {
+function indexResolvedAssets(
+  cache: OwnerCache,
+  assets: ResolvedAssetRecord[],
+  assembledContainerIds: Set<number>,
+) {
   cache.assetsByItemId = new Map(assets.map((asset) => [asset.itemId, asset]));
-  const parentItemIds = new Set(
-    assets
-      .filter((asset) => asset.locationType === "item")
-      .map((asset) => asset.locationId),
-  );
   cache.assembledContainersByItemId = new Map(
     assets
-      .filter((asset) => !asset.isSingleton && parentItemIds.has(asset.itemId))
+      .filter((asset) => assembledContainerIds.has(asset.itemId))
       .map((asset) => [asset.itemId, asset]),
   );
-  const assembledContainerIds = new Set(cache.assembledContainersByItemId.keys());
-  cache.resolvedAssets = assets.filter((asset) => !assembledContainerIds.has(asset.itemId));
+  const cachedContainerIds = new Set(cache.assembledContainersByItemId.keys());
+  cache.resolvedAssets = assets.filter((asset) => !cachedContainerIds.has(asset.itemId));
+}
+
+async function selectCachedAssets(assets: AssetRecord[]) {
+  if (assets.length === 0) {
+    return { assets, assembledContainerIds: new Set<number>() };
+  }
+  const [types, groups, marketGroups] = await Promise.all([
+    getTypesByIds([...new Set(assets.map((asset) => asset.typeId))]),
+    getGroups(),
+    getMarketGroups(),
+  ]);
+  const selected: AssetRecord[] = [];
+  const assembledContainerIds = new Set<number>();
+  for (const asset of assets) {
+    const type = types.get(asset.typeId);
+    const categorized = type
+      ? categorizeType(type, "en", marketGroups, groups)
+      : { category: "item" as const, marketCategory: undefined };
+    const isCargoContainer = categorized.marketCategory === "Cargo Containers" ||
+      isCargoContainerType(asset.typeId, types, groups, marketGroups);
+    const isAssembledContainer = isCargoContainer && !asset.isSingleton;
+    const isStockItem = categorized.category === "item" && !asset.isSingleton;
+    const isBlueprintOrReaction = categorized.category === "bpo" || categorized.category === "reaction";
+    if (!isAssembledContainer && !isStockItem && !isBlueprintOrReaction) continue;
+    selected.push(asset);
+    if (isAssembledContainer) assembledContainerIds.add(asset.itemId);
+  }
+  return { assets: selected, assembledContainerIds };
+}
+
+async function cacheResolvedAssets(
+  cache: OwnerCache,
+  assets: AssetRecord[],
+  token: Parameters<typeof fetchAssetLocations>[3],
+  headers?: Headers,
+  previous?: EndpointCache,
+) {
+  const selected = await selectCachedAssets(assets);
+  cache.assets = setFresh(selected.assets, headers, previous);
+  const resolved = await resolveAssets(selected.assets, token);
+  indexResolvedAssets(cache, resolved, selected.assembledContainerIds);
+  cache.unresolvedAssetCount = [
+    ...cache.resolvedAssets,
+    ...cache.assembledContainersByItemId.values(),
+  ].filter((asset) => !asset.location.resolved).length;
+  cache.assetLocations = setFresh(
+    [...cache.resolvedAssets, ...cache.assembledContainersByItemId.values()],
+    headers,
+    cache.assetLocations,
+  );
+}
+
+function isCargoContainerType(
+  typeId: number,
+  types: Awaited<ReturnType<typeof getTypesByIds>>,
+  groups: Awaited<ReturnType<typeof getGroups>>,
+  marketGroups: Awaited<ReturnType<typeof getMarketGroups>>,
+) {
+  const type = types.get(typeId);
+  const group = groups.get(type?.groupID ?? -1);
+  if (group?.categoryID === 2) return true;
+  let marketGroup = type?.marketGroupID === undefined ? undefined : marketGroups.get(type.marketGroupID);
+  while (marketGroup) {
+    if (marketGroup.name.en === "Cargo Containers") return true;
+    marketGroup = marketGroup.parentGroupID === undefined
+      ? undefined
+      : marketGroups.get(marketGroup.parentGroupID);
+  }
+  return false;
 }
 
 function directKind(locationType: AssetRecord["locationType"]): AssetLocation["kind"] | null {
@@ -277,11 +351,7 @@ async function rebuildResolvedAssets(
   if (!record || cache.resolvedAssets.length > 0 || !Array.isArray(cache.assets?.lastBody)) return;
   try {
     const token = await getUsableToken(record, purpose);
-    indexResolvedAssets(cache, await resolveAssets(cache.assets.lastBody as AssetRecord[], token));
-    cache.unresolvedAssetCount = cache.resolvedAssets.filter(
-      (asset) => !asset.location.resolved,
-    ).length;
-    cache.assetLocations = setFresh(cache.resolvedAssets);
+    await cacheResolvedAssets(cache, cache.assets.lastBody as AssetRecord[], token);
   } catch {
     // Keep raw assets available when ESI is paused or unavailable.
   }
@@ -317,11 +387,7 @@ export async function refreshCharacterState(
         characterSummary.assets = { ...cache.assets, status: "cached" };
         if (cache.resolvedAssets.length === 0 && Array.isArray(cache.assets.lastBody)) {
           const token = await getUsableToken(record, "personal");
-          indexResolvedAssets(cache, await resolveAssets(cache.assets.lastBody as AssetRecord[], token));
-          cache.unresolvedAssetCount = cache.resolvedAssets.filter(
-            (asset) => !asset.location.resolved,
-          ).length;
-          cache.assetLocations = setFresh(cache.resolvedAssets);
+          await cacheResolvedAssets(cache, cache.assets.lastBody as AssetRecord[], token);
         }
       } else {
         const result = await fetchCharacterAssets(record, cache.assets?.etag);
@@ -329,20 +395,10 @@ export async function refreshCharacterState(
           const assets = result.blueprints.length > 0
             ? applyBlueprintMetadata(cache.assets.lastBody as AssetRecord[], result.blueprints)
             : cache.assets.lastBody;
-          cache.assets = setFresh(assets, result.headers, cache.assets);
+          await cacheResolvedAssets(cache, assets as AssetRecord[], result.token, result.headers, cache.assets);
           cache.assets.status = "cached";
-          indexResolvedAssets(cache, await resolveAssets(assets as AssetRecord[], result.token));
-          cache.unresolvedAssetCount = cache.resolvedAssets.filter(
-            (asset) => !asset.location.resolved,
-          ).length;
-          cache.assetLocations = setFresh(cache.resolvedAssets, result.headers, cache.assetLocations);
         } else if (result.assets) {
-          cache.assets = setFresh(result.assets, result.headers, cache.assets);
-          indexResolvedAssets(cache, await resolveAssets(result.assets, result.token));
-          cache.unresolvedAssetCount = cache.resolvedAssets.filter(
-            (asset) => !asset.location.resolved,
-          ).length;
-          cache.assetLocations = setFresh(cache.resolvedAssets);
+          await cacheResolvedAssets(cache, result.assets, result.token, result.headers, cache.assets);
         }
         characterSummary.assets = cache.assets;
         characterSummary.assetLocations = cache.assetLocations;
@@ -391,14 +447,7 @@ export async function refreshCharacterState(
           corpSummary.assets = { ...corpCache.assets, status: "cached" };
           if (corpCache.resolvedAssets.length === 0 && Array.isArray(corpCache.assets.lastBody)) {
             const token = await getUsableToken(record, "corp");
-            indexResolvedAssets(
-              corpCache,
-              await resolveAssets(corpCache.assets.lastBody as AssetRecord[], token),
-            );
-            corpCache.unresolvedAssetCount = corpCache.resolvedAssets.filter(
-              (asset) => !asset.location.resolved,
-            ).length;
-            corpCache.assetLocations = setFresh(corpCache.resolvedAssets);
+            await cacheResolvedAssets(corpCache, corpCache.assets.lastBody as AssetRecord[], token);
           }
         } else {
           const result = await fetchCorporationAssets(record, corpCache.assets?.etag);
@@ -406,28 +455,10 @@ export async function refreshCharacterState(
             const assets = result.blueprints.length > 0
               ? applyBlueprintMetadata(corpCache.assets.lastBody as AssetRecord[], result.blueprints)
               : corpCache.assets.lastBody;
-            corpCache.assets = setFresh(
-              assets,
-              result.headers,
-              corpCache.assets,
-            );
+            await cacheResolvedAssets(corpCache, assets as AssetRecord[], result.token, result.headers, corpCache.assets);
             corpCache.assets.status = "cached";
-            indexResolvedAssets(corpCache, await resolveAssets(assets as AssetRecord[], result.token));
-            corpCache.unresolvedAssetCount = corpCache.resolvedAssets.filter(
-              (asset) => !asset.location.resolved,
-            ).length;
-            corpCache.assetLocations = setFresh(
-              corpCache.resolvedAssets,
-              result.headers,
-              corpCache.assetLocations,
-            );
           } else if (result.assets) {
-            corpCache.assets = setFresh(result.assets, result.headers, corpCache.assets);
-            indexResolvedAssets(corpCache, await resolveAssets(result.assets, result.token));
-            corpCache.unresolvedAssetCount = corpCache.resolvedAssets.filter(
-              (asset) => !asset.location.resolved,
-            ).length;
-            corpCache.assetLocations = setFresh(corpCache.resolvedAssets);
+            await cacheResolvedAssets(corpCache, result.assets, result.token, result.headers, corpCache.assets);
           }
           corpSummary.assets = corpCache.assets;
           corpSummary.assetLocations = corpCache.assetLocations;
