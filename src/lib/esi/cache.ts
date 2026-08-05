@@ -45,6 +45,7 @@ type OwnerCache = {
   resolvedAssets: ResolvedAssetRecord[];
   assetsByItemId: Map<number, ResolvedAssetRecord>;
   assembledContainersByItemId: Map<number, ResolvedAssetRecord>;
+  assembledStructureRigsByItemId: Map<number, ResolvedAssetRecord>;
   unresolvedAssetCount: number;
 };
 
@@ -58,6 +59,7 @@ function getCache(map: Map<number, OwnerCache>, id: number): OwnerCache {
     resolvedAssets: [],
     assetsByItemId: new Map(),
     assembledContainersByItemId: new Map(),
+    assembledStructureRigsByItemId: new Map(),
     unresolvedAssetCount: 0,
   };
   map.set(id, created);
@@ -104,20 +106,35 @@ function indexResolvedAssets(
   cache: OwnerCache,
   assets: ResolvedAssetRecord[],
   assembledContainerIds: Set<number>,
+  assembledStructureRigIds: Set<number>,
 ) {
-  cache.assetsByItemId = new Map(assets.map((asset) => [asset.itemId, asset]));
+  cache.assetsByItemId = new Map(
+    assets
+      .filter((asset) => !assembledStructureRigIds.has(asset.itemId))
+      .map((asset) => [asset.itemId, asset]),
+  );
   cache.assembledContainersByItemId = new Map(
     assets
       .filter((asset) => assembledContainerIds.has(asset.itemId))
       .map((asset) => [asset.itemId, asset]),
   );
-  const cachedContainerIds = new Set(cache.assembledContainersByItemId.keys());
-  cache.resolvedAssets = assets.filter((asset) => !cachedContainerIds.has(asset.itemId));
+  cache.assembledStructureRigsByItemId = new Map(
+    assets
+      .filter((asset) => assembledStructureRigIds.has(asset.itemId))
+      .map((asset) => [asset.itemId, asset]),
+  );
+  cache.resolvedAssets = assets.filter(
+    (asset) => !assembledContainerIds.has(asset.itemId) && !assembledStructureRigIds.has(asset.itemId),
+  );
 }
 
 async function selectCachedAssets(assets: AssetRecord[]) {
   if (assets.length === 0) {
-    return { assets, assembledContainerIds: new Set<number>() };
+    return {
+      assets,
+      assembledContainerIds: new Set<number>(),
+      assembledStructureRigIds: new Set<number>(),
+    };
   }
   const [types, groups, marketGroups] = await Promise.all([
     getTypesByIds([...new Set(assets.map((asset) => asset.typeId))]),
@@ -126,6 +143,7 @@ async function selectCachedAssets(assets: AssetRecord[]) {
   ]);
   const selected: AssetRecord[] = [];
   const assembledContainerIds = new Set<number>();
+  const assembledStructureRigIds = new Set<number>();
   for (const asset of assets) {
     const type = types.get(asset.typeId);
     const categorized = type
@@ -134,13 +152,17 @@ async function selectCachedAssets(assets: AssetRecord[]) {
     const isCargoContainer = categorized.marketCategory === "Cargo Containers" ||
       isCargoContainerType(asset.typeId, types, groups, marketGroups);
     const isAssembledContainer = isCargoContainer && !asset.isSingleton;
+    const isAssembledStructureRig = asset.ownerType === "corporation" &&
+      asset.locationType === "structure" &&
+      asset.locationFlag.startsWith("RigSlot");
     const isStockItem = categorized.category === "item" && !asset.isSingleton;
     const isBlueprintOrReaction = categorized.category === "bpo" || categorized.category === "reaction";
-    if (!isAssembledContainer && !isStockItem && !isBlueprintOrReaction) continue;
+    if (!isAssembledContainer && !isAssembledStructureRig && !isStockItem && !isBlueprintOrReaction) continue;
     selected.push(asset);
     if (isAssembledContainer) assembledContainerIds.add(asset.itemId);
+    if (isAssembledStructureRig) assembledStructureRigIds.add(asset.itemId);
   }
-  return { assets: selected, assembledContainerIds };
+  return { assets: selected, assembledContainerIds, assembledStructureRigIds };
 }
 
 async function cacheResolvedAssets(
@@ -153,13 +175,23 @@ async function cacheResolvedAssets(
   const selected = await selectCachedAssets(assets);
   cache.assets = setFresh(selected.assets, headers, previous);
   const resolved = await resolveAssets(selected.assets, token);
-  indexResolvedAssets(cache, resolved, selected.assembledContainerIds);
+  indexResolvedAssets(
+    cache,
+    resolved,
+    selected.assembledContainerIds,
+    selected.assembledStructureRigIds,
+  );
   cache.unresolvedAssetCount = [
     ...cache.resolvedAssets,
     ...cache.assembledContainersByItemId.values(),
+    ...cache.assembledStructureRigsByItemId.values(),
   ].filter((asset) => !asset.location.resolved).length;
   cache.assetLocations = setFresh(
-    [...cache.resolvedAssets, ...cache.assembledContainersByItemId.values()],
+    [
+      ...cache.resolvedAssets,
+      ...cache.assembledContainersByItemId.values(),
+      ...cache.assembledStructureRigsByItemId.values(),
+    ],
     headers,
     cache.assetLocations,
   );
@@ -611,6 +643,28 @@ export async function getAssembledContainerAssets(
       [...getCache(corporationCaches, id).assembledContainersByItemId.values()],
     ),
   ];
+}
+
+export async function getAssembledStructureRigAssets(
+  characterIds: number[],
+  includeCorporationAssets: boolean,
+) {
+  if (!includeCorporationAssets) return [];
+  const characters = await getCharacters();
+  const corporationIds = new Set(
+    characters
+      .filter(
+        (character) =>
+          characterIds.includes(character.characterId) &&
+          character.corpAuthCompleted &&
+          character.hasDirectorRole &&
+          character.corporationId,
+      )
+      .map((character) => character.corporationId!),
+  );
+  return [...corporationIds].flatMap((id) =>
+    [...getCache(corporationCaches, id).assembledStructureRigsByItemId.values()],
+  );
 }
 
 export async function getAssetCacheMetadata(
