@@ -1,7 +1,7 @@
 import type { GroupsRecord, MarketGroupsRecord } from "@/lib/sde/generated";
 import type { SdeLanguage } from "./languages";
 
-export type ItemCategory = "bpo" | "bpc" | "reaction" | "item";
+export type ItemCategory = "blueprint" | "reaction" | "item";
 
 type CategorizedType = {
   name: { en?: string };
@@ -47,14 +47,14 @@ export function categorizeType(
   if (type.groupID !== undefined && reactionFormulaGroupIds.has(type.groupID)) {
     marketCategory = "Reaction Formulas";
   } else if (categoryId === blueprintCategoryId) {
-    marketCategory = "Blueprint Originals";
+    marketCategory = "Blueprints";
   } else if (categoryName(root, "en") === "Manufacture & Research") {
     marketCategory = categoryName(path[2], language) ?? rootName;
   }
 
   let category: ItemCategory = "item";
   if (marketCategory === "Reaction Formulas") category = "reaction";
-  else if (categoryId === blueprintCategoryId) category = "bpo";
+  else if (categoryId === blueprintCategoryId) category = "blueprint";
 
   return { category, marketCategory };
 }

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth/session";
 import {
-  getAssembledContainerAssets,
+  getAssembledContainerAssetsByItemId,
   getResolvedAssetIndex,
   getResolvedAssets,
   getRunningIndustryJobs,
 } from "@/lib/esi/cache";
-import { fetchCorporationStructures, fetchLocationMetadata } from "@/lib/esi/client";
+import { fetchCorporationStructures, fetchLocationMetadata, getUsableToken } from "@/lib/esi/client";
 import { getCharacter } from "@/lib/auth/tokensStore";
 import {
   getDogmaEffects,
@@ -25,7 +25,6 @@ import { categorizeType } from "@/lib/reference/category";
 type StructureSize = "Small" | "Medium" | "Large" | "Extra Large";
 type Activity = "manufacturing" | "research" | "reactions" | "invention";
 type ActivityBonuses = Record<Activity, { me: number; te: number; cost: number }>;
-const shipCategoryId = 6;
 const containerCategoryId = 2;
 const bonusAttributeIds = { me: 2594, te: 2593, cost: 2595 } as const;
 
@@ -151,9 +150,6 @@ export async function GET(request: Request) {
   const requestedLanguage = new URL(request.url).searchParams.get("language");
   const url = new URL(request.url);
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
-  const includeAssembledContainers = url.searchParams.get("includeAssembledContainers") === "true";
-  const includeAssembledShips = url.searchParams.get("includeAssembledShips") === "true";
-  const stockOnly = url.searchParams.get("stockOnly") === "true";
   const requestedTypeIds = new Set(
     (url.searchParams.get("typeIds") ?? "")
       .split(",")
@@ -161,9 +157,9 @@ export async function GET(request: Request) {
       .filter((typeId) => Number.isInteger(typeId)),
   );
 
-  const [productionAssets, assembledContainers, jobs, activityInputTypeIds, rigDogma, dogmaEffects, typeBonuses, marketGroups] = await Promise.all([
+  const [productionAssets, assembledContainersById, jobs, activityInputTypeIds, rigDogma, dogmaEffects, typeBonuses, marketGroups] = await Promise.all([
     getResolvedAssets(session.characterIds, true),
-    getAssembledContainerAssets(session.characterIds, true),
+    getAssembledContainerAssetsByItemId(session.characterIds, true),
     getRunningIndustryJobs(session.characterIds, true),
     getActivityInputTypeIds(),
     getRigDogma(),
@@ -171,9 +167,7 @@ export async function GET(request: Request) {
     getTypeBonuses(),
     getMarketGroups(),
   ]);
-  const assets = stockOnly || !includeAssembledContainers
-    ? productionAssets
-    : [...productionAssets, ...assembledContainers];
+  const assets = productionAssets;
   const assetTypes = await getTypesByIds([...new Set([
     ...assets.map((asset) => asset.typeId),
     ...jobs.flatMap((job) => [job.productTypeId ?? job.blueprintTypeId, job.blueprintTypeId]),
@@ -183,19 +177,17 @@ export async function GET(request: Request) {
     const type = assetTypes.get(asset.typeId);
     const category = type ? categorizeType(type, language, marketGroups, groups).category : "item";
     if (
-      stockOnly &&
       !requestedTypeIds.has(asset.typeId) &&
       !activityInputTypeIds.has(asset.typeId) &&
-      category !== "bpo" &&
+      category !== "blueprint" &&
       category !== "reaction"
     ) return false;
     const categoryId = groups.get(assetTypes.get(asset.typeId)?.groupID ?? -1)?.categoryID;
     const isCargoContainer =
       categoryId === containerCategoryId ||
       isCargoContainerType(asset.typeId, assetTypes, groups, marketGroups);
-    if (isCargoContainer) return includeAssembledContainers || !asset.isSingleton;
+    if (isCargoContainer) return true;
     if (!asset.isSingleton) return true;
-    if (categoryId === shipCategoryId) return includeAssembledShips;
     return true;
   });
   const filteredLocationIds = new Set(
@@ -204,53 +196,82 @@ export async function GET(request: Request) {
       .map((asset) => asset.location.locationId),
   );
   const assetsByItemId = await getResolvedAssetIndex(session.characterIds, true);
-  const records = await Promise.all(session.characterIds.map((characterId) => getCharacter(characterId)));
+  const characters = await Promise.all(session.characterIds.map((characterId) => getCharacter(characterId)));
   const corporationStructures = new Map<number, Awaited<ReturnType<typeof fetchCorporationStructures>>[number]>();
-  for (const record of records) {
-    if (!record) continue;
+  for (const character of characters) {
+    if (!character) continue;
     try {
-      for (const structure of await fetchCorporationStructures(record)) {
+      for (const structure of await fetchCorporationStructures(character)) {
         corporationStructures.set(structure.structure_id, structure);
       }
     } catch {}
   }
-  const jobLocationCandidates = [
-    ...jobs.map((job) => job.locationId),
-    ...jobs.map((job) => job.blueprintLocationId),
-    ...jobs.flatMap((job) => {
-      const locations: number[] = [];
-      const visited = new Set<number>();
-      let asset = assetsByItemId.get(job.blueprintLocationId);
-      while (asset && !visited.has(asset.itemId)) {
-        visited.add(asset.itemId);
-        locations.push(asset.location.locationId);
-        if (asset.location.kind !== "container" && asset.locationType !== "item") break;
-        asset = assetsByItemId.get(asset.location.locationId);
-      }
-      return locations;
-    }),
-  ];
-  const stationLocations = new Map<number, NonNullable<Awaited<ReturnType<typeof fetchLocationMetadata>>["data"]>>();
-  await Promise.all(
-    [...new Set(jobLocationCandidates)].map(async (locationId) => {
+  const itemAndJobLocations = new Set([
+    ...jobs.map((job) => findTerminalAssetLocation(job.locationId)),
+    ...jobs.map((job) => findTerminalAssetLocation(job.blueprintLocationId)),
+    ...assets.map((asset) => findTerminalAssetLocation(asset.locationId)),
+  ].filter(l => l !== undefined));
+  type LocationMetadata = NonNullable<Awaited<ReturnType<typeof fetchLocationMetadata>>["data"]>;
+  const locationMetadata = new Map<number, LocationMetadata>();
+  const locationKinds = new Map<number, "station" | "structure">();
+  const metadataTokens = (await Promise.all(characters.map(async (character) => {
+    if (!character) return [];
+    const tokens = [];
+    try { tokens.push(await getUsableToken(character, "personal")); } catch {}
+    try { if (character.corpAuth) tokens.push(await getUsableToken(character, "corp")); } catch {}
+    return tokens;
+  }))).flat();
+  async function resolveLocationMetadata(locationId: number) {
+    if (locationMetadata.has(locationId)) return;
+    // Stations are in the SDE, so we can resolve them without an ESI request.
+    metadataTokens.sort((a, b) => a.lastUsedAt - b.lastUsedAt);
+    for (const token of metadataTokens) {
       try {
-        const result = await fetchLocationMetadata(locationId, "station");
-        if (result.data) stationLocations.set(locationId, result.data);
+        const result = await fetchLocationMetadata(locationId, "structure", token);
+        if (result.data) {
+          locationMetadata.set(locationId, result.data);
+          locationKinds.set(locationId, "structure");
+          return;
+        }
       } catch {}
+    }
+  };
+  await Promise.all(
+    [...new Set([
+      ...itemAndJobLocations,
+    ])].map(async (location) => {
+      try {
+        await resolveLocationMetadata(location.locationId);
+      } catch {
+        // Keep unresolved locations visible below.
+      }
     }),
   );
+  const locations = includedAssets.map((asset) => {
+    const location = findTerminalAssetLocation(asset.locationId);
+    if (!location) return { ...asset, location: asset.location };
+    const metadata = locationMetadata.get(location.locationId);
+    if (!metadata) return { ...asset, location };
+    const kind = locationKinds.get(location.locationId) ?? "station";
+    return {
+      ...asset,
+      location: {
+        ...location,
+        kind,
+        name: metadata.name,
+        typeId: metadata.type_id,
+        systemId: metadata.system_id,
+        regionId: metadata.region_id,
+        resolved: true,
+      },
+    };
+  });
   function findTerminalAssetLocation(itemId: number) {
-    const visited = new Set<number>();
     let asset = assetsByItemId.get(itemId);
-    while (asset && !visited.has(asset.itemId)) {
-      visited.add(asset.itemId);
-      if (
-        asset.location.kind === "station" || asset.location.kind === "structure"
-      ) return asset.location;
-      const parentId = asset.location.kind === "container" || asset.locationType === "item"
-        ? asset.location.locationId
-        : undefined;
-      asset = parentId === undefined ? undefined : assetsByItemId.get(parentId);
+    while (asset) {
+      const parentContainer = assembledContainersById.get(asset.locationId);
+      if (!parentContainer) return asset.location;
+      asset = parentContainer;
     }
     return undefined;
   }
@@ -301,93 +322,101 @@ export async function GET(request: Request) {
     }
   >();
 
-  for (const asset of includedAssets) {
-    if (asset.location.kind !== "structure" && asset.location.kind !== "station") continue;
-    const existing = structures.get(asset.location.locationId);
+  // Populate structures with assets and jobs.
+  for (const location of locations.values()) {
+    const displayLocation = location.location.kind !== "facility"
+      ? {
+          ...location.location,
+          kind: "facility" as const,
+          name: location.location.name ?? `Unresolved location ${location.locationId}`,
+        }
+      : location.location;
+    if (displayLocation.kind !== "facility") continue;
+    const displayAsset = { ...location, location: displayLocation };
+    const existing = structures.get(displayLocation.locationId);
     if (existing) {
       existing.assetCount += 1;
-      if (asset.ownerType === "corporation") existing.corporationAssetCount += 1;
+      if (displayAsset.ownerType === "corporation") existing.corporationAssetCount += 1;
       else existing.personalAssetCount += 1;
-      existing.resolved ||= asset.location.resolved;
-      if (!existing.name && asset.location.name) existing.name = asset.location.name;
-      if (!existing.systemId && asset.location.systemId)
-        existing.systemId = asset.location.systemId;
-      if (!existing.typeId && asset.location.typeId) existing.typeId = asset.location.typeId;
-      if (asset.ownerType === "corporation" && asset.location.kind === "structure" && asset.locationFlag.startsWith("RigSlot")) {
-        existing.rigs.push(String(asset.typeId));
+      if (!existing.name && displayAsset.location.name) existing.name = displayAsset.location.name;
+      if (!existing.systemId && displayAsset.location.systemId)
+        existing.systemId = displayAsset.location.systemId;
+      if (!existing.typeId && displayAsset.location.typeId) existing.typeId = displayAsset.location.typeId;
+      if (displayAsset.ownerType === "corporation" && displayAsset.location.kind === "facility" && displayAsset.locationFlag.startsWith("RigSlot")) {
+        existing.rigs.push(String(displayAsset.typeId));
       }
-      const isPackaged = !asset.isSingleton;
-      const assetType = assetTypes.get(asset.typeId);
+      const isPackaged = !displayAsset.isSingleton;
+      const assetType = assetTypes.get(displayAsset.typeId);
       const assetCategory = assetType
         ? categorizeType(assetType, language, marketGroups, groups).category
         : "item";
-      const blueprintKind = assetCategory === "bpo"
-        ? asset.runCount === -1
+      const blueprintKind = assetCategory === "blueprint"
+        ? location.runCount === -1
           ? "bpo"
-          : asset.runCount !== undefined
+          : location.runCount !== undefined
             ? "bpc"
             : isPackaged
               ? "bpc"
               : "bpc"
         : null;
-      const itemKey = `${asset.typeId}:${blueprintKind ?? (isPackaged ? "packaged" : "assembled")}`;
-      const item = existing.items.get(itemKey) ?? { typeId: asset.typeId, quantity: 0, isPackaged };
-      const assetQuantity = asset.quantity > 0 ? asset.quantity : 1;
+      const itemKey = `${displayAsset.typeId}:${blueprintKind ?? (isPackaged ? "packaged" : "assembled")}`;
+      const item = existing.items.get(itemKey) ?? { typeId: displayAsset.typeId, quantity: 0, isPackaged };
+      const assetQuantity = displayAsset.quantity > 0 ? displayAsset.quantity : 1;
       item.quantity += assetQuantity;
-      if (asset.runCount !== undefined) {
-        item.runCount = item.runCount === -1 || asset.runCount === -1
+      if (displayAsset.runCount !== undefined) {
+        item.runCount = item.runCount === -1 || displayAsset.runCount === -1
           ? -1
-          : (item.runCount ?? 0) + asset.runCount * assetQuantity;
-        item.me ??= asset.me;
-        item.te ??= asset.te;
+          : (item.runCount ?? 0) + displayAsset.runCount * assetQuantity;
+        item.me ??= displayAsset.me;
+        item.te ??= displayAsset.te;
         const blueprintPrints = item.blueprintPrints ?? [];
         blueprintPrints.push({
-          itemId: asset.itemId,
-          runs: asset.runCount * assetQuantity,
-          ...(asset.me !== undefined ? { me: asset.me } : {}),
-          ...(asset.te !== undefined ? { te: asset.te } : {}),
+          itemId: displayAsset.itemId,
+          runs: displayAsset.runCount * assetQuantity,
+          ...(displayAsset.me !== undefined ? { me: displayAsset.me } : {}),
+          ...(displayAsset.te !== undefined ? { te: displayAsset.te } : {}),
         });
         item.blueprintPrints = blueprintPrints;
       }
       existing.items.set(itemKey, item);
       continue;
     }
-    structures.set(asset.location.locationId, {
-      structureId: asset.location.locationId,
-      name: asset.location.name ?? `Structure ${asset.location.locationId}`,
-      ...(asset.location.systemId ? { systemId: asset.location.systemId } : {}),
-      locationType: asset.location.kind,
+    structures.set(displayLocation.locationId, {
+      structureId: displayLocation.locationId,
+      name: displayLocation.name ?? `Unresolved location ${displayLocation.locationId}`,
+      ...(displayLocation.systemId ? { systemId: displayLocation.systemId } : {}),
+      locationType: displayLocation.kind === "facility" ? "structure" : displayLocation.kind,
       assetCount: 1,
-      personalAssetCount: asset.ownerType === "character" ? 1 : 0,
-      corporationAssetCount: asset.ownerType === "corporation" ? 1 : 0,
-      resolved: asset.location.resolved,
-      ...(asset.location.typeId ? { typeId: asset.location.typeId } : {}),
+      personalAssetCount: displayAsset.ownerType === "character" ? 1 : 0,
+      corporationAssetCount: displayAsset.ownerType === "corporation" ? 1 : 0,
+      resolved: true,
+      ...(displayLocation.typeId ? { typeId: displayLocation.typeId } : {}),
       rigs:
-        asset.ownerType === "corporation" &&
-        asset.location.kind === "structure" &&
-        asset.locationFlag.startsWith("RigSlot")
-          ? [String(asset.typeId)]
+        displayAsset.ownerType === "corporation" &&
+        displayAsset.location.kind === "facility" &&
+        displayAsset.locationFlag.startsWith("RigSlot")
+          ? [String(displayAsset.typeId)]
           : [],
       ownedByCorporation: false,
-      items: new Map([[`${asset.typeId}:${asset.runCount !== undefined ? (asset.runCount === -1 ? "bpo" : "bpc") : (asset.isSingleton ? "assembled" : "packaged")}`, {
-        typeId: asset.typeId,
-        quantity: asset.quantity > 0 ? asset.quantity : 1,
-        ...(asset.runCount !== undefined
-          ? { runCount: asset.runCount === -1 ? -1 : asset.runCount * (asset.quantity > 0 ? asset.quantity : 1) }
+      items: new Map([[`${displayAsset.typeId}:${displayAsset.runCount !== undefined ? (displayAsset.runCount === -1 ? "bpo" : "bpc") : (displayAsset.isSingleton ? "assembled" : "packaged")}`, {
+        typeId: displayAsset.typeId,
+        quantity: displayAsset.quantity > 0 ? displayAsset.quantity : 1,
+        ...(displayAsset.runCount !== undefined
+          ? { runCount: displayAsset.runCount === -1 ? -1 : displayAsset.runCount * (displayAsset.quantity > 0 ? displayAsset.quantity : 1) }
           : {}),
-        ...(asset.me !== undefined ? { me: asset.me } : {}),
-        ...(asset.te !== undefined ? { te: asset.te } : {}),
-        ...(asset.runCount !== undefined
+        ...(displayAsset.me !== undefined ? { me: displayAsset.me } : {}),
+        ...(displayAsset.te !== undefined ? { te: displayAsset.te } : {}),
+        ...(displayAsset.runCount !== undefined
           ? {
               blueprintPrints: [{
-                itemId: asset.itemId,
-                runs: asset.runCount * (asset.quantity > 0 ? asset.quantity : 1),
-                ...(asset.me !== undefined ? { me: asset.me } : {}),
-                ...(asset.te !== undefined ? { te: asset.te } : {}),
+                itemId: displayAsset.itemId,
+                runs: displayAsset.runCount * (displayAsset.quantity > 0 ? displayAsset.quantity : 1),
+                ...(displayAsset.me !== undefined ? { me: displayAsset.me } : {}),
+                ...(displayAsset.te !== undefined ? { te: displayAsset.te } : {}),
               }],
             }
           : {}),
-        isPackaged: !asset.isSingleton,
+        isPackaged: !displayAsset.isSingleton,
       }]]),
       bonuses: emptyBonuses(),
     });
@@ -472,7 +501,7 @@ export async function GET(request: Request) {
       const blueprintLocation = findTerminalAssetLocation(job.blueprintLocationId);
       const blueprintStructureId =
         blueprintLocation?.locationId ??
-        (stationLocations.has(job.blueprintLocationId) || corporationStructures.has(job.blueprintLocationId)
+        (locationMetadata.has(job.blueprintLocationId)
           ? job.blueprintLocationId
           : job.locationId);
       const blueprintStructure = structures.get(blueprintStructureId);
@@ -484,21 +513,17 @@ export async function GET(request: Request) {
       } else {
         structures.set(blueprintStructureId, {
           structureId: blueprintStructureId,
-          name: blueprintLocation?.name ?? stationLocations.get(blueprintStructureId)?.name ?? `Location ${blueprintStructureId}`,
-          locationType: stationLocations.has(blueprintStructureId) ? "station" : "structure",
+          name: blueprintLocation?.name ?? locationMetadata.get(blueprintStructureId)?.name ?? `Location ${blueprintStructureId}`,
+          locationType: locationKinds.get(blueprintStructureId) ?? "structure",
           assetCount: 1,
           personalAssetCount: job.ownerType === "character" ? 1 : 0,
           corporationAssetCount: job.ownerType === "corporation" ? 1 : 0,
-          resolved: Boolean(
-            blueprintLocation?.resolved ||
-            stationLocations.has(blueprintStructureId) ||
-            corporationStructures.has(blueprintStructureId),
-          ),
-          ...(stationLocations.get(blueprintStructureId)?.type_id
-            ? { typeId: stationLocations.get(blueprintStructureId)?.type_id }
+          resolved: true,
+          ...(locationMetadata.get(blueprintStructureId)?.type_id
+            ? { typeId: locationMetadata.get(blueprintStructureId)?.type_id }
             : {}),
-          ...(stationLocations.get(blueprintStructureId)?.system_id
-            ? { systemId: stationLocations.get(blueprintStructureId)?.system_id }
+          ...(locationMetadata.get(blueprintStructureId)?.system_id
+            ? { systemId: locationMetadata.get(blueprintStructureId)?.system_id }
             : {}),
           ownedByCorporation: job.ownerType === "corporation",
           rigs: [],
@@ -536,17 +561,17 @@ export async function GET(request: Request) {
     }
     structures.set(job.locationId, {
       structureId: job.locationId,
-      name: stationLocations.get(job.locationId)?.name ?? `Location ${job.locationId}`,
-      locationType: stationLocations.has(job.locationId) ? "station" : "structure",
+      name: locationMetadata.get(job.locationId)?.name ?? `Location ${job.locationId}`,
+      locationType: locationKinds.get(job.locationId) ?? "structure",
       assetCount: 1,
       personalAssetCount: job.ownerType === "character" ? 1 : 0,
       corporationAssetCount: job.ownerType === "corporation" ? 1 : 0,
-      resolved: stationLocations.has(job.locationId),
-      ...(stationLocations.get(job.locationId)?.type_id
-        ? { typeId: stationLocations.get(job.locationId)?.type_id }
+      resolved: locationMetadata.has(job.locationId),
+      ...(locationMetadata.get(job.locationId)?.type_id
+        ? { typeId: locationMetadata.get(job.locationId)?.type_id }
         : {}),
-      ...(stationLocations.get(job.locationId)?.system_id
-        ? { systemId: stationLocations.get(job.locationId)?.system_id }
+      ...(locationMetadata.get(job.locationId)?.system_id
+        ? { systemId: locationMetadata.get(job.locationId)?.system_id }
         : {}),
       ownedByCorporation: job.ownerType === "corporation",
       rigs: [],
@@ -569,11 +594,11 @@ export async function GET(request: Request) {
     const corporationRigs = structure.rigs.map((rig) => types.get(Number(rig))?.name.en ?? rig);
     if (metadata) {
       structure.ownedByCorporation = true;
-      structure.typeId = metadata.type_id;
-      structure.type = types.get(metadata.type_id)?.name.en ?? `Type ${metadata.type_id}`;
+      structure.typeId ??= metadata.type_id;
+      structure.type = type ?? types.get(metadata.type_id)?.name.en ?? `Type ${metadata.type_id}`;
       structure.size = structureSize(structure.type);
-      structure.name = metadata.name ?? structure.name;
-      structure.systemId = metadata.system_id;
+      if (!structure.resolved && metadata.name) structure.name = metadata.name;
+      structure.systemId ??= metadata.system_id;
       structure.state = metadata.state;
       structure.fuelExpires = metadata.fuel_expires;
       structure.services = metadata.services;
@@ -616,7 +641,7 @@ export async function GET(request: Request) {
           if (!type?.published) return [];
           const categorized = categorizeType(type, language, marketGroups, groups);
           const category =
-            categorized.category === "bpo"
+            categorized.category === "blueprint"
               ? item.runCount !== undefined
                 ? item.runCount === -1
                   ? "bpo"

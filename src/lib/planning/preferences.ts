@@ -21,8 +21,6 @@ export type PlannerSettings = {
   personalSellOrdersAsStock: boolean;
   allCorporationSellOrdersAsStock: boolean;
   myCorporationSellOrdersAsStock: boolean;
-  includeAssembledContainers: boolean;
-  includeAssembledShips: boolean;
   respectActiveJobs: boolean;
   defaultMe: number;
   defaultTe: number;
@@ -40,8 +38,6 @@ export const defaultSettings: PlannerSettings = {
   personalSellOrdersAsStock: true,
   allCorporationSellOrdersAsStock: true,
   myCorporationSellOrdersAsStock: true,
-  includeAssembledContainers: false,
-  includeAssembledShips: false,
   respectActiveJobs: true,
   defaultMe: 10,
   defaultTe: 20,

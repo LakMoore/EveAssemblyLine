@@ -130,6 +130,22 @@ export async function getTypesByIds(typeIds: readonly number[]): Promise<Map<num
   return new Map(resolvedEntries);
 }
 
+let shipTypeIdsPromise: Promise<Set<number>> | undefined;
+
+export function getShipTypeIds(): Promise<Set<number>> {
+  shipTypeIdsPromise ??= Promise.all([getTypes(), getGroups()]).then(([types, groups]) =>
+    new Set(
+      [...types.values()]
+        .filter((type) => groups.get(type.groupID)?.categoryID === 6)
+        .map((type) => type._key),
+    ),
+  ).catch((error) => {
+    shipTypeIdsPromise = undefined;
+    throw error;
+  });
+  return shipTypeIdsPromise;
+}
+
 export function getMarketGroup(marketGroupId: number): Promise<MarketGroupsRecord | null> {
   return getMapValue("marketGroup", marketGroupId, loadMarketGroups);
 }

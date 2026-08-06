@@ -141,6 +141,8 @@ export async function requestEsi<T>(
   const headers = new Headers(init?.headers);
   headers.set("accept", "application/json");
   if (tokenSet) headers.set("authorization", `Bearer ${tokenSet.accessToken}`);
+  // store last used date
+  tokenSet && (tokenSet.lastUsedAt = Date.now());
   const response = await fetch(`${esiBaseUrl}${path}`, { ...init, headers, cache: "no-store" });
   if (response.status === 304)
     return { data: null, headers: response.headers, status: response.status };

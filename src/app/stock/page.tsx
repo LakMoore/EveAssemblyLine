@@ -16,8 +16,6 @@ import { loadStructures } from "@/lib/planning/structureStore";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import {
-  defaultSettings,
-  settingsStorageKey,
   type KnownStructure,
 } from "@/lib/planning/preferences";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
@@ -136,16 +134,6 @@ export default function StockPage() {
   const [stockSort, setStockSort] = useState<StockSort>("alphabetical");
   const [pasting, setPasting] = useState<StockRecord | null>(null);
   const [isHydratingVolumes, setIsHydratingVolumes] = useState(false);
-  const [settings] = useState(() => {
-    if (typeof window === "undefined") return defaultSettings;
-    try {
-      const stored = window.localStorage.getItem(settingsStorageKey);
-      return stored ? { ...defaultSettings, ...JSON.parse(stored) } : defaultSettings;
-    } catch {
-      return defaultSettings;
-    }
-  });
-
   useEffect(() => {
     async function loadPageData() {
       setIsHydratingVolumes(true);
@@ -155,9 +143,6 @@ export default function StockPage() {
           loadStructures().catch(() => []),
           fetch(`/api/state/structures?${new URLSearchParams({
             language,
-            includeAssembledContainers: String(settings.includeAssembledContainers),
-            includeAssembledShips: String(settings.includeAssembledShips),
-            stockOnly: "true",
           }).toString()}`),
         ]);
         const esiData = (await esiResponse.json()) as EsiStockResponse;
@@ -261,7 +246,7 @@ export default function StockPage() {
     };
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
     return () => window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
-  }, [language, settings.includeAssembledContainers, settings.includeAssembledShips]);
+  }, [language]);
 
   const sortedLocations = [...locations].sort((left, right) => {
     if (stockSort === "totalVolume") return stockTotalVolume(right) - stockTotalVolume(left);
@@ -645,7 +630,7 @@ function StockLocationCard({
             .filter(
               (category) =>
                 category &&
-                category !== "Blueprint Originals" &&
+                category !== "Blueprints" &&
                 category !== "Reaction Formulas",
             ),
     ),

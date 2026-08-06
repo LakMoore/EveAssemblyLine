@@ -3,6 +3,7 @@ export interface TokenSet {
   accessToken: string;
   accessTokenExpiresAt: string;
   scopes: string[];
+  lastUsedAt: number;
 }
 
 export interface CharacterTokenRecord {
@@ -35,7 +36,23 @@ export interface AssetRecord {
   me?: number;
   te?: number;
   locationId: number;
-  locationType: "station" | "solar_system" | "item" | "structure" | "other";
+  locationType: "facility" | "station" | "solar_system" | "item" | "structure" | "container" | "other";   // ESI location type
+// ESI location_flag = AssetSafety, AutoFit, Bonus, Booster, BoosterBay, Capsule, CapsuleerDeliveries, Cargo, CorpDeliveries,
+// CorpSAG1, CorpSAG2, CorpSAG3, CorpSAG4, CorpSAG5, CorpSAG6, CorpSAG7, CorporationGoalDeliveries, CrateLoot, Deliveries,
+// DroneBay, DustBattle, DustDatabank, ExpeditionHold, FighterBay, FighterTube0, FighterTube1, FighterTube2, FighterTube3,
+// FighterTube4, FleetHangar, FrigateEscapeBay, Hangar, HangarAll, HiSlot0, HiSlot1, HiSlot2, HiSlot3, HiSlot4, HiSlot5,
+// HiSlot6, HiSlot7, HiddenModifiers, Implant, Impounded, InfrastructureHangar, JunkyardReprocessed, JunkyardTrashed,
+// LoSlot0, LoSlot1, LoSlot2, LoSlot3, LoSlot4, LoSlot5, LoSlot6, LoSlot7, Locked, MedSlot0, MedSlot1, MedSlot2, MedSlot3,
+// MedSlot4, MedSlot5, MedSlot6, MedSlot7
+// MobileDepotHold, MoonMaterialBay, OfficeFolder, Pilot, PlanetSurface, QuafeBay, QuantumCoreRoom, Reward, RigSlot0
+// RigSlot1, RigSlot2, RigSlot3, RigSlot4, RigSlot5, RigSlot6, RigSlot7, SecondaryStorage, ServiceSlot0, ServiceSlot1
+// ServiceSlot2, ServiceSlot3, ServiceSlot4, ServiceSlot5, ServiceSlot6, ServiceSlot7, ShipHangar, ShipOffline, Skill,
+// SkillInTraining, SpecializedAmmoHold, SpecializedAsteroidHold, SpecializedCommandCenterHold, SpecializedFuelBay,
+// SpecializedGasHold, SpecializedIceHold, SpecializedIndustrialShipHold, SpecializedLargeShipHold, SpecializedMaterialBay
+// SpecializedMediumShipHold, SpecializedMineralHold, SpecializedOreHold, SpecializedPlanetaryCommoditiesHold, SpecializedSalvageHold
+// SpecializedShipHold, SpecializedSmallShipHold, StructureActive, StructureFuel, StructureInactive, StructureOffline, SubSystemBay
+// SubSystemSlot0, SubSystemSlot1, SubSystemSlot2, SubSystemSlot3, SubSystemSlot4, SubSystemSlot5, SubSystemSlot6, SubSystemSlot7
+// Unlocked, Wallet, Wardrobe
   locationFlag: string;
   isSingleton: boolean;
   ownerType: "character" | "corporation";
@@ -78,18 +95,18 @@ export interface MarketOrderRecord {
 
 export interface AssetLocation {
   locationId: number;
-  kind: "station" | "solar_system" | "structure" | "container" | "unknown";
+  kind: "facility" | "station" | "structure" | "solar_system" | "item" | "container" | "unknown";
   name?: string;
   typeId?: number;
   systemId?: number;
   regionId?: number;
   parentLocationId?: number;
-  resolved: boolean;
+  resolved?: boolean;
 }
 
 export interface ResolvedAssetRecord extends AssetRecord {
   location: AssetLocation;
-  sourceLocationId: number;
+  sourceLocationId?: number;
   sourceLocationName?: string;
 }
 

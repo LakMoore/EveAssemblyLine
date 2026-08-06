@@ -9,6 +9,7 @@ function normalizeTokenSet(value: Partial<TokenSet> | undefined): TokenSet | nul
 		refreshToken: value.refreshToken,
 		accessTokenExpiresAt: value.accessTokenExpiresAt,
 		scopes: Array.isArray(value.scopes) ? value.scopes : [],
+		lastUsedAt: value.lastUsedAt ?? 0,
 	};
 }
 

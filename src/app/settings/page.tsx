@@ -109,32 +109,6 @@ export default function SettingsPage() {
         </div>
         <div className={styles.rule}>
           <span>
-            <strong>Include assembled containers in stock</strong>
-            <small>Show assembled containers in stock and location asset lists</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={settings.includeAssembledContainers}
-            onChange={(event) =>
-              setSettings({ ...settings, includeAssembledContainers: event.target.checked })
-            }
-          />
-        </div>
-        <div className={styles.rule}>
-          <span>
-            <strong>Include assembled ships in stock</strong>
-            <small>Show assembled ships in stock and location asset lists</small>
-          </span>
-          <input
-            type="checkbox"
-            checked={settings.includeAssembledShips}
-            onChange={(event) =>
-              setSettings({ ...settings, includeAssembledShips: event.target.checked })
-            }
-          />
-        </div>
-        <div className={styles.rule}>
-          <span>
             <strong>Respect active jobs</strong>
             <small>Account for jobs already in flight</small>
           </span>

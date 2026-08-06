@@ -4,9 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import AppShell, { languageStorageKey } from "../AppShell";
 import {
   defaultLocations,
-  defaultSettings,
   locationsStorageKey,
-  settingsStorageKey,
   type KnownStructure,
   type PlannerLocations,
 } from "@/lib/planning/preferences";
@@ -314,16 +312,6 @@ export default function LocationsPage() {
   const [esiConnected, setEsiConnected] = useState(false);
   const [esiRateLimitedUntil, setEsiRateLimitedUntil] = useState<string | null>(null);
   const [locationSort, setLocationSort] = useState<LocationSort>("alphabetical");
-  const [settings] = useState(() => {
-    if (typeof window === "undefined") return defaultSettings;
-    try {
-      const stored = window.localStorage.getItem(settingsStorageKey);
-      return stored ? { ...defaultSettings, ...JSON.parse(stored) } : defaultSettings;
-    } catch {
-      return defaultSettings;
-    }
-  });
-
   useEffect(() => {
     let cancelled = false;
 
@@ -382,8 +370,6 @@ export default function LocationsPage() {
         }
         const params = new URLSearchParams({
           language,
-          includeAssembledContainers: String(settings.includeAssembledContainers),
-          includeAssembledShips: String(settings.includeAssembledShips),
         });
         const response = await fetch(`/api/state/structures?${params.toString()}`, {
           cache: "no-store",
@@ -406,7 +392,7 @@ export default function LocationsPage() {
       cancelled = true;
       window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
     };
-  }, [esiConnected, language, settings.includeAssembledContainers, settings.includeAssembledShips]);
+  }, [esiConnected, language]);
 
   useEffect(() => {
     fetchRigs(language)

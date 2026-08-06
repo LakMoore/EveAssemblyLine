@@ -132,6 +132,7 @@ export async function exchangeCodeForTokens(
     refreshToken: response.refresh_token ?? "",
     accessTokenExpiresAt: new Date(Date.now() + response.expires_in * 1000).toISOString(),
     scopes: [],
+    lastUsedAt: Date.now(),
   };
 }
 

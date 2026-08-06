@@ -117,9 +117,6 @@ export default function Home() {
       try {
         const stockResponse = await fetch(`/api/state/structures?${new URLSearchParams({
           language,
-          includeAssembledContainers: String(settings.includeAssembledContainers),
-          includeAssembledShips: String(settings.includeAssembledShips),
-          stockOnly: "true",
           typeIds: items.map((item) => item.typeId).join(","),
         }).toString()}`);
         if (stockResponse.ok) {

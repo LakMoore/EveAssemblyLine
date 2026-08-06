@@ -4,17 +4,18 @@ import type {
   IndustryJobRecord,
   MarketOrderRecord,
   ResolvedAssetRecord,
+  TokenSet,
 } from "@/lib/auth/model";
 import type { PlanStockItem } from "@/lib/planning/types";
 import {
   getGroups,
   getMarketGroups,
   getTypesByIds,
+  getShipTypeIds,
 } from "@/cache/services/sdeCache";
 import { categorizeType } from "@/lib/reference/category";
 import { getCharacter, getCharacters } from "@/lib/auth/tokensStore";
 import {
-  fetchAssetLocations,
   fetchCharacterAssets,
   fetchLocationMetadata,
   fetchCorporationAssets,
@@ -46,11 +47,13 @@ type OwnerCache = {
   assetsByItemId: Map<number, ResolvedAssetRecord>;
   assembledContainersByItemId: Map<number, ResolvedAssetRecord>;
   assembledStructureRigsByItemId: Map<number, ResolvedAssetRecord>;
+  assembledShipsByItemId: Map<number, ResolvedAssetRecord>;
   unresolvedAssetCount: number;
 };
 
 const characterCaches = new Map<number, OwnerCache>();
 const corporationCaches = new Map<number, OwnerCache>();
+const locationMetadataCache = new Map<string, AssetLocation>();
 
 function getCache(map: Map<number, OwnerCache>, id: number): OwnerCache {
   const existing = map.get(id);
@@ -60,6 +63,7 @@ function getCache(map: Map<number, OwnerCache>, id: number): OwnerCache {
     assetsByItemId: new Map(),
     assembledContainersByItemId: new Map(),
     assembledStructureRigsByItemId: new Map(),
+    assembledShipsByItemId: new Map(),
     unresolvedAssetCount: 0,
   };
   map.set(id, created);
@@ -107,10 +111,11 @@ function indexResolvedAssets(
   assets: ResolvedAssetRecord[],
   assembledContainerIds: Set<number>,
   assembledStructureRigIds: Set<number>,
+  assembledShipIds: Set<number>,
 ) {
   cache.assetsByItemId = new Map(
     assets
-      .filter((asset) => !assembledStructureRigIds.has(asset.itemId))
+      .filter((asset) => !assembledStructureRigIds.has(asset.itemId) && !assembledShipIds.has(asset.itemId))
       .map((asset) => [asset.itemId, asset]),
   );
   cache.assembledContainersByItemId = new Map(
@@ -123,8 +128,16 @@ function indexResolvedAssets(
       .filter((asset) => assembledStructureRigIds.has(asset.itemId))
       .map((asset) => [asset.itemId, asset]),
   );
+  cache.assembledShipsByItemId = new Map(
+    assets
+      .filter((asset) => assembledShipIds.has(asset.itemId))
+      .map((asset) => [asset.itemId, asset]),
+  );
   cache.resolvedAssets = assets.filter(
-    (asset) => !assembledContainerIds.has(asset.itemId) && !assembledStructureRigIds.has(asset.itemId),
+    (asset) =>
+      !assembledContainerIds.has(asset.itemId) &&
+      !assembledStructureRigIds.has(asset.itemId) &&
+      !assembledShipIds.has(asset.itemId),
   );
 }
 
@@ -134,16 +147,20 @@ async function selectCachedAssets(assets: AssetRecord[]) {
       assets,
       assembledContainerIds: new Set<number>(),
       assembledStructureRigIds: new Set<number>(),
+      assembledShipIds: new Set<number>(),
     };
   }
-  const [types, groups, marketGroups] = await Promise.all([
+  const [types, groups, marketGroups, shipTypeIds] = await Promise.all([
     getTypesByIds([...new Set(assets.map((asset) => asset.typeId))]),
     getGroups(),
     getMarketGroups(),
+    getShipTypeIds(),
   ]);
   const selected: AssetRecord[] = [];
   const assembledContainerIds = new Set<number>();
   const assembledStructureRigIds = new Set<number>();
+  const assembledShipRootIds = new Set<number>();
+  const assetByItemId = new Map(assets.map((asset) => [asset.itemId, asset]));
   for (const asset of assets) {
     const type = types.get(asset.typeId);
     const categorized = type
@@ -151,24 +168,47 @@ async function selectCachedAssets(assets: AssetRecord[]) {
       : { category: "item" as const, marketCategory: undefined };
     const isCargoContainer = categorized.marketCategory === "Cargo Containers" ||
       isCargoContainerType(asset.typeId, types, groups, marketGroups);
-    const isAssembledContainer = isCargoContainer && !asset.isSingleton;
+    const isAssembledContainer =
+      (isCargoContainer && !asset.isSingleton) ||
+      asset.locationFlag === "OfficeFolder" ||
+      asset.locationFlag.startsWith("CorpSAG");
     const isAssembledStructureRig = asset.ownerType === "corporation" &&
       asset.locationType === "structure" &&
       asset.locationFlag.startsWith("RigSlot");
+    const isAssembledShip = asset.ownerType === "corporation" &&
+      asset.isSingleton &&
+      shipTypeIds.has(asset.typeId);
     const isStockItem = categorized.category === "item" && !asset.isSingleton;
-    const isBlueprintOrReaction = categorized.category === "bpo" || categorized.category === "reaction";
-    if (!isAssembledContainer && !isAssembledStructureRig && !isStockItem && !isBlueprintOrReaction) continue;
+    const isBlueprintOrReaction = categorized.category === "blueprint" || categorized.category === "reaction";
+    if (!isAssembledContainer && !isAssembledStructureRig && !isAssembledShip && !isStockItem && !isBlueprintOrReaction) continue;
     selected.push(asset);
     if (isAssembledContainer) assembledContainerIds.add(asset.itemId);
     if (isAssembledStructureRig) assembledStructureRigIds.add(asset.itemId);
+    if (isAssembledShip) assembledShipRootIds.add(asset.itemId);
   }
-  return { assets: selected, assembledContainerIds, assembledStructureRigIds };
+  const assembledShipIds = new Set(assembledShipRootIds);
+  for (const asset of assets) {
+    let current = asset;
+    const visited = new Set<number>();
+    while (current.locationType === "item" && !visited.has(current.itemId)) {
+      visited.add(current.itemId);
+      if (assembledShipRootIds.has(current.locationId)) {
+        assembledShipIds.add(asset.itemId);
+        selected.push(asset);
+        break;
+      }
+      const parent = assetByItemId.get(current.locationId);
+      if (!parent) break;
+      current = parent;
+    }
+  }
+  return { assets: [...new Map(selected.map((asset) => [asset.itemId, asset])).values()], assembledContainerIds, assembledStructureRigIds, assembledShipIds };
 }
 
 async function cacheResolvedAssets(
   cache: OwnerCache,
   assets: AssetRecord[],
-  token: Parameters<typeof fetchAssetLocations>[3],
+  token: TokenSet,
   headers?: Headers,
   previous?: EndpointCache,
 ) {
@@ -180,21 +220,28 @@ async function cacheResolvedAssets(
     resolved,
     selected.assembledContainerIds,
     selected.assembledStructureRigIds,
+    selected.assembledShipIds,
   );
   cache.unresolvedAssetCount = [
     ...cache.resolvedAssets,
     ...cache.assembledContainersByItemId.values(),
     ...cache.assembledStructureRigsByItemId.values(),
+    ...cache.assembledShipsByItemId.values(),
   ].filter((asset) => !asset.location.resolved).length;
   cache.assetLocations = setFresh(
     [
       ...cache.resolvedAssets,
       ...cache.assembledContainersByItemId.values(),
       ...cache.assembledStructureRigsByItemId.values(),
+      ...cache.assembledShipsByItemId.values(),
     ],
     headers,
     cache.assetLocations,
   );
+}
+
+function needsAssetLocationResolution(cache: OwnerCache) {
+  return cache.unresolvedAssetCount > 0;
 }
 
 function isCargoContainerType(
@@ -224,41 +271,27 @@ function directKind(locationType: AssetRecord["locationType"]): AssetLocation["k
 
 async function resolveAssets(
   assets: AssetRecord[],
-  token: Parameters<typeof fetchAssetLocations>[3],
+  token: TokenSet,
 ) {
   const byItemId = new Map(assets.map((asset) => [asset.itemId, asset]));
-  const locationNames = new Map<number, string>();
   const resolvedItemLocations = new Map<number, AssetLocation>();
-  const grouped = new Map<string, number[]>();
   for (const asset of assets) {
-    const key = `${asset.ownerType}:${asset.ownerId}`;
-    const ids = grouped.get(key) ?? [];
-    if (!ids.includes(asset.itemId)) ids.push(asset.itemId);
-    grouped.set(key, ids);
-  }
-  for (const [key, ids] of grouped) {
-    const [ownerType, ownerId] = key.split(":");
-    const locations = await fetchAssetLocations(
-      ownerType as AssetRecord["ownerType"],
-      Number(ownerId),
-      ids,
-      token,
-    );
-    if (!locations) continue;
-    for (const location of locations) {
-      locationNames.set(location.item_id, location.name);
-      const kind =
-        location.location_type === "other" || !location.location_type
-          ? "structure"
-          : directKind(location.location_type as AssetRecord["locationType"]);
-      if (kind && location.location_id) {
-        resolvedItemLocations.set(location.item_id, {
-          locationId: location.location_id,
-          kind,
-          name: location.name,
-          resolved: false,
-        });
-      }
+    const visited = new Set<number>();
+    let current: AssetRecord | undefined = asset;
+    while (current?.locationType === "item" && !visited.has(current.itemId)) {
+      visited.add(current.itemId);
+      current = byItemId.get(current.locationId);
+    }
+    if (!current) continue;
+    const kind = current.locationType === "other" || !current.locationType
+      ? "structure"
+      : directKind(current.locationType);
+    if (kind) {
+      resolvedItemLocations.set(asset.itemId, {
+        locationId: current.locationId,
+        kind,
+        resolved: false,
+      });
     }
   }
 
@@ -267,9 +300,6 @@ async function resolveAssets(
   for (const asset of assets) {
     const kind = directKind(asset.locationType);
     if (kind) directLocations.set(`${kind}:${asset.locationId}`, asset.locationId);
-    if (asset.locationType === "item" && !byItemId.has(asset.locationId)) {
-      directLocations.set(`structure:${asset.locationId}`, asset.locationId);
-    }
   }
   for (const location of resolvedItemLocations.values()) {
     if (location.kind === "structure") {
@@ -279,10 +309,16 @@ async function resolveAssets(
   await Promise.all(
     [...directLocations].map(async ([key, locationId]) => {
       const kind = key.split(":")[0] as "station" | "solar_system" | "structure";
+      const metadataKey = `${kind}:${locationId}`;
+      const cached = locationMetadataCache.get(metadataKey);
+      if (cached) {
+        metadata.set(locationId, cached);
+        return;
+      }
       try {
         const result = await fetchLocationMetadata(locationId, kind, token);
         if (!result.data) throw new Error("Location response was not modified");
-        metadata.set(locationId, {
+        const resolved = {
           locationId,
           kind,
           name: result.data.name,
@@ -290,12 +326,13 @@ async function resolveAssets(
           systemId: kind === "solar_system" ? locationId : result.data.system_id,
           regionId: result.data.region_id,
           resolved: true,
-        });
+        } satisfies AssetLocation;
+        locationMetadataCache.set(metadataKey, resolved);
+        metadata.set(locationId, resolved);
       } catch {
         metadata.set(locationId, {
           locationId,
           kind,
-          name: locationNames.get(locationId),
           resolved: false,
         });
       }
@@ -308,7 +345,6 @@ async function resolveAssets(
       const location = metadata.get(asset.locationId) ?? {
         locationId: asset.locationId,
         kind: direct,
-        name: locationNames.get(asset.locationId),
         resolved: false,
       };
       return {
@@ -320,11 +356,18 @@ async function resolveAssets(
     }
     const resolvedItemLocation = resolvedItemLocations.get(asset.itemId);
     if (resolvedItemLocation) {
+      const metadataLocation = metadata.get(resolvedItemLocation.locationId);
+      const location = metadataLocation
+        ? {
+            ...metadataLocation,
+            parentLocationId: asset.locationId,
+          }
+        : resolvedItemLocation;
       return {
         ...asset,
-        location: resolvedItemLocation,
+        location,
         sourceLocationId: asset.locationId,
-        sourceLocationName: resolvedItemLocation.name,
+        sourceLocationName: location.name,
       };
     }
     const visited = new Set<number>();
@@ -334,10 +377,10 @@ async function resolveAssets(
       visited.add(current.itemId);
       const parent = byItemId.get(current.locationId);
       if (!parent) {
-        const location = metadata.get(current.locationId) ?? {
+        const location = {
           locationId: current.locationId,
-          kind: "structure" as const,
-          name: locationNames.get(current.itemId),
+          kind: "container" as const,
+          name: undefined,
           resolved: false,
         };
         return {
@@ -355,14 +398,12 @@ async function resolveAssets(
         ? (metadata.get(current.locationId) ?? {
             locationId: current.locationId,
             kind: effectiveKind,
-            name: locationNames.get(current.locationId),
             parentLocationId: asset.locationId,
             resolved: false,
           })
         : {
             locationId: asset.locationId,
             kind: "container" as const,
-            name: locationNames.get(asset.locationId),
             parentLocationId: asset.locationId,
             resolved: false,
           };
@@ -417,7 +458,7 @@ export async function refreshCharacterState(
         Date.parse(cache.assets.nextRefreshAllowed) > Date.now()
       ) {
         characterSummary.assets = { ...cache.assets, status: "cached" };
-        if (cache.resolvedAssets.length === 0 && Array.isArray(cache.assets.lastBody)) {
+        if (needsAssetLocationResolution(cache) && Array.isArray(cache.assets.lastBody)) {
           const token = await getUsableToken(record, "personal");
           await cacheResolvedAssets(cache, cache.assets.lastBody as AssetRecord[], token);
         }
@@ -477,7 +518,7 @@ export async function refreshCharacterState(
           Date.parse(corpCache.assets.nextRefreshAllowed) > Date.now()
         ) {
           corpSummary.assets = { ...corpCache.assets, status: "cached" };
-          if (corpCache.resolvedAssets.length === 0 && Array.isArray(corpCache.assets.lastBody)) {
+          if (needsAssetLocationResolution(corpCache) && Array.isArray(corpCache.assets.lastBody)) {
             const token = await getUsableToken(record, "corp");
             await cacheResolvedAssets(corpCache, corpCache.assets.lastBody as AssetRecord[], token);
           }
@@ -617,14 +658,14 @@ export async function getResolvedAssetIndex(
   return index;
 }
 
-export async function getAssembledContainerAssets(
+export async function getAssembledContainerAssetsByItemId(
   characterIds: number[],
   includeCorporationAssets: boolean,
-) {
+): Promise<Map<number, ResolvedAssetRecord>> {
   const assets = characterIds.flatMap((id) =>
     [...getCache(characterCaches, id).assembledContainersByItemId.values()],
   );
-  if (!includeCorporationAssets) return assets;
+  if (!includeCorporationAssets) return new Map(assets.map(asset => [asset.itemId, asset]));
   const characters = await getCharacters();
   const corporations = new Set(
     characters
@@ -638,11 +679,14 @@ export async function getAssembledContainerAssets(
       .map((character) => character.corporationId!),
   );
   return [
-    ...assets,
+    ...assets.map(asset => [asset.itemId, asset]),
     ...[...corporations].flatMap((id) =>
-      [...getCache(corporationCaches, id).assembledContainersByItemId.values()],
+      [...getCache(corporationCaches, id).assembledContainersByItemId.values()].map(asset => [asset.itemId, asset]),
     ),
-  ];
+  ].map(([itemId, asset]) => [itemId, asset] as [number, ResolvedAssetRecord]).reduce((map, [itemId, asset]) => {
+    map.set(itemId, asset);
+    return map;
+  }, new Map<number, ResolvedAssetRecord>());
 }
 
 export async function getAssembledStructureRigAssets(
@@ -664,6 +708,28 @@ export async function getAssembledStructureRigAssets(
   );
   return [...corporationIds].flatMap((id) =>
     [...getCache(corporationCaches, id).assembledStructureRigsByItemId.values()],
+  );
+}
+
+export async function getAssembledShipAssets(
+  characterIds: number[],
+  includeCorporationAssets: boolean,
+) {
+  if (!includeCorporationAssets) return [];
+  const characters = await getCharacters();
+  const corporationIds = new Set(
+    characters
+      .filter(
+        (character) =>
+          characterIds.includes(character.characterId) &&
+          character.corpAuthCompleted &&
+          character.hasDirectorRole &&
+          character.corporationId,
+      )
+      .map((character) => character.corporationId!),
+  );
+  return [...corporationIds].flatMap((id) =>
+    [...getCache(corporationCaches, id).assembledShipsByItemId.values()],
   );
 }
 
