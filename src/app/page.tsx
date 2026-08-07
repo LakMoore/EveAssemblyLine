@@ -25,7 +25,7 @@ type BuildItem = { name: string; typeId: number; quantity: number; me: number; t
 type TypeResult = { name: string; typeId: number };
 type PasteResult = { name: string; quantity?: number; typeId?: number; error?: string };
 type EsiStockResponse = {
-  structures?: Array<{ items?: StockItem[] }>;
+  locations?: Array<{ items?: StockItem[] }>;
   marketOrderStock?: StockItem[];
 };
 function formatDuration(totalSeconds: number) {
@@ -115,30 +115,33 @@ export default function Home() {
     try {
       let requestedStock = stock;
       try {
-        const stockResponse = await fetch(`/api/state/structures?${new URLSearchParams({
-          language,
-          typeIds: items.map((item) => item.typeId).join(","),
-        }).toString()}`);
+        const stockResponse = await fetch(
+          `/api/state/stock?${new URLSearchParams({
+            language,
+            typeIds: items.map((item) => item.typeId).join(","),
+          }).toString()}`,
+        );
         if (stockResponse.ok) {
-          const liveStock = (await stockResponse.json() as EsiStockResponse).structures?.flatMap(
-            (structure) => structure.items ?? [],
-          ) ?? [];
+          const liveStock =
+            ((await stockResponse.json()) as EsiStockResponse).locations?.flatMap(
+              (structure) => structure.items ?? [],
+            ) ?? [];
           requestedStock = [...stock, ...liveStock];
         }
-      } catch {
-      }
+      } catch {}
       try {
-        const orderResponse = await fetch(`/api/state/assets?${new URLSearchParams({
-          personalSellOrdersAsStock: String(settings.personalSellOrdersAsStock),
-          allCorporationSellOrdersAsStock: String(settings.allCorporationSellOrdersAsStock),
-          myCorporationSellOrdersAsStock: String(settings.myCorporationSellOrdersAsStock),
-        }).toString()}`);
+        const orderResponse = await fetch(
+          `/api/state/assets?${new URLSearchParams({
+            personalSellOrdersAsStock: String(settings.personalSellOrdersAsStock),
+            allCorporationSellOrdersAsStock: String(settings.allCorporationSellOrdersAsStock),
+            myCorporationSellOrdersAsStock: String(settings.myCorporationSellOrdersAsStock),
+          }).toString()}`,
+        );
         if (orderResponse.ok) {
-          const orderData = await orderResponse.json() as EsiStockResponse;
+          const orderData = (await orderResponse.json()) as EsiStockResponse;
           requestedStock = [...requestedStock, ...(orderData.marketOrderStock ?? [])];
         }
-      } catch {
-      }
+      } catch {}
       const response = await fetch("/api/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -643,19 +646,24 @@ function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult
     activeTab === "Plan"
       ? plan.lists.planItems
       : activeTab === "Buy"
-      ? [...plan.lists.materialsToBuy.filter((entry) => entry.buyQuantity > 0), ...plan.lists.bpcsToBuy.filter((entry) => entry.buyQuantity > 0)]
-      : activeTab === "Copy"
-        ? plan.lists.bpcsNeeded.filter((entry) => entry.buyQuantity > 0)
-        : activeTab === "Invent"
-          ? plan.lists.inventionJobs
-          : activeTab === "React"
-            ? plan.lists.reactionJobs
-            : activeTab === "Manufacture"
-              ? plan.lists.manufacturingJobs
-              : plan.lists.haulingTasks;
+        ? [
+            ...plan.lists.materialsToBuy.filter((entry) => entry.buyQuantity > 0),
+            ...plan.lists.bpcsToBuy.filter((entry) => entry.buyQuantity > 0),
+          ]
+        : activeTab === "Copy"
+          ? plan.lists.bpcsNeeded.filter((entry) => entry.buyQuantity > 0)
+          : activeTab === "Invent"
+            ? plan.lists.inventionJobs
+            : activeTab === "React"
+              ? plan.lists.reactionJobs
+              : activeTab === "Manufacture"
+                ? plan.lists.manufacturingJobs
+                : plan.lists.haulingTasks;
   const planColumns = ["Required", "Available", "Buy/Build", "Surplus"] as const;
 
-  function getPlanCells(entry: PlanResult["lists"]["planItems"][number]): Partial<Record<(typeof planColumns)[number], string>> {
+  function getPlanCells(
+    entry: PlanResult["lists"]["planItems"][number],
+  ): Partial<Record<(typeof planColumns)[number], string>> {
     if (entry.kind === "material") {
       return {
         Required: entry.requiredQuantity.toLocaleString(),
@@ -697,12 +705,12 @@ function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult
               activeTab === "Copy" && "quantity" in entry
                 ? entry.quantity
                 : "runsNeeded" in entry
-                ? entry.runsNeeded
-                : "runs" in entry
-                  ? entry.runs
-                  : "buyQuantity" in entry
-                    ? entry.buyQuantity
-                    : entry.quantity;
+                  ? entry.runsNeeded
+                  : "runs" in entry
+                    ? entry.runs
+                    : "buyQuantity" in entry
+                      ? entry.buyQuantity
+                      : entry.quantity;
             return `${entry.name}\t${amount}`;
           });
     try {
@@ -733,7 +741,9 @@ function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult
         <div className={styles.planTableHeader}>
           <span aria-hidden="true" />
           <span aria-hidden="true" />
-          {planColumns.map((column) => <span key={column}>{column}</span>)}
+          {planColumns.map((column) => (
+            <span key={column}>{column}</span>
+          ))}
         </div>
       )}
       <div className={activeTab === "Plan" ? styles.planTable : styles.planList}>
@@ -752,7 +762,8 @@ function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult
           const totalTime =
             "totalTime" in entry && typeof entry.totalTime === "number" ? entry.totalTime : null;
           const materialEntry =
-            (activeTab === "Buy" && !isBpcPurchase && "quantity" in entry) || (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
+            (activeTab === "Buy" && !isBpcPurchase && "quantity" in entry) ||
+            (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
               ? (entry as PlanResult["lists"]["materialsToBuy"][number])
               : null;
           const amount =
@@ -761,22 +772,28 @@ function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult
               : isBpcPurchase
                 ? `${entry.buyQuantity.toLocaleString()} runs`
                 : isPlanBpc
-                ? `${entry.neededQuantity.toLocaleString()} needed`
-                : isPlanReaction
-                  ? `${entry.runsNeeded.toLocaleString()} runs`
-                  : materialEntry
-                    ? `${(materialEntry.buildQuantity || materialEntry.buyQuantity).toLocaleString()} units`
-              : "quantity" in entry
-                ? `${entry.quantity.toLocaleString()} ${activeTab === "Copy" ? "runs" : "units"}`
-                : "runs" in entry
-                  ? `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} runs`
-                  : "";
+                  ? `${entry.neededQuantity.toLocaleString()} needed`
+                  : isPlanReaction
+                    ? `${entry.runsNeeded.toLocaleString()} runs`
+                    : materialEntry
+                      ? `${(materialEntry.buildQuantity || materialEntry.buyQuantity).toLocaleString()} units`
+                      : "quantity" in entry
+                        ? `${entry.quantity.toLocaleString()} ${activeTab === "Copy" ? "runs" : "units"}`
+                        : "runs" in entry
+                          ? `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} runs`
+                          : "";
           const imageVariation =
             "imageVariation" in entry && entry.imageVariation
               ? entry.imageVariation
               : isPlanBpc && entry.bpoCount > 0
                 ? "bp"
-                : activeTab === "Manufacture" || activeTab === "React" || isPlanBpc || isBpcPurchase || isPlanReaction || activeTab === "Copy" || activeTab === "Invent"
+                : activeTab === "Manufacture" ||
+                    activeTab === "React" ||
+                    isPlanBpc ||
+                    isBpcPurchase ||
+                    isPlanReaction ||
+                    activeTab === "Copy" ||
+                    activeTab === "Invent"
                   ? "bpc"
                   : "icon";
           const planCells =
@@ -784,7 +801,10 @@ function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult
               ? getPlanCells(entry as PlanResult["lists"]["planItems"][number])
               : null;
           return (
-            <div className={activeTab === "Plan" ? styles.planTableRow : styles.planRow} key={`${activeTab}-${index}`}>
+            <div
+              className={activeTab === "Plan" ? styles.planTableRow : styles.planRow}
+              key={`${activeTab}-${index}`}
+            >
               <Image
                 className={styles.typeImage}
                 src={eveTypeImageUrl(typeId, imageVariation)}
@@ -795,18 +815,22 @@ function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult
               <span className={styles.planRowMain} data-label="Type">
                 <strong>{name}</strong>
               </span>
-              {activeTab === "Plan"
-                ? planColumns.map((column) => (
-                    planCells?.[column] ? (
-                      <span className={styles.planTableCell} data-label={column} key={column}>
-                        {planCells[column]}
-                      </span>
-                    ) : <span className={styles.planTableCellEmpty} key={column} />
-                  ))
-                : <span className={styles.planRowAmount}>
-                    <strong>{amount}</strong>
-                    {detail && <small>{detail}</small>}
-                  </span>}
+              {activeTab === "Plan" ? (
+                planColumns.map((column) =>
+                  planCells?.[column] ? (
+                    <span className={styles.planTableCell} data-label={column} key={column}>
+                      {planCells[column]}
+                    </span>
+                  ) : (
+                    <span className={styles.planTableCellEmpty} key={column} />
+                  ),
+                )
+              ) : (
+                <span className={styles.planRowAmount}>
+                  <strong>{amount}</strong>
+                  {detail && <small>{detail}</small>}
+                </span>
+              )}
             </div>
           );
         })}

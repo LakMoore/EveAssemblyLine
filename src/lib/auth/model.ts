@@ -57,6 +57,8 @@ export interface AssetRecord {
   isSingleton: boolean;
   ownerType: "character" | "corporation";
   ownerId: number;
+  rootLocationId?: number;
+  rootLocationKind: "structure" | "station" | "solar_system" | "ship" | undefined;
 }
 
 export interface IndustryJobRecord {
@@ -91,23 +93,6 @@ export interface MarketOrderRecord {
   issuedBy?: number;
   ownerType: "character" | "corporation";
   ownerId: number;
-}
-
-export interface AssetLocation {
-  locationId: number;
-  kind: "facility" | "station" | "structure" | "solar_system" | "item" | "container" | "unknown";
-  name?: string;
-  typeId?: number;
-  systemId?: number;
-  regionId?: number;
-  parentLocationId?: number;
-  resolved?: boolean;
-}
-
-export interface ResolvedAssetRecord extends AssetRecord {
-  location: AssetLocation;
-  sourceLocationId?: number;
-  sourceLocationName?: string;
 }
 
 export interface SessionRecord {

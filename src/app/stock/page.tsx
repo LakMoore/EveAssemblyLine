@@ -15,9 +15,7 @@ import {
 import { loadStructures } from "@/lib/planning/structureStore";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
-import {
-  type KnownStructure,
-} from "@/lib/planning/preferences";
+import { type KnownStructure } from "@/lib/planning/preferences";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import styles from "../page.module.css";
 
@@ -32,7 +30,7 @@ type EsiStockLocation = {
   items: StockItem[];
 };
 type EsiStockResponse = {
-  structures?: EsiStockLocation[];
+  locations?: Array<EsiStockLocation & { locationId: number }>;
   filteredLocationIds?: number[];
 };
 type PasteResult = {
@@ -68,9 +66,12 @@ function formatVolume(volume: number) {
 }
 
 function stockItemVolume(item: StockItem) {
-  return item.quantity * (item.isPackaged
-    ? item.packagedVolume ?? item.assembledVolume ?? 0
-    : item.assembledVolume ?? 0);
+  return (
+    item.quantity *
+    (item.isPackaged
+      ? (item.packagedVolume ?? item.assembledVolume ?? 0)
+      : (item.assembledVolume ?? 0))
+  );
 }
 
 function stockTotalCount(location: StockRecord) {
@@ -141,12 +142,19 @@ export default function StockPage() {
         const [records, structures, esiResponse] = await Promise.all([
           loadStockRecords().catch(() => []),
           loadStructures().catch(() => []),
-          fetch(`/api/state/structures?${new URLSearchParams({
-            language,
-          }).toString()}`),
+          fetch(
+            `/api/state/stock?${new URLSearchParams({
+              language,
+            }).toString()}`,
+          ),
         ]);
         const esiData = (await esiResponse.json()) as EsiStockResponse;
-        const esiLocations = esiResponse.ok ? (esiData.structures ?? []) : [];
+        const esiLocations = esiResponse.ok
+          ? (esiData.locations ?? []).map((location) => ({
+              ...location,
+              structureId: location.locationId,
+            }))
+          : [];
         setEsiLocationIds(new Set(esiLocations.map((location) => String(location.structureId))));
         setKnownStructures(structures);
         const correctedRecords = records.map((record) => {
@@ -159,24 +167,27 @@ export default function StockPage() {
             structureName: structure.name,
           };
         });
-        const esiRecords = esiLocations
-          .map((location) => {
-            const knownStructure = structures.find(
-              (structure) => structure.esiStructureId === location.structureId,
-            );
-            return {
-              systemId: location.systemId ?? knownStructure?.systemId ?? 0,
-              systemName: location.systemName ?? knownStructure?.systemName ?? "Unknown system",
-              structureId: String(location.structureId),
-              structureName: knownStructure?.name ?? location.name,
-              items: location.items,
-            };
-          });
+        const esiRecords = esiLocations.map((location) => {
+          const knownStructure = structures.find(
+            (structure) => structure.esiStructureId === location.structureId,
+          );
+          return {
+            systemId: location.systemId ?? knownStructure?.systemId ?? 0,
+            systemName: location.systemName ?? knownStructure?.systemName ?? "Unknown system",
+            structureId: String(location.structureId),
+            structureName: knownStructure?.name ?? location.name,
+            items: location.items,
+          };
+        });
         const esiKeys = new Set(esiRecords.map((record) => locationKey(record)));
-        const esiLocationIds = new Set(esiLocations.map((location) => String(location.structureId)));
+        const esiLocationIds = new Set(
+          esiLocations.map((location) => String(location.structureId)),
+        );
         const esiBlueprintItemIds = new Set(
           esiLocations.flatMap((location) =>
-            location.items.flatMap((item) => item.blueprintPrints?.map((print) => print.itemId) ?? []),
+            location.items.flatMap(
+              (item) => item.blueprintPrints?.map((print) => print.itemId) ?? [],
+            ),
           ),
         );
         const filteredEsiLocationIds = new Set(esiData.filteredLocationIds ?? []);
@@ -211,26 +222,25 @@ export default function StockPage() {
         setLocations(sortedHydratedRecords);
         setViewing((current) => {
           if (!current) return current;
-          return sortedHydratedRecords.find(
-            (record) => locationKey(record) === locationKey(current),
-          ) ?? current;
+          return (
+            sortedHydratedRecords.find((record) => locationKey(record) === locationKey(current)) ??
+            current
+          );
         });
         const previousByLocation = new Map(records.map((record) => [locationKey(record), record]));
         const manualKeys = new Set(manualRecords.map((record) => locationKey(record)));
-        await Promise.all(
-          [
-            ...manualRecords.flatMap((record) => {
-              const previous = previousByLocation.get(locationKey(record));
-              const writes = record !== previous ? [saveStock(record)] : [];
-              if (previous && locationKey(previous) !== locationKey(record))
-                writes.push(deleteStock(previous));
-              return writes;
-            }),
-            ...records
-              .filter((record) => isEsiRecord(record) && !manualKeys.has(locationKey(record)))
-              .map((record) => deleteStock(record)),
-          ],
-        );
+        await Promise.all([
+          ...manualRecords.flatMap((record) => {
+            const previous = previousByLocation.get(locationKey(record));
+            const writes = record !== previous ? [saveStock(record)] : [];
+            if (previous && locationKey(previous) !== locationKey(record))
+              writes.push(deleteStock(previous));
+            return writes;
+          }),
+          ...records
+            .filter((record) => isEsiRecord(record) && !manualKeys.has(locationKey(record)))
+            .map((record) => deleteStock(record)),
+        ]);
       } catch {
         setEsiLocationIds(new Set());
         setLocations([]);
@@ -428,9 +438,7 @@ function AddLocationModal({
         }));
         setStructures([
           ...npcStructures,
-          ...localStructures.filter(
-            (local) => !npcStructures.some((npc) => npc.id === local.id),
-          ),
+          ...localStructures.filter((local) => !npcStructures.some((npc) => npc.id === local.id)),
         ]);
       })
       .catch((error: unknown) => {
@@ -444,10 +452,9 @@ function AddLocationModal({
     if (!isOpen || systemName.trim().length < 2) return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      fetch(
-        `/api/reference/systems?query=${encodeURIComponent(systemName)}&language=${language}`,
-        { signal: controller.signal },
-      )
+      fetch(`/api/reference/systems?query=${encodeURIComponent(systemName)}&language=${language}`, {
+        signal: controller.signal,
+      })
         .then(
           (response) =>
             response.json() as Promise<{
@@ -460,8 +467,7 @@ function AddLocationModal({
           ),
         )
         .catch((error: unknown) => {
-          if (!(error instanceof DOMException && error.name === "AbortError"))
-            setSuggestions([]);
+          if (!(error instanceof DOMException && error.name === "AbortError")) setSuggestions([]);
         });
     }, 180);
     return () => {
@@ -532,11 +538,7 @@ function AddLocationModal({
               />
             </div>
             {isOpen && suggestions.length > 0 && (
-              <div
-                className={styles.searchResults}
-                id="add-location-system-options"
-                role="listbox"
-              >
+              <div className={styles.searchResults} id="add-location-system-options" role="listbox">
                 {uniqueById(suggestions).map((entry) => (
                   <button
                     type="button"
@@ -627,12 +629,9 @@ function StockLocationCard({
     ...new Set(
       location.items
         .map((item) => item.marketCategory)
-            .filter(
-              (category) =>
-                category &&
-                category !== "Blueprints" &&
-                category !== "Reaction Formulas",
-            ),
+        .filter(
+          (category) => category && category !== "Blueprints" && category !== "Reaction Formulas",
+        ),
     ),
   ] as string[];
   return (
@@ -644,8 +643,24 @@ function StockLocationCard({
         </div>
         {!isEsiLocation && (
           <div className={styles.stockCardActions}>
-            <button type="button" className={styles.iconButton} aria-label={`Paste items at ${location.structureName}`} title="Paste items" onClick={onPaste}>⇩</button>
-            <button type="button" className={styles.stockRemoveButton} aria-label={`Remove stock at ${location.structureName}`} title="Remove stock location" onClick={onRemove}>×</button>
+            <button
+              type="button"
+              className={styles.iconButton}
+              aria-label={`Paste items at ${location.structureName}`}
+              title="Paste items"
+              onClick={onPaste}
+            >
+              ⇩
+            </button>
+            <button
+              type="button"
+              className={styles.stockRemoveButton}
+              aria-label={`Remove stock at ${location.structureName}`}
+              title="Remove stock location"
+              onClick={onRemove}
+            >
+              ×
+            </button>
           </div>
         )}
       </div>
@@ -656,24 +671,41 @@ function StockLocationCard({
               ? item.category === "bpo" || item.category === "bpc"
               : (item.category ?? "item") === category.id,
           );
-          const volume = items.reduce(
-            (total, item) => total + stockItemVolume(item),
-            0,
-          );
+          const volume = items.reduce((total, item) => total + stockItemVolume(item), 0);
           return (
-            <button type="button" className={styles.stockMetric} key={category.id} onClick={() => onView(location, { kind: "category", value: category.id })}>
+            <button
+              type="button"
+              className={styles.stockMetric}
+              key={category.id}
+              onClick={() => onView(location, { kind: "category", value: category.id })}
+            >
               <span>{category.label}</span>
               <strong>{items.length.toLocaleString()}</strong>
-              <small>{isVolumesLoading ? "Calculating..." : `${formatVolume(volume)} Volume`}</small>
+              <small>
+                {isVolumesLoading ? "Calculating..." : `${formatVolume(volume)} Volume`}
+              </small>
             </button>
           );
         })}
       </div>
       <div className={styles.stockMarketCategories}>
-        {marketCategories.length === 0 ? <span>No market categories</span> : marketCategories.map((category) => <button type="button" key={category} onClick={() => onView(location, { kind: "market", value: category })}>{category}</button>)}
+        {marketCategories.length === 0 ? (
+          <span>No market categories</span>
+        ) : (
+          marketCategories.map((category) => (
+            <button
+              type="button"
+              key={category}
+              onClick={() => onView(location, { kind: "market", value: category })}
+            >
+              {category}
+            </button>
+          ))
+        )}
       </div>
       <button type="button" className={styles.stockCardViewAll} onClick={() => onView(location)}>
-        <span>View all items</span><b>→</b>
+        <span>View all items</span>
+        <b>→</b>
       </button>
     </article>
   );
@@ -710,10 +742,16 @@ function ViewItemsModal({
       ? item.category === "bpo" || item.category === "bpc"
       : (item.category ?? "item") === filter.value;
   });
-  const displayItems: Array<{ item: StockItem; blueprints?: StockItem[]; reactionJobs?: StockItem[] }> = [];
+  const displayItems: Array<{
+    item: StockItem;
+    blueprints?: StockItem[];
+    reactionJobs?: StockItem[];
+  }> = [];
   for (const item of filteredItems) {
     if (item.category === "reaction") {
-      const existing = displayItems.find((entry) => entry.item.typeId === item.typeId && entry.item.category === "reaction");
+      const existing = displayItems.find(
+        (entry) => entry.item.typeId === item.typeId && entry.item.category === "reaction",
+      );
       if (!existing) {
         displayItems.push({ item, reactionJobs: item.inUse ? [item] : [] });
         continue;
@@ -740,7 +778,12 @@ function ViewItemsModal({
     };
     if (!existing.item.inBuild && item.inBuild) existing.item = item;
   }
-  const title = filter.kind === "all" ? "All items" : filter.kind === "market" ? filter.value : stockCategories.find((category) => category.id === filter.value)?.label;
+  const title =
+    filter.kind === "all"
+      ? "All items"
+      : filter.kind === "market"
+        ? filter.value
+        : stockCategories.find((category) => category.id === filter.value)?.label;
   return (
     <div
       className={styles.modalBackdrop}
@@ -771,10 +814,29 @@ function ViewItemsModal({
           {location.systemName} · {title} · {displayItems.length} item types
         </p>
         <div className={styles.stockViewFilters}>
-          <button type="button" className={filter.kind === "all" ? styles.stockFilterActive : ""} onClick={() => onFilterChange({ kind: "all" })}>All</button>
-          {stockCategories.map((category) => <button type="button" className={filter.kind === "category" && filter.value === category.id ? styles.stockFilterActive : ""} key={category.id} onClick={() => onFilterChange({ kind: "category", value: category.id })}>{category.label}</button>)}
+          <button
+            type="button"
+            className={filter.kind === "all" ? styles.stockFilterActive : ""}
+            onClick={() => onFilterChange({ kind: "all" })}
+          >
+            All
+          </button>
+          {stockCategories.map((category) => (
+            <button
+              type="button"
+              className={
+                filter.kind === "category" && filter.value === category.id
+                  ? styles.stockFilterActive
+                  : ""
+              }
+              key={category.id}
+              onClick={() => onFilterChange({ kind: "category", value: category.id })}
+            >
+              {category.label}
+            </button>
+          ))}
         </div>
-          {displayItems.length === 0 ? (
+        {displayItems.length === 0 ? (
           <div className={styles.emptyBuildList}>No items recorded at this location.</div>
         ) : (
           <div className={styles.stockList}>
@@ -782,129 +844,193 @@ function ViewItemsModal({
               const counts = blueprintCounts.get(item.typeId);
               const isBlueprint = Boolean(blueprints);
               const isReaction = Boolean(reactionJobs);
-              const reactionInUse = reactionJobs?.reduce((total, job) => total + job.quantity, 0) ?? 0;
-              const details: BlueprintDetail[] | undefined = blueprints?.flatMap((blueprint): BlueprintDetail[] => {
-                const isInventionOutput = blueprint.inBuild && blueprint.activityName === "Invention" && !blueprint.blueprintPrints?.length;
-                if (blueprint.blueprintPrints?.length) {
-                  return blueprint.blueprintPrints.map((print) => ({
-                    kind: blueprint.category === "bpo" ? "BPO" : "BPC",
-                    source: blueprint.inBuild ? "In use" : "Asset",
-                    ...(print.runs >= 0 ? { runs: print.runs } : {}),
-                    me: print.me ?? blueprint.me,
-                    te: print.te ?? blueprint.te,
-                    activity: blueprint.activityName,
-                    endDate: blueprint.endDate,
-                  }));
-                }
-                const perPrintRuns = blueprint.quantity > 0 && blueprint.runCount !== undefined
-                  ? blueprint.runCount / blueprint.quantity
-                  : blueprint.runCount;
-                return [{
-                  kind: blueprint.category === "bpo" ? "BPO" : "BPC",
-                  source: isInventionOutput ? "In Progress" : blueprint.inBuild ? "In use" : "Asset",
-                  runs: isInventionOutput ? blueprint.runCount : perPrintRuns,
-                  ...(isInventionOutput ? {} : { me: blueprint.me, te: blueprint.te }),
-                  activity: blueprint.activityName,
-                  endDate: blueprint.endDate,
-                  ...(isInventionOutput ? { quantity: blueprint.quantity, estimated: true } : {}),
-                }];
-              });
+              const reactionInUse =
+                reactionJobs?.reduce((total, job) => total + job.quantity, 0) ?? 0;
+              const details: BlueprintDetail[] | undefined = blueprints?.flatMap(
+                (blueprint): BlueprintDetail[] => {
+                  const isInventionOutput =
+                    blueprint.inBuild &&
+                    blueprint.activityName === "Invention" &&
+                    !blueprint.blueprintPrints?.length;
+                  if (blueprint.blueprintPrints?.length) {
+                    return blueprint.blueprintPrints.map((print) => ({
+                      kind: blueprint.category === "bpo" ? "BPO" : "BPC",
+                      source: blueprint.inBuild ? "In use" : "Asset",
+                      ...(print.runs >= 0 ? { runs: print.runs } : {}),
+                      me: print.me ?? blueprint.me,
+                      te: print.te ?? blueprint.te,
+                      activity: blueprint.activityName,
+                      endDate: blueprint.endDate,
+                    }));
+                  }
+                  const perPrintRuns =
+                    blueprint.quantity > 0 && blueprint.runCount !== undefined
+                      ? blueprint.runCount / blueprint.quantity
+                      : blueprint.runCount;
+                  return [
+                    {
+                      kind: blueprint.category === "bpo" ? "BPO" : "BPC",
+                      source: isInventionOutput
+                        ? "In Progress"
+                        : blueprint.inBuild
+                          ? "In use"
+                          : "Asset",
+                      runs: isInventionOutput ? blueprint.runCount : perPrintRuns,
+                      ...(isInventionOutput ? {} : { me: blueprint.me, te: blueprint.te }),
+                      activity: blueprint.activityName,
+                      endDate: blueprint.endDate,
+                      ...(isInventionOutput
+                        ? { quantity: blueprint.quantity, estimated: true }
+                        : {}),
+                    },
+                  ];
+                },
+              );
               const showTooltip = isBlueprint && openBlueprintTypeId === item.typeId;
               const showReactionTooltip = isReaction && openReactionTypeId === item.typeId;
               return (
-              <div
-                className={styles.stockRow}
-                key={`${item.typeId}:${item.category ?? "item"}:${isReaction ? "reaction" : item.isPackaged ? "packaged" : "assembled"}:${item.jobId ?? "asset"}`}
-              >
-                <StockItemImage
-                  typeId={item.typeId}
-                  variation={
-                    counts?.bpo
-                      ? "bp"
-                      : item.category === "bpo"
+                <div
+                  className={styles.stockRow}
+                  key={`${item.typeId}:${item.category ?? "item"}:${isReaction ? "reaction" : item.isPackaged ? "packaged" : "assembled"}:${item.jobId ?? "asset"}`}
+                >
+                  <StockItemImage
+                    typeId={item.typeId}
+                    variation={
+                      counts?.bpo
                         ? "bp"
-                        : item.category === "bpc" || item.category === "reaction"
-                          ? "bpc"
-                          : item.techLevel === 1
-                            ? "render"
-                            : "icon"
-                  }
-                />
-                <span>
-                  <strong>{item.name}</strong>
-                  <small>
-                    Type ID {item.typeId} · Volume {formatVolume(item.quantity * (item.isPackaged
-                      ? item.packagedVolume ?? item.assembledVolume ?? 0
-                      : item.assembledVolume ?? 0))}
-                  </small>
-                </span>
-                {item.inBuild && item.endDate && (
-                  <small className={styles.stockCompletion}>
-                    <span>{item.activityName ?? "Industry job"} completes</span>
-                    <span>{new Date(item.endDate).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })} {new Date(item.endDate).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false })}</span>
-                  </small>
-                )}
-                {isReaction ? (
-                  <div
-                    className={styles.stockBlueprintSummary}
-                    onMouseEnter={() => setOpenReactionTypeId(item.typeId)}
-                    onMouseLeave={() => setOpenReactionTypeId(null)}
-                  >
-                    <button
-                      type="button"
-                      className={styles.stockBlueprintSummaryButton}
-                      aria-label={`Show installed reaction formulas for ${item.name}`}
-                      aria-expanded={showReactionTooltip}
-                      onClick={() => setOpenReactionTypeId(showReactionTooltip ? null : item.typeId)}
-                    >
-                      {reactionInUse > 0 && <b className={styles.stockBlueprintHelp}>?</b>}
-                      <span>{reactionInUse.toLocaleString()} / {item.quantity.toLocaleString()} in use</span>
-                    </button>
-                    {showReactionTooltip && reactionJobs && reactionJobs.length > 0 && (
-                      <div className={styles.stockBlueprintTooltip} role="tooltip">
-                        {reactionJobs.map((job, index) => (
-                          <div className={styles.stockBlueprintDetail} key={`${job.jobId ?? index}`}>
-                            <strong>In use · {job.blueprintRunsUsed ?? 0} runs</strong>
-                            <span>{job.endDate ? formatBlueprintDate(job.endDate) : "Completion date unavailable"}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : isBlueprint && counts ? (
-                  <div
-                    className={styles.stockBlueprintSummary}
-                    onMouseEnter={() => setOpenBlueprintTypeId(item.typeId)}
-                    onMouseLeave={() => setOpenBlueprintTypeId(null)}
-                  >
-                    <button
-                      type="button"
-                      className={styles.stockBlueprintSummaryButton}
-                      aria-label={`Show details for ${item.name}`}
-                      aria-expanded={showTooltip}
-                      onClick={() => setOpenBlueprintTypeId(showTooltip ? null : item.typeId)}
-                    >
+                        : item.category === "bpo"
+                          ? "bp"
+                          : item.category === "bpc" || item.category === "reaction"
+                            ? "bpc"
+                            : item.techLevel === 1
+                              ? "render"
+                              : "icon"
+                    }
+                  />
+                  <span>
+                    <strong>{item.name}</strong>
+                    <small>
+                      Type ID {item.typeId} · Volume{" "}
+                      {formatVolume(
+                        item.quantity *
+                          (item.isPackaged
+                            ? (item.packagedVolume ?? item.assembledVolume ?? 0)
+                            : (item.assembledVolume ?? 0)),
+                      )}
+                    </small>
+                  </span>
+                  {item.inBuild && item.endDate && (
+                    <small className={styles.stockCompletion}>
+                      <span>{item.activityName ?? "Industry job"} completes</span>
                       <span>
-                        {counts.bpo > 0 && <span className={styles.stockSummaryLine}>{counts.bpo.toLocaleString()} BPO</span>}
-                        {counts.bpc > 0 && <span className={styles.stockSummaryLine}>{counts.runs > 0 ? `${counts.runs.toLocaleString()} Runs on ${counts.bpc.toLocaleString()} BPC` : `${counts.bpc.toLocaleString()} BPC`}</span>}
+                        {new Date(item.endDate).toLocaleDateString("en-GB", {
+                          day: "2-digit",
+                          month: "short",
+                        })}{" "}
+                        {new Date(item.endDate).toLocaleTimeString("en-GB", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          hour12: false,
+                        })}
                       </span>
-                      <b className={styles.stockBlueprintHelp}>?</b>
-                    </button>
-                    {showTooltip && details && (
-                      <div className={styles.stockBlueprintTooltip} role="tooltip">
-                        {details.map((detail, index) => (
-                          <div className={styles.stockBlueprintDetail} key={`${item.typeId}-${index}`}>
-                            <strong>{detail.kind} · {detail.source}{detail.quantity ? ` · ~${detail.quantity} copies` : ""}</strong>
-                            <span>{detail.me !== undefined ? `ME ${detail.me}` : ""}{detail.te !== undefined ? ` · TE ${detail.te}` : ""}{detail.runs !== undefined ? ` · ${detail.estimated ? "~" : ""}${detail.runs} runs` : ""}{detail.activity ? ` · ${detail.activity}` : ""}{detail.endDate ? ` · ${formatBlueprintDate(detail.endDate)}` : ""}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <strong>{`${item.quantity.toLocaleString()}${item.inBuild ? " · In Build" : ""}${item.inUse ? " · In Use" : ""}`}</strong>
-                )}
-              </div>
+                    </small>
+                  )}
+                  {isReaction ? (
+                    <div
+                      className={styles.stockBlueprintSummary}
+                      onMouseEnter={() => setOpenReactionTypeId(item.typeId)}
+                      onMouseLeave={() => setOpenReactionTypeId(null)}
+                    >
+                      <button
+                        type="button"
+                        className={styles.stockBlueprintSummaryButton}
+                        aria-label={`Show installed reaction formulas for ${item.name}`}
+                        aria-expanded={showReactionTooltip}
+                        onClick={() =>
+                          setOpenReactionTypeId(showReactionTooltip ? null : item.typeId)
+                        }
+                      >
+                        {reactionInUse > 0 && <b className={styles.stockBlueprintHelp}>?</b>}
+                        <span>
+                          {reactionInUse.toLocaleString()} / {item.quantity.toLocaleString()} in use
+                        </span>
+                      </button>
+                      {showReactionTooltip && reactionJobs && reactionJobs.length > 0 && (
+                        <div className={styles.stockBlueprintTooltip} role="tooltip">
+                          {reactionJobs.map((job, index) => (
+                            <div
+                              className={styles.stockBlueprintDetail}
+                              key={`${job.jobId ?? index}`}
+                            >
+                              <strong>In use · {job.blueprintRunsUsed ?? 0} runs</strong>
+                              <span>
+                                {job.endDate
+                                  ? formatBlueprintDate(job.endDate)
+                                  : "Completion date unavailable"}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : isBlueprint && counts ? (
+                    <div
+                      className={styles.stockBlueprintSummary}
+                      onMouseEnter={() => setOpenBlueprintTypeId(item.typeId)}
+                      onMouseLeave={() => setOpenBlueprintTypeId(null)}
+                    >
+                      <button
+                        type="button"
+                        className={styles.stockBlueprintSummaryButton}
+                        aria-label={`Show details for ${item.name}`}
+                        aria-expanded={showTooltip}
+                        onClick={() => setOpenBlueprintTypeId(showTooltip ? null : item.typeId)}
+                      >
+                        <span>
+                          {counts.bpo > 0 && (
+                            <span className={styles.stockSummaryLine}>
+                              {counts.bpo.toLocaleString()} BPO
+                            </span>
+                          )}
+                          {counts.bpc > 0 && (
+                            <span className={styles.stockSummaryLine}>
+                              {counts.runs > 0
+                                ? `${counts.runs.toLocaleString()} Runs on ${counts.bpc.toLocaleString()} BPC`
+                                : `${counts.bpc.toLocaleString()} BPC`}
+                            </span>
+                          )}
+                        </span>
+                        <b className={styles.stockBlueprintHelp}>?</b>
+                      </button>
+                      {showTooltip && details && (
+                        <div className={styles.stockBlueprintTooltip} role="tooltip">
+                          {details.map((detail, index) => (
+                            <div
+                              className={styles.stockBlueprintDetail}
+                              key={`${item.typeId}-${index}`}
+                            >
+                              <strong>
+                                {detail.kind} · {detail.source}
+                                {detail.quantity ? ` · ~${detail.quantity} copies` : ""}
+                              </strong>
+                              <span>
+                                {detail.me !== undefined ? `ME ${detail.me}` : ""}
+                                {detail.te !== undefined ? ` · TE ${detail.te}` : ""}
+                                {detail.runs !== undefined
+                                  ? ` · ${detail.estimated ? "~" : ""}${detail.runs} runs`
+                                  : ""}
+                                {detail.activity ? ` · ${detail.activity}` : ""}
+                                {detail.endDate ? ` · ${formatBlueprintDate(detail.endDate)}` : ""}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <strong>{`${item.quantity.toLocaleString()}${item.inBuild ? " · In Build" : ""}${item.inUse ? " · In Use" : ""}`}</strong>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -1093,14 +1219,11 @@ function mergeItems(existing: StockItem[], imported: StockItem[]) {
       if (item.runCount !== undefined) {
         current.runCount = (current.runCount ?? 0) + item.runCount;
       }
-          current.me ??= item.me;
-          current.te ??= item.te;
-          if (item.blueprintPrints) {
-            current.blueprintPrints = [
-              ...(current.blueprintPrints ?? []),
-              ...item.blueprintPrints,
-            ];
-          }
+      current.me ??= item.me;
+      current.te ??= item.te;
+      if (item.blueprintPrints) {
+        current.blueprintPrints = [...(current.blueprintPrints ?? []), ...item.blueprintPrints];
+      }
       current.assembledVolume = item.assembledVolume;
       current.packagedVolume = item.packagedVolume;
     } else {

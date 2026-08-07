@@ -216,7 +216,10 @@ type EsiStructure = {
   fuelExpires?: string;
   totalCount: number;
   totalVolume: number;
-  bonuses: Record<"manufacturing" | "research" | "reactions" | "invention", { me: number; te: number; cost: number }>;
+  bonuses: Record<
+    "manufacturing" | "research" | "reactions" | "invention",
+    { me: number; te: number; cost: number }
+  >;
 };
 type LocationSort =
   | "alphabetical"
@@ -246,10 +249,7 @@ function formatPercent(value: number) {
   return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
 }
 
-function formatBonusSummary(
-  label: string,
-  bonuses: { me: number; te: number; cost: number },
-) {
+function formatBonusSummary(label: string, bonuses: { me: number; te: number; cost: number }) {
   return `${label} ME ${formatPercent(bonuses.me)} / TE ${formatPercent(bonuses.te)} / Cost ${formatPercent(bonuses.cost)}`;
 }
 
@@ -371,11 +371,48 @@ export default function LocationsPage() {
         const params = new URLSearchParams({
           language,
         });
-        const response = await fetch(`/api/state/structures?${params.toString()}`, {
+        const response = await fetch(`/api/state/stock?${params.toString()}`, {
           cache: "no-store",
         });
-        const data = (await response.json()) as { structures?: EsiStructure[] };
-        if (!cancelled) setEsiStructures(data.structures ?? []);
+        const data = (await response.json()) as {
+          locations?: Array<{
+            locationId: number;
+            name: string;
+            locationType: "structure" | "station";
+            systemId?: number;
+            systemName?: string;
+            typeId?: number;
+            totalCount: number;
+            totalVolume: number;
+            assetCount: number;
+            personalAssetCount: number;
+            corporationAssetCount: number;
+            resolved: boolean;
+          }>;
+        };
+        const locations = (data.locations ?? []).map((location): EsiStructure => ({
+          structureId: location.locationId,
+          name: location.name,
+          locationType: location.locationType,
+          systemId: location.systemId,
+          systemName: location.systemName,
+          type: location.typeId ? `Type ${location.typeId}` : undefined,
+          assetCount: location.assetCount,
+          personalAssetCount: location.personalAssetCount,
+          corporationAssetCount: location.corporationAssetCount,
+          resolved: location.resolved,
+          ownedByCorporation: false,
+          rigs: [],
+          totalCount: location.totalCount,
+          totalVolume: location.totalVolume,
+          bonuses: {
+            manufacturing: { me: 0, te: 0, cost: 0 },
+            research: { me: 0, te: 0, cost: 0 },
+            reactions: { me: 0, te: 0, cost: 0 },
+            invention: { me: 0, te: 0, cost: 0 },
+          },
+        }));
+        if (!cancelled) setEsiStructures(locations);
       } catch {
         if (!cancelled) setEsiStructures([]);
       }
@@ -475,7 +512,8 @@ export default function LocationsPage() {
       type: type.name,
       size: esiStructure.size ?? type.size,
       name: localOverride?.name ?? esiStructure.name,
-      rigs: localOverride?.rigs ??
+      rigs:
+        localOverride?.rigs ??
         (esiStructure.rigs.length > 0 ? esiStructure.rigs : ["No Rig", "No Rig", "No Rig"]),
     });
     setIsDialogOpen(true);
@@ -507,23 +545,23 @@ export default function LocationsPage() {
             <p className={styles.panelKicker}>02 / ESI INVENTORY</p>
             <h2>Locations with assets</h2>
           </div>
-            <div className={styles.locationControls}>
-              <label>
-                <span>SORT</span>
-                <select
-                  aria-label="Sort locations"
-                  value={locationSort}
-                  onChange={(event) => setLocationSort(event.target.value as LocationSort)}
-                >
-                  {locationSortOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <span className={styles.panelDescription}>{displayedEsiStructures.length} found</span>
-            </div>
+          <div className={styles.locationControls}>
+            <label>
+              <span>SORT</span>
+              <select
+                aria-label="Sort locations"
+                value={locationSort}
+                onChange={(event) => setLocationSort(event.target.value as LocationSort)}
+              >
+                {locationSortOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className={styles.panelDescription}>{displayedEsiStructures.length} found</span>
+          </div>
         </div>
         {displayedEsiStructures.length === 0 ? (
           <div className={styles.emptyBuildList}>
@@ -540,11 +578,12 @@ export default function LocationsPage() {
                   <small>
                     {structure.locationType === "station"
                       ? "Station"
-                      : structure.type ?? "Structure"}
-                      {" · "}
-                    {structure.assetCount.toLocaleString()} records · {structure.totalCount.toLocaleString()} quantity ·{" "}
-                    {structure.totalVolume.toLocaleString(undefined, { maximumFractionDigits: 2 })} m³ Volume ·{" "}
-                    {structure.personalAssetCount.toLocaleString()} character ·{" "}
+                      : (structure.type ?? "Structure")}
+                    {" · "}
+                    {structure.assetCount.toLocaleString()} records ·{" "}
+                    {structure.totalCount.toLocaleString()} quantity ·{" "}
+                    {structure.totalVolume.toLocaleString(undefined, { maximumFractionDigits: 2 })}{" "}
+                    m³ Volume · {structure.personalAssetCount.toLocaleString()} character ·{" "}
                     {structure.corporationAssetCount.toLocaleString()} corp
                     {structure.locationType === "structure"
                       ? ` · ${structure.rigs.filter((rig) => rig !== "No Rig").length} rig${structure.rigs.filter((rig) => rig !== "No Rig").length === 1 ? "" : "s"}`
@@ -561,11 +600,11 @@ export default function LocationsPage() {
                   {visibleBonusSummaries(structure.bonuses).length > 0 && (
                     <small className={styles.locationBonusLine}>
                       {visibleBonusSummaries(structure.bonuses).map(([label, bonuses], index) => (
-                          <span key={label}>
-                            {index > 0 ? " · " : ""}
-                            {formatBonusSummary(label, bonuses)}
-                          </span>
-                        ))}
+                        <span key={label}>
+                          {index > 0 ? " · " : ""}
+                          {formatBonusSummary(label, bonuses)}
+                        </span>
+                      ))}
                     </small>
                   )}
                 </span>

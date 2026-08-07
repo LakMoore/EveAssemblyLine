@@ -19,6 +19,7 @@ Do not present prototype data as live EVE data. When replacing a mock path, keep
 - Read the nearby implementation and relevant section of `FullPlan.md` before editing. Keep changes focused on the owning module.
 - Preserve existing user changes and avoid unrelated refactors.
 - Follow the existing TypeScript style: strict typing, double quotes, semicolons, the `@/*` alias, and small focused modules.
+- Generate well-commented code: add concise comments before non-obvious algorithms, data-flow boundaries, and important invariants, while avoiding comments that merely restate the code.
 - Keep server-only code and secrets out of client components. Never send access tokens or refresh tokens to the browser, log them, or include them in error messages.
 - Validate and narrow all external input at API boundaries. Do not rely on a TypeScript cast as runtime validation. Reject malformed IDs, quantities, locations, settings, and character selections with useful 4xx responses.
 - Use Next.js App Router conventions already in the project. This project uses Next.js 16; before changing framework APIs, consult the relevant guide under `node_modules/next/dist/docs/` as required by `AGENTS.md`.
