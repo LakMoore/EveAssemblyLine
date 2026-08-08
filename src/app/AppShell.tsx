@@ -3,7 +3,9 @@
 import { ReactNode, useEffect, useState } from "react";
 import Link from "next/link";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
-import { replaceEsiStock, type StockItem } from "@/lib/planning/stockStore";
+import { replaceEsiStock, replaceMarketOrderStock, type StockItem } from "@/lib/planning/stockStore";
+import { settingsStorageKey, type PlannerSettings } from "@/lib/planning/preferences";
+import { loadClientSession, loadClientStock } from "@/lib/client/requestCache";
 import styles from "./page.module.css";
 
 const languageStorageKey = "assembly-line-language";
@@ -23,6 +25,26 @@ type EsiStockResponse = {
     systemName?: string;
     items: StockItem[];
   }>;
+};
+type MarketOrderResponse = { marketOrderStock?: StockItem[] };
+
+function loadPlannerSettings(): PlannerSettings {
+  try {
+    const stored = window.localStorage.getItem(settingsStorageKey);
+    return stored ? { ...defaultPlannerSettings, ...JSON.parse(stored) } : defaultPlannerSettings;
+  } catch {
+    return defaultPlannerSettings;
+  }
+}
+
+const defaultPlannerSettings: PlannerSettings = {
+  includeCorporationAssets: true,
+  personalSellOrdersAsStock: true,
+  allCorporationSellOrdersAsStock: true,
+  myCorporationSellOrdersAsStock: true,
+  respectActiveJobs: true,
+  defaultMe: 10,
+  defaultTe: 20,
 };
 
 export default function AppShell({
@@ -48,8 +70,7 @@ export default function AppShell({
   const language = controlledLanguage ?? localLanguage;
 
   useEffect(() => {
-    fetch("/api/auth/session")
-      .then((response) => response.json())
+    loadClientSession()
       .then((data: { authenticated?: boolean; characters?: CharacterSummary[] }) => {
         setAuthenticated(Boolean(data.authenticated));
         setCharacters(data.characters ?? []);
@@ -77,6 +98,7 @@ export default function AppShell({
   async function refreshData() {
     if (isRefreshingData || !authenticated || characters.length === 0) return;
     setIsRefreshingData(true);
+    let stockLocations: EsiStockResponse["locations"] | undefined;
     try {
       const response = await fetch("/api/state/refresh", {
         method: "POST",
@@ -90,13 +112,11 @@ export default function AppShell({
       };
       if (!response.ok || data.success !== true) return;
       try {
-        const stockResponse = await fetch(`/api/state/stock?language=${encodeURIComponent(language)}`, {
-          cache: "no-store",
-        });
-        if (stockResponse.ok) {
-          const stockData = (await stockResponse.json()) as EsiStockResponse;
+        const stockData = await loadClientStock(language, true);
+        stockLocations = stockData.locations ?? [];
+        {
           await replaceEsiStock(
-            (stockData.locations ?? []).map((location) => ({
+            stockLocations.map((location) => ({
               systemId: location.systemId ?? 0,
               systemName: location.systemName ?? "Unknown system",
               structureId: String(location.locationId),
@@ -108,11 +128,28 @@ export default function AppShell({
         }
       } catch {
       }
+      try {
+        const settings = loadPlannerSettings();
+        const marketOrderResponse = await fetch(
+          `/api/state/marketOrders?${new URLSearchParams({
+            personalSellOrdersAsStock: String(settings.personalSellOrdersAsStock),
+            allCorporationSellOrdersAsStock: String(settings.allCorporationSellOrdersAsStock),
+            myCorporationSellOrdersAsStock: String(settings.myCorporationSellOrdersAsStock),
+          }).toString()}`,
+          { cache: "no-store" },
+        );
+        if (marketOrderResponse.ok) {
+          const marketOrders = (await marketOrderResponse.json()) as MarketOrderResponse;
+          await replaceMarketOrderStock(marketOrders.marketOrderStock ?? []);
+        }
+      } catch {
+      }
       window.dispatchEvent(
         new CustomEvent("assembly-line-esi-refreshed", {
           detail: {
             refreshedAt: data.refreshedAt ?? null,
             rateLimitedUntil: data.rateLimitedUntil ?? null,
+            stockLocations,
           },
         }),
       );

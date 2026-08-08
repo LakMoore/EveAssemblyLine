@@ -93,12 +93,23 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
   const inventionJobs = new Map<number, PlanResult["lists"]["inventionJobs"][number]>();
   const inventedBpcTypeIds = new Set<number>();
   const producedParts = new Map<number, number>();
-  const availableStock = request.stock
+  const standardStock = request.stock
     ?.filter((item) => item.category === "item")
+    .filter((item) => item.source !== "marketOrder")
     .reduce((map, item) => 
       map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity), new Map<number, number>()
     ) ?? new Map<number, number>() ;
-  const totalStock = new Map(availableStock);
+  const marketOrderStock = request.stock
+    ?.filter((item) => item.category === "item" && item.source === "marketOrder")
+    .reduce((map, item) =>
+      map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity), new Map<number, number>()
+    ) ?? new Map<number, number>();
+  const totalStock = new Map(standardStock);
+  const initialBuildTypeIds = new Set(request.items.map((item) => item.typeId));
+  for (const [typeId, quantity] of marketOrderStock) {
+    if (!initialBuildTypeIds.has(typeId)) continue;
+    totalStock.set(typeId, (totalStock.get(typeId) ?? 0) + quantity);
+  }
   const availableBlueprintCopies = request.stock
     ?.filter((item) => item.category === "bpc" && (item.runCount === undefined || item.runCount >= 0)
     ) ?? [];
@@ -135,6 +146,7 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
   }
   const usedRunsByBlueprint = new Map<number, number>();
   const consumedStock = new Map<number, number>();
+  const consumedMarketOrderStock = new Set<number>();
   const buildBlacklist = new Set(request.settings.buildBlacklist);
   const buyBlacklist = new Set(request.settings.buyBlacklist);
   const buildBlueprintsByTypeId = new Map<
@@ -164,6 +176,7 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
       buyQuantity: existing?.buyQuantity ?? 0,
       remainingStockQuantity: existing?.remainingStockQuantity ?? 0,
       remainingProductionQuantity: existing?.remainingProductionQuantity ?? 0,
+      fromMarketOrder: existing?.fromMarketOrder || consumedMarketOrderStock.has(typeId),
       ...update,
       ...(request.locations ? { locationId: request.locations.market } : {}),
     });
@@ -177,12 +190,12 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
     imageVariation: "icon" | "bp" | "bpc" = "icon",
   ) {
     return profiler.measure("addMaterial", async () => {
-      const stockAvailable = availableStock.get(typeId) ?? 0;
+      const stockAvailable = standardStock.get(typeId) ?? 0;
       const stockConsumed = Math.min(stockAvailable, quantity);
       if (stockConsumed > 0) consumedStock.set(typeId, (consumedStock.get(typeId) ?? 0) + stockConsumed);
       const remainingStock = stockAvailable - stockConsumed;
-      if (remainingStock > 0) availableStock.set(typeId, remainingStock);
-      else if (stockConsumed > 0) availableStock.delete(typeId);
+      if (remainingStock > 0) standardStock.set(typeId, remainingStock);
+      else if (stockConsumed > 0) standardStock.delete(typeId);
       const existing = materials.get(typeId);
       updateMaterial(typeId, fallbackName, {
         quantity: (existing?.quantity ?? 0) + quantity - stockConsumed,
@@ -201,6 +214,7 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
     fallbackName: string,
     stack: Set<number>,
     efficiency: Efficiency,
+    allowMarketOrderStock = false,
   ) {
     let phase = "stock";
     let activity = "unknown";
@@ -208,19 +222,34 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
     return profiler.measure("expand", async () => {
       if (quantity <= 0) return;
 
-      const stockAvailable = availableStock.get(typeId) ?? 0;
-      const stockConsumed = Math.min(stockAvailable, quantity);
+      const standardAvailable = standardStock.get(typeId) ?? 0;
+      const standardConsumed = Math.min(standardAvailable, quantity);
+      const marketAvailable = allowMarketOrderStock ? marketOrderStock.get(typeId) ?? 0 : 0;
+      const marketConsumed = Math.min(marketAvailable, quantity - standardConsumed);
+      const stockConsumed = standardConsumed + marketConsumed;
       updateMaterial(typeId, fallbackName, {
         requiredQuantity: (materials.get(typeId)?.requiredQuantity ?? 0) + requestedQuantity,
         stockQuantity: (materials.get(typeId)?.stockQuantity ?? 0) + stockConsumed,
       });
       if (stockConsumed > 0) consumedStock.set(typeId, (consumedStock.get(typeId) ?? 0) + stockConsumed);
       if (stockConsumed > 0) {
-        const remaining = stockAvailable - stockConsumed;
-        if (remaining > 0) availableStock.set(typeId, remaining);
-        else availableStock.delete(typeId);
+        if (standardConsumed > 0) {
+          const remainingStandard = standardAvailable - standardConsumed;
+          if (remainingStandard > 0) standardStock.set(typeId, remainingStandard);
+          else standardStock.delete(typeId);
+        }
+        if (marketConsumed > 0) {
+          const remainingMarket = marketAvailable - marketConsumed;
+          if (remainingMarket > 0) marketOrderStock.set(typeId, remainingMarket);
+          else marketOrderStock.delete(typeId);
+          consumedMarketOrderStock.add(typeId);
+        }
         quantity -= stockConsumed;
-        updateMaterial(typeId, fallbackName, { remainingStockQuantity: remaining });
+        updateMaterial(typeId, fallbackName, {
+          remainingStockQuantity:
+            (standardStock.get(typeId) ?? 0) + (marketOrderStock.get(typeId) ?? 0),
+          ...(marketConsumed > 0 ? { fromMarketOrder: true } : {}),
+        });
       }
       if (quantity <= 0) return;
 
@@ -374,7 +403,7 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
     await expand(item.typeId, item.quantity, item.name, new Set(), {
       me: clampEfficiency(item.me, 10),
       te: clampEfficiency(item.te, 20),
-    });
+    }, true);
   }
 
   await profiler.measure("invention", async () => {

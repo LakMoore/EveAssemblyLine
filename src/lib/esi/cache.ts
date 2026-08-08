@@ -44,7 +44,7 @@ type OwnerCache = {
   assembledShipsByItemId: Map<number, AssetRecord>;
   assembledStructureRigs: AssetRecord[];
   jobs?: EndpointCache<IndustryJobRecord[]>;
-  orders?: EndpointCache<MarketOrderRecord[]>;
+  marketOrders?: EndpointCache<MarketOrderRecord[]>;
   unresolvedAssetCount: number;
 };
 
@@ -371,7 +371,7 @@ export async function refreshCharacterState(
     assets?: EndpointCache<AssetRecord[] | null>;
     rootContainersById?: Map<number, AssetRecord>;
     jobs?: EndpointCache<IndustryJobRecord[] | null>;
-    orders?: EndpointCache<MarketOrderRecord[] | null>;
+    marketOrders?: EndpointCache<MarketOrderRecord[] | null>;
     corporations?: Array<{
       corporationId: number;
       assets?: EndpointCache<AssetRecord[] | null>;
@@ -379,8 +379,8 @@ export async function refreshCharacterState(
     }>;
   }[] = [];
   for (const characterId of characterIds) {
-    const record = await getCharacter(characterId);
-    if (!record) continue;
+    const character = await getCharacter(characterId);
+    if (!character) continue;
     const cache = getCache(characterCaches, characterId);
     const characterSummary: (typeof summary)[number] = { characterId };
     try {
@@ -394,11 +394,11 @@ export async function refreshCharacterState(
           (needsAssetLocationResolution(cache) || needsCompleteAssetGraph(cache)) &&
           Array.isArray(cache.allAssetsRaw.lastBody)
         ) {
-          const token = await getUsableToken(record, "personal");
+          const token = await getUsableToken(character, "personal");
           await cacheResolvedAssets(cache, cache.allAssetsRaw.lastBody as AssetRecord[], token);
         }
       } else {
-        const result = await fetchCharacterAssets(record, cache.allAssetsRaw?.etag);
+        const result = await fetchCharacterAssets(character, cache.allAssetsRaw?.etag);
         if (result.notModified && cache.allAssetsRaw) {
           const assets =
             result.blueprints.length > 0
@@ -424,41 +424,41 @@ export async function refreshCharacterState(
         characterSummary.assets = cache.allAssetsRaw;
         characterSummary.rootContainersById = cache.rootContainersById;
       }
-      const jobs = await fetchCharacterIndustryJobs(record);
+      const jobs = await fetchCharacterIndustryJobs(character);
       cache.jobs = setFresh(jobs.jobs, jobs.headers);
       characterSummary.jobs = cache.jobs;
     } catch (error) {
-      await rebuildResolvedAssets(cache, record, "personal");
+      await rebuildResolvedAssets(cache, character, "personal");
       characterSummary.assets = {
         ...(cache.allAssetsRaw ?? { lastBody: null }),
         ...endpointStatus(error),
       };
     }
     try {
-      const orders = await fetchCharacterMarketOrders(record, cache.orders?.etag);
-      if (orders.notModified && cache.orders) {
-        cache.orders = setFresh(cache.orders.lastBody, orders.headers, cache.orders);
-        cache.orders.status = "cached";
+      const orders = await fetchCharacterMarketOrders(character, cache.marketOrders?.etag);
+      if (orders.notModified && cache.marketOrders) {
+        cache.marketOrders = setFresh(cache.marketOrders.lastBody, orders.headers, cache.marketOrders);
+        cache.marketOrders.status = "cached";
       } else if (orders.orders) {
-        cache.orders = setFresh(orders.orders, orders.headers, cache.orders);
+        cache.marketOrders = setFresh(orders.orders, orders.headers, cache.marketOrders);
       }
-      characterSummary.orders = cache.orders;
+      characterSummary.marketOrders = cache.marketOrders;
     } catch (error) {
-      characterSummary.orders = {
-        ...(cache.orders ?? { lastBody: null }),
+      characterSummary.marketOrders = {
+        ...(cache.marketOrders ?? { lastBody: null }),
         ...endpointStatus(error),
       };
     }
 
-    if (record.corpAuthCompleted && record.hasDirectorRole && record.corporationId) {
-      const corpCache = getCache(corporationCaches, record.corporationId);
+    if (character.corpAuthCompleted && character.hasDirectorRole && character.corporationId) {
+      const corpCache = getCache(corporationCaches, character.corporationId);
       const corpSummary: {
         corporationId: number;
         assets?: EndpointCache<AssetRecord[] | null>;
         rootContainersById?: Map<number, AssetRecord>;
         jobs?: EndpointCache<IndustryJobRecord[] | null>;
-        orders?: EndpointCache<MarketOrderRecord[] | null>;
-      } = { corporationId: record.corporationId };
+        marketOrders?: EndpointCache<MarketOrderRecord[] | null>;
+      } = { corporationId: character.corporationId };
       try {
         if (
           !options.force &&
@@ -470,11 +470,11 @@ export async function refreshCharacterState(
             (needsAssetLocationResolution(corpCache) || needsCompleteAssetGraph(corpCache)) &&
             Array.isArray(corpCache.allAssetsRaw.lastBody)
           ) {
-            const token = await getUsableToken(record, "corp");
+            const token = await getUsableToken(character, "corp");
             await cacheResolvedAssets(corpCache, corpCache.allAssetsRaw.lastBody as AssetRecord[], token);
           }
         } else {
-          const result = await fetchCorporationAssets(record, corpCache.allAssetsRaw?.etag);
+          const result = await fetchCorporationAssets(character, corpCache.allAssetsRaw?.etag);
           if (result.notModified && corpCache.allAssetsRaw) {
             const assets =
               result.blueprints.length > 0
@@ -504,14 +504,14 @@ export async function refreshCharacterState(
           corpSummary.rootContainersById = corpCache.rootContainersById;
         }
       } catch (error) {
-        await rebuildResolvedAssets(corpCache, record, "corp");
+        await rebuildResolvedAssets(corpCache, character, "corp");
         corpSummary.assets = {
           ...(corpCache.allAssetsRaw ?? { lastBody: null }),
           ...endpointStatus(error),
         };
       }
       try {
-        const jobs = await fetchCorporationIndustryJobs(record);
+        const jobs = await fetchCorporationIndustryJobs(character);
         corpCache.jobs = setFresh(jobs.jobs, jobs.headers);
         corpSummary.jobs = corpCache.jobs;
       } catch (error) {
@@ -521,17 +521,17 @@ export async function refreshCharacterState(
         };
       }
       try {
-        const orders = await fetchCorporationMarketOrders(record, corpCache.orders?.etag);
-        if (orders.notModified && corpCache.orders) {
-          corpCache.orders = setFresh(corpCache.orders.lastBody, orders.headers, corpCache.orders);
-          corpCache.orders.status = "cached";
+        const orders = await fetchCorporationMarketOrders(character, corpCache.marketOrders?.etag);
+        if (orders.notModified && corpCache.marketOrders) {
+          corpCache.marketOrders = setFresh(corpCache.marketOrders.lastBody, orders.headers, corpCache.marketOrders);
+          corpCache.marketOrders.status = "cached";
         } else if (orders.orders) {
-          corpCache.orders = setFresh(orders.orders, orders.headers, corpCache.orders);
+          corpCache.marketOrders = setFresh(orders.orders, orders.headers, corpCache.marketOrders);
         }
-        corpSummary.orders = corpCache.orders;
+        corpSummary.marketOrders = corpCache.marketOrders;
       } catch (error) {
-        corpSummary.orders = {
-          ...(corpCache.orders ?? { lastBody: null }),
+        corpSummary.marketOrders = {
+          ...(corpCache.marketOrders ?? { lastBody: null }),
           ...endpointStatus(error),
         };
       }
@@ -814,7 +814,7 @@ export async function getMarketOrderStock(
   const stock: PlanStockItem[] = [];
   if (options.personalSellOrdersAsStock) {
     for (const characterId of characterIds) {
-      const orders = getCache(characterCaches, characterId).orders?.lastBody;
+      const orders = getCache(characterCaches, characterId).marketOrders?.lastBody;
       if (!Array.isArray(orders)) continue;
       for (const order of orders as MarketOrderRecord[]) {
         if (order.isBuyOrder || order.isCorporation || order.volumeRemain <= 0) continue;
@@ -827,6 +827,7 @@ export async function getMarketOrderStock(
           ownerId: order.ownerId,
           locationResolved: true,
           category: "item",
+          source: "marketOrder",
         });
       }
     }
@@ -848,7 +849,7 @@ export async function getMarketOrderStock(
       .map((character) => character.corporationId!),
   );
   for (const corporationId of corporationIds) {
-    const orders = getCache(corporationCaches, corporationId).orders?.lastBody;
+    const orders = getCache(corporationCaches, corporationId).marketOrders?.lastBody;
     if (!Array.isArray(orders)) continue;
     for (const order of orders as MarketOrderRecord[]) {
       if (order.isBuyOrder || order.volumeRemain <= 0) continue;
@@ -868,6 +869,7 @@ export async function getMarketOrderStock(
         ownerId: order.ownerId,
         locationResolved: true,
         category: "item",
+        source: "marketOrder",
       });
     }
   }
@@ -904,7 +906,7 @@ export async function getStateStatus(characterIds: number[]) {
         status: "cached" as const,
         lastBody: null,
       },
-      orders: getCache(characterCaches, characterId).orders ?? {
+      orders: getCache(characterCaches, characterId).marketOrders ?? {
         status: "cached" as const,
         lastBody: null,
       },
@@ -914,7 +916,7 @@ export async function getStateStatus(characterIds: number[]) {
           status: "cached" as const,
           lastBody: null,
         },
-        orders: getCache(corporationCaches, corporationId).orders ?? {
+        orders: getCache(corporationCaches, corporationId).marketOrders ?? {
           status: "cached" as const,
           lastBody: null,
         },

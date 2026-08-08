@@ -43,6 +43,7 @@ type StockItem = {
   }>;
   assembledVolume: number;
   packagedVolume?: number;
+  techLevel?: number;
   category: string;
   marketCategory?: string;
   inBuild?: boolean;
@@ -294,6 +295,7 @@ function addContribution(
     isPackaged: contribution.isPackaged,
     assembledVolume: type.volume ?? 0,
     packagedVolume: type.packagedVolume,
+    techLevel: type.techLevel,
     ...categorized,
     category,
   };

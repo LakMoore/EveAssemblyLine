@@ -9,6 +9,8 @@ export type StockLocation = {
 };
 
 export type StockItem = Pick<BuildItem, "typeId" | "name" | "quantity"> & {
+  source?: "marketOrder";
+  marketOrderQuantity?: number;
   isPackaged?: boolean;
   runCount?: number;
   me?: number;
@@ -17,7 +19,7 @@ export type StockItem = Pick<BuildItem, "typeId" | "name" | "quantity"> & {
   assembledVolume?: number;
   packagedVolume?: number;
   techLevel?: number;
-  category?: "bpo" | "bpc" | "reaction" | "item";
+  category?: "blueprint" | "bpo" | "bpc" | "reaction" | "item";
   marketCategory?: string;
   inBuild?: boolean;
   inUse?: boolean;
@@ -36,7 +38,7 @@ export type StockItem = Pick<BuildItem, "typeId" | "name" | "quantity"> & {
 };
 
 export type StockRecord = StockLocation & {
-  source?: "esi";
+  source?: "esi" | "marketOrder";
   items: StockItem[];
 };
 
@@ -121,6 +123,54 @@ export async function replaceEsiStock(records: StockRecord[]) {
     };
     transaction.onerror = () => {
       reject(transaction.error ?? new Error("Could not replace cached ESI stock."));
+    };
+  });
+}
+
+export async function replaceMarketOrderStock(items: StockItem[]) {
+  const database = await getPlanningDatabase();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(stockStoreName, "readwrite");
+    const store = transaction.objectStore(stockStoreName);
+    const request = store.getAll();
+    request.onsuccess = () => {
+      const records = request.result.filter(isStockRecord);
+      const marketOrderQuantities = new Map<number, number>();
+      for (const item of items) {
+        marketOrderQuantities.set(
+          item.typeId,
+          (marketOrderQuantities.get(item.typeId) ?? 0) + item.quantity,
+        );
+      }
+      for (const record of records) {
+        if (record.source === "marketOrder") store.delete(locationKey(record));
+        else {
+          store.put({
+            ...record,
+            items: record.items.map((item) => ({
+              ...item,
+              marketOrderQuantity: marketOrderQuantities.get(item.typeId),
+            })),
+          }, locationKey(record));
+        }
+      }
+      if (items.length > 0) {
+        store.put({
+          systemId: 0,
+          systemName: "Market orders",
+          structureId: "market-orders",
+          structureName: "Market sell orders",
+          source: "marketOrder",
+          items: items.map((item) => ({ ...item, source: "marketOrder" as const })),
+        }, "0:market-orders");
+      }
+    };
+    request.onerror = () => {
+      reject(request.error ?? new Error("Could not replace cached market orders."));
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => {
+      reject(transaction.error ?? new Error("Could not replace cached market orders."));
     };
   });
 }

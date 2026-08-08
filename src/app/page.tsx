@@ -3,7 +3,7 @@
 import { FormEvent, KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import type { PlanResult } from "@/lib/planning/types";
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
-import { loadStockRecords, type StockItem, type StockRecord } from "@/lib/planning/stockStore";
+import { loadStockRecords, type StockRecord } from "@/lib/planning/stockStore";
 import {
   defaultLocations,
   defaultSettings,
@@ -20,11 +20,21 @@ import styles from "./page.module.css";
 
 type PlannerTab = "Plan" | "Buy" | "Copy" | "Invent" | "React" | "Manufacture";
 const tabs: PlannerTab[] = ["Plan", "Buy", "Copy", "Invent", "React", "Manufacture"];
-type BuildItem = { name: string; typeId: number; quantity: number; me: number; te: number };
+type BuildItem = {
+  name: string;
+  typeId: number;
+  quantity: number;
+  me: number;
+  te: number;
+  category?: "blueprint" | "bpo" | "bpc" | "reaction" | "item";
+};
 type TypeResult = { name: string; typeId: number };
-type PasteResult = { name: string; quantity?: number; typeId?: number; error?: string };
-type EsiStockResponse = {
-  marketOrderStock?: StockItem[];
+type PasteResult = {
+  name: string;
+  quantity?: number;
+  typeId?: number;
+  category?: BuildItem["category"];
+  error?: string;
 };
 function formatDuration(totalSeconds: number) {
   const totalMinutes = Math.ceil(totalSeconds / 60);
@@ -86,7 +96,9 @@ async function localizeItems(buildItems: BuildItem[], targetLanguage: SdeLanguag
     const metadataByTypeId = new Map(metadata.map((item) => [item.typeId, item]));
     return buildItems.map((item) => {
       const localizedItem = metadataByTypeId.get(item.typeId);
-      return localizedItem ? { ...item, name: localizedItem.name } : item;
+      return localizedItem
+        ? { ...item, name: localizedItem.name, category: localizedItem.category }
+        : item;
     });
   } catch {
     return buildItems;
@@ -169,20 +181,7 @@ export default function Home() {
       const stockLoad = stockLoadPromiseRef.current ?? loadStockRecords();
       stockLoadPromiseRef.current = stockLoad;
       const localRecords = await stockLoad;
-      let requestedStock = localRecords.flatMap((record) => record.items);
-      try {
-        const orderResponse = await fetch(
-          `/api/state/assets?${new URLSearchParams({
-            personalSellOrdersAsStock: String(settings.personalSellOrdersAsStock),
-            allCorporationSellOrdersAsStock: String(settings.allCorporationSellOrdersAsStock),
-            myCorporationSellOrdersAsStock: String(settings.myCorporationSellOrdersAsStock),
-          }).toString()}`,
-        );
-        if (orderResponse.ok) {
-          const orderData = (await orderResponse.json()) as EsiStockResponse;
-          requestedStock = [...requestedStock, ...(orderData.marketOrderStock ?? [])];
-        }
-      } catch {}
+      const requestedStock = localRecords.flatMap((record) => record.items);
       const response = await fetch("/api/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -219,7 +218,14 @@ export default function Home() {
     }
   }
 
-  function importItems(importedItems: Array<{ name: string; typeId: number; quantity: number }>) {
+  function importItems(
+    importedItems: Array<{
+      name: string;
+      typeId: number;
+      quantity: number;
+      category?: BuildItem["category"];
+    }>,
+  ) {
     setItems((current) => {
       const next = [...current];
       for (const imported of importedItems) {
@@ -289,7 +295,17 @@ export default function Home() {
             ) : (
               items.map((item, index) => (
                 <div className={styles.itemRow} key={item.typeId}>
-                  <TypeIdentity name={item.name} typeId={item.typeId} />
+                  <TypeIdentity
+                    name={item.name}
+                    typeId={item.typeId}
+                    variation={
+                      item.category === "blueprint" || item.category === "bpo"
+                        ? "bp"
+                        : item.category === "bpc"
+                          ? "bpc"
+                          : "icon"
+                    }
+                  />
                   <input
                     aria-label={`${item.name} quantity`}
                     type="number"
@@ -419,7 +435,14 @@ function PasteListModal({
 }: {
   language: SdeLanguage;
   onCancel: () => void;
-  onImport: (items: Array<{ name: string; typeId: number; quantity: number }>) => void;
+  onImport: (
+    items: Array<{
+      name: string;
+      typeId: number;
+      quantity: number;
+      category?: BuildItem["category"];
+    }>,
+  ) => void;
 }) {
   const [text, setText] = useState("");
   const [results, setResults] = useState<PasteResult[]>([]);
@@ -459,6 +482,7 @@ function PasteListModal({
             name: item.name,
             typeId: item.typeId!,
             quantity: item.quantity!,
+            category: item.category,
           })),
         );
       }
@@ -523,7 +547,17 @@ function PasteListModal({
                 key={`${item.name}-${index}`}
               >
                 {item.typeId ? (
-                  <TypeIdentity name={item.name} typeId={item.typeId} />
+                  <TypeIdentity
+                    name={item.name}
+                    typeId={item.typeId}
+                    variation={
+                      item.category === "blueprint" || item.category === "bpo"
+                        ? "bp"
+                        : item.category === "bpc"
+                          ? "bpc"
+                          : "icon"
+                    }
+                  />
                 ) : (
                   <span>{item.name}</span>
                 )}
@@ -792,6 +826,7 @@ function PlanList({
           const isPlanBpc = "kind" in entry && entry.kind === "bpc";
           const isBpcPurchase = activeTab === "Buy" && "bpoCount" in entry;
           const isCopyOfBpo = activeTab === "Copy" && "bpoCount" in entry && entry.bpoCount > 0;
+          const isBlueprintName = / blueprint$/i.test(name);
           const isPlanReaction = "kind" in entry && entry.kind === "reaction";
           const detail =
             "fromLocationId" in entry && activeTab !== "Buy"
@@ -801,6 +836,7 @@ function PlanList({
                 : "";
           const totalTime =
             "totalTime" in entry && typeof entry.totalTime === "number" ? entry.totalTime : null;
+          const isSellOrder = "fromMarketOrder" in entry && entry.fromMarketOrder === true;
           const materialEntry =
             (activeTab === "Buy" && !isBpcPurchase && "quantity" in entry) ||
             (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
@@ -829,6 +865,8 @@ function PlanList({
               ? entry.imageVariation
               : isCopyOfBpo || (isPlanBpc && entry.bpoCount > 0)
                 ? "bp"
+                : isBlueprintName
+                  ? "bpc"
                 : activeTab === "Manufacture" ||
                     activeTab === "React" ||
                     isPlanBpc ||
@@ -847,13 +885,16 @@ function PlanList({
               className={activeTab === "Plan" ? styles.planTableRow : styles.planRow}
               key={`${activeTab}-${index}`}
             >
-              <TypeIdentity
-                name={name}
-                typeId={typeId}
-                imageSize={40}
-                variation={imageVariation}
-                className={styles.planTypeIdentity}
-              />
+              <div className={styles.planTypeCell}>
+                <TypeIdentity
+                  name={name}
+                  typeId={typeId}
+                  imageSize={40}
+                  variation={imageVariation}
+                  className={styles.planTypeIdentity}
+                />
+                {isSellOrder && <span className={styles.sellOrderTag}>Sell Order</span>}
+              </div>
               {activeTab === "Plan" ? (
                 planColumns.map((column) =>
                   planCells?.[column] ? (

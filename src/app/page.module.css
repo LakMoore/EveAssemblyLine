@@ -1192,6 +1192,23 @@
     min-width: 0
 }
 
+.planTypeCell {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px
+}
+
+.sellOrderTag {
+    display: inline-block;
+    padding: 3px 5px;
+    border: 1px solid #c28a4a;
+    color: #e4b36f;
+    font: 9px 'DM Mono';
+    letter-spacing: .3px;
+    white-space: nowrap
+}
+
 .planRowMain strong,
 .planRowMain small,
 .planRowAmount strong,

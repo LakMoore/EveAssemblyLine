@@ -14,6 +14,7 @@ import {
 import { loadStructures } from "@/lib/planning/structureStore";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
+import { loadClientStock } from "@/lib/client/requestCache";
 import { type KnownStructure } from "@/lib/planning/preferences";
 import TypeIdentity from "../components/TypeIdentity";
 import styles from "../page.module.css";
@@ -111,17 +112,15 @@ export default function StockPage() {
   const [pasting, setPasting] = useState<StockRecord | null>(null);
   const [isHydratingVolumes, setIsHydratingVolumes] = useState(false);
   useEffect(() => {
-    async function loadPageData() {
+    async function loadPageData(refreshedLocations?: EsiStockResponse["locations"]) {
       setIsHydratingVolumes(true);
       try {
         const [records, structures, esiResponse] = await Promise.all([
           loadStockRecords().catch(() => []),
           loadStructures().catch(() => []),
-          fetch(
-            `/api/state/stock?${new URLSearchParams({
-              language,
-            }).toString()}`,
-          ),
+          refreshedLocations
+            ? Promise.resolve({ ok: true, json: async () => ({ locations: refreshedLocations }) })
+            : loadClientStock(language).then((data) => ({ ok: true, json: async () => data })),
         ]);
         const esiData = (await esiResponse.json()) as EsiStockResponse;
         const esiLocations = esiResponse.ok
@@ -193,7 +192,28 @@ export default function StockPage() {
           ),
         );
         const hydratedRecords = await hydrateVolumes(combinedRecords, language);
-        const sortedHydratedRecords = [...hydratedRecords].sort((left, right) =>
+        const marketOrderQuantities = new Map<number, number>();
+        for (const record of hydratedRecords) {
+          if (record.source !== "marketOrder") continue;
+          for (const item of record.items) {
+            marketOrderQuantities.set(
+              item.typeId,
+              (marketOrderQuantities.get(item.typeId) ?? 0) + item.quantity,
+            );
+          }
+        }
+        const recordsWithMarketQuantities = hydratedRecords.map((record) =>
+          record.source === "marketOrder"
+            ? record
+            : {
+                ...record,
+                items: record.items.map((item) => ({
+                  ...item,
+                  marketOrderQuantity: marketOrderQuantities.get(item.typeId),
+                })),
+              },
+        );
+        const sortedHydratedRecords = [...recordsWithMarketQuantities].sort((left, right) =>
           left.systemName.localeCompare(right.systemName),
         );
         setLocations(sortedHydratedRecords);
@@ -205,9 +225,9 @@ export default function StockPage() {
           );
         });
         const previousByLocation = new Map(records.map((record) => [locationKey(record), record]));
-        const currentKeys = new Set(hydratedRecords.map((record) => locationKey(record)));
+        const currentKeys = new Set(recordsWithMarketQuantities.map((record) => locationKey(record)));
         await Promise.all([
-          ...hydratedRecords.flatMap((record) => {
+          ...recordsWithMarketQuantities.flatMap((record) => {
             const previous = previousByLocation.get(locationKey(record));
             const writes = record !== previous ? [saveStock(record)] : [];
             if (previous && locationKey(previous) !== locationKey(record))
@@ -229,9 +249,16 @@ export default function StockPage() {
     }
     void loadPageData();
     const handleRefresh = (event: Event) => {
-      const detail = (event as CustomEvent<{ rateLimitedUntil?: string | null }>).detail;
+      const detail = (event as CustomEvent<{
+        rateLimitedUntil?: string | null;
+        stockLocations?: EsiStockResponse["locations"];
+      }>).detail;
       if (detail?.rateLimitedUntil) return;
-      void loadPageData();
+      if (!detail?.stockLocations) {
+        void loadPageData();
+        return;
+      }
+      void loadPageData(detail.stockLocations);
     };
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
     return () => window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
@@ -244,7 +271,6 @@ export default function StockPage() {
       `${right.systemName} ${right.structureName}`,
     );
   });
-
   async function addLocation(location: StockRecord) {
     if (locations.some((current) => locationKey(current) === locationKey(location))) {
       setIsAddOpen(false);
@@ -621,7 +647,7 @@ function StockLocationCard({
           <p className={styles.panelKicker}>{location.systemName}</p>
           <h3>{location.structureName}</h3>
         </div>
-        {!isEsiLocation && (
+        {!isEsiLocation && location.source !== "marketOrder" && (
           <div className={styles.stockCardActions}>
             <button
               type="button"
@@ -822,6 +848,8 @@ function ViewItemsModal({
           <div className={styles.stockList}>
             {displayItems.map(({ item, blueprints, reactionJobs }) => {
               const counts = blueprintCounts.get(item.typeId);
+              const marketOrderQuantity = item.marketOrderQuantity ?? 0;
+              const isMarketOrder = item.source === "marketOrder";
               const isBlueprint = Boolean(blueprints);
               const isReaction = Boolean(reactionJobs);
               const reactionInUse =
@@ -1017,7 +1045,12 @@ function ViewItemsModal({
                       )}
                     </div>
                   ) : (
-                    <strong>{`${item.quantity.toLocaleString()}${item.inBuild ? " · In Build" : ""}${item.inUse ? " · In Use" : ""}`}</strong>
+                    <strong>
+                      {isMarketOrder
+                        ? `${item.quantity.toLocaleString()} on market`
+                        : `${item.quantity.toLocaleString()} stock${marketOrderQuantity > 0 ? ` · ${marketOrderQuantity.toLocaleString()} on market` : ""}${item.inBuild ? " · In Build" : ""}${item.inUse ? " · In Use" : ""}`}
+                      {isMarketOrder && <span className={styles.sellOrderTag}>Sell Order</span>}
+                    </strong>
                   )}
                 </div>
               );
@@ -1223,10 +1256,23 @@ function mergeItems(existing: StockItem[], imported: StockItem[]) {
 }
 
 async function hydrateVolumes(records: StockRecord[], language: SdeLanguage) {
+  const typeIdsNeedingMetadata = records.flatMap((record) =>
+    record.items
+      .filter(
+        (item) =>
+          item.assembledVolume === undefined ||
+          (item.isPackaged && item.packagedVolume === undefined) ||
+          item.techLevel === undefined ||
+          item.category === undefined ||
+          item.marketCategory === undefined,
+      )
+      .map((item) => item.typeId),
+  );
+  if (typeIdsNeedingMetadata.length === 0) return records;
   let metadata: Awaited<ReturnType<typeof fetchTypeMetadata>> = [];
   try {
     metadata = await fetchTypeMetadata(
-      records.flatMap((record) => record.items.map((item) => item.typeId)),
+      typeIdsNeedingMetadata,
       language,
     );
   } catch {

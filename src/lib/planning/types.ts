@@ -6,6 +6,7 @@ export interface BuildItem {
   quantity: number;
   me: number;
   te: number;
+  category?: "blueprint" | "bpo" | "bpc" | "reaction" | "item";
 }
 
 export interface PlanStockItem {
@@ -19,7 +20,8 @@ export interface PlanStockItem {
   ownerType?: "character" | "corporation";
   ownerId?: number;
   locationResolved?: boolean;
-  category?: "bpo" | "bpc" | "reaction" | "item";
+  category?: "blueprint" | "bpo" | "bpc" | "reaction" | "item";
+  source?: "marketOrder";
 }
 
 export interface BlueprintPrint {
@@ -90,6 +92,7 @@ export interface PlanResult {
       buyQuantity: number;
       remainingStockQuantity: number;
       remainingProductionQuantity: number;
+      fromMarketOrder?: boolean;
       imageVariation?: "icon" | "bp" | "bpc";
       locationId?: number;
     }>;

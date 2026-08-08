@@ -5,7 +5,7 @@ import AppShell from "../AppShell";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import styles from "./imagechecker.module.css";
 
-const variations = ["icon", "render", "bpo", "bpc", "relic"] as const;
+const variations = ["icon", "render", "bp", "bpc", "relic"] as const;
 type Variation = (typeof variations)[number];
 type ImageStatus = "checking" | "ok" | "missing";
 type ImageResults = Record<Variation, ImageStatus>;
@@ -21,7 +21,7 @@ type BatchResponse = {
 const emptyResults = (): ImageResults => ({
   icon: "checking",
   render: "checking",
-  bpo: "checking",
+  bp: "checking",
   bpc: "checking",
   relic: "checking",
 });
