@@ -27,6 +27,8 @@ export interface BlueprintPrint {
   runs: number;
   me?: number;
   te?: number;
+  activity?: string;
+  endDate?: string;
 }
 
 export interface PlanRequest {

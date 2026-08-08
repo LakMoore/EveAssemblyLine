@@ -57,8 +57,17 @@ export interface AssetRecord {
   isSingleton: boolean;
   ownerType: "character" | "corporation";
   ownerId: number;
-  rootLocationId?: number;
-  rootLocationKind: "structure" | "station" | "solar_system" | "ship" | undefined;
+  rootLocation?: AssetRecord | AssetLocation;
+}
+
+export interface AssetLocation {
+  locationId: number;
+  kind: "station" | "structure" | "solar_system";
+  name?: string;
+  typeId?: number;
+  systemId?: number;
+  regionId?: number;
+  resolved: boolean;
 }
 
 export interface IndustryJobRecord {

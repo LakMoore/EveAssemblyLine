@@ -1,11 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth/session";
-import {
-  getResolvedAssetIndex,
-  getResolvedAssets,
-  getResolvedContainersById,
-  getRunningIndustryJobs,
-} from "@/lib/esi/cache";
+import { getResolvedAssetIndex, getResolvedAssets, getRunningIndustryJobs } from "@/lib/esi/cache";
 import { fetchLocationMetadata, getUsableToken } from "@/lib/esi/client";
 import { getCharacter } from "@/lib/auth/tokensStore";
 import {
@@ -19,7 +14,17 @@ import {
 } from "@/cache/services/sdeCache";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { categorizeType } from "@/lib/reference/category";
-import type { AssetRecord, IndustryJobRecord } from "@/lib/auth/model";
+import type { AssetLocation, AssetRecord, IndustryJobRecord } from "@/lib/auth/model";
+
+type TerminalLocation = {
+  locationId: number;
+  kind: "station" | "structure" | "anchored";
+  typeId?: number;
+  name?: string;
+  systemId?: number;
+  regionId?: number;
+  resolved?: boolean;
+};
 
 type StockItem = {
   typeId: number;
@@ -29,6 +34,13 @@ type StockItem = {
   runCount?: number;
   me?: number;
   te?: number;
+  blueprintPrints?: Array<{
+    itemId: number;
+    runs: number;
+    me?: number;
+    te?: number;
+    activity?: string;
+  }>;
   assembledVolume: number;
   packagedVolume?: number;
   category: string;
@@ -52,7 +64,7 @@ type StockItem = {
 type StockBucket = {
   locationId: number;
   name: string;
-  locationType: "station" | "structure";
+  locationType: "station" | "structure" | "anchored";
   typeId?: number;
   systemId?: number;
   systemName?: string;
@@ -75,6 +87,14 @@ type StockContribution = {
   runCount?: number;
   me?: number;
   te?: number;
+  blueprintPrint?: {
+    itemId: number;
+    runs: number;
+    me?: number;
+    te?: number;
+    activity?: string;
+    endDate?: string;
+  };
   inBuild?: boolean;
   inUse?: boolean;
   job?: IndustryJobRecord;
@@ -85,10 +105,10 @@ type StockContribution = {
   activityName?: string;
 };
 
-function isDirectLocation(
-  asset: AssetRecord,
-): asset is AssetRecord & { rootLocationType: "station" | "structure" } {
-  return asset.rootLocationKind === "station" || asset.rootLocationKind === "structure";
+function isDirectLocation(asset: AssetRecord): asset is AssetRecord & {
+  rootLocation: AssetLocation;
+} {
+  return asset.rootLocation !== undefined && "kind" in asset.rootLocation;
 }
 
 function activityName(activityId: number) {
@@ -106,45 +126,51 @@ function activityName(activityId: number) {
   );
 }
 
-function terminalContainerFor(
-  asset: AssetRecord,
-  containersById: Map<number, AssetRecord>,
-  shipTypeIds: Set<number>,
-) {
-  let current = asset;
-  const visited = new Set<number>();
-  while (current.locationType === "item") {
-    if (visited.has(current.itemId)) return undefined;
-    visited.add(current.itemId);
-    const parent = containersById.get(current.locationId);
-    if (!parent) break;
-    if (parent.location.typeId !== undefined && shipTypeIds.has(parent.location.typeId))
-      return parent.location;
-    current = parent;
-  }
-  return current.location;
-}
-
-function shouldIncludeAsset(
-  asset: AssetRecord,
-  containerIds: Set<number>,
-  shipTypeIds: Set<number>,
-) {
-  if (containerIds.has(asset.itemId)) return false;
+function shouldIncludeAsset(asset: AssetRecord, shipTypeIds: Set<number>) {
   if (asset.isSingleton && shipTypeIds.has(asset.typeId)) return false;
   return true;
 }
 
-function createLocationIndex(assets: AssetRecord[]) {
-  const locations = new Map<number, AssetRecord>();
+function createRootLocationIndex(assets: AssetRecord[]) {
+  const locations = new Map<number, TerminalLocation>();
   for (const asset of assets) {
-    if (isDirectLocation(asset.location)) locations.set(asset.location.locationId, asset.location);
+    if (!isDirectLocation(asset)) continue;
+    const root = asset.rootLocation;
+    const kind: TerminalLocation["kind"] = root.kind === "solar_system"
+      ? "anchored"
+      : root.kind === "station"
+        ? "station"
+        : "structure";
+    locations.set(root.locationId, {
+      ...(root.kind !== "solar_system" ? root : {}),
+      locationId: root.locationId,
+      kind,
+      ...(root.kind === "solar_system"
+        ? { systemId: root.locationId, resolved: true }
+        : {}),
+    });
   }
   return locations;
 }
 
+function normalizeLocationKinds(
+  locations: Map<number, TerminalLocation>,
+  stations: Awaited<ReturnType<typeof getStations>>,
+  structureTypeIds: Set<number>,
+) {
+  const stationTypeIds = new Set([...stations.values()].map((station) => station.typeID));
+  for (const [locationId, location] of locations) {
+    if (location.kind === "anchored") continue;
+    if (location.typeId !== undefined && stationTypeIds.has(location.typeId)) {
+      locations.set(locationId, { ...location, kind: "station" });
+    } else if (location.typeId !== undefined && structureTypeIds.has(location.typeId)) {
+      locations.set(locationId, { ...location, kind: "structure" });
+    }
+  }
+}
+
 async function resolveUnknownLocations(
-  locations: Map<number, AssetRecord>,
+  locations: Map<number, TerminalLocation>,
   structureTypeIds: Set<number>,
   stations: Awaited<ReturnType<typeof getStations>>,
   types: Awaited<ReturnType<typeof getTypesByIds>>,
@@ -194,7 +220,7 @@ async function resolveUnknownLocations(
           locations.set(locationId, {
             ...location,
             kind: "structure",
-            typeId: result.data.type_id,
+            ...(result.data.type_id !== undefined ? { typeId: result.data.type_id } : {}),
             name: result.data.name,
             systemId: result.data.system_id,
             regionId: result.data.region_id,
@@ -219,14 +245,14 @@ async function resolveUnknownLocations(
 function addContribution(
   buckets: Map<number, StockBucket>,
   contribution: StockContribution,
-  location: AssetRecord,
+  location: TerminalLocation,
   types: Awaited<ReturnType<typeof getTypesByIds>>,
   groups: Awaited<ReturnType<typeof getGroups>>,
   marketGroups: Awaited<ReturnType<typeof getMarketGroups>>,
   language: SdeLanguage,
   systems: Awaited<ReturnType<typeof getSystems>>,
 ) {
-  if (!isDirectLocation(location) || location.typeId === undefined) return;
+  if (location.kind !== "anchored" && location.typeId === undefined) return;
   const type = types.get(contribution.typeId);
   if (!type?.published) return;
   const categorized = categorizeType(type, language, marketGroups, groups);
@@ -240,7 +266,10 @@ function addContribution(
     buckets.get(location.locationId) ??
     ({
       locationId: location.locationId,
-      name: location.name ?? `Location ${location.locationId}`,
+      name:
+        location.kind === "anchored"
+          ? "Anchored"
+          : (location.name ?? `Location ${location.locationId}`),
       locationType: location.kind,
       typeId: location.typeId,
       systemId: location.systemId,
@@ -277,6 +306,9 @@ function addContribution(
         : (item.runCount ?? 0) + contribution.runCount;
   item.me ??= contribution.me;
   item.te ??= contribution.te;
+  if (contribution.blueprintPrint) {
+    item.blueprintPrints = [...(item.blueprintPrints ?? []), contribution.blueprintPrint];
+  }
   if (contribution.inBuild) {
     item.inBuild = true;
     item.inUse = contribution.inUse;
@@ -328,6 +360,18 @@ function jobContributions(
       blueprintRunsUsed: job.runs,
       blueprintRunsRemaining: remainingRuns,
       activityName: activityName(job.activityId),
+      ...(installedRuns >= 0
+        ? {
+            blueprintPrint: {
+              itemId: job.blueprintId,
+              runs: remainingRuns,
+              me: blueprint?.me,
+              te: blueprint?.te,
+              activity: activityName(job.activityId),
+              endDate: job.endDate,
+            },
+          }
+        : {}),
     },
   ];
   if (job.productTypeId && job.successfulRuns !== 0) {
@@ -351,27 +395,17 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const requestedLanguage = url.searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
-  const [
-    assets,
-    containersById,
-    jobs,
-    shipTypeIds,
-    structureTypeIds,
-    groups,
-    marketGroups,
-    stations,
-    systems,
-  ] = await Promise.all([
-    getResolvedAssets(session.characterIds, true),
-    getResolvedContainersById(session.characterIds, true),
-    getRunningIndustryJobs(session.characterIds, true),
-    getShipTypeIds(),
-    getStructureTypeIds(),
-    getGroups(),
-    getMarketGroups(),
-    getStations(),
-    getSystems(),
-  ]);
+  const [assets, jobs, shipTypeIds, structureTypeIds, groups, marketGroups, stations, systems] =
+    await Promise.all([
+      getResolvedAssets(session.characterIds, true),
+      getRunningIndustryJobs(session.characterIds, true),
+      getShipTypeIds(),
+      getStructureTypeIds(),
+      getGroups(),
+      getMarketGroups(),
+      getStations(),
+      getSystems(),
+    ]);
   const types = await getTypesByIds([
     ...new Set([
       ...assets.map((asset) => asset.typeId),
@@ -380,37 +414,15 @@ export async function GET(request: Request) {
       ),
     ]),
   ]);
-  const locations = createLocationIndex(assets);
-  normalizeLocationKinds(locations, stations, structureTypeIds);
-  await resolveUnknownLocations(locations, structureTypeIds, stations, types, session.characterIds);
-  const containerIds = new Set(containersById.keys());
-  const terminalByContainerId = new Map<number, AssetRecord | undefined>();
-  function normalizeLocationKinds(
-    locations: Map<number, AssetRecord>,
-    stations: Awaited<ReturnType<typeof getStations>>,
-    structureTypeIds: Set<number>,
-  ) {
-    const stationTypeIds = new Set([...stations.values()].map((station) => station.typeID));
-    for (const [locationId, location] of locations) {
-      if (location.typeId !== undefined && stationTypeIds.has(location.typeId)) {
-        locations.set(locationId, { ...location, rootLocationKind: "station" });
-      } else if (location.typeId !== undefined && structureTypeIds.has(location.typeId)) {
-        locations.set(locationId, { ...location, rootLocationKind: "structure" });
-      }
-    }
-  }
-  for (const container of containersById.values()) {
-    terminalByContainerId.set(
-      container.itemId,
-      terminalContainerFor(container, containersById, shipTypeIds),
-    );
-  }
+  const rootLocations = createRootLocationIndex(assets);
+  normalizeLocationKinds(rootLocations, stations, structureTypeIds);
+  await resolveUnknownLocations(rootLocations, structureTypeIds, stations, types, session.characterIds);
+  normalizeLocationKinds(rootLocations, stations, structureTypeIds);
   const buckets = new Map<number, StockBucket>();
   const allAssetIndex = await getResolvedAssetIndex(session.characterIds, true);
   for (const asset of assets) {
-    if (!shouldIncludeAsset(asset, containerIds, shipTypeIds)) continue;
-    const terminal =
-      terminalByContainerId.get(asset.locationId) ?? asset.locationId;
+    if (!shouldIncludeAsset(asset, shipTypeIds) || !isDirectLocation(asset)) continue;
+    const terminal = rootLocations.get(asset.rootLocation.locationId);
     if (!terminal || (terminal.typeId !== undefined && shipTypeIds.has(terminal.typeId))) continue;
     addContribution(
       buckets,
@@ -423,8 +435,18 @@ export async function GET(request: Request) {
         runCount: asset.runCount,
         me: asset.me,
         te: asset.te,
+          ...(asset.runCount !== undefined && asset.runCount >= 0
+            ? {
+                blueprintPrint: {
+                  itemId: asset.itemId,
+                  runs: asset.runCount,
+                  me: asset.me,
+                  te: asset.te,
+                },
+              }
+            : {}),
       },
-      locations.get(terminal.locationId) ?? terminal,
+      terminal,
       types,
       groups,
       marketGroups,
@@ -435,17 +457,19 @@ export async function GET(request: Request) {
   for (const job of jobs) {
     if (job.status === "cancelled" || job.status === "delivered") continue;
     const blueprint = allAssetIndex.get(job.blueprintId);
-    const blueprintLocation = containersById.get(blueprint?.locationId ?? job.locationId);
+    const blueprintLocation = blueprint && isDirectLocation(blueprint)
+      ? rootLocations.get(blueprint.rootLocation.locationId)
+      : rootLocations.get(job.locationId);
     if (
       !blueprintLocation ||
-      (blueprintLocation !== undefined && shipTypeIds.has(blueprintLocation.typeId))
+      (blueprintLocation.typeId !== undefined && shipTypeIds.has(blueprintLocation.typeId))
     )
       continue;
     for (const [index, contribution] of jobContributions(job, blueprint).entries()) {
       const location =
         index === 0
           ? blueprintLocation
-          : (locations.get(job.outputLocationId) ?? locations.get(job.locationId));
+          : (rootLocations.get(job.outputLocationId) ?? rootLocations.get(job.locationId));
       if (!location || (location.typeId !== undefined && shipTypeIds.has(location.typeId)))
         continue;
       addContribution(

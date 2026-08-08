@@ -1,4 +1,5 @@
 import type {
+  AssetLocation,
   AssetRecord,
   IndustryJobRecord,
   MarketOrderRecord,
@@ -20,8 +21,10 @@ import {
   fetchCharacterMarketOrders,
   fetchCorporationMarketOrders,
   applyBlueprintMetadata,
+  fetchLocationMetadata,
   getUsableToken,
 } from "./client";
+import { getStation } from "@/cache/services/sdeCache";
 
 export type EndpointStatus = "fresh" | "cached" | "rate_limited" | "error";
 export type EndpointCache<T> = {
@@ -97,19 +100,6 @@ function setFresh<T>(body: T, headers?: Headers, previous?: EndpointCache<T>): E
   };
 }
 
-function cacheAssets(
-  cache: OwnerCache,
-  stockAssetsByItemId: Map<number, AssetRecord>,
-  rootContainersById: Map<number, AssetRecord>,
-  assembledStructureRigIds: [],
-  assembledShipsByItemId: Map<number, AssetRecord>,
-) {
-  cache.stockAssetsByItemId = stockAssetsByItemId;
-  cache.rootContainersById = rootContainersById;
-  cache.assembledStructureRigs = assembledStructureRigIds;
-  cache.assembledShipsByItemId = assembledShipsByItemId;
-}
-
 async function indexAssetsByPurpose(rawAssets: AssetRecord[]) {
   if (rawAssets.length === 0) {
     return {
@@ -177,15 +167,37 @@ async function cacheResolvedAssets(
   const assetIndexes = await indexAssetsByPurpose(rawAssets);
 
   const containerRootsById = await resolveContainerRoots(assetIndexes.stockLocationItemsByItemId, token);
+  const inferredRoots = new Map<number, Promise<AssetLocation | null>>();
+
+  function inferRoot(locationId: number, asset: AssetRecord) {
+    const existing = inferredRoots.get(locationId);
+    if (existing) return existing;
+    const resolution = getRealParent(asset, token);
+    inferredRoots.set(locationId, resolution);
+    return resolution;
+  }
 
   // add locations to stock assets
-  const resolvedByItemId = new Map(assetIndexes.stockAssetsByItemId.values()
-    .map((asset) => [
-      asset.itemId, {
-        rootLocationId: containerRootsById.get(asset.locationId)?.rootLocationId ?? asset.locationId,
-        ...asset
+  const resolvedStockAssets = await Promise.all(
+    [...assetIndexes.stockAssetsByItemId.values()].map(async (asset) => {
+      const containerRoot = containerRootsById.get(asset.locationId)?.rootLocation;
+      if (containerRoot) return { ...asset, rootLocation: containerRoot };
+      try {
+        const rootLocation = await inferRoot(asset.locationId, asset);
+        return rootLocation ? { ...asset, rootLocation } : asset;
+      } catch (error) {
+        console.warn("Could not resolve stock asset location", {
+          itemId: asset.itemId,
+          locationId: asset.locationId,
+          error,
+        });
+        return asset;
       }
-    ]));
+    }),
+  );
+  const resolvedByItemId = new Map(
+    resolvedStockAssets.map((asset) => [asset.itemId, asset]),
+  );
 
   cache.allAssetsRaw = setFresh(rawAssets, headers, previous);
   cache.stockAssetsByItemId = resolvedByItemId;
@@ -195,10 +207,10 @@ async function cacheResolvedAssets(
 
 
   cache.unresolvedAssetCount = [
-    ...cache.stockAssetsByItemId.values(),
+    ...resolvedByItemId.values(),
     ...cache.assembledStructureRigs,
     ...cache.assembledShipsByItemId.values(),
-  ].filter((asset) => !asset.rootLocationId).length;
+  ].filter((asset) => !asset.rootLocation).length;
 }
 
 function needsAssetLocationResolution(cache: OwnerCache) {
@@ -230,59 +242,110 @@ function isCargoContainerType(
   return false;
 }
 
-function directKind(locationType: AssetRecord["locationType"]): AssetRecord["rootLocationKind"] | null {
-  if (locationType === "station" || locationType === "solar_system" || locationType === "structure")
+function directKind(locationType: AssetRecord["locationType"]): AssetLocation["kind"] | null {
+  if (locationType === "station" || locationType === "solar_system" || locationType === "structure") {
     return locationType;
+  }
+  return null;
+}
+
+async function getRealParent(current: AssetRecord, token: TokenSet): Promise<AssetLocation | null> {
+  const locationId = current.locationId;
+  const kind = directKind(current.locationType);
+  const station = kind === "station" || kind === null ? await getStation(locationId) : null;
+  if (station) {
+    let name: string | undefined;
+    try {
+      name = (await fetchLocationMetadata(locationId, "station", token)).data?.name;
+    } catch {
+      // SDE still provides the station identity when ESI name lookup is unavailable.
+    }
+    return {
+      locationId,
+      kind: "station",
+      ...(name ? { name } : {}),
+      typeId: station.typeID,
+      systemId: station.solarSystemID,
+      resolved: true,
+    };
+  }
+  if (kind === "solar_system" || kind === "structure" || kind === null) {
+    const result = await fetchLocationMetadata(
+      locationId,
+      kind === "solar_system" ? "solar_system" : "structure",
+      token,
+    ).catch(() => null);
+    if (!result?.data) return null;
+    return {
+      locationId,
+      kind: kind === "solar_system" ? "solar_system" : "structure",
+      ...(result.data.type_id !== undefined ? { typeId: result.data.type_id } : {}),
+      name: result.data.name,
+      ...(result.data.system_id !== undefined || result.data.solar_system_id !== undefined
+        ? { systemId: result.data.system_id ?? result.data.solar_system_id }
+        : {}),
+      ...(result.data.region_id !== undefined ? { regionId: result.data.region_id } : {}),
+      resolved: true,
+    };
+  }
   return null;
 }
 
 async function resolveContainerRoots(containerItemsByItemId: Map<number, AssetRecord>, token: TokenSet) {
   // Cache already-resolved roots
-  const rootCache = new Map<number, number>();
+  const rootCache = new Map<number, AssetLocation>();
 
-  function findRoot(location: number): number {
+  async function findRoot(location: number): Promise<AssetLocation | null> {
     const cachedRoot = rootCache.get(location);
     if (cachedRoot) {
       return cachedRoot;
     }
 
     const visited = new Set<number>();
-    let current = location;
-
-    while (current !== null) {
-      if (visited.has(current)) {
-        throw new Error(`Circular location hierarchy detected at ${current}`);
+    let current = containerItemsByItemId.get(location);
+    if (!current) {
+      console.warn(`Location ${location} is not a container item`);
+      return null;
+    }
+    while (true) {
+      if (visited.has(current.itemId)) {
+        throw new Error(`Circular location hierarchy detected at ${current.itemId}`);
       }
-
-      visited.add(current);
-
-      const parent = containerItemsByItemId.get(current);
-
+      visited.add(current.itemId);
+      const parent = containerItemsByItemId.get(current.locationId);
       if (!parent) {
-        throw new Error(
-          `Parent location ${current} not found`
-        );
+        // The first parent outside the container index must be resolved through SDE or ESI.
+        const realParent = await getRealParent(current, token);
+        if (!realParent) return null;
+        for (const id of visited) rootCache.set(id, realParent);
+        return realParent;
       }
-
-      current = parent.locationId;
+      current = parent;
     }
-
-    // Cache the root for every location visited in this chain
-    for (const id of visited) {
-      rootCache.set(id, current);
-    }
-
-    rootCache.set(current, current);
-
-    return current;
   }
 
-  return new Map<number, AssetRecord>(Array.from(containerItemsByItemId.values()).map(asset => 
-    [asset.itemId, {
-      ...asset,
-      rootLocationId: findRoot(asset.locationId),
-    }]
-  ));
+  const results = await Promise.allSettled(
+    [...containerItemsByItemId.values()].map(async (asset) => [
+      asset.itemId,
+      { ...asset, rootLocation: await findRoot(asset.itemId) },
+    ] as const),
+  );
+  const roots: Array<readonly [number, AssetRecord]> = [];
+  for (const result of results) {
+    if (result.status === "fulfilled" && result.value[1].rootLocation) {
+      roots.push(result.value as readonly [number, AssetRecord]);
+    } else if (result.status === "fulfilled") {
+      const asset = result.value[1];
+      console.warn("Could not resolve a container root", {
+        itemId: asset.itemId,
+        locationId: asset.locationId,
+        locationType: asset.locationType,
+      });
+    } else {
+      console.warn("Could not resolve a container root", result.reason);
+    }
+  }
+  return new Map<number, AssetRecord>(roots);
 }
 
 async function rebuildResolvedAssets(

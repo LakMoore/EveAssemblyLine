@@ -26,7 +26,7 @@ type EsiStockLocation = {
   name: string;
   systemId?: number;
   systemName?: string;
-  locationType: "structure" | "station";
+  locationType: "structure" | "station" | "anchored";
   items: StockItem[];
 };
 type EsiStockResponse = {
@@ -602,6 +602,7 @@ type BlueprintDetail = {
   kind: "BPO" | "BPC";
   source: "Asset" | "In use" | "In Progress";
   runs?: number;
+  copies: number;
   me?: number;
   te?: number;
   activity?: string;
@@ -846,46 +847,59 @@ function ViewItemsModal({
               const isReaction = Boolean(reactionJobs);
               const reactionInUse =
                 reactionJobs?.reduce((total, job) => total + job.quantity, 0) ?? 0;
-              const details: BlueprintDetail[] | undefined = blueprints?.flatMap(
-                (blueprint): BlueprintDetail[] => {
-                  const isInventionOutput =
-                    blueprint.inBuild &&
-                    blueprint.activityName === "Invention" &&
-                    !blueprint.blueprintPrints?.length;
-                  if (blueprint.blueprintPrints?.length) {
-                    return blueprint.blueprintPrints.map((print) => ({
-                      kind: blueprint.category === "bpo" ? "BPO" : "BPC",
-                      source: blueprint.inBuild ? "In use" : "Asset",
-                      ...(print.runs >= 0 ? { runs: print.runs } : {}),
-                      me: print.me ?? blueprint.me,
-                      te: print.te ?? blueprint.te,
-                      activity: blueprint.activityName,
-                      endDate: blueprint.endDate,
-                    }));
-                  }
-                  const perPrintRuns =
-                    blueprint.quantity > 0 && blueprint.runCount !== undefined
-                      ? blueprint.runCount / blueprint.quantity
-                      : blueprint.runCount;
-                  return [
-                    {
-                      kind: blueprint.category === "bpo" ? "BPO" : "BPC",
-                      source: isInventionOutput
-                        ? "In Progress"
-                        : blueprint.inBuild
-                          ? "In use"
-                          : "Asset",
-                      runs: isInventionOutput ? blueprint.runCount : perPrintRuns,
-                      ...(isInventionOutput ? {} : { me: blueprint.me, te: blueprint.te }),
-                      activity: blueprint.activityName,
-                      endDate: blueprint.endDate,
-                      ...(isInventionOutput
-                        ? { quantity: blueprint.quantity, estimated: true }
-                        : {}),
-                    },
-                  ];
-                },
-              );
+              const details: BlueprintDetail[] | undefined = blueprints
+                ? (() => {
+                    const buckets = new Map<string, BlueprintDetail>();
+                    const addToBucket = (detail: BlueprintDetail) => {
+                      const key = `${detail.kind}:${detail.activity ?? "-"}:${detail.me ?? "-"}:${detail.te ?? "-"}`;
+                      const existing = buckets.get(key);
+                      if (!existing) {
+                        buckets.set(key, detail);
+                        return;
+                      }
+                      existing.copies += detail.copies;
+                      if (detail.runs !== undefined) existing.runs = (existing.runs ?? 0) + detail.runs;
+                    };
+
+                    for (const blueprint of blueprints) {
+                      const kind = blueprint.category === "bpo" ? "BPO" : "BPC";
+                      const source = blueprint.inBuild
+                        ? blueprint.activityName === "Invention" && !blueprint.blueprintPrints?.length
+                          ? "In Progress"
+                          : "In use"
+                        : "Asset";
+                      if (blueprint.blueprintPrints?.length) {
+                        for (const print of blueprint.blueprintPrints) {
+                          addToBucket({
+                            kind,
+                            source,
+                            copies: 1,
+                            ...(kind === "BPC" && print.runs >= 0 ? { runs: print.runs } : {}),
+                            me: print.me,
+                            te: print.te,
+                            activity: print.activity,
+                            endDate: print.endDate,
+                          });
+                        }
+                        continue;
+                      }
+                      addToBucket({
+                        kind,
+                        source,
+                        copies: blueprint.quantity,
+                        ...(kind === "BPC" && blueprint.runCount !== undefined
+                          ? { runs: blueprint.runCount }
+                          : {}),
+                        ...(source === "In Progress"
+                          ? { estimated: true }
+                          : { me: blueprint.me, te: blueprint.te }),
+                        activity: blueprint.activityName,
+                        endDate: blueprint.endDate,
+                      });
+                    }
+                    return [...buckets.values()];
+                  })()
+                : undefined;
               const showTooltip = isBlueprint && openBlueprintTypeId === item.typeId;
               const showReactionTooltip = isReaction && openReactionTypeId === item.typeId;
               return (
@@ -1010,14 +1024,19 @@ function ViewItemsModal({
                               key={`${item.typeId}-${index}`}
                             >
                               <strong>
-                                {detail.kind} · {detail.source}
-                                {detail.quantity ? ` · ~${detail.quantity} copies` : ""}
+                                {detail.copies.toLocaleString()} {detail.kind === "BPO"
+                                  ? detail.copies === 1
+                                    ? "Original"
+                                    : "Originals"
+                                  : detail.copies === 1
+                                    ? "Copy"
+                                    : "Copies"}
                               </strong>
                               <span>
                                 {detail.me !== undefined ? `ME ${detail.me}` : ""}
                                 {detail.te !== undefined ? ` · TE ${detail.te}` : ""}
                                 {detail.runs !== undefined
-                                  ? ` · ${detail.estimated ? "~" : ""}${detail.runs} runs`
+                                  ? ` · ${detail.estimated ? "~" : ""}${detail.runs.toLocaleString()} runs`
                                   : ""}
                                 {detail.activity ? ` · ${detail.activity}` : ""}
                                 {detail.endDate ? ` · ${formatBlueprintDate(detail.endDate)}` : ""}

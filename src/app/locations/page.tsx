@@ -378,7 +378,7 @@ export default function LocationsPage() {
           locations?: Array<{
             locationId: number;
             name: string;
-            locationType: "structure" | "station";
+            locationType: "structure" | "station" | "anchored";
             systemId?: number;
             systemName?: string;
             typeId?: number;
@@ -390,28 +390,36 @@ export default function LocationsPage() {
             resolved: boolean;
           }>;
         };
-        const locations = (data.locations ?? []).map((location): EsiStructure => ({
-          structureId: location.locationId,
-          name: location.name,
-          locationType: location.locationType,
-          systemId: location.systemId,
-          systemName: location.systemName,
-          type: location.typeId ? `Type ${location.typeId}` : undefined,
-          assetCount: location.assetCount,
-          personalAssetCount: location.personalAssetCount,
-          corporationAssetCount: location.corporationAssetCount,
-          resolved: location.resolved,
-          ownedByCorporation: false,
-          rigs: [],
-          totalCount: location.totalCount,
-          totalVolume: location.totalVolume,
-          bonuses: {
-            manufacturing: { me: 0, te: 0, cost: 0 },
-            research: { me: 0, te: 0, cost: 0 },
-            reactions: { me: 0, te: 0, cost: 0 },
-            invention: { me: 0, te: 0, cost: 0 },
-          },
-        }));
+        const locations = (data.locations ?? [])
+          .filter(
+            (
+              location,
+            ): location is typeof location & {
+              locationType: "structure" | "station";
+            } => location.locationType !== "anchored",
+          )
+          .map((location): EsiStructure => ({
+            structureId: location.locationId,
+            name: location.name,
+            locationType: location.locationType,
+            systemId: location.systemId,
+            systemName: location.systemName,
+            type: location.typeId ? `Type ${location.typeId}` : undefined,
+            assetCount: location.assetCount,
+            personalAssetCount: location.personalAssetCount,
+            corporationAssetCount: location.corporationAssetCount,
+            resolved: location.resolved,
+            ownedByCorporation: false,
+            rigs: [],
+            totalCount: location.totalCount,
+            totalVolume: location.totalVolume,
+            bonuses: {
+              manufacturing: { me: 0, te: 0, cost: 0 },
+              research: { me: 0, te: 0, cost: 0 },
+              reactions: { me: 0, te: 0, cost: 0 },
+              invention: { me: 0, te: 0, cost: 0 },
+            },
+          }));
         if (!cancelled) setEsiStructures(locations);
       } catch {
         if (!cancelled) setEsiStructures([]);

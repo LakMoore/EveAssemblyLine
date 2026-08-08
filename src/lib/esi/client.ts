@@ -516,6 +516,7 @@ export async function fetchLocationMetadata(
     name: string;
     type_id?: number;
     system_id?: number;
+    solar_system_id?: number;
     constellation_id?: number;
     region_id?: number;
   }>(path, token);
