@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import type { PlanResult } from "@/lib/planning/types";
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
 import { loadStockRecords, type StockItem } from "@/lib/planning/stockStore";
@@ -40,6 +40,44 @@ function formatDuration(totalSeconds: number) {
   return parts.join(" ");
 }
 
+function ScrollTopButton({
+  targetRef,
+  headerRef,
+}: {
+  targetRef: RefObject<HTMLElement | null>;
+  headerRef: RefObject<HTMLElement | null>;
+}) {
+  const [isFloating, setIsFloating] = useState(false);
+
+  useEffect(() => {
+    function updateFloatingState() {
+      const isDesktop = window.matchMedia("(min-width: 901px)").matches;
+      const headerTop = headerRef.current?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY;
+      setIsFloating(isDesktop && headerTop <= 0);
+    }
+
+    updateFloatingState();
+    window.addEventListener("scroll", updateFloatingState, { passive: true });
+    window.addEventListener("resize", updateFloatingState);
+    return () => {
+      window.removeEventListener("scroll", updateFloatingState);
+      window.removeEventListener("resize", updateFloatingState);
+    };
+  }, [headerRef]);
+
+  return (
+    <button
+      type="button"
+      className={`${styles.scrollTopButton} ${isFloating ? "" : styles.scrollTopButtonHidden}`}
+      onClick={() => targetRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+      aria-label="Scroll to top of list"
+      title="Scroll to top of list"
+    >
+      ↑
+    </button>
+  );
+}
+
 async function localizeItems(buildItems: BuildItem[], targetLanguage: SdeLanguage) {
   try {
     const metadata = await fetchTypeMetadata(
@@ -58,6 +96,9 @@ async function localizeItems(buildItems: BuildItem[], targetLanguage: SdeLanguag
 
 export default function Home() {
   const [items, setItems] = useState<BuildItem[]>([]);
+  const requirementsHeaderRef = useRef<HTMLParagraphElement>(null);
+  const buildListHeaderRef = useRef<HTMLDivElement>(null);
+  const resultsHeaderRef = useRef<HTMLDivElement>(null);
   const [stock, setStock] = useState<StockItem[]>([]);
   const [language, setLanguage] = useState<SdeLanguage>(() => {
     if (typeof window === "undefined") return "en";
@@ -206,7 +247,7 @@ export default function Home() {
           <div className={styles.panel}>
             <div className={styles.panelHeader}>
               <div>
-                <p className={styles.panelKicker}>01 / REQUIREMENTS</p>
+                <p className={styles.panelKicker} ref={requirementsHeaderRef}>01 / REQUIREMENTS</p>
                 <h2>Build list</h2>
               </div>
               <button
@@ -233,9 +274,9 @@ export default function Home() {
                 })
               }
             />
-            <div className={styles.tableHead}>
-              <span>ITEM</span>
-              <span>QUANTITY</span>
+            <div className={styles.tableHead} ref={buildListHeaderRef}>
+              <ScrollTopButton targetRef={requirementsHeaderRef} headerRef={buildListHeaderRef} />
+              <span>Quantity</span>
               <span>ME</span>
               <span>TE</span>
               <span />
@@ -334,7 +375,7 @@ export default function Home() {
         />
       )}
       <div className={styles.results}>
-        <div className={styles.resultsHeader}>
+        <div className={styles.resultsHeader} ref={resultsHeaderRef}>
           <div>
             <p className={styles.panelKicker}>03 / OUTPUT</p>
             <h2>Plan breakdown</h2>
@@ -357,7 +398,7 @@ export default function Home() {
           ))}
         </div>
         {plan ? (
-          <PlanList activeTab={activeTab} plan={plan} />
+          <PlanList activeTab={activeTab} plan={plan} resultsHeaderRef={resultsHeaderRef} />
         ) : (
           <div className={styles.emptyResult}>
             <div className={styles.resultGlyph}>↗</div>
@@ -629,8 +670,17 @@ function TypeSearch({
   );
 }
 
-function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult }) {
+function PlanList({
+  activeTab,
+  plan,
+  resultsHeaderRef,
+}: {
+  activeTab: PlannerTab;
+  plan: PlanResult;
+  resultsHeaderRef: RefObject<HTMLElement | null>;
+}) {
   const [copyStatus, setCopyStatus] = useState("");
+  const planListHeaderRef = useRef<HTMLDivElement>(null);
   const list =
     activeTab === "Plan"
       ? plan.lists.planItems
@@ -667,7 +717,7 @@ function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult
       return {
         Required: entry.neededQuantity.toLocaleString(),
         Available: entry.stockRuns.toLocaleString(),
-        "Buy/Build": entry.buyQuantity.toLocaleString(),
+        "Buy/Build": Math.max(0, entry.neededQuantity - entry.stockRuns).toLocaleString(),
         Surplus: "0",
       };
     }
@@ -691,8 +741,8 @@ function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult
           ]
         : list.map((entry) => {
             const amount =
-              activeTab === "Copy" && "quantity" in entry
-                ? entry.quantity
+              activeTab === "Copy" && "neededQuantity" in entry
+                ? Math.max(0, entry.neededQuantity - entry.stockRuns)
                 : "runsNeeded" in entry
                   ? entry.runsNeeded
                   : "runs" in entry
@@ -715,7 +765,7 @@ function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult
     return (
       <div className={styles.emptyResult}>
         <div className={styles.resultGlyph}>✓</div>
-        <strong>No {activeTab.toLowerCase()} required</strong>
+        <strong>Nothing to {activeTab}</strong>
         <p>The current project has no work in this category.</p>
       </div>
     );
@@ -727,8 +777,8 @@ function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult
         </button>
       </div>
       {activeTab === "Plan" && (
-        <div className={styles.planTableHeader}>
-          <span aria-hidden="true" />
+        <div className={styles.planTableHeader} ref={planListHeaderRef}>
+          <ScrollTopButton targetRef={resultsHeaderRef} headerRef={planListHeaderRef} />
           {planColumns.map((column) => (
             <span key={column}>{column}</span>
           ))}
@@ -740,6 +790,7 @@ function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult
           const name = entry.name;
           const isPlanBpc = "kind" in entry && entry.kind === "bpc";
           const isBpcPurchase = activeTab === "Buy" && "bpoCount" in entry;
+          const isCopyOfBpo = activeTab === "Copy" && "bpoCount" in entry && entry.bpoCount > 0;
           const isPlanReaction = "kind" in entry && entry.kind === "reaction";
           const detail =
             "fromLocationId" in entry && activeTab !== "Buy"
@@ -765,6 +816,8 @@ function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult
                     ? `${entry.runsNeeded.toLocaleString()} runs`
                     : materialEntry
                       ? `${(materialEntry.buildQuantity || materialEntry.buyQuantity).toLocaleString()} units`
+                      : activeTab === "Copy" && "neededQuantity" in entry
+                        ? `${Math.max(0, entry.neededQuantity - entry.stockRuns).toLocaleString()} runs`
                       : "quantity" in entry
                         ? `${entry.quantity.toLocaleString()} ${activeTab === "Copy" ? "runs" : "units"}`
                         : "runs" in entry
@@ -773,7 +826,7 @@ function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult
           const imageVariation =
             "imageVariation" in entry && entry.imageVariation
               ? entry.imageVariation
-              : isPlanBpc && entry.bpoCount > 0
+              : isCopyOfBpo || (isPlanBpc && entry.bpoCount > 0)
                 ? "bp"
                 : activeTab === "Manufacture" ||
                     activeTab === "React" ||

@@ -1145,6 +1145,11 @@
     gap: 13px
 }
 
+.planList,
+.planTable {
+    padding-bottom: 14px
+}
+
 .planTableHeader,
 .planTableRow {
     display: grid;
@@ -1154,7 +1159,7 @@
 }
 
 .planTableHeader {
-    padding: 0 0 8px;
+    padding: 14px 0 8px;
     color: #6e8a95;
     font: 10px 'DM Mono';
     letter-spacing: 0.5px;
@@ -1224,6 +1229,17 @@
 
 .planTypeIdentity {
     min-width: 0
+}
+
+@media (min-width: 901px) {
+    .tableHead,
+    .planTableHeader {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background: var(--white);
+        box-shadow: 0 1px 0 var(--line)
+    }
 }
 
 .shell {
@@ -1672,6 +1688,29 @@
     display: grid;
     grid-template-columns: 1fr 83px 15px;
     padding: 23px 7px 9px
+}
+
+.scrollTopButton {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    justify-self: start;
+    border: 1px solid #315662;
+    border-radius: 0;
+    background: transparent;
+    color: #6e8a95;
+    padding: 0;
+    font: 12px 'DM Mono';
+    cursor: pointer
+}
+
+.scrollTopButton:hover {
+    color: var(--cyan)
+}
+
+.scrollTopButtonHidden {
+    visibility: hidden
 }
 
 .itemRow {
