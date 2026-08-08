@@ -16,10 +16,11 @@ export function getEsiResponse<T>(path: string, queryParams?: EsiQueryParams): P
 export function setEsiResponse<T>(
   path: string,
   data: T,
+  expiresHeader: string | null,
   cacheControlHeader: string | null,
   queryParams?: EsiQueryParams,
 ): Promise<void> {
-  return cache.set(esiKey(path, queryParams), data, getEsiTtlMs(path, cacheControlHeader));
+  return cache.set(esiKey(path, queryParams), data, getEsiTtlMs(path, expiresHeader, cacheControlHeader));
 }
 
 export function getCachedEsiResponse<T>(path: string, queryParams?: EsiQueryParams) {
@@ -29,8 +30,9 @@ export function getCachedEsiResponse<T>(path: string, queryParams?: EsiQueryPara
 export function setCachedEsiResponse<T>(
   path: string,
   response: EsiCachedResponse<T>,
+  expiresHeader: string | null,
   cacheControlHeader: string | null,
   queryParams?: EsiQueryParams,
 ): Promise<void> {
-  return cache.set(esiKey(path, queryParams), response, getEsiTtlMs(path, cacheControlHeader));
+  return cache.set(esiKey(path, queryParams), response, getEsiTtlMs(path, expiresHeader, cacheControlHeader));
 }

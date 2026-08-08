@@ -69,12 +69,25 @@ export type ClientCharacter = {
 
 export type ClientCharacterStatus = {
   characterId: number;
-  assets?: { status: "fresh" | "cached" | "rate_limited" | "error"; lastUpdated?: string };
-  jobs?: { status: "fresh" | "cached" | "rate_limited" | "error"; lastUpdated?: string };
+  assets?: ClientEndpointStatus;
+  jobs?: ClientEndpointStatus;
+  orders?: ClientEndpointStatus;
   corporations?: Array<{
     corporationId: number;
-    assets?: { status: "fresh" | "cached" | "rate_limited" | "error"; lastUpdated?: string };
+    assets?: ClientEndpointStatus;
+    jobs?: ClientEndpointStatus;
+    orders?: ClientEndpointStatus;
   }>;
+};
+
+type ClientEndpointStatus = {
+  status: "fresh" | "cached" | "stale" | "rate_limited" | "error";
+  lastUpdated?: string;
+  lastModified?: string;
+  expires?: string;
+  nextRefreshAllowed?: string;
+  rateLimitedUntil?: string;
+  error?: string;
 };
 
 let sessionRequest: Promise<ClientSession> | undefined;
@@ -173,6 +186,7 @@ export function loadClientCorpStatus() {
 }
 
 export function loadClientStateStatus(force = false) {
+  if (force) stateStatusRequest = undefined;
   if (!force && stateStatusResponse) return Promise.resolve(stateStatusResponse);
   stateStatusRequest = loadJson("/api/state/status", stateStatusRequest, (value) => {
     stateStatusRequest = value;

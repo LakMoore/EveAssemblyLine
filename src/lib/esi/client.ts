@@ -124,14 +124,14 @@ export async function requestEsi<T>(
   path: string,
   tokenSet?: TokenSet,
   init?: RequestInit,
-): Promise<{ data: T | null; headers: Headers; status: number }> {
+): Promise<{ data: T | null; headers: Headers; status: number; fromCache: boolean }> {
   const body = typeof init?.body === "string" ? init.body : "";
   const cachePath = body
     ? `${path}&body_hash=${createHash("sha256").update(body).digest("hex")}`
     : path;
   const cached = await getCachedEsiResponse<T>(cachePath);
   if (cached) {
-    return { data: cached.data, headers: new Headers(cached.headers), status: cached.status };
+    return { data: cached.data, headers: new Headers(cached.headers), status: cached.status, fromCache: true };
   }
   if (esiRateLimitedUntil > Date.now()) {
     const error = new Error(
@@ -150,7 +150,7 @@ export async function requestEsi<T>(
   if (tokenSet) tokenSet.lastUsedAt = Date.now();
   const response = await fetch(`${esiBaseUrl}${path}`, { ...init, headers, cache: "no-store" });
   if (response.status === 304)
-    return { data: null, headers: response.headers, status: response.status };
+    return { data: null, headers: response.headers, status: response.status, fromCache: false };
   if (!response.ok) {
     if (response.status === 429) {
       const retryAfter = response.headers.get("retry-after");
@@ -181,9 +181,10 @@ export async function requestEsi<T>(
       headers: Object.fromEntries(response.headers.entries()),
       status: response.status,
     },
+    response.headers.get("expires"),
     response.headers.get("cache-control"),
   );
-  return { data, headers: response.headers, status: response.status };
+  return { data, headers: response.headers, status: response.status, fromCache: false };
 }
 
 export function getEsiRateLimitUntil() {
@@ -206,8 +207,8 @@ export async function requestEsiConditional<T>(path: string, tokenSet: TokenSet,
 async function fetchPages<T>(path: string, tokenSet: TokenSet, etag?: string) {
   const first = await requestEsiConditional<T[]>(`${path}?page=1`, tokenSet, etag);
   const pageCount = Number(first.headers.get("x-pages") ?? "1");
-  if (first.status === 304) return { data: null, headers: first.headers, notModified: true };
-  if (pageCount <= 1) return { data: first.data ?? [], headers: first.headers, notModified: false };
+  if (first.status === 304) return { data: null, headers: first.headers, notModified: true, fromCache: false };
+  if (pageCount <= 1) return { data: first.data ?? [], headers: first.headers, notModified: false, fromCache: first.fromCache };
   const rest: T[][] = [];
   for (let page = 2; page <= pageCount; page += 1) {
     const result = await requestEsi<T[]>(`${path}?page=${page}`, tokenSet);
@@ -217,6 +218,7 @@ async function fetchPages<T>(path: string, tokenSet: TokenSet, etag?: string) {
     data: [first.data ?? [], ...rest].flat().filter((item): item is T => item !== null),
     headers: first.headers,
     notModified: false,
+    fromCache: first.fromCache,
   };
 }
 
@@ -314,6 +316,7 @@ export async function fetchCharacterAssets(record: CharacterTokenRecord, etag?: 
     blueprints,
     headers: result.headers,
     notModified: result.notModified,
+    fromCache: result.fromCache,
   };
 }
 
@@ -343,6 +346,7 @@ export async function fetchCorporationAssets(record: CharacterTokenRecord, etag?
     token,
     headers: result.headers,
     notModified: result.notModified,
+    fromCache: result.fromCache,
   };
 }
 
@@ -384,6 +388,7 @@ export async function fetchCharacterIndustryJobs(record: CharacterTokenRecord) {
       .filter((job) => job.status !== "cancelled" && job.status !== "delivered")
       .map((job) => mapIndustryJob(job, "character", record.characterId)),
     headers: result.headers,
+    fromCache: result.fromCache,
   };
 }
 
@@ -401,6 +406,7 @@ export async function fetchCorporationIndustryJobs(record: CharacterTokenRecord)
       .filter((job) => job.status !== "cancelled" && job.status !== "delivered")
       .map((job) => mapIndustryJob(job, "corporation", record.corporationId!)),
     headers: result.headers,
+    fromCache: result.fromCache,
   };
 }
 
@@ -435,6 +441,7 @@ export async function fetchCharacterMarketOrders(record: CharacterTokenRecord, e
     token,
     headers: result.headers,
     notModified: result.notModified,
+    fromCache: result.fromCache,
   };
 }
 
@@ -453,6 +460,7 @@ export async function fetchCorporationMarketOrders(record: CharacterTokenRecord,
     token,
     headers: result.headers,
     notModified: result.notModified,
+    fromCache: result.fromCache,
   };
 }
 

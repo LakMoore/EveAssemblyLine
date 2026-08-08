@@ -301,7 +301,7 @@ export default function Home() {
                     variation={
                       item.category === "blueprint" || item.category === "bpo"
                         ? "bp"
-                        : item.category === "bpc"
+                        : item.category === "bpc" || item.category === "reaction"
                           ? "bpc"
                           : "icon"
                     }
@@ -696,7 +696,13 @@ function TypeSearch({
                   <TypeIdentity
                     name={item.name}
                     typeId={item.typeId}
-                    variation={item.category === "blueprint" ? "bp" : "icon"}
+                    variation={
+                      item.category === "blueprint"
+                        ? "bp"
+                        : item.category === "reaction"
+                          ? "bpc"
+                          : "icon"
+                    }
                   />
                 </div>
               ))
@@ -831,6 +837,7 @@ function PlanList({
           const isBpcPurchase = activeTab === "Buy" && "bpoCount" in entry;
           const isCopyOfBpo = activeTab === "Copy" && "bpoCount" in entry && entry.bpoCount > 0;
           const isBlueprintName = / blueprint$/i.test(name);
+          const isReactionFormulaName = / formula$/i.test(name);
           const isPlanReaction = "kind" in entry && entry.kind === "reaction";
           const detail =
             "fromLocationId" in entry && activeTab !== "Buy"
@@ -868,11 +875,15 @@ function PlanList({
             "imageVariation" in entry && entry.imageVariation
               ? entry.imageVariation === "icon" && isBlueprintName
                 ? "bp"
+                : entry.imageVariation === "icon" && isReactionFormulaName
+                  ? "bpc"
                 : entry.imageVariation
               : isCopyOfBpo || (isPlanBpc && entry.bpoCount > 0)
                 ? "bp"
                 : isBlueprintName
                   ? "bp"
+                : isReactionFormulaName
+                  ? "bpc"
                 : activeTab === "Manufacture" ||
                     activeTab === "React" ||
                     isPlanBpc ||

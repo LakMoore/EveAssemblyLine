@@ -483,8 +483,7 @@
     display: grid;
     place-items: center;
     padding: 20px;
-    background: #020a0dcc;
-    overscroll-behavior: contain
+    background: #020a0dcc
 }
 
 .shipsStats {
@@ -544,7 +543,7 @@
 
 .shipCard {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: 54px minmax(0, 1fr);
     align-items: center;
     gap: 8px 12px;
     padding: 12px;
@@ -562,9 +561,8 @@
     background: #102f38
 }
 
-.shipCardIdentity {
-    grid-column: 1 / -1;
-    min-width: 0
+.shipCard .identity {
+    grid-row: span 2
 }
 
 .shipCardMeta,
@@ -589,7 +587,6 @@
     width: min(720px, 100%);
     max-height: min(760px, 100%);
     overflow: auto;
-    overscroll-behavior: contain;
     padding: 25px;
     background: var(--white);
     border: 1px solid #37606c;
@@ -598,17 +595,6 @@
 
 .shipModalSystem {
     margin: 7px 0 0
-}
-
-.shipModalHeading {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 14px
-}
-
-.shipModalIdentity span {
-    display: none
 }
 
 .shipAssetGroups {
@@ -632,51 +618,16 @@
 .shipAssetRow {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 12px;
     padding: 7px 0;
     border-top: 1px solid #183a44
 }
 
-.shipAssetLoadout {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 18px;
-    flex: 1 1 auto
-}
-
-.shipAssetItem {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 10px;
-    flex: 1 1 0
-}
-
 .shipAssetQuantity {
-    margin-left: auto;
-    padding-right: 10px;
     flex: 0 0 auto;
     color: #d5e6e9;
     font: 11px 'DM Mono'
-}
-
-.shipAssetFittingButton {
-    flex: 0 0 auto;
-    border: 0;
-    padding: 0;
-    background: transparent;
-    color: var(--cyan);
-    cursor: pointer;
-    font: 10px 'DM Mono';
-    text-transform: uppercase;
-    white-space: nowrap
-}
-
-.shipAssetFittingButton:hover,
-.shipAssetFittingButton:focus-visible {
-    color: #fff;
-    outline: 0
 }
 
 @media (max-width: 640px) {
@@ -2205,8 +2156,8 @@
 .characterTableHeader,
 .characterRow {
     display: grid;
-    grid-template-columns: minmax(220px, 1fr) 180px 180px auto;
-    gap: 20px;
+    grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)) 74px;
+    gap: 12px;
     align-items: center;
 }
 
@@ -2221,6 +2172,12 @@
 .characterRow {
     border-top: 1px solid #1e3740;
     padding: 16px 0;
+    cursor: pointer;
+}
+
+.characterRow:focus-visible {
+    outline: 1px solid var(--cyan);
+    outline-offset: 4px;
 }
 
 .characterIdentity strong,
@@ -2229,6 +2186,9 @@
 .eligibilityRow strong,
 .eligibilityRow small {
     display: block;
+}
+.characterIdentity {
+    min-width: 0;
 }
 
 .characterIdentity strong,
@@ -2242,18 +2202,21 @@
     color: #78929b;
     font-size: 10px;
     margin-top: 4px;
+    overflow-wrap: anywhere;
 }
 
 .statusCell {
-    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
     min-width: 0;
-    padding-left: 18px;
+    padding-left: 0;
 }
 
 .statusCell .statusDot {
-    position: absolute;
-    left: 0;
-    top: 4px;
+    position: static;
+    flex: 0 0 auto;
 }
 
 .statusDot {
@@ -2279,7 +2242,92 @@
 }
 
 .characterRow > .remove {
-    justify-self: end;
+    width: 74px;
+    min-width: 0;
+    justify-self: center;
+}
+
+.characterModalHeading {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.characterPortrait {
+    width: 64px;
+    height: 64px;
+    object-fit: cover;
+    border: 1px solid #37606c;
+    background: #102b34;
+}
+
+.characterModalIdentity,
+.characterModalRoles {
+    display: grid;
+    gap: 6px;
+    margin-top: 18px;
+}
+
+.characterModalIdentity small,
+.characterModalRoles div {
+    color: #78929b;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.characterModalStatuses {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 22px;
+}
+
+.characterModalStatus {
+    display: grid;
+    gap: 7px;
+    min-width: 0;
+    padding: 12px;
+    background: #102b34;
+}
+
+.characterModalStatus > small:first-child,
+.characterModalRoles > .panelKicker {
+    color: #6d8b95;
+    font: 9px 'DM Mono';
+    letter-spacing: 1px;
+}
+
+.characterModalStatus span {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+}
+
+.characterModalStatus > small:last-child {
+    color: #78929b;
+    font-size: 10px;
+}
+
+.characterModalRoles div {
+    overflow-wrap: anywhere;
+}
+
+@media (min-width: 641px) {
+    .characterTableHeader,
+    .characterRow {
+        text-align: center;
+    }
+
+    .characterIdentity,
+    .statusCell {
+        align-items: center;
+        text-align: center;
+    }
+
+    .characterRow > .remove {
+        justify-self: center;
+    }
 }
 
 .eligibilityList {
@@ -2293,6 +2341,71 @@
     align-items: center;
     border-top: 1px solid #1e3740;
     padding: 16px 0;
+    cursor: pointer;
+}
+
+.eligibilityRow:focus-visible {
+    outline: 1px solid var(--cyan);
+    outline-offset: 4px;
+}
+
+.endpointList {
+    display: grid;
+    gap: 5px;
+    min-width: 250px;
+}
+
+.endpointStatus {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.endpointStatus .statusDot {
+    flex: 0 0 auto;
+}
+
+@media (min-width: 641px) {
+    .endpointList {
+        flex: 1 1 auto;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        min-width: 0;
+        gap: 12px;
+    }
+
+    .endpointHeaders {
+        display: grid;
+        grid-column: 1 / -1;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+    }
+
+    .endpointHeaders small {
+        color: #6d8b95;
+        font: 9px 'DM Mono';
+        letter-spacing: 1px;
+        text-align: center;
+    }
+
+    .endpointName {
+        display: none;
+    }
+
+    .endpointList > small {
+        grid-column: 1 / -1;
+        text-align: center;
+    }
+
+    .endpointStatus {
+        flex-direction: column;
+        justify-content: center;
+        gap: 5px;
+        text-align: center;
+    }
+
+    .endpointStatus .statusDot {
+        margin: 0;
+    }
 }
 
 @media (max-width: 900px) {
@@ -2308,18 +2421,22 @@
 @media (max-width: 900px) {
     .characterTableHeader,
     .characterRow {
-        grid-template-columns: minmax(160px, 1fr) 130px 130px auto;
+        grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)) 74px;
         gap: 12px;
     }
 }
 
 @media (max-width: 640px) {
+    .characterModalStatuses {
+        grid-template-columns: 1fr;
+    }
+
     .characterTableHeader {
         display: none;
     }
 
     .characterRow {
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: minmax(0, 1fr);
         gap: 8px;
     }
 
@@ -2328,23 +2445,30 @@
         min-width: 0;
     }
 
+    .characterRow > .statusCell {
+        grid-column: 1 / -1;
+        width: 100%;
+    }
+
     .characterRow > .remove {
         grid-column: 1 / -1;
         justify-self: start;
     }
 
     .statusCell small {
-        white-space: normal;
-        overflow: visible;
-        text-overflow: clip;
+        margin-top: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .statusCell {
         display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 3px;
+        flex-direction: row;
+        align-items: center;
+        gap: 7px;
         padding-left: 0;
+        white-space: nowrap;
     }
 
     .statusCell::before {
@@ -2352,22 +2476,35 @@
         color: #6d8b95;
         font: 9px 'DM Mono';
         letter-spacing: 1px;
-        margin-bottom: 2px;
+        margin-bottom: 0;
+        flex: 0 0 auto;
     }
 
     .statusCell .statusDot {
         position: static;
-        margin-bottom: 1px;
+        flex: 0 0 auto;
     }
 
     .statusCell .statusDate {
-        display: none;
+        display: block;
     }
 
     .eligibilityRow {
         align-items: flex-start;
         flex-direction: column;
         gap: 8px;
+    }
+
+    .endpointList {
+        min-width: 0;
+    }
+
+    .endpointHeaders {
+        display: none;
+    }
+
+    .endpointName {
+        display: inline;
     }
 }
 
