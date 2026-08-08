@@ -3,6 +3,7 @@
 import { ReactNode, useEffect, useState } from "react";
 import Link from "next/link";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
+import { replaceEsiStock, type StockItem } from "@/lib/planning/stockStore";
 import styles from "./page.module.css";
 
 const languageStorageKey = "assembly-line-language";
@@ -12,6 +13,16 @@ type CharacterSummary = {
   characterName: string;
   hasDirectorRole: boolean;
   corpAuthCompleted: boolean;
+};
+
+type EsiStockResponse = {
+  locations?: Array<{
+    locationId: number;
+    name: string;
+    systemId?: number;
+    systemName?: string;
+    items: StockItem[];
+  }>;
 };
 
 export default function AppShell({
@@ -78,6 +89,25 @@ export default function AppShell({
         rateLimitedUntil?: string | null;
       };
       if (!response.ok || data.success !== true) return;
+      try {
+        const stockResponse = await fetch(`/api/state/stock?language=${encodeURIComponent(language)}`, {
+          cache: "no-store",
+        });
+        if (stockResponse.ok) {
+          const stockData = (await stockResponse.json()) as EsiStockResponse;
+          await replaceEsiStock(
+            (stockData.locations ?? []).map((location) => ({
+              systemId: location.systemId ?? 0,
+              systemName: location.systemName ?? "Unknown system",
+              structureId: String(location.locationId),
+              structureName: location.name,
+              source: "esi" as const,
+              items: location.items,
+            })),
+          );
+        }
+      } catch {
+      }
       window.dispatchEvent(
         new CustomEvent("assembly-line-esi-refreshed", {
           detail: {

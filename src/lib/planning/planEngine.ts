@@ -388,10 +388,14 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
       const inventionProduct = invention?.products?.find((product) => product.typeID === bpc.typeId);
       if (!inventingBlueprint || !invention || !inventionProduct) continue;
 
+      const successProbability = inventionProduct.probability ?? 1;
+      const remainingBpcRuns = Math.max(0, bpc.neededQuantity - bpc.stockRuns);
+      if (remainingBpcRuns <= 0) continue;
+
       inventedBpcTypeIds.add(bpc.typeId);
 
-      const successProbability = inventionProduct.probability ?? 1;
-      const successfulBpcQuantity = Math.ceil(bpc.quantity / inventionProduct.quantity);
+      const successfulBpcRuns = inventingBlueprint.maxProductionLimit;
+      const successfulBpcQuantity = Math.ceil(remainingBpcRuns / successfulBpcRuns);
       const inventionAttempts = Math.ceil(successfulBpcQuantity / successProbability);
       const existing = inventionJobs.get(inventingBlueprint._key);
       inventionJobs.set(inventingBlueprint._key, {

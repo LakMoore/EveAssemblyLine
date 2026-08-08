@@ -3,7 +3,7 @@
 import { FormEvent, KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import type { PlanResult } from "@/lib/planning/types";
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
-import { loadStockRecords, type StockItem } from "@/lib/planning/stockStore";
+import { loadStockRecords, type StockItem, type StockRecord } from "@/lib/planning/stockStore";
 import {
   defaultLocations,
   defaultSettings,
@@ -24,7 +24,6 @@ type BuildItem = { name: string; typeId: number; quantity: number; me: number; t
 type TypeResult = { name: string; typeId: number };
 type PasteResult = { name: string; quantity?: number; typeId?: number; error?: string };
 type EsiStockResponse = {
-  locations?: Array<{ items?: StockItem[] }>;
   marketOrderStock?: StockItem[];
 };
 function formatDuration(totalSeconds: number) {
@@ -99,13 +98,14 @@ export default function Home() {
   const requirementsHeaderRef = useRef<HTMLParagraphElement>(null);
   const buildListHeaderRef = useRef<HTMLDivElement>(null);
   const resultsHeaderRef = useRef<HTMLDivElement>(null);
-  const [stock, setStock] = useState<StockItem[]>([]);
+  const stockLoadPromiseRef = useRef<Promise<StockRecord[]> | null>(null);
   const [language, setLanguage] = useState<SdeLanguage>(() => {
     if (typeof window === "undefined") return "en";
     const savedLanguage = window.localStorage.getItem(languageStorageKey);
     return isSdeLanguage(savedLanguage) ? savedLanguage : "en";
   });
   const [isBuildListLoaded, setIsBuildListLoaded] = useState(false);
+  const [isStockLoaded, setIsStockLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState<PlannerTab>("Plan");
   const [planStatus, setPlanStatus] = useState("Ready to calculate");
   const [isPlanLoading, setIsPlanLoading] = useState(false);
@@ -138,9 +138,22 @@ export default function Home() {
   }, [language]);
 
   useEffect(() => {
-    loadStockRecords()
-      .then((records) => setStock(records.flatMap((record) => record.items)))
-      .catch(() => setStock([]));
+    function loadCachedStock() {
+      const stockLoad = loadStockRecords();
+      stockLoadPromiseRef.current = stockLoad;
+      stockLoad.then(
+        () => setIsStockLoaded(true),
+        () => setIsStockLoaded(true),
+      );
+    }
+
+    loadCachedStock();
+    const handleRefresh = () => {
+      setIsStockLoaded(false);
+      loadCachedStock();
+    };
+    window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
+    return () => window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
   }, []);
 
   useEffect(() => {
@@ -153,22 +166,10 @@ export default function Home() {
     setIsPlanLoading(true);
     setPlanStatus("Calculating...");
     try {
-      let requestedStock = stock;
-      try {
-        const stockResponse = await fetch(
-          `/api/state/stock?${new URLSearchParams({
-            language,
-            typeIds: items.map((item) => item.typeId).join(","),
-          }).toString()}`,
-        );
-        if (stockResponse.ok) {
-          const liveStock =
-            ((await stockResponse.json()) as EsiStockResponse).locations?.flatMap(
-              (structure) => structure.items ?? [],
-            ) ?? [];
-          requestedStock = [...stock, ...liveStock];
-        }
-      } catch {}
+      const stockLoad = stockLoadPromiseRef.current ?? loadStockRecords();
+      stockLoadPromiseRef.current = stockLoad;
+      const localRecords = await stockLoad;
+      let requestedStock = localRecords.flatMap((record) => record.items);
       try {
         const orderResponse = await fetch(
           `/api/state/assets?${new URLSearchParams({
@@ -359,7 +360,7 @@ export default function Home() {
             <button
               className={styles.calculate}
               type="submit"
-              disabled={isPlanLoading || items.length === 0}
+              disabled={isPlanLoading || items.length === 0 || !isStockLoaded}
             >
               <span>{isPlanLoading ? "Calculating..." : "Calculate production plan"}</span>
               <b>→</b>
@@ -821,7 +822,7 @@ function PlanList({
                       : "quantity" in entry
                         ? `${entry.quantity.toLocaleString()} ${activeTab === "Copy" ? "runs" : "units"}`
                         : "runs" in entry
-                          ? `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} runs`
+                          ? `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
                           : "";
           const imageVariation =
             "imageVariation" in entry && entry.imageVariation

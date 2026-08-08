@@ -151,6 +151,7 @@ export default function StockPage() {
             systemName: location.systemName ?? knownStructure?.systemName ?? "Unknown system",
             structureId: String(location.structureId),
             structureName: knownStructure?.name ?? location.name,
+            source: "esi" as const,
             items: location.items,
           };
         });
@@ -180,10 +181,12 @@ export default function StockPage() {
             item.blueprintPrints?.some((print) => esiBlueprintItemIds.has(print.itemId)),
           ) ||
           (record.systemName === "Unknown system" && record.structureName.startsWith("Location "));
-        const combinedRecords = [
-          ...esiRecords,
-          ...correctedRecords.filter((record) => !isEsiRecord(record)),
-        ];
+        const combinedRecords = esiResponse.ok
+          ? [
+              ...esiRecords,
+              ...correctedRecords.filter((record) => !isEsiRecord(record)),
+            ]
+          : correctedRecords;
         setLocations(
           [...combinedRecords].sort((left, right) =>
             left.systemName.localeCompare(right.systemName),
@@ -193,7 +196,6 @@ export default function StockPage() {
         const sortedHydratedRecords = [...hydratedRecords].sort((left, right) =>
           left.systemName.localeCompare(right.systemName),
         );
-        const manualRecords = hydratedRecords.filter((record) => !isEsiRecord(record));
         setLocations(sortedHydratedRecords);
         setViewing((current) => {
           if (!current) return current;
@@ -203,18 +205,20 @@ export default function StockPage() {
           );
         });
         const previousByLocation = new Map(records.map((record) => [locationKey(record), record]));
-        const manualKeys = new Set(manualRecords.map((record) => locationKey(record)));
+        const currentKeys = new Set(hydratedRecords.map((record) => locationKey(record)));
         await Promise.all([
-          ...manualRecords.flatMap((record) => {
+          ...hydratedRecords.flatMap((record) => {
             const previous = previousByLocation.get(locationKey(record));
             const writes = record !== previous ? [saveStock(record)] : [];
             if (previous && locationKey(previous) !== locationKey(record))
               writes.push(deleteStock(previous));
             return writes;
           }),
-          ...records
-            .filter((record) => isEsiRecord(record) && !manualKeys.has(locationKey(record)))
-            .map((record) => deleteStock(record)),
+          ...(esiResponse.ok
+            ? records
+                .filter((record) => isEsiRecord(record) && !currentKeys.has(locationKey(record)))
+                .map((record) => deleteStock(record))
+            : []),
         ]);
       } catch {
         setEsiLocationIds(new Set());

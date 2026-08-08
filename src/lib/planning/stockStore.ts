@@ -36,6 +36,7 @@ export type StockItem = Pick<BuildItem, "typeId" | "name" | "quantity"> & {
 };
 
 export type StockRecord = StockLocation & {
+  source?: "esi";
   items: StockItem[];
 };
 
@@ -96,6 +97,30 @@ export async function saveStock(record: StockRecord) {
     };
     transaction.onerror = () => {
       reject(transaction.error ?? new Error("Could not save stock."));
+    };
+  });
+}
+
+export async function replaceEsiStock(records: StockRecord[]) {
+  const database = await getPlanningDatabase();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(stockStoreName, "readwrite");
+    const store = transaction.objectStore(stockStoreName);
+    const request = store.getAll();
+    request.onsuccess = () => {
+      for (const record of request.result.filter(isStockRecord)) {
+        if (record.source === "esi") store.delete(locationKey(record));
+      }
+      for (const record of records) store.put({ ...record, source: "esi" }, locationKey(record));
+    };
+    request.onerror = () => {
+      reject(request.error ?? new Error("Could not replace cached ESI stock."));
+    };
+    transaction.oncomplete = () => {
+      resolve();
+    };
+    transaction.onerror = () => {
+      reject(transaction.error ?? new Error("Could not replace cached ESI stock."));
     };
   });
 }
