@@ -1,0 +1,26 @@
+.region {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 20;
+    display: grid;
+    gap: 8px;
+    pointer-events: none
+}
+
+.toast {
+    border: 1px solid #477582;
+    background: #102a32;
+    box-shadow: 0 8px 24px #0008;
+    color: var(--ink);
+    padding: 10px 13px;
+    font: 11px 'DM Mono', monospace
+}
+
+@media (max-width: 640px) {
+    .region {
+        right: 12px;
+        bottom: 12px;
+        left: 12px
+    }
+}

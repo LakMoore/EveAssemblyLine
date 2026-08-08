@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import AppShell, { languageStorageKey } from "../AppShell";
 import {
@@ -16,7 +15,7 @@ import { loadStructures } from "@/lib/planning/structureStore";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import { type KnownStructure } from "@/lib/planning/preferences";
-import { eveTypeImageUrl } from "@/lib/eve/imageServer";
+import TypeIdentity from "../components/TypeIdentity";
 import styles from "../page.module.css";
 
 type StructureOption = { id: string; name: string };
@@ -80,30 +79,6 @@ function stockTotalCount(location: StockRecord) {
 
 function stockTotalVolume(location: StockRecord) {
   return location.items.reduce((total, item) => total + stockItemVolume(item), 0);
-}
-
-function StockItemImage({
-  typeId,
-  variation,
-}: {
-  typeId: number;
-  variation: "icon" | "render" | "bp" | "bpc";
-}) {
-  const [useFallback, setUseFallback] = useState(false);
-  const activeVariation = useFallback ? "icon" : variation;
-
-  return (
-    <Image
-      className={styles.stockItemImage}
-      src={eveTypeImageUrl(typeId, activeVariation)}
-      alt=""
-      width={40}
-      height={40}
-      onError={() => {
-        if (variation === "render") setUseFallback(true);
-      }}
-    />
-  );
 }
 
 function emptyLocation(system: SystemOption, structure: StructureOption | null): StockRecord {
@@ -907,8 +882,11 @@ function ViewItemsModal({
                   className={styles.stockRow}
                   key={`${item.typeId}:${item.category ?? "item"}:${isReaction ? "reaction" : item.isPackaged ? "packaged" : "assembled"}:${item.jobId ?? "asset"}`}
                 >
-                  <StockItemImage
+                  <TypeIdentity
+                    name={item.name}
                     typeId={item.typeId}
+                    imageSize={40}
+                    className={styles.stockTypeIdentity}
                     variation={
                       counts?.bpo
                         ? "bp"
@@ -921,18 +899,6 @@ function ViewItemsModal({
                               : "icon"
                     }
                   />
-                  <span>
-                    <strong>{item.name}</strong>
-                    <small>
-                      Type ID {item.typeId} · Volume{" "}
-                      {formatVolume(
-                        item.quantity *
-                          (item.isPackaged
-                            ? (item.packagedVolume ?? item.assembledVolume ?? 0)
-                            : (item.assembledVolume ?? 0)),
-                      )}
-                    </small>
-                  </span>
                   {item.inBuild && item.endDate && (
                     <small className={styles.stockCompletion}>
                       <span>{item.activityName ?? "Industry job"} completes</span>

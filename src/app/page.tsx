@@ -1,9 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
-import Image from "next/image";
 import type { PlanResult } from "@/lib/planning/types";
-import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
 import { loadStockRecords, type StockItem } from "@/lib/planning/stockStore";
 import {
@@ -17,6 +15,7 @@ import {
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import AppShell, { languageStorageKey } from "./AppShell";
+import TypeIdentity from "./components/TypeIdentity";
 import styles from "./page.module.css";
 
 type PlannerTab = "Plan" | "Buy" | "Copy" | "Invent" | "React" | "Manufacture";
@@ -248,17 +247,7 @@ export default function Home() {
             ) : (
               items.map((item, index) => (
                 <div className={styles.itemRow} key={item.typeId}>
-                  <Image
-                    className={styles.typeImage}
-                    src={eveTypeImageUrl(item.typeId)}
-                    alt=""
-                    width={32}
-                    height={32}
-                  />
-                  <span>
-                    <strong>{item.name}</strong>
-                    <small>Type ID {item.typeId}</small>
-                  </span>
+                  <TypeIdentity name={item.name} typeId={item.typeId} />
                   <input
                     aria-label={`${item.name} quantity`}
                     type="number"
@@ -491,11 +480,13 @@ function PasteListModal({
                 className={item.error ? styles.importResultInvalid : styles.importResult}
                 key={`${item.name}-${index}`}
               >
-                <span>
-                  {item.name}
-                  {item.quantity ? ` × ${item.quantity}` : ""}
-                </span>
-                <small>{item.error ?? `Type ID ${item.typeId}`}</small>
+                {item.typeId ? (
+                  <TypeIdentity name={item.name} typeId={item.typeId} />
+                ) : (
+                  <span>{item.name}</span>
+                )}
+                {item.quantity ? <small>Quantity {item.quantity}</small> : null}
+                {item.error ? <small>{item.error}</small> : null}
               </div>
             ))}
           </div>
@@ -614,8 +605,7 @@ function TypeSearch({
         <div className={styles.searchResults} role="listbox">
           {results.length > 0
             ? results.map((item, index) => (
-                <button
-                  type="button"
+                <div
                   role="option"
                   aria-selected={index === highlightedIndex}
                   className={
@@ -627,9 +617,8 @@ function TypeSearch({
                     selectItem(item);
                   }}
                 >
-                  <span>{item.name}</span>
-                  <small>Type ID {item.typeId}</small>
-                </button>
+                  <TypeIdentity name={item.name} typeId={item.typeId} />
+                </div>
               ))
             : !isLoading && (
                 <div className={styles.noSearchResults}>No matching published items.</div>
@@ -740,7 +729,6 @@ function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult
       {activeTab === "Plan" && (
         <div className={styles.planTableHeader}>
           <span aria-hidden="true" />
-          <span aria-hidden="true" />
           {planColumns.map((column) => (
             <span key={column}>{column}</span>
           ))}
@@ -805,16 +793,13 @@ function PlanList({ activeTab, plan }: { activeTab: PlannerTab; plan: PlanResult
               className={activeTab === "Plan" ? styles.planTableRow : styles.planRow}
               key={`${activeTab}-${index}`}
             >
-              <Image
-                className={styles.typeImage}
-                src={eveTypeImageUrl(typeId, imageVariation)}
-                alt=""
-                width={40}
-                height={40}
+              <TypeIdentity
+                name={name}
+                typeId={typeId}
+                imageSize={40}
+                variation={imageVariation}
+                className={styles.planTypeIdentity}
               />
-              <span className={styles.planRowMain} data-label="Type">
-                <strong>{name}</strong>
-              </span>
               {activeTab === "Plan" ? (
                 planColumns.map((column) =>
                   planCells?.[column] ? (

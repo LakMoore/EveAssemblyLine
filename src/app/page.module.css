@@ -56,16 +56,12 @@
 }
 
 .shell .tableHead {
-    grid-template-columns: 28px minmax(0, 1fr) 84px 64px 64px 28px;
+    grid-template-columns: minmax(0, 1fr) 84px 64px 64px 28px;
     column-gap: 12px
 }
 
-.shell .tableHead span:first-child {
-    grid-column: 1 / span 2
-}
-
 .shell .itemRow {
-    grid-template-columns: 28px minmax(0, 1fr) 84px 64px 64px 28px;
+    grid-template-columns: minmax(0, 1fr) 84px 64px 64px 28px;
     column-gap: 12px
 }
 
@@ -82,12 +78,12 @@
 
 @media (max-width: 640px) {
     .shell .tableHead {
-        grid-template-columns: 28px minmax(0, 1fr) 68px 48px 48px 24px;
+        grid-template-columns: minmax(0, 1fr) 68px 48px 48px 24px;
         column-gap: 7px
     }
 
     .shell .itemRow {
-        grid-template-columns: 28px minmax(0, 1fr) 68px 48px 48px 24px;
+        grid-template-columns: minmax(0, 1fr) 68px 48px 48px 24px;
         column-gap: 7px
     }
 
@@ -361,7 +357,7 @@
     }
 
     .planTableRow {
-        grid-template-columns: 40px minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr);
         gap: 8px 13px;
         align-items: start;
         padding: 13px 0;
@@ -691,6 +687,11 @@
 }
 
 .stockRow > span {
+    flex: 1 1 auto;
+    min-width: 0
+}
+
+.stockTypeIdentity {
     flex: 1 1 auto;
     min-width: 0
 }
@@ -1139,7 +1140,7 @@
 
 .planRow {
     display: grid;
-    grid-template-columns: 40px minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 13px
 }
@@ -1147,7 +1148,7 @@
 .planTableHeader,
 .planTableRow {
     display: grid;
-    grid-template-columns: 40px minmax(110px, 1.35fr) repeat(4, minmax(0, 1fr));
+    grid-template-columns: minmax(190px, 1.9fr) repeat(4, minmax(0, .78fr));
     gap: 13px;
     align-items: center;
 }
@@ -1181,7 +1182,8 @@
 }
 
 .planRowMain,
-.planRowAmount {
+.planRowAmount,
+.planTypeIdentity {
     min-width: 0
 }
 
@@ -1220,9 +1222,8 @@
     white-space: nowrap
 }
 
-.planRow .typeImage {
-    width: 40px;
-    height: 40px
+.planTypeIdentity {
+    min-width: 0
 }
 
 .shell {
@@ -1675,7 +1676,7 @@
 
 .itemRow {
     display: grid;
-    grid-template-columns: 28px 1fr 72px 16px;
+    grid-template-columns: minmax(0, 1fr) 72px 16px;
     align-items: center;
     gap: 9px;
     border-top: 1px solid #1e3740;
@@ -1690,21 +1691,6 @@
     color: var(--cyan);
     background: #12333d;
     font-size: 13px
-}
-
-.itemRow strong,
-.itemRow small {
-    display: block
-}
-
-.itemRow strong {
-    font-size: 12px
-}
-
-.itemRow small {
-    color: #78959e;
-    font: 9px 'DM Mono';
-    margin-top: 3px
 }
 
 .itemRow input {
@@ -2126,7 +2112,7 @@
     }
 
     .planTableRow {
-        grid-template-columns: 40px minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr);
         gap: 8px 13px;
         align-items: start;
     }
