@@ -5,11 +5,11 @@ import Link from "next/link";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { replaceEsiStock, replaceMarketOrderStock, type StockItem } from "@/lib/planning/stockStore";
 import { settingsStorageKey, type PlannerSettings } from "@/lib/planning/preferences";
-import { loadClientSession, loadClientStock } from "@/lib/client/requestCache";
+import { loadClientSession, loadClientShips, loadClientStock } from "@/lib/client/requestCache";
 import styles from "./page.module.css";
 
 const languageStorageKey = "assembly-line-language";
-type ActivePage = "planner" | "stock" | "locations" | "settings" | "imagechecker" | "characters";
+type ActivePage = "planner" | "stock" | "ships" | "locations" | "settings" | "imagechecker" | "characters";
 type CharacterSummary = {
   characterId: number;
   characterName: string;
@@ -111,6 +111,11 @@ export default function AppShell({
         rateLimitedUntil?: string | null;
       };
       if (!response.ok || data.success !== true) return;
+      let shipsResponse;
+      try {
+        shipsResponse = await loadClientShips(true);
+      } catch {
+      }
       try {
         const stockData = await loadClientStock(language, true);
         stockLocations = stockData.locations ?? [];
@@ -150,6 +155,7 @@ export default function AppShell({
             refreshedAt: data.refreshedAt ?? null,
             rateLimitedUntil: data.rateLimitedUntil ?? null,
             stockLocations,
+            ships: shipsResponse ?? null,
           },
         }),
       );
@@ -224,6 +230,13 @@ export default function AppShell({
           >
             <span>▤</span>
             <span className={styles.navText}>Stock</span>
+          </Link>
+          <Link
+            className={`${styles.navItem} ${activePage === "ships" ? styles.navActive : ""}`}
+            href="/ships"
+          >
+            <span>◇</span>
+            <span className={styles.navText}>Ships</span>
           </Link>
           <div className={styles.sectionLabel}>CONFIGURATION</div>
           <Link

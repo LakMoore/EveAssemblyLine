@@ -31,6 +31,11 @@ export type EsiAsset = {
   is_singleton: boolean;
 };
 
+type EsiAssetName = {
+  item_id: number;
+  name: string;
+};
+
 export type EsiBlueprint = {
   item_id: number;
   runs: number;
@@ -142,7 +147,7 @@ export async function requestEsi<T>(
   headers.set("accept", "application/json");
   if (tokenSet) headers.set("authorization", `Bearer ${tokenSet.accessToken}`);
   // store last used date
-  tokenSet && (tokenSet.lastUsedAt = Date.now());
+  if (tokenSet) tokenSet.lastUsedAt = Date.now();
   const response = await fetch(`${esiBaseUrl}${path}`, { ...init, headers, cache: "no-store" });
   if (response.status === 304)
     return { data: null, headers: response.headers, status: response.status };
@@ -268,6 +273,23 @@ export function applyBlueprintMetadata(assets: AssetRecord[], blueprints: EsiBlu
       te: blueprint.time_efficiency,
     };
   });
+}
+
+export async function fetchAssetNames(
+  path: string,
+  token: TokenSet,
+  itemIds: number[],
+) {
+  const names = new Map<number, string>();
+  for (let index = 0; index < itemIds.length; index += 1000) {
+    const result = await requestEsi<EsiAssetName[]>(path, token, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(itemIds.slice(index, index + 1000)),
+    });
+    for (const asset of result.data ?? []) names.set(asset.item_id, asset.name);
+  }
+  return names;
 }
 
 export async function fetchCharacterAssets(record: CharacterTokenRecord, etag?: string) {

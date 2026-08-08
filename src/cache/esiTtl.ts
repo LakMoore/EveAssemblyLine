@@ -5,6 +5,7 @@ export function parseCacheControlMaxAge(header: string | null): number | null {
 }
 
 export function getEsiTtlMs(path: string, cacheControlHeader: string | null): number {
+  if (path.includes("/assets/names")) return 30 * 60 * 1000;
   const maxAge = parseCacheControlMaxAge(cacheControlHeader);
   if (maxAge != null && maxAge > 0) return maxAge * 1000;
   if (path.includes("/universe/types/")) return 60 * 60 * 1000;

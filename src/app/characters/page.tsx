@@ -3,31 +3,24 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import AppShell from "../AppShell";
+import {
+  invalidateClientCharacterData,
+  loadClientCharacters,
+  loadClientCorpStatus,
+  loadClientStateStatus,
+  type ClientCharacter,
+  type ClientCharacterStatus,
+} from "@/lib/client/requestCache";
 import styles from "../page.module.css";
 
-type Character = {
-  characterId: number;
-  characterName: string;
-  corporationId?: number;
-  corporationName?: string;
-  corporationRoles: string[];
-  hasDirectorRole: boolean;
-  hasAccountantRole: boolean;
-  hasTraderRole: boolean;
-  corpAuthCompleted: boolean;
-};
+type Character = ClientCharacter;
 
 type EndpointStatus = {
   status: "fresh" | "cached" | "rate_limited" | "error";
   lastUpdated?: string;
 };
 
-type CharacterStatus = {
-  characterId: number;
-  assets?: EndpointStatus;
-  jobs?: EndpointStatus;
-  corporations?: Array<{ corporationId: number; assets?: EndpointStatus }>;
-};
+type CharacterStatus = ClientCharacterStatus;
 
 function formatDate(value?: string) {
   if (!value) return "Not refreshed";
@@ -60,22 +53,13 @@ export default function CharactersPage() {
   const [error, setError] = useState<string | null>(null);
 
   async function loadCharacters() {
-    const [charactersResponse, corpResponse] = await Promise.all([fetch("/api/characters"), fetch("/api/auth/corp/status")]);
-    if (!charactersResponse.ok) {
-      setCharacters([]);
-      if (charactersResponse.status !== 401) setError("Could not load connected characters.");
-      return;
-    }
-    const loaded = (await charactersResponse.json()) as Character[];
-    const corpStatus = corpResponse.ok ? ((await corpResponse.json()) as Character[]) : [];
+    const [loaded, corpStatus] = await Promise.all([loadClientCharacters(), loadClientCorpStatus()]);
     const corpById = new Map(corpStatus.map((character) => [character.characterId, character]));
     setCharacters(loaded.map((character) => ({ ...character, ...corpById.get(character.characterId) })));
   }
 
-  async function loadStatuses() {
-    const response = await fetch("/api/state/status");
-    if (!response.ok) return;
-    const data = (await response.json()) as { characters?: CharacterStatus[] };
+  async function loadStatuses(force = false) {
+    const data = await loadClientStateStatus(force);
     setStatuses(data.characters ?? []);
   }
 
@@ -83,7 +67,7 @@ export default function CharactersPage() {
     void Promise.resolve().then(() => Promise.all([loadCharacters(), loadStatuses()]))
       .catch(() => setError("Could not reach the character service."))
       .finally(() => setIsLoading(false));
-    const handleRefresh = () => void loadStatuses();
+    const handleRefresh = () => void loadStatuses(true);
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
     return () => window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
   }, []);
@@ -100,6 +84,7 @@ export default function CharactersPage() {
       }
       setCharacters((current) => current.filter((entry) => entry.characterId !== character.characterId));
       setStatuses((current) => current.filter((entry) => entry.characterId !== character.characterId));
+      invalidateClientCharacterData();
     } catch (removeError) {
       setError(removeError instanceof Error ? removeError.message : "Could not remove character.");
     } finally {

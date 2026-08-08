@@ -483,7 +483,216 @@
     display: grid;
     place-items: center;
     padding: 20px;
-    background: #020a0dcc
+    background: #020a0dcc;
+    overscroll-behavior: contain
+}
+
+.shipsStats {
+    display: grid;
+    justify-items: end;
+    align-content: center;
+    gap: 4px;
+    color: #78959e;
+    font: 10px 'DM Mono';
+    text-transform: uppercase
+}
+
+.shipsStats strong {
+    color: var(--cyan);
+    font-size: 28px;
+    line-height: 1
+}
+
+.shipSystems {
+    display: grid;
+    gap: 18px
+}
+
+.shipSystem {
+    border-top: 1px solid #2b5260;
+    padding-top: 15px
+}
+
+.shipSystemHeader {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px
+}
+
+.shipSystemHeader h2 {
+    margin: 4px 0 0;
+    color: #e2f0f2;
+    font-size: 20px
+}
+
+.shipCount,
+.shipCardMeta,
+.shipCardAction,
+.shipModalSystem {
+    color: #78959e;
+    font: 10px 'DM Mono';
+    text-transform: uppercase
+}
+
+.shipList {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 10px
+}
+
+.shipCard {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 12px;
+    border: 1px solid #244b57;
+    background: #0c222a;
+    color: inherit;
+    text-align: left;
+    cursor: pointer
+}
+
+.shipCard:hover,
+.shipCard:focus-visible {
+    border-color: var(--cyan);
+    outline: 0;
+    background: #102f38
+}
+
+.shipCardIdentity {
+    grid-column: 1 / -1;
+    min-width: 0
+}
+
+.shipCardMeta,
+.shipCardAction {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap
+}
+
+.shipCardAction {
+    color: var(--cyan);
+    text-align: right
+}
+
+.shipsEmpty {
+    padding: 28px 0;
+    color: #78959e;
+    font-size: 12px
+}
+
+.shipModal {
+    width: min(720px, 100%);
+    max-height: min(760px, 100%);
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 25px;
+    background: var(--white);
+    border: 1px solid #37606c;
+    box-shadow: 0 18px 50px #000b
+}
+
+.shipModalSystem {
+    margin: 7px 0 0
+}
+
+.shipModalHeading {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 14px
+}
+
+.shipModalIdentity span {
+    display: none
+}
+
+.shipAssetGroups {
+    display: grid;
+    gap: 18px;
+    margin-top: 22px
+}
+
+.shipAssetGroup {
+    border-top: 1px solid #2b5260;
+    padding-top: 10px
+}
+
+.shipAssetGroup h3 {
+    margin: 0 0 8px;
+    color: var(--cyan);
+    font: 11px 'DM Mono';
+    text-transform: uppercase
+}
+
+.shipAssetRow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 7px 0;
+    border-top: 1px solid #183a44
+}
+
+.shipAssetLoadout {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 18px;
+    flex: 1 1 auto
+}
+
+.shipAssetItem {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 10px;
+    flex: 1 1 0
+}
+
+.shipAssetQuantity {
+    margin-left: auto;
+    padding-right: 10px;
+    flex: 0 0 auto;
+    color: #d5e6e9;
+    font: 11px 'DM Mono'
+}
+
+.shipAssetFittingButton {
+    flex: 0 0 auto;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--cyan);
+    cursor: pointer;
+    font: 10px 'DM Mono';
+    text-transform: uppercase;
+    white-space: nowrap
+}
+
+.shipAssetFittingButton:hover,
+.shipAssetFittingButton:focus-visible {
+    color: #fff;
+    outline: 0
+}
+
+@media (max-width: 640px) {
+    .shipsStats {
+        justify-items: start
+    }
+
+    .shipSystemHeader {
+        align-items: start;
+        flex-direction: column;
+        gap: 6px
+    }
+
+    .shipModal {
+        padding: 18px
+    }
 }
 
 .importModal {

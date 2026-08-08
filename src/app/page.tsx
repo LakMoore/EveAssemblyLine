@@ -28,7 +28,7 @@ type BuildItem = {
   te: number;
   category?: "blueprint" | "bpo" | "bpc" | "reaction" | "item";
 };
-type TypeResult = { name: string; typeId: number };
+type TypeResult = { name: string; typeId: number; category?: BuildItem["category"] };
 type PasteResult = {
   name: string;
   quantity?: number;
@@ -693,7 +693,11 @@ function TypeSearch({
                     selectItem(item);
                   }}
                 >
-                  <TypeIdentity name={item.name} typeId={item.typeId} />
+                  <TypeIdentity
+                    name={item.name}
+                    typeId={item.typeId}
+                    variation={item.category === "blueprint" ? "bp" : "icon"}
+                  />
                 </div>
               ))
             : !isLoading && (
@@ -862,11 +866,13 @@ function PlanList({
                           : "";
           const imageVariation =
             "imageVariation" in entry && entry.imageVariation
-              ? entry.imageVariation
+              ? entry.imageVariation === "icon" && isBlueprintName
+                ? "bp"
+                : entry.imageVariation
               : isCopyOfBpo || (isPlanBpc && entry.bpoCount > 0)
                 ? "bp"
                 : isBlueprintName
-                  ? "bpc"
+                  ? "bp"
                 : activeTab === "Manufacture" ||
                     activeTab === "React" ||
                     isPlanBpc ||

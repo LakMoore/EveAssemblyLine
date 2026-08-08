@@ -31,6 +31,7 @@ export interface AccountRecord {
 export interface AssetRecord {
   itemId: number;
   typeId: number;
+  name?: string;
   quantity: number;
   runCount?: number;
   me?: number;

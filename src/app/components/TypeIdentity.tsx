@@ -8,6 +8,7 @@ import { useToast } from "./ToastProvider";
 
 type TypeIdentityProps = {
   name: string;
+  typeName?: string;
   typeId: number;
   imageSize?: number;
   variation?: "icon" | "render" | "bp" | "bpc";
@@ -16,6 +17,7 @@ type TypeIdentityProps = {
 
 export default function TypeIdentity({
   name,
+  typeName,
   typeId,
   imageSize = 32,
   variation = "icon",
@@ -60,7 +62,7 @@ export default function TypeIdentity({
           title="Copy type ID"
           onClick={() => void copyValue(String(typeId), "Type ID")}
         >
-          Type ID {typeId}
+          {typeName ? `${typeName} · ` : ""}Type ID {typeId}
         </button>
       </span>
     </div>

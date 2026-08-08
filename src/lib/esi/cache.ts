@@ -9,12 +9,15 @@ import type { PlanStockItem } from "@/lib/planning/types";
 import {
   getGroups,
   getMarketGroups,
+  getTypes,
   getTypesByIds,
   getShipTypeIds,
+  getHaulerShipTypeIds,
 } from "@/cache/services/sdeCache";
 import { getCharacter, getCharacters } from "@/lib/auth/tokensStore";
 import {
   fetchCharacterAssets,
+  fetchAssetNames,
   fetchCorporationAssets,
   fetchCharacterIndustryJobs,
   fetchCorporationIndustryJobs,
@@ -40,6 +43,7 @@ export type EndpointCache<T> = {
 type OwnerCache = {
   allAssetsRaw?: EndpointCache<AssetRecord[]>;
   stockAssetsByItemId?: Map<number, AssetRecord>;
+  shipAssetsByItemId: Map<number, AssetRecord>;
   rootContainersById: Map<number, AssetRecord>;
   assembledShipsByItemId: Map<number, AssetRecord>;
   assembledStructureRigs: AssetRecord[];
@@ -50,12 +54,14 @@ type OwnerCache = {
 
 const characterCaches = new Map<number, OwnerCache>();
 const corporationCaches = new Map<number, OwnerCache>();
+const corporationDirectorRotation = new Map<number, number>();
 
 function getCache(map: Map<number, OwnerCache>, id: number): OwnerCache {
   const existing = map.get(id);
   if (existing) return existing;
   const created: OwnerCache = {
     assembledStructureRigs: [],
+    shipAssetsByItemId: new Map(),
     rootContainersById: new Map(),
     assembledShipsByItemId: new Map(),
     unresolvedAssetCount: 0,
@@ -104,14 +110,47 @@ async function indexAssetsByPurpose(rawAssets: AssetRecord[]) {
   if (rawAssets.length === 0) {
     return {
       stockAssetsByItemId: new Map<number, AssetRecord>(),
+      shipAssetsByItemId: new Map<number, AssetRecord>(),
+      shipTypeIds: new Set<number>(),
       stockLocationItemsByItemId: new Map<number, AssetRecord>(),
       installedStructureRigs: [] as AssetRecord[],
       assembledShipsByItemId: new Map<number, AssetRecord>(),
     };
   }
-  const [shipTypeIds] = await Promise.all([
+  const [shipTypeIds, haulerShipTypeIds] = await Promise.all([
     getShipTypeIds(),
+    getHaulerShipTypeIds(),
   ]);
+
+  const assetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+  const shipByAssetId = new Map<number, AssetRecord | null>();
+  function findContainingShip(asset: AssetRecord): AssetRecord | null {
+    const cachedShip = shipByAssetId.get(asset.itemId);
+    if (cachedShip !== undefined) return cachedShip;
+    const visited = new Set<number>();
+    let current: AssetRecord | undefined = asset;
+    while (current) {
+      if (shipTypeIds.has(current.typeId)) {
+        shipByAssetId.set(asset.itemId, current);
+        return current;
+      }
+      if (visited.has(current.itemId)) break;
+      visited.add(current.itemId);
+      current = assetsByItemId.get(current.locationId);
+    }
+    shipByAssetId.set(asset.itemId, null);
+    return null;
+  }
+
+  const shipAssetsByItemId = new Map(
+    rawAssets
+      .map((asset) => [asset, findContainingShip(asset)] as const)
+      .filter(
+        (entry): entry is readonly [AssetRecord, AssetRecord] =>
+          entry[1] !== null && entry[1].isSingleton,
+      )
+      .map(([asset]) => [asset.itemId, asset]),
+  );
 
   const assembledShipsByItemId = new Map(
     rawAssets
@@ -135,8 +174,17 @@ async function indexAssetsByPurpose(rawAssets: AssetRecord[]) {
   // assets may be onboard assembled ships!
   const stockAssetsByItemId = new Map(rawAssets
     .filter((asset) => 
-      !stockLocationIds.has(asset.itemId)
-      && !assembledShipsByItemId.has(asset.itemId)
+      !assembledShipsByItemId.has(asset.itemId)
+      && (shipTypeIds.has(asset.typeId)
+        ? !asset.isSingleton
+        : (() => {
+        const containingShip = shipByAssetId.get(asset.itemId) ?? null;
+        const isPackagedHaulerDescendant = containingShip !== null
+          && containingShip.itemId !== asset.itemId
+          && !asset.isSingleton
+          && haulerShipTypeIds.has(containingShip.typeId);
+        return !stockLocationIds.has(asset.itemId) || isPackagedHaulerDescendant;
+      })())
     )
     .map((asset) => [asset.itemId, asset])
   );
@@ -151,6 +199,8 @@ async function indexAssetsByPurpose(rawAssets: AssetRecord[]) {
 
   return {
     stockAssetsByItemId,
+    shipAssetsByItemId,
+    shipTypeIds,
     stockLocationItemsByItemId,
     installedStructureRigs,
     assembledShipsByItemId,
@@ -163,10 +213,33 @@ async function cacheResolvedAssets(
   token: TokenSet,
   headers?: Headers,
   previous?: EndpointCache<AssetRecord[]>,
+  assetNamePath?: string,
 ) {
   const assetIndexes = await indexAssetsByPurpose(rawAssets);
+  let namedAssets = rawAssets;
+  if (assetNamePath) {
+    const stockAssetIds = new Set(assetIndexes.stockAssetsByItemId.keys());
+    namedAssets = await mergeAssetNames(rawAssets, token, assetNamePath, stockAssetIds);
+    if (namedAssets !== rawAssets) {
+      const namesByItemId = new Map(namedAssets.map((asset) => [asset.itemId, asset]));
+      const replaceMapValues = <T extends AssetRecord>(assets: Map<number, T>) => {
+        for (const itemId of assets.keys()) {
+          const namedAsset = namesByItemId.get(itemId);
+          if (namedAsset) assets.set(itemId, namedAsset as T);
+        }
+      };
+      replaceMapValues(assetIndexes.stockAssetsByItemId);
+      replaceMapValues(assetIndexes.shipAssetsByItemId);
+      replaceMapValues(assetIndexes.stockLocationItemsByItemId);
+      replaceMapValues(assetIndexes.assembledShipsByItemId);
+    }
+  }
 
-  const containerRootsById = await resolveContainerRoots(assetIndexes.stockLocationItemsByItemId, token);
+  const containerRootsById = await resolveContainerRoots(
+    assetIndexes.stockLocationItemsByItemId,
+    assetIndexes.shipTypeIds,
+    token,
+  );
   const inferredRoots = new Map<number, Promise<AssetLocation | null>>();
 
   function inferRoot(locationId: number, asset: AssetRecord) {
@@ -199,8 +272,23 @@ async function cacheResolvedAssets(
     resolvedStockAssets.map((asset) => [asset.itemId, asset]),
   );
 
-  cache.allAssetsRaw = setFresh(rawAssets, headers, previous);
+  cache.allAssetsRaw = setFresh(namedAssets, headers, previous);
   cache.stockAssetsByItemId = resolvedByItemId;
+  const resolvedShipAssets = await Promise.all(
+    [...assetIndexes.shipAssetsByItemId.values()].map(async (asset) => {
+      const containerRoot = containerRootsById.get(asset.locationId)?.rootLocation;
+      if (containerRoot) return { ...asset, rootLocation: containerRoot };
+      try {
+        const rootLocation = await inferRoot(asset.locationId, asset);
+        return rootLocation ? { ...asset, rootLocation } : asset;
+      } catch {
+        return asset;
+      }
+    }),
+  );
+  cache.shipAssetsByItemId = new Map(
+    resolvedShipAssets.map((asset) => [asset.itemId, asset]),
+  );
   cache.rootContainersById = containerRootsById;
   cache.assembledShipsByItemId = assetIndexes.assembledShipsByItemId;
   cache.assembledStructureRigs = assetIndexes.installedStructureRigs;
@@ -213,8 +301,38 @@ async function cacheResolvedAssets(
   ].filter((asset) => !asset.rootLocation).length;
 }
 
-function needsAssetLocationResolution(cache: OwnerCache) {
-  return cache.unresolvedAssetCount > 0;
+async function mergeAssetNames(
+  assets: AssetRecord[],
+  token: TokenSet,
+  ownerPath: string,
+  excludedItemIds: ReadonlySet<number>,
+) {
+  const [types, groups, marketGroups, shipTypeIds] = await Promise.all([
+    getTypes(),
+    getGroups(),
+    getMarketGroups(),
+    getShipTypeIds(),
+  ]);
+  const nameableItemIds = assets
+    .filter(
+      (asset) =>
+        asset.isSingleton &&
+        !excludedItemIds.has(asset.itemId) &&
+        (shipTypeIds.has(asset.typeId) || isCargoContainerType(asset.typeId, types, groups, marketGroups)) &&
+        !asset.name,
+    )
+    .map((asset) => asset.itemId);
+  if (nameableItemIds.length === 0) return assets;
+  try {
+    const names = await fetchAssetNames(`${ownerPath}/assets/names`, token, nameableItemIds);
+    if (names.size === 0) return assets;
+    return assets.map((asset) => {
+      const name = names.get(asset.itemId);
+      return name === undefined ? asset : { ...asset, name };
+    });
+  } catch {
+    return assets;
+  }
 }
 
 function needsCompleteAssetGraph(cache: OwnerCache) {
@@ -291,7 +409,11 @@ async function getRealParent(current: AssetRecord, token: TokenSet): Promise<Ass
   return null;
 }
 
-async function resolveContainerRoots(containerItemsByItemId: Map<number, AssetRecord>, token: TokenSet) {
+async function resolveContainerRoots(
+  containerItemsByItemId: Map<number, AssetRecord>,
+  shipTypeIds: Set<number>,
+  token: TokenSet,
+) {
   // Cache already-resolved roots
   const rootCache = new Map<number, AssetLocation>();
 
@@ -312,6 +434,12 @@ async function resolveContainerRoots(containerItemsByItemId: Map<number, AssetRe
         throw new Error(`Circular location hierarchy detected at ${current.itemId}`);
       }
       visited.add(current.itemId);
+      if (shipTypeIds.has(current.typeId)) {
+        const realParent = await getRealParent(current, token);
+        if (!realParent) return null;
+        for (const id of visited) rootCache.set(id, realParent);
+        return realParent;
+      }
       const parent = containerItemsByItemId.get(current.locationId);
       if (!parent) {
         // The first parent outside the container index must be resolved through SDE or ESI.
@@ -336,6 +464,7 @@ async function resolveContainerRoots(containerItemsByItemId: Map<number, AssetRe
       roots.push(result.value as readonly [number, AssetRecord]);
     } else if (result.status === "fulfilled") {
       const asset = result.value[1];
+      if (asset.locationType === "item") continue;
       console.warn("Could not resolve a container root", {
         itemId: asset.itemId,
         locationId: asset.locationId,
@@ -356,7 +485,17 @@ async function rebuildResolvedAssets(
   if (!record || !needsCompleteAssetGraph(cache) || !Array.isArray(cache.allAssetsRaw?.lastBody)) return;
   try {
     const token = await getUsableToken(record, purpose);
-    await cacheResolvedAssets(cache, cache.allAssetsRaw.lastBody as AssetRecord[], token);
+    const ownerPath = purpose === "corp"
+      ? `/corporations/${record.corporationId}`
+      : `/characters/${record.characterId}`;
+    await cacheResolvedAssets(
+      cache,
+      cache.allAssetsRaw.lastBody as AssetRecord[],
+      token,
+      undefined,
+      cache.allAssetsRaw,
+      ownerPath,
+    );
   } catch {
     // Keep raw assets available when ESI is paused or unavailable.
   }
@@ -366,6 +505,25 @@ export async function refreshCharacterState(
   characterIds: number[],
   options: { force?: boolean } = {},
 ) {
+  const characters = await getCharacters();
+  const selectedCorpDirectors = new Map<number, number>();
+  const directorsByCorporation = new Map<number, number[]>();
+  for (const character of characters) {
+    if (
+      !characterIds.includes(character.characterId) ||
+      !character.corpAuthCompleted ||
+      !character.hasDirectorRole ||
+      !character.corporationId
+    ) continue;
+    const directors = directorsByCorporation.get(character.corporationId) ?? [];
+    directors.push(character.characterId);
+    directorsByCorporation.set(character.corporationId, directors);
+  }
+  for (const [corporationId, directors] of directorsByCorporation) {
+    const offset = corporationDirectorRotation.get(corporationId) ?? 0;
+    selectedCorpDirectors.set(corporationId, directors[offset % directors.length]);
+    corporationDirectorRotation.set(corporationId, offset + 1);
+  }
   const summary: {
     characterId: number;
     assets?: EndpointCache<AssetRecord[] | null>;
@@ -390,12 +548,16 @@ export async function refreshCharacterState(
         Date.parse(cache.allAssetsRaw.nextRefreshAllowed) > Date.now()
       ) {
         characterSummary.assets = { ...cache.allAssetsRaw, status: "cached" };
-        if (
-          (needsAssetLocationResolution(cache) || needsCompleteAssetGraph(cache)) &&
-          Array.isArray(cache.allAssetsRaw.lastBody)
-        ) {
+        if (Array.isArray(cache.allAssetsRaw.lastBody)) {
           const token = await getUsableToken(character, "personal");
-          await cacheResolvedAssets(cache, cache.allAssetsRaw.lastBody as AssetRecord[], token);
+          await cacheResolvedAssets(
+            cache,
+            cache.allAssetsRaw.lastBody as AssetRecord[],
+            token,
+            undefined,
+            cache.allAssetsRaw,
+            `/characters/${character.characterId}`,
+          );
         }
       } else {
         const result = await fetchCharacterAssets(character, cache.allAssetsRaw?.etag);
@@ -410,6 +572,7 @@ export async function refreshCharacterState(
             result.token,
             result.headers,
             cache.allAssetsRaw,
+            `/characters/${character.characterId}`,
           );
           cache.allAssetsRaw.status = "cached";
         } else if (result.assets) {
@@ -419,6 +582,7 @@ export async function refreshCharacterState(
             result.token,
             result.headers,
             cache.allAssetsRaw,
+            `/characters/${character.characterId}`,
           );
         }
         characterSummary.assets = cache.allAssetsRaw;
@@ -450,7 +614,12 @@ export async function refreshCharacterState(
       };
     }
 
-    if (character.corpAuthCompleted && character.hasDirectorRole && character.corporationId) {
+    if (
+      character.corpAuthCompleted &&
+      character.hasDirectorRole &&
+      character.corporationId &&
+      selectedCorpDirectors.get(character.corporationId) === character.characterId
+    ) {
       const corpCache = getCache(corporationCaches, character.corporationId);
       const corpSummary: {
         corporationId: number;
@@ -466,12 +635,16 @@ export async function refreshCharacterState(
           Date.parse(corpCache.allAssetsRaw.nextRefreshAllowed) > Date.now()
         ) {
           corpSummary.assets = { ...corpCache.allAssetsRaw, status: "cached" };
-          if (
-            (needsAssetLocationResolution(corpCache) || needsCompleteAssetGraph(corpCache)) &&
-            Array.isArray(corpCache.allAssetsRaw.lastBody)
-          ) {
+          if (Array.isArray(corpCache.allAssetsRaw.lastBody)) {
             const token = await getUsableToken(character, "corp");
-            await cacheResolvedAssets(corpCache, corpCache.allAssetsRaw.lastBody as AssetRecord[], token);
+            await cacheResolvedAssets(
+              corpCache,
+              corpCache.allAssetsRaw.lastBody as AssetRecord[],
+              token,
+              undefined,
+              corpCache.allAssetsRaw,
+              `/corporations/${character.corporationId}`,
+            );
           }
         } else {
           const result = await fetchCorporationAssets(character, corpCache.allAssetsRaw?.etag);
@@ -489,6 +662,7 @@ export async function refreshCharacterState(
               result.token,
               result.headers,
               corpCache.allAssetsRaw,
+              `/corporations/${character.corporationId}`,
             );
             corpCache.allAssetsRaw.status = "cached";
           } else if (result.assets) {
@@ -498,6 +672,7 @@ export async function refreshCharacterState(
               result.token,
               result.headers,
               corpCache.allAssetsRaw,
+              `/corporations/${character.corporationId}`,
             );
           }
           corpSummary.assets = corpCache.allAssetsRaw;
@@ -593,6 +768,36 @@ export async function getResolvedAssets(characterIds: number[], includeCorporati
   return [
     ...assets,
     ...[...corporations].flatMap((id) => Array.from(getCache(corporationCaches, id).stockAssetsByItemId?.values() ?? [])),
+  ];
+}
+
+/** Returns ships and every asset contained by a ship, including nested containers. */
+export async function getShipAssets(
+  characterIds: number[],
+  includeCorporationAssets: boolean,
+): Promise<AssetRecord[]> {
+  const assets = characterIds.flatMap((id) => [
+    ...getCache(characterCaches, id).shipAssetsByItemId.values(),
+  ]);
+  if (!includeCorporationAssets) return assets;
+
+  const characters = await getCharacters();
+  const corporationIds = new Set(
+    characters
+      .filter(
+        (character) =>
+          characterIds.includes(character.characterId) &&
+          character.corpAuthCompleted &&
+          character.hasDirectorRole &&
+          character.corporationId,
+      )
+      .map((character) => character.corporationId!),
+  );
+  return [
+    ...assets,
+    ...[...corporationIds].flatMap((id) => [
+      ...getCache(corporationCaches, id).shipAssetsByItemId.values(),
+    ]),
   ];
 }
 

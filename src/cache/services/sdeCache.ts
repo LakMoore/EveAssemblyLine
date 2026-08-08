@@ -131,6 +131,7 @@ export async function getTypesByIds(typeIds: readonly number[]): Promise<Map<num
 }
 
 let shipTypeIdsPromise: Promise<Set<number>> | undefined;
+let haulerShipTypeIdsPromise: Promise<Set<number>> | undefined;
 let structureTypeIdsPromise: Promise<Set<number>> | undefined;
 
 export function getShipTypeIds(): Promise<Set<number>> {
@@ -139,7 +140,10 @@ export function getShipTypeIds(): Promise<Set<number>> {
       ([types, groups]) =>
         new Set(
           [...types.values()]
-            .filter((type) => groups.get(type.groupID)?.categoryID === 6)
+            .filter(
+              (type) =>
+                groups.get(type.groupID)?.categoryID === 6,
+            )
             .map((type) => type._key),
         ),
     )
@@ -148,6 +152,36 @@ export function getShipTypeIds(): Promise<Set<number>> {
       throw error;
     });
   return shipTypeIdsPromise;
+}
+
+export function getHaulerShipTypeIds(): Promise<Set<number>> {
+  haulerShipTypeIdsPromise ??= Promise.all([getTypes(), getMarketGroups(), getShipTypeIds()])
+    .then(([types, marketGroups, shipTypeIds]) => {
+      return new Set(
+        [...types.values()]
+          .filter((type) => {
+            if (!shipTypeIds.has(type._key) || type.marketGroupID === undefined) return false;
+            let descendsFromShips = false;
+            let descendsFromIndustrialOrFreighter = false;
+            let group = type.marketGroupID === undefined ? undefined : marketGroups.get(type.marketGroupID);
+            while (group) {
+              const name = group.name.en.toLocaleLowerCase("en");
+              if (name === "ships") descendsFromShips = true;
+              if (name.includes("industrial") || name.includes("freighter")) {
+                descendsFromIndustrialOrFreighter = true;
+              }
+              group = group.parentGroupID === undefined ? undefined : marketGroups.get(group.parentGroupID);
+            }
+            return descendsFromShips && descendsFromIndustrialOrFreighter;
+          })
+          .map((type) => type._key),
+      );
+    })
+    .catch((error) => {
+      haulerShipTypeIdsPromise = undefined;
+      throw error;
+    });
+  return haulerShipTypeIdsPromise;
 }
 
 export function getStructureTypeIds(): Promise<Set<number>> {

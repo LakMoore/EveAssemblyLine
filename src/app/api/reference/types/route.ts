@@ -42,6 +42,7 @@ export async function GET(request: Request) {
       });
     }
     if (query.length < 2) return NextResponse.json({ items: [] });
+    const [marketGroupById, groupById] = await Promise.all([getMarketGroups(), getGroups()]);
     const normalizedQuery = query.toLocaleLowerCase();
     const numericQuery = /^\d+$/.test(query) ? Number(query) : null;
     const matches = [...typeById.values()]
@@ -67,6 +68,7 @@ export async function GET(request: Request) {
       .slice(0, resultLimit)
       .map((item) => ({
         typeId: item._key,
+        ...categorizeType(item, language, marketGroupById, groupById),
         name:
           item.name[language] ??
           item.name.en ??

@@ -9,7 +9,7 @@ import {
   type PlannerLocations,
 } from "@/lib/planning/preferences";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
-import { loadClientSession } from "@/lib/client/requestCache";
+import { loadClientShips, loadClientSession } from "@/lib/client/requestCache";
 import { fetchRigs } from "@/lib/reference/rigs";
 import { loadStructures, saveStructures } from "@/lib/planning/structureStore";
 import styles from "../page.module.css";
@@ -366,6 +366,7 @@ export default function LocationsPage() {
           const refreshData = (await refreshResponse.json()) as {
             rateLimitedUntil?: string | null;
           };
+          if (refreshResponse.ok) await loadClientShips(true).catch(() => undefined);
           if (!cancelled) setEsiRateLimitedUntil(refreshData.rateLimitedUntil ?? null);
         }
         const params = new URLSearchParams({
