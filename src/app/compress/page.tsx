@@ -26,13 +26,24 @@ type CompressResult = {
   surplus?: ResultItem[];
   efficiencies?: EfficiencyResult;
 };
-type CompressOption = { id: string; name: string; structure?: "NPC" | "Athanor" | "Tatara"; modifier?: number; securityStatus?: number };
+type CompressOption = { id: string; name: string; structure?: "NPC" | "Athanor" | "Tatara"; modifier?: number; securityStatus?: number; rigModifier?: number; rankBonus?: number };
 type CharacterOption = { id: string; characterId: number; name: string; skills: Record<string, number>; implants: number[] };
 type ImplantOption = { id: string; name: string; level: number; typeId?: number };
 type CompressOptions = { locations: CompressOption[]; characters: CharacterOption[]; implants: ImplantOption[]; relevantSkillIds: number[] };
 
 function variation(category?: CompressItem["category"]) {
   return category === "blueprint" || category === "bpo" ? "bp" : category === "bpc" || category === "reaction" ? "bpc" : "icon";
+}
+
+function reprocessingRigModifier(rigs: string[]) {
+  const rig = rigs.find((name) => /Ore Grading Processor|Reprocessing Monitor/.test(name));
+  if (!rig) return 0;
+  return / II(?:$|\s)/.test(rig) ? 3 : 1;
+}
+
+function securityBonus(securityStatus: number | undefined, rigModifier: number) {
+  if (rigModifier === 0 || securityStatus === undefined) return 0;
+  return securityStatus >= 0.5 ? 0 : securityStatus > 0 ? 0.06 : 0.12;
 }
 
 export default function CompressPage() {
@@ -64,17 +75,26 @@ function CompressContent() {
       loadCompressSettings(),
     ]).then(([loadedOptions, structures, loadedSettings]) => {
       const loadedLocations = [
-        ...loadedOptions.locations,
+        ...loadedOptions.locations.map((location) => {
+          const known = structures.find((structure) => location.id === `structure:${structure.esiStructureId}`);
+          return known ? { ...location, rigModifier: reprocessingRigModifier(known.rigs) } : location;
+        }),
         ...structures.filter((structure) => structure.type === "Athanor" || structure.type === "Tatara").map((structure) => ({
           id: structure.id,
           name: `${structure.systemName} - ${structure.name}`,
           structure: structure.type === "Athanor" ? "Athanor" as const : structure.type === "Tatara" ? "Tatara" as const : "NPC" as const,
           modifier: structure.type === "Tatara" ? 5.5 : structure.type === "Athanor" ? 2 : 0,
           securityStatus: undefined,
+          rigModifier: reprocessingRigModifier(structure.rigs),
         })),
-      ].filter((location, index, all) => all.findIndex((candidate) => candidate.id === location.id) === index).sort((left, right) => (right.modifier ?? 0) - (left.modifier ?? 0) || left.name.localeCompare(right.name));
+      ].filter((location, index, all) => all.findIndex((candidate) => candidate.id === location.id) === index).map((location) => {
+        const rigModifier = location.rigModifier ?? 0;
+        const base = 50 + rigModifier;
+        const rankBonus = base * (1 + securityBonus(location.securityStatus, rigModifier)) * (1 + (location.modifier ?? 0) / 100) - 50;
+        return { ...location, rigModifier, rankBonus };
+      }).sort((left, right) => (right.rankBonus ?? 0) - (left.rankBonus ?? 0) || left.name.localeCompare(right.name));
       const normalizedSettings = { ...loadedSettings, locationId: loadedLocations.some((location) => location.id === loadedSettings.locationId) ? loadedSettings.locationId : loadedLocations[0]?.id ?? loadedSettings.locationId };
-      setOptions(loadedOptions);
+      setOptions({ ...loadedOptions, locations: loadedLocations });
       setKnownStructures(structures);
       setSettings(normalizedSettings);
       void saveCompressSettings(normalizedSettings);
@@ -91,8 +111,12 @@ function CompressContent() {
 
   const locationOptions = [
     ...options.locations,
-    ...knownStructures.filter((structure) => structure.type === "Athanor" || structure.type === "Tatara").filter((structure) => !options.locations.some((location) => location.id === `structure:${structure.esiStructureId}`)).map((structure) => ({ id: structure.id, name: `${structure.systemName} - ${structure.name}`, structure: structure.type === "Athanor" ? "Athanor" as const : "Tatara" as const, modifier: structure.type === "Tatara" ? 5.5 : 2, securityStatus: undefined })),
-  ].filter((location, index, all) => all.findIndex((candidate) => candidate.id === location.id) === index).sort((left, right) => (right.modifier ?? 0) - (left.modifier ?? 0) || left.name.localeCompare(right.name));
+    ...knownStructures.filter((structure) => structure.type === "Athanor" || structure.type === "Tatara").filter((structure) => !options.locations.some((location) => location.id === `structure:${structure.esiStructureId}`)).map((structure) => ({ id: structure.id, name: `${structure.systemName} - ${structure.name}`, structure: structure.type === "Athanor" ? "Athanor" as const : "Tatara" as const, modifier: structure.type === "Tatara" ? 5.5 : 2, securityStatus: undefined, rigModifier: reprocessingRigModifier(structure.rigs) })),
+  ].filter((location, index, all) => all.findIndex((candidate) => candidate.id === location.id) === index).map((location) => {
+    const rigModifier = location.rigModifier ?? 0;
+    const base = 50 + rigModifier;
+    return { ...location, rigModifier, rankBonus: base * (1 + securityBonus(location.securityStatus, rigModifier)) * (1 + (location.modifier ?? 0) / 100) - 50 };
+  }).sort((left, right) => (right.rankBonus ?? 0) - (left.rankBonus ?? 0) || left.name.localeCompare(right.name));
   const selectedCharacter = options.characters.find((character) => character.id === settings.characterId);
   const selectedImplant = options.implants.find((implant) => implant.id === settings.implantId) ?? options.implants[0];
   const implantOptions = selectedCharacter ? options.implants.filter((implant) => implant.id === "none" || (implant.typeId !== undefined && selectedCharacter.implants.includes(implant.typeId))) : options.implants;
@@ -140,7 +164,7 @@ function CompressContent() {
       const response = await fetch("/api/compress", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ language, items: items.map(({ typeId, name, quantity }) => ({ typeId, name, quantity })), structure: selectedLocation?.structure ?? "NPC", skillLevels, implantLevel: selectedImplant?.level ?? 0, securityStatus: selectedLocation?.securityStatus }),
+        body: JSON.stringify({ language, items: items.map(({ typeId, name, quantity }) => ({ typeId, name, quantity })), structure: selectedLocation?.structure ?? "NPC", skillLevels, implantLevel: selectedImplant?.level ?? 0, securityStatus: selectedLocation?.securityStatus, rigModifier: selectedLocation?.rigModifier ?? 0 }),
       });
       const contentType = response.headers.get("content-type") ?? "";
       const data = contentType.includes("application/json")
@@ -179,7 +203,7 @@ function CompressContent() {
           <p className={styles.description}>Add the minerals you need, then find the compressed ores that can produce them.</p>
           <TypeSearch language={language} onSelect={addItem} />
           <div className={styles.compressOptions}>
-            <label><span>LOCATION</span><select value={settings.locationId} onChange={(event) => updateSettings({ locationId: event.target.value })}>{locationOptions.map((location) => <option value={location.id} key={location.id}>{location.name} · {location.modifier ?? 0}%</option>)}</select></label>
+            <label><span>LOCATION</span><select value={settings.locationId} onChange={(event) => updateSettings({ locationId: event.target.value })}>{locationOptions.map((location) => <option value={location.id} key={location.id}>{location.name} · {(location.rankBonus ?? location.modifier ?? 0).toFixed(2)}%</option>)}</select></label>
             <label><span>CHARACTER / SKILLS</span><select value={settings.characterId} onChange={(event) => updateSettings({ characterId: event.target.value, implantId: "none" })}><option value="all-zero">All zero</option><option value="all-iv">All IV</option><option value="all-v">All V</option>{options.characters.map((character) => <option value={character.id} key={character.id}>{character.name}</option>)}</select></label>
             <label><span>IMPLANT</span><select value={implantOptions.some((implant) => implant.id === settings.implantId) ? settings.implantId : "none"} onChange={(event) => updateSettings({ implantId: event.target.value })}>{implantOptions.map((implant) => <option value={implant.id} key={implant.id}>{implant.name}</option>)}</select></label>
           </div>

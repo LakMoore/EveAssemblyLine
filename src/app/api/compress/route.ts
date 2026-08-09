@@ -6,7 +6,7 @@ import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { language?: string; items?: CompressionRequestItem[]; structure?: ReprocessingStructure; skillLevels?: Record<string, number>; reprocessingSkillLevel?: number; reprocessingEfficiencySkillLevel?: number; implantLevel?: number; securityStatus?: number };
+    const body = (await request.json()) as { language?: string; items?: CompressionRequestItem[]; structure?: ReprocessingStructure; skillLevels?: Record<string, number>; reprocessingSkillLevel?: number; reprocessingEfficiencySkillLevel?: number; implantLevel?: number; securityStatus?: number; rigModifier?: number };
     if (!Array.isArray(body.items) || body.items.length === 0)
       return NextResponse.json({ error: "A non-empty list of raw materials is required." }, { status: 400 });
     if (body.items.some((item) => !Number.isSafeInteger(item.typeId) || !Number.isSafeInteger(item.quantity) || item.quantity <= 0 || typeof item.name !== "string"))
@@ -19,6 +19,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Implant level must be 0, 1, 2, or 4." }, { status: 400 });
     if (body.securityStatus !== undefined && (!Number.isFinite(body.securityStatus) || body.securityStatus < -1 || body.securityStatus > 1))
       return NextResponse.json({ error: "Security status must be between -1 and 1." }, { status: 400 });
+    const rigModifier = body.rigModifier ?? 0;
+    if (!Number.isInteger(rigModifier) || ![0, 1, 3].includes(rigModifier))
+      return NextResponse.json({ error: "Rig modifier must be 0, 1, or 3." }, { status: 400 });
     const skillLevels = body.skillLevels ?? {};
     if (Object.values(skillLevels).some((level) => !Number.isInteger(level) || level < 0 || level > 5) || [body.reprocessingSkillLevel, body.reprocessingEfficiencySkillLevel].some((level) => level !== undefined && (!Number.isInteger(level) || level < 0 || level > 5)))
       return NextResponse.json({ error: "Skill levels must be whole numbers from 0 through 5." }, { status: 400 });
@@ -31,7 +34,7 @@ export async function POST(request: Request) {
     const effectiveSkillLevels = { ...skillLevels };
     if (body.reprocessingSkillLevel !== undefined && reprocessingId !== undefined) effectiveSkillLevels[String(reprocessingId)] = body.reprocessingSkillLevel;
     if (body.reprocessingEfficiencySkillLevel !== undefined && reprocessingEfficiencyId !== undefined) effectiveSkillLevels[String(reprocessingEfficiencyId)] = body.reprocessingEfficiencySkillLevel;
-    const calculatedEfficiency = calculateReprocessingEfficiency({ types, groups, typeDogma, dogmaAttributes }, structure, effectiveSkillLevels, implantLevel, body.securityStatus);
+    const calculatedEfficiency = calculateReprocessingEfficiency({ types, groups, typeDogma, dogmaAttributes }, structure, effectiveSkillLevels, implantLevel, body.securityStatus, rigModifier);
     const names = new Map<number, string>();
     for (const type of types.values()) names.set(type._key, type.name[language] ?? type.name.en ?? `Type ${type._key}`);
     const maps = { types, groups, typeDogma, dogmaAttributes };

@@ -50,8 +50,8 @@ function structureBonus(maps: SdeMaps, structure: ReprocessingStructure) {
   return dogmaValue(typeDogma, attributeId(maps, "strRefiningYieldBonus")) ?? 0;
 }
 
-function securityMultiplier(structure: ReprocessingStructure, securityStatus?: number) {
-  if (structure === "NPC" || securityStatus === undefined) return 1;
+function securityMultiplier(structure: ReprocessingStructure, securityStatus: number | undefined, rigModifier: number) {
+  if (structure === "NPC" || securityStatus === undefined || rigModifier === 0) return 1;
   const securityBonus = securityStatus >= 0.5 ? 0 : securityStatus > 0 ? 0.06 : 0.12;
   return 1 + securityBonus;
 }
@@ -62,6 +62,7 @@ export function calculateReprocessingEfficiency(
   skillLevels: ReprocessingSkillLevels,
   implantLevel: number,
   securityStatus?: number,
+  rigModifier = 0,
 ): ReprocessingEfficiency {
   const normalBase = maps.dogmaAttributes.get(attributeId(maps, "refiningYieldNormalOres") ?? -1)?.defaultValue ?? 0;
   const moonBase = maps.dogmaAttributes.get(attributeId(maps, "refiningYieldMoonOres") ?? -1)?.defaultValue ?? normalBase;
@@ -76,11 +77,12 @@ export function calculateReprocessingEfficiency(
     .map((typeId) => maps.typeDogma.get(typeId))
     .map((record) => dogmaValue(record, implantMutatorId))
     .find((value) => value === implantLevel) ?? 0;
-  const multiplier = securityMultiplier(structure, securityStatus) * skillMultiplier(maps, [reprocessingId, reprocessingEfficiencyId].filter((skillId): skillId is number => skillId !== undefined), skillLevels) * (1 + implant / 100);
+  const multiplier = securityMultiplier(structure, securityStatus, rigModifier) * skillMultiplier(maps, [reprocessingId, reprocessingEfficiencyId].filter((skillId): skillId is number => skillId !== undefined), skillLevels) * (1 + implant / 100);
   const structureBonusPercent = structureBonus(maps, structure);
-  const normalOre = (normalBase * 100 + structureBonusPercent) * multiplier;
-  const moonOre = (moonBase * 100 + structureBonusPercent) * multiplier;
-  const ice = (iceBase * 100 + structureBonusPercent) * multiplier;
+  const structureMultiplier = 1 + structureBonusPercent / 100;
+  const normalOre = (normalBase * 100 + rigModifier) * multiplier * structureMultiplier;
+  const moonOre = (moonBase * 100 + rigModifier) * multiplier * structureMultiplier;
+  const ice = (iceBase * 100 + rigModifier) * multiplier * structureMultiplier;
   const structureTypeId = namedTypeId(maps, structure);
   const gasStructureBonus = structure === "NPC" || structureTypeId === undefined
     ? 0
