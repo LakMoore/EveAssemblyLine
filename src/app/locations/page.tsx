@@ -9,7 +9,7 @@ import {
   type PlannerLocations,
 } from "@/lib/planning/preferences";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
-import { loadClientShips, loadClientSession } from "@/lib/client/requestCache";
+import { loadClientSession } from "@/lib/client/requestCache";
 import { fetchRigs } from "@/lib/reference/rigs";
 import { loadStructures, saveStructures } from "@/lib/planning/structureStore";
 import styles from "../page.module.css";
@@ -359,16 +359,8 @@ export default function LocationsPage() {
     if (!esiConnected) return;
     let cancelled = false;
 
-    async function loadEsiStructures(refresh: boolean) {
+    async function loadEsiStructures() {
       try {
-        if (refresh) {
-          const refreshResponse = await fetch("/api/state/refresh", { method: "POST" });
-          const refreshData = (await refreshResponse.json()) as {
-            rateLimitedUntil?: string | null;
-          };
-          if (refreshResponse.ok) await loadClientShips(true).catch(() => undefined);
-          if (!cancelled) setEsiRateLimitedUntil(refreshData.rateLimitedUntil ?? null);
-        }
         const params = new URLSearchParams({
           language,
         });
@@ -430,10 +422,10 @@ export default function LocationsPage() {
     const handleRefresh = (event: Event) => {
       const detail = (event as CustomEvent<{ rateLimitedUntil?: string | null }>).detail;
       setEsiRateLimitedUntil(detail?.rateLimitedUntil ?? null);
-      void loadEsiStructures(false);
+      void loadEsiStructures();
     };
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
-    void loadEsiStructures(true);
+    void loadEsiStructures();
     return () => {
       cancelled = true;
       window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);

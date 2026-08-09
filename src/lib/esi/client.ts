@@ -382,11 +382,13 @@ function mapIndustryJob(
   };
 }
 
-export async function fetchCharacterIndustryJobs(record: CharacterTokenRecord) {
+export async function fetchCharacterIndustryJobs(record: CharacterTokenRecord, bypassCache = false) {
   const token = await getUsableToken(record, "personal");
   const result = await requestEsi<EsiIndustryJob[]>(
     `/characters/${record.characterId}/industry/jobs/`,
     token,
+    undefined,
+    { bypassCache },
   );
   return {
     jobs: (result.data ?? [])
@@ -397,7 +399,7 @@ export async function fetchCharacterIndustryJobs(record: CharacterTokenRecord) {
   };
 }
 
-export async function fetchCorporationIndustryJobs(record: CharacterTokenRecord) {
+export async function fetchCorporationIndustryJobs(record: CharacterTokenRecord, bypassCache = false) {
   if (!record.corporationId || !record.hasDirectorRole || !record.corpAuthCompleted) {
     throw new Error("Corporation authorization is incomplete");
   }
@@ -405,6 +407,8 @@ export async function fetchCorporationIndustryJobs(record: CharacterTokenRecord)
   const result = await requestEsi<EsiIndustryJob[]>(
     `/corporations/${record.corporationId}/industry/jobs/`,
     token,
+    undefined,
+    { bypassCache },
   );
   return {
     jobs: (result.data ?? [])

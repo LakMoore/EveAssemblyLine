@@ -982,17 +982,19 @@ function PlanList({
                 planColumns.map((column) =>
                   planCells?.[column] ? (
                     <span className={styles.planTableCell} data-label={column} key={column}>
-                      {column === "Available" && (
-                        <AvailableSourceIcons
-                          icons={
-                            "availableSourceIcons" in entry ? entry.availableSourceIcons : undefined
-                          }
-                          counts={
-                            "availableSourceCounts" in entry ? entry.availableSourceCounts : undefined
-                          }
-                        />
-                      )}
-                      {planCells[column]}
+                      <span className={styles.planTableValue}>
+                        {column === "Available" && (
+                          <AvailableSourceIcons
+                            icons={
+                              "availableSourceIcons" in entry ? entry.availableSourceIcons : undefined
+                            }
+                            counts={
+                              "availableSourceCounts" in entry ? entry.availableSourceCounts : undefined
+                            }
+                          />
+                        )}
+                        {planCells[column]}
+                      </span>
                     </span>
                   ) : (
                     <span className={styles.planTableCellEmpty} key={column} />

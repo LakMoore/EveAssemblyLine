@@ -18,6 +18,7 @@ type Character = ClientCharacter;
 
 type EndpointStatus = {
   status: "fresh" | "cached" | "stale" | "rate_limited" | "error";
+  lastBody?: unknown;
   lastUpdated?: string;
   lastModified?: string;
   expires?: string;
@@ -33,21 +34,29 @@ function formatDate(value?: string) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
-function renderedStatus(status: EndpointStatus | undefined, renderedAt: number): EndpointStatus | undefined {
+function renderedStatus(status: EndpointStatus | undefined): EndpointStatus | undefined {
   if (!status || status.status === "error" || status.status === "rate_limited") return status;
   const expiresAt = Date.parse(status.expires ?? status.nextRefreshAllowed ?? "");
   const modifiedAt = Date.parse(status.lastModified ?? "");
-  if (Number.isFinite(expiresAt) && expiresAt <= renderedAt) return { ...status, status: "stale" };
-  const recentlyModified = Number.isFinite(modifiedAt) && modifiedAt <= renderedAt && renderedAt - modifiedAt <= 2 * 60 * 1000;
+  const now = Date.now();
+  if (Number.isFinite(expiresAt) && expiresAt <= now) return { ...status, status: "stale" };
+  const recentlyModified = Number.isFinite(modifiedAt) && modifiedAt <= now && now - modifiedAt <= 2 * 60 * 1000;
   if (recentlyModified) {
     return { ...status, status: "fresh" };
   }
   return { ...status, status: "cached" };
 }
 
-function statusLabel(status: EndpointStatus | undefined, renderedAt: number) {
-  const currentStatus = renderedStatus(status, renderedAt);
-  if (!currentStatus) return "No data";
+function statusLabel(status: EndpointStatus | undefined) {
+  const currentStatus = renderedStatus(status);
+  if (!currentStatus || currentStatus.lastBody === null || currentStatus.lastBody === undefined) return "Unknown";
+  if (
+    currentStatus.status !== "error" &&
+    currentStatus.status !== "rate_limited" &&
+    !currentStatus.lastUpdated &&
+    !currentStatus.expires &&
+    !currentStatus.nextRefreshAllowed
+  ) return "Refresh required";
   if (currentStatus.status === "fresh") return "Fresh";
   if (currentStatus.status === "stale") return "Stale";
   if (currentStatus.status === "rate_limited") return "Rate limited";
@@ -55,8 +64,9 @@ function statusLabel(status: EndpointStatus | undefined, renderedAt: number) {
   return "Cached";
 }
 
-function statusClass(status: EndpointStatus | undefined, renderedAt: number) {
-  const currentStatus = renderedStatus(status, renderedAt);
+function statusClass(status: EndpointStatus | undefined) {
+  const currentStatus = renderedStatus(status);
+  if (!currentStatus || currentStatus.lastBody === null || currentStatus.lastBody === undefined) return styles.statusError;
   if (currentStatus?.status === "fresh") return styles.statusFresh;
   if (currentStatus?.status === "stale") return styles.statusError;
   if (currentStatus?.status === "rate_limited" || currentStatus?.status === "error") return styles.statusError;
@@ -69,6 +79,7 @@ function availabilityLabel(status?: EndpointStatus) {
   if (status.status === "rate_limited" && status.rateLimitedUntil) {
     return `Available ${formatDate(status.rateLimitedUntil)}`;
   }
+  if (!status.expires && !status.nextRefreshAllowed) return "Refresh required";
   if (!status.lastUpdated && !status.nextRefreshAllowed) return "Refresh required";
   const blockedUntil = status.rateLimitedUntil ?? status.nextRefreshAllowed;
   if (blockedUntil && Date.parse(blockedUntil) > Date.now()) {
@@ -84,7 +95,7 @@ function roleLabel(hasRole: boolean) {
 export default function CharactersPage() {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [statuses, setStatuses] = useState<CharacterStatus[]>([]);
-  const [renderedAt] = useState(() => Date.now());
+  const [, setFreshnessTick] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [removingId, setRemovingId] = useState<number | null>(null);
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
@@ -100,15 +111,20 @@ export default function CharactersPage() {
   async function loadStatuses(force = false) {
     const data = await loadClientStateStatus(force);
     setStatuses(data.characters ?? []);
+    setFreshnessTick((tick) => tick + 1);
   }
 
   useEffect(() => {
     void Promise.resolve().then(() => Promise.all([loadCharacters(), loadStatuses()]))
       .catch(() => setError("Could not reach the character service."))
       .finally(() => setIsLoading(false));
+    const freshnessTimer = window.setInterval(() => setFreshnessTick((tick) => tick + 1), 5_000);
     const handleRefresh = () => void loadStatuses(true);
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
-    return () => window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
+    return () => {
+      window.clearInterval(freshnessTimer);
+      window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
+    };
   }, []);
 
   useEffect(() => {
@@ -188,9 +204,9 @@ export default function CharactersPage() {
                   <small>{character.corporationName ?? (character.corporationId ? `Corporation ${character.corporationId}` : "Corporation unavailable")} / {hasCorpAccess ? "Director access" : "Character access only"}</small>
                   <small>Director: {roleLabel(character.hasDirectorRole)} · Accountant: {roleLabel(character.hasAccountantRole)} · Trader: {roleLabel(character.hasTraderRole)}</small>
                 </span>
-                <span className={styles.statusCell} data-label="Assets" title={`Assets: ${availabilityLabel(status?.assets)}${status?.assets?.error ? `; ${status.assets.error}` : ""}${status?.assets?.lastModified ? `; modified ${formatDate(status.assets.lastModified)}` : ""}`}><span className={`${styles.statusDot} ${statusClass(status?.assets, renderedAt)}`} /><small>{statusLabel(status?.assets, renderedAt)}</small><small className={styles.statusDate}>{availabilityLabel(status?.assets)}</small></span>
-                  <span className={styles.statusCell} data-label="Jobs" title={`Jobs: ${availabilityLabel(status?.jobs)}${status?.jobs?.error ? `; ${status.jobs.error}` : ""}${status?.jobs?.lastModified ? `; modified ${formatDate(status.jobs.lastModified)}` : ""}`}><span className={`${styles.statusDot} ${statusClass(status?.jobs, renderedAt)}`} /><small>{statusLabel(status?.jobs, renderedAt)}</small><small className={styles.statusDate}>{availabilityLabel(status?.jobs)}</small></span>
-                  <span className={styles.statusCell} data-label="Orders" title={`Orders: ${availabilityLabel(status?.orders)}${status?.orders?.error ? `; ${status.orders.error}` : ""}${status?.orders?.lastModified ? `; modified ${formatDate(status.orders.lastModified)}` : ""}`}><span className={`${styles.statusDot} ${statusClass(status?.orders, renderedAt)}`} /><small>{statusLabel(status?.orders, renderedAt)}</small><small className={styles.statusDate}>{availabilityLabel(status?.orders)}</small></span>
+                <span className={styles.statusCell} data-label="Assets" title={`Assets: ${availabilityLabel(status?.assets)}${status?.assets?.error ? `; ${status.assets.error}` : ""}${status?.assets?.lastModified ? `; modified ${formatDate(status.assets.lastModified)}` : ""}`}><span className={`${styles.statusDot} ${statusClass(status?.assets)}`} /><small>{statusLabel(status?.assets)}</small><small className={styles.statusDate}>{availabilityLabel(status?.assets)}</small></span>
+                  <span className={styles.statusCell} data-label="Jobs" title={`Jobs: ${availabilityLabel(status?.jobs)}${status?.jobs?.error ? `; ${status.jobs.error}` : ""}${status?.jobs?.lastModified ? `; modified ${formatDate(status.jobs.lastModified)}` : ""}`}><span className={`${styles.statusDot} ${statusClass(status?.jobs)}`} /><small>{statusLabel(status?.jobs)}</small><small className={styles.statusDate}>{availabilityLabel(status?.jobs)}</small></span>
+                  <span className={styles.statusCell} data-label="Orders" title={`Orders: ${availabilityLabel(status?.orders)}${status?.orders?.error ? `; ${status.orders.error}` : ""}${status?.orders?.lastModified ? `; modified ${formatDate(status.orders.lastModified)}` : ""}`}><span className={`${styles.statusDot} ${statusClass(status?.orders)}`} /><small>{statusLabel(status?.orders)}</small><small className={styles.statusDate}>{availabilityLabel(status?.orders)}</small></span>
                 <button type="button" className={styles.remove} onClick={(event) => { event.stopPropagation(); void removeCharacter(character); }} disabled={removingId === character.characterId}>{removingId === character.characterId ? "Removing..." : "Remove"}</button>
               </div>;
             })}
@@ -216,7 +232,7 @@ export default function CharactersPage() {
                 const endpointStatus = selectedStatus?.[endpoint];
                 return <div className={styles.characterModalStatus} key={endpoint}>
                   <small>{endpoint.toUpperCase()}</small>
-                  <span><span className={`${styles.statusDot} ${statusClass(endpointStatus, renderedAt)}`} />{statusLabel(endpointStatus, renderedAt)}</span>
+                  <span><span className={`${styles.statusDot} ${statusClass(endpointStatus)}`} />{statusLabel(endpointStatus)}</span>
                   <small>{availabilityLabel(endpointStatus)}</small>
                   {endpointStatus?.lastModified && <small>Modified {formatDate(endpointStatus.lastModified)}</small>}
                   {endpointStatus?.error && <small>{endpointStatus.error}</small>}
@@ -247,7 +263,7 @@ export default function CharactersPage() {
                 setSelectedCorporationId(corporation.corporationId);
               }
             }}
-          ><span><strong>{corporation.corporationName ?? `Corporation ${corporation.corporationId}`}</strong><small>{corporation.pilots.map((pilot) => pilot.characterName).join(" · ")}</small></span><span className={styles.endpointList}><span className={styles.endpointHeaders}><small>ASSETS</small><small>JOBS</small><small>ORDERS</small></span>{(["assets", "jobs", "orders"] as const).map((endpoint) => { const endpointStatus = corporationStatus?.[endpoint]; return <span className={styles.endpointStatus} key={endpoint}><span className={`${styles.statusDot} ${statusClass(endpointStatus, renderedAt)}`} /><small className={styles.endpointState}>{statusLabel(endpointStatus, renderedAt)}</small><small><span className={styles.endpointName}>{endpoint.toUpperCase()}: </span>{availabilityLabel(endpointStatus)}</small></span>; })}</span></div>;
+          ><span><strong>{corporation.corporationName ?? `Corporation ${corporation.corporationId}`}</strong><small>{corporation.pilots.map((pilot) => pilot.characterName).join(" · ")}</small></span><span className={styles.endpointList}><span className={styles.endpointHeaders}><small>ASSETS</small><small>JOBS</small><small>ORDERS</small></span>{(["assets", "jobs", "orders"] as const).map((endpoint) => { const endpointStatus = corporationStatus?.[endpoint]; return <span className={styles.endpointStatus} key={endpoint}><span className={`${styles.statusDot} ${statusClass(endpointStatus)}`} /><small className={styles.endpointState}>{statusLabel(endpointStatus)}</small><small><span className={styles.endpointName}>{endpoint.toUpperCase()}: </span>{availabilityLabel(endpointStatus)}</small></span>; })}</span></div>;
         })}</div>}
       </section>
       {selectedCorporationId !== null && (() => {
@@ -269,7 +285,7 @@ export default function CharactersPage() {
                 const endpointStatus = corporationStatus?.[endpoint];
                 return <div className={styles.characterModalStatus} key={endpoint}>
                   <small>{endpoint.toUpperCase()}</small>
-                  <span><span className={`${styles.statusDot} ${statusClass(endpointStatus, renderedAt)}`} />{statusLabel(endpointStatus, renderedAt)}</span>
+                  <span><span className={`${styles.statusDot} ${statusClass(endpointStatus)}`} />{statusLabel(endpointStatus)}</span>
                   <small>{availabilityLabel(endpointStatus)}</small>
                   {endpointStatus?.lastModified && <small>Modified {formatDate(endpointStatus.lastModified)}</small>}
                   {endpointStatus?.error && <small>{endpointStatus.error}</small>}

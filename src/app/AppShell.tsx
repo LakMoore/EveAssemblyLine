@@ -52,9 +52,16 @@ function hasExpiredEndpoint(statuses: ClientCharacterStatus[]) {
       ...(character.corporations ?? []).flatMap((corporation) => stateEndpoints.map((endpoint) => corporation[endpoint])),
     ];
     return endpoints.some((endpoint) => {
-      if (!endpoint || endpoint.status === "error") return false;
+      if (!endpoint) return true;
+      if (endpoint.status === "error") return false;
+      const now = Date.now();
+      if (
+        endpoint.status === "rate_limited" &&
+        endpoint.rateLimitedUntil &&
+        Date.parse(endpoint.rateLimitedUntil) > now
+      ) return false;
       const expiresAt = Date.parse(endpoint.expires ?? endpoint.nextRefreshAllowed ?? "");
-      return endpoint.status === "stale" || (Number.isFinite(expiresAt) && expiresAt <= Date.now());
+      return endpoint.status === "stale" || !Number.isFinite(expiresAt) || expiresAt <= now;
     });
   });
 }

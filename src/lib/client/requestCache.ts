@@ -82,6 +82,7 @@ export type ClientCharacterStatus = {
 
 export type ClientEndpointStatus = {
   status: "fresh" | "cached" | "stale" | "rate_limited" | "error";
+  lastBody?: unknown;
   lastUpdated?: string;
   lastModified?: string;
   expires?: string;

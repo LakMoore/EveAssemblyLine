@@ -87,6 +87,14 @@
         column-gap: 7px
     }
 
+    .shell .itemRow > :first-child {
+        grid-column: 1 / -1
+    }
+
+    .shell .itemRow > input:first-of-type {
+        grid-column: 2
+    }
+
     .shell .itemRow .remove {
         width: 24px
     }
@@ -370,11 +378,20 @@
     .planTableCell {
         grid-column: 1 / -1;
         display: grid;
-        grid-template-columns: minmax(76px, 0.35fr) minmax(0, 1fr);
-        gap: 10px;
+        grid-template-columns: max-content minmax(0, 1fr);
+        gap: 6px;
         align-items: baseline;
         padding-top: 2px;
-        width: 60%;
+        width: 100%;
+        white-space: nowrap;
+    }
+
+    .planTableValue {
+        display: flex;
+        min-width: 0;
+        align-items: baseline;
+        justify-content: flex-end;
+        gap: 0;
     }
 
     .planTableCell::before {
@@ -2589,8 +2606,8 @@
     .planTableCell {
         grid-column: 1 / -1;
         display: grid;
-        grid-template-columns: minmax(76px, 0.35fr) minmax(0, 1fr);
-        gap: 10px;
+        grid-template-columns: max-content minmax(0, 1fr);
+        gap: 6px;
         align-items: baseline;
     }
 

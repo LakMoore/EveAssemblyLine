@@ -34,7 +34,6 @@ export async function POST(request: Request) {
   if (connectedCharacterIds.size === 0) {
     return NextResponse.json({ error: "ESI is not connected." }, { status: 401 });
   }
-  const body = (await request.json().catch(() => ({}))) as { force?: boolean };
   const rateLimitedUntil = getEsiRateLimitUntil();
   if (rateLimitedUntil) {
     return NextResponse.json({
@@ -57,7 +56,7 @@ export async function POST(request: Request) {
       rateLimitedUntil: getEsiRateLimitUntil(),
     });
   }
-  const refresh = refreshCharacterState(session.characterIds, { force: body.force === true });
+  const refresh = refreshCharacterState(session.characterIds);
   activeRefreshes.set(key, refresh);
   const result = await refresh.finally(() => activeRefreshes.delete(key));
   return NextResponse.json({
