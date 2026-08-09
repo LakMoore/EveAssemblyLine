@@ -16,6 +16,12 @@ export async function GET(request: Request) {
     allCorporationSellOrdersAsStock: url.searchParams.get("allCorporationSellOrdersAsStock") === "true",
     myCorporationSellOrdersAsStock: url.searchParams.get("myCorporationSellOrdersAsStock") === "true",
   });
+  if (marketOrderStock === null) {
+    return NextResponse.json(
+      { error: "Market order data is not currently available from ESI." },
+      { status: 503 },
+    );
+  }
   return NextResponse.json({
     marketOrderStock,
   });

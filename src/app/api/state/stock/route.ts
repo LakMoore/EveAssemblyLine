@@ -6,6 +6,7 @@ import { getCharacter } from "@/lib/auth/tokensStore";
 import {
   getGroups,
   getMarketGroups,
+  getBuildBlueprintByProductTypeId,
   getShipTypeIds,
   getStations,
   getStructureTypeIds,
@@ -47,6 +48,7 @@ type StockItem = {
   category: string;
   marketCategory?: string;
   inBuild?: boolean;
+  inBuildQuantity?: number;
   inUse?: boolean;
   jobId?: number;
   installerId?: number;
@@ -59,6 +61,7 @@ type StockItem = {
   blueprintRunsUsed?: number;
   blueprintRunsRemaining?: number;
   activityName?: string;
+  jobRuns?: number;
   endDate?: string;
 };
 
@@ -104,6 +107,7 @@ type StockContribution = {
   blueprintRunsUsed?: number;
   blueprintRunsRemaining?: number;
   activityName?: string;
+  jobRuns?: number;
 };
 
 function isDirectLocation(asset: AssetRecord): asset is AssetRecord & {
@@ -312,7 +316,11 @@ function addContribution(
     item.blueprintPrints = [...(item.blueprintPrints ?? []), contribution.blueprintPrint];
   }
   if (contribution.inBuild) {
+    item.inBuildQuantity = (item.inBuildQuantity ?? 0) + contribution.quantity;
     item.inBuild = true;
+    if (contribution.itemId === contribution.job?.blueprintId) {
+      item.jobRuns = (item.jobRuns ?? 0) + (contribution.job?.runs ?? 0);
+    }
     item.inUse = contribution.inUse;
     item.jobId = contribution.job?.jobId;
     item.installerId = contribution.job?.installerId;
@@ -338,14 +346,20 @@ function addContribution(
 function jobContributions(
   job: IndustryJobRecord,
   blueprint: AssetRecord | undefined,
+  productQuantityPerRun = 1,
 ): StockContribution[] {
+  const isCopying = job.activityId === 5;
   const installedRuns =
     blueprint?.runCount !== undefined && blueprint.runCount >= 0
       ? blueprint.runCount
       : job.licensedRuns !== undefined && job.licensedRuns >= 0
         ? job.licensedRuns
         : -1;
-  const remainingRuns = installedRuns === -1 ? -1 : Math.max(0, installedRuns - job.runs);
+  const remainingRuns = installedRuns === -1
+    ? -1
+    : isCopying
+      ? undefined
+      : Math.max(0, installedRuns - job.runs);
   const contributions: StockContribution[] = [
     {
       itemId: job.blueprintId,
@@ -353,20 +367,20 @@ function jobContributions(
       quantity: 1,
       isPackaged: true,
       ownerType: job.ownerType,
-      runCount: remainingRuns,
+      ...(remainingRuns !== undefined ? { runCount: remainingRuns } : {}),
       inBuild: true,
       inUse: true,
       job,
       blueprintIsOriginal: installedRuns === -1,
       blueprintRunsAtInstall: installedRuns,
       blueprintRunsUsed: job.runs,
-      blueprintRunsRemaining: remainingRuns,
+      ...(remainingRuns !== undefined ? { blueprintRunsRemaining: remainingRuns } : {}),
       activityName: activityName(job.activityId),
-      ...(installedRuns >= 0
+      ...(installedRuns >= 0 && !isCopying
         ? {
             blueprintPrint: {
               itemId: job.blueprintId,
-              runs: remainingRuns,
+              runs: Math.max(0, installedRuns - job.runs),
               me: blueprint?.me,
               te: blueprint?.te,
               activity: activityName(job.activityId),
@@ -377,12 +391,19 @@ function jobContributions(
     },
   ];
   if (job.productTypeId && job.successfulRuns !== 0) {
+    const outputRuns = job.successfulRuns ?? job.runs;
+    const outputQuantity = job.activityId === 5 || job.activityId === 8
+      ? outputRuns
+      : outputRuns * productQuantityPerRun;
     contributions.push({
       itemId: job.jobId,
       typeId: job.productTypeId,
-      quantity: job.successfulRuns ?? job.runs,
+      quantity: outputQuantity,
       isPackaged: false,
       ownerType: job.ownerType,
+      ...(job.activityId === 5 && job.licensedRuns !== undefined
+        ? { runCount: outputQuantity * job.licensedRuns }
+        : {}),
       inBuild: true,
       job,
       activityName: activityName(job.activityId),
@@ -421,6 +442,24 @@ export async function GET(request: Request) {
   await resolveUnknownLocations(rootLocations, structureTypeIds, stations, types, session.characterIds);
   normalizeLocationKinds(rootLocations, stations, structureTypeIds);
   const buckets = new Map<number, StockBucket>();
+  const productQuantities = new Map<number, number>();
+  await Promise.all(
+    [...new Set(jobs.flatMap((job) =>
+      job.productTypeId !== undefined ? [job.productTypeId] : [],
+    ))].map(async (productTypeId) => {
+      const buildBlueprint = await getBuildBlueprintByProductTypeId(productTypeId);
+      const product = buildBlueprint?.activity === "manufacturing"
+        ? buildBlueprint.blueprint.activities.manufacturing?.products?.find(
+            (candidate) => candidate.typeID === productTypeId,
+          )
+        : buildBlueprint?.blueprint.activities.reaction?.products?.find(
+            (candidate) => candidate.typeID === productTypeId,
+          );
+      if (product?.quantity && product.quantity > 0) {
+        productQuantities.set(productTypeId, product.quantity);
+      }
+    }),
+  );
   const allAssetIndex = await getResolvedAssetIndex(session.characterIds, true);
   for (const asset of assets) {
     if (!shouldIncludeAsset(asset, shipTypeIds) || !isDirectLocation(asset)) continue;
@@ -467,7 +506,11 @@ export async function GET(request: Request) {
       (blueprintLocation.typeId !== undefined && shipTypeIds.has(blueprintLocation.typeId))
     )
       continue;
-    for (const [index, contribution] of jobContributions(job, blueprint).entries()) {
+    for (const [index, contribution] of jobContributions(
+      job,
+      blueprint,
+      job.productTypeId !== undefined ? productQuantities.get(job.productTypeId) : undefined,
+    ).entries()) {
       const location =
         index === 0
           ? blueprintLocation

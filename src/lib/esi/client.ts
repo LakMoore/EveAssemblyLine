@@ -434,12 +434,17 @@ function mapMarketOrder(
   };
 }
 
-export async function fetchCharacterMarketOrders(record: CharacterTokenRecord, etag?: string) {
+export async function fetchCharacterMarketOrders(
+  record: CharacterTokenRecord,
+  etag?: string,
+  bypassCache = false,
+) {
   const token = await getUsableToken(record, "personal");
   const result = await fetchPages<EsiMarketOrder>(
     `/characters/${record.characterId}/orders`,
     token,
     etag,
+    bypassCache,
   );
   return {
     orders: result.data?.map((order) => mapMarketOrder(order, "character", record.characterId)) ?? null,
@@ -450,7 +455,11 @@ export async function fetchCharacterMarketOrders(record: CharacterTokenRecord, e
   };
 }
 
-export async function fetchCorporationMarketOrders(record: CharacterTokenRecord, etag?: string) {
+export async function fetchCorporationMarketOrders(
+  record: CharacterTokenRecord,
+  etag?: string,
+  bypassCache = false,
+) {
   if (!record.corporationId || !record.hasDirectorRole || !record.corpAuthCompleted) {
     throw new Error("Corporation authorization is incomplete");
   }
@@ -459,6 +468,7 @@ export async function fetchCorporationMarketOrders(record: CharacterTokenRecord,
     `/corporations/${record.corporationId}/orders`,
     token,
     etag,
+    bypassCache,
   );
   return {
     orders: result.data?.map((order) => mapMarketOrder(order, "corporation", record.corporationId!)) ?? null,

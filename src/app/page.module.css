@@ -1342,6 +1342,63 @@
     font: 11px 'DM Mono';
 }
 
+.availableSourceIcons {
+    display: inline-flex;
+    gap: 4px;
+    margin-right: 7px;
+    color: #82b9c4;
+    vertical-align: -2px;
+}
+
+.availableSourceIcon {
+    position: relative;
+    display: inline-flex;
+    cursor: help;
+    outline: none;
+}
+
+.availableSourceIcon::after {
+    position: absolute;
+    z-index: 10;
+    right: 0;
+    bottom: calc(100% + 8px);
+    display: block;
+    padding: 6px 8px;
+    border: 1px solid #315662;
+    background: #102a32;
+    color: #d8e8ec;
+    content: attr(data-tooltip);
+    font: 10px 'DM Mono';
+    line-height: 1.2;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(3px);
+    transition: opacity .15s ease, transform .15s ease;
+}
+
+.availableSourceIcon:hover::after,
+.availableSourceIcon:focus-visible::after {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.availableSourceIcon[data-source='market'] {
+    color: #e4b36f;
+}
+
+.availableSourceIcon[data-source='industry'] {
+    color: #72d3b1;
+}
+
+.availableSourceIcon[data-source='invention'] {
+    color: #c5a6e8;
+}
+
+.availableSourceIcon[data-source='copying'] {
+    color: #f28c8c;
+}
+
 .planTableCellEmpty {
     min-width: 0;
 }
@@ -1357,16 +1414,6 @@
     min-width: 0;
     align-items: center;
     gap: 8px
-}
-
-.sellOrderTag {
-    display: inline-block;
-    padding: 3px 5px;
-    border: 1px solid #c28a4a;
-    color: #e4b36f;
-    font: 9px 'DM Mono';
-    letter-spacing: .3px;
-    white-space: nowrap
 }
 
 .planRowMain strong,
@@ -1408,7 +1455,7 @@
     min-width: 0
 }
 
-@media (min-width: 901px) {
+@media (min-width: 641px) {
     .tableHead,
     .planTableHeader {
         position: sticky;

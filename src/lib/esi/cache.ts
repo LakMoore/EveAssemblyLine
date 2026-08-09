@@ -58,6 +58,16 @@ const characterCaches = new Map<number, OwnerCache>();
 const corporationCaches = new Map<number, OwnerCache>();
 const corporationDirectorRotation = new Map<number, number>();
 
+function hasUsableMarketOrders(cache: OwnerCache | undefined) {
+  const marketOrders = cache?.marketOrders;
+  return Boolean(
+    marketOrders &&
+      Array.isArray(marketOrders.lastBody) &&
+      marketOrders.status !== "error" &&
+      marketOrders.status !== "rate_limited",
+  );
+}
+
 function getCache(map: Map<number, OwnerCache>, id: number): OwnerCache {
   const existing = map.get(id);
   if (existing) return existing;
@@ -682,7 +692,11 @@ export async function refreshCharacterState(
       characterSummary.jobs = cache.jobs;
     }
     try {
-      const orders = await fetchCharacterMarketOrders(character, cache.marketOrders?.etag);
+      const orders = await fetchCharacterMarketOrders(
+        character,
+        cache.marketOrders?.etag,
+        options.force === true,
+      );
       if (orders.notModified && cache.marketOrders) {
         cache.marketOrders = setFresh(cache.marketOrders.lastBody, orders.headers, cache.marketOrders, 5 * 60 * 1000, true);
         cache.marketOrders.status = endpointDataStatus(
@@ -820,7 +834,11 @@ export async function refreshCharacterState(
         };
       }
       try {
-        const orders = await fetchCorporationMarketOrders(character, corpCache.marketOrders?.etag);
+        const orders = await fetchCorporationMarketOrders(
+          character,
+          corpCache.marketOrders?.etag,
+          options.force === true,
+        );
         if (orders.notModified && corpCache.marketOrders) {
           corpCache.marketOrders = setFresh(
             corpCache.marketOrders.lastBody,
@@ -1165,12 +1183,19 @@ export async function getMarketOrderStock(
     allCorporationSellOrdersAsStock: boolean;
     myCorporationSellOrdersAsStock: boolean;
   },
-): Promise<PlanStockItem[]> {
+): Promise<PlanStockItem[] | null> {
   const stock: PlanStockItem[] = [];
+  let hasUsableSource = false;
+  let hasUnavailableSource = false;
   if (options.personalSellOrdersAsStock) {
     for (const characterId of characterIds) {
-      const orders = getCache(characterCaches, characterId).marketOrders?.lastBody;
-      if (!Array.isArray(orders)) continue;
+      const cache = getCache(characterCaches, characterId);
+      if (!hasUsableMarketOrders(cache)) {
+        hasUnavailableSource = true;
+        continue;
+      }
+      hasUsableSource = true;
+      const orders = cache.marketOrders!.lastBody;
       for (const order of orders as MarketOrderRecord[]) {
         if (order.isBuyOrder || order.isCorporation || order.volumeRemain <= 0) continue;
         stock.push({
@@ -1204,8 +1229,13 @@ export async function getMarketOrderStock(
       .map((character) => character.corporationId!),
   );
   for (const corporationId of corporationIds) {
-    const orders = getCache(corporationCaches, corporationId).marketOrders?.lastBody;
-    if (!Array.isArray(orders)) continue;
+    const cache = getCache(corporationCaches, corporationId);
+    if (!hasUsableMarketOrders(cache)) {
+      hasUnavailableSource = true;
+      continue;
+    }
+    hasUsableSource = true;
+    const orders = cache.marketOrders!.lastBody;
     for (const order of orders as MarketOrderRecord[]) {
       if (order.isBuyOrder || order.volumeRemain <= 0) continue;
       const isMyCorporationOrder =
@@ -1228,6 +1258,7 @@ export async function getMarketOrderStock(
       });
     }
   }
+  if (!hasUsableSource || (stock.length === 0 && hasUnavailableSource)) return null;
   return stock;
 }
 

@@ -22,6 +22,7 @@ export type StockItem = Pick<BuildItem, "typeId" | "name" | "quantity"> & {
   category?: "blueprint" | "bpo" | "bpc" | "reaction" | "item";
   marketCategory?: string;
   inBuild?: boolean;
+  inBuildQuantity?: number;
   inUse?: boolean;
   jobId?: number;
   installerId?: number;
@@ -34,6 +35,7 @@ export type StockItem = Pick<BuildItem, "typeId" | "name" | "quantity"> & {
   blueprintRunsUsed?: number;
   blueprintRunsRemaining?: number;
   activityName?: string;
+  jobRuns?: number;
   endDate?: string;
 };
 

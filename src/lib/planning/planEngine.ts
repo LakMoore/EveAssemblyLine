@@ -3,7 +3,7 @@ import {
   getBuildBlueprintByProductTypeId,
 } from "@/cache/services/sdeCache";
 import { getTypes } from "@/lib/sde/loader";
-import { PlanRequest, PlanResult } from "./types";
+import { PlanRequest, PlanResult, PlanSourceCounts, PlanSourceIcon } from "./types";
 
 type Material = PlanResult["lists"]["materialsToBuy"][number];
 type Efficiency = { me: number; te: number };
@@ -93,6 +93,48 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
   const inventionJobs = new Map<number, PlanResult["lists"]["inventionJobs"][number]>();
   const inventedBpcTypeIds = new Set<number>();
   const producedParts = new Map<number, number>();
+  const sourceCountsByTypeId = new Map<number, Map<PlanSourceIcon, number>>();
+  for (const stockItem of request.stock ?? []) {
+    const sourceCounts = sourceCountsByTypeId.get(stockItem.typeId) ?? new Map<PlanSourceIcon, number>();
+    const addSource = (source: PlanSourceIcon, quantityOverride?: number) => {
+      const quantity = quantityOverride ?? (source === "invention" || source === "copying"
+        ? (stockItem.jobRuns ?? stockItem.quantity) *
+          (source === "copying" ? stockItem.blueprintRunsAtInstall ?? 1 : 1)
+        : stockItem.quantity);
+      sourceCounts.set(source, (sourceCounts.get(source) ?? 0) + quantity);
+    };
+    if (stockItem.category === "item" && stockItem.source === "marketOrder") {
+      addSource("market");
+    }
+    if (stockItem.inBuild && stockItem.category === "item") {
+      addSource("industry", stockItem.inBuildQuantity ?? stockItem.quantity);
+    }
+    if (
+      stockItem.inBuild &&
+      stockItem.category === "bpc" &&
+      stockItem.blueprintRunsAtInstall !== undefined &&
+      stockItem.activityName === "Invention"
+    ) {
+      addSource("invention");
+    }
+    if (
+      stockItem.inBuild &&
+      (stockItem.category === "bpo" || stockItem.category === "bpc") &&
+      stockItem.blueprintRunsAtInstall !== undefined &&
+      stockItem.activityName === "Copying"
+    ) {
+      addSource("copying");
+    }
+    if (sourceCounts.size > 0) sourceCountsByTypeId.set(stockItem.typeId, sourceCounts);
+  }
+  function sourceMetadata(typeId: number) {
+    const counts = sourceCountsByTypeId.get(typeId);
+    if (!counts) return undefined;
+    return {
+      icons: [...counts.keys()],
+      counts: Object.fromEntries(counts) as PlanSourceCounts,
+    };
+  }
   const standardStock = request.stock
     ?.filter((item) => item.category === "item")
     .filter((item) => item.source !== "marketOrder")
@@ -131,9 +173,10 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
     });
     if (prints.length > 0 && uniquePrints.length === 0) continue;
     const printRuns = uniquePrints.reduce((total, print) => total + print.runs, 0);
+    const reportedRuns = item.runCount ?? 0;
     blueprintCopyStock.set(item.typeId, {
       copies: existing.copies + item.quantity,
-      runs: existing.runs + (prints.length > 0 ? printRuns : item.runCount ?? 0),
+      runs: existing.runs + Math.max(printRuns, reportedRuns),
     });
   }
   const blueprintOriginalCounts = new Map<number, number>();
@@ -177,6 +220,8 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
       remainingStockQuantity: existing?.remainingStockQuantity ?? 0,
       remainingProductionQuantity: existing?.remainingProductionQuantity ?? 0,
       fromMarketOrder: existing?.fromMarketOrder || consumedMarketOrderStock.has(typeId),
+      availableSourceIcons: existing?.availableSourceIcons ?? sourceMetadata(typeId)?.icons,
+      availableSourceCounts: existing?.availableSourceCounts ?? sourceMetadata(typeId)?.counts,
       ...update,
       ...(request.locations ? { locationId: request.locations.market } : {}),
     });
@@ -356,6 +401,8 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
           neededQuantity: (bpcs.get(blueprint._key)?.neededQuantity ?? 0) + runsNeeded,
           stockQuantity: copyStock?.copies ?? 0,
           stockRuns: copyStock?.runs ?? 0,
+          availableSourceIcons: sourceMetadata(blueprint._key)?.icons,
+          availableSourceCounts: sourceMetadata(blueprint._key)?.counts,
           bpoCount,
           buyQuantity: (bpcs.get(blueprint._key)?.buyQuantity ?? 0) + bpcBuyQuantity,
         });
@@ -448,6 +495,8 @@ export async function calculatePlan(request: PlanRequest): Promise<PlanResult> {
         neededQuantity: sourceNeededQuantity,
         stockQuantity: sourceBpc?.stockQuantity ?? 0,
         stockRuns: sourceBpc?.stockRuns ?? 0,
+        availableSourceIcons: sourceMetadata(inventingBlueprint._key)?.icons,
+        availableSourceCounts: sourceMetadata(inventingBlueprint._key)?.counts,
         bpoCount: sourceBpoCount,
         buyQuantity: sourceBpoCount > 0
           ? Math.ceil(sourceRemainingRuns / inventingBlueprint.maxProductionLimit)

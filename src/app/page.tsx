@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
-import type { PlanResult } from "@/lib/planning/types";
+import type { PlanResult, PlanSourceCounts, PlanSourceIcon } from "@/lib/planning/types";
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
 import {
   loadStockRecords,
@@ -21,6 +21,7 @@ import { fetchTypeMetadata } from "@/lib/reference/types";
 import AppShell, { languageStorageKey } from "./AppShell";
 import TypeIdentity from "./components/TypeIdentity";
 import styles from "./page.module.css";
+import { ChartLine, Factory, Microscope, TestTubes } from "lucide-react";
 
 type PlannerTab = "Plan" | "Buy" | "Copy" | "Invent" | "React" | "Manufacture";
 const tabs: PlannerTab[] = ["Plan", "Buy", "Copy", "Invent", "React", "Manufacture"];
@@ -40,6 +41,53 @@ type PasteResult = {
   category?: BuildItem["category"];
   error?: string;
 };
+
+function AvailableSourceIcons({
+  icons,
+  counts,
+}: {
+  icons?: PlanSourceIcon[];
+  counts?: PlanSourceCounts;
+}) {
+  if (!icons?.length) return null;
+  return (
+    <span className={styles.availableSourceIcons} aria-label="Available sources">
+      {icons.map((icon) => {
+        const Icon =
+          icon === "market"
+            ? ChartLine
+            : icon === "industry"
+              ? Factory
+              : icon === "invention"
+                ? Microscope
+                : TestTubes;
+        const quantity = counts?.[icon] ?? 0;
+        const label =
+          icon === "market"
+            ? `${quantity.toLocaleString()} in Sell Orders`
+            : icon === "industry"
+              ? `${quantity.toLocaleString()} in Production`
+              : icon === "invention"
+                ? `${quantity.toLocaleString()} being Invented`
+                : `${quantity.toLocaleString()} being Copied`;
+        return (
+          <span
+            key={icon}
+            className={styles.availableSourceIcon}
+            data-source={icon}
+            data-tooltip={label}
+            aria-label={label}
+            role="img"
+            tabIndex={0}
+          >
+            <Icon size={14} strokeWidth={1.8} aria-hidden="true" />
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 function formatDuration(totalSeconds: number) {
   const totalMinutes = Math.ceil(totalSeconds / 60);
   const days = Math.floor(totalMinutes / 1440);
@@ -867,7 +915,6 @@ function PlanList({
                 : "";
           const totalTime =
             "totalTime" in entry && typeof entry.totalTime === "number" ? entry.totalTime : null;
-          const isSellOrder = "fromMarketOrder" in entry && entry.fromMarketOrder === true;
           const materialEntry =
             (activeTab === "Buy" && !isBpcPurchase && "quantity" in entry) ||
             (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
@@ -930,12 +977,21 @@ function PlanList({
                   variation={imageVariation}
                   className={styles.planTypeIdentity}
                 />
-                {isSellOrder && <span className={styles.sellOrderTag}>Sell Order</span>}
               </div>
               {activeTab === "Plan" ? (
                 planColumns.map((column) =>
                   planCells?.[column] ? (
                     <span className={styles.planTableCell} data-label={column} key={column}>
+                      {column === "Available" && (
+                        <AvailableSourceIcons
+                          icons={
+                            "availableSourceIcons" in entry ? entry.availableSourceIcons : undefined
+                          }
+                          counts={
+                            "availableSourceCounts" in entry ? entry.availableSourceCounts : undefined
+                          }
+                        />
+                      )}
                       {planCells[column]}
                     </span>
                   ) : (
