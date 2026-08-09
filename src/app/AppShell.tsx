@@ -1,11 +1,17 @@
 "use client";
 
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { replaceEsiStock, replaceMarketOrderStock, type StockItem } from "@/lib/planning/stockStore";
 import { settingsStorageKey, type PlannerSettings } from "@/lib/planning/preferences";
-import { loadClientSession, loadClientShips, loadClientStock } from "@/lib/client/requestCache";
+import {
+  loadClientSession,
+  loadClientShips,
+  loadClientStateStatus,
+  loadClientStock,
+  type ClientCharacterStatus,
+} from "@/lib/client/requestCache";
 import styles from "./page.module.css";
 
 const languageStorageKey = "assembly-line-language";
@@ -27,6 +33,8 @@ type EsiStockResponse = {
   }>;
 };
 type MarketOrderResponse = { marketOrderStock?: StockItem[] };
+type StateEndpoint = keyof Pick<ClientCharacterStatus, "assets" | "jobs" | "orders">;
+const stateEndpoints: StateEndpoint[] = ["assets", "jobs", "orders"];
 
 function loadPlannerSettings(): PlannerSettings {
   try {
@@ -35,6 +43,20 @@ function loadPlannerSettings(): PlannerSettings {
   } catch {
     return defaultPlannerSettings;
   }
+}
+
+function hasExpiredEndpoint(statuses: ClientCharacterStatus[]) {
+  return statuses.some((character) => {
+    const endpoints = [
+      ...stateEndpoints.map((endpoint) => character[endpoint]),
+      ...(character.corporations ?? []).flatMap((corporation) => stateEndpoints.map((endpoint) => corporation[endpoint])),
+    ];
+    return endpoints.some((endpoint) => {
+      if (!endpoint || endpoint.status === "error") return false;
+      const expiresAt = Date.parse(endpoint.expires ?? endpoint.nextRefreshAllowed ?? "");
+      return endpoint.status === "stale" || (Number.isFinite(expiresAt) && expiresAt <= Date.now());
+    });
+  });
 }
 
 const defaultPlannerSettings: PlannerSettings = {
@@ -67,7 +89,12 @@ export default function AppShell({
   const [authenticated, setAuthenticated] = useState(false);
   const [characters, setCharacters] = useState<CharacterSummary[]>([]);
   const [isRefreshingData, setIsRefreshingData] = useState(false);
+  const [stateStatuses, setStateStatuses] = useState<ClientCharacterStatus[]>([]);
+  const [hasLoadedStateStatuses, setHasLoadedStateStatuses] = useState(false);
+  const [statusCheckAt, setStatusCheckAt] = useState(() => Date.now());
+  const refreshAfterCharacterAdd = useRef(false);
   const language = controlledLanguage ?? localLanguage;
+  const hasExpiredState = authenticated && characters.length > 0 && hasLoadedStateStatuses && statusCheckAt > 0 && hasExpiredEndpoint(stateStatuses);
 
   useEffect(() => {
     loadClientSession()
@@ -80,6 +107,34 @@ export default function AppShell({
         setCharacters([]);
       });
   }, []);
+
+  useEffect(() => {
+    if (!authenticated || characters.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    const loadStatuses = (force = false) => {
+      void loadClientStateStatus(force)
+        .then((data) => {
+          if (cancelled) return;
+          setStateStatuses(data.characters ?? []);
+          setHasLoadedStateStatuses(true);
+          setStatusCheckAt(Date.now());
+        })
+        .catch(() => {
+          if (!cancelled) setHasLoadedStateStatuses(false);
+        });
+    };
+    loadStatuses();
+    const handleRefresh = () => loadStatuses(true);
+    const statusTimer = window.setInterval(() => setStatusCheckAt(Date.now()), 5_000);
+    window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
+    return () => {
+      cancelled = true;
+      window.clearInterval(statusTimer);
+      window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
+    };
+  }, [authenticated, characters.length]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 900px)");
@@ -95,7 +150,7 @@ export default function AppShell({
     onLanguageChange?.(nextLanguage);
   }
 
-  async function refreshData() {
+  const refreshData = useCallback(async () => {
     if (isRefreshingData || !authenticated || characters.length === 0) return;
     setIsRefreshingData(true);
     let stockLocations: EsiStockResponse["locations"] | undefined;
@@ -163,7 +218,17 @@ export default function AppShell({
     } finally {
       setIsRefreshingData(false);
     }
-  }
+  }, [authenticated, characters.length, isRefreshingData, language]);
+
+  useEffect(() => {
+    if (!authenticated || characters.length === 0 || refreshAfterCharacterAdd.current) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("refresh") !== "1") return;
+    refreshAfterCharacterAdd.current = true;
+    url.searchParams.delete("refresh");
+    window.history.replaceState({}, "", url);
+    window.setTimeout(() => void refreshData(), 0);
+  }, [authenticated, characters.length, refreshData]);
 
   return (
     <main className={styles.shell}>
@@ -200,8 +265,14 @@ export default function AppShell({
               className={styles.refresh}
               onClick={() => void refreshData()}
               disabled={isRefreshingData}
+              aria-label={hasExpiredState ? "Refresh data" : "Up to date"}
             >
-              ↻ <span>{isRefreshingData ? "Refreshing..." : "Refresh data"}</span>
+              {hasExpiredState ? (
+                <span className={styles.refreshIconWarning} aria-hidden="true">↻</span>
+              ) : (
+                <span className={styles.refreshStatusDot} aria-hidden="true" />
+              )}
+              <span>{isRefreshingData ? "Refreshing..." : hasExpiredState ? "Refresh Data" : "Up To Date"}</span>
             </button>
           )}
         </div>

@@ -59,7 +59,7 @@ export async function GET(request: Request) {
     for (const characterId of account?.characterIds ?? [identity.characterId]) {
       await attachCharacter(session.sessionId, characterId);
     }
-    const response = NextResponse.redirect(`${getPublicOrigin(request, pending.redirectUri)}/`);
+    const response = NextResponse.redirect(`${getPublicOrigin(request, pending.redirectUri)}/?refresh=1`);
     setSessionCookie(response, session.sessionId);
     response.cookies.set("assembly_line_sso_state", "", { httpOnly: true, path: "/", maxAge: 0 });
     return response;

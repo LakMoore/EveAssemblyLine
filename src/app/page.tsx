@@ -3,7 +3,11 @@
 import { FormEvent, KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import type { PlanResult } from "@/lib/planning/types";
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
-import { loadStockRecords, type StockRecord } from "@/lib/planning/stockStore";
+import {
+  loadStockRecords,
+  replaceMarketOrderStock,
+  type StockRecord,
+} from "@/lib/planning/stockStore";
 import {
   defaultLocations,
   defaultSettings,
@@ -150,7 +154,23 @@ export default function Home() {
   }, [language]);
 
   useEffect(() => {
-    function loadCachedStock() {
+    async function loadCachedStock() {
+      try {
+        const response = await fetch(
+          `/api/state/marketOrders?${new URLSearchParams({
+            personalSellOrdersAsStock: String(settings.personalSellOrdersAsStock),
+            allCorporationSellOrdersAsStock: String(settings.allCorporationSellOrdersAsStock),
+            myCorporationSellOrdersAsStock: String(settings.myCorporationSellOrdersAsStock),
+          }).toString()}`,
+          { cache: "no-store" },
+        );
+        if (response.ok) {
+          const data = (await response.json()) as { marketOrderStock?: Parameters<typeof replaceMarketOrderStock>[0] };
+          await replaceMarketOrderStock(data.marketOrderStock ?? []);
+        }
+      } catch {
+        // Keep cached stock available when market orders cannot be loaded.
+      }
       const stockLoad = loadStockRecords();
       stockLoadPromiseRef.current = stockLoad;
       stockLoad.then(
@@ -166,7 +186,7 @@ export default function Home() {
     };
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
     return () => window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
-  }, []);
+  }, [settings]);
 
   useEffect(() => {
     if (isBuildListLoaded) void saveBuildList(items);

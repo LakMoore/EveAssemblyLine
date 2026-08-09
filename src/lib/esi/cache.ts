@@ -167,14 +167,14 @@ async function indexAssetsByPurpose(rawAssets: AssetRecord[]) {
     let current: AssetRecord | undefined = asset;
     while (current) {
       if (shipTypeIds.has(current.typeId)) {
-        shipByAssetId.set(asset.itemId, current);
+        for (const itemId of visited) shipByAssetId.set(itemId, current);
         return current;
       }
       if (visited.has(current.itemId)) break;
       visited.add(current.itemId);
       current = assetsByItemId.get(current.locationId);
     }
-    shipByAssetId.set(asset.itemId, null);
+    for (const itemId of visited) shipByAssetId.set(itemId, null);
     return null;
   }
 
@@ -183,6 +183,7 @@ async function indexAssetsByPurpose(rawAssets: AssetRecord[]) {
       .map((asset) => [asset, findContainingShip(asset)] as const)
       .filter(
         (entry): entry is readonly [AssetRecord, AssetRecord] =>
+          // containing ship exists and is assembled
           entry[1] !== null && entry[1].isSingleton,
       )
       .map(([asset]) => [asset.itemId, asset]),
@@ -209,19 +210,22 @@ async function indexAssetsByPurpose(rawAssets: AssetRecord[]) {
   // all the assets that are not also locations of other assets or assembled ships
   // assets may be onboard assembled ships!
   const stockAssetsByItemId = new Map(rawAssets
-    .filter((asset) => 
-      !assembledShipsByItemId.has(asset.itemId)
-      && (shipTypeIds.has(asset.typeId)
-        ? !asset.isSingleton
-        : (() => {
+      .filter((asset) => {
+        // filter out assets that are assembled ships
+        if (assembledShipsByItemId.has(asset.itemId)) return false;
+
+        // filter out assets that are locations of other assets, unless they are packaged hauler descendants
         const containingShip = shipByAssetId.get(asset.itemId) ?? null;
-        const isPackagedHaulerDescendant = containingShip !== null
-          && containingShip.itemId !== asset.itemId
+        const isParentedByShip = containingShip !== null
+          && containingShip.itemId !== asset.itemId;
+        const isPackagedHaulerDescendant = isParentedByShip
           && !asset.isSingleton
           && haulerShipTypeIds.has(containingShip.typeId);
-        return !stockLocationIds.has(asset.itemId) || isPackagedHaulerDescendant;
-      })())
-    )
+
+        // not parented by a ship and not a stock location, or is a packaged hauler descendant
+        return (!isParentedByShip && !stockLocationIds.has(asset.itemId))
+          || isPackagedHaulerDescendant;
+      })
     .map((asset) => [asset.itemId, asset])
   );
 
@@ -610,7 +614,7 @@ export async function refreshCharacterState(
           lastUpdated: cache.allAssetsRaw.lastUpdated,
           nextRefreshAllowed: cache.allAssetsRaw.nextRefreshAllowed,
         };
-        const result = await fetchCharacterAssets(character, cache.allAssetsRaw?.etag);
+        const result = await fetchCharacterAssets(character, cache.allAssetsRaw?.etag, options.force === true);
         if (result.notModified && cache.allAssetsRaw) {
           const assets =
             result.blueprints.length > 0
@@ -743,7 +747,7 @@ export async function refreshCharacterState(
             lastUpdated: corpCache.allAssetsRaw.lastUpdated,
             nextRefreshAllowed: corpCache.allAssetsRaw.nextRefreshAllowed,
           };
-          const result = await fetchCorporationAssets(character, corpCache.allAssetsRaw?.etag);
+          const result = await fetchCorporationAssets(character, corpCache.allAssetsRaw?.etag, options.force === true);
           if (result.notModified && corpCache.allAssetsRaw) {
             const assets =
               result.blueprints.length > 0

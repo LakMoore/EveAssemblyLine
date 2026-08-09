@@ -124,14 +124,17 @@ export async function requestEsi<T>(
   path: string,
   tokenSet?: TokenSet,
   init?: RequestInit,
+  options: { bypassCache?: boolean } = {},
 ): Promise<{ data: T | null; headers: Headers; status: number; fromCache: boolean }> {
   const body = typeof init?.body === "string" ? init.body : "";
   const cachePath = body
     ? `${path}&body_hash=${createHash("sha256").update(body).digest("hex")}`
     : path;
-  const cached = await getCachedEsiResponse<T>(cachePath);
-  if (cached) {
-    return { data: cached.data, headers: new Headers(cached.headers), status: cached.status, fromCache: true };
+  if (!options.bypassCache) {
+    const cached = await getCachedEsiResponse<T>(cachePath);
+    if (cached) {
+      return { data: cached.data, headers: new Headers(cached.headers), status: cached.status, fromCache: true };
+    }
   }
   if (esiRateLimitedUntil > Date.now()) {
     const error = new Error(
@@ -199,19 +202,19 @@ function parseRetryAfterMs(value: string | null) {
   return Number.isFinite(timestamp) ? Math.max(1_000, timestamp - Date.now()) : 60_000;
 }
 
-export async function requestEsiConditional<T>(path: string, tokenSet: TokenSet, etag?: string) {
+export async function requestEsiConditional<T>(path: string, tokenSet: TokenSet, etag?: string, bypassCache = false) {
   const headers = etag ? { "if-none-match": etag } : undefined;
-  return requestEsi<T>(path, tokenSet, { headers });
+  return requestEsi<T>(path, tokenSet, { headers }, { bypassCache });
 }
 
-async function fetchPages<T>(path: string, tokenSet: TokenSet, etag?: string) {
-  const first = await requestEsiConditional<T[]>(`${path}?page=1`, tokenSet, etag);
+async function fetchPages<T>(path: string, tokenSet: TokenSet, etag?: string, bypassCache = false) {
+  const first = await requestEsiConditional<T[]>(`${path}?page=1`, tokenSet, etag, bypassCache);
   const pageCount = Number(first.headers.get("x-pages") ?? "1");
   if (first.status === 304) return { data: null, headers: first.headers, notModified: true, fromCache: false };
   if (pageCount <= 1) return { data: first.data ?? [], headers: first.headers, notModified: false, fromCache: first.fromCache };
   const rest: T[][] = [];
   for (let page = 2; page <= pageCount; page += 1) {
-    const result = await requestEsi<T[]>(`${path}?page=${page}`, tokenSet);
+    const result = await requestEsi<T[]>(`${path}?page=${page}`, tokenSet, undefined, { bypassCache });
     rest.push(result.data ?? []);
   }
   return {
@@ -294,12 +297,13 @@ export async function fetchAssetNames(
   return names;
 }
 
-export async function fetchCharacterAssets(record: CharacterTokenRecord, etag?: string) {
+export async function fetchCharacterAssets(record: CharacterTokenRecord, etag?: string, bypassCache = false) {
   const token = await getUsableToken(record, "personal");
   const result = await fetchPages<EsiAsset>(
     `/characters/${record.characterId}/assets/`,
     token,
     etag,
+    bypassCache,
   );
   let blueprintsByItemId = new Map<number, EsiBlueprint>();
   let blueprints: EsiBlueprint[] = [];
@@ -320,7 +324,7 @@ export async function fetchCharacterAssets(record: CharacterTokenRecord, etag?: 
   };
 }
 
-export async function fetchCorporationAssets(record: CharacterTokenRecord, etag?: string) {
+export async function fetchCorporationAssets(record: CharacterTokenRecord, etag?: string, bypassCache = false) {
   if (!record.corporationId || !record.hasDirectorRole || !record.corpAuthCompleted) {
     throw new Error("Corporation authorization is incomplete");
   }
@@ -329,6 +333,7 @@ export async function fetchCorporationAssets(record: CharacterTokenRecord, etag?
     `/corporations/${record.corporationId}/assets/`,
     token,
     etag,
+    bypassCache,
   );
   let blueprintsByItemId = new Map<number, EsiBlueprint>();
   let blueprints: EsiBlueprint[] = [];

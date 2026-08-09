@@ -1750,11 +1750,31 @@
 }
 
 .refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     border: 1px solid #2b5260;
     background: transparent;
     color: #a7c1c8;
     padding: 11px 15px;
     font-size: 12px
+}
+
+.refreshStatusDot {
+    width: 8px;
+    height: 8px;
+    flex: 0 0 8px;
+    border-radius: 50%;
+    background: #5ed8ef;
+    box-shadow: 0 0 9px #5ed8ef;
+}
+
+.refreshIconWarning {
+    display: inline-block;
+    color: #f2a65a;
+    font-size: 16px;
+    line-height: 1;
+    text-shadow: 0 0 9px #f2a65a;
 }
 
 .stats {

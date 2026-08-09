@@ -80,7 +80,7 @@ export type ClientCharacterStatus = {
   }>;
 };
 
-type ClientEndpointStatus = {
+export type ClientEndpointStatus = {
   status: "fresh" | "cached" | "stale" | "rate_limited" | "error";
   lastUpdated?: string;
   lastModified?: string;
