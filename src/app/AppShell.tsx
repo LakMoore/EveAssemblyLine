@@ -12,6 +12,7 @@ import {
   loadClientStock,
   type ClientCharacterStatus,
 } from "@/lib/client/requestCache";
+import { Activity, Boxes, Factory, Image as ImageIcon, MapPinned, Rocket, Settings2, UsersRound } from "lucide-react";
 import styles from "./page.module.css";
 
 const languageStorageKey = "assembly-line-language";
@@ -299,21 +300,21 @@ export default function AppShell({
             className={`${styles.navItem} ${activePage === "planner" ? styles.navActive : ""}`}
             href="/"
           >
-            <span>▦</span>
+            <span><Factory size={17} strokeWidth={1.8} aria-hidden="true" /></span>
             <span className={styles.navText}>Production planner</span>
           </Link>
           <Link
             className={`${styles.navItem} ${activePage === "stock" ? styles.navActive : ""}`}
             href="/stock"
           >
-            <span>▤</span>
+            <span><Boxes size={17} strokeWidth={1.8} aria-hidden="true" /></span>
             <span className={styles.navText}>Stock</span>
           </Link>
           <Link
             className={`${styles.navItem} ${activePage === "ships" ? styles.navActive : ""}`}
             href="/ships"
           >
-            <span>◇</span>
+            <span><Rocket size={17} strokeWidth={1.8} aria-hidden="true" /></span>
             <span className={styles.navText}>Ships</span>
           </Link>
           <div className={styles.sectionLabel}>CONFIGURATION</div>
@@ -321,33 +322,33 @@ export default function AppShell({
             className={`${styles.navItem} ${activePage === "locations" ? styles.navActive : ""}`}
             href="/locations"
           >
-            <span>⌖</span>
+            <span><MapPinned size={17} strokeWidth={1.8} aria-hidden="true" /></span>
             <span className={styles.navText}>Locations</span>
           </Link>
           <Link
             className={`${styles.navItem} ${activePage === "settings" ? styles.navActive : ""}`}
             href="/settings"
           >
-            <span>⚙</span>
+            <span><Settings2 size={17} strokeWidth={1.8} aria-hidden="true" /></span>
             <span className={styles.navText}>Settings</span>
           </Link>
           <Link
             className={`${styles.navItem} ${activePage === "imagechecker" ? styles.navActive : ""}`}
             href="/imagechecker"
           >
-            <span>▧</span>
+            <span><ImageIcon size={17} strokeWidth={1.8} aria-hidden="true" /></span>
             <span className={styles.navText}>Image checker</span>
           </Link>
           <Link
             className={`${styles.navItem} ${activePage === "characters" ? styles.navActive : ""}`}
             href="/characters"
           >
-            <span className={styles.characterGlyph} aria-hidden="true" />
+            <span><UsersRound size={17} strokeWidth={1.8} aria-hidden="true" /></span>
             <span className={styles.navText}>Characters</span>
             <b>{characters.length}</b>
           </Link>
           <button type="button" className={styles.navItem}>
-            <span>⌁</span>
+            <span><Activity size={17} strokeWidth={1.8} aria-hidden="true" /></span>
             <span className={styles.navText}>Data status</span>
           </button>
           <div className={styles.sidebarBottom}>
