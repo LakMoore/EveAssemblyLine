@@ -1,9 +1,10 @@
 const databaseName = "assembly-line";
-const databaseVersion = 5;
+const databaseVersion = 6;
 
 export const buildStoreName = "build-lists";
 export const stockStoreName = "stock";
 export const structureStoreName = "structures";
+export const compressSettingsStoreName = "compress-settings";
 
 let databasePromise: Promise<IDBDatabase> | null = null;
 
@@ -12,7 +13,7 @@ function openDatabase() {
     const request = indexedDB.open(databaseName, databaseVersion);
     request.onupgradeneeded = () => {
       const database = request.result;
-      for (const storeName of [buildStoreName, stockStoreName, structureStoreName]) {
+      for (const storeName of [buildStoreName, stockStoreName, structureStoreName, compressSettingsStoreName]) {
         if (!database.objectStoreNames.contains(storeName)) database.createObjectStore(storeName);
       }
     };

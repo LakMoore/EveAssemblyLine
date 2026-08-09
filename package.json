@@ -10,6 +10,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
+    "test": "tsx --test",
     "fetch-sde": "tsx scripts/fetch-sde.ts",
     "parse-sde": "tsx scripts/parse-sde.ts",
     "generate-types": "tsx scripts/generate-types.ts",

@@ -2176,6 +2176,7 @@
 
 .planActions {
     display: flex;
+    gap: 10px;
     justify-content: flex-end;
     padding: 14px 0 10px
 }

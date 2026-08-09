@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { PlanResult, PlanSourceCounts, PlanSourceIcon } from "@/lib/planning/types";
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
 import {
@@ -792,6 +793,7 @@ function PlanList({
   plan: PlanResult;
   resultsHeaderRef: RefObject<HTMLElement | null>;
 }) {
+  const router = useRouter();
   const [copyStatus, setCopyStatus] = useState("");
   const planListHeaderRef = useRef<HTMLDivElement>(null);
   const list =
@@ -842,6 +844,23 @@ function PlanList({
     };
   }
 
+  function getListAmount(entry: (typeof list)[number]) {
+    return activeTab === "Copy" && "neededQuantity" in entry
+      ? Math.max(0, entry.neededQuantity - entry.stockRuns)
+      : "runsNeeded" in entry
+        ? entry.runsNeeded
+        : "runs" in entry
+          ? entry.runs
+          : "buyQuantity" in entry
+            ? entry.buyQuantity
+            : entry.quantity;
+  }
+
+  function sendToCompress() {
+    const multibuy = list.map((entry) => `${entry.name}\t${getListAmount(entry)}`).join("\n");
+    router.push(`/compress?multibuy=${encodeURIComponent(multibuy)}`);
+  }
+
   async function copyList() {
     const lines =
       activeTab === "Plan"
@@ -853,17 +872,7 @@ function PlanList({
             }),
           ]
         : list.map((entry) => {
-            const amount =
-              activeTab === "Copy" && "neededQuantity" in entry
-                ? Math.max(0, entry.neededQuantity - entry.stockRuns)
-                : "runsNeeded" in entry
-                  ? entry.runsNeeded
-                  : "runs" in entry
-                    ? entry.runs
-                    : "buyQuantity" in entry
-                      ? entry.buyQuantity
-                      : entry.quantity;
-            return `${entry.name}\t${amount}`;
+            return `${entry.name}\t${getListAmount(entry)}`;
           });
     try {
       await navigator.clipboard.writeText(lines.join("\n"));
@@ -885,6 +894,7 @@ function PlanList({
   return (
     <>
       <div className={styles.planActions}>
+        {activeTab === "Buy" && <button type="button" className={styles.copyButton} onClick={sendToCompress}>Send to Compress</button>}
         <button type="button" className={styles.copyButton} onClick={copyList}>
           {copyStatus || (activeTab === "Plan" ? "Copy table" : "Copy list")}
         </button>

@@ -3,6 +3,7 @@ import type { SdeLanguage } from "./languages";
 export type SdeRig = {
   name: string;
   size: "Medium" | "Large" | "Extra Large";
+  reprocessingBonus: number;
 };
 
 const rigsCache = new Map<string, Promise<SdeRig[]>>();

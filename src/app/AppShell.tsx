@@ -12,11 +12,11 @@ import {
   loadClientStock,
   type ClientCharacterStatus,
 } from "@/lib/client/requestCache";
-import { Activity, Boxes, Factory, Image as ImageIcon, MapPinned, Rocket, Settings2, UsersRound } from "lucide-react";
+import { Activity, Boxes, Factory, Image as ImageIcon, MapPinned, Minimize2, Rocket, Settings2, UsersRound } from "lucide-react";
 import styles from "./page.module.css";
 
 const languageStorageKey = "assembly-line-language";
-type ActivePage = "planner" | "stock" | "ships" | "locations" | "settings" | "imagechecker" | "characters";
+type ActivePage = "planner" | "compress" | "stock" | "ships" | "locations" | "settings" | "imagechecker" | "characters";
 type CharacterSummary = {
   characterId: number;
   characterName: string;
@@ -302,6 +302,13 @@ export default function AppShell({
           >
             <span><Factory size={17} strokeWidth={1.8} aria-hidden="true" /></span>
             <span className={styles.navText}>Production planner</span>
+          </Link>
+          <Link
+            className={`${styles.navItem} ${activePage === "compress" ? styles.navActive : ""}`}
+            href="/compress"
+          >
+            <span><Minimize2 size={17} strokeWidth={1.8} aria-hidden="true" /></span>
+            <span className={styles.navText}>Compress</span>
           </Link>
           <Link
             className={`${styles.navItem} ${activePage === "stock" ? styles.navActive : ""}`}

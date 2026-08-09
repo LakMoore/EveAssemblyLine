@@ -6,6 +6,7 @@ import {
   BlueprintsRecordActivitiesManufacturingProductsItem,
   BlueprintsRecordActivitiesReactionMaterialsItem,
   BlueprintsRecordActivitiesReactionProductsItem,
+  CompressibleTypesRecord,
   DogmaAttributesRecord,
   DogmaEffectsRecord,
   GroupsRecord,
@@ -15,6 +16,7 @@ import {
   TypeDogmaRecord,
   TypeBonusRecord,
   TypesRecord,
+  TypeMaterialsRecord,
 } from "./generated";
 
 const processedDir = resolve("sde/processed");
@@ -38,13 +40,17 @@ const reactionMaterialsByBlueprintId = new Map<
 >();
 const activityInputTypeIds = new Set<number>();
 const reactionProductByTypeId = new Map<number, BlueprintsRecordActivitiesReactionProductsItem[]>();
+const compressibleTypeByTypeId = new Map<number, number>();
+const typeMaterialsByTypeId = new Map<number, TypeMaterialsRecord>();
 const dogmaEffectById = new Map<number, DogmaEffectsRecord>();
 const groupById = new Map<number, GroupsRecord>();
 const typeBonusById = new Map<number, TypeBonusRecord>();
 const systemById = new Map<number, MapSolarSystemsRecord>();
 const stationById = new Map<number, NpcStationsRecord>();
 const rigDogmaByTypeId = new Map<number, TypeDogmaRecord>();
+const typeDogmaByTypeId = new Map<number, TypeDogmaRecord>();
 const bonusDogmaAttributesById = new Map<number, DogmaAttributesRecord>();
+const dogmaAttributeById = new Map<number, DogmaAttributesRecord>();
 const loadPromises = new Map<string, Promise<unknown>>();
 
 function records<T>(file: string) {
@@ -161,6 +167,24 @@ export function getBlueprints() {
   });
 }
 
+export function getCompressibleTypes() {
+  return getOnce("compressibleTypes", () => {
+    for (const record of records<CompressibleTypesRecord>("compressibleTypes.json")) {
+      compressibleTypeByTypeId.set(record._key, record.compressedTypeID);
+    }
+    return compressibleTypeByTypeId;
+  });
+}
+
+export function getTypeMaterials() {
+  return getOnce("typeMaterials", () => {
+    for (const record of records<TypeMaterialsRecord>("typeMaterials.json")) {
+      typeMaterialsByTypeId.set(record._key, record);
+    }
+    return typeMaterialsByTypeId;
+  });
+}
+
 export function getActivityInputTypeIds() {
   return getOnce("activityInputTypeIds", async () => {
     const indexes = await getBlueprints();
@@ -202,11 +226,27 @@ export function getRigDogma() {
   });
 }
 
+export function getTypeDogma() {
+  return getOnce("typeDogma", () => {
+    for (const record of records<TypeDogmaRecord>("typeDogma.json"))
+      typeDogmaByTypeId.set(record._key, record);
+    return typeDogmaByTypeId;
+  });
+}
+
 export function getBonusDogmaAttributes() {
   return getOnce("bonusDogmaAttributes", () => {
     for (const record of records<DogmaAttributesRecord>("dogmaAttributes.json"))
       if (record.attributeCategoryID === 37) bonusDogmaAttributesById.set(record._key, record);
     return bonusDogmaAttributesById;
+  });
+}
+
+export function getDogmaAttributes() {
+  return getOnce("dogmaAttributes", () => {
+    for (const record of records<DogmaAttributesRecord>("dogmaAttributes.json"))
+      dogmaAttributeById.set(record._key, record);
+    return dogmaAttributeById;
   });
 }
 

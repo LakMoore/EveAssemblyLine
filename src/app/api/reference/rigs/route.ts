@@ -7,6 +7,8 @@ const rigSizeAttribute = 1547;
 const materialBonusAttribute = 2594;
 const timeBonusAttribute = 2593;
 const costBonusAttribute = 2595;
+const reprocessingYieldAttribute = 379;
+const refiningYieldMultiplierAttribute = 717;
 const securityMultiplierAttributes = [2355, 2356, 2357] as const;
 const sizeByValue = { 2: "Medium", 3: "Large", 4: "Extra Large" } as const;
 const outpostRigGroupId = 1984;
@@ -16,6 +18,7 @@ let cachedRigs: Array<{
   name: TypesRecordName;
   size: "Medium" | "Large" | "Extra Large";
   bonuses: { material: number; time: number; cost: number };
+  reprocessingBonus: number;
   securityMultipliers: number[];
 }> | null = null;
 
@@ -34,6 +37,8 @@ export async function GET(request: Request) {
         materialBonusAttribute,
         timeBonusAttribute,
         costBonusAttribute,
+        reprocessingYieldAttribute,
+        refiningYieldMultiplierAttribute,
         ...securityMultiplierAttributes,
       ]);
       cachedRigs = [...rigDogmaByTypeId.values()].flatMap((dogma) => {
@@ -43,7 +48,9 @@ export async function GET(request: Request) {
               (attribute) =>
                 bonusAttributes.has(attribute.attributeID) &&
                 (attribute.attributeID === rigSizeAttribute ||
-                  bonusDogmaAttributesById.has(attribute.attributeID)),
+                  bonusDogmaAttributesById.has(attribute.attributeID) ||
+                  attribute.attributeID === reprocessingYieldAttribute ||
+                  attribute.attributeID === refiningYieldMultiplierAttribute),
             )
             .map((attribute) => [attribute.attributeID, attribute.value]),
         );
@@ -53,7 +60,7 @@ export async function GET(request: Request) {
           !type?.published ||
           type.groupID === outpostRigGroupId ||
           !size ||
-          ![materialBonusAttribute, timeBonusAttribute, costBonusAttribute].some(
+          ![materialBonusAttribute, timeBonusAttribute, costBonusAttribute, reprocessingYieldAttribute, refiningYieldMultiplierAttribute].some(
             (id) => (attributes.get(id) ?? 0) !== 0,
           )
         )
@@ -68,6 +75,9 @@ export async function GET(request: Request) {
               time: attributes.get(timeBonusAttribute) ?? 0,
               cost: attributes.get(costBonusAttribute) ?? 0,
             },
+            reprocessingBonus:
+              attributes.get(reprocessingYieldAttribute) ??
+              (attributes.get(refiningYieldMultiplierAttribute) ?? 0.5) * 100 - 50,
             securityMultipliers: securityMultiplierAttributes.map((id) => attributes.get(id) ?? 1),
           },
         ];

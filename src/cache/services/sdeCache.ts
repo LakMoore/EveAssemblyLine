@@ -2,13 +2,17 @@ import { cache } from "../cache";
 import { sdeKey } from "../keys";
 import {
   getBonusDogmaAttributes as loadBonusDogmaAttributes,
+  getDogmaAttributes as loadDogmaAttributes,
   getDogmaEffects as loadDogmaEffects,
   getGroups as loadGroups,
   getTypeBonuses as loadTypeBonuses,
   getBlueprints as loadBlueprints,
+  getCompressibleTypes as loadCompressibleTypes,
+  getTypeMaterials as loadTypeMaterials,
   getActivityInputTypeIds as loadActivityInputTypeIds,
   getMarketGroups as loadMarketGroups,
   getRigDogma as loadRigDogma,
+  getTypeDogma as loadTypeDogma,
   getSdeBuildNumber as loadSdeBuildNumber,
   getStations as loadStations,
   getSystems as loadSystems,
@@ -209,6 +213,14 @@ export async function getBlueprintIndexes(): Promise<SdeBlueprintIndexes> {
   return loadBlueprints();
 }
 
+export function getCompressibleTypes() {
+  return loadCompressibleTypes();
+}
+
+export function getTypeMaterials() {
+  return loadTypeMaterials();
+}
+
 export async function getActivityInputTypeIds(): Promise<Set<number>> {
   return loadActivityInputTypeIds();
 }
@@ -301,12 +313,20 @@ export function getRigDogma() {
   return getMap(loadRigDogma);
 }
 
+export function getTypeDogma() {
+  return getMap(loadTypeDogma);
+}
+
 export function getRigDogmaByTypeId(typeId: number): Promise<TypeDogmaRecord | null> {
   return getMapValue("rigDogma", typeId, loadRigDogma);
 }
 
 export function getBonusDogmaAttributes() {
   return getMap(loadBonusDogmaAttributes);
+}
+
+export function getDogmaAttributes() {
+  return getMap(loadDogmaAttributes);
 }
 
 export function getDogmaEffects() {
