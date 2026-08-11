@@ -4,11 +4,13 @@ import { FormEvent, KeyboardEvent, type RefObject, useEffect, useRef, useState }
 import { useRouter } from "next/navigation";
 import type { PlanResult, PlanSourceCounts, PlanSourceIcon } from "@/lib/planning/types";
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
+import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
 import {
   loadStockRecords,
   replaceMarketOrderStock,
   type StockRecord,
 } from "@/lib/planning/stockStore";
+import { loadClientMarketOrders } from "@/lib/client/requestCache";
 import {
   defaultLocations,
   defaultSettings,
@@ -22,7 +24,7 @@ import { fetchTypeMetadata } from "@/lib/reference/types";
 import AppShell, { languageStorageKey } from "./AppShell";
 import TypeIdentity from "./components/TypeIdentity";
 import styles from "./page.module.css";
-import { ChartLine, Factory, Microscope, TestTubes } from "lucide-react";
+import { ChartLine, Clipboard, Copy as CopyIcon, Factory, Minimize2, Microscope, TestTubes } from "lucide-react";
 
 type PlannerTab = "Plan" | "Buy" | "Copy" | "Invent" | "React" | "Manufacture";
 const tabs: PlannerTab[] = ["Plan", "Buy", "Copy", "Invent", "React", "Manufacture"];
@@ -205,16 +207,8 @@ export default function Home() {
   useEffect(() => {
     async function loadCachedStock() {
       try {
-        const response = await fetch(
-          `/api/state/marketOrders?${new URLSearchParams({
-            personalSellOrdersAsStock: String(settings.personalSellOrdersAsStock),
-            allCorporationSellOrdersAsStock: String(settings.allCorporationSellOrdersAsStock),
-            myCorporationSellOrdersAsStock: String(settings.myCorporationSellOrdersAsStock),
-          }).toString()}`,
-          { cache: "no-store" },
-        );
-        if (response.ok) {
-          const data = (await response.json()) as { marketOrderStock?: Parameters<typeof replaceMarketOrderStock>[0] };
+        const data = await loadClientMarketOrders(settings);
+        if (data) {
           await replaceMarketOrderStock(data.marketOrderStock ?? []);
         }
       } catch {
@@ -231,7 +225,9 @@ export default function Home() {
     loadCachedStock();
     const handleRefresh = () => {
       setIsStockLoaded(false);
-      loadCachedStock();
+      loadStockRecords().finally(
+        () => setIsStockLoaded(true)
+      );
     };
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
     return () => window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
@@ -328,10 +324,11 @@ export default function Home() {
               </div>
               <button
                 type="button"
-                className={styles.importButton}
+                className={`actionButton ${styles.importButton}`}
                 onClick={() => setIsPasteModalOpen(true)}
               >
-                Paste list
+                <Clipboard aria-hidden="true" />
+                <span>Paste list</span>
               </button>
             </div>
             <p className={styles.panelDescription}>What are you making?</p>
@@ -856,9 +853,25 @@ function PlanList({
             : entry.quantity;
   }
 
-  function sendToCompress() {
-    const multibuy = list.map((entry) => `${entry.name}\t${getListAmount(entry)}`).join("\n");
-    router.push(`/compress?multibuy=${encodeURIComponent(multibuy)}`);
+  async function sendToCompress() {
+    const settings = await loadCompressSettings();
+    await saveCompressSettings({
+      ...settings,
+      items: list.map((entry) => ({
+        name: entry.name,
+        typeId: "typeId" in entry ? entry.typeId : entry.itemTypeId,
+        quantity: getListAmount(entry),
+        category: "item" as const,
+        imageVariation: "bpoCount" in entry
+          ? "bpc" as const
+          : / blueprint$/i.test(entry.name)
+            ? "bp" as const
+            : / formula$/i.test(entry.name)
+              ? "bpc" as const
+              : "icon" as const,
+      })),
+    });
+    router.push("/compress");
   }
 
   async function copyList() {
@@ -894,8 +907,9 @@ function PlanList({
   return (
     <>
       <div className={styles.planActions}>
-        {activeTab === "Buy" && <button type="button" className={styles.copyButton} onClick={sendToCompress}>Send to Compress</button>}
-        <button type="button" className={styles.copyButton} onClick={copyList}>
+        {activeTab === "Buy" && <button type="button" className={`actionButton ${styles.copyButton}`} onClick={() => void sendToCompress()}><Minimize2 aria-hidden="true" /><span>Send to Compress</span></button>}
+        <button type="button" className={`actionButton ${styles.copyButton}`} onClick={copyList}>
+          <CopyIcon aria-hidden="true" />
           {copyStatus || (activeTab === "Plan" ? "Copy table" : "Copy list")}
         </button>
       </div>

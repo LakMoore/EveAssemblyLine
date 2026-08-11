@@ -1,11 +1,57 @@
-import storage from "node-persist";
+import { applicationDefault, cert, getApps, initializeApp } from "firebase-admin/app";
+import { getFirestore, type Firestore } from "firebase-admin/firestore";
 
-let initialized = false;
+const storageCollection = "assemblyLineStorage";
+let firestorePromise: Promise<Firestore> | undefined;
+
+export interface Storage {
+  getItem<T>(key: string): Promise<T | undefined>;
+  setItem<T>(key: string, value: T): Promise<void>;
+}
+
+function getFirestoreDatabase() {
+  if (!firestorePromise) {
+    firestorePromise = Promise.resolve().then(() => {
+      const app = getApps()[0] ?? initializeApp(getFirebaseOptions());
+      return getFirestore(app);
+    });
+  }
+  return firestorePromise;
+}
+
+function withoutUndefined(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutUndefined);
+  if (!value || typeof value !== "object" || value instanceof Date) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, entry]) => entry !== undefined)
+      .map(([key, entry]) => [key, withoutUndefined(entry)]),
+  );
+}
+
+function getFirebaseOptions() {
+  const projectId = process.env.FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+  if (projectId && clientEmail && privateKey) {
+    return { credential: cert({ projectId, clientEmail, privateKey }) };
+  }
+  if (projectId) return { credential: applicationDefault(), projectId };
+  return undefined;
+}
 
 export async function initStorage() {
-  if (!initialized) {
-    await storage.init({ dir: process.env.STORAGE_DIR ?? "./data", ttl: false });
-    initialized = true;
-  }
-  return storage;
+  const database = await getFirestoreDatabase();
+  return {
+    async getItem<T>(key: string) {
+      const snapshot = await database.collection(storageCollection).doc(key).get();
+      return snapshot.exists ? (snapshot.data()?.value as T) : undefined;
+    },
+    async setItem<T>(key: string, value: T) {
+      await database.collection(storageCollection).doc(key).set({
+        value: withoutUndefined(value),
+        updatedAt: new Date(),
+      });
+    },
+  } satisfies Storage;
 }

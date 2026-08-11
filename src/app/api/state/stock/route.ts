@@ -72,6 +72,7 @@ type StockBucket = {
   typeId?: number;
   systemId?: number;
   systemName?: string;
+  securityStatus?: number;
   regionId?: number;
   resolved: boolean;
   assetCount: number;
@@ -279,6 +280,7 @@ function addContribution(
       typeId: location.typeId,
       systemId: location.systemId,
       systemName: location.systemId ? systems.get(location.systemId)?.name.en : undefined,
+      securityStatus: location.systemId === undefined ? undefined : systems.get(location.systemId)?.securityStatus,
       regionId: location.regionId,
       resolved: location.resolved !== false,
       assetCount: 0,

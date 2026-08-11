@@ -28,6 +28,7 @@ import {
   getUsableToken,
 } from "./client";
 import { getStation } from "@/cache/services/sdeCache";
+import { parseCacheControlMaxAge } from "@/cache/esiTtl";
 
 export type EndpointStatus = "fresh" | "cached" | "stale" | "rate_limited" | "error";
 export type EndpointCache<T> = {
@@ -68,6 +69,16 @@ function hasUsableMarketOrders(cache: OwnerCache | undefined) {
   );
 }
 
+function getUsableMarketOrdersEtag(cache: OwnerCache | undefined) {
+  const marketOrders = cache?.marketOrders;
+  return marketOrders &&
+    Array.isArray(marketOrders.lastBody) &&
+    marketOrders.status !== "error" &&
+    marketOrders.status !== "rate_limited"
+    ? marketOrders.etag
+    : undefined;
+}
+
 function getCache(map: Map<number, OwnerCache>, id: number): OwnerCache {
   const existing = map.get(id);
   if (existing) return existing;
@@ -87,9 +98,11 @@ function endpointStatus<T>(
 ): Pick<EndpointCache<T>, "status" | "rateLimitedUntil" | "error"> {
   const status = (error as { status?: number }).status;
   if (status !== 429) {
-    const errorMessage = status === 401 || status === 403
-      ? `ESI authorization failed (${status}); reconnect this character to grant the required scope.`
-      : error instanceof Error ? error.message : "ESI request failed";
+    const errorMessage = status === 401
+      ? error instanceof Error ? error.message : "ESI authorization failed (401)"
+      : status === 403
+        ? "ESI authorization failed (403); reconnect this character to grant the required scope."
+        : error instanceof Error ? error.message : "ESI request failed";
     return {
       status: "error",
       error: errorMessage,
@@ -119,19 +132,22 @@ function setFresh<T>(
   previous?: EndpointCache<T>,
   lifetimeMs = 5 * 60 * 1000,
   preserveExpiry = false,
+  useFallbackLifetime = false,
 ): EndpointCache<T> {
   const now = new Date();
   const expiresAt = Date.parse(headers?.get("expires") ?? "");
+  const maxAge = parseCacheControlMaxAge(headers?.get("cache-control") ?? null);
   const lastModified = normalizeUtcTimestamp(headers?.get("last-modified"), previous?.lastModified);
   const previousExpiry = previous?.expires ?? previous?.nextRefreshAllowed;
-  const preservePreviousExpiry = preserveExpiry || (!headers && Boolean(previousExpiry));
-  const nextRefreshAllowed = preservePreviousExpiry && previousExpiry
+  const nextRefreshAllowed = preserveExpiry && previousExpiry
     ? previousExpiry
     : Number.isFinite(expiresAt) && expiresAt > now.getTime()
       ? new Date(expiresAt).toISOString()
-      : lastModified && Number.isFinite(Date.parse(lastModified))
-        ? new Date(Date.parse(lastModified) + lifetimeMs).toISOString()
-        : new Date(now.getTime() + lifetimeMs).toISOString();
+      : maxAge != null && maxAge > 0
+        ? new Date(now.getTime() + maxAge * 1_000).toISOString()
+        : useFallbackLifetime
+          ? new Date(now.getTime() + lifetimeMs).toISOString()
+          : now.toISOString();
   return {
     lastBody: body,
     etag: headers?.get("etag") ?? previous?.etag,
@@ -694,10 +710,22 @@ export async function refreshCharacterState(
       characterSummary.jobs = cache.jobs;
     }
     try {
-      if (!cache.marketOrders || !cache.marketOrders.nextRefreshAllowed || Date.parse(cache.marketOrders.nextRefreshAllowed) <= Date.now()) {
-        const orders = await fetchCharacterMarketOrders(character, cache.marketOrders?.etag, !cache.marketOrders);
+      if (
+        cache.marketOrders?.status === "stale" ||
+        !cache.marketOrders ||
+        !cache.marketOrders.nextRefreshAllowed ||
+        Date.parse(cache.marketOrders.nextRefreshAllowed) <= Date.now()
+      ) {
+        const orders = await fetchCharacterMarketOrders(character, getUsableMarketOrdersEtag(cache), true);
         if (orders.notModified && cache.marketOrders) {
-          cache.marketOrders = setFresh(cache.marketOrders.lastBody, orders.headers, cache.marketOrders, 5 * 60 * 1000, true);
+          cache.marketOrders = setFresh(
+            cache.marketOrders.lastBody,
+            orders.headers,
+            cache.marketOrders,
+            5 * 60 * 1000,
+            false,
+            true,
+          );
           cache.marketOrders.status = endpointDataStatus(
             cache.marketOrders.lastModified,
             cache.marketOrders.nextRefreshAllowed,
@@ -839,11 +867,16 @@ export async function refreshCharacterState(
         };
       }
       try {
-        if (!corpCache.marketOrders || !corpCache.marketOrders.nextRefreshAllowed || Date.parse(corpCache.marketOrders.nextRefreshAllowed) <= Date.now()) {
+        if (
+          corpCache.marketOrders?.status === "stale" ||
+          !corpCache.marketOrders ||
+          !corpCache.marketOrders.nextRefreshAllowed ||
+          Date.parse(corpCache.marketOrders.nextRefreshAllowed) <= Date.now()
+        ) {
           const orders = await fetchCorporationMarketOrders(
             character,
-            corpCache.marketOrders?.etag,
-            !corpCache.marketOrders,
+            getUsableMarketOrdersEtag(corpCache),
+            true,
           );
           if (orders.notModified && corpCache.marketOrders) {
             corpCache.marketOrders = setFresh(
@@ -851,6 +884,7 @@ export async function refreshCharacterState(
               orders.headers,
               corpCache.marketOrders,
               20 * 60 * 1000,
+              false,
               true,
             );
             corpCache.marketOrders.status = endpointDataStatus(

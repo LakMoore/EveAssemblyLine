@@ -9,10 +9,14 @@ export type KnownStructure = {
   id: string;
   systemId: number;
   systemName: string;
+  securityStatus?: number;
   type: string;
+  typeId?: number;
   size: "Small" | "Medium" | "Large" | "Extra Large";
+  sizeId?: number;
   name: string;
   rigs: string[];
+  rigTypeIds?: number[];
   esiStructureId?: number;
 };
 

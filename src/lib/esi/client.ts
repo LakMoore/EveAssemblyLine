@@ -155,12 +155,22 @@ export async function requestEsi<T>(
   if (response.status === 304)
     return { data: null, headers: response.headers, status: response.status, fromCache: false };
   if (!response.ok) {
+    const details = response.status === 401 ? await response.text() : "";
     if (response.status === 429) {
       const retryAfter = response.headers.get("retry-after");
       const retryAfterMs = parseRetryAfterMs(retryAfter);
       esiRateLimitedUntil = Math.max(esiRateLimitedUntil, Date.now() + retryAfterMs);
     }
-    const error = new Error(`ESI request failed (${response.status})`);
+    let message = `ESI request failed (${response.status})`;
+    if (response.status === 401) {
+      try {
+        const body = JSON.parse(details) as { error?: unknown };
+        if (typeof body.error === "string") message = `ESI authorization failed (401): ${body.error}`;
+      } catch {
+        // Keep the generic status when ESI does not return JSON.
+      }
+    }
+    const error = new Error(message);
     (error as Error & { status?: number; retryAfter?: string }).status = response.status;
     (error as Error & { status?: number; retryAfter?: string }).retryAfter =
       response.headers.get("retry-after") ?? undefined;
@@ -568,6 +578,7 @@ export async function fetchLocationMetadata(
     solar_system_id?: number;
     constellation_id?: number;
     region_id?: number;
+    services?: Array<{ name: string; state: "online" | "offline" | "cleanup" }>;
   }>(path, token);
 }
 

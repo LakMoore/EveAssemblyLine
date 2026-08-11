@@ -7,24 +7,31 @@ const issuer = "https://login.eveonline.com";
 const pendingAuthPrefix = "pending-auth:";
 const pendingAuthTtlMs = 10 * 60 * 1000;
 
-export const personalScopes = [
+export const authorizationScopes = [
+  "esi-skills.read_skills.v1",
+  "esi-clones.read_clones.v1",
+  "esi-corporations.read_corporation_membership.v1",
+  "esi-planets.manage_planets.v1",
+  "esi-fittings.read_fittings.v1",
+  "esi-markets.structure_markets.v1",
+  "esi-contracts.read_character_contracts.v1",
+  "esi-clones.read_implants.v1",
+  "esi-corporations.read_divisions.v1",
+  "esi-contracts.read_corporation_contracts.v1",
+  "esi-universe.read_structures.v1",
   "esi-assets.read_assets.v1",
   "esi-industry.read_character_jobs.v1",
-  "esi-characters.read_blueprints.v1",
   "esi-markets.read_character_orders.v1",
-];
-
-export const corporationScopes = [
-  ...personalScopes,
-  "esi-assets.read_corporation_assets.v1",
+  "esi-characters.read_blueprints.v1",
   "esi-characters.read_corporation_roles.v1",
+  "esi-assets.read_corporation_assets.v1",
   "esi-corporations.read_blueprints.v1",
   "esi-industry.read_corporation_jobs.v1",
   "esi-markets.read_corporation_orders.v1",
-  "esi-universe.read_structures.v1",
 ];
 
-export const authorizationScopes = corporationScopes;
+export const personalScopes = authorizationScopes;
+export const corporationScopes = authorizationScopes;
 
 type PendingAuth = {
   sessionId?: string;
@@ -91,7 +98,7 @@ export async function savePendingAuth(state: string, pending: PendingAuth) {
 export async function consumePendingAuth(state: string) {
   const storage = await initStorage();
   const key = `${pendingAuthPrefix}${state}`;
-  const pending = await storage.getItem<PendingAuth>(key);
+  const pending = (await storage.getItem(key)) as PendingAuth | null | undefined;
   await storage.setItem(key, null);
   if (!pending || Date.parse(pending.expiresAt) < Date.now()) return null;
   return pending;

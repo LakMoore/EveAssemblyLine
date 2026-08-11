@@ -17,6 +17,35 @@ The final `sde:prepare` step bulk uploads the SDE-backed cache entries when the 
 
 Without SDE data the application still builds, but SDE-backed routes should call `ensureSdeLoaded()` and report its setup error. This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Firebase persistence
+
+Durable server-side accounts, sessions, EVE tokens, and pending SSO state are stored in Cloud Firestore through the Firebase Admin SDK. The application uses one document per storage key in the `assemblyLineStorage` collection. SDE data remains a build/runtime input loaded into process memory; it is not stored in Firestore.
+
+For Firebase App Hosting, no Firebase-specific `.env` variables are required. App Hosting provides `FIREBASE_CONFIG` automatically and the Firebase Admin SDK uses Application Default Credentials from the backend's runtime service account. The backend service account must have permission to access Firestore.
+
+For local development, either use Google Application Default Credentials with `gcloud auth application-default login` and set `FIREBASE_PROJECT_ID`, or provide these server-only variables in `.env.local`:
+
+```env
+FIREBASE_PROJECT_ID=your-firebase-project-id
+FIREBASE_CLIENT_EMAIL=firebase-adminsdk-...@your-firebase-project-id.iam.gserviceaccount.com
+FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+```
+
+Use a dedicated service account with access limited to the required Firestore database. Never expose these variables to the browser or commit them.
+
+The Firestore database must be created in the Firebase project before the first authenticated request. Existing `data/` files are intentionally not migrated; they contain disposable pre-Firestore state and will be abandoned on deployment.
+
+### Create the Firestore database
+
+1. Open the [Firebase console](https://console.firebase.google.com/) and select the project used by the App Hosting backend.
+2. Open **Databases & Storage > Firestore Database** and click **Create database**.
+3. Choose **Production mode**, not Test mode. This server uses the Admin SDK and IAM; browser clients should not have direct access to the token collection.
+4. Select a database location close to the App Hosting backend and confirm **Create**. The default `(default)` database is sufficient.
+5. Open **Project settings > Service accounts** and identify the service account used by the App Hosting backend. Grant it a Firestore role such as **Cloud Datastore User** (`roles/datastore.user`) at the project level if it does not already have access.
+6. Roll out the App Hosting backend. The first successful authenticated request creates the `assemblyLineStorage` collection and its documents automatically; no manual collection creation is needed.
+
+For local ADC setup, install the Google Cloud CLI, run `gcloud auth application-default login`, set `FIREBASE_PROJECT_ID` in `.env.local`, and run the app from the application root. Do not use production credentials for local experiments; use a separate Firebase project or the Firestore emulator.
+
 ## Cache configuration
 
 The cache layer is available through `src/cache/cache.ts` and defaults to an in-memory provider:

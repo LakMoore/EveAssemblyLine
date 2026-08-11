@@ -1,4 +1,5 @@
 import type { StockItem } from "@/lib/planning/stockStore";
+import type { PlannerSettings } from "@/lib/planning/preferences";
 import type { SdeLanguage } from "@/lib/reference/languages";
 
 export type ClientSession = {
@@ -20,6 +21,10 @@ export type ClientStockResponse = {
     items: StockItem[];
   }>;
   filteredLocationIds?: number[];
+};
+
+export type ClientMarketOrderResponse = {
+  marketOrderStock?: StockItem[];
 };
 
 export type ClientShipsResponse = {
@@ -102,6 +107,7 @@ let corpStatusRequest: Promise<ClientCharacter[]> | undefined;
 let corpStatusResponse: ClientCharacter[] | undefined;
 let stateStatusRequest: Promise<{ characters?: ClientCharacterStatus[] }> | undefined;
 let stateStatusResponse: { characters?: ClientCharacterStatus[] } | undefined;
+const marketOrderRequests = new Map<string, Promise<ClientMarketOrderResponse | null>>();
 
 function loadJson<T>(url: string, pending: Promise<T> | undefined, setPending: (value: Promise<T> | undefined) => void) {
   if (pending) return pending;
@@ -129,6 +135,34 @@ export function loadClientSession() {
   return sessionRequest;
 }
 
+export async function loadClientMarketOrders(
+  settings: Pick<
+    PlannerSettings,
+    "personalSellOrdersAsStock" | "allCorporationSellOrdersAsStock" | "myCorporationSellOrdersAsStock"
+  >,
+) {
+  const session = await loadClientSession();
+  if (!session.authenticated || !session.characters?.length) return null;
+
+  const query = new URLSearchParams({
+    personalSellOrdersAsStock: String(settings.personalSellOrdersAsStock),
+    allCorporationSellOrdersAsStock: String(settings.allCorporationSellOrdersAsStock),
+    myCorporationSellOrdersAsStock: String(settings.myCorporationSellOrdersAsStock),
+  }).toString();
+  const pending = marketOrderRequests.get(query);
+  if (pending) return pending;
+
+  const request = fetch(`/api/state/marketOrders?${query}`, { cache: "no-store" })
+    .then(async (response) => {
+      const data = (await response.json()) as ClientMarketOrderResponse;
+      if (!response.ok) throw new Error("Could not load market orders.");
+      return data;
+    })
+    .finally(() => marketOrderRequests.delete(query));
+  marketOrderRequests.set(query, request);
+  return request;
+}
+
 export function loadClientStock(language: SdeLanguage, force = false) {
   const pending = stockRequests.get(language);
   if (pending) return pending;
@@ -147,6 +181,10 @@ export function loadClientStock(language: SdeLanguage, force = false) {
     .finally(() => stockRequests.delete(language));
   stockRequests.set(language, request);
   return request;
+}
+
+export function clearClientStockCache(language: SdeLanguage) {
+  stockResponses.set(language, { locations: [] });
 }
 
 export function loadClientShips(force = false) {

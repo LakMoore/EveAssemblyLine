@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import AppShell, { languageStorageKey } from "../AppShell";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import {
   defaultLocations,
   locationsStorageKey,
@@ -15,23 +16,23 @@ import { loadStructures, saveStructures } from "@/lib/planning/structureStore";
 import styles from "../page.module.css";
 
 type StructureSize = "Small" | "Medium" | "Large" | "Extra Large";
-type StructureType = { name: string; size: StructureSize };
+type StructureType = { name: string; size: StructureSize; typeId: number; sizeId: number };
 
 const structureTypes: StructureType[] = [
-  { name: "Athanor", size: "Medium" },
-  { name: "Raitaru", size: "Medium" },
-  { name: "Astrahus", size: "Medium" },
-  { name: "Tatara", size: "Large" },
-  { name: "Sotiyo", size: "Extra Large" },
-  { name: "Azbel", size: "Large" },
-  { name: "Fortizar", size: "Large" },
-  { name: "Keepstar", size: "Extra Large" },
-  { name: "'Draccous' Fortizar", size: "Large" },
-  { name: "'Horizon' Fortizar", size: "Large" },
-  { name: "'Marginis' Fortizar", size: "Large" },
-  { name: "'Moreau' Fortizar", size: "Large" },
-  { name: "'Prometheus' Fortizar", size: "Large" },
-  { name: "Upwell Palatine Keepstar", size: "Extra Large" },
+  { name: "Athanor", size: "Medium", typeId: 35835, sizeId: 2 },
+  { name: "Raitaru", size: "Medium", typeId: 35825, sizeId: 2 },
+  { name: "Astrahus", size: "Medium", typeId: 35832, sizeId: 2 },
+  { name: "Tatara", size: "Large", typeId: 35836, sizeId: 3 },
+  { name: "Sotiyo", size: "Extra Large", typeId: 35827, sizeId: 4 },
+  { name: "Azbel", size: "Large", typeId: 35826, sizeId: 3 },
+  { name: "Fortizar", size: "Large", typeId: 35833, sizeId: 3 },
+  { name: "Keepstar", size: "Extra Large", typeId: 35834, sizeId: 4 },
+  { name: "'Draccous' Fortizar", size: "Large", typeId: 35833, sizeId: 3 },
+  { name: "'Horizon' Fortizar", size: "Large", typeId: 35833, sizeId: 3 },
+  { name: "'Marginis' Fortizar", size: "Large", typeId: 35833, sizeId: 3 },
+  { name: "'Moreau' Fortizar", size: "Large", typeId: 35833, sizeId: 3 },
+  { name: "'Prometheus' Fortizar", size: "Large", typeId: 35833, sizeId: 3 },
+  { name: "Upwell Palatine Keepstar", size: "Extra Large", typeId: 35834, sizeId: 4 },
 ];
 const fallbackRigOptionsBySize: Record<StructureSize, string[]> = {
   Small: [
@@ -203,6 +204,7 @@ type EsiStructure = {
   name: string;
   systemId?: number;
   systemName?: string;
+  securityStatus?: number;
   locationType: "structure" | "station";
   assetCount: number;
   personalAssetCount: number;
@@ -309,6 +311,7 @@ export default function LocationsPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingStructure, setEditingStructure] = useState<KnownStructure | null>(null);
   const [rigOptionsBySize, setRigOptionsBySize] = useState(fallbackRigOptionsBySize);
+  const [rigTypeIdsByName, setRigTypeIdsByName] = useState<Record<string, number>>({});
   const [esiStructures, setEsiStructures] = useState<EsiStructure[]>([]);
   const [esiConnected, setEsiConnected] = useState(false);
   const [esiRateLimitedUntil, setEsiRateLimitedUntil] = useState<string | null>(null);
@@ -374,6 +377,7 @@ export default function LocationsPage() {
             locationType: "structure" | "station" | "anchored";
             systemId?: number;
             systemName?: string;
+            securityStatus?: number;
             typeId?: number;
             totalCount: number;
             totalVolume: number;
@@ -397,6 +401,7 @@ export default function LocationsPage() {
             locationType: location.locationType,
             systemId: location.systemId,
             systemName: location.systemName,
+            securityStatus: location.securityStatus,
             type: location.typeId ? `Type ${location.typeId}` : undefined,
             assetCount: location.assetCount,
             personalAssetCount: location.personalAssetCount,
@@ -444,6 +449,7 @@ export default function LocationsPage() {
         };
         for (const rig of rigs) options[rig.size].push(rig.name);
         setRigOptionsBySize(options);
+        setRigTypeIdsByName(Object.fromEntries(rigs.map((rig) => [rig.name, rig.typeId])));
       })
       .catch(() => undefined);
   }, [language]);
@@ -510,8 +516,11 @@ export default function LocationsPage() {
       esiStructureId: esiStructure.structureId,
       systemId: localOverride?.systemId || esiStructure.systemId || 0,
       systemName: localOverride?.systemName || esiStructure.systemName || "",
+      securityStatus: localOverride?.securityStatus ?? esiStructure.securityStatus,
       type: type.name,
+      typeId: type.typeId,
       size: esiStructure.size ?? type.size,
+      sizeId: type.sizeId,
       name: localOverride?.name ?? esiStructure.name,
       rigs:
         localOverride?.rigs ??
@@ -576,46 +585,51 @@ export default function LocationsPage() {
               <div className={styles.knownStructure} key={structure.structureId}>
                 <span>
                   <strong>{structure.name}</strong>
-                  <small>
-                    {structure.locationType === "station"
-                      ? "Station"
-                      : (structure.type ?? "Structure")}
-                    {" · "}
-                    {structure.assetCount.toLocaleString()} records ·{" "}
-                    {structure.totalCount.toLocaleString()} quantity ·{" "}
-                    {structure.totalVolume.toLocaleString(undefined, { maximumFractionDigits: 2 })}{" "}
-                    m³ Volume · {structure.personalAssetCount.toLocaleString()} character ·{" "}
-                    {structure.corporationAssetCount.toLocaleString()} corp
-                    {structure.locationType === "structure"
-                      ? ` · ${structure.rigs.filter((rig) => rig !== "No Rig").length} rig${structure.rigs.filter((rig) => rig !== "No Rig").length === 1 ? "" : "s"}`
-                      : ""}
-                    {structure.state ? ` · ${structure.state}` : ""}
-                    {structure.services?.length
-                      ? ` · ${structure.services.filter((service) => service.state === "online").length} services online`
-                      : ""}
-                    {structure.fuelExpires
-                      ? ` · Fuel expires ${new Date(structure.fuelExpires).toLocaleDateString()}`
-                      : ""}
-                    {!structure.resolved ? " · Name or metadata unavailable" : ""}
-                  </small>
-                  {visibleBonusSummaries(structure.bonuses).length > 0 && (
-                    <small className={styles.locationBonusLine}>
-                      {visibleBonusSummaries(structure.bonuses).map(([label, bonuses], index) => (
-                        <span key={label}>
-                          {index > 0 ? " · " : ""}
-                          {formatBonusSummary(label, bonuses)}
-                        </span>
-                      ))}
+                  <span className={styles.knownStructureMeta}>
+                    <small>
+                      {structure.locationType === "station"
+                        ? "Station"
+                        : (structure.type ?? "Structure")}
+                      {" · "}
+                      {structure.assetCount.toLocaleString()} records ·{" "}
+                      {structure.totalCount.toLocaleString()} quantity ·{" "}
+                      {structure.totalVolume.toLocaleString(undefined, { maximumFractionDigits: 2 })}{" "}
+                      m³ Volume · {structure.personalAssetCount.toLocaleString()} character ·{" "}
+                      {structure.corporationAssetCount.toLocaleString()} corp
+                      {structure.locationType === "structure"
+                        ? ` · ${structure.rigs.filter((rig) => rig !== "No Rig").length} rig${structure.rigs.filter((rig) => rig !== "No Rig").length === 1 ? "" : "s"}`
+                        : ""}
+                      {structure.state ? ` · ${structure.state}` : ""}
+                      {structure.services?.length
+                        ? ` · ${structure.services.filter((service) => service.state === "online").length} services online`
+                        : ""}
+                      {structure.fuelExpires
+                        ? ` · Fuel expires ${new Date(structure.fuelExpires).toLocaleDateString()}`
+                        : ""}
+                      {!structure.resolved ? " · Name or metadata unavailable" : ""}
                     </small>
-                  )}
+                    {visibleBonusSummaries(structure.bonuses).length > 0 && (
+                      <small className={styles.locationBonusLine}>
+                        {visibleBonusSummaries(structure.bonuses).map(([label, bonuses], index) => (
+                          <span key={label}>
+                            {index > 0 ? " · " : ""}
+                            {formatBonusSummary(label, bonuses)}
+                          </span>
+                        ))}
+                      </small>
+                    )}
+                  </span>
                 </span>
                 {structure.locationType === "structure" && (
                   <button
                     type="button"
-                    className={styles.importButton}
+                    className={`actionButton ${styles.importButton}`}
+                    aria-label={`Edit ${structure.name}`}
+                    title={`Edit ${structure.name}`}
                     onClick={() => openEsiEditDialog(structure)}
                   >
-                    Edit
+                    <Pencil aria-hidden="true" />
+                    <span className={styles.structureActionLabel}>Edit</span>
                   </button>
                 )}
               </div>
@@ -629,8 +643,9 @@ export default function LocationsPage() {
             <p className={styles.panelKicker}>01 / STRUCTURES</p>
             <h2>Known structures</h2>
           </div>
-          <button type="button" className={styles.importButton} onClick={openAddDialog}>
-            Add structure
+          <button type="button" className={`actionButton ${styles.importButton}`} onClick={openAddDialog}>
+            <Plus aria-hidden="true" />
+            <span>Add structure</span>
           </button>
         </div>
         {unmatchedKnownStructures.length === 0 ? (
@@ -646,30 +661,40 @@ export default function LocationsPage() {
                   <strong>
                     {structure.systemName} - {structure.name}
                   </strong>
-                  <small>
-                    {structure.type} · {structure.size}
-                    {structure.rigs.length
-                      ? ` · ${structure.rigs.filter((rig) => rig !== "No Rig").length} rig${structure.rigs.filter((rig) => rig !== "No Rig").length === 1 ? "" : "s"}`
-                      : ""}
-                  </small>
+                  <span className={styles.knownStructureMeta}>
+                    <small>
+                      <span>{structure.type}</span>
+                      <span>{structure.size}</span>
+                      {structure.rigs.length > 0 && (
+                        <span>
+                          {structure.rigs.filter((rig) => rig !== "No Rig").length} rig
+                          {structure.rigs.filter((rig) => rig !== "No Rig").length === 1 ? "" : "s"}
+                        </span>
+                      )}
+                    </small>
+                  </span>
                 </span>
                 <button
                   type="button"
-                  className={styles.importButton}
+                  className={`actionButton ${styles.importButton}`}
+                  aria-label={`Edit ${structure.name}`}
+                  title={`Edit ${structure.name}`}
                   onClick={() => {
                     setEditingStructure(structure);
                     setIsDialogOpen(true);
                   }}
                 >
-                  Edit
+                  <Pencil aria-hidden="true" />
+                  <span className={styles.structureActionLabel}>Edit</span>
                 </button>
                 <button
                   type="button"
-                  className={styles.remove}
+                  className={`actionButton ${styles.remove}`}
                   aria-label={`Remove ${structure.name}`}
                   onClick={() => removeStructure(structure.id)}
                 >
-                  ×
+                  <Trash2 aria-hidden="true" />
+                  <span className={styles.structureActionLabel}>Delete</span>
                 </button>
               </div>
             ))}
@@ -681,6 +706,7 @@ export default function LocationsPage() {
           language={language}
           structure={editingStructure}
           rigOptionsBySize={rigOptionsBySize}
+          rigTypeIdsByName={rigTypeIdsByName}
           onCancel={() => setIsDialogOpen(false)}
           onSave={(structure) => {
             const existing = locations.structures.some((current) => current.id === structure.id);
@@ -709,12 +735,14 @@ function StructureDialog({
   onSave,
   structure,
   rigOptionsBySize,
+  rigTypeIdsByName,
 }: {
   language: SdeLanguage;
   onCancel: () => void;
   onSave: (structure: KnownStructure) => void;
   structure: KnownStructure | null;
   rigOptionsBySize: Record<StructureSize, string[]>;
+  rigTypeIdsByName: Record<string, number>;
 }) {
   const [systemName, setSystemName] = useState(structure?.systemName ?? "");
   const [system, setSystem] = useState<SystemMatch | null>(
@@ -759,9 +787,12 @@ function StructureDialog({
       systemId: system.systemId,
       systemName: system.name,
       type,
+      typeId: selectedType.typeId,
       size: selectedType.size,
+      sizeId: selectedType.sizeId,
       name: name.trim(),
       rigs,
+      rigTypeIds: rigs.map((rig) => rigTypeIdsByName[rig] ?? 0),
       ...(structure?.esiStructureId ? { esiStructureId: structure.esiStructureId } : {}),
     });
   }

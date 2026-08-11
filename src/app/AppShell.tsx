@@ -2,7 +2,7 @@
 
 import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
+import { isSdeLanguage, sdeLanguages, type SdeLanguage } from "@/lib/reference/languages";
 import { replaceEsiStock, replaceMarketOrderStock, type StockItem } from "@/lib/planning/stockStore";
 import { settingsStorageKey, type PlannerSettings } from "@/lib/planning/preferences";
 import {
@@ -10,9 +10,10 @@ import {
   loadClientShips,
   loadClientStateStatus,
   loadClientStock,
+  loadClientMarketOrders,
   type ClientCharacterStatus,
 } from "@/lib/client/requestCache";
-import { Activity, Boxes, Factory, Image as ImageIcon, MapPinned, Minimize2, Rocket, Settings2, UsersRound } from "lucide-react";
+import { Activity, Boxes, Factory, Image as ImageIcon, MapPinned, Minimize2, Rocket, Settings2, UserRoundPlus, UsersRound } from "lucide-react";
 import styles from "./page.module.css";
 
 const languageStorageKey = "assembly-line-language";
@@ -33,7 +34,6 @@ type EsiStockResponse = {
     items: StockItem[];
   }>;
 };
-type MarketOrderResponse = { marketOrderStock?: StockItem[] };
 type StateEndpoint = keyof Pick<ClientCharacterStatus, "assets" | "jobs" | "orders">;
 const stateEndpoints: StateEndpoint[] = ["assets", "jobs", "orders"];
 
@@ -97,10 +97,14 @@ export default function AppShell({
   const [authenticated, setAuthenticated] = useState(false);
   const [characters, setCharacters] = useState<CharacterSummary[]>([]);
   const [isRefreshingData, setIsRefreshingData] = useState(false);
+  const [isMobileMetaExpanded, setIsMobileMetaExpanded] = useState(false);
+  const [isMobileMetaCollapsing, setIsMobileMetaCollapsing] = useState(false);
   const [stateStatuses, setStateStatuses] = useState<ClientCharacterStatus[]>([]);
   const [hasLoadedStateStatuses, setHasLoadedStateStatuses] = useState(false);
   const [statusCheckAt, setStatusCheckAt] = useState(() => Date.now());
   const refreshAfterCharacterAdd = useRef(false);
+  const mobileMetaCollapseTimer = useRef<number | null>(null);
+  const mobileMetaCollapseAnimationTimer = useRef<number | null>(null);
   const language = controlledLanguage ?? localLanguage;
   const hasExpiredState = authenticated && characters.length > 0 && hasLoadedStateStatuses && statusCheckAt > 0 && hasExpiredEndpoint(stateStatuses);
 
@@ -159,7 +163,7 @@ export default function AppShell({
   }
 
   const refreshData = useCallback(async () => {
-    if (isRefreshingData || !authenticated || characters.length === 0) return;
+    if (isRefreshingData || !authenticated || characters.length === 0) return false;
     setIsRefreshingData(true);
     let stockLocations: EsiStockResponse["locations"] | undefined;
     try {
@@ -173,7 +177,7 @@ export default function AppShell({
         refreshedAt?: string;
         rateLimitedUntil?: string | null;
       };
-      if (!response.ok || data.success !== true) return;
+      if (!response.ok || data.success !== true) return false;
       let shipsResponse;
       try {
         shipsResponse = await loadClientShips(true);
@@ -198,16 +202,8 @@ export default function AppShell({
       }
       try {
         const settings = loadPlannerSettings();
-        const marketOrderResponse = await fetch(
-          `/api/state/marketOrders?${new URLSearchParams({
-            personalSellOrdersAsStock: String(settings.personalSellOrdersAsStock),
-            allCorporationSellOrdersAsStock: String(settings.allCorporationSellOrdersAsStock),
-            myCorporationSellOrdersAsStock: String(settings.myCorporationSellOrdersAsStock),
-          }).toString()}`,
-          { cache: "no-store" },
-        );
-        if (marketOrderResponse.ok) {
-          const marketOrders = (await marketOrderResponse.json()) as MarketOrderResponse;
+        const marketOrders = await loadClientMarketOrders(settings);
+        if (marketOrders) {
           await replaceMarketOrderStock(marketOrders.marketOrderStock ?? []);
         }
       } catch {
@@ -222,11 +218,49 @@ export default function AppShell({
           },
         }),
       );
+      return true;
     } catch {
+      return false;
     } finally {
       setIsRefreshingData(false);
     }
   }, [authenticated, characters.length, isRefreshingData, language]);
+
+  const scheduleMobileMetaCollapse = useCallback(() => {
+    if (mobileMetaCollapseTimer.current !== null) {
+      window.clearTimeout(mobileMetaCollapseTimer.current);
+    }
+    if (mobileMetaCollapseAnimationTimer.current !== null) {
+      window.clearTimeout(mobileMetaCollapseAnimationTimer.current);
+    }
+    mobileMetaCollapseTimer.current = window.setTimeout(() => {
+      setIsMobileMetaCollapsing(true);
+      mobileMetaCollapseTimer.current = null;
+      mobileMetaCollapseAnimationTimer.current = window.setTimeout(() => {
+        setIsMobileMetaExpanded(false);
+        setIsMobileMetaCollapsing(false);
+        mobileMetaCollapseAnimationTimer.current = null;
+      }, 220);
+    }, 900);
+  }, []);
+
+  const handleMobileMetaAction = useCallback(async () => {
+    setIsMobileMetaExpanded(true);
+    setIsMobileMetaCollapsing(false);
+    if (authenticated && hasExpiredState) {
+      await refreshData();
+    }
+    scheduleMobileMetaCollapse();
+  }, [authenticated, hasExpiredState, refreshData, scheduleMobileMetaCollapse]);
+
+  useEffect(() => () => {
+    if (mobileMetaCollapseTimer.current !== null) {
+      window.clearTimeout(mobileMetaCollapseTimer.current);
+    }
+    if (mobileMetaCollapseAnimationTimer.current !== null) {
+      window.clearTimeout(mobileMetaCollapseAnimationTimer.current);
+    }
+  }, []);
 
   useEffect(() => {
     if (!authenticated || characters.length === 0 || refreshAfterCharacterAdd.current) return;
@@ -247,33 +281,59 @@ export default function AppShell({
             Eve <span className={styles.brandAccent}>AssemblyLine</span>
           </span>
         </Link>
-        <div className={styles.topMeta}>
+        <div className={`${styles.topMeta} ${isMobileMetaExpanded || isMobileMetaCollapsing ? styles.topMetaExpanded : ""} ${isMobileMetaCollapsing ? styles.topMetaCollapsing : ""}`}>
           <label className={styles.languageControl}>
             <span>LANGUAGE</span>
             <select
+              className={styles.languageSelectFull}
               aria-label="Language"
               value={language}
               onChange={(event) => changeLanguage(event.target.value)}
             >
-              <option value="de">Deutsch</option>
-              <option value="en">English</option>
-              <option value="es">Español</option>
-              <option value="fr">Français</option>
-              <option value="ja">日本語</option>
-              <option value="ko">한국어</option>
-              <option value="ru">Русский</option>
-              <option value="zh">中文</option>
+              {sdeLanguages.map(({ code, label }) => (
+                <option key={code} value={code}>{label}</option>
+              ))}
+            </select>
+            <select
+              className={styles.languageSelectCompact}
+              aria-label="Language"
+              value={language}
+              onChange={(event) => changeLanguage(event.target.value)}
+            >
+              {sdeLanguages.map(({ code }) => (
+                <option key={code} value={code}>{code.toUpperCase()}</option>
+              ))}
             </select>
           </label>
-          <span className={`${styles.onlineDot} ${authenticated ? "" : styles.offlineDot}`} />{" "}
-          {authenticated ? "ESI CONNECTED" : "NOT CONNECTED"}
+          {authenticated ? (
+            <span
+              className={styles.esiStatus}
+              aria-label="ESI connected"
+              title="ESI connected"
+            >
+              <span className={`${styles.onlineDot} ${styles.onlineDotCompact}`} />
+              <span className={styles.esiStatusLabel}>ESI CONNECTED</span>
+            </span>
+          ) : (
+            <button
+              type="button"
+              className={styles.esiStatus}
+              onClick={() => void handleMobileMetaAction()}
+              aria-label="ESI not connected"
+              title="ESI not connected"
+            >
+              <span className={`${styles.onlineDot} ${styles.offlineDot}`} />
+              <span className={styles.esiStatusLabel}>NOT CONNECTED</span>
+            </button>
+          )}
           {authenticated && (
             <button
               type="button"
-              className={styles.refresh}
-              onClick={() => void refreshData()}
+              className={`${styles.refresh} ${!hasExpiredState ? styles.refreshCurrent : ""}`}
+              onClick={() => void handleMobileMetaAction()}
               disabled={isRefreshingData}
               aria-label={hasExpiredState ? "Refresh data" : "Up to date"}
+              title={hasExpiredState ? "Refresh data" : "Up to date"}
             >
               {hasExpiredState ? (
                 <span className={styles.refreshIconWarning} aria-hidden="true">↻</span>
@@ -387,8 +447,12 @@ export default function AppShell({
               >
                 {characters.length}
               </span>
-              <a className={`${styles.addButton} ${styles.navText}`} href="/api/auth/eve/start">
-                + Add character
+              <a
+                className={`${styles.addButton} ${styles.navText} ${!authenticated ? styles.addButtonDisconnected : ""}`}
+                href="/api/auth/eve/start"
+              >
+                <UserRoundPlus size={16} strokeWidth={1.8} aria-hidden="true" />
+                <span>Add character</span>
               </a>
             </div>
           </div>

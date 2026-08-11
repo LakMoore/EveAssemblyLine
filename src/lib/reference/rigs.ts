@@ -1,6 +1,7 @@
 import type { SdeLanguage } from "./languages";
 
 export type SdeRig = {
+  typeId: number;
   name: string;
   size: "Medium" | "Large" | "Extra Large";
   reprocessingBonus: number;

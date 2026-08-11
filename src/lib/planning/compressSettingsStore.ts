@@ -4,10 +4,21 @@ export type CompressSettings = {
   locationId: string;
   characterId: string;
   implantId: string;
+  marketId: string;
+  orderType: "buy-1-day" | "buy-5-day" | "sell";
+  items: CompressMaterial[];
+};
+
+export type CompressMaterial = {
+  name: string;
+  typeId: number;
+  quantity: number;
+  category?: "blueprint" | "bpo" | "bpc" | "reaction" | "item";
+  imageVariation?: "icon" | "bp" | "bpc";
 };
 
 const settingsKey = "selected";
-const defaults: CompressSettings = { locationId: "npc", characterId: "all-zero", implantId: "none" };
+const defaults: CompressSettings = { locationId: "npc", characterId: "all-zero", implantId: "none", marketId: "jita", orderType: "buy-1-day", items: [] };
 
 export async function loadCompressSettings(): Promise<CompressSettings> {
   try {

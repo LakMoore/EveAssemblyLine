@@ -6,12 +6,22 @@ const resultLimit = 12;
 
 export async function GET(request: Request) {
   const searchParams = new URL(request.url).searchParams;
+  const requestedSystemIdValue = searchParams.get("systemId");
+  const requestedSystemId = requestedSystemIdValue === null ? undefined : Number(requestedSystemIdValue);
   const query = searchParams.get("query")?.trim() ?? "";
   const requestedLanguage = searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
 
   try {
     const systemById = await getSystems();
+    if (requestedSystemId !== undefined && Number.isInteger(requestedSystemId)) {
+      const system = systemById.get(requestedSystemId);
+      return NextResponse.json({
+        item: system
+          ? { systemId: system._key, name: system.name[language] ?? system.name.en, securityStatus: system.securityStatus }
+          : null,
+      });
+    }
     if (query.length < 2) return NextResponse.json({ items: [] });
 
     const normalizedQuery = query.toLocaleLowerCase(language);
@@ -33,6 +43,7 @@ export async function GET(request: Request) {
       .map((system) => ({
         systemId: system._key,
         name: system.name[language] ?? system.name.en,
+        securityStatus: system.securityStatus,
       }));
 
     return NextResponse.json({ items: matches });

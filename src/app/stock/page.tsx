@@ -18,6 +18,7 @@ import { loadClientStock } from "@/lib/client/requestCache";
 import { type KnownStructure } from "@/lib/planning/preferences";
 import TypeIdentity from "../components/TypeIdentity";
 import styles from "../page.module.css";
+import { Clipboard, Trash2 } from "lucide-react";
 
 type StructureOption = { id: string; name: string };
 type SystemOption = { id: number; name: string };
@@ -62,7 +63,7 @@ const defaultSystems: SystemOption[] = [
 ];
 
 function formatVolume(volume: number) {
-  return `${volume.toLocaleString(undefined, { maximumFractionDigits: 2 })} m³`;
+  return `${Math.ceil(volume).toLocaleString()} m³`;
 }
 
 function stockItemVolume(item: StockItem) {
@@ -263,6 +264,15 @@ export default function StockPage() {
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
     return () => window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
   }, [language]);
+
+  useEffect(() => {
+    if (!isAddOpen && !viewing && !pasting) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isAddOpen, pasting, viewing]);
 
   const sortedLocations = [...locations].sort((left, right) => {
     if (stockSort === "totalVolume") return stockTotalVolume(right) - stockTotalVolume(left);
@@ -651,21 +661,23 @@ function StockLocationCard({
           <div className={styles.stockCardActions}>
             <button
               type="button"
-              className={styles.iconButton}
+              className={`actionButton ${styles.stockPasteButton}`}
               aria-label={`Paste items at ${location.structureName}`}
               title="Paste items"
               onClick={onPaste}
             >
-              ⇩
+              <Clipboard aria-hidden="true" />
+              <span>Paste</span>
             </button>
             <button
               type="button"
-              className={styles.stockRemoveButton}
+              className={`actionButton ${styles.stockRemoveButton}`}
               aria-label={`Remove stock at ${location.structureName}`}
               title="Remove stock location"
               onClick={onRemove}
             >
-              ×
+              <Trash2 aria-hidden="true" />
+              <span>Remove</span>
             </button>
           </div>
         )}
@@ -846,7 +858,7 @@ function ViewItemsModal({
           <div className={styles.emptyBuildList}>No items recorded at this location.</div>
         ) : (
           <div className={styles.stockList}>
-            {displayItems.map(({ item, blueprints, reactionJobs }) => {
+            {displayItems.map(({ item, blueprints, reactionJobs }, itemIndex) => {
               const counts = blueprintCounts.get(item.typeId);
               const marketOrderQuantity = item.marketOrderQuantity ?? 0;
               const isMarketOrder = item.source === "marketOrder";
@@ -912,7 +924,7 @@ function ViewItemsModal({
               return (
                 <div
                   className={styles.stockRow}
-                  key={`${item.typeId}:${item.category ?? "item"}:${isReaction ? "reaction" : item.isPackaged ? "packaged" : "assembled"}:${item.jobId ?? "asset"}`}
+                  key={`${item.typeId}:${item.category ?? "item"}:${isReaction ? "reaction" : item.isPackaged ? "packaged" : "assembled"}:${item.jobId ?? "asset"}:${itemIndex}`}
                 >
                   <TypeIdentity
                     name={item.name}
@@ -926,7 +938,7 @@ function ViewItemsModal({
                           ? "bp"
                           : item.category === "bpc" || item.category === "reaction"
                             ? "bpc"
-                            : item.techLevel === 1
+                            : item.source !== "marketOrder" && item.techLevel === 1
                               ? "render"
                               : "icon"
                     }

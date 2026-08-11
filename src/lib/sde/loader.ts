@@ -169,7 +169,11 @@ export function getBlueprints() {
 
 export function getCompressibleTypes() {
   return getOnce("compressibleTypes", () => {
+    const typeNames = new Map(
+      records<TypesRecord>("types.json").map((record) => [record._key, record.name.en] as const),
+    );
     for (const record of records<CompressibleTypesRecord>("compressibleTypes.json")) {
+      if (typeNames.get(record.compressedTypeID)?.startsWith("Batch Compressed ")) continue;
       compressibleTypeByTypeId.set(record._key, record.compressedTypeID);
     }
     return compressibleTypeByTypeId;

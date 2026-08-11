@@ -30,12 +30,40 @@ test("selects exact mixed-ore quantities for Tritanium and Pyerite", () => {
   assert.deepEqual(result.surplus, []);
 });
 
-test("uses one unit for batch-compressed ore", () => {
+test("excludes batch-compressed ore", () => {
   const result = compressMaterials([{ typeId: 34, name: "Tritanium", quantity: 420 }], [{ typeId: 28430, name: "Batch Compressed Veldspar II-Grade", unitsToReprocess: 1, efficiency: 100, yields: new Map([[34, 420]]) }], names);
-  assert.deepEqual(result.toBuy, [{ typeId: 28430, name: "Batch Compressed Veldspar II-Grade", quantity: 1 }]);
+  assert.deepEqual(result.toBuy, [{ typeId: 34, name: "Tritanium", quantity: 420 }]);
 });
 
 test("keeps minerals without a matching recipe in the buy list", () => {
   const result = compressMaterials([{ typeId: 35, name: "Pyerite", quantity: 1 }], candidates.slice(0, 1), names);
   assert.deepEqual(result.toBuy, [{ typeId: 35, name: "Pyerite", quantity: 1 }]);
+});
+
+test("keeps fractional gas output instead of discarding compressed gas", () => {
+  const result = compressMaterials(
+    [{ typeId: 28694, name: "Amber Mykoserocin", quantity: 1 }],
+    [{ typeId: 62377, name: "Compressed Amber Mykoserocin", unitsToReprocess: 1, efficiency: 95, yields: new Map([[28694, 1]]) }],
+    new Map([[62377, "Compressed Amber Mykoserocin"]]),
+  );
+  assert.deepEqual(result.toBuy, [{ typeId: 62377, name: "Compressed Amber Mykoserocin", quantity: 2 }]);
+  assert.deepEqual(result.plan, [{ typeId: 28694, name: "Amber Mykoserocin", quantity: 1, fromReprocessing: 1, surplus: 0 }]);
+});
+
+test("does not exceed a candidate's market volume limit", () => {
+  const result = compressMaterials(
+    [{ typeId: 34, name: "Tritanium", quantity: 800 }],
+    [{ typeId: 62516, name: "Compressed Veldspar", unitsToReprocess: 100, efficiency: 100, maxRuns: 1, yields: new Map([[34, 400]]) }],
+    names,
+  );
+  assert.deepEqual(result.toBuy, [{ typeId: 34, name: "Tritanium", quantity: 800 }]);
+});
+
+test("excludes candidates with zero market volume", () => {
+  const result = compressMaterials(
+    [{ typeId: 34, name: "Tritanium", quantity: 400 }],
+    [{ typeId: 62516, name: "Compressed Veldspar", unitsToReprocess: 100, efficiency: 100, maxRuns: 0, yields: new Map([[34, 400]]) }],
+    names,
+  );
+  assert.deepEqual(result.toBuy, [{ typeId: 34, name: "Tritanium", quantity: 400 }]);
 });

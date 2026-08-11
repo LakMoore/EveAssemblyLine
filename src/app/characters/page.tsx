@@ -2,13 +2,20 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import AppShell from "../AppShell";
+import { Plus, Trash2 } from "lucide-react";
+import AppShell, { languageStorageKey } from "../AppShell";
+import { replaceEsiStock, replaceMarketOrderStock } from "@/lib/planning/stockStore";
+import { defaultSettings, settingsStorageKey } from "@/lib/planning/preferences";
+import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageServer";
 import {
   invalidateClientCharacterData,
+  clearClientStockCache,
   loadClientCharacters,
   loadClientCorpStatus,
+  loadClientMarketOrders,
   loadClientStateStatus,
+  loadClientStock,
   type ClientCharacter,
   type ClientCharacterStatus,
 } from "@/lib/client/requestCache";
@@ -92,6 +99,67 @@ function roleLabel(hasRole: boolean) {
   return hasRole ? "Yes" : "No";
 }
 
+function missingScopes(statuses: CharacterStatus[]) {
+  return [...new Set(statuses.flatMap((character) => [
+    character.assets?.error,
+    character.jobs?.error,
+    character.orders?.error,
+    ...(character.corporations ?? []).flatMap((corporation) => [
+      corporation.assets?.error,
+      corporation.jobs?.error,
+      corporation.orders?.error,
+    ]),
+  ]).flatMap((error) => {
+    const match = error?.match(/scope: (esi-[^\s]+)/i);
+    return match ? [match[1]] : [];
+  }))];
+}
+
+async function refreshStockAfterCharacterRemoval() {
+  const savedLanguage = window.localStorage.getItem(languageStorageKey);
+  const language: SdeLanguage = isSdeLanguage(savedLanguage) ? savedLanguage : "en";
+  const response = await fetch("/api/state/refresh", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+
+  if (response.status === 401) {
+    clearClientStockCache(language);
+    await replaceEsiStock([]);
+    await replaceMarketOrderStock([]);
+    window.dispatchEvent(
+      new CustomEvent("assembly-line-esi-refreshed", { detail: { stockLocations: [] } }),
+    );
+    return;
+  }
+  if (!response.ok) throw new Error("Could not refresh stock.");
+
+  const stockData = await loadClientStock(language, true);
+  const stockLocations = stockData.locations ?? [];
+  await replaceEsiStock(
+    stockLocations.map((location) => ({
+      systemId: location.systemId ?? 0,
+      systemName: location.systemName ?? "Unknown system",
+      structureId: String(location.locationId),
+      structureName: location.name,
+      source: "esi" as const,
+      items: location.items,
+    })),
+  );
+  let settings = defaultSettings;
+  try {
+    const savedSettings = window.localStorage.getItem(settingsStorageKey);
+    settings = savedSettings ? { ...defaultSettings, ...JSON.parse(savedSettings) } : defaultSettings;
+  } catch {
+  }
+  const marketOrders = await loadClientMarketOrders(settings);
+  await replaceMarketOrderStock(marketOrders?.marketOrderStock ?? []);
+  window.dispatchEvent(
+    new CustomEvent("assembly-line-esi-refreshed", { detail: { stockLocations } }),
+  );
+}
+
 export default function CharactersPage() {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [statuses, setStatuses] = useState<CharacterStatus[]>([]);
@@ -152,6 +220,11 @@ export default function CharactersPage() {
       setCharacters((current) => current.filter((entry) => entry.characterId !== character.characterId));
       setStatuses((current) => current.filter((entry) => entry.characterId !== character.characterId));
       invalidateClientCharacterData();
+      try {
+        await refreshStockAfterCharacterRemoval();
+      } catch {
+        setError("Character removed, but stock could not be refreshed.");
+      }
     } catch (removeError) {
       setError(removeError instanceof Error ? removeError.message : "Could not remove character.");
     } finally {
@@ -165,21 +238,26 @@ export default function CharactersPage() {
     const corpStatuses = pilots.flatMap((pilot) => statuses.find((status) => status.characterId === pilot.characterId)?.corporations ?? []).filter((status) => status.corporationId === corporationId);
     return { corporationId: corporationId!, corporationName: pilots[0]?.corporationName, pilots, eligible, status: corpStatuses[0]?.assets };
   });
+  const scopes = missingScopes(statuses);
 
   return (
     <AppShell activePage="characters">
       <div className={styles.pageIntro}>
         <div><p className={styles.eyebrow}>CONFIGURATION / ACCESS</p><h1>Characters</h1><p className={styles.subtitle}>Manage the pilots available to the planner and verify corporation access.</p></div>
-        <Link className={styles.addButton} href="/api/auth/eve/start">+ Add character</Link>
+        <Link className={`actionButton ${styles.addButton}`} href="/api/auth/eve/start">
+          <Plus aria-hidden="true" />
+          <span>Add character</span>
+        </Link>
       </div>
       {error && <p role="alert" className={styles.importError}>{error}</p>}
+      {scopes.length > 0 && <p role="alert" className={styles.importError}>EVE authorization is missing {scopes.join(", ")}. Reconnect the affected character to grant this scope.</p>}
       <section className={styles.panel}>
         <div className={styles.panelHeader}>
           <div><p className={styles.panelKicker}>01 / CONNECTED PILOTS</p><h2>{isLoading ? "Loading characters..." : `${characters.length} connected`}</h2></div>
           <span className={styles.panelDescription}>Use Refresh data in the top bar to update all connected pilots.</span>
         </div>
         {!isLoading && characters.length === 0 ? (
-          <div className={styles.emptyBuildList}><strong>No characters connected</strong><p>Connect an EVE character to make assets, jobs, and corporation access available.</p><Link className={styles.addButton} href="/api/auth/eve/start">Connect with EVE SSO</Link></div>
+          <div className={styles.emptyBuildList}><strong>No characters connected</strong><p>Connect an EVE character to make assets, jobs, and corporation access available.</p><Link className={`actionButton ${styles.addButton}`} href="/api/auth/eve/start"><Plus aria-hidden="true" /><span>Connect with EVE SSO</span></Link></div>
         ) : (
           <>
             <div className={styles.characterTableHeader}><span>PILOT</span><span>ASSETS</span><span>JOBS</span><span>ORDERS</span><span /></div>
@@ -207,7 +285,17 @@ export default function CharactersPage() {
                 <span className={styles.statusCell} data-label="Assets" title={`Assets: ${availabilityLabel(status?.assets)}${status?.assets?.error ? `; ${status.assets.error}` : ""}${status?.assets?.lastModified ? `; modified ${formatDate(status.assets.lastModified)}` : ""}`}><span className={`${styles.statusDot} ${statusClass(status?.assets)}`} /><small>{statusLabel(status?.assets)}</small><small className={styles.statusDate}>{availabilityLabel(status?.assets)}</small></span>
                   <span className={styles.statusCell} data-label="Jobs" title={`Jobs: ${availabilityLabel(status?.jobs)}${status?.jobs?.error ? `; ${status.jobs.error}` : ""}${status?.jobs?.lastModified ? `; modified ${formatDate(status.jobs.lastModified)}` : ""}`}><span className={`${styles.statusDot} ${statusClass(status?.jobs)}`} /><small>{statusLabel(status?.jobs)}</small><small className={styles.statusDate}>{availabilityLabel(status?.jobs)}</small></span>
                   <span className={styles.statusCell} data-label="Orders" title={`Orders: ${availabilityLabel(status?.orders)}${status?.orders?.error ? `; ${status.orders.error}` : ""}${status?.orders?.lastModified ? `; modified ${formatDate(status.orders.lastModified)}` : ""}`}><span className={`${styles.statusDot} ${statusClass(status?.orders)}`} /><small>{statusLabel(status?.orders)}</small><small className={styles.statusDate}>{availabilityLabel(status?.orders)}</small></span>
-                <button type="button" className={styles.remove} onClick={(event) => { event.stopPropagation(); void removeCharacter(character); }} disabled={removingId === character.characterId}>{removingId === character.characterId ? "Removing..." : "Remove"}</button>
+                <button
+                  type="button"
+                  className={`actionButton ${styles.characterRemove}`}
+                  onClick={(event) => { event.stopPropagation(); void removeCharacter(character); }}
+                  disabled={removingId === character.characterId}
+                  aria-label={removingId === character.characterId ? "Removing character" : `Remove ${character.characterName}`}
+                  title={removingId === character.characterId ? "Removing character" : "Remove character"}
+                >
+                  <Trash2 aria-hidden="true" strokeWidth={1.8} />
+                  <span>{removingId === character.characterId ? "Removing..." : "Remove"}</span>
+                </button>
               </div>;
             })}
           </>

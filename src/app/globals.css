@@ -37,3 +37,27 @@ select {
 button {
     cursor: pointer;
 }
+
+.actionButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 28px;
+    min-height: 28px;
+    padding: 0 11px;
+    box-sizing: border-box;
+    font-size: 11px;
+    white-space: nowrap;
+    transition: filter .15s ease;
+}
+
+.actionButton:hover:not(:disabled) {
+    filter: brightness(1.25);
+}
+
+.actionButton > svg {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 14px;
+}

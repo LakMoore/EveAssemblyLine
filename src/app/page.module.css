@@ -176,11 +176,6 @@
     padding: 10px 0
 }
 
-.layoutCollapsed .sidebar .addButton:after {
-    content: "+";
-    font-size: 16px
-}
-
 .layoutCollapsed .sidebarFooter .addButton {
     display: block
 }
@@ -256,11 +251,6 @@
         padding: 10px 0
     }
 
-    .layout .sidebar .addButton:after {
-        content: "+";
-        font-size: 16px
-    }
-
     .layout .sidebarFooter .addButton {
         display: block
     }
@@ -282,28 +272,155 @@
         white-space: nowrap
     }
 
+    .layout .sidebarFooter .addButton {
+        display: grid;
+        place-items: center;
+    }
+
+    .layout .sidebarFooter .addButton svg {
+        margin-right: 0;
+    }
+
     .sidebarToggle {
         display: none
     }
 }
 
+@media (max-width: 739px) {
+    .topMeta .languageControl > span {
+        display: none;
+    }
+}
+
+@media (max-width: 689px) {
+    .topMeta .languageSelectFull {
+        display: none;
+    }
+
+    .topMeta .languageControl .languageSelectCompact {
+        display: block;
+        width: 46px;
+        flex: 0 0 46px;
+        padding: 6px 14px 6px 4px;
+    }
+}
+
 @media (max-width: 640px) {
     .topbar {
+        height: 48px;
         min-width: 0;
         box-sizing: border-box;
+        flex-wrap: nowrap;
+        gap: 8px;
+        padding: 0 16px;
+        justify-content: space-between;
+    }
+
+    .topbar > .brand {
+        flex: 0 1 auto;
+        font-size: 11px;
+        letter-spacing: 1px;
+    }
+
+    .topMeta {
+        width: auto;
+        min-width: 86px;
+        max-width: 90px;
+        flex: 1 1 auto;
+        justify-content: space-between;
+        gap: 0;
         overflow: hidden;
+        transition: max-width .22s ease;
     }
 
     .topMeta .languageControl {
+        flex: 0 0 auto;
+        width: 46px;
+        margin-right: 0;
+        gap: 0;
+        overflow: hidden;
+        visibility: visible;
+        transition: max-width .22s ease, opacity .18s ease, transform .22s ease, visibility 0s linear .22s;
+    }
+
+    .topMeta .languageControl span {
         display: none;
     }
 
-    .topMeta .refresh span {
+    .topMeta .languageControl select {
+        width: 120px;
+        flex: 0 1 120px;
+        min-width: 0;
+    }
+
+    .topMeta .languageSelectFull {
         display: none;
+    }
+
+    .topMeta .languageControl .languageSelectCompact {
+        display: block;
+        width: 46px;
+        flex: 0 0 46px;
+        padding: 6px 14px 6px 4px;
+    }
+
+    .topMeta .esiStatusLabel {
+        display: inline-block;
+        max-width: 0;
+        opacity: 0;
+        overflow: hidden;
+        transition: max-width .22s ease, opacity .14s ease;
     }
 
     .topMeta .refresh {
         padding: 9px 11px;
+        flex: 0 0 auto;
+        width: 28px;
+        overflow: hidden;
+        white-space: nowrap;
+        transition: width .22s ease, padding .22s ease, gap .22s ease;
+    }
+
+    .topMetaExpanded {
+        min-width: 0;
+        max-width: 230px;
+        flex: 1 1 auto;
+    }
+
+    .topMetaExpanded .languageControl {
+        max-width: 0;
+        opacity: 0;
+        transform: translateX(8px);
+        visibility: hidden;
+        pointer-events: none;
+        transition-delay: 0s;
+    }
+
+    .topMetaExpanded .esiStatusLabel,
+    .topMetaExpanded .refresh > span:last-child {
+        display: inline-block;
+        max-width: 120px;
+        opacity: 1;
+        overflow: hidden;
+        transition: max-width .22s ease, opacity .14s ease;
+    }
+
+    .topMetaExpanded .esiStatus {
+        flex: 0 0 auto;
+        width: auto;
+        height: auto;
+    }
+
+    .topMetaExpanded .refresh {
+        width: auto;
+        padding: 9px 11px;
+        gap: 8px;
+    }
+
+    .topMeta.topMetaExpanded.topMetaCollapsing .esiStatusLabel,
+    .topMeta.topMetaExpanded.topMetaCollapsing .refresh > span:last-child {
+        max-width: 0;
+        opacity: 0;
     }
 
     .pageIntro {
@@ -311,12 +428,12 @@
     }
 
     .pageIntro > .addButton {
-        display: inline-block;
+        display: inline-flex;
         margin-top: 16px;
     }
 
     .brand {
-        font-size: 12px
+        font-size: 11px
     }
 
     .languageControl span {
@@ -331,6 +448,45 @@
     .onlineDot {
         width: 6px;
         height: 6px
+    }
+
+    .topMeta .refresh > span:last-child {
+        display: inline-block;
+        max-width: 0;
+        opacity: 0;
+        overflow: hidden;
+        transition: max-width .22s ease, opacity .14s ease;
+    }
+
+    .topMeta .refresh {
+        padding: 9px 10px;
+        width: 32px;
+        height: 32px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .esiStatus {
+        flex: 0 0 auto;
+        width: 32px;
+        height: 32px;
+        align-items: center;
+        justify-content: center;
+    }
+}
+
+@media (max-width: 380px) {
+    .topMeta .refresh {
+        border: 0;
+    }
+
+    .esiStatus > .esiStatusLabel {
+        display: inline-block;
+        max-width: 0;
+        opacity: 0;
+        overflow: hidden;
+        transition: max-width .22s ease, opacity .14s ease;
     }
 
     .content {
@@ -403,6 +559,141 @@
     }
 
     .planTableCellEmpty {
+        display: none;
+    }
+}
+
+@media (max-width: 640px) {
+    .topbar {
+        min-height: 48px;
+        height: 48px;
+        padding: 0 16px;
+    }
+
+    .topMeta.topMetaExpanded .esiStatus > .esiStatusLabel,
+    .topMeta.topMetaExpanded .refresh > span:last-child {
+        display: inline-block;
+        max-width: 120px;
+        opacity: 1;
+        overflow: hidden;
+        transition: max-width .22s ease, opacity .14s ease;
+    }
+
+    .topMeta .refresh,
+    .topMeta.topMetaExpanded .refresh {
+        width: auto;
+        padding: 9px 11px;
+        gap: 8px;
+    }
+
+    .topMeta.topMetaExpanded.topMetaCollapsing .esiStatus > .esiStatusLabel,
+    .topMeta.topMetaExpanded.topMetaCollapsing .refresh > span:last-child {
+        max-width: 0;
+        opacity: 0;
+        transition: max-width .22s ease, opacity .12s ease .1s;
+    }
+}
+
+@media (min-width: 380px) and (max-width: 640px) {
+    .topMeta,
+    .topMeta.topMetaExpanded {
+        max-width: 190px;
+        transition: none;
+    }
+
+    .topMeta .languageControl,
+    .topMeta.topMetaExpanded .languageControl {
+        max-width: 46px;
+        opacity: 1;
+        transform: none;
+        visibility: visible;
+        pointer-events: auto;
+        transition: none;
+    }
+
+    .topMeta .esiStatusLabel,
+    .topMeta .refresh > span:last-child,
+    .topMeta.topMetaExpanded .esiStatus > .esiStatusLabel,
+    .topMeta.topMetaExpanded .refresh > span:last-child {
+        max-width: 120px;
+        opacity: 1;
+        transition: none;
+    }
+
+    .topMeta .esiStatusLabel {
+        display: none;
+    }
+
+    .topMeta .esiStatus {
+        width: 32px;
+        height: 32px;
+        flex: 0 0 32px;
+        justify-content: center;
+    }
+
+    .topMeta .esiStatus,
+    .topMeta.topMetaExpanded .esiStatus {
+        width: auto;
+        height: auto;
+    }
+
+    .topMeta.topMetaExpanded .refresh {
+        width: auto;
+        padding: 9px 11px;
+        gap: 8px;
+        transition: none;
+    }
+
+    .topMeta.topMetaExpanded.topMetaCollapsing .esiStatus > .esiStatusLabel,
+    .topMeta.topMetaExpanded.topMetaCollapsing .refresh > span:last-child {
+        max-width: 120px;
+        opacity: 1;
+        transition: none;
+    }
+}
+
+@media (min-width: 500px) and (max-width: 640px) {
+    .topMeta,
+    .topMeta.topMetaExpanded {
+        max-width: 286px;
+    }
+
+    .topMeta .languageControl,
+    .topMeta.topMetaExpanded .languageControl {
+        width: 46px;
+        max-width: 46px;
+    }
+
+    .topMeta .languageSelectFull {
+        display: none;
+    }
+
+    .topMeta .languageControl .languageSelectCompact {
+        display: block;
+        width: 46px;
+        flex: 0 0 46px;
+        padding: 6px 14px 6px 4px;
+    }
+
+    .topMeta .esiStatus {
+        font-size: 10px;
+    }
+
+    .topMeta .refresh {
+        padding-inline: 5px;
+        font-size: 10px;
+    }
+
+    .topMeta .esiStatusLabel,
+    .topMeta.topMetaExpanded .esiStatusLabel {
+        display: inline-block;
+        max-width: 120px;
+        opacity: 1;
+    }
+}
+
+@media (max-width: 499px) {
+    .topMeta .esiStatus {
         display: none;
     }
 }
@@ -500,6 +791,7 @@
     display: grid;
     place-items: center;
     padding: 20px;
+    overscroll-behavior: contain;
     background: #020a0dcc
 }
 
@@ -667,6 +959,7 @@
     width: min(620px, 100%);
     max-height: min(720px, 100%);
     overflow: auto;
+    overscroll-behavior: contain;
     padding: 25px;
     background: var(--white);
     border: 1px solid #37606c;
@@ -1015,30 +1308,40 @@
     gap: 8px
 }
 
+.stockPasteButton {
+    border: 1px solid #2b5260;
+    background: transparent;
+    color: var(--cyan);
+}
+
 .stockRemoveButton {
-    width: 28px;
-    height: 28px;
-    padding: 0;
     border: 1px solid #673d42;
     background: transparent;
     color: #c58b91;
-    cursor: pointer;
-    font-size: 17px
 }
 
-.stockRemoveButton:hover {
-    border-color: #c58b91;
-    color: #f0c6ca
+@media (max-width: 640px) {
+    .stockCardActions :global(.actionButton) {
+        width: 28px;
+        padding: 0;
+    }
+
+    .stockCardActions :global(.actionButton) > span {
+        display: none;
+    }
 }
 
 .stockCardTotals {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
     padding: 15px 0
 }
 
 .stockMetric {
+    display: grid;
+    grid-template-rows: 25px 25px 30px;
+    align-content: start;
     min-width: 0;
     padding: 8px 5px;
     border: 1px solid transparent;
@@ -1224,6 +1527,19 @@
     border-bottom: 1px solid #1e3740
 }
 
+.knownStructure > span {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.knownStructureMeta {
+    display: block;
+}
+
+.knownStructureMeta small > span + span::before {
+    content: " · ";
+}
+
 .knownStructure strong,
 .knownStructure small {
     display: block
@@ -1268,14 +1584,52 @@
 }
 
 .knownStructure .remove {
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border: 1px solid #31515b;
+    width: auto;
+    border: 1px solid #6b3f47;
     background: transparent;
-    color: #a7c1c8;
+    color: #e38b92;
     cursor: pointer;
-    font-size: 17px
+    font-family: inherit;
+}
+
+@media (max-width: 640px) {
+    .knownStructure {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        gap: 8px;
+    }
+
+    .knownStructure > span {
+        display: contents;
+    }
+
+    .knownStructure > span > strong {
+        grid-column: 1 / -1;
+    }
+
+    .knownStructureMeta {
+        grid-column: 1;
+        min-width: 0;
+    }
+
+    .knownStructureMeta small > span {
+        display: block;
+    }
+
+    .knownStructureMeta small > span + span::before {
+        content: "";
+    }
+
+    .knownStructure .actionButton {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        flex: 0 0 28px;
+    }
+
+    .structureActionLabel {
+        display: none;
+    }
 }
 
 @keyframes spin {
@@ -1488,7 +1842,7 @@
 }
 
 .topbar {
-    height: 72px;
+    min-height: 72px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1516,7 +1870,8 @@
     background: var(--cyan);
     font-family: 'DM Mono';
     font-size: 19px;
-    box-shadow: 0 0 16px #5ed8ef55
+    box-shadow: 0 0 16px #5ed8ef55;
+    flex-shrink: 0;
 }
 
 .brandAccent {
@@ -1526,7 +1881,7 @@
 .topMeta {
     display: flex;
     align-items: center;
-    gap: 9px;
+    gap: 16px;
     color: #8fb1bc;
     font: 11px 'DM Mono';
     letter-spacing: 1px
@@ -1547,6 +1902,20 @@
     box-shadow: 0 0 9px #e77b68
 }
 
+.esiStatus {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    white-space: nowrap;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    cursor: pointer
+}
+
 .avatar {
     margin-left: 18px;
     width: 34px;
@@ -1563,6 +1932,9 @@
     cursor: pointer
 }
 
+.languageSelectCompact {
+    display: none;
+}
 .layout {
     display: grid;
     --sidebar-width: 230px;
@@ -1683,12 +2055,25 @@
     border: 1px dashed #2b4d59;
     background: transparent;
     color: #8aa4ad;
-    font-size: 11px;
-    padding: 10px;
     width: 100%;
     margin-top: 10px;
     flex-shrink: 0;
     text-decoration: none
+}
+
+.addButton svg {
+    vertical-align: middle
+}
+
+.addButtonDisconnected {
+    border-color: #5ed8ef88;
+    background: #5ed8ef12;
+    color: var(--cyan);
+    box-shadow: 0 0 12px #5ed8ef22;
+}
+
+.addButtonDisconnected svg {
+    filter: drop-shadow(0 0 5px #5ed8efaa);
 }
 
 .sidebarFooter {
@@ -1767,8 +2152,90 @@
     white-space: nowrap
 }
 
+.layoutCollapsed .sidebarFooter .addButton svg {
+    margin-right: 0
+}
+
 .layoutCollapsed .sidebarCount {
     display: none
+}
+
+@media (max-width: 900px) {
+    .layout .sidebar {
+        padding-left: 12.5px;
+        padding-right: 12.5px;
+    }
+
+    .layout .sidebarFooter {
+        padding: 10px 0;
+        justify-content: center;
+    }
+
+    .layout .sidebarFooter .addButton {
+        width: 51px;
+        height: 51px;
+        flex: 0 0 51px;
+        padding: 0;
+        margin: 0;
+        display: grid;
+        place-items: center;
+    }
+
+    .layout .sidebarFooter .addButton > span {
+        display: none;
+    }
+
+    .layout .sidebarFooter .addButton svg {
+        width: 26px;
+        height: 26px;
+    }
+}
+
+@media (max-width: 640px) {
+    .stockCardGrid {
+        grid-template-columns: minmax(0, 1fr);
+        margin-inline: -25px;
+    }
+
+    .stockCard {
+        max-width: 100%;
+        overflow: hidden;
+    }
+
+    .stockCardHeading > div:first-child {
+        min-width: 0;
+    }
+
+    .panelHeader {
+        flex-wrap: wrap;
+        gap: 14px;
+    }
+
+    .locationControls {
+        min-width: 0;
+        max-width: 100%;
+        width: 100%;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+
+    .locationControls label {
+        min-width: 0;
+        flex: 1 1 auto;
+    }
+
+    .locationControls select {
+        min-width: 0;
+        max-width: 100%;
+        width: 100%;
+    }
+
+    .locationControls > .panelDescription {
+        flex: 0 0 100%;
+        margin: 0;
+        text-align: right;
+        white-space: nowrap;
+    }
 }
 
 .content {
@@ -1831,6 +2298,10 @@
     border-radius: 50%;
     background: #5ed8ef;
     box-shadow: 0 0 9px #5ed8ef;
+}
+
+.refreshCurrent {
+    color: #5ed8ef;
 }
 
 .refreshIconWarning {
@@ -1899,6 +2370,10 @@
 
 .content > .panel:first-of-type {
     margin-top: 28px
+}
+
+.content > .panel + .panel {
+    margin-top: 18px;
 }
 
 .panel h2,
@@ -2007,7 +2482,10 @@
 .remove {
     border: 0;
     background: none;
-    color: #718c95;
+    color: #718c95
+}
+
+.itemRow .remove {
     font-size: 20px
 }
 
@@ -2184,20 +2662,17 @@
 .copyButton {
     border: 1px solid #2b5260;
     background: transparent;
-    color: var(--cyan);
-    padding: 8px 11px;
-    font-size: 11px
-}
-
-.copyButton:hover,
-.importButton:hover {
-    border-color: var(--cyan);
-    color: var(--ink)
+    color: var(--cyan)
 }
 
 @media (max-width: 640px) {
     .pageIntro {
         display: block;
+    }
+
+    .pageIntro > .importButton {
+        margin-top: 18px;
+        margin-bottom: 18px;
     }
 
     .pageIntro > .addButton {
@@ -2326,8 +2801,24 @@
     box-shadow: 0 0 10px #ed6a5a66;
 }
 
-.characterRow > .remove {
-    width: 74px;
+.characterRemove {
+    width: 100%;
+    border: 1px solid #6b3f47;
+    background: transparent;
+    color: #e38b92;
+}
+
+.characterRemove:focus-visible {
+    outline: 1px solid #ed6a5a;
+    outline-offset: 3px;
+}
+
+.characterRemove:disabled {
+    cursor: wait;
+    opacity: .55;
+}
+
+.characterRow > .characterRemove {
     min-width: 0;
     justify-self: center;
 }
@@ -2535,7 +3026,7 @@
         width: 100%;
     }
 
-    .characterRow > .remove {
+    .characterRow > .characterRemove {
         grid-column: 1 / -1;
         justify-self: start;
     }
@@ -2614,5 +3105,13 @@
 
     .planTableCellEmpty {
         display: none;
+    }
+}
+
+@media (max-width: 640px) {
+    .topbar {
+        min-height: 48px;
+        height: 48px;
+        padding: 0 16px;
     }
 }

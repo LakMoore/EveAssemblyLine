@@ -47,14 +47,14 @@ function normalizeCharacter(value: unknown): CharacterTokenRecord | null {
 
 export async function getCharacters(): Promise<CharacterTokenRecord[]> {
 	const storage = await initStorage();
-	const raw = await storage.getItem<unknown[]>("characters");
+	const raw = (await storage.getItem("characters")) as unknown[] | undefined;
 	const records = (raw ?? []).map(normalizeCharacter).filter((record): record is CharacterTokenRecord => record !== null);
 	if (JSON.stringify(raw ?? []) !== JSON.stringify(records)) await storage.setItem("characters", records);
 	return records;
 }
 export async function saveCharacters(records: CharacterTokenRecord[]) { await (await initStorage()).setItem("characters", records); }
 export async function getSessions(): Promise<SessionRecord[]> {
-	const records = await (await initStorage()).getItem<SessionRecord[]>("sessions");
+	const records = (await (await initStorage()).getItem("sessions")) as SessionRecord[] | undefined;
 	return records ?? [];
 }
 export async function saveSessions(records: SessionRecord[]) { await (await initStorage()).setItem("sessions", records); }
@@ -62,7 +62,7 @@ export async function saveSessions(records: SessionRecord[]) { await (await init
 export async function getAccounts(): Promise<AccountRecord[]> {
 	const storage = await initStorage();
 	const characters = await getCharacters();
-	const stored = await storage.getItem<AccountRecord[]>("accounts");
+	const stored = (await storage.getItem("accounts")) as AccountRecord[] | undefined;
 	const accounts = stored ?? [];
 	const accountById = new Map(accounts.map((account) => [account.accountId, account]));
 	const now = new Date().toISOString();

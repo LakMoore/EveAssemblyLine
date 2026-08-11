@@ -2,14 +2,14 @@
 
 ## Project context
 
-AssemblyLine is a Next.js App Router application for planning large EVE Online manufacturing projects. The authoritative product and architecture plan is [FullPlan.md](../../FullPlan.md). The application must eventually support EVE SSO, multiple attached characters, server-side ESI calls, static SDE data, node-persist storage, inventory-aware planning, and six plan output lists.
+AssemblyLine is a Next.js App Router application for planning large EVE Online manufacturing projects. The authoritative product and architecture plan is [FullPlan.md](../../FullPlan.md). The application must eventually support EVE SSO, multiple attached characters, server-side ESI calls, static SDE data, Firestore persistence, inventory-aware planning, and six plan output lists.
 
 The repository is currently an early prototype, not a completed implementation of FullPlan.md:
 
 - `src/app/page.tsx` is a client-side prototype with hard-coded characters, locations, and sample build items.
 - `src/lib/planning/planEngine.ts` uses two hard-coded recipes and does not yet use SDE or cached assets.
 - `src/app/api/plan/route.ts` validates only a small part of the request and does not yet validate a session or character ownership.
-- `src/lib/storage.ts`, `src/lib/auth/model.ts`, and `src/lib/auth/tokensStore.ts` provide only the initial node-persist primitives.
+- `src/lib/storage.ts`, `src/lib/auth/model.ts`, and `src/lib/auth/tokensStore.ts` provide the initial Firestore-backed persistence primitives.
 - EVE SSO, app sessions, ESI clients/cache, SDE processing/loading, character/corporation routes, state refresh routes, reference routes, and automated planning tests are not yet implemented.
 
 Do not present prototype data as live EVE data. When replacing a mock path, keep the UI usable and make loading, unauthenticated, stale, rate-limited, and error states explicit.
@@ -23,9 +23,10 @@ Do not present prototype data as live EVE data. When replacing a mock path, keep
 - Keep server-only code and secrets out of client components. Never send access tokens or refresh tokens to the browser, log them, or include them in error messages.
 - Validate and narrow all external input at API boundaries. Do not rely on a TypeScript cast as runtime validation. Reject malformed IDs, quantities, locations, settings, and character selections with useful 4xx responses.
 - Use Next.js App Router conventions already in the project. This project uses Next.js 16; before changing framework APIs, consult the relevant guide under `node_modules/next/dist/docs/` as required by `AGENTS.md`.
-- Prefer existing platform and repository APIs over new abstractions. Do not add a database: node-persist is the minimal persistent store and SDE is static build/runtime data.
+- Prefer existing platform and repository APIs over new abstractions. Firestore is the durable server-side store for accounts, sessions, tokens, and pending SSO state; SDE remains static build/runtime data.
 - Do not add fake ESI responses or silently fall back to hard-coded recipes in production paths. Test fixtures belong in tests or explicitly named fixture modules.
 - Keep UI changes consistent with the current visual language: dark technical workspace, Manrope and DM Mono, restrained cyan/teal/lime accents, dense operational layouts, and responsive controls. Do not replace the planner with a generic dashboard or marketing page.
+- For compact icon-and-label actions, use the global `actionButton` class and compose it with a visual variant such as `styles.importButton`, `styles.remove`, or `styles.characterRemove`. Keep the shared class responsible for height, alignment, spacing, padding, icon sizing, and typography; keep variants responsible for color, border, and state styling. At narrow breakpoints, override the shared class for icon-only controls rather than creating separate button dimensions.
 
 ## Architecture boundaries
 
@@ -88,6 +89,7 @@ Keep each step independently testable. Avoid broad UI rewrites while server cont
 
 - Use `NextResponse.json` with appropriate status codes and stable error shapes.
 - Treat request JSON, query strings, ESI responses, and SDE records as untrusted external data.
+- Persist and transmit stable numeric IDs rather than localized or display type names. Users may change language at any time, so names must never be the identifier used by a stored record or API request.
 - Do not expose internal token records. Map them to public character/session DTOs.
 - Keep `/api/plan` fast and side-effect free. Refresh belongs in `/api/state/refresh`.
 - Include timestamps and cache status in plan/state metadata so stale data is visible to users.
@@ -106,4 +108,29 @@ npm run build
 
 Run the narrowest relevant test or check first after an edit, then run the broader checks before finishing. If a command cannot run because SDE data or environment variables are missing, report that prerequisite clearly rather than weakening the implementation to hide the failure.
 
-Required environment/configuration should be documented before use, including `EVE_CLIENT_ID`, `EVE_CLIENT_SECRET`, `EVE_CALLBACK_URL`, and `STORAGE_DIR`. Never commit secrets, downloaded SDE data, node-persist data, or generated local artifacts unless the repository explicitly changes that policy.
+## Local development notes
+
+- The VS Code workspace may open the parent directory `/Users/stuart/Development/AssemblyLine`, but the application and Git repository root is `eveassemblyline/`. Run application commands from `eveassemblyline/`, or begin with `cd /Users/stuart/Development/AssemblyLine/eveassemblyline`.
+- The root contains the Next.js App Router project (`package.json`, `src/`, `scripts/`, `sde/`, `data/`, and `node_modules/`). Repository-level planning documents such as `FullPlan.md` and `CachingPlan.md` are one directory above the application root.
+- `src/lib/storage.ts` uses Firebase Admin Firestore and stores one document per logical key in the `assemblyLineStorage` collection. Firebase App Hosting may use Application Default Credentials; local development can use `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY`. Keep all service-account values server-only and never log tokens.
+- Firestore is the durable store, not the full SDE cache. Keep processed SDE data in build/runtime inputs and process memory. Upstash Redis is not the production SDE cache because its observed latency was too high for that workload.
+- For one-off TypeScript probes, use `tsx -e` from the application root. Because the project uses CommonJS output, put asynchronous code in an async IIFE rather than using top-level `await`:
+
+	```bash
+	npx tsx -e '(async () => { const loaded = await import("./src/lib/storage.ts"); const api = loaded.initStorage ? loaded : loaded.default; const store = await api.initStorage(); console.log(await store.getItem("accounts")); })();'
+	```
+
+	Dynamic imports from `tsx -e` may be exposed through a CommonJS default wrapper, so support both `loaded.initStorage` and `loaded.default` when probing local modules.
+- For isolated storage probes, use a separate Firebase project/database or emulator configuration. Do not point probes at production Firestore or attempt to recreate the old `STORAGE_DIR` behavior:
+
+	```bash
+	FIREBASE_PROJECT_ID=assembly-line-test npx tsx -e '/* async probe */'
+	```
+
+- If `npm install` fails with an `EPERM` error because `/Users/stuart/.npm` contains root-owned cache files, do not change ownership or use `sudo` from the agent. Use a writable temporary cache instead:
+
+	```bash
+	npm_config_cache="$TMPDIR/assemblyline-npm-cache" npm install <package>
+	```
+
+Required environment/configuration should be documented before use, including `EVE_CLIENT_ID`, `EVE_CLIENT_SECRET`, and `EVE_CALLBACK_URL`. Firebase App Hosting requires no Firebase-specific variables when its runtime service account and `FIREBASE_CONFIG` are available; local ADC or the optional `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY` variables may be used for development. Never commit secrets, downloaded SDE data, Firestore credentials, or generated local artifacts unless the repository explicitly changes that policy.
