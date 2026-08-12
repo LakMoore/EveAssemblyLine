@@ -43,6 +43,15 @@ export type EndpointCache<T> = {
   status: EndpointStatus;
 };
 
+export function toClientEndpointStatus<T>(cache: EndpointCache<T> | undefined) {
+  if (!cache) return undefined;
+  const { lastBody, ...status } = cache;
+  return {
+    ...status,
+    hasBody: lastBody !== null && lastBody !== undefined,
+  };
+}
+
 type OwnerCache = {
   allAssetsRaw?: EndpointCache<AssetRecord[]>;
   stockAssetsByItemId?: Map<number, AssetRecord>;
@@ -1334,35 +1343,35 @@ export async function getStateStatus(characterIds: number[]) {
   return {
     characters: characterIds.map((characterId) => ({
       characterId,
-      assets: getCache(characterCaches, characterId).allAssetsRaw ?? {
+      assets: toClientEndpointStatus(getCache(characterCaches, characterId).allAssetsRaw) ?? {
         status: "cached" as const,
-        lastBody: null,
+        hasBody: false,
       },
       rootContainersById: getCache(characterCaches, characterId).rootContainersById ?? {
         status: "cached" as const,
-        lastBody: null,
+        hasBody: false,
       },
-      jobs: getCache(characterCaches, characterId).jobs ?? {
+      jobs: toClientEndpointStatus(getCache(characterCaches, characterId).jobs) ?? {
         status: "cached" as const,
-        lastBody: null,
+        hasBody: false,
       },
-      orders: getCache(characterCaches, characterId).marketOrders ?? {
+      orders: toClientEndpointStatus(getCache(characterCaches, characterId).marketOrders) ?? {
         status: "cached" as const,
-        lastBody: null,
+        hasBody: false,
       },
       corporations: (corporationsByCharacter.get(characterId) ?? []).map((corporationId) => ({
         corporationId,
-        assets: getCache(corporationCaches, corporationId).allAssetsRaw ?? {
+        assets: toClientEndpointStatus(getCache(corporationCaches, corporationId).allAssetsRaw) ?? {
           status: "cached" as const,
-          lastBody: null,
+          hasBody: false,
         },
-        jobs: getCache(corporationCaches, corporationId).jobs ?? {
+        jobs: toClientEndpointStatus(getCache(corporationCaches, corporationId).jobs) ?? {
           status: "cached" as const,
-          lastBody: null,
+          hasBody: false,
         },
-        orders: getCache(corporationCaches, corporationId).marketOrders ?? {
+        orders: toClientEndpointStatus(getCache(corporationCaches, corporationId).marketOrders) ?? {
           status: "cached" as const,
-          lastBody: null,
+          hasBody: false,
         },
       })),
     })),

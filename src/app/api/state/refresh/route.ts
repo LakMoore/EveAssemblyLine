@@ -1,13 +1,32 @@
 import { NextResponse } from "next/server";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
 import { getCharacters } from "@/lib/auth/tokensStore";
-import { refreshCharacterState } from "@/lib/esi/cache";
+import { refreshCharacterState, toClientEndpointStatus } from "@/lib/esi/cache";
 import { getEsiRateLimitUntil } from "@/lib/esi/client";
 
 const activeRefreshes = new Map<
   string,
   Promise<Awaited<ReturnType<typeof refreshCharacterState>>>
 >();
+
+function toClientRefreshResult(result: Awaited<ReturnType<typeof refreshCharacterState>>) {
+  return {
+    characters: result.characters.map((character) => ({
+      characterId: character.characterId,
+      ...(character.assets ? { assets: toClientEndpointStatus(character.assets) } : {}),
+      ...(character.jobs ? { jobs: toClientEndpointStatus(character.jobs) } : {}),
+      ...(character.marketOrders ? { marketOrders: toClientEndpointStatus(character.marketOrders) } : {}),
+      ...(character.corporations
+        ? {
+            corporations: character.corporations.map((corporation) => ({
+              corporationId: corporation.corporationId,
+              ...(corporation.assets ? { assets: toClientEndpointStatus(corporation.assets) } : {}),
+            })),
+          }
+        : {}),
+    })),
+  };
+}
 
 export async function POST(request: Request) {
   let session;
@@ -51,7 +70,7 @@ export async function POST(request: Request) {
   if (activeRefresh) {
     const result = await activeRefresh;
     return NextResponse.json({
-      ...result,
+      ...toClientRefreshResult(result),
       success: true,
       refreshedAt: new Date().toISOString(),
       rateLimitedUntil: getEsiRateLimitUntil(),
@@ -61,7 +80,7 @@ export async function POST(request: Request) {
   activeRefreshes.set(key, refresh);
   const result = await refresh.finally(() => activeRefreshes.delete(key));
   return NextResponse.json({
-    ...result,
+    ...toClientRefreshResult(result),
     success: true,
     refreshedAt: new Date().toISOString(),
     rateLimitedUntil: getEsiRateLimitUntil(),

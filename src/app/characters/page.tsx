@@ -31,7 +31,7 @@ type MergeDetails = {
 
 type EndpointStatus = {
   status: "fresh" | "cached" | "stale" | "rate_limited" | "error";
-  lastBody?: unknown;
+  hasBody: boolean;
   lastUpdated?: string;
   lastModified?: string;
   expires?: string;
@@ -64,7 +64,7 @@ function statusLabel(status: EndpointStatus | undefined, noAccess = false) {
   if (noAccess) return "No Access";
   const currentStatus = renderedStatus(status);
   if (currentStatus?.status === "error") return "Reauthorize required";
-  if (!currentStatus || currentStatus.lastBody === null || currentStatus.lastBody === undefined) return "Unknown";
+  if (!currentStatus || !currentStatus.hasBody) return "Unknown";
   if (
     currentStatus.status !== "rate_limited" &&
     !currentStatus.lastUpdated &&
@@ -79,7 +79,7 @@ function statusLabel(status: EndpointStatus | undefined, noAccess = false) {
 
 function statusClass(status: EndpointStatus | undefined) {
   const currentStatus = renderedStatus(status);
-  if (!currentStatus || currentStatus.lastBody === null || currentStatus.lastBody === undefined) return styles.statusError;
+  if (!currentStatus || !currentStatus.hasBody) return styles.statusError;
   if (currentStatus?.status === "fresh") return styles.statusFresh;
   if (currentStatus?.status === "stale") return styles.statusError;
   if (currentStatus?.status === "rate_limited" || currentStatus?.status === "error") return styles.statusError;
