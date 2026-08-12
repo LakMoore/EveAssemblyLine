@@ -56,7 +56,7 @@ type OwnerCache = {
   allAssetsRaw?: EndpointCache<AssetRecord[]>;
   stockAssetsByItemId?: Map<number, AssetRecord>;
   shipAssetsByItemId: Map<number, AssetRecord>;
-  rootContainersById: Map<number, AssetRecord>;
+  rootContainersByItemId: Map<number, AssetRecord>;
   assembledShipsByItemId: Map<number, AssetRecord>;
   assembledStructureRigs: AssetRecord[];
   jobs?: EndpointCache<IndustryJobRecord[]>;
@@ -93,7 +93,7 @@ function getCache(map: Map<number, OwnerCache>, id: number): OwnerCache {
   const created: OwnerCache = {
     assembledStructureRigs: [],
     shipAssetsByItemId: new Map(),
-    rootContainersById: new Map(),
+    rootContainersByItemId: new Map(),
     assembledShipsByItemId: new Map(),
     unresolvedAssetCount: 0,
   };
@@ -313,7 +313,7 @@ async function cacheResolvedAssets(
     }
   }
 
-  const containerRootsById = await resolveContainerRoots(
+  const rootContainersByItemId = await resolveRootContainers(
     assetIndexes.stockLocationItemsByItemId,
     assetIndexes.shipTypeIds,
     token,
@@ -331,7 +331,8 @@ async function cacheResolvedAssets(
   // add locations to stock assets
   const resolvedStockAssets = await Promise.all(
     [...assetIndexes.stockAssetsByItemId.values()].map(async (asset) => {
-      const containerRoot = containerRootsById.get(asset.locationId)?.rootLocation;
+      const rootContainer = rootContainersByItemId.get(asset.locationId);
+      const containerRoot = rootContainer?.rootLocation;
       if (containerRoot) return { ...asset, rootLocation: containerRoot };
       try {
         const rootLocation = await inferRoot(asset.locationId, asset);
@@ -367,7 +368,8 @@ async function cacheResolvedAssets(
   cache.stockAssetsByItemId = resolvedByItemId;
   const resolvedShipAssets = await Promise.all(
     [...assetIndexes.shipAssetsByItemId.values()].map(async (asset) => {
-      const containerRoot = containerRootsById.get(asset.locationId)?.rootLocation;
+      const rootContainer = rootContainersByItemId.get(asset.locationId);
+      const containerRoot = rootContainer?.rootLocation;
       if (containerRoot) return { ...asset, rootLocation: containerRoot };
       try {
         const rootLocation = await inferRoot(asset.locationId, asset);
@@ -380,7 +382,7 @@ async function cacheResolvedAssets(
   cache.shipAssetsByItemId = new Map(
     resolvedShipAssets.map((asset) => [asset.itemId, asset]),
   );
-  cache.rootContainersById = containerRootsById;
+  cache.rootContainersByItemId = rootContainersByItemId;
   cache.assembledShipsByItemId = assetIndexes.assembledShipsByItemId;
   cache.assembledStructureRigs = assetIndexes.installedStructureRigs;
 
@@ -500,7 +502,7 @@ async function getRealParent(current: AssetRecord, token: TokenSet): Promise<Ass
   return null;
 }
 
-async function resolveContainerRoots(
+async function resolveRootContainers(
   containerItemsByItemId: Map<number, AssetRecord>,
   shipTypeIds: Set<number>,
   token: TokenSet,
@@ -600,13 +602,13 @@ export async function refreshCharacterState(
   const summary: {
     characterId: number;
     assets?: EndpointCache<AssetRecord[] | null>;
-    rootContainersById?: Map<number, AssetRecord>;
+    rootContainersByItemId?: Map<number, AssetRecord>;
     jobs?: EndpointCache<IndustryJobRecord[] | null>;
     marketOrders?: EndpointCache<MarketOrderRecord[] | null>;
     corporations?: Array<{
       corporationId: number;
       assets?: EndpointCache<AssetRecord[] | null>;
-      rootContainersById?: Map<number, AssetRecord>;
+      rootContainersByItemId?: Map<number, AssetRecord>;
     }>;
   }[] = [];
   for (const characterId of characterIds) {
@@ -690,7 +692,7 @@ export async function refreshCharacterState(
           );
         }
         characterSummary.assets = cache.allAssetsRaw;
-        characterSummary.rootContainersById = cache.rootContainersById;
+        characterSummary.rootContainersByItemId = cache.rootContainersByItemId;
       }
     } catch (error) {
       await rebuildResolvedAssets(cache, character, "personal");
@@ -772,7 +774,7 @@ export async function refreshCharacterState(
       const corpSummary: {
         corporationId: number;
         assets?: EndpointCache<AssetRecord[] | null>;
-        rootContainersById?: Map<number, AssetRecord>;
+        rootContainersByItemId?: Map<number, AssetRecord>;
         jobs?: EndpointCache<IndustryJobRecord[] | null>;
         marketOrders?: EndpointCache<MarketOrderRecord[] | null>;
       } = { corporationId: character.corporationId };
@@ -844,7 +846,7 @@ export async function refreshCharacterState(
             );
           }
           corpSummary.assets = corpCache.allAssetsRaw;
-          corpSummary.rootContainersById = corpCache.rootContainersById;
+          corpSummary.rootContainersByItemId = corpCache.rootContainersByItemId;
           if (result.fromCache && corpCache.allAssetsRaw) {
             if (previousAssetTiming) {
               corpCache.allAssetsRaw.lastUpdated = previousAssetTiming.lastUpdated;
@@ -1051,35 +1053,6 @@ export async function getAllAssetsRaw(
   ];
 }
 
-/** Returns only assets that can be used as parent containers by /state/stock. */
-export async function getResolvedContainersById(
-  characterIds: number[],
-  includeCorporationAssets: boolean,
-) {
-  const containers = characterIds.flatMap((id) => [
-    ...getCache(characterCaches, id).rootContainersById.entries(),
-  ]);
-  if (!includeCorporationAssets) return new Map(containers);
-  const characters = await getCharacters();
-  const corporationIds = new Set(
-    characters
-      .filter(
-        (character) =>
-          characterIds.includes(character.characterId) &&
-          character.corpAuthCompleted &&
-          character.hasDirectorRole &&
-          character.corporationId,
-      )
-      .map((character) => character.corporationId!),
-  );
-  for (const corporationId of corporationIds) {
-    for (const entry of getCache(corporationCaches, corporationId).rootContainersById) {
-      containers.push(entry);
-    }
-  }
-  return new Map(containers);
-}
-
 export async function getResolvedAssetIndex(
   characterIds: number[],
   includeCorporationAssets: boolean,
@@ -1117,7 +1090,7 @@ export async function getRootContainersByItemId(
   includeCorporationAssets: boolean,
 ): Promise<Map<number, AssetRecord>> {
   const assets = characterIds.flatMap((id) => [
-    ...getCache(characterCaches, id).rootContainersById.values(),
+    ...getCache(characterCaches, id).rootContainersByItemId.values(),
   ]);
   if (!includeCorporationAssets) return new Map(assets.map((asset) => [asset.itemId, asset]));
   const characters = await getCharacters();
@@ -1135,7 +1108,7 @@ export async function getRootContainersByItemId(
   return [
     ...assets.map((asset) => [asset.itemId, asset]),
     ...[...corporations].flatMap((id) =>
-      [...getCache(corporationCaches, id).rootContainersById.values()].map((asset) => [
+      [...getCache(corporationCaches, id).rootContainersByItemId.values()].map((asset) => [
         asset.itemId,
         asset,
       ]),
@@ -1248,8 +1221,17 @@ export async function getMarketOrderStock(
   },
 ): Promise<PlanStockItem[] | null> {
   const stock: PlanStockItem[] = [];
+  const typeIds = new Set<number>();
   let hasUsableSource = false;
   let hasUnavailableSource = false;
+  const resolveNames = async () => {
+    if (typeIds.size === 0) return stock;
+    const types = await getTypesByIds([...typeIds]);
+    return stock.map((item) => ({
+      ...item,
+      name: types.get(item.typeId)?.name.en ?? item.name,
+    }));
+  };
   if (options.personalSellOrdersAsStock) {
     for (const characterId of characterIds) {
       const cache = getCache(characterCaches, characterId);
@@ -1261,6 +1243,7 @@ export async function getMarketOrderStock(
       const orders = cache.marketOrders!.lastBody;
       for (const order of orders as MarketOrderRecord[]) {
         if (order.isBuyOrder || order.isCorporation || order.volumeRemain <= 0) continue;
+        typeIds.add(order.typeId);
         stock.push({
           typeId: order.typeId,
           name: `Type ${order.typeId}`,
@@ -1268,7 +1251,6 @@ export async function getMarketOrderStock(
           sourceLocationId: order.locationId,
           ownerType: order.ownerType,
           ownerId: order.ownerId,
-          locationResolved: true,
           category: "item",
           source: "marketOrder",
         });
@@ -1277,7 +1259,7 @@ export async function getMarketOrderStock(
   }
 
   if (!options.allCorporationSellOrdersAsStock && !options.myCorporationSellOrdersAsStock) {
-    return stock;
+    return resolveNames();
   }
   const characters = await getCharacters();
   const selectedCharacters = characters.filter((character) =>
@@ -1308,6 +1290,7 @@ export async function getMarketOrderStock(
             character.characterId === order.issuedBy && character.corporationId === corporationId,
         );
       if (!options.allCorporationSellOrdersAsStock && !isMyCorporationOrder) continue;
+      typeIds.add(order.typeId);
       stock.push({
         typeId: order.typeId,
         name: `Type ${order.typeId}`,
@@ -1315,14 +1298,13 @@ export async function getMarketOrderStock(
         sourceLocationId: order.locationId,
         ownerType: order.ownerType,
         ownerId: order.ownerId,
-        locationResolved: true,
         category: "item",
         source: "marketOrder",
       });
     }
   }
   if (!hasUsableSource || (stock.length === 0 && hasUnavailableSource)) return null;
-  return stock;
+  return resolveNames();
 }
 
 export async function getStateStatus(characterIds: number[]) {
@@ -1347,7 +1329,7 @@ export async function getStateStatus(characterIds: number[]) {
         status: "cached" as const,
         hasBody: false,
       },
-      rootContainersById: getCache(characterCaches, characterId).rootContainersById ?? {
+      rootContainersByItemId: getCache(characterCaches, characterId).rootContainersByItemId ?? {
         status: "cached" as const,
         hasBody: false,
       },

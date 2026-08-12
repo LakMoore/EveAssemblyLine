@@ -66,7 +66,6 @@ export interface PlanStockItem {
   sourceLocationName?: string;
   ownerType?: "character" | "corporation";
   ownerId?: number;
-  locationResolved?: boolean;
   category?: "blueprint" | "bp" | "bpo" | "bpc" | "reaction" | "item";
   inBuild?: boolean;
   inBuildQuantity?: number;
@@ -217,7 +216,6 @@ export interface PlanResult {
       toLocationName?: string;
       ownerType?: "character" | "corporation";
       ownerId?: number;
-      locationResolved?: boolean;
     }>;
   };
 }

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import TypeIdentity from "../components/TypeIdentity";
 import { loadClientShips, type ClientShipsResponse } from "@/lib/client/requestCache";
 import styles from "../page.module.css";
+import { ArrowRight, X } from "lucide-react";
 
 type ShipAsset = NonNullable<ClientShipsResponse["assets"]>[number];
 type ShipSummary = NonNullable<ClientShipsResponse["ships"]>[number];
@@ -139,7 +140,6 @@ export default function ShipsPage() {
         <div>
           <p className={styles.pageKicker}>FLEET INVENTORY</p>
           <h1>Ships</h1>
-          <p className={styles.pageIntro}>Ships and their onboard assets, grouped by system.</p>
         </div>
         <div className={styles.shipsStats}>
           <strong>{data?.ships?.length ?? 0}</strong>
@@ -161,7 +161,12 @@ export default function ShipsPage() {
               <span className={styles.shipCount}>{system.ships.length} ships</span>
             </div>
             <div className={styles.shipList}>
-              {system.ships.map((ship) => (
+              {system.ships.map((ship) => {
+                const shipTypeName = typeNames.get(ship.typeId) ?? `Type ${ship.typeId}`;
+                const shipDisplayName = ship.name
+                  ? `${ship.name} - ${shipTypeName}`
+                  : shipTypeName;
+                return (
                 <div
                   role="button"
                   tabIndex={0}
@@ -176,8 +181,7 @@ export default function ShipsPage() {
                   }}
                 >
                   <TypeIdentity
-                    name={ship.name ?? typeNames.get(ship.typeId) ?? `Type ${ship.typeId}`}
-                    typeName={ship.name ? typeNames.get(ship.typeId) : undefined}
+                    name={shipDisplayName}
                     typeId={ship.typeId}
                     variation="render"
                     imageSize={54}
@@ -186,7 +190,8 @@ export default function ShipsPage() {
                   <span className={styles.shipCardMeta}>ITEM ID {ship.itemId}</span>
                   <span className={styles.shipCardAction}>SHIP FITTING →</span>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </section>
         ))}
@@ -291,6 +296,10 @@ function ShipContentsModal({
       }),
     }))
     .sort((left, right) => left.order - right.order || left.label.localeCompare(right.label));
+  const shipTypeName = typeNames.get(ship.typeId) ?? `Type ${ship.typeId}`;
+  const shipDisplayName = ship.name
+    ? `${ship.name} - ${shipTypeName}`
+    : shipTypeName;
 
   return (
     <div
@@ -298,25 +307,28 @@ function ShipContentsModal({
       role="presentation"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
-      <div ref={modalRef} className={styles.shipModal} role="dialog" aria-modal="true" aria-labelledby="ship-modal-title">
+      <div ref={modalRef} className={styles.shipModal} role="dialog" aria-modal="true" aria-label={`${shipDisplayName} ship fitting`}>
         <div className={styles.panelHeader}>
           <div className={styles.shipModalHeading}>
+            <p className={styles.panelKicker}>SHIP FITTING</p>
             <TypeIdentity
-              name={ship.name ?? typeNames.get(ship.typeId) ?? `Type ${ship.typeId}`}
+              name={shipDisplayName}
               typeId={ship.typeId}
               variation="render"
               imageSize={54}
               className={styles.shipModalIdentity}
             />
-            <div>
-              <p className={styles.panelKicker}>SHIP FITTING</p>
-              <h2 id="ship-modal-title">
-                {ship.name ?? `Type ${ship.typeId}`} - {typeNames.get(ship.typeId) ?? `Type ${ship.typeId}`}
-              </h2>
-              <p className={styles.shipModalSystem}>{ship.systemName ?? "Unknown system"} · ITEM ID {ship.itemId}</p>
-            </div>
+            <p className={styles.shipModalSystem}>{ship.systemName ?? "Unknown system"} · ITEM ID {ship.itemId}</p>
           </div>
-          <button type="button" className={styles.iconButton} aria-label="Close ship contents" onClick={onClose}>×</button>
+          <button
+            type="button"
+            className={`actionButton ${styles.importButton}`}
+            aria-label="Close ship contents"
+            onClick={onClose}
+          >
+            <X aria-hidden="true" />
+            <span>Close</span>
+          </button>
         </div>
         {orderedGroups.length === 0 ? (
           <p className={styles.shipsEmpty}>No contained assets.</p>
@@ -356,14 +368,15 @@ function ShipContentsModal({
                     {shipsByItemId.has(asset.itemId) && (
                       <button
                         type="button"
-                        className={styles.shipAssetFittingButton}
+                        className={`actionButton ${styles.importButton}`}
                         title="View ship fitting"
                         onClick={() => {
                           const nestedShip = shipsByItemId.get(asset.itemId);
                           if (nestedShip) onSelectShip(nestedShip);
                         }}
                       >
-                        VIEW FITTING →
+                        <span>VIEW FITTING</span>
+                        <ArrowRight aria-hidden="true" />
                       </button>
                     )}
                   </div>

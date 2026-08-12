@@ -75,6 +75,10 @@ function stockItemVolume(item: StockItem) {
   );
 }
 
+function isBlueprintStockItem(item: StockItem) {
+  return item.category === "blueprint" || item.category === "bp" || item.category === "bpo" || item.category === "bpc";
+}
+
 function stockTotalCount(location: StockRecord) {
   return location.items.reduce((total, item) => total + item.quantity, 0);
 }
@@ -682,7 +686,7 @@ function StockLocationCard({
         {stockCategories.map((category) => {
           const items = location.items.filter((item) =>
             category.id === "bpc"
-              ? item.category === "bpo" || item.category === "bpc"
+              ? isBlueprintStockItem(item)
               : (item.category ?? "item") === category.id,
           );
           const volume = items.reduce((total, item) => total + stockItemVolume(item), 0);
@@ -740,7 +744,7 @@ function ViewItemsModal({
   const [openReactionTypeId, setOpenReactionTypeId] = useState<number | null>(null);
   const blueprintCounts = new Map<number, { bpo: number; bpc: number; runs: number }>();
   for (const item of location.items) {
-    if (item.category !== "bp" && item.category !== "bpo" && item.category !== "bpc") continue;
+    if (!isBlueprintStockItem(item)) continue;
     const counts = blueprintCounts.get(item.typeId) ?? { bpo: 0, bpc: 0, runs: 0 };
     if (item.type === "bpo" || item.category === "bpo") counts.bpo += item.quantity;
     else {
@@ -755,7 +759,7 @@ function ViewItemsModal({
     if (filter.kind === "all") return true;
     if (filter.kind === "market") return item.marketCategory === filter.value;
     return filter.value === "bpc"
-      ? item.category === "bp" || item.category === "bpo" || item.category === "bpc"
+      ? isBlueprintStockItem(item)
       : (item.category ?? "item") === filter.value;
   });
   const displayItems: Array<{
@@ -776,7 +780,7 @@ function ViewItemsModal({
       if (item.inUse) existing.reactionJobs?.push(item);
       continue;
     }
-    if (item.category !== "bpo" && item.category !== "bpc") {
+    if (!isBlueprintStockItem(item)) {
       displayItems.push({ item });
       continue;
     }
@@ -861,6 +865,9 @@ function ViewItemsModal({
               const marketOrderQuantity = item.marketOrderQuantity ?? 0;
               const isMarketOrder = item.source === "marketOrder";
               const isBlueprint = Boolean(blueprints);
+              const hasBlueprintOriginal = blueprints?.some(
+                (blueprint) => blueprint.type === "bpo" || blueprint.category === "bpo",
+              ) ?? false;
               const isReaction = Boolean(reactionJobs);
               const reactionInUse =
                 reactionJobs?.reduce((total, job) => total + job.quantity, 0) ?? 0;
@@ -930,15 +937,13 @@ function ViewItemsModal({
                     imageSize={40}
                     className={styles.stockTypeIdentity}
                     variation={
-                      counts?.bpo
-                        ? "bp"
-                        : item.category === "bpo"
-                          ? "bp"
-                          : item.category === "bpc" || item.category === "reaction"
-                            ? "bpc"
-                            : item.source !== "marketOrder" && item.techLevel === 1
-                              ? "render"
-                              : "icon"
+                      isBlueprint
+                        ? hasBlueprintOriginal ? "bp" : "bpc"
+                        : item.category === "reaction"
+                          ? "bpc"
+                          : item.source !== "marketOrder" && item.techLevel === 1
+                            ? "render"
+                            : "icon"
                     }
                   />
                   {item.inBuild && item.endDate && (

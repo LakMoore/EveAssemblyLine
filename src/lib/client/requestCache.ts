@@ -16,8 +16,10 @@ export type ClientStockResponse = {
   locations?: Array<{
     locationId: number;
     name: string;
+    locationType: "station" | "structure" | "anchored";
     systemId?: number;
     systemName?: string;
+    typeId?: number;
     items: StockItem[];
   }>;
   filteredLocationIds?: number[];

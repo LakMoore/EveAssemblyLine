@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
-import { getResolvedAssetIndex, getResolvedAssets, getRunningIndustryJobs } from "@/lib/esi/cache";
+import {
+  getResolvedAssetIndex,
+  getResolvedAssets,
+  getRootContainersByItemId,
+  getRunningIndustryJobs,
+} from "@/lib/esi/cache";
 import { fetchLocationMetadata, getUsableToken } from "@/lib/esi/client";
 import { getCharacter } from "@/lib/auth/tokensStore";
 import {
@@ -17,14 +22,13 @@ import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { categorizeType } from "@/lib/reference/category";
 import type { AssetLocation, AssetRecord, IndustryJobRecord } from "@/lib/auth/model";
 
-type TerminalLocation = {
+type RootLocation = {
   locationId: number;
   kind: "station" | "structure" | "anchored";
   typeId?: number;
   name?: string;
   systemId?: number;
   regionId?: number;
-  resolved?: boolean;
 };
 
 type StockItem = {
@@ -145,51 +149,48 @@ function shouldIncludeAsset(asset: AssetRecord, shipTypeIds: Set<number>) {
   return true;
 }
 
-function createRootLocationIndex(assets: AssetRecord[]) {
-  const locations = new Map<number, TerminalLocation>();
-  for (const asset of assets) {
-    if (!isDirectLocation(asset)) continue;
-    const root = asset.rootLocation;
-    const kind: TerminalLocation["kind"] = root.kind === "solar_system"
+function rootLocationFromAssetLocation(root: AssetLocation): RootLocation {
+  return {
+    locationId: root.locationId,
+    kind: root.kind === "solar_system"
       ? "anchored"
       : root.kind === "station"
         ? "station"
-        : "structure";
-    locations.set(root.locationId, {
-      ...(root.kind !== "solar_system" ? root : {}),
-      locationId: root.locationId,
-      kind,
-      ...(root.kind === "solar_system"
-        ? { systemId: root.locationId, resolved: true }
+        : "structure",
+      ...(root.typeId !== undefined ? { typeId: root.typeId } : {}),
+      ...(root.name !== undefined ? { name: root.name } : {}),
+      ...(root.systemId !== undefined ? { systemId: root.systemId } : {}),
+      ...(root.regionId !== undefined ? { regionId: root.regionId } : {}),
+      ...(root.kind === "solar_system" && root.systemId === undefined
+        ? { systemId: root.locationId }
         : {}),
-    });
-  }
-  return locations;
+  };
 }
 
-function normalizeLocationKinds(
-  locations: Map<number, TerminalLocation>,
-  stations: Awaited<ReturnType<typeof getStations>>,
-  structureTypeIds: Set<number>,
-) {
-  const stationTypeIds = new Set([...stations.values()].map((station) => station.typeID));
-  for (const [locationId, location] of locations) {
-    if (location.kind === "anchored") continue;
-    if (location.typeId !== undefined && stationTypeIds.has(location.typeId)) {
-      locations.set(locationId, { ...location, kind: "station" });
-    } else if (location.typeId !== undefined && structureTypeIds.has(location.typeId)) {
-      locations.set(locationId, { ...location, kind: "structure" });
-    }
-  }
-}
-
-async function resolveUnknownLocations(
-  locations: Map<number, TerminalLocation>,
+async function resolveLocation(
+  locationId: number,
+  containersByItemId: Map<number, AssetRecord>,
   structureTypeIds: Set<number>,
   stations: Awaited<ReturnType<typeof getStations>>,
   types: Awaited<ReturnType<typeof getTypesByIds>>,
   characterIds: number[],
-) {
+): Promise<RootLocation | undefined> {
+  const container = containersByItemId.get(locationId);
+  if (container && isDirectLocation(container)) {
+    return rootLocationFromAssetLocation(container.rootLocation);
+  }
+
+  const station = stations.get(locationId);
+  if (station) {
+    return {
+      locationId,
+      kind: "station",
+      typeId: station.typeID,
+      name: types.get(station.typeID)?.name.en,
+      systemId: station.solarSystemID,
+    };
+  }
+
   const characters = await Promise.all(characterIds.map((id) => getCharacter(id)));
   const tokens = (
     await Promise.all(
@@ -207,59 +208,41 @@ async function resolveUnknownLocations(
     )
   ).flat();
 
-  for (const [locationId, location] of locations) {
-    if (location.typeId !== undefined) {
-      if (!location.name) {
-        const typeName = types.get(location.typeId)?.name.en;
-        if (typeName) locations.set(locationId, { ...location, name: typeName });
-      }
-      continue;
-    }
-    const station = stations.get(locationId);
-    if (station) {
-      locations.set(locationId, {
-        locationId,
-        kind: "station",
-        typeId: station.typeID,
-        name: types.get(station.typeID)?.name.en,
-        systemId: station.solarSystemID,
-        resolved: true,
-      });
-      continue;
-    }
-    for (const token of tokens) {
-      try {
-        const result = await fetchLocationMetadata(locationId, "structure", token);
-        if (result.data) {
-          locations.set(locationId, {
-            ...location,
-            kind: "structure",
-            ...(result.data.type_id !== undefined ? { typeId: result.data.type_id } : {}),
-            name: result.data.name,
-            systemId: result.data.system_id,
-            regionId: result.data.region_id,
-            resolved: true,
+  for (const token of tokens) {
+    try {
+      const result = await fetchLocationMetadata(locationId, "structure", token);
+      if (result.data) {
+        const resolved: RootLocation = {
+          locationId,
+          kind: "structure",
+          ...(result.data.type_id !== undefined ? { typeId: result.data.type_id } : {}),
+          name: result.data.name,
+          systemId: result.data.system_id,
+          regionId: result.data.region_id,
+        };
+        if (!resolved.typeId || !structureTypeIds.has(resolved.typeId)) {
+          console.warn("[stock] Could not resolve root location", {
+            locationId,
+            locationType: resolved.kind,
+            typeId: resolved.typeId,
+            typeName: resolved.typeId ? types.get(resolved.typeId)?.name.en : undefined,
           });
-          break;
         }
-      } catch {}
-    }
-    const resolved = locations.get(locationId);
-    if (!resolved?.typeId || !structureTypeIds.has(resolved.typeId)) {
-      console.warn("[stock] Could not resolve terminal location", {
-        locationId,
-        locationType: location.kind,
-        typeId: resolved?.typeId,
-        typeName: resolved?.typeId ? types.get(resolved.typeId)?.name.en : undefined,
-      });
-    }
+        return resolved;
+      }
+    } catch {}
   }
+  console.warn("[stock] Could not resolve root location", {
+    locationId,
+    locationType: "structure",
+  });
+  return undefined;
 }
 
 function addContribution(
   buckets: Map<number, StockBucket>,
   contribution: StockContribution,
-  location: TerminalLocation,
+  location: RootLocation,
   types: Awaited<ReturnType<typeof getTypesByIds>>,
   groups: Awaited<ReturnType<typeof getGroups>>,
   marketGroups: Awaited<ReturnType<typeof getMarketGroups>>,
@@ -291,7 +274,7 @@ function addContribution(
       systemName: location.systemId ? systems.get(location.systemId)?.name.en : undefined,
       securityStatus: location.systemId === undefined ? undefined : systems.get(location.systemId)?.securityStatus,
       regionId: location.regionId,
-      resolved: location.resolved !== false,
+      resolved: true,
       assetCount: 0,
       personalAssetCount: 0,
       corporationAssetCount: 0,
@@ -434,13 +417,22 @@ function jobContributions(
 }
 
 export async function GET(request: Request) {
+  const startedAt = performance.now();
+  let lastPhaseAt = startedAt;
+  const phaseDurations: Record<string, number> = {};
+  const markPhase = (name: string) => {
+    const now = performance.now();
+    phaseDurations[name] = Math.round(now - lastPhaseAt);
+    lastPhaseAt = now;
+  };
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   const characterIds = await getSessionCharacterIds(session);
   const url = new URL(request.url);
   const requestedLanguage = url.searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
-  const [assets, jobs, shipTypeIds, structureTypeIds, groups, marketGroups, stations, systems] =
+  markPhase("session");
+  const [assets, jobs, shipTypeIds, structureTypeIds, groups, marketGroups, stations, systems, rootContainersByItemId] =
     await Promise.all([
       getResolvedAssets(characterIds, true),
       getRunningIndustryJobs(characterIds, true),
@@ -450,7 +442,9 @@ export async function GET(request: Request) {
       getMarketGroups(),
       getStations(),
       getSystems(),
+      getRootContainersByItemId(characterIds, true),
     ]);
+  markPhase("data");
   const types = await getTypesByIds([
     ...new Set([
       ...assets.map((asset) => asset.typeId),
@@ -459,21 +453,26 @@ export async function GET(request: Request) {
       ),
     ]),
   ]);
-  const rootLocations = createRootLocationIndex(assets);
-  for (const job of jobs) {
-    for (const locationId of [job.blueprintLocationId, job.locationId, job.outputLocationId]) {
-      if (!rootLocations.has(locationId)) {
-        rootLocations.set(locationId, {
-          locationId,
-          kind: "station",
-          resolved: false,
-        });
-      }
-    }
-  }
-  normalizeLocationKinds(rootLocations, stations, structureTypeIds);
-  await resolveUnknownLocations(rootLocations, structureTypeIds, stations, types, characterIds);
-  normalizeLocationKinds(rootLocations, stations, structureTypeIds);
+  markPhase("types");
+  const jobLocationIds = [...new Set(jobs.flatMap((job) => [
+    job.blueprintLocationId,
+    job.locationId,
+    job.outputLocationId,
+  ]))];
+  const jobLocations = new Map(
+    await Promise.all(jobLocationIds.map(async (locationId) => [
+      locationId,
+      await resolveLocation(
+        locationId,
+        rootContainersByItemId,
+        structureTypeIds,
+        stations,
+        types,
+        characterIds,
+      ),
+    ] as const)),
+  );
+  markPhase("locations");
   const buckets = new Map<number, StockBucket>();
   const productQuantities = new Map<number, number>();
   await Promise.all(
@@ -494,10 +493,11 @@ export async function GET(request: Request) {
     }),
   );
   const allAssetIndex = await getResolvedAssetIndex(characterIds, true);
+  markPhase("indexes");
   for (const asset of assets) {
     if (!shouldIncludeAsset(asset, shipTypeIds) || !isDirectLocation(asset)) continue;
-    const terminal = rootLocations.get(asset.rootLocation.locationId);
-    if (!terminal || (terminal.typeId !== undefined && shipTypeIds.has(terminal.typeId))) continue;
+    const rootLocation = rootLocationFromAssetLocation(asset.rootLocation);
+    if (!rootLocation || (rootLocation.typeId !== undefined && shipTypeIds.has(rootLocation.typeId))) continue;
     addContribution(
       buckets,
       {
@@ -524,7 +524,7 @@ export async function GET(request: Request) {
               }
             : {}),
       },
-      terminal,
+      rootLocation,
       types,
       groups,
       marketGroups,
@@ -538,11 +538,9 @@ export async function GET(request: Request) {
       (asset) => asset.itemId === job.blueprintId,
     );
     const preferredBlueprintLocation = blueprint && isDirectLocation(blueprint)
-      ? rootLocations.get(blueprint.rootLocation.locationId)
-      : rootLocations.get(job.blueprintLocationId) ?? rootLocations.get(job.locationId);
-    const blueprintLocation = preferredBlueprintLocation?.resolved === false
-      ? rootLocations.get(job.locationId) ?? preferredBlueprintLocation
-      : preferredBlueprintLocation;
+      ? rootLocationFromAssetLocation(blueprint.rootLocation)
+      : jobLocations.get(job.blueprintLocationId) ?? jobLocations.get(job.locationId);
+    const blueprintLocation = preferredBlueprintLocation ?? jobLocations.get(job.locationId);
     if (
       !blueprintLocation ||
       (blueprintLocation.typeId !== undefined && shipTypeIds.has(blueprintLocation.typeId))
@@ -556,7 +554,7 @@ export async function GET(request: Request) {
       const location =
         index === 0
           ? blueprintLocation
-          : (rootLocations.get(job.outputLocationId) ?? rootLocations.get(job.locationId));
+          : (jobLocations.get(job.outputLocationId) ?? jobLocations.get(job.locationId));
       if (!location || (location.typeId !== undefined && shipTypeIds.has(location.typeId)))
         continue;
       addContribution(
@@ -575,9 +573,24 @@ export async function GET(request: Request) {
       );
     }
   }
-  return NextResponse.json({
+  markPhase("aggregate");
+  const payload = {
     locations: [...buckets.values()]
       .map((bucket) => ({ ...bucket, items: [...bucket.items.values()] }))
       .sort((left, right) => left.name.localeCompare(right.name)),
+  };
+  const totalMs = Math.round(performance.now() - startedAt);
+  const timingHeader = [`total;dur=${totalMs}`, ...Object.entries(phaseDurations).map(([name, duration]) => `${name};dur=${duration}`)].join(", ");
+  console.info("[state/stock] timing", {
+    totalMs,
+    phasesMs: phaseDurations,
+    characters: characterIds.length,
+    assets: assets.length,
+    jobs: jobs.length,
+    jobLocations: jobLocations.size,
+    locations: payload.locations.length,
   });
+  const response = NextResponse.json(payload);
+  response.headers.set("Server-Timing", timingHeader);
+  return response;
 }

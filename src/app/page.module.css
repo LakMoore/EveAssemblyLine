@@ -959,7 +959,7 @@
 
 .shipCard {
     display: grid;
-    grid-template-columns: 54px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 8px 12px;
     padding: 12px;
@@ -977,8 +977,9 @@
     background: #102f38
 }
 
-.shipCard .identity {
-    grid-row: span 2
+.shipCard > div:first-child {
+    grid-column: 1 / -1;
+    grid-row: auto
 }
 
 .shipCardMeta,
@@ -1013,6 +1014,10 @@
     margin: 7px 0 0
 }
 
+.shipModal > .panelHeader {
+    align-items: flex-start
+}
+
 .shipAssetGroups {
     display: grid;
     gap: 18px;
@@ -1040,10 +1045,31 @@
     border-top: 1px solid #183a44
 }
 
+.shipAssetLoadout {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 14px;
+    min-width: 0
+}
+
+.shipAssetItem {
+    display: flex;
+    flex: 1 1 0;
+    align-items: center;
+    gap: 7px;
+    min-width: 0
+}
+
+.shipAssetItem > div {
+    min-width: 0
+}
+
 .shipAssetQuantity {
+    margin-left: auto;
     flex: 0 0 auto;
     color: #d5e6e9;
-    font: 11px 'DM Mono'
+    font: 14px 'DM Mono'
 }
 
 @media (max-width: 640px) {

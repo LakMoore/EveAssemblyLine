@@ -12,6 +12,8 @@ import { getCharacter, upsertCharacter } from "@/lib/auth/tokensStore";
 
 const esiBaseUrl = process.env.ESI_BASE_URL ?? "https://esi.evetech.net/latest";
 const refreshLocks = new Map<string, Promise<TokenSet>>();
+const structureMetadataCache = new Map<number, { expiresAt: number; response: LocationMetadataResponse }>();
+const structureMetadataCacheTtlMs = 6 * 60 * 60 * 1000;
 let esiRateLimitedUntil = 0;
 
 export type EsiAssetLocation = {
@@ -94,6 +96,23 @@ type EsiUniverseName = {
   id: number;
   name: string;
   category: string;
+};
+
+type LocationMetadata = {
+  name: string;
+  type_id?: number;
+  system_id?: number;
+  solar_system_id?: number;
+  constellation_id?: number;
+  region_id?: number;
+  services?: Array<{ name: string; state: "online" | "offline" | "cleanup" }>;
+};
+
+type LocationMetadataResponse = {
+  data: LocationMetadata | null;
+  headers: Headers;
+  status: number;
+  fromCache: boolean;
 };
 
 async function getUsableToken(record: CharacterTokenRecord, purpose: "personal" | "corp") {
@@ -571,15 +590,12 @@ export async function fetchLocationMetadata(
       : kind === "solar_system"
         ? `/universe/systems/${locationId}/`
         : `/universe/structures/${locationId}/`;
-  return requestEsi<{
-    name: string;
-    type_id?: number;
-    system_id?: number;
-    solar_system_id?: number;
-    constellation_id?: number;
-    region_id?: number;
-    services?: Array<{ name: string; state: "online" | "offline" | "cleanup" }>;
-  }>(path, token);
+  if (kind !== "structure") return requestEsi<LocationMetadata>(path, token);
+  const cached = structureMetadataCache.get(locationId);
+  if (cached && cached.expiresAt > Date.now()) return { ...cached.response, fromCache: true };
+  const response = await requestEsi<LocationMetadata>(path, token);
+  if (response.data) structureMetadataCache.set(locationId, { expiresAt: Date.now() + structureMetadataCacheTtlMs, response });
+  return response;
 }
 
 export { getUsableToken };

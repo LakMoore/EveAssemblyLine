@@ -554,7 +554,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
   const remainingConsumption = new Map(consumedStock);
   const planningStock = request.stock ?? [];
   for (const stock of planningStock) {
-    if (!stock.sourceLocationId || stock.locationResolved === false) continue;
+    if (!stock.sourceLocationId) continue;
     const quantity = Math.min(stock.quantity, remainingConsumption.get(stock.typeId) ?? 0);
     if (quantity <= 0 || !request.locations || stock.sourceLocationId === request.locations.manufacturing) continue;
     remainingConsumption.set(stock.typeId, (remainingConsumption.get(stock.typeId) ?? 0) - quantity);
@@ -568,7 +568,6 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       fromLocationName: stock.sourceLocationName,
       ownerType: stock.ownerType,
       ownerId: stock.ownerId,
-      locationResolved: true,
     });
   }
   const result = {
@@ -576,7 +575,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       generatedAt: new Date().toISOString(),
       assetsLastUpdated: null,
       jobsLastUpdated: null,
-      unresolvedAssetCount: planningStock.filter((stock) => stock.locationResolved === false).length,
+      unresolvedAssetCount: planningStock.length,
       corporationAssetSources: [...new Set(planningStock.filter((stock) => stock.ownerType === "corporation").map((stock) => stock.ownerId).filter((id): id is number => id !== undefined))],
     },
     lists: {

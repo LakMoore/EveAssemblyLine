@@ -13,6 +13,7 @@ import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import { loadStructures } from "@/lib/planning/structureStore";
 import { loadCompressSettings, saveCompressSettings, type CompressMaterial, type CompressSettings } from "@/lib/planning/compressSettingsStore";
 import type { KnownStructure } from "@/lib/planning/preferences";
+import { loadClientStock } from "@/lib/client/requestCache";
 import styles from "./compress.module.css";
 import { marketHubs } from "@/lib/reference/marketHubs";
 
@@ -78,10 +79,17 @@ function CompressContent() {
   const [knownStructures, setKnownStructures] = useState<KnownStructure[]>([]);
   const [settings, setSettings] = useState<CompressSettings>({ locationId: "npc", characterId: "all-zero", implantId: "none", marketId: "jita", orderType: "buy-1-day", items: [] });
   const importedRef = useRef("");
+  const optionsLoadLanguageRef = useRef<SdeLanguage | null>(null);
 
   useEffect(() => {
-    Promise.all([loadStructures(), loadCompressSettings()]).then(async ([structures, loadedSettings]) => {
-      const loadedOptions = await fetch("/api/compress/options", { method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store", body: JSON.stringify({ language, structures: structures.filter((structure) => structure.typeId !== undefined && structure.rigTypeIds !== undefined && Number.isSafeInteger(structure.systemId) && structure.systemId > 0).map((structure) => ({ id: structure.id, type: structure.typeId, systemId: structure.systemId, rigs: structure.rigTypeIds })) }) }).then((response) => response.json() as Promise<CompressOptions>);
+    if (optionsLoadLanguageRef.current === language) return;
+    optionsLoadLanguageRef.current = language;
+    Promise.all([loadStructures(), loadCompressSettings(), loadClientStock(language)]).then(async ([structures, loadedSettings, stock]) => {
+      const loadedOptions = await fetch("/api/compress/options", { method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store", body: JSON.stringify({
+        language,
+        structures: structures.filter((structure) => structure.typeId !== undefined && structure.rigTypeIds !== undefined && Number.isSafeInteger(structure.systemId) && structure.systemId > 0).map((structure) => ({ id: structure.esiStructureId === undefined ? structure.id : `structure:${structure.esiStructureId}`, type: structure.typeId, systemId: structure.systemId, rigs: structure.rigTypeIds })),
+        assetLocations: (stock.locations ?? []).filter((location) => location.locationType !== "anchored").map(({ locationId, name, locationType, typeId, systemId }) => ({ locationId, name, locationType, ...(typeId === undefined ? {} : { typeId }), ...(systemId === undefined ? {} : { systemId }) })),
+      }) }).then((response) => response.json() as Promise<CompressOptions>);
       const structuresWithSecurity = structures.map((structure) => {
         const suppliedSecurityStatus = loadedOptions.locations.find((location) => location.id === structure.id)?.securityStatus;
         if (suppliedSecurityStatus !== undefined) return { ...structure, securityStatus: suppliedSecurityStatus };
@@ -111,7 +119,10 @@ function CompressContent() {
       setSettings(normalizedSettings);
       setItems(normalizedSettings.items);
       void saveCompressSettings(normalizedSettings);
-    }).catch(() => setStatus("Could not load compression options."));
+    }).catch(() => {
+      optionsLoadLanguageRef.current = null;
+      setStatus("Could not load compression options.");
+    });
   }, [language]);
 
   function updateSettings(next: Partial<CompressSettings>) {

@@ -34,6 +34,7 @@ const structureTypes: StructureType[] = [
   { name: "'Prometheus' Fortizar", size: "Large", typeId: 35833, sizeId: 3 },
   { name: "Upwell Palatine Keepstar", size: "Extra Large", typeId: 35834, sizeId: 4 },
 ];
+const structureTypeNames = new Map(structureTypes.map((structure) => [structure.typeId, structure.name]));
 const fallbackRigOptionsBySize: Record<StructureSize, string[]> = {
   Small: [
     "No Rig",
@@ -398,7 +399,9 @@ export default function LocationsPage() {
             systemId: location.systemId,
             systemName: location.systemName,
             securityStatus: location.securityStatus,
-            type: location.typeId ? `Type ${location.typeId}` : undefined,
+            type: location.typeId
+              ? structureTypeNames.get(location.typeId) ?? `Type ${location.typeId}`
+              : undefined,
             assetCount: location.assetCount,
             personalAssetCount: location.personalAssetCount,
             corporationAssetCount: location.corporationAssetCount,
