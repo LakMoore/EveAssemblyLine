@@ -14,7 +14,8 @@ import {
   loadClientMarketOrders,
   type ClientCharacterStatus,
 } from "@/lib/client/requestCache";
-import { Activity, Boxes, Factory, Image as ImageIcon, MapPinned, Minimize2, PanelLeftClose, PanelLeftOpen, Rocket, Settings2, UserRoundPlus, UsersRound } from "lucide-react";
+import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
+import { Activity, ArrowUp, Boxes, Factory, Image as ImageIcon, MapPinned, Minimize2, PanelLeftClose, PanelLeftOpen, Rocket, Settings2, UserRoundPlus, UsersRound } from "lucide-react";
 import styles from "./page.module.css";
 
 const languageStorageKey = "assembly-line-language";
@@ -58,7 +59,7 @@ function hasExpiredEndpoint(statuses: ClientCharacterStatus[]) {
     ];
     return endpoints.some((endpoint) => {
       if (!endpoint) return true;
-      if (endpoint.status === "error") return false;
+      if (endpoint.status === "error") return true;
       const now = Date.now();
       if (
         endpoint.status === "rate_limited" &&
@@ -69,6 +70,13 @@ function hasExpiredEndpoint(statuses: ClientCharacterStatus[]) {
       return endpoint.status === "stale" || !Number.isFinite(expiresAt) || expiresAt <= now;
     });
   });
+}
+
+function hasEndpointErrors(statuses: ClientCharacterStatus[]) {
+  return statuses.some((character) => [
+    ...stateEndpoints.map((endpoint) => character[endpoint]),
+    ...(character.corporations ?? []).flatMap((corporation) => stateEndpoints.map((endpoint) => corporation[endpoint])),
+  ].some((endpoint) => endpoint?.status === "error"));
 }
 
 const defaultPlannerSettings: PlannerSettings = {
@@ -101,10 +109,12 @@ export default function AppShell({
   const [isMobileMetaCollapsing, setIsMobileMetaCollapsing] = useState(false);
   const [stateStatuses, setStateStatuses] = useState<ClientCharacterStatus[]>([]);
   const [hasLoadedStateStatuses, setHasLoadedStateStatuses] = useState(false);
+  const [showSidebarScrollTop, setShowSidebarScrollTop] = useState(false);
   const [statusCheckAt, setStatusCheckAt] = useState(() => Date.now());
   const refreshAfterCharacterAdd = useRef(false);
   const mobileMetaCollapseTimer = useRef<number | null>(null);
   const mobileMetaCollapseAnimationTimer = useRef<number | null>(null);
+  const pilotListSentinelRef = useRef<HTMLSpanElement | null>(null);
   const language = localLanguage;
   const activePage: ActivePage = pathname === "/compress"
     ? "compress"
@@ -122,6 +132,31 @@ export default function AppShell({
                 ? "characters"
                 : "planner";
   const hasExpiredState = authenticated && characters.length > 0 && hasLoadedStateStatuses && statusCheckAt > 0 && hasExpiredEndpoint(stateStatuses);
+  const hasStateErrors = authenticated && characters.length > 0 && hasLoadedStateStatuses && hasEndpointErrors(stateStatuses);
+
+  useEffect(() => {
+    const pilotListSentinel = pilotListSentinelRef.current;
+    if (!pilotListSentinel) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      const sentinelIsAboveViewport = entry.rootBounds
+        ? entry.boundingClientRect.bottom < entry.rootBounds.top
+        : false;
+      setShowSidebarScrollTop(sentinelIsAboveViewport);
+    });
+    const handleScroll = () => {
+      if (window.scrollY === 0) setShowSidebarScrollTop(false);
+    };
+    observer.observe(pilotListSentinel);
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("scroll", handleScroll);
+    };
+  }, [characters.length]);
+
+  function scrollSidebarToTop() {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   useEffect(() => {
     loadClientSession()
@@ -284,7 +319,7 @@ export default function AppShell({
   const handleMobileMetaAction = useCallback(async () => {
     setIsMobileMetaExpanded(true);
     setIsMobileMetaCollapsing(false);
-    if (authenticated && hasExpiredState) {
+    if (authenticated) {
       await refreshData();
     }
     scheduleMobileMetaCollapse();
@@ -371,9 +406,11 @@ export default function AppShell({
               onClick={() => void handleMobileMetaAction()}
               disabled={isRefreshingData}
               aria-label={hasExpiredState ? "Refresh data" : "Up to date"}
-              title={hasExpiredState ? "Refresh data" : "Up to date"}
+              title={hasStateErrors ? "Refresh data; one or more endpoints failed" : hasExpiredState ? "Refresh data" : "Up to date"}
             >
-              {hasExpiredState ? (
+              {hasStateErrors ? (
+                <span className={styles.refreshIconError} aria-hidden="true">!</span>
+              ) : hasExpiredState ? (
                 <span className={styles.refreshIconWarning} aria-hidden="true">↻</span>
               ) : (
                 <span className={styles.refreshStatusDot} aria-hidden="true" />
@@ -399,6 +436,17 @@ export default function AppShell({
           >
             {isSidebarCollapsed ? <PanelLeftOpen size={16} strokeWidth={1.8} aria-hidden="true" /> : <PanelLeftClose size={16} strokeWidth={1.8} aria-hidden="true" />}
           </button>
+          {showSidebarScrollTop && (
+            <button
+              type="button"
+              className={styles.sidebarScrollTop}
+              aria-label="Scroll to top"
+              title="Scroll to top"
+              onClick={scrollSidebarToTop}
+            >
+              <ArrowUp size={16} strokeWidth={1.8} aria-hidden="true" />
+            </button>
+          )}
           <div className={styles.sectionLabel}>WORKSPACE</div>
           <Link
             className={`${styles.navItem} ${activePage === "planner" ? styles.navActive : ""}`}
@@ -476,7 +524,10 @@ export default function AppShell({
               {characters.map((character, index) => (
                 <div className={styles.pilot} key={character.characterId}>
                   <span className={`${styles.pilotDot} ${index > 0 ? styles.pilotAlt : ""}`}>
-                    {character.characterName.slice(0, 2).toUpperCase()}
+                    <img
+                      src={eveCharacterPortraitUrl(character.characterId, 64)}
+                      alt=""
+                    />
                   </span>
                   <span className={styles.navText}>
                     <strong>{character.characterName}</strong>
@@ -489,6 +540,7 @@ export default function AppShell({
                   <i />
                 </div>
               ))}
+              <span className={styles.sidebarSentinel} ref={pilotListSentinelRef} aria-hidden="true" />
             </div>
             <div className={styles.sidebarFooter}>
               <span

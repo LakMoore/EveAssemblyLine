@@ -23,6 +23,7 @@ import type { SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import { useAppLanguage } from "./AppShell";
 import TypeIdentity from "./components/TypeIdentity";
+import { useToast } from "./components/ToastProvider";
 import styles from "./page.module.css";
 import { ChartLine, Clipboard, Copy as CopyIcon, Factory, Minimize2, Microscope, TestTubes } from "lucide-react";
 
@@ -34,7 +35,7 @@ type BuildItem = {
   quantity: number;
   me: number;
   te: number;
-  category?: "blueprint" | "bpo" | "bpc" | "reaction" | "item";
+  category?: "blueprint" | "bp" | "bpo" | "bpc" | "reaction" | "item";
 };
 type TypeResult = { name: string; typeId: number; category?: BuildItem["category"] };
 type PasteResult = {
@@ -46,12 +47,13 @@ type PasteResult = {
 };
 
 function AvailableSourceIcons({
-  icons,
   counts,
 }: {
-  icons?: PlanSourceIcon[];
   counts?: PlanSourceCounts;
 }) {
+  const icons = (Object.keys(counts ?? {}) as PlanSourceIcon[]).filter(
+    (icon) => (counts?.[icon] ?? 0) > 0,
+  );
   if (!icons?.length) return null;
   return (
     <span className={styles.availableSourceIcons} aria-label="Available sources">
@@ -167,6 +169,7 @@ export default function Home() {
   const resultsHeaderRef = useRef<HTMLDivElement>(null);
   const stockLoadPromiseRef = useRef<Promise<StockRecord[]> | null>(null);
   const { language } = useAppLanguage();
+  const { showToast } = useToast();
   const [isBuildListLoaded, setIsBuildListLoaded] = useState(false);
   const [isStockLoaded, setIsStockLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState<PlannerTab>("Plan");
@@ -221,7 +224,9 @@ export default function Home() {
     loadCachedStock();
     const handleRefresh = () => {
       setIsStockLoaded(false);
-      loadStockRecords().finally(
+      const stockLoad = loadStockRecords();
+      stockLoadPromiseRef.current = stockLoad;
+      stockLoad.finally(
         () => setIsStockLoaded(true)
       );
     };
@@ -242,14 +247,110 @@ export default function Home() {
       const stockLoad = stockLoadPromiseRef.current ?? loadStockRecords();
       stockLoadPromiseRef.current = stockLoad;
       const localRecords = await stockLoad;
-      const requestedStock = localRecords.flatMap((record) => record.items);
+      const assets = {
+        items: [],
+        blueprints: [],
+        industry: [],
+        market: [],
+      } as {
+        items: Array<{ typeId: number; locationId: number; rootLocationId: number; quantity: number }>;
+        blueprints: Array<{
+          itemId?: number;
+          typeId: number;
+          type: "bpc" | "bpo";
+          locationId: number;
+          rootLocationId: number;
+          quantity: number;
+          runs: number;
+          me?: number;
+          te?: number;
+        }>;
+        industry: Array<{
+          jobId: number;
+          blueprintId?: number;
+          typeId: number;
+          blueprintTypeId?: number;
+          locationId: number;
+          rootLocationId: number;
+          quantity: number;
+          runs: number;
+          activity: string;
+          blueprintRunsAtInstall?: number;
+          licensedRuns?: number;
+        }>;
+        market: Array<{ typeId: number; locationId: number; rootLocationId: number; quantity: number }>;
+      };
+      const industryByJobId = new Map<number, (typeof assets.industry)[number]>();
+      for (const record of localRecords) {
+        for (const item of record.items) {
+          const recordLocationId = record.structureId ? Number(record.structureId) : undefined;
+          const locationId = item.locationId ?? recordLocationId;
+          const rootLocationId = item.rootLocationId ?? recordLocationId;
+          if (locationId === undefined || rootLocationId === undefined || !Number.isInteger(locationId) || !Number.isInteger(rootLocationId)) continue;
+          const location = { locationId, rootLocationId };
+          const jobActivity = item.activityName ?? item.blueprintPrints?.find(
+            (print) => print.activity === "Copying" || print.activity === "Invention",
+          )?.activity ?? (
+            item.inBuild &&
+            item.jobId !== undefined &&
+            item.typeId !== item.blueprintTypeId
+              ? "Manufacturing"
+              : undefined
+          );
+          if (record.source === "marketOrder" || item.source === "marketOrder") {
+            assets.market.push({ typeId: item.typeId, ...location, quantity: item.quantity });
+            continue;
+          }
+          if (item.inBuild && item.jobId !== undefined && jobActivity !== undefined) {
+            const industryRow = {
+              jobId: item.jobId,
+              blueprintId: item.blueprintId,
+              typeId: item.typeId,
+              blueprintTypeId: item.blueprintTypeId,
+              ...location,
+              quantity: item.inBuildQuantity ?? item.quantity,
+              runs: item.jobRuns ?? item.quantity,
+              activity: jobActivity,
+              blueprintRunsAtInstall: item.blueprintRunsAtInstall,
+              licensedRuns: item.licensedRuns,
+            };
+            const existingIndustryRow = industryByJobId.get(item.jobId);
+            const isOutputRow = item.typeId !== item.blueprintTypeId;
+            const shouldReplace = !existingIndustryRow ||
+              (isOutputRow && existingIndustryRow.typeId === existingIndustryRow.blueprintTypeId);
+            if (shouldReplace) industryByJobId.set(item.jobId, industryRow);
+          }
+          if (item.category === "bp" && item.type) {
+            for (const print of item.blueprintPrints ?? []) {
+              assets.blueprints.push({
+                itemId: print.itemId,
+                typeId: item.typeId,
+                type: print.type,
+                ...location,
+                quantity: 1,
+                runs: print.runs,
+                me: print.me,
+                te: print.te,
+              });
+            }
+            continue;
+          }
+          const directQuantity = item.inBuild
+            ? Math.max(0, item.quantity - (item.inBuildQuantity ?? 0))
+            : item.quantity;
+          if (directQuantity > 0) {
+            assets.items.push({ typeId: item.typeId, ...location, quantity: directQuantity });
+          }
+        }
+      }
+      assets.industry.push(...industryByJobId.values());
       const response = await fetch("/api/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           language,
-          items,
-          assets: requestedStock,
+          toBuild: items.map(({ typeId, quantity, me, te }) => ({ typeId, quantity, me, te })),
+          assets,
           locations,
           settings: {
             includeCorporationAssets: settings.includeCorporationAssets,
@@ -299,6 +400,17 @@ export default function Home() {
     setIsPasteModalOpen(false);
   }
 
+  async function copyBuildList() {
+    try {
+      await navigator.clipboard.writeText(
+        items.map((item) => `${item.name}\t${item.quantity}`).join("\n"),
+      );
+      showToast("Build list multibuy copied");
+    } catch {
+      showToast("Could not copy build list multibuy");
+    }
+  }
+
   return (
     <>
       <div className={styles.pageIntro}>
@@ -318,14 +430,25 @@ export default function Home() {
                 <p className={styles.panelKicker} ref={requirementsHeaderRef}>01 / REQUIREMENTS</p>
                 <h2>Build list</h2>
               </div>
-              <button
-                type="button"
-                className={`actionButton ${styles.importButton}`}
-                onClick={() => setIsPasteModalOpen(true)}
-              >
-                <Clipboard aria-hidden="true" />
-                <span>Paste list</span>
-              </button>
+              <div className={styles.panelHeaderActions}>
+                <button
+                  type="button"
+                  className={`actionButton ${styles.importButton}`}
+                  onClick={() => setIsPasteModalOpen(true)}
+                >
+                  <Clipboard aria-hidden="true" />
+                  <span>Paste list</span>
+                </button>
+                <button
+                  type="button"
+                  className={`actionButton ${styles.importButton}`}
+                  onClick={() => void copyBuildList()}
+                  disabled={items.length === 0}
+                >
+                  <CopyIcon aria-hidden="true" />
+                  <span>Copy list</span>
+                </button>
+              </div>
             </div>
             <p className={styles.panelDescription}>What are you making?</p>
             <TypeSearch
@@ -927,6 +1050,12 @@ function PlanList({
           const isBlueprintName = / blueprint$/i.test(name);
           const isReactionFormulaName = / formula$/i.test(name);
           const isPlanReaction = "kind" in entry && entry.kind === "reaction";
+          const planBlueprintVariation =
+            activeTab === "Plan" && (isPlanBpc || isBlueprintName)
+              ? isPlanBpc && entry.bpoCount > 0
+                ? "bp"
+                : "bpc"
+              : null;
           const detail =
             "fromLocationId" in entry && activeTab !== "Buy"
               ? `From ${entry.fromLocationId} to ${entry.toLocationId}`
@@ -959,7 +1088,8 @@ function PlanList({
                           ? `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
                           : "";
           const imageVariation =
-            "imageVariation" in entry && entry.imageVariation
+            planBlueprintVariation ??
+            ("imageVariation" in entry && entry.imageVariation
               ? entry.imageVariation === "icon" && isBlueprintName
                 ? "bp"
                 : entry.imageVariation === "icon" && isReactionFormulaName
@@ -979,7 +1109,7 @@ function PlanList({
                     activeTab === "Copy" ||
                     activeTab === "Invent"
                   ? "bpc"
-                  : "icon";
+                  : "icon");
           const planCells =
             activeTab === "Plan"
               ? getPlanCells(entry as PlanResult["lists"]["planItems"][number])
@@ -1005,9 +1135,6 @@ function PlanList({
                       <span className={styles.planTableValue}>
                         {column === "Available" && (
                           <AvailableSourceIcons
-                            icons={
-                              "availableSourceIcons" in entry ? entry.availableSourceIcons : undefined
-                            }
                             counts={
                               "availableSourceCounts" in entry ? entry.availableSourceCounts : undefined
                             }

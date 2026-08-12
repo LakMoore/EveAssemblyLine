@@ -57,7 +57,6 @@ type OwnerCache = {
 
 const characterCaches = new Map<number, OwnerCache>();
 const corporationCaches = new Map<number, OwnerCache>();
-const corporationDirectorRotation = new Map<number, number>();
 
 function hasUsableMarketOrders(cache: OwnerCache | undefined) {
   const marketOrders = cache?.marketOrders;
@@ -588,24 +587,7 @@ export async function refreshCharacterState(
   characterIds: number[],
 ) {
   const characters = await getCharacters();
-  const selectedCorpDirectors = new Map<number, number>();
-  const directorsByCorporation = new Map<number, number[]>();
-  for (const character of characters) {
-    if (
-      !characterIds.includes(character.characterId) ||
-      !character.corpAuthCompleted ||
-      !character.hasDirectorRole ||
-      !character.corporationId
-    ) continue;
-    const directors = directorsByCorporation.get(character.corporationId) ?? [];
-    directors.push(character.characterId);
-    directorsByCorporation.set(character.corporationId, directors);
-  }
-  for (const [corporationId, directors] of directorsByCorporation) {
-    const offset = corporationDirectorRotation.get(corporationId) ?? 0;
-    selectedCorpDirectors.set(corporationId, directors[offset % directors.length]);
-    corporationDirectorRotation.set(corporationId, offset + 1);
-  }
+  const refreshedCorporationIds = new Set<number>();
   const summary: {
     characterId: number;
     assets?: EndpointCache<AssetRecord[] | null>;
@@ -774,8 +756,9 @@ export async function refreshCharacterState(
       character.corpAuthCompleted &&
       character.hasDirectorRole &&
       character.corporationId &&
-      selectedCorpDirectors.get(character.corporationId) === character.characterId
+      !refreshedCorporationIds.has(character.corporationId)
     ) {
+      refreshedCorporationIds.add(character.corporationId);
       const corpCache = getCache(corporationCaches, character.corporationId);
       const corpSummary: {
         corporationId: number;

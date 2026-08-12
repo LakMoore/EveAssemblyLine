@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { GitMerge, Plus, Trash2, X } from "lucide-react";
+import { GitMerge, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { languageStorageKey } from "../AppShell";
 import { replaceEsiStock, replaceMarketOrderStock } from "@/lib/planning/stockStore";
 import { defaultSettings, settingsStorageKey } from "@/lib/planning/preferences";
@@ -63,7 +63,7 @@ function renderedStatus(status: EndpointStatus | undefined): EndpointStatus | un
 function statusLabel(status: EndpointStatus | undefined, noAccess = false) {
   if (noAccess) return "No Access";
   const currentStatus = renderedStatus(status);
-  if (currentStatus?.status === "error") return "No permission";
+  if (currentStatus?.status === "error") return "Reauthorize required";
   if (!currentStatus || currentStatus.lastBody === null || currentStatus.lastBody === undefined) return "Unknown";
   if (
     currentStatus.status !== "rate_limited" &&
@@ -275,6 +275,16 @@ export default function CharactersPage() {
     return { corporationId: corporationId!, corporationName: pilots[0]?.corporationName, pilots, eligible, status: corpStatuses[0]?.assets };
   });
   const scopes = missingScopes(statuses);
+  const hasAuthorizationErrors = statuses.some((status) => [
+    status.assets,
+    status.jobs,
+    status.orders,
+    ...(status.corporations ?? []).flatMap((corporation) => [
+      corporation.assets,
+      corporation.jobs,
+      corporation.orders,
+    ]),
+  ].some((endpoint) => endpoint?.status === "error"));
 
   return (
     <>
@@ -286,6 +296,7 @@ export default function CharactersPage() {
         </Link>
       </div>
       {error && <p role="alert" className={styles.importError}>{error}</p>}
+      {hasAuthorizationErrors && <p role="alert" className={styles.importError}>EVE authorization has expired for one or more connected characters. Reauthorize the affected character to restore assets, jobs, and orders. <Link href="/api/auth/eve/start">Reauthorize character</Link></p>}
       {scopes.length > 0 && <p role="alert" className={styles.importError}>EVE authorization is missing {scopes.join(", ")}. Reconnect the affected character to grant this scope.</p>}
       <section className={styles.panel}>
         <div className={styles.panelHeader}>
@@ -299,9 +310,19 @@ export default function CharactersPage() {
             <div className={styles.characterTableHeader}><span>PILOT</span><span>ASSETS</span><span>JOBS</span><span>ORDERS</span><span /></div>
             {characters.map((character) => {
               const status = statuses.find((entry) => entry.characterId === character.characterId);
+              const hasAuthorizationError = [
+                status?.assets,
+                status?.jobs,
+                status?.orders,
+                ...(status?.corporations ?? []).flatMap((corporation) => [
+                  corporation.assets,
+                  corporation.jobs,
+                  corporation.orders,
+                ]),
+              ].some((endpoint) => endpoint?.status === "error");
               const hasCorpAccess = character.corpAuthCompleted && character.hasDirectorRole;
               return <div
-                className={styles.characterRow}
+                className={`${styles.characterRow} ${hasAuthorizationError ? styles.characterRowWithReauthorize : ""}`}
                 key={character.characterId}
                 role="button"
                 tabIndex={0}
@@ -321,17 +342,29 @@ export default function CharactersPage() {
                 <span className={styles.statusCell} title={`Assets: ${availabilityLabel(status?.assets)}${status?.assets?.error ? `; ${status.assets.error}` : ""}${status?.assets?.lastModified ? `; modified ${formatDate(status.assets.lastModified)}` : ""}`}><small className={styles.endpointName}>ASSETS</small><span className={`${styles.statusDot} ${statusClass(status?.assets)}`} /><small className={styles.endpointState}>{statusLabel(status?.assets)}</small><small className={styles.statusDate}><span className={styles.availabilityWide}>{availabilityLabel(status?.assets)}</span><span className={styles.availabilityNarrow}>{availabilityLabel(status?.assets).replace(/^Available /, "")}</span></small></span>
                   <span className={styles.statusCell} title={`Jobs: ${availabilityLabel(status?.jobs)}${status?.jobs?.error ? `; ${status.jobs.error}` : ""}${status?.jobs?.lastModified ? `; modified ${formatDate(status.jobs.lastModified)}` : ""}`}><small className={styles.endpointName}>JOBS</small><span className={`${styles.statusDot} ${statusClass(status?.jobs)}`} /><small className={styles.endpointState}>{statusLabel(status?.jobs)}</small><small className={styles.statusDate}><span className={styles.availabilityWide}>{availabilityLabel(status?.jobs)}</span><span className={styles.availabilityNarrow}>{availabilityLabel(status?.jobs).replace(/^Available /, "")}</span></small></span>
                   <span className={styles.statusCell} title={`Orders: ${availabilityLabel(status?.orders)}${status?.orders?.error ? `; ${status.orders.error}` : ""}${status?.orders?.lastModified ? `; modified ${formatDate(status.orders.lastModified)}` : ""}`}><small className={styles.endpointName}>ORDERS</small><span className={`${styles.statusDot} ${statusClass(status?.orders)}`} /><small className={styles.endpointState}>{statusLabel(status?.orders)}</small><small className={styles.statusDate}><span className={styles.availabilityWide}>{availabilityLabel(status?.orders)}</span><span className={styles.availabilityNarrow}>{availabilityLabel(status?.orders).replace(/^Available /, "")}</span></small></span>
-                <button
-                  type="button"
-                  className={`actionButton ${styles.characterRemove}`}
-                  onClick={(event) => { event.stopPropagation(); void removeCharacter(character); }}
-                  disabled={removingId === character.characterId}
-                  aria-label={removingId === character.characterId ? "Removing character" : `Remove ${character.characterName}`}
-                  title={removingId === character.characterId ? "Removing character" : "Remove character"}
-                >
-                  <Trash2 aria-hidden="true" strokeWidth={1.8} />
-                  <span>{removingId === character.characterId ? "Removing..." : "Remove"}</span>
-                </button>
+                <span className={styles.characterActions}>
+                  {hasAuthorizationError && <button
+                    type="button"
+                    className={`actionButton ${styles.characterReauthorize}`}
+                    onClick={(event) => { event.stopPropagation(); window.location.assign("/api/auth/eve/start"); }}
+                    aria-label={`Re-authorise ${character.characterName}`}
+                    title="Re-authorise character"
+                  >
+                    <RotateCcw aria-hidden="true" strokeWidth={1.8} />
+                    <span>Re-authorise</span>
+                  </button>}
+                  <button
+                    type="button"
+                    className={`actionButton ${styles.characterRemove}`}
+                    onClick={(event) => { event.stopPropagation(); void removeCharacter(character); }}
+                    disabled={removingId === character.characterId}
+                    aria-label={removingId === character.characterId ? "Removing character" : `Remove ${character.characterName}`}
+                    title={removingId === character.characterId ? "Removing character" : "Remove character"}
+                  >
+                    <Trash2 aria-hidden="true" strokeWidth={1.8} />
+                    <span>{removingId === character.characterId ? "Removing..." : "Remove"}</span>
+                  </button>
+                </span>
               </div>;
             })}
           </>

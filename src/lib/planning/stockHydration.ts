@@ -21,8 +21,8 @@ export async function hydrateStockCategories(items: PlanStockItem[]) {
 
     const categorized = categorizeType(type, "en", marketGroups, groups);
     const category: NonNullable<PlanStockItem["category"]> = categorized.category === "blueprint"
-      ? item.runCount === -1 ? "bpo" : "bpc"
+      ? item.category === "bp" ? "bp" : item.type === "bpo" ? "bpo" : "bpc"
       : categorized.category;
-    return { ...item, category };
+    return { ...item, category, ...(category === "bp" && !item.type ? { type: "bpc" as const } : {}) };
   });
 }

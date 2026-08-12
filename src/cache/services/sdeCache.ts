@@ -238,6 +238,17 @@ export async function getBuildBlueprintByProductTypeId(
   );
 }
 
+export async function getBlueprintById(typeId: number): Promise<BlueprintsRecord | null> {
+  return (
+    (await getDerivedMapValue(
+      "byBlueprintId",
+      typeId,
+      getBlueprintIndexes,
+      (indexes) => indexes.byBlueprintId,
+    )) ?? null
+  );
+}
+
 export async function getBlueprintsByInventionProductId(typeId: number) {
   return (
     (await getDerivedMapValue(

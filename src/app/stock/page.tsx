@@ -740,12 +740,14 @@ function ViewItemsModal({
   const [openReactionTypeId, setOpenReactionTypeId] = useState<number | null>(null);
   const blueprintCounts = new Map<number, { bpo: number; bpc: number; runs: number }>();
   for (const item of location.items) {
-    if (item.category !== "bpo" && item.category !== "bpc") continue;
+    if (item.category !== "bp" && item.category !== "bpo" && item.category !== "bpc") continue;
     const counts = blueprintCounts.get(item.typeId) ?? { bpo: 0, bpc: 0, runs: 0 };
-    if (item.category === "bpo") counts.bpo += item.quantity;
+    if (item.type === "bpo" || item.category === "bpo") counts.bpo += item.quantity;
     else {
       counts.bpc += item.quantity;
-      if (item.runCount !== undefined && item.runCount >= 0) counts.runs += item.runCount;
+      counts.runs += (item.blueprintPrints ?? [])
+        .filter((print) => print.type === "bpc" && print.runs >= 0)
+        .reduce((total, print) => total + print.runs, 0);
     }
     blueprintCounts.set(item.typeId, counts);
   }
@@ -753,7 +755,7 @@ function ViewItemsModal({
     if (filter.kind === "all") return true;
     if (filter.kind === "market") return item.marketCategory === filter.value;
     return filter.value === "bpc"
-      ? item.category === "bpo" || item.category === "bpc"
+      ? item.category === "bp" || item.category === "bpo" || item.category === "bpc"
       : (item.category ?? "item") === filter.value;
   });
   const displayItems: Array<{
@@ -877,7 +879,7 @@ function ViewItemsModal({
                     };
 
                     for (const blueprint of blueprints) {
-                      const kind = blueprint.category === "bpo" ? "BPO" : "BPC";
+                      const kind = blueprint.type === "bpo" || blueprint.category === "bpo" ? "BPO" : "BPC";
                       const source = blueprint.inBuild
                         ? blueprint.activityName === "Invention" && !blueprint.blueprintPrints?.length
                           ? "In Progress"
@@ -902,8 +904,8 @@ function ViewItemsModal({
                         kind,
                         source,
                         copies: blueprint.quantity,
-                        ...(kind === "BPC" && blueprint.runCount !== undefined
-                          ? { runs: blueprint.runCount }
+                        ...(kind === "BPC"
+                          ? { runs: (blueprint.blueprintPrints ?? []).reduce((total, print) => total + Math.max(0, print.runs), 0) }
                           : {}),
                         ...(source === "In Progress"
                           ? { estimated: true }
@@ -1246,9 +1248,7 @@ function mergeItems(existing: StockItem[], imported: StockItem[]) {
     );
     if (current) {
       current.quantity += item.quantity;
-      if (item.runCount !== undefined) {
-        current.runCount = (current.runCount ?? 0) + item.runCount;
-      }
+      current.type ??= item.type;
       current.me ??= item.me;
       current.te ??= item.te;
       if (item.blueprintPrints) {

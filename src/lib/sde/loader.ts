@@ -28,6 +28,7 @@ const blueprintByBuildProductTypeId = new Map<
   number,
   { activity: "manufacturing" | "reaction"; blueprint: BlueprintsRecord }
 >();
+const blueprintById = new Map<number, BlueprintsRecord>();
 const blueprintByInventionProductId = new Map<number, BlueprintsRecord[]>();
 const productByTypeId = new Map<number, BlueprintsRecordActivitiesManufacturingProductsItem[]>();
 const materialsByBlueprintId = new Map<
@@ -117,6 +118,7 @@ export function getMarketGroups() {
 export function getBlueprints() {
   return getOnce("blueprints", () => {
     for (const record of records<BlueprintsRecord>("blueprints.json")) {
+      blueprintById.set(record._key, record);
       const manufacturing = record.activities.manufacturing;
       if (manufacturing?.materials)
         materialsByBlueprintId.set(record._key, manufacturing.materials);
@@ -158,6 +160,7 @@ export function getBlueprints() {
     }
     return {
       byBuildProductTypeId: blueprintByBuildProductTypeId,
+      byBlueprintId: blueprintById,
       byInventionProductId: blueprintByInventionProductId,
       productByTypeId,
       materialsByBlueprintId,

@@ -6,26 +6,75 @@ export interface BuildItem {
   quantity: number;
   me: number;
   te: number;
-  category?: "blueprint" | "bpo" | "bpc" | "reaction" | "item";
+  category?: "blueprint" | "bp" | "bpo" | "bpc" | "reaction" | "item";
+}
+
+export interface PlanBuildInput {
+  typeId: number;
+  quantity: number;
+  me: number;
+  te: number;
+}
+
+export interface PlanAssetLocation {
+  locationId: number;
+  rootLocationId: number;
+}
+
+export interface PlanItemInput extends PlanAssetLocation {
+  typeId: number;
+  quantity: number;
+}
+
+export interface PlanBlueprintInput extends PlanAssetLocation {
+  itemId?: number;
+  typeId: number;
+  type: "bpc" | "bpo";
+  quantity: number;
+  runs: number;
+  me?: number;
+  te?: number;
+}
+
+export interface PlanIndustryInput extends PlanAssetLocation {
+  jobId: number;
+  blueprintId?: number;
+  typeId: number;
+  quantity: number;
+  runs: number;
+  activity: string;
+  blueprintTypeId?: number;
+  blueprintRunsAtInstall?: number;
+  licensedRuns?: number;
+}
+
+export interface PlanMarketInput extends PlanAssetLocation {
+  typeId: number;
+  quantity: number;
 }
 
 export interface PlanStockItem {
   typeId: number;
   name: string;
   quantity: number;  // this is the number of items in the stack (not the number of runs)
+  locationId?: number;
+  rootLocationId?: number;
   techLevel?: number;
-  runCount?: number;
+  type?: "bpo" | "bpc";
   blueprintPrints?: BlueprintPrint[];
   sourceLocationId?: number;
   sourceLocationName?: string;
   ownerType?: "character" | "corporation";
   ownerId?: number;
   locationResolved?: boolean;
-  category?: "blueprint" | "bpo" | "bpc" | "reaction" | "item";
+  category?: "blueprint" | "bp" | "bpo" | "bpc" | "reaction" | "item";
   inBuild?: boolean;
   inBuildQuantity?: number;
+  jobId?: number;
+  blueprintTypeId?: number;
   blueprintIsOriginal?: boolean;
   blueprintRunsAtInstall?: number;
+  licensedRuns?: number;
   activityName?: string;
   jobRuns?: number;
   source?: "marketOrder";
@@ -34,6 +83,7 @@ export interface PlanStockItem {
 export interface BlueprintPrint {
   itemId: number;
   runs: number;
+  type: "bpo" | "bpc";
   me?: number;
   te?: number;
   activity?: string;
@@ -42,9 +92,14 @@ export interface BlueprintPrint {
 
 export interface PlanRequest {
   language?: SdeLanguage;
-  items: BuildItem[];
+  toBuild: PlanBuildInput[];
+  assets: {
+    items: PlanItemInput[];
+    blueprints: PlanBlueprintInput[];
+    industry: PlanIndustryInput[];
+    market: PlanMarketInput[];
+  };
   stock?: PlanStockItem[];
-  assets?: PlanStockItem[];
   locations?: { manufacturing: number; reactions: number; market: number };
   settings: {
     includeCorporationAssets: boolean;
@@ -57,6 +112,11 @@ export interface PlanRequest {
     defaultTe: number;
   };
 }
+
+export type PlannerRequest = Omit<PlanRequest, "toBuild" | "assets"> & {
+  items: BuildItem[];
+  stock: PlanStockItem[];
+};
 
 export type PlanSourceIcon = "market" | "industry" | "invention" | "copying";
 export type PlanSourceCounts = Partial<Record<PlanSourceIcon, number>>;
@@ -81,7 +141,6 @@ export interface PlanResult {
           stockRuns: number;
           buyQuantity: number;
           bpoCount: number;
-          availableSourceIcons?: PlanSourceIcon[];
           availableSourceCounts?: PlanSourceCounts;
         }
       | {
@@ -90,7 +149,6 @@ export interface PlanResult {
           name: string;
           runsNeeded: number;
           availableQuantity: number;
-          availableSourceIcons?: PlanSourceIcon[];
           availableSourceCounts?: PlanSourceCounts;
         }
     >;
@@ -107,7 +165,6 @@ export interface PlanResult {
       remainingStockQuantity: number;
       remainingProductionQuantity: number;
       fromMarketOrder?: boolean;
-      availableSourceIcons?: PlanSourceIcon[];
       availableSourceCounts?: PlanSourceCounts;
       imageVariation?: "icon" | "bp" | "bpc";
       locationId?: number;
@@ -121,7 +178,6 @@ export interface PlanResult {
       stockRuns: number;
       buyQuantity: number;
       bpoCount: number;
-      availableSourceIcons?: PlanSourceIcon[];
       availableSourceCounts?: PlanSourceCounts;
     }>;
     bpcsToBuy: Array<{
@@ -133,7 +189,6 @@ export interface PlanResult {
       stockRuns: number;
       buyQuantity: number;
       bpoCount: number;
-      availableSourceIcons?: PlanSourceIcon[];
       availableSourceCounts?: PlanSourceCounts;
     }>;
     inventionJobs: Array<{ typeId: number; name: string; runs: number; locationId?: number }>;

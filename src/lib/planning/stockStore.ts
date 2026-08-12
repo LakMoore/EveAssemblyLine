@@ -9,17 +9,19 @@ export type StockLocation = {
 };
 
 export type StockItem = Pick<BuildItem, "typeId" | "name" | "quantity"> & {
+  locationId?: number;
+  rootLocationId?: number;
   source?: "marketOrder";
   marketOrderQuantity?: number;
   isPackaged?: boolean;
-  runCount?: number;
+  type?: "bpo" | "bpc";
   me?: number;
   te?: number;
   blueprintPrints?: BlueprintPrint[];
   assembledVolume?: number;
   packagedVolume?: number;
   techLevel?: number;
-  category?: "blueprint" | "bpo" | "bpc" | "reaction" | "item";
+  category?: "blueprint" | "bp" | "bpo" | "bpc" | "reaction" | "item";
   marketCategory?: string;
   inBuild?: boolean;
   inBuildQuantity?: number;
@@ -32,6 +34,7 @@ export type StockItem = Pick<BuildItem, "typeId" | "name" | "quantity"> & {
   blueprintTypeId?: number;
   blueprintIsOriginal?: boolean;
   blueprintRunsAtInstall?: number;
+  licensedRuns?: number;
   blueprintRunsUsed?: number;
   blueprintRunsRemaining?: number;
   activityName?: string;
