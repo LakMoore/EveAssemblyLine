@@ -641,6 +641,10 @@ export async function refreshCharacterState(
             undefined,
             cache.allAssetsRaw,
             `/characters/${character.characterId}`,
+            true,
+            false,
+            false,
+            true,
           );
         }
       } else {
@@ -798,6 +802,10 @@ export async function refreshCharacterState(
               undefined,
               corpCache.allAssetsRaw,
               `/corporations/${character.corporationId}`,
+              true,
+              false,
+              false,
+              true,
             );
           }
         } else {
