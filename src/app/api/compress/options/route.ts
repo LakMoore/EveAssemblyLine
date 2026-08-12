@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionFromRequest } from "@/lib/auth/session";
+import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
 import { getCharacters } from "@/lib/auth/tokensStore";
 import { getDogmaAttributes, getGroups, getStations, getSystems, getTypeDogma, getTypes } from "@/cache/services/sdeCache";
 import { requestEsi, fetchLocationMetadata, getUsableToken } from "@/lib/esi/client";
@@ -51,7 +51,8 @@ async function getOptions(request: Request, language: SdeLanguage, suppliedStruc
     })
     .filter((location): location is NonNullable<typeof location> => location !== null);
   const session = await getSessionFromRequest(request);
-  const records = session ? (await getCharacters()).filter((record) => session.characterIds.includes(record.characterId)) : [];
+  const characterIds = session ? await getSessionCharacterIds(session) : [];
+  const records = session ? (await getCharacters()).filter((record) => characterIds.includes(record.characterId)) : [];
   const structureTokens = (await Promise.all(records.flatMap((record) => [getUsableToken(record, "personal"), ...(record.corpAuth ? [getUsableToken(record, "corp")] : [])].map((promise) => promise.catch(() => null))))).filter((token): token is NonNullable<typeof token> => token !== null);
   const resolvedStructures = await Promise.all(assetStructures.map(async (location) => {
     const metadata = await Promise.all(structureTokens.map((token) => fetchLocationMetadata(Number(location.id.slice("structure:".length)), "structure", token).catch(() => null)));

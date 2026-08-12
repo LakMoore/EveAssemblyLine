@@ -1,16 +1,17 @@
 import { NextResponse } from "next/server";
-import { getSessionFromRequest } from "@/lib/auth/session";
+import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
 import { getMarketOrderStock } from "@/lib/esi/cache";
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  const sessionCharacterIds = await getSessionCharacterIds(session);
   const url = new URL(request.url);
   const requested = (url.searchParams.get("characterIds") ?? "")
     .split(",")
     .map(Number)
-    .filter((id) => Number.isInteger(id) && session.characterIds.includes(id));
-  const characterIds = requested.length > 0 ? requested : session.characterIds;
+    .filter((id) => Number.isInteger(id) && sessionCharacterIds.includes(id));
+  const characterIds = requested.length > 0 ? requested : sessionCharacterIds;
   const marketOrderStock = await getMarketOrderStock(characterIds, {
     personalSellOrdersAsStock: url.searchParams.get("personalSellOrdersAsStock") === "true",
     allCorporationSellOrdersAsStock: url.searchParams.get("allCorporationSellOrdersAsStock") === "true",

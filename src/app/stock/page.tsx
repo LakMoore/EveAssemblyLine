@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import AppShell, { languageStorageKey } from "../AppShell";
+import { useAppLanguage } from "../AppShell";
 import {
   deleteStock,
   loadStockRecords,
@@ -12,7 +12,7 @@ import {
   type StockRecord,
 } from "@/lib/planning/stockStore";
 import { loadStructures } from "@/lib/planning/structureStore";
-import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
+import type { SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import { loadClientStock } from "@/lib/client/requestCache";
 import { type KnownStructure } from "@/lib/planning/preferences";
@@ -98,11 +98,7 @@ function uniqueById<T extends { id: string | number }>(entries: T[]) {
 }
 
 export default function StockPage() {
-  const [language, setLanguage] = useState<SdeLanguage>(() => {
-    if (typeof window === "undefined") return "en";
-    const saved = window.localStorage.getItem(languageStorageKey);
-    return isSdeLanguage(saved) ? saved : "en";
-  });
+  const { language } = useAppLanguage();
   const [locations, setLocations] = useState<StockRecord[]>([]);
   const [esiLocationIds, setEsiLocationIds] = useState<Set<string>>(new Set());
   const [knownStructures, setKnownStructures] = useState<KnownStructure[]>([]);
@@ -326,7 +322,7 @@ export default function StockPage() {
   }
 
   return (
-    <AppShell activePage="stock" language={language} onLanguageChange={setLanguage}>
+    <>
       <div className={styles.pageIntro}>
         <div>
           <p className={styles.eyebrow}>WORKSPACE / INVENTORY</p>
@@ -408,7 +404,7 @@ export default function StockPage() {
           onImport={(items) => updateLocation({ ...pasting, items })}
         />
       )}
-    </AppShell>
+    </>
   );
 }
 

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import AppShell from "./AppShell";
 import { ToastProvider } from "./components/ToastProvider";
 import "./globals.css";
 
@@ -11,7 +12,20 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body>
-        <ToastProvider>{children}</ToastProvider>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(() => {
+              try {
+                if (window.matchMedia("(min-width: 901px)").matches && window.localStorage.getItem("assembly-line-sidebar-collapsed") === "false") {
+                  document.documentElement.dataset.sidebarPreference = "expanded";
+                }
+              } catch {}
+            })();`,
+          }}
+        />
+        <ToastProvider>
+          <AppShell>{children}</AppShell>
+        </ToastProvider>
       </body>
     </html>
   );

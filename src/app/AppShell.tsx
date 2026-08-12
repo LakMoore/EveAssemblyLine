@@ -1,7 +1,8 @@
 "use client";
 
-import { ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { isSdeLanguage, sdeLanguages, type SdeLanguage } from "@/lib/reference/languages";
 import { replaceEsiStock, replaceMarketOrderStock, type StockItem } from "@/lib/planning/stockStore";
 import { settingsStorageKey, type PlannerSettings } from "@/lib/planning/preferences";
@@ -13,11 +14,14 @@ import {
   loadClientMarketOrders,
   type ClientCharacterStatus,
 } from "@/lib/client/requestCache";
-import { Activity, Boxes, Factory, Image as ImageIcon, MapPinned, Minimize2, Rocket, Settings2, UserRoundPlus, UsersRound } from "lucide-react";
+import { Activity, Boxes, Factory, Image as ImageIcon, MapPinned, Minimize2, PanelLeftClose, PanelLeftOpen, Rocket, Settings2, UserRoundPlus, UsersRound } from "lucide-react";
 import styles from "./page.module.css";
 
 const languageStorageKey = "assembly-line-language";
+const sidebarStorageKey = "assembly-line-sidebar-collapsed";
 type ActivePage = "planner" | "compress" | "stock" | "ships" | "locations" | "settings" | "imagechecker" | "characters";
+type LanguageContextValue = { language: SdeLanguage; setLanguage: (language: SdeLanguage) => void };
+const LanguageContext = createContext<LanguageContextValue | null>(null);
 type CharacterSummary = {
   characterId: number;
   characterName: string;
@@ -79,21 +83,17 @@ const defaultPlannerSettings: PlannerSettings = {
 
 export default function AppShell({
   children,
-  activePage,
-  language: controlledLanguage,
-  onLanguageChange,
 }: {
   children: ReactNode;
-  activePage: ActivePage;
-  language?: SdeLanguage;
-  onLanguageChange?: (language: SdeLanguage) => void;
 }) {
+  const pathname = usePathname();
   const [localLanguage, setLocalLanguage] = useState<SdeLanguage>(() => {
     if (typeof window === "undefined") return "en";
     const savedLanguage = window.localStorage.getItem(languageStorageKey);
     return isSdeLanguage(savedLanguage) ? savedLanguage : "en";
   });
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
+  const [isSidebarReady, setIsSidebarReady] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [characters, setCharacters] = useState<CharacterSummary[]>([]);
   const [isRefreshingData, setIsRefreshingData] = useState(false);
@@ -105,7 +105,22 @@ export default function AppShell({
   const refreshAfterCharacterAdd = useRef(false);
   const mobileMetaCollapseTimer = useRef<number | null>(null);
   const mobileMetaCollapseAnimationTimer = useRef<number | null>(null);
-  const language = controlledLanguage ?? localLanguage;
+  const language = localLanguage;
+  const activePage: ActivePage = pathname === "/compress"
+    ? "compress"
+    : pathname === "/stock"
+      ? "stock"
+      : pathname === "/ships"
+        ? "ships"
+        : pathname === "/locations"
+          ? "locations"
+          : pathname === "/settings"
+            ? "settings"
+            : pathname === "/imagechecker"
+              ? "imagechecker"
+              : pathname === "/characters"
+                ? "characters"
+                : "planner";
   const hasExpiredState = authenticated && characters.length > 0 && hasLoadedStateStatuses && statusCheckAt > 0 && hasExpiredEndpoint(stateStatuses);
 
   useEffect(() => {
@@ -150,16 +165,39 @@ export default function AppShell({
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 900px)");
-    const handleViewportChange = () => setIsSidebarCollapsed(mediaQuery.matches);
+    let readyFrame = 0;
+    const handleViewportChange = () => {
+      if (mediaQuery.matches) {
+        setIsSidebarCollapsed(true);
+      } else {
+        const savedState = window.localStorage.getItem(sidebarStorageKey);
+        setIsSidebarCollapsed(savedState === "true");
+      }
+      setIsSidebarReady(false);
+      window.cancelAnimationFrame(readyFrame);
+      readyFrame = window.requestAnimationFrame(() => {
+        document.documentElement.removeAttribute("data-sidebar-preference");
+        setIsSidebarReady(true);
+      });
+    };
     mediaQuery.addEventListener("change", handleViewportChange);
-    return () => mediaQuery.removeEventListener("change", handleViewportChange);
+    handleViewportChange();
+    return () => {
+      mediaQuery.removeEventListener("change", handleViewportChange);
+      window.cancelAnimationFrame(readyFrame);
+    };
   }, []);
 
   function changeLanguage(nextLanguage: string) {
     if (!isSdeLanguage(nextLanguage)) return;
     setLocalLanguage(nextLanguage);
     window.localStorage.setItem(languageStorageKey, nextLanguage);
-    onLanguageChange?.(nextLanguage);
+  }
+
+  function closeSidebarOnNavigation() {
+    if (window.matchMedia("(max-width: 900px)").matches) {
+      setIsSidebarCollapsed(true);
+    }
   }
 
   const refreshData = useCallback(async () => {
@@ -273,7 +311,8 @@ export default function AppShell({
   }, [authenticated, characters.length, refreshData]);
 
   return (
-    <main className={styles.shell}>
+    <LanguageContext.Provider value={{ language, setLanguage: (nextLanguage) => changeLanguage(nextLanguage) }}>
+      <main className={styles.shell}>
       <header className={styles.topbar}>
         <Link className={styles.brand} href="/">
           <span className={styles.brandMark}>E</span>
@@ -345,20 +384,27 @@ export default function AppShell({
           )}
         </div>
       </header>
-      <div className={`${styles.layout} ${isSidebarCollapsed ? styles.layoutCollapsed : ""}`}>
+      <div className={`${styles.layout} ${isSidebarCollapsed ? styles.layoutCollapsed : ""} ${!isSidebarReady ? styles.sidebarInitialising : ""}`}>
         <aside className={styles.sidebar}>
           <button
             type="button"
             className={styles.sidebarToggle}
             aria-label={isSidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
-            onClick={() => setIsSidebarCollapsed((collapsed) => !collapsed)}
+            onClick={() => setIsSidebarCollapsed((collapsed) => {
+              const nextState = !collapsed;
+              if (window.matchMedia("(min-width: 901px)").matches) {
+                window.localStorage.setItem(sidebarStorageKey, String(nextState));
+              }
+              return nextState;
+            })}
           >
-            {isSidebarCollapsed ? "→" : "←"}
+            {isSidebarCollapsed ? <PanelLeftOpen size={16} strokeWidth={1.8} aria-hidden="true" /> : <PanelLeftClose size={16} strokeWidth={1.8} aria-hidden="true" />}
           </button>
           <div className={styles.sectionLabel}>WORKSPACE</div>
           <Link
             className={`${styles.navItem} ${activePage === "planner" ? styles.navActive : ""}`}
             href="/"
+            onClick={closeSidebarOnNavigation}
           >
             <span><Factory size={17} strokeWidth={1.8} aria-hidden="true" /></span>
             <span className={styles.navText}>Production planner</span>
@@ -366,6 +412,7 @@ export default function AppShell({
           <Link
             className={`${styles.navItem} ${activePage === "compress" ? styles.navActive : ""}`}
             href="/compress"
+            onClick={closeSidebarOnNavigation}
           >
             <span><Minimize2 size={17} strokeWidth={1.8} aria-hidden="true" /></span>
             <span className={styles.navText}>Compress</span>
@@ -373,6 +420,7 @@ export default function AppShell({
           <Link
             className={`${styles.navItem} ${activePage === "stock" ? styles.navActive : ""}`}
             href="/stock"
+            onClick={closeSidebarOnNavigation}
           >
             <span><Boxes size={17} strokeWidth={1.8} aria-hidden="true" /></span>
             <span className={styles.navText}>Stock</span>
@@ -380,6 +428,7 @@ export default function AppShell({
           <Link
             className={`${styles.navItem} ${activePage === "ships" ? styles.navActive : ""}`}
             href="/ships"
+            onClick={closeSidebarOnNavigation}
           >
             <span><Rocket size={17} strokeWidth={1.8} aria-hidden="true" /></span>
             <span className={styles.navText}>Ships</span>
@@ -388,6 +437,7 @@ export default function AppShell({
           <Link
             className={`${styles.navItem} ${activePage === "locations" ? styles.navActive : ""}`}
             href="/locations"
+            onClick={closeSidebarOnNavigation}
           >
             <span><MapPinned size={17} strokeWidth={1.8} aria-hidden="true" /></span>
             <span className={styles.navText}>Locations</span>
@@ -395,6 +445,7 @@ export default function AppShell({
           <Link
             className={`${styles.navItem} ${activePage === "settings" ? styles.navActive : ""}`}
             href="/settings"
+            onClick={closeSidebarOnNavigation}
           >
             <span><Settings2 size={17} strokeWidth={1.8} aria-hidden="true" /></span>
             <span className={styles.navText}>Settings</span>
@@ -402,6 +453,7 @@ export default function AppShell({
           <Link
             className={`${styles.navItem} ${activePage === "imagechecker" ? styles.navActive : ""}`}
             href="/imagechecker"
+            onClick={closeSidebarOnNavigation}
           >
             <span><ImageIcon size={17} strokeWidth={1.8} aria-hidden="true" /></span>
             <span className={styles.navText}>Image checker</span>
@@ -409,6 +461,7 @@ export default function AppShell({
           <Link
             className={`${styles.navItem} ${activePage === "characters" ? styles.navActive : ""}`}
             href="/characters"
+            onClick={closeSidebarOnNavigation}
           >
             <span><UsersRound size={17} strokeWidth={1.8} aria-hidden="true" /></span>
             <span className={styles.navText}>Characters</span>
@@ -459,8 +512,15 @@ export default function AppShell({
         </aside>
         <section className={styles.content}>{children}</section>
       </div>
-    </main>
+      </main>
+    </LanguageContext.Provider>
   );
 }
 
 export { languageStorageKey };
+
+export function useAppLanguage() {
+  const context = useContext(LanguageContext);
+  if (!context) throw new Error("useAppLanguage must be used inside AppShell");
+  return context;
+}

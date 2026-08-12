@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionFromRequest } from "@/lib/auth/session";
+import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
 import { getResolvedAssetIndex, getResolvedAssets, getRunningIndustryJobs } from "@/lib/esi/cache";
 import { fetchLocationMetadata, getUsableToken } from "@/lib/esi/client";
 import { getCharacter } from "@/lib/auth/tokensStore";
@@ -417,13 +417,14 @@ function jobContributions(
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  const characterIds = await getSessionCharacterIds(session);
   const url = new URL(request.url);
   const requestedLanguage = url.searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
   const [assets, jobs, shipTypeIds, structureTypeIds, groups, marketGroups, stations, systems] =
     await Promise.all([
-      getResolvedAssets(session.characterIds, true),
-      getRunningIndustryJobs(session.characterIds, true),
+      getResolvedAssets(characterIds, true),
+      getRunningIndustryJobs(characterIds, true),
       getShipTypeIds(),
       getStructureTypeIds(),
       getGroups(),
@@ -441,7 +442,7 @@ export async function GET(request: Request) {
   ]);
   const rootLocations = createRootLocationIndex(assets);
   normalizeLocationKinds(rootLocations, stations, structureTypeIds);
-  await resolveUnknownLocations(rootLocations, structureTypeIds, stations, types, session.characterIds);
+  await resolveUnknownLocations(rootLocations, structureTypeIds, stations, types, characterIds);
   normalizeLocationKinds(rootLocations, stations, structureTypeIds);
   const buckets = new Map<number, StockBucket>();
   const productQuantities = new Map<number, number>();
@@ -462,7 +463,7 @@ export async function GET(request: Request) {
       }
     }),
   );
-  const allAssetIndex = await getResolvedAssetIndex(session.characterIds, true);
+  const allAssetIndex = await getResolvedAssetIndex(characterIds, true);
   for (const asset of assets) {
     if (!shouldIncludeAsset(asset, shipTypeIds) || !isDirectLocation(asset)) continue;
     const terminal = rootLocations.get(asset.rootLocation.locationId);

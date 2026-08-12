@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import AppShell, { languageStorageKey } from "../AppShell";
 import TypeIdentity from "../components/TypeIdentity";
 import { loadClientShips, type ClientShipsResponse } from "@/lib/client/requestCache";
-import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import styles from "../page.module.css";
 
 type ShipAsset = NonNullable<ClientShipsResponse["assets"]>[number];
@@ -39,11 +37,6 @@ function getAssetGroup(flag: string) {
 }
 
 export default function ShipsPage() {
-  const [language] = useState<SdeLanguage>(() => {
-    if (typeof window === "undefined") return "en";
-    const saved = window.localStorage.getItem(languageStorageKey);
-    return isSdeLanguage(saved) ? saved : "en";
-  });
   const [data, setData] = useState<ClientShipsResponse | null>(null);
   const [selectedShipItemId, setSelectedShipItemId] = useState<number | null>(() => {
     if (typeof window === "undefined") return null;
@@ -141,7 +134,7 @@ export default function ShipsPage() {
   }, [data]);
 
   return (
-    <AppShell activePage="ships" language={language}>
+    <>
       <div className={styles.pageHeader}>
         <div>
           <p className={styles.pageKicker}>FLEET INVENTORY</p>
@@ -209,7 +202,7 @@ export default function ShipsPage() {
           onSelectShip={selectShip}
         />
       )}
-    </AppShell>
+    </>
   );
 }
 

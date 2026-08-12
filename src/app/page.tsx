@@ -19,9 +19,9 @@ import {
   type PlannerLocations,
   type PlannerSettings,
 } from "@/lib/planning/preferences";
-import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
+import type { SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
-import AppShell, { languageStorageKey } from "./AppShell";
+import { useAppLanguage } from "./AppShell";
 import TypeIdentity from "./components/TypeIdentity";
 import styles from "./page.module.css";
 import { ChartLine, Clipboard, Copy as CopyIcon, Factory, Minimize2, Microscope, TestTubes } from "lucide-react";
@@ -166,11 +166,7 @@ export default function Home() {
   const buildListHeaderRef = useRef<HTMLDivElement>(null);
   const resultsHeaderRef = useRef<HTMLDivElement>(null);
   const stockLoadPromiseRef = useRef<Promise<StockRecord[]> | null>(null);
-  const [language, setLanguage] = useState<SdeLanguage>(() => {
-    if (typeof window === "undefined") return "en";
-    const savedLanguage = window.localStorage.getItem(languageStorageKey);
-    return isSdeLanguage(savedLanguage) ? savedLanguage : "en";
-  });
+  const { language } = useAppLanguage();
   const [isBuildListLoaded, setIsBuildListLoaded] = useState(false);
   const [isStockLoaded, setIsStockLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState<PlannerTab>("Plan");
@@ -304,7 +300,7 @@ export default function Home() {
   }
 
   return (
-    <AppShell activePage="planner" language={language} onLanguageChange={setLanguage}>
+    <>
       <div className={styles.pageIntro}>
         <div>
           <p className={styles.eyebrow}>PRODUCTION CONTROL</p>
@@ -490,7 +486,7 @@ export default function Home() {
           </div>
         )}
       </div>
-    </AppShell>
+    </>
   );
 }
 

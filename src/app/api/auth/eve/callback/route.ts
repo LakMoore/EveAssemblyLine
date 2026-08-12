@@ -1,8 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { attachCharacter, createSession, getRequestCookie, setSessionCookie } from "@/lib/auth/session";
+import { createSession, getRequestCookie, setSessionCookie } from "@/lib/auth/session";
 import { consumePendingAuth, exchangeCodeForTokens, sameState, validateToken } from "@/lib/auth/eveSso";
 import { fetchCharacterCorporationId, fetchCharacterRoles } from "@/lib/esi/client";
-import { createAccount, getAccount, getAccountForCharacter, getCharacter, getSession, upsertCharacter } from "@/lib/auth/tokensStore";
+import { createCollection, getCollectionForCharacter, getCharacter, getSession, savePendingMerge, saveSession, upsertCharacter } from "@/lib/auth/tokensStore";
 
 function getPublicOrigin(request: Request, callbackUrl: string) {
   const configuredCallback = process.env.EVE_CALLBACK_URL;
@@ -30,12 +31,27 @@ export async function GET(request: Request) {
     tokenSet.scopes = identity.scopes.length > 0 ? identity.scopes : pending.scopes;
     const existingCharacter = await getCharacter(identity.characterId);
     const existingSession = pending.sessionId ? await getSession(pending.sessionId) : null;
-    const accountId = existingSession?.accountId ?? existingCharacter?.accountId ?? (await getAccountForCharacter(identity.characterId))?.accountId;
-    if (existingSession?.accountId && existingCharacter?.accountId && existingSession.accountId !== existingCharacter.accountId) {
-      throw new Error("Character belongs to another account");
+    const currentCollectionId = existingSession?.collectionId;
+    const characterCollection = await getCollectionForCharacter(identity.characterId);
+    if (currentCollectionId && characterCollection && currentCollectionId !== characterCollection.collectionId) {
+      const mergeId = randomUUID();
+      await savePendingMerge(mergeId, {
+        sessionId: existingSession!.sessionId,
+        targetCollectionId: currentCollectionId,
+        sourceCollectionId: characterCollection.collectionId,
+        characterId: identity.characterId,
+        characterName: identity.characterName,
+        tokenSet,
+        scopes: tokenSet.scopes,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      });
+      const response = NextResponse.redirect(`${getPublicOrigin(request, pending.redirectUri)}/characters?merge=1`);
+      response.cookies.set("assembly_line_merge", mergeId, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 600 });
+      response.cookies.set("assembly_line_sso_state", "", { httpOnly: true, path: "/", maxAge: 0 });
+      return response;
     }
-    const resolvedAccountId = accountId ?? (await createAccount()).accountId;
-    const session = existingSession ?? await createSession(resolvedAccountId);
+    const resolvedCollectionId = currentCollectionId ?? characterCollection?.collectionId ?? (await createCollection()).collectionId;
+    const session = existingSession ?? await createSession(resolvedCollectionId);
     const corporationId = await fetchCharacterCorporationId(identity.characterId);
     const roles = tokenSet.scopes.includes("esi-characters.read_corporation_roles.v1")
       ? await fetchCharacterRoles(identity.characterId, tokenSet)
@@ -44,7 +60,7 @@ export async function GET(request: Request) {
       ...existingCharacter,
       characterId: identity.characterId,
       characterName: identity.characterName ?? `Character ${identity.characterId}`,
-      accountId: resolvedAccountId,
+      collectionId: resolvedCollectionId,
       personalAuth: tokenSet,
       corporationId,
       corporationRoles: roles,
@@ -54,11 +70,8 @@ export async function GET(request: Request) {
       hasStationManagerRole: roles.includes("Station_Manager"),
       corpAuthCompleted: roles.includes("Director") || roles.includes("Station_Manager"),
     });
-    if (!session.accountId && resolvedAccountId) session.accountId = resolvedAccountId;
-    const account = await getAccount(resolvedAccountId);
-    for (const characterId of account?.characterIds ?? [identity.characterId]) {
-      await attachCharacter(session.sessionId, characterId);
-    }
+    if (!session.collectionId) session.collectionId = resolvedCollectionId;
+    await saveSession(session);
     const response = NextResponse.redirect(`${getPublicOrigin(request, pending.redirectUri)}/?refresh=1`);
     setSessionCookie(response, session.sessionId);
     response.cookies.set("assembly_line_sso_state", "", { httpOnly: true, path: "/", maxAge: 0 });

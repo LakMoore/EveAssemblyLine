@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { NextResponse } from "next/server";
 import type { SessionRecord } from "./model";
-import { getSession, saveSession } from "./tokensStore";
+import { getCollection, getSession, saveSession } from "./tokensStore";
 
 export const sessionCookieName = "assembly_line_session";
 
@@ -13,12 +13,11 @@ export function getRequestCookie(request: Request, name: string) {
     ?.slice(name.length + 1);
 }
 
-export async function createSession(accountId?: string): Promise<SessionRecord> {
+export async function createSession(collectionId?: string): Promise<SessionRecord> {
   const now = new Date().toISOString();
   const record: SessionRecord = {
     sessionId: randomUUID(),
-    accountId,
-    characterIds: [],
+    collectionId,
     createdAt: now,
     lastSeenAt: now,
   };
@@ -26,13 +25,9 @@ export async function createSession(accountId?: string): Promise<SessionRecord> 
   return record;
 }
 
-export async function attachCharacter(sessionId: string, characterId: number) {
-  const session = await getSession(sessionId);
-  if (!session) throw new Error("Session not found");
-  if (!session.characterIds.includes(characterId)) session.characterIds.push(characterId);
-  session.lastSeenAt = new Date().toISOString();
-  await saveSession(session);
-  return session;
+export async function getSessionCharacterIds(session: SessionRecord) {
+  if (!session.collectionId) return [];
+  return (await getCollection(session.collectionId))?.characterIds ?? [];
 }
 
 export async function getSessionFromRequest(request: Request) {

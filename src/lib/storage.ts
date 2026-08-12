@@ -7,6 +7,12 @@ let firestorePromise: Promise<Firestore> | undefined;
 export interface Storage {
   getItem<T>(key: string): Promise<T | undefined>;
   setItem<T>(key: string, value: T): Promise<void>;
+  runTransaction<T>(callback: (transaction: StorageTransaction) => Promise<T>): Promise<T>;
+}
+
+export interface StorageTransaction {
+  getItem<T>(key: string): Promise<T | undefined>;
+  setItem<T>(key: string, value: T): void;
 }
 
 function getFirestoreDatabase() {
@@ -52,6 +58,20 @@ export async function initStorage() {
         value: withoutUndefined(value),
         updatedAt: new Date(),
       });
+    },
+    async runTransaction<T>(callback: (transaction: StorageTransaction) => Promise<T>) {
+      return database.runTransaction(async (transaction) => callback({
+        async getItem<K>(key: string) {
+          const snapshot = await transaction.get(database.collection(storageCollection).doc(key));
+          return snapshot.exists ? (snapshot.data()?.value as K) : undefined;
+        },
+        setItem<K>(key: string, value: K) {
+          transaction.set(database.collection(storageCollection).doc(key), {
+            value: withoutUndefined(value),
+            updatedAt: new Date(),
+          });
+        },
+      }));
     },
   } satisfies Storage;
 }

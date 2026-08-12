@@ -9,7 +9,7 @@ export interface TokenSet {
 export interface CharacterTokenRecord {
   characterId: number;
   characterName: string;
-  accountId?: string;
+  collectionId?: string;
   personalAuth: TokenSet;
   corpAuth?: TokenSet;
   corporationId?: number;
@@ -21,8 +21,8 @@ export interface CharacterTokenRecord {
   corpAuthCompleted?: boolean;
 }
 
-export interface AccountRecord {
-  accountId: string;
+export interface CharacterCollectionRecord {
+  collectionId: string;
   characterIds: number[];
   createdAt: string;
   lastSeenAt: string;
@@ -107,8 +107,18 @@ export interface MarketOrderRecord {
 
 export interface SessionRecord {
   sessionId: string;
-  accountId?: string;
-  characterIds: number[];
+  collectionId?: string;
   createdAt: string;
   lastSeenAt: string;
+}
+
+export interface PendingMergeRecord {
+  sessionId: string;
+  targetCollectionId: string;
+  sourceCollectionId: string;
+  characterId: number;
+  characterName?: string;
+  tokenSet: TokenSet;
+  scopes: string[];
+  expiresAt: string;
 }

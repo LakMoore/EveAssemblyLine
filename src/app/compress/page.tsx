@@ -3,10 +3,10 @@
 import { FormEvent, KeyboardEvent, Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import AppShell, { languageStorageKey } from "../AppShell";
+import { useAppLanguage } from "../AppShell";
 import TypeIdentity from "../components/TypeIdentity";
 import { useToast } from "../components/ToastProvider";
-import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
+import type { SdeLanguage } from "@/lib/reference/languages";
 import { Clipboard, Minimize2 } from "lucide-react";
 import Image from "next/image";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
@@ -68,11 +68,7 @@ export default function CompressPage() {
 function CompressContent() {
   const searchParams = useSearchParams();
   const importedMultibuy = searchParams.get("multibuy");
-  const [language, setLanguage] = useState<SdeLanguage>(() => {
-    if (typeof window === "undefined") return "en";
-    const saved = window.localStorage.getItem(languageStorageKey);
-    return isSdeLanguage(saved) ? saved : "en";
-  });
+  const { language } = useAppLanguage();
   const [items, setItems] = useState<CompressItem[]>([]);
   const [result, setResult] = useState<CompressResult | null>(null);
   const [isPasteOpen, setIsPasteOpen] = useState(false);
@@ -209,7 +205,7 @@ function CompressContent() {
   }
 
   return (
-    <AppShell activePage="compress" language={language} onLanguageChange={setLanguage}>
+    <>
       <div className={styles.intro}>
         <div>
           <p className={styles.eyebrow}>MATERIALS / REPROCESSING</p>
@@ -251,7 +247,7 @@ function CompressContent() {
 
       {result && <Results result={result} />}
       {isPasteOpen && <PasteDialog language={language} currentItems={items} onCancel={() => setIsPasteOpen(false)} onReplace={(next) => { updateItems(next); setResult(null); setIsPasteOpen(false); }} />}
-    </AppShell>
+    </>
   );
 }
 

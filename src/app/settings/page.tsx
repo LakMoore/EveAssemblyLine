@@ -6,7 +6,6 @@ import {
   settingsStorageKey,
   type PlannerSettings,
 } from "@/lib/planning/preferences";
-import AppShell from "../AppShell";
 import styles from "../page.module.css";
 
 function boundedNumber(value: string, maximum: number) {
@@ -32,7 +31,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <AppShell activePage="settings">
+    <>
       <div className={styles.pageIntro}>
         <div>
           <p className={styles.eyebrow}>CONFIGURATION / PLANNING</p>
@@ -159,6 +158,6 @@ export default function SettingsPage() {
           <b>→</b>
         </button>
       </form>
-    </AppShell>
+    </>
   );
 }

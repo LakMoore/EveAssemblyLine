@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import AppShell, { languageStorageKey } from "../AppShell";
+import { useAppLanguage } from "../AppShell";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import {
   defaultLocations,
@@ -9,7 +9,7 @@ import {
   type KnownStructure,
   type PlannerLocations,
 } from "@/lib/planning/preferences";
-import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
+import type { SdeLanguage } from "@/lib/reference/languages";
 import { loadClientSession } from "@/lib/client/requestCache";
 import { fetchRigs } from "@/lib/reference/rigs";
 import { loadStructures, saveStructures } from "@/lib/planning/structureStore";
@@ -299,11 +299,7 @@ function readLegacyStructures() {
 }
 
 export default function LocationsPage() {
-  const [language, setLanguage] = useState<SdeLanguage>(() => {
-    const saved =
-      typeof window === "undefined" ? null : window.localStorage.getItem(languageStorageKey);
-    return isSdeLanguage(saved) ? saved : "en";
-  });
+  const { language } = useAppLanguage();
   const [locations, setLocations] = useState<PlannerLocations>(() => ({
     ...defaultLocations,
     structures: [],
@@ -539,7 +535,7 @@ export default function LocationsPage() {
   }
 
   return (
-    <AppShell activePage="locations" language={language} onLanguageChange={setLanguage}>
+    <>
       <div className={styles.pageIntro}>
         <div>
           <p className={styles.eyebrow}>CONFIGURATION / OPERATIONS</p>
@@ -725,7 +721,7 @@ export default function LocationsPage() {
           }}
         />
       )}
-    </AppShell>
+    </>
   );
 }
 

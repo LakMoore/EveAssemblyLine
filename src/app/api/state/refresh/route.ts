@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSessionFromRequest } from "@/lib/auth/session";
+import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
 import { getCharacters } from "@/lib/auth/tokensStore";
 import { refreshCharacterState } from "@/lib/esi/cache";
 import { getEsiRateLimitUntil } from "@/lib/esi/client";
@@ -17,7 +17,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "ESI is not connected." }, { status: 401 });
   }
   if (!session) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
-  if (session.characterIds.length === 0) {
+  const characterIds = await getSessionCharacterIds(session);
+  if (characterIds.length === 0) {
     return NextResponse.json({ error: "ESI is not connected." }, { status: 401 });
   }
   let characters;
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
   }
   const connectedCharacterIds = new Set(
     characters
-      .filter((character) => session.characterIds.includes(character.characterId) && character.personalAuth)
+      .filter((character) => characterIds.includes(character.characterId) && character.personalAuth)
       .map((character) => character.characterId),
   );
   if (connectedCharacterIds.size === 0) {
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
       rateLimitedUntil,
     });
   }
-  const key = session.characterIds
+  const key = characterIds
     .slice()
     .sort((left, right) => left - right)
     .join(",");
@@ -56,7 +57,7 @@ export async function POST(request: Request) {
       rateLimitedUntil: getEsiRateLimitUntil(),
     });
   }
-  const refresh = refreshCharacterState(session.characterIds);
+  const refresh = refreshCharacterState(characterIds);
   activeRefreshes.set(key, refresh);
   const result = await refresh.finally(() => activeRefreshes.delete(key));
   return NextResponse.json({

@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import AppShell from "../AppShell";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import styles from "./imagechecker.module.css";
 
@@ -100,7 +99,7 @@ export default function ImageCheckerPage() {
   );
 
   return (
-    <AppShell activePage="imagechecker">
+    <>
       <div className={styles.pageIntro}>
         <div>
           <p className={styles.eyebrow}>DIAGNOSTICS / IMAGE CDN</p>
@@ -196,7 +195,7 @@ export default function ImageCheckerPage() {
           </div>
         ) : null}
       </section>
-    </AppShell>
+    </>
   );
 }
 

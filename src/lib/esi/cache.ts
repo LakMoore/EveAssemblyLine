@@ -281,6 +281,9 @@ async function cacheResolvedAssets(
   previous?: EndpointCache<AssetRecord[]>,
   assetNamePath?: string,
   preserveExpiry = false,
+  useFallbackLifetime = false,
+  markRefreshed = false,
+  preserveLastModified = false,
 ) {
   const assetIndexes = await indexAssetsByPurpose(rawAssets);
   let namedAssets = rawAssets;
@@ -339,13 +342,20 @@ async function cacheResolvedAssets(
     resolvedStockAssets.map((asset) => [asset.itemId, asset]),
   );
 
+  const refreshedAt = markRefreshed ? new Date().toISOString() : undefined;
   cache.allAssetsRaw = setFresh(
     namedAssets,
     headers,
     previous,
     assetNamePath?.startsWith("/corporations/") ? 60 * 60 * 1000 : 5 * 60 * 1000,
     preserveExpiry,
+    useFallbackLifetime,
   );
+  if (preserveLastModified && previous?.lastModified) {
+    cache.allAssetsRaw.lastModified = previous.lastModified;
+  }
+  if (refreshedAt) cache.allAssetsRaw.lastModified = refreshedAt;
+  if (refreshedAt) cache.allAssetsRaw.status = endpointDataStatus(cache.allAssetsRaw.lastModified, cache.allAssetsRaw.nextRefreshAllowed);
   cache.stockAssetsByItemId = resolvedByItemId;
   const resolvedShipAssets = await Promise.all(
     [...assetIndexes.shipAssetsByItemId.values()].map(async (asset) => {
@@ -638,7 +648,7 @@ export async function refreshCharacterState(
           lastUpdated: cache.allAssetsRaw.lastUpdated,
           nextRefreshAllowed: cache.allAssetsRaw.nextRefreshAllowed,
         };
-        const result = await fetchCharacterAssets(character, cache.allAssetsRaw?.etag, !cache.allAssetsRaw);
+        const result = await fetchCharacterAssets(character, cache.allAssetsRaw?.etag, true);
         if (result.notModified && cache.allAssetsRaw) {
           const assets =
             result.blueprints.length > 0
@@ -651,6 +661,9 @@ export async function refreshCharacterState(
             result.headers,
             cache.allAssetsRaw,
             `/characters/${character.characterId}`,
+            false,
+            true,
+            false,
             true,
           );
           cache.allAssetsRaw.status = endpointDataStatus(
@@ -666,6 +679,8 @@ export async function refreshCharacterState(
             cache.allAssetsRaw,
             `/characters/${character.characterId}`,
             result.fromCache,
+            true,
+            true,
           );
         }
         if (result.fromCache && cache.allAssetsRaw) {
@@ -790,7 +805,7 @@ export async function refreshCharacterState(
             lastUpdated: corpCache.allAssetsRaw.lastUpdated,
             nextRefreshAllowed: corpCache.allAssetsRaw.nextRefreshAllowed,
           };
-          const result = await fetchCorporationAssets(character, corpCache.allAssetsRaw?.etag, !corpCache.allAssetsRaw);
+          const result = await fetchCorporationAssets(character, corpCache.allAssetsRaw?.etag, true);
           if (result.notModified && corpCache.allAssetsRaw) {
             const assets =
               result.blueprints.length > 0
@@ -806,6 +821,9 @@ export async function refreshCharacterState(
               result.headers,
               corpCache.allAssetsRaw,
               `/corporations/${character.corporationId}`,
+              false,
+              true,
+              false,
               true,
             );
             corpCache.allAssetsRaw.status = endpointDataStatus(
@@ -821,6 +839,8 @@ export async function refreshCharacterState(
               corpCache.allAssetsRaw,
               `/corporations/${character.corporationId}`,
               result.fromCache,
+              true,
+              true,
             );
           }
           corpSummary.assets = corpCache.allAssetsRaw;

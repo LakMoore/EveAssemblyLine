@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
-import { getSessionFromRequest } from "@/lib/auth/session";
+import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
 import { getCharacters } from "@/lib/auth/tokensStore";
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
+  const characterIds = await getSessionCharacterIds(session);
   const records = await getCharacters();
   return NextResponse.json(records
-    .filter((record) => session.characterIds.includes(record.characterId))
+    .filter((record) => characterIds.includes(record.characterId))
     .map(({ characterId, characterName, corporationId, corporationRoles, hasDirectorRole, hasAccountantRole, hasTraderRole, corpAuthCompleted }) => ({
       characterId,
       characterName,
