@@ -176,7 +176,6 @@ export default function AppShell({
       setIsSidebarReady(false);
       window.cancelAnimationFrame(readyFrame);
       readyFrame = window.requestAnimationFrame(() => {
-        document.documentElement.removeAttribute("data-sidebar-preference");
         setIsSidebarReady(true);
       });
     };

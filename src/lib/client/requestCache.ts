@@ -111,7 +111,7 @@ const marketOrderRequests = new Map<string, Promise<ClientMarketOrderResponse | 
 
 function loadJson<T>(url: string, pending: Promise<T> | undefined, setPending: (value: Promise<T> | undefined) => void) {
   if (pending) return pending;
-  const request = fetch(url)
+  const request = fetch(url, { cache: "no-store" })
     .then(async (response) => {
       const data = (await response.json()) as T;
       if (!response.ok) throw new Error(`Could not load ${url}.`);

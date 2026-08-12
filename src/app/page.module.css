@@ -153,61 +153,6 @@
     padding-right: 6px
 }
 
-@media (min-width: 901px) {
-    html[data-sidebar-preference='expanded'] .layout.layoutCollapsed {
-        --sidebar-width: 230px;
-        grid-template-columns: 230px 1fr;
-    }
-
-    html[data-sidebar-preference='expanded'] .layout.layoutCollapsed .sidebar {
-        padding: 38px 17px 24px;
-    }
-
-    html[data-sidebar-preference='expanded'] .layout.layoutCollapsed .sidebarToggle {
-        right: 12px;
-        padding-left: 9px;
-        padding-right: 9px;
-    }
-
-    html[data-sidebar-preference='expanded'] .layout.layoutCollapsed .sectionLabel {
-        height: auto;
-        padding: 0 14px 12px;
-        border-top: 0;
-        font-size: 10px;
-    }
-
-    html[data-sidebar-preference='expanded'] .layout.layoutCollapsed .navText {
-        display: inline;
-    }
-
-    html[data-sidebar-preference='expanded'] .layout.layoutCollapsed .navItem {
-        justify-content: initial;
-        padding-left: 14px;
-        padding-right: 14px;
-    }
-
-    html[data-sidebar-preference='expanded'] .layout.layoutCollapsed .navItem b,
-    html[data-sidebar-preference='expanded'] .layout.layoutCollapsed .pilot i {
-        display: block;
-    }
-
-    html[data-sidebar-preference='expanded'] .layout.layoutCollapsed .pilot {
-        justify-content: initial;
-        padding-left: 14px;
-        padding-right: 14px;
-    }
-
-    html[data-sidebar-preference='expanded'] .layout.layoutCollapsed .sidebar .addButton {
-        font-size: 11px;
-        padding: 0 11px;
-    }
-
-    html[data-sidebar-preference='expanded'] .layout.layoutCollapsed .sidebarFooter {
-        width: 230px;
-        padding: 10px 17px 24px;
-    }
-}
-
 .layoutCollapsed .sectionLabel,
 .layoutCollapsed .navText {
     display: none

@@ -12,17 +12,6 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(() => {
-              try {
-                if (window.matchMedia("(min-width: 901px)").matches && window.localStorage.getItem("assembly-line-sidebar-collapsed") === "false") {
-                  document.documentElement.dataset.sidebarPreference = "expanded";
-                }
-              } catch {}
-            })();`,
-          }}
-        />
         <ToastProvider>
           <AppShell>{children}</AppShell>
         </ToastProvider>
