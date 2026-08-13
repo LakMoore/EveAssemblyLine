@@ -64,8 +64,8 @@ type OwnerCache = {
   unresolvedAssetCount: number;
 };
 
-const characterCaches = new Map<number, OwnerCache>();
-const corporationCaches = new Map<number, OwnerCache>();
+const characterCaches = new Map<string, OwnerCache>();
+const corporationCaches = new Map<string, OwnerCache>();
 
 function hasUsableMarketOrders(cache: OwnerCache | undefined) {
   const marketOrders = cache?.marketOrders;
@@ -87,8 +87,9 @@ function getUsableMarketOrdersEtag(cache: OwnerCache | undefined) {
     : undefined;
 }
 
-function getCache(map: Map<number, OwnerCache>, id: number): OwnerCache {
-  const existing = map.get(id);
+function getCache(map: Map<string, OwnerCache>, id: number, sessionId: string): OwnerCache {
+  const key = `${sessionId}:${id}`;
+  const existing = map.get(key);
   if (existing) return existing;
   const created: OwnerCache = {
     assembledStructureRigs: [],
@@ -97,7 +98,7 @@ function getCache(map: Map<number, OwnerCache>, id: number): OwnerCache {
     assembledShipsByItemId: new Map(),
     unresolvedAssetCount: 0,
   };
-  map.set(id, created);
+  map.set(key, created);
   return created;
 }
 
@@ -628,7 +629,7 @@ async function rebuildResolvedAssets(
   }
 }
 
-export async function refreshCharacterState(characterIds: number[]) {
+export async function refreshCharacterState(characterIds: number[], sessionId: string) {
   const characters = await getCharacters();
   const refreshedCorporationIds = new Set<number>();
   const summary: {
@@ -646,7 +647,7 @@ export async function refreshCharacterState(characterIds: number[]) {
   for (const characterId of characterIds) {
     const character = await getCharacter(characterId);
     if (!character) continue;
-    const cache = getCache(characterCaches, characterId);
+    const cache = getCache(characterCaches, characterId, sessionId);
     const characterSummary: (typeof summary)[number] = { characterId };
     try {
       if (
@@ -751,14 +752,16 @@ export async function refreshCharacterState(characterIds: number[]) {
         || !cache.jobs.nextRefreshAllowed
         || Date.parse(cache.jobs.nextRefreshAllowed) <= Date.now()
       ) {
-        const jobs = await fetchCharacterIndustryJobs(character, true);
+        const jobs = await fetchCharacterIndustryJobs(character, cache.jobs?.etag, true);
         cache.jobs =
-          jobs.fromCache && cache.jobs
+          jobs.notModified && cache.jobs
+            ? setFresh(cache.jobs.lastBody, jobs.headers, cache.jobs)
+            : jobs.fromCache && cache.jobs
             ? {
                 ...cache.jobs,
                 status: endpointDataStatus(cache.jobs.lastModified, cache.jobs.nextRefreshAllowed),
               }
-            : setFresh(jobs.jobs, jobs.headers, cache.jobs);
+            : setFresh(jobs.jobs ?? [], jobs.headers, cache.jobs);
       }
       else {
         cache.jobs.status = endpointDataStatus(
@@ -847,7 +850,7 @@ export async function refreshCharacterState(characterIds: number[]) {
       && !refreshedCorporationIds.has(character.corporationId)
     ) {
       refreshedCorporationIds.add(character.corporationId);
-      const corpCache = getCache(corporationCaches, character.corporationId);
+      const corpCache = getCache(corporationCaches, character.corporationId, sessionId);
       const corpSummary: {
         corporationId: number;
         assets?: EndpointCache<AssetRecord[] | null>;
@@ -962,9 +965,11 @@ export async function refreshCharacterState(characterIds: number[]) {
           || !corpCache.jobs.nextRefreshAllowed
           || Date.parse(corpCache.jobs.nextRefreshAllowed) <= Date.now()
         ) {
-          const jobs = await fetchCorporationIndustryJobs(character, true);
+          const jobs = await fetchCorporationIndustryJobs(character, corpCache.jobs?.etag, true);
           corpCache.jobs =
-            jobs.fromCache && corpCache.jobs
+            jobs.notModified && corpCache.jobs
+              ? setFresh(corpCache.jobs.lastBody, jobs.headers, corpCache.jobs)
+              : jobs.fromCache && corpCache.jobs
               ? {
                   ...corpCache.jobs,
                   status: endpointDataStatus(
@@ -972,7 +977,7 @@ export async function refreshCharacterState(characterIds: number[]) {
                     corpCache.jobs.nextRefreshAllowed,
                   ),
                 }
-              : setFresh(jobs.jobs, jobs.headers, corpCache.jobs, 5 * 60 * 1000, jobs.fromCache);
+              : setFresh(jobs.jobs ?? [], jobs.headers, corpCache.jobs, 5 * 60 * 1000, jobs.fromCache);
         }
         else {
           corpCache.jobs.status = endpointDataStatus(
@@ -1057,9 +1062,10 @@ export async function refreshCharacterState(characterIds: number[]) {
 export async function getRunningIndustryJobs(
   characterIds: number[],
   includeCorporationJobs: boolean,
+  sessionId = "default",
 ) {
   const jobs = characterIds.flatMap((id) => {
-    const body = getCache(characterCaches, id).jobs?.lastBody;
+    const body = getCache(characterCaches, id, sessionId).jobs?.lastBody;
     return Array.isArray(body) ? (body as IndustryJobRecord[]) : [];
   });
   if (!includeCorporationJobs) return jobs.filter((job) => job.ownerType === "character");
@@ -1077,7 +1083,7 @@ export async function getRunningIndustryJobs(
   return [
     ...jobs,
     ...[...corporationIds].flatMap((id) => {
-      const body = getCache(corporationCaches, id).jobs?.lastBody;
+      const body = getCache(corporationCaches, id, sessionId).jobs?.lastBody;
       return Array.isArray(body) ? (body as IndustryJobRecord[]) : [];
     }),
   ];
@@ -1087,9 +1093,10 @@ export async function getRunningIndustryJobs(
 export async function getResolvedAssets(
   characterIds: number[],
   includeCorporationAssets: boolean,
+  sessionId = "default",
 ): Promise<AssetRecord[]> {
   const assets = characterIds.flatMap((id) =>
-    Array.from(getCache(characterCaches, id).stockAssetsByItemId?.values() ?? []),
+    Array.from(getCache(characterCaches, id, sessionId).stockAssetsByItemId?.values() ?? []),
   );
   if (!includeCorporationAssets) return [...assets];
 
@@ -1107,7 +1114,7 @@ export async function getResolvedAssets(
   return [
     ...assets,
     ...[...corporations].flatMap((id) =>
-      Array.from(getCache(corporationCaches, id).stockAssetsByItemId?.values() ?? []),
+      Array.from(getCache(corporationCaches, id, sessionId).stockAssetsByItemId?.values() ?? []),
     ),
   ];
 }
@@ -1116,9 +1123,10 @@ export async function getResolvedAssets(
 export async function getShipAssets(
   characterIds: number[],
   includeCorporationAssets: boolean,
+  sessionId = "default",
 ): Promise<AssetRecord[]> {
   const assets = characterIds.flatMap((id) => [
-    ...getCache(characterCaches, id).shipAssetsByItemId.values(),
+    ...getCache(characterCaches, id, sessionId).shipAssetsByItemId.values(),
   ]);
   if (!includeCorporationAssets) return assets;
 
@@ -1136,15 +1144,19 @@ export async function getShipAssets(
   return [
     ...assets,
     ...[...corporationIds].flatMap((id) => [
-      ...getCache(corporationCaches, id).shipAssetsByItemId.values(),
+      ...getCache(corporationCaches, id, sessionId).shipAssetsByItemId.values(),
     ]),
   ];
 }
 
 /** Returns the complete resolved graph, including containers and ships. */
-export async function getAllAssetsRaw(characterIds: number[], includeCorporationAssets: boolean) {
+export async function getAllAssetsRaw(
+  characterIds: number[],
+  includeCorporationAssets: boolean,
+  sessionId = "default",
+) {
   const assets = characterIds.flatMap(
-    (id) => getCache(characterCaches, id).allAssetsRaw?.lastBody ?? [],
+    (id) => getCache(characterCaches, id, sessionId).allAssetsRaw?.lastBody ?? [],
   );
   if (!includeCorporationAssets) return assets;
   const characters = await getCharacters();
@@ -1161,7 +1173,7 @@ export async function getAllAssetsRaw(characterIds: number[], includeCorporation
   return [
     ...assets,
     ...[...corporationIds].flatMap(
-      (id) => getCache(corporationCaches, id).allAssetsRaw?.lastBody ?? [],
+      (id) => getCache(corporationCaches, id, sessionId).allAssetsRaw?.lastBody ?? [],
     ),
   ];
 }
@@ -1169,6 +1181,7 @@ export async function getAllAssetsRaw(characterIds: number[], includeCorporation
 export async function getResolvedAssetIndex(
   characterIds: number[],
   includeCorporationAssets: boolean,
+  sessionId = "default",
 ) {
   const index = new Map<number, AssetRecord>();
   const characters = await getCharacters();
@@ -1185,13 +1198,13 @@ export async function getResolvedAssetIndex(
       )
     : new Set<number>();
   for (const characterId of characterIds) {
-    for (const asset of getCache(characterCaches, characterId).stockAssetsByItemId?.values()
+    for (const asset of getCache(characterCaches, characterId, sessionId).stockAssetsByItemId?.values()
       ?? []) {
       index.set(asset.itemId, asset);
     }
   }
   for (const corporationId of corporationIds) {
-    for (const asset of getCache(corporationCaches, corporationId).stockAssetsByItemId?.values()
+    for (const asset of getCache(corporationCaches, corporationId, sessionId).stockAssetsByItemId?.values()
       ?? []) {
       index.set(asset.itemId, asset);
     }
@@ -1202,9 +1215,10 @@ export async function getResolvedAssetIndex(
 export async function getRootContainersByItemId(
   characterIds: number[],
   includeCorporationAssets: boolean,
+  sessionId = "default",
 ): Promise<Map<number, AssetRecord>> {
   const assets = characterIds.flatMap((id) => [
-    ...getCache(characterCaches, id).rootContainersByItemId.values(),
+    ...getCache(characterCaches, id, sessionId).rootContainersByItemId.values(),
   ]);
   if (!includeCorporationAssets) return new Map(assets.map((asset) => [asset.itemId, asset]));
   const characters = await getCharacters();
@@ -1221,7 +1235,7 @@ export async function getRootContainersByItemId(
   return [
     ...assets.map((asset) => [asset.itemId, asset]),
     ...[...corporations].flatMap((id) =>
-      [...getCache(corporationCaches, id).rootContainersByItemId.values()].map((asset) => [
+      [...getCache(corporationCaches, id, sessionId).rootContainersByItemId.values()].map((asset) => [
         asset.itemId,
         asset,
       ]),
@@ -1240,6 +1254,7 @@ export async function getRootContainersByItemId(
 export async function getAssembledStructureRigAssets(
   characterIds: number[],
   includeCorporationAssets: boolean,
+  sessionId = "default",
 ) {
   if (!includeCorporationAssets) return [];
   const characters = await getCharacters();
@@ -1254,16 +1269,17 @@ export async function getAssembledStructureRigAssets(
       .map((character) => character.corporationId!),
   );
   return [...corporationIds].flatMap((id) => [
-    ...getCache(corporationCaches, id).assembledStructureRigs.values(),
+    ...getCache(corporationCaches, id, sessionId).assembledStructureRigs.values(),
   ]);
 }
 
 export async function getAssembledShipAssets(
   characterIds: number[],
   includeCorporationAssets: boolean,
+  sessionId = "default",
 ) {
   const assets = characterIds.flatMap((id) => [
-    ...getCache(characterCaches, id).assembledShipsByItemId.values(),
+    ...getCache(characterCaches, id, sessionId).assembledShipsByItemId.values(),
   ]);
   if (!includeCorporationAssets) return assets;
   const characters = await getCharacters();
@@ -1280,7 +1296,7 @@ export async function getAssembledShipAssets(
   return [
     ...assets,
     ...[...corporationIds].flatMap((id) => [
-      ...getCache(corporationCaches, id).assembledShipsByItemId.values(),
+      ...getCache(corporationCaches, id, sessionId).assembledShipsByItemId.values(),
     ]),
   ];
 }
@@ -1288,8 +1304,9 @@ export async function getAssembledShipAssets(
 export async function getAssetCacheMetadata(
   characterIds: number[],
   includeCorporationAssets: boolean,
+  sessionId = "default",
 ) {
-  const characterCachesForPlan = characterIds.map((id) => getCache(characterCaches, id));
+  const characterCachesForPlan = characterIds.map((id) => getCache(characterCaches, id, sessionId));
   const characters = await getCharacters();
   const corporations = includeCorporationAssets
     ? [
@@ -1305,7 +1322,7 @@ export async function getAssetCacheMetadata(
         ),
       ]
     : [];
-  const corporationCachesForPlan = corporations.map((id) => getCache(corporationCaches, id));
+  const corporationCachesForPlan = corporations.map((id) => getCache(corporationCaches, id, sessionId));
   const allCaches = [...characterCachesForPlan, ...corporationCachesForPlan];
   return {
     assetsLastUpdated:
@@ -1332,6 +1349,7 @@ export async function getMarketOrderStock(
     allCorporationSellOrdersAsStock: boolean;
     myCorporationSellOrdersAsStock: boolean;
   },
+  sessionId = "default",
 ): Promise<PlanStockItem[] | null> {
   const stock: PlanStockItem[] = [];
   const typeIds = new Set<number>();
@@ -1347,7 +1365,7 @@ export async function getMarketOrderStock(
   };
   if (options.personalSellOrdersAsStock) {
     for (const characterId of characterIds) {
-      const cache = getCache(characterCaches, characterId);
+      const cache = getCache(characterCaches, characterId, sessionId);
       if (!hasUsableMarketOrders(cache)) {
         hasUnavailableSource = true;
         continue;
@@ -1384,7 +1402,7 @@ export async function getMarketOrderStock(
       .map((character) => character.corporationId!),
   );
   for (const corporationId of corporationIds) {
-    const cache = getCache(corporationCaches, corporationId);
+    const cache = getCache(corporationCaches, corporationId, sessionId);
     if (!hasUsableMarketOrders(cache)) {
       hasUnavailableSource = true;
       continue;
@@ -1417,7 +1435,7 @@ export async function getMarketOrderStock(
   return resolveNames();
 }
 
-export async function getStateStatus(characterIds: number[]) {
+export async function getStateStatus(characterIds: number[], sessionId: string) {
   const characters = await getCharacters();
   const corporationsByCharacter = new Map<number, number[]>();
   for (const character of characters) {
@@ -1433,33 +1451,29 @@ export async function getStateStatus(characterIds: number[]) {
   return {
     characters: characterIds.map((characterId) => ({
       characterId,
-      assets: toClientEndpointStatus(getCache(characterCaches, characterId).allAssetsRaw) ?? {
+      assets: toClientEndpointStatus(getCache(characterCaches, characterId, sessionId).allAssetsRaw) ?? {
         status: "cached" as const,
         hasBody: false,
       },
-      rootContainersByItemId: getCache(characterCaches, characterId).rootContainersByItemId ?? {
+      jobs: toClientEndpointStatus(getCache(characterCaches, characterId, sessionId).jobs) ?? {
         status: "cached" as const,
         hasBody: false,
       },
-      jobs: toClientEndpointStatus(getCache(characterCaches, characterId).jobs) ?? {
-        status: "cached" as const,
-        hasBody: false,
-      },
-      orders: toClientEndpointStatus(getCache(characterCaches, characterId).marketOrders) ?? {
+      orders: toClientEndpointStatus(getCache(characterCaches, characterId, sessionId).marketOrders) ?? {
         status: "cached" as const,
         hasBody: false,
       },
       corporations: (corporationsByCharacter.get(characterId) ?? []).map((corporationId) => ({
         corporationId,
-        assets: toClientEndpointStatus(getCache(corporationCaches, corporationId).allAssetsRaw) ?? {
+        assets: toClientEndpointStatus(getCache(corporationCaches, corporationId, sessionId).allAssetsRaw) ?? {
           status: "cached" as const,
           hasBody: false,
         },
-        jobs: toClientEndpointStatus(getCache(corporationCaches, corporationId).jobs) ?? {
+        jobs: toClientEndpointStatus(getCache(corporationCaches, corporationId, sessionId).jobs) ?? {
           status: "cached" as const,
           hasBody: false,
         },
-        orders: toClientEndpointStatus(getCache(corporationCaches, corporationId).marketOrders) ?? {
+        orders: toClientEndpointStatus(getCache(corporationCaches, corporationId, sessionId).marketOrders) ?? {
           status: "cached" as const,
           hasBody: false,
         },

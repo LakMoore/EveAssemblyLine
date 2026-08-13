@@ -168,8 +168,7 @@ export function getHaulerShipTypeIds(): Promise<Set<number>> {
               if (!shipTypeIds.has(type._key) || type.marketGroupID === undefined) return false;
               let descendsFromShips = false;
               let descendsFromIndustrialOrFreighter = false;
-              let group =
-                type.marketGroupID === undefined ? undefined : marketGroups.get(type.marketGroupID);
+              let group = marketGroups.get(type.marketGroupID ?? -1);
               while (group) {
                 const name = group.name.en.toLocaleLowerCase("en");
                 if (name === "ships") descendsFromShips = true;

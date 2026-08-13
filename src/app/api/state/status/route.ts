@@ -11,7 +11,7 @@ export async function GET(request: Request) {
     );
   }
   return NextResponse.json(
-    await getStateStatus(await getSessionCharacterIds(session)),
+    await getStateStatus(await getSessionCharacterIds(session), session.sessionId),
     {
       headers: { "Cache-Control": "no-store" },
     },

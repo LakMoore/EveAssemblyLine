@@ -21,6 +21,7 @@ export async function GET(request: Request) {
       myCorporationSellOrdersAsStock:
         url.searchParams.get("myCorporationSellOrdersAsStock") === "true",
     },
+    session.sessionId,
   );
   if (marketOrderStock === null) {
     return NextResponse.json(

@@ -292,7 +292,7 @@ function addContribution(
   const itemKey = `${contribution.typeId}:${category}:${blueprintType ?? "item"}:${contribution.locationId ?? location.locationId}:${contribution.rootLocationId ?? location.locationId}${jobKey}`;
   const item: StockItem = bucket.items.get(itemKey) ?? {
     typeId: contribution.typeId,
-    name: type.name[language] ?? type.name.en ?? `Type ${contribution.typeId}`,
+    name: type.name[language] ?? type.name.en,
     quantity: 0,
     locationId: contribution.locationId ?? location.locationId,
     rootLocationId: contribution.rootLocationId ?? location.locationId,
@@ -444,7 +444,7 @@ export async function GET(request: Request) {
     systems,
     rootContainersByItemId,
   ] = await Promise.all([
-    getResolvedAssets(characterIds, true),
+    getResolvedAssets(characterIds, true, session.sessionId),
     getRunningIndustryJobs(characterIds, true),
     getShipTypeIds(),
     getStructureTypeIds(),
@@ -452,7 +452,7 @@ export async function GET(request: Request) {
     getMarketGroups(),
     getStations(),
     getSystems(),
-    getRootContainersByItemId(characterIds, true),
+    getRootContainersByItemId(characterIds, true, session.sessionId),
   ]);
   markPhase("data");
   const types = await getTypesByIds([
@@ -502,7 +502,7 @@ export async function GET(request: Request) {
           ? buildBlueprint.blueprint.activities.manufacturing?.products?.find(
               (candidate) => candidate.typeID === productTypeId,
             )
-          : buildBlueprint?.blueprint.activities.reaction?.products?.find(
+          : buildBlueprint?.blueprint.activities.reaction?.products.find(
               (candidate) => candidate.typeID === productTypeId,
             );
       if (product?.quantity && product.quantity > 0) {
@@ -510,14 +510,14 @@ export async function GET(request: Request) {
       }
     }),
   );
-  const allAssetIndex = await getResolvedAssetIndex(characterIds, true);
+  const allAssetIndex = await getResolvedAssetIndex(characterIds, true, session.sessionId);
   markPhase("indexes");
   for (const asset of assets) {
     if (!shouldIncludeAsset(asset, shipTypeIds) || !isDirectLocation(asset)) continue;
     const rootLocation = rootLocationFromAssetLocation(asset.rootLocation);
     if (
-      !rootLocation
-      || (rootLocation.typeId !== undefined && shipTypeIds.has(rootLocation.typeId))
+      rootLocation.typeId !== undefined 
+      && shipTypeIds.has(rootLocation.typeId)
     ) continue;
     addContribution(
       buckets,

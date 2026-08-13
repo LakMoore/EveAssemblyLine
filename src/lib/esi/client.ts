@@ -151,11 +151,35 @@ async function getUsableToken(record: CharacterTokenRecord, purpose: "personal" 
   return refresh;
 }
 
+async function refreshTokenAfterAuthorizationFailure(
+  characterId: number,
+  tokenSet: TokenSet,
+  purpose: "personal" | "corp",
+) {
+  const lockKey = `${characterId}:${purpose}`;
+  const existing = refreshLocks.get(lockKey);
+  if (existing) return existing;
+  const refresh = Promise.resolve()
+    .then(async () => {
+      const current = await getCharacter(characterId);
+      const currentTokenSet = current?.personalAuth;
+      if (!currentTokenSet) throw new Error("Character token is missing.");
+      if (currentTokenSet.accessToken !== tokenSet.accessToken) return currentTokenSet;
+      const updated = await refreshTokenSet(currentTokenSet);
+      const stored = await saveCharacterTokens(characterId, currentTokenSet.accessToken, updated);
+      tokenContexts.set(stored, { characterId, purpose });
+      return stored;
+    })
+    .finally(() => refreshLocks.delete(lockKey));
+  refreshLocks.set(lockKey, refresh);
+  return refresh;
+}
+
 export async function requestEsi<T>(
   path: string,
   tokenSet?: TokenSet,
   init?: RequestInit,
-  options: { bypassCache?: boolean; retry401?: boolean } = {},
+  options: { bypassCache?: boolean; retryAuthorization?: boolean } = {},
 ): Promise<{ data: T | null; headers: Headers; status: number; fromCache: boolean }> {
   const body = typeof init?.body === "string" ? init.body : "";
   const cachePath = body
@@ -192,7 +216,11 @@ export async function requestEsi<T>(
     return { data: null, headers: response.headers, status: response.status, fromCache: false };
   }
   if (!response.ok) {
-    if (response.status === 401 && tokenSet && options.retry401 !== false) {
+    if (
+      (response.status === 401 || response.status === 403)
+      && tokenSet
+      && options.retryAuthorization !== false
+    ) {
       const context = tokenContexts.get(tokenSet);
       const current = context ? await getCharacter(context.characterId) : null;
       const currentTokenSet = context ? current?.personalAuth : undefined;
@@ -210,9 +238,30 @@ export async function requestEsi<T>(
           init,
           {
             bypassCache: true,
-            retry401: false,
+            retryAuthorization: false,
           },
         );
+      }
+      if (response.status === 401 && context) {
+        try {
+          const refreshedTokenSet = await refreshTokenAfterAuthorizationFailure(
+            context.characterId,
+            tokenSet,
+            context.purpose,
+          );
+          return requestEsi<T>(
+            path,
+            refreshedTokenSet,
+            init,
+            {
+              bypassCache: true,
+              retryAuthorization: false,
+            },
+          );
+        }
+        catch {
+          // Preserve the original authorization error when refresh is rejected.
+        }
       }
     }
     const details = response.status === 401 ? await response.text() : "";
@@ -492,43 +541,51 @@ function mapIndustryJob(
 
 export async function fetchCharacterIndustryJobs(
   record: CharacterTokenRecord,
+  etag?: string,
   bypassCache = false,
 ) {
   const token = await getUsableToken(record, "personal");
-  const result = await requestEsi<EsiIndustryJob[]>(
+  const result = await requestEsiConditional<EsiIndustryJob[]>(
     `/characters/${record.characterId}/industry/jobs/`,
     token,
-    undefined,
-    { bypassCache },
+    etag,
+    bypassCache,
   );
   return {
-    jobs: (result.data ?? [])
+    jobs: result.data === null
+      ? null
+      : result.data
       .filter((job) => job.status !== "cancelled" && job.status !== "delivered")
       .map((job) => mapIndustryJob(job, "character", record.characterId)),
     headers: result.headers,
+    notModified: result.status === 304,
     fromCache: result.fromCache,
   };
 }
 
 export async function fetchCorporationIndustryJobs(
   record: CharacterTokenRecord,
+  etag?: string,
   bypassCache = false,
 ) {
   if (!record.corporationId || !record.hasDirectorRole) {
     throw new Error("Corporation authorization is incomplete");
   }
   const token = await getUsableToken(record, "corp");
-  const result = await requestEsi<EsiIndustryJob[]>(
+  const result = await requestEsiConditional<EsiIndustryJob[]>(
     `/corporations/${record.corporationId}/industry/jobs/`,
     token,
-    undefined,
-    { bypassCache },
+    etag,
+    bypassCache,
   );
   return {
-    jobs: (result.data ?? [])
+    jobs: result.data === null
+      ? null
+      : result.data
       .filter((job) => job.status !== "cancelled" && job.status !== "delivered")
       .map((job) => mapIndustryJob(job, "corporation", record.corporationId!)),
     headers: result.headers,
+    notModified: result.status === 304,
     fromCache: result.fromCache,
   };
 }

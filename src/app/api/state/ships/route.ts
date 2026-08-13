@@ -30,7 +30,7 @@ export async function GET(request: Request) {
   const characterIds = await getSessionCharacterIds(session);
 
   const [assets, shipTypeIds, stations, systems, marketGroups] = await Promise.all([
-    getShipAssets(characterIds, true),
+    getShipAssets(characterIds, true, session.sessionId),
     getShipTypeIds(),
     getStations(),
     getSystems(),

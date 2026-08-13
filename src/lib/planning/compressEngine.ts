@@ -92,9 +92,6 @@ export function compressMaterials(
           || (left.price ?? Number.POSITIVE_INFINITY) - (right.price ?? Number.POSITIVE_INFINITY)
           || left.typeId - right.typeId,
       )[0];
-    if (!candidate) {
-      break;
-    }
     const runs = runsNeeded(candidate, remaining);
     const yields = adjustedYields(candidate);
     selected.set(candidateKey(candidate), (selected.get(candidateKey(candidate)) ?? 0) + runs);

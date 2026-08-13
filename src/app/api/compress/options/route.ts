@@ -255,7 +255,7 @@ async function getOptions(
           ? 50
           : calculateReprocessingEfficiency(
               baseYieldMaps,
-              structureType === "Athanor" || structureType === "Tatara" ? structureType : "NPC",
+              structureType,
               {},
               0,
               location.securityStatus,
@@ -306,8 +306,7 @@ export async function POST(request: Request) {
         !Array.isArray(body.structures)
         || body.structures.some(
           (structure) =>
-            !structure
-            || typeof structure.id !== "string"
+            typeof structure.id !== "string"
             || !Number.isInteger(structure.type)
             || !Number.isSafeInteger(structure.systemId)
             || structure.systemId <= 0
@@ -327,10 +326,8 @@ export async function POST(request: Request) {
         !Array.isArray(body.assetLocations)
         || body.assetLocations.some(
           (location) =>
-            !location
-            || !Number.isSafeInteger(location.locationId)
+            !Number.isSafeInteger(location.locationId)
             || typeof location.name !== "string"
-            || (location.locationType !== "station" && location.locationType !== "structure")
             || (location.typeId !== undefined && !Number.isSafeInteger(location.typeId))
             || (location.systemId !== undefined && !Number.isSafeInteger(location.systemId)),
         )

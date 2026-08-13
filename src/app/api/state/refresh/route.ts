@@ -66,10 +66,10 @@ export async function POST(request: Request) {
       rateLimitedUntil,
     });
   }
-  const key = characterIds
+  const key = `${session.sessionId}:${characterIds
     .slice()
     .sort((left, right) => left - right)
-    .join(",");
+    .join(",")}`;
   const activeRefresh = activeRefreshes.get(key);
   if (activeRefresh) {
     const result = await activeRefresh;
@@ -80,7 +80,7 @@ export async function POST(request: Request) {
       rateLimitedUntil: getEsiRateLimitUntil(),
     });
   }
-  const refresh = refreshCharacterState(characterIds);
+  const refresh = refreshCharacterState(characterIds, session.sessionId);
   activeRefreshes.set(key, refresh);
   const result = await refresh.finally(() => activeRefreshes.delete(key));
   return NextResponse.json({

@@ -61,7 +61,6 @@ export async function GET(request: Request) {
         if (
           !type?.published
           || type.groupID === outpostRigGroupId
-          || !size
           || ![
             materialBonusAttribute,
             timeBonusAttribute,
@@ -88,15 +87,11 @@ export async function GET(request: Request) {
         ];
       });
     }
-    const rigs = cachedRigs ?? [];
+    const rigs = cachedRigs;
     return NextResponse.json({
       items: rigs.map((rig) => ({
         ...rig,
-        name:
-          rig.name[language]
-          ?? rig.name.en
-          ?? Object.values(rig.name).find(Boolean)
-          ?? `Type ${rig.typeId}`,
+        name: rig.name[language] ?? rig.name.en,
       })),
     });
   }

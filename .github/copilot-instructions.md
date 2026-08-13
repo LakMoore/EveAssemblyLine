@@ -4,6 +4,8 @@
 
 AssemblyLine is a Next.js App Router application for planning large EVE Online manufacturing projects. The authoritative product and architecture plan is [FullPlan.md](../../FullPlan.md). The application must eventually support EVE SSO, multiple attached characters, server-side ESI calls, static SDE data, Firestore persistence, inventory-aware planning, and six plan output lists.
 
+The repository root is the application root and contains `package.json`. Run project commands from this directory unless a task explicitly requires a different working directory.
+
 The repository is currently an early prototype, not a completed implementation of FullPlan.md:
 
 - `src/app/page.tsx` is a client-side prototype with hard-coded characters, locations, and sample build items.
@@ -27,6 +29,23 @@ Do not present prototype data as live EVE data. When replacing a mock path, keep
 - Do not add fake ESI responses or silently fall back to hard-coded recipes in production paths. Test fixtures belong in tests or explicitly named fixture modules.
 - Keep UI changes consistent with the current visual language: dark technical workspace, Manrope and DM Mono, restrained cyan/teal/lime accents, dense operational layouts, and responsive controls. Do not replace the planner with a generic dashboard or marketing page.
 - For compact icon-and-label actions, use the global `actionButton` class and compose it with a visual variant such as `styles.importButton`, `styles.remove`, or `styles.characterRemove`. Keep the shared class responsible for height, alignment, spacing, padding, icon sizing, and typography; keep variants responsible for color, border, and state styling. At narrow breakpoints, override the shared class for icon-only controls rather than creating separate button dimensions.
+- For formatting workflow, run `npm run lint`, then `npm run format`, and only then do additional validation or issue triage. Prettier is the final style pass, not a substitute for linting.
+
+## Formatting and readability rules
+
+- Keep code formatted in the repo's current style: semicolons, double quotes, trailing commas, and a 100-column line width.
+- Prefer the leading-operator layout for multiline boolean expressions so the condition reads naturally in review:
+
+```ts
+const allowed =
+  boolA
+  && (
+    boolB
+    || boolC
+  );
+```
+
+- Do not reformat unrelated code while making a targeted fix. Keep the edit focused and let the repo-wide format pass clean up simple style drift only after linting succeeds.
 
 ## Architecture boundaries
 
