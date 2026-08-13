@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { initStorage } from "../storage";
 import {
+  mergeStructureRigs,
+  normalizeStructureRigs,
+  type StructureRigsPayload,
+} from "../planning/structureRigs";
+import {
   CharacterCollectionRecord,
   CharacterTokenRecord,
   PendingMergeRecord,
@@ -227,7 +232,7 @@ export async function mergeCollections(targetId: string, sourceId: string) {
     const legacyAccounts = (await transaction.getItem("accounts")) as
       | Array<{ accountId: string; characterIds: number[]; createdAt: string; lastSeenAt: string }>
       | undefined;
-    const collections =
+    const collections: CharacterCollectionRecord[] =
       storedCollections
       ?? legacyAccounts?.map((account) => ({
         collectionId: account.accountId,
@@ -241,6 +246,10 @@ export async function mergeCollections(targetId: string, sourceId: string) {
     if (!target || !source) throw new Error("Collection not found");
     target.characterIds = [...new Set([...target.characterIds, ...source.characterIds])];
     target.lastSeenAt = new Date().toISOString();
+    target.structureRigs = mergeStructureRigs(
+      normalizeStructureRigs(target.structureRigs),
+      normalizeStructureRigs(source.structureRigs),
+    );
     for (const character of characters) {
       if (character.collectionId === sourceId) character.collectionId = targetId;
     }
@@ -267,6 +276,34 @@ export async function mergeCollections(targetId: string, sourceId: string) {
 
 export async function getCharacter(characterId: number) {
   return (await getCharacters()).find((record) => record.characterId === characterId) ?? null;
+}
+
+export async function getCollectionStructureRigs(
+  collectionId: string,
+): Promise<StructureRigsPayload> {
+  return normalizeStructureRigs((await getCollection(collectionId))?.structureRigs);
+}
+
+/** Merges the supplied rig map into the collection, keeping whichever side reports the newer edit. */
+export async function saveCollectionStructureRigs(
+  collectionId: string,
+  payload: StructureRigsPayload,
+): Promise<StructureRigsPayload> {
+  await getCollections();
+  const storage = await initStorage();
+  return storage.runTransaction(async (transaction) => {
+    const collections =
+      ((await transaction.getItem("collections")) as CharacterCollectionRecord[] | undefined) ?? [];
+    const collection = collections.find((record) => record.collectionId === collectionId);
+    if (!collection) throw new Error("Collection not found");
+    const merged = mergeStructureRigs(
+      normalizeStructureRigs(collection.structureRigs),
+      normalizeStructureRigs(payload),
+    );
+    collection.structureRigs = merged;
+    transaction.setItem("collections", collections);
+    return merged;
+  });
 }
 
 export async function upsertCharacter(record: CharacterTokenRecord) {

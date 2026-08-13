@@ -1,3 +1,5 @@
+import type { StructureRigsPayload } from "../planning/structureRigs";
+
 export interface TokenSet {
   refreshToken: string;
   accessToken: string;
@@ -24,6 +26,8 @@ export interface CharacterCollectionRecord {
   characterIds: number[];
   createdAt: string;
   lastSeenAt: string;
+  // Structure rig configuration shared by every session attached to this collection.
+  structureRigs?: StructureRigsPayload;
 }
 
 export interface AssetRecord {

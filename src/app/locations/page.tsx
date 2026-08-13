@@ -13,6 +13,18 @@ import type { SdeLanguage } from "@/lib/reference/languages";
 import { loadClientSession, loadClientStock } from "@/lib/client/requestCache";
 import { fetchRigs } from "@/lib/reference/rigs";
 import { loadStructures, saveStructures } from "@/lib/planning/structureStore";
+import {
+  emptyStructureRigs,
+  structureRigsKey,
+  structureRigsName,
+  type StructureRigsEntry,
+  type StructureRigsPayload,
+} from "@/lib/planning/structureRigs";
+import {
+  fetchStructureRigs,
+  publishStructureRigs,
+  structureRigsFromStructures,
+} from "@/lib/planning/structureRigsStore";
 import styles from "../page.module.css";
 
 type StructureSize = "Small" | "Medium" | "Large" | "Extra Large";
@@ -285,6 +297,15 @@ function normalizedStructureName(name: string) {
   return name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
 
+function sameRigTypeIds(left: number[] | undefined, right: number[] | undefined) {
+  const leftIds = left ?? [];
+  const rightIds = right ?? [];
+  return (
+    leftIds.length === rightIds.length
+    && leftIds.every((rigTypeId, index) => rigTypeId === rightIds[index])
+  );
+}
+
 function readLegacyStructures() {
   if (typeof window === "undefined") return [];
   try {
@@ -307,6 +328,8 @@ export default function LocationsPage() {
   const [editingStructure, setEditingStructure] = useState<KnownStructure | null>(null);
   const [rigOptionsBySize, setRigOptionsBySize] = useState(fallbackRigOptionsBySize);
   const [rigTypeIdsByName, setRigTypeIdsByName] = useState<Record<string, number>>({});
+  const [rigNamesByTypeId, setRigNamesByTypeId] = useState<Record<number, string>>({});
+  const [structureRigs, setStructureRigs] = useState<StructureRigsPayload>(emptyStructureRigs);
   const [esiStructures, setEsiStructures] = useState<EsiStructure[]>([]);
   const [esiConnected, setEsiConnected] = useState(false);
   const [esiRateLimitedUntil, setEsiRateLimitedUntil] = useState<string | null>(null);
@@ -445,22 +468,67 @@ export default function LocationsPage() {
         for (const rig of rigs) options[rig.size].push(rig.name);
         setRigOptionsBySize(options);
         setRigTypeIdsByName(Object.fromEntries(rigs.map((rig) => [rig.name, rig.typeId])));
+        setRigNamesByTypeId(Object.fromEntries(rigs.map((rig) => [rig.typeId, rig.name])));
       })
       .catch(() => undefined);
   }, [language]);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetchStructureRigs()
+      .then((payload) => {
+        if (!cancelled) setStructureRigs(payload);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function sharedRigEntry(
+    systemId: number | undefined,
+    systemName: string | undefined,
+    name: string,
+  ) {
+    if (!systemId) return undefined;
+    const entry: StructureRigsEntry | undefined =
+      structureRigs.structures[structureRigsKey(systemId, structureRigsName(systemName, name))];
+    return entry;
+  }
+
+  function sharedRigNames(
+    systemId: number | undefined,
+    systemName: string | undefined,
+    name: string,
+  ) {
+    const entry = sharedRigEntry(systemId, systemName, name);
+    if (!entry) return null;
+    return entry.rigTypeIds.map((rigTypeId) => rigNamesByTypeId[rigTypeId] ?? "No Rig");
+  }
+
+  // The collection rig map is shared by every session, so it wins over the local copy.
+  const knownStructures = locations.structures.map((structure) => {
+    const entry = sharedRigEntry(structure.systemId, structure.systemName, structure.name);
+    if (!entry || sameRigTypeIds(structure.rigTypeIds, entry.rigTypeIds)) return structure;
+    return {
+      ...structure,
+      rigTypeIds: entry.rigTypeIds,
+      rigs: entry.rigTypeIds.map((rigTypeId) => rigNamesByTypeId[rigTypeId] ?? "No Rig"),
+    };
+  });
+
   const knownStructuresByKey = new Map<string, KnownStructure>();
-  for (const structure of locations.structures) {
+  for (const structure of knownStructures) {
     knownStructuresByKey.set(structureMatchKey(structure.systemName, structure.name), structure);
     knownStructuresByKey.set(structureMatchKey(undefined, structure.name), structure);
   }
 
   function findLocalOverride(esiStructure: EsiStructure) {
     return (
-      locations.structures.find((known) => known.esiStructureId === esiStructure.structureId)
+      knownStructures.find((known) => known.esiStructureId === esiStructure.structureId)
       ?? knownStructuresByKey.get(structureMatchKey(esiStructure.systemName, esiStructure.name))
       ?? knownStructuresByKey.get(structureMatchKey(undefined, esiStructure.name))
-      ?? locations.structures.find((known) => {
+      ?? knownStructures.find((known) => {
         const esiName = normalizedStructureName(esiStructure.name);
         const localNames = [
           known.name,
@@ -474,7 +542,10 @@ export default function LocationsPage() {
   const displayedEsiStructures = esiStructures.map((structure) => {
     if (structure.locationType !== "structure") return structure;
     const localOverride = findLocalOverride(structure);
-    return localOverride ? { ...structure, rigs: localOverride.rigs } : structure;
+    const rigs =
+      localOverride?.rigs
+      ?? sharedRigNames(structure.systemId, structure.systemName, structure.name);
+    return rigs ? { ...structure, rigs } : structure;
   });
   const matchedKnownStructureIds = new Set(
     esiStructures
@@ -483,7 +554,7 @@ export default function LocationsPage() {
       .filter((structure): structure is KnownStructure => Boolean(structure))
       .map((structure) => structure.id),
   );
-  const unmatchedKnownStructures = locations.structures.filter(
+  const unmatchedKnownStructures = knownStructures.filter(
     (structure) => !matchedKnownStructureIds.has(structure.id),
   );
   const sortedEsiStructures = [...displayedEsiStructures].sort((left, right) => {
@@ -519,6 +590,7 @@ export default function LocationsPage() {
       name: localOverride?.name ?? esiStructure.name,
       rigs:
         localOverride?.rigs
+        ?? sharedRigNames(esiStructure.systemId, esiStructure.systemName, esiStructure.name)
         ?? (esiStructure.rigs.length > 0 ? esiStructure.rigs : ["No Rig", "No Rig", "No Rig"]),
     });
     setIsDialogOpen(true);
@@ -713,17 +785,24 @@ export default function LocationsPage() {
           rigTypeIdsByName={rigTypeIdsByName}
           onCancel={() => setIsDialogOpen(false)}
           onSave={(structure) => {
-            const existing = locations.structures.some((current) => current.id === structure.id);
-            const structures = existing
-              ? locations.structures.map((current) =>
-                  current.id === structure.id ? structure : current,
-                )
-              : [...locations.structures, structure];
+            const previous = knownStructures.find((current) => current.id === structure.id);
+            const structures =
+              previous !== undefined
+                ? knownStructures.map((current) =>
+                    current.id === structure.id ? structure : current,
+                  )
+                : [...knownStructures, structure];
             setLocations((current) => ({
               ...current,
               structures,
             }));
             void saveStructures(structures);
+            // Only publish when the rig loadout actually changed to avoid pointless writes.
+            if (!sameRigTypeIds(previous?.rigTypeIds, structure.rigTypeIds)) {
+              void publishStructureRigs(structureRigsFromStructures(structures)).then(
+                setStructureRigs,
+              );
+            }
             setIsDialogOpen(false);
             setEditingStructure(null);
           }}
