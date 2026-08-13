@@ -24,13 +24,11 @@ export async function loadBuildList() {
     request.onsuccess = () => {
       resolve(
         Array.isArray(request.result)
-          ? request.result
-              .filter(isBuildItem)
-              .map((item) => ({
-                ...item,
-                me: typeof item.me === "number" ? item.me : 0,
-                te: typeof item.te === "number" ? item.te : 0,
-              }))
+          ? request.result.filter(isBuildItem).map((item) => ({
+              ...item,
+              me: typeof item.me === "number" ? item.me : 0,
+              te: typeof item.te === "number" ? item.te : 0,
+            }))
           : [],
       );
     };

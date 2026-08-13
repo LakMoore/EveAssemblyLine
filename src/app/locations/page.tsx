@@ -10,7 +10,7 @@ import {
   type PlannerLocations,
 } from "@/lib/planning/preferences";
 import type { SdeLanguage } from "@/lib/reference/languages";
-import { loadClientSession } from "@/lib/client/requestCache";
+import { loadClientSession, loadClientStock } from "@/lib/client/requestCache";
 import { fetchRigs } from "@/lib/reference/rigs";
 import { loadStructures, saveStructures } from "@/lib/planning/structureStore";
 import styles from "../page.module.css";
@@ -363,13 +363,7 @@ export default function LocationsPage() {
 
     async function loadEsiStructures() {
       try {
-        const params = new URLSearchParams({
-          language,
-        });
-        const response = await fetch(`/api/state/stock?${params.toString()}`, {
-          cache: "no-store",
-        });
-        const data = (await response.json()) as {
+        const data = (await loadClientStock(language)) as {
           locations?: Array<{
             locationId: number;
             name: string;

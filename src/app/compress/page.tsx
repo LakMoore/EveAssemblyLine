@@ -7,7 +7,7 @@ import { useAppLanguage } from "../AppShell";
 import TypeIdentity from "../components/TypeIdentity";
 import { useToast } from "../components/ToastProvider";
 import type { SdeLanguage } from "@/lib/reference/languages";
-import { Clipboard, Minimize2 } from "lucide-react";
+import { Clipboard, Copy, Minimize2, Upload, X } from "lucide-react";
 import Image from "next/image";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import { loadStructures } from "@/lib/planning/structureStore";
@@ -806,9 +806,10 @@ function Results({ result }: { result: CompressResult }) {
             {active.key === "toBuy" && items.length > 0 && (
               <button
                 type="button"
-                className={styles.secondaryButton}
+                className={`actionButton ${styles.secondaryButton}`}
                 onClick={() => void copyToBuyList()}
               >
+                <Copy aria-hidden="true" />
                 Copy multibuy
               </button>
             )}
@@ -1048,10 +1049,20 @@ function PasteDialog({
           </button>
         </div>
         <div className={styles.modalActions}>
-          <button type="button" className={styles.secondaryButton} onClick={onCancel}>
+          <button
+            type="button"
+            className={`actionButton ${styles.secondaryButton}`}
+            onClick={onCancel}
+          >
+            <X aria-hidden="true" />
             Cancel
           </button>
-          <button type="submit" className={styles.primaryButton} disabled={!text.trim()}>
+          <button
+            type="submit"
+            className={`actionButton ${styles.primaryButton}`}
+            disabled={!text.trim()}
+          >
+            <Upload aria-hidden="true" />
             Import list
           </button>
         </div>

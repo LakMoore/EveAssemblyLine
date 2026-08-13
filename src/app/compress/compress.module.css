@@ -74,7 +74,11 @@
   color: #a9d5d5;
   cursor: pointer;
 }
+.secondaryButton {
+  composes: actionButton from global;
+}
 .primaryButton {
+  composes: actionButton from global;
   display: inline-flex;
   align-items: center;
   gap: 8px;

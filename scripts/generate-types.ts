@@ -5,8 +5,8 @@ const processedDir = resolve("sde/processed");
 const outputDir = resolve("src/lib/sde/generated");
 const interfaces = new Map<string, { records: JsonObject[]; name: string }>();
 
-type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
-type JsonObject = { [key: string]: JsonValue };
+type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
+type JsonObject = { [key: string]: JsonValue | undefined };
 
 function typeName(value: string) {
   const name = value

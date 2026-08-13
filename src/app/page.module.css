@@ -894,6 +894,7 @@
 }
 
 .importButton {
+  composes: actionButton from global;
   border: 1px solid #2b5260;
   background: transparent;
   color: var(--cyan);

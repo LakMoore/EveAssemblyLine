@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Next.js: debug server",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/eveassemblyline/node_modules/next/dist/bin/next",
+      "args": ["dev", "-p", "3000"],
+      "cwd": "${workspaceFolder}/eveassemblyline",
+      "envFile": "${workspaceFolder}/eveassemblyline/.env.local",
+      "env": {
+        "NODE_OPTIONS": "--inspect=0"
+      },
+      "autoAttachChildProcesses": true,
+      "skipFiles": ["<node_internals>/**"],
+      "console": "integratedTerminal",
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "Local:\\s+http://localhost:(\\d+)",
+        "uriFormat": "http://localhost:%s"
+      }
+    }
+  ]
+}

@@ -18,7 +18,7 @@ import { loadClientStock } from "@/lib/client/requestCache";
 import { type KnownStructure } from "@/lib/planning/preferences";
 import TypeIdentity from "../components/TypeIdentity";
 import styles from "../page.module.css";
-import { Clipboard, Trash2 } from "lucide-react";
+import { Clipboard, Plus, Trash2 } from "lucide-react";
 
 type StructureOption = { id: string; name: string };
 type SystemOption = { id: number; name: string };
@@ -340,6 +340,7 @@ export default function StockPage() {
           <p className={styles.subtitle}>Track available materials and components by location.</p>
         </div>
         <button type="button" className={styles.importButton} onClick={() => setIsAddOpen(true)}>
+          <Plus aria-hidden="true" />
           Add location
         </button>
       </div>
