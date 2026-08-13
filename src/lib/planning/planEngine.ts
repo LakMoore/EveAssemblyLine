@@ -137,35 +137,32 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       counts: Object.fromEntries(counts) as PlanSourceCounts,
     };
   }
-  const standardStock =
-    request.stock
-      ?.filter((item) => item.category === "item")
-      .filter((item) => item.source !== "marketOrder")
-      .reduce(
-        (map, item) => map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity),
-        new Map<number, number>(),
-      ) ?? new Map<number, number>();
-  const marketOrderStock =
-    request.stock
-      ?.filter((item) => item.category === "item" && item.source === "marketOrder")
-      .reduce(
-        (map, item) => map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity),
-        new Map<number, number>(),
-      ) ?? new Map<number, number>();
+  const standardStock = request.stock
+    .filter((item) => item.category === "item")
+    .filter((item) => item.source !== "marketOrder")
+    .reduce(
+      (map, item) => map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity),
+      new Map<number, number>(),
+    );
+  const marketOrderStock = request.stock
+    .filter((item) => item.category === "item" && item.source === "marketOrder")
+    .reduce(
+      (map, item) => map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity),
+      new Map<number, number>(),
+    );
   const totalStock = new Map(standardStock);
   const initialBuildTypeIds = new Set(request.items.map((item) => item.typeId));
   for (const [typeId, quantity] of marketOrderStock) {
     if (!initialBuildTypeIds.has(typeId)) continue;
     totalStock.set(typeId, (totalStock.get(typeId) ?? 0) + quantity);
   }
-  const availableBlueprintCopies =
-    request.stock?.filter(
-      (item) => item.category === "bp" && item.type === "bpc" && !item.inBuild,
-    ) ?? [];
-  const availableBlueprintOriginals =
-    request.stock?.filter((item) => item.category === "bp" && item.type === "bpo") ?? [];
-  const availableReactionFormulas =
-    request.stock?.filter((item) => item.category === "reaction") ?? [];
+  const availableBlueprintCopies = request.stock.filter(
+    (item) => item.category === "bp" && item.type === "bpc" && !item.inBuild,
+  );
+  const availableBlueprintOriginals = request.stock.filter(
+    (item) => item.category === "bp" && item.type === "bpo",
+  );
+  const availableReactionFormulas = request.stock.filter((item) => item.category === "reaction");
   const blueprintCopyStock = new Map<number, { copies: number; runs: number }>();
   const seenBlueprintPrints = new Set<number>();
   for (const item of availableBlueprintCopies) {
@@ -489,12 +486,13 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       const inventingBlueprints = await profiler.measure("inventionBlueprintLookup", () =>
         getBlueprintsByInventionProductId(bpc.typeId),
       );
+      if (inventingBlueprints.length === 0) continue;
       const inventingBlueprint = inventingBlueprints[0];
-      const invention = inventingBlueprint?.activities.invention;
+      const invention = inventingBlueprint.activities.invention;
       const inventionProduct = invention?.products?.find(
         (product) => product.typeID === bpc.typeId,
       );
-      if (!inventingBlueprint || !invention || !inventionProduct) continue;
+      if (!invention || !inventionProduct) continue;
 
       const successProbability = inventionProduct.probability ?? 1;
       const remainingBpcRuns = Math.max(0, bpc.neededQuantity - bpc.stockRuns);
@@ -573,7 +571,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
   ];
   const haulingTasks: PlanResult["lists"]["haulingTasks"] = [];
   const remainingConsumption = new Map(consumedStock);
-  const planningStock = request.stock ?? [];
+  const planningStock = request.stock;
   for (const stock of planningStock) {
     if (!stock.sourceLocationId) continue;
     const quantity = Math.min(stock.quantity, remainingConsumption.get(stock.typeId) ?? 0);

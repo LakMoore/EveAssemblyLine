@@ -290,12 +290,7 @@ function readLegacyStructures() {
   try {
     const stored = window.localStorage.getItem(locationsStorageKey);
     const parsed = stored ? (JSON.parse(stored) as Partial<PlannerLocations>) : {};
-    return Array.isArray(parsed.structures)
-      ? parsed.structures.map((structure) => ({
-          ...structure,
-          size: structure.size ?? typeForName(structure.type).size,
-        }))
-      : [];
+    return Array.isArray(parsed.structures) ? parsed.structures : [];
   } catch {
     return [];
   }
@@ -421,7 +416,7 @@ export default function LocationsPage() {
 
     const handleRefresh = (event: Event) => {
       const detail = (event as CustomEvent<{ rateLimitedUntil?: string | null }>).detail;
-      setEsiRateLimitedUntil(detail?.rateLimitedUntil ?? null);
+      setEsiRateLimitedUntil(detail.rateLimitedUntil ?? null);
       void loadEsiStructures();
     };
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);

@@ -287,7 +287,7 @@ export function getSdeBuildNumber() {
   return getOnce("metadata", () => {
     const metadata = records<{ buildNumber?: unknown }>("_sde.json")[0];
     sdeBuildNumber =
-      typeof metadata?.buildNumber === "number" ? String(metadata.buildNumber) : "unknown";
+      typeof metadata.buildNumber === "number" ? String(metadata.buildNumber) : "unknown";
     return sdeBuildNumber;
   });
 }

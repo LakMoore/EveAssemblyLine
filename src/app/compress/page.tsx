@@ -248,7 +248,7 @@ function CompressContent() {
           })
           .sort(
             (left, right) =>
-              (right.rankBonus ?? 0) - (left.rankBonus ?? 0) ||
+              right.rankBonus - left.rankBonus ||
               (left.name ?? left.id).localeCompare(right.name ?? right.id),
           );
         const normalizedSettings = {
@@ -260,7 +260,6 @@ function CompressContent() {
           marketId: marketHubs.some((market) => market.id === loadedSettings.marketId)
             ? loadedSettings.marketId
             : "jita",
-          orderType: loadedSettings.orderType ?? "buy-1-day",
         };
         setOptions({ ...loadedOptions, locations: loadedLocations });
         setKnownStructures(structuresWithSecurity);
@@ -411,7 +410,7 @@ function CompressContent() {
           structureTypeId: selectedLocation?.structureTypeId ?? 0,
           reprocessingRig: reprocessingRigLevel(selectedLocation?.rigs ?? []),
           skillLevels,
-          implantLevel: selectedImplant?.level ?? 0,
+          implantLevel: selectedImplant.level,
           securityStatus: selectedLocation?.securityStatus,
           marketId:
             marketHubs.find((market) => market.id === settings.marketId)?.regionId ??

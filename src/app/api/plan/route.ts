@@ -72,7 +72,6 @@ export async function POST(request: Request) {
     }
     const assets = input.assets;
     if (
-      !assets ||
       !Array.isArray(assets.items) ||
       !Array.isArray(assets.blueprints) ||
       !Array.isArray(assets.industry) ||
@@ -92,19 +91,6 @@ export async function POST(request: Request) {
     ) {
       return NextResponse.json(
         { error: "Every plan input needs valid IDs and a positive quantity." },
-        { status: 400 },
-      );
-    }
-    if (
-      assets.blueprints.some(
-        (blueprint) =>
-          !Number.isInteger(blueprint.runs) ||
-          blueprint.runs < -1 ||
-          (blueprint.type !== "bpc" && blueprint.type !== "bpo"),
-      )
-    ) {
-      return NextResponse.json(
-        { error: "Every blueprint needs a valid type and run count." },
         { status: 400 },
       );
     }
@@ -164,8 +150,6 @@ export async function POST(request: Request) {
         if (matchingBlueprint) matchingBlueprint.runs = remainingRuns;
         else if (
           job.blueprintId !== undefined &&
-          job.blueprintTypeId !== undefined &&
-          remainingRuns !== undefined &&
           (remainingRuns === -1 || job.activity === "Manufacturing" || job.activity === "Copying")
         ) {
           normalizedBlueprints.push({
@@ -225,7 +209,7 @@ export async function POST(request: Request) {
           type: blueprint.type,
           blueprintPrints: [
             {
-              itemId: -(index + 1),
+              itemId: blueprint.itemId ?? -(index + 1),
               runs: blueprint.runs,
               type: blueprint.type,
               me: blueprint.me,
