@@ -8,7 +8,7 @@ import type {
 } from "@/lib/auth/model";
 import { getCachedEsiResponse, setCachedEsiResponse } from "@/cache/services/esiCache";
 import { refreshTokenSet } from "@/lib/auth/eveSso";
-import { getCharacter, upsertCharacter } from "@/lib/auth/tokensStore";
+import { getCharacter, saveCharacterTokens } from "@/lib/auth/tokensStore";
 
 const esiBaseUrl = process.env.ESI_BASE_URL ?? "https://esi.evetech.net/latest";
 const refreshLocks = new Map<string, Promise<TokenSet>>();
@@ -132,26 +132,19 @@ async function getUsableToken(record: CharacterTokenRecord, purpose: "personal" 
   const refresh = Promise.resolve()
     .then(async () => {
       const current = await getCharacter(record.characterId);
-      const currentTokenSet = current?.personalAuth;
-      if (
-        currentTokenSet
-        && Date.parse(currentTokenSet.accessTokenExpiresAt) > Date.now() + 5 * 60 * 1000
-      ) {
+      const currentTokenSet = current?.personalAuth ?? tokenSet;
+      if (Date.parse(currentTokenSet.accessTokenExpiresAt) > Date.now() + 5 * 60 * 1000) {
         tokenContexts.set(currentTokenSet, { characterId: record.characterId, purpose });
         return currentTokenSet;
       }
-      return refreshTokenSet(currentTokenSet ?? tokenSet);
-    })
-    .then(async (updated) => {
-      const current = await getCharacter(record.characterId);
-      if (current) {
-        await upsertCharacter({
-          ...current,
-          personalAuth: updated,
-        });
-      }
-      tokenContexts.set(updated, { characterId: record.characterId, purpose });
-      return updated;
+      const updated = await refreshTokenSet(currentTokenSet);
+      const stored = await saveCharacterTokens(
+        record.characterId,
+        currentTokenSet.accessToken,
+        updated,
+      );
+      tokenContexts.set(stored, { characterId: record.characterId, purpose });
+      return stored;
     })
     .finally(() => refreshLocks.delete(lockKey));
   refreshLocks.set(lockKey, refresh);

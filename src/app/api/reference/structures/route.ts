@@ -15,14 +15,19 @@ async function stationName(stationId: number, language: SdeLanguage, sdeBuildNum
       `https://esi.evetech.net/latest/universe/stations/${stationId}/?datasource=tranquility&language=${language}&sde_build=${sdeBuildNumber}`,
       { next: { revalidate: stationNameCacheSeconds } },
     );
-    if (!response.ok) return `Station ${stationId}`;
+    if (!response.ok) {
+      throw new Error(`Station ${stationId} metadata request failed.`);
+    }
     const data = (await response.json()) as { name?: string };
-    const name = data.name?.trim() || `Station ${stationId}`;
+    const name = data.name?.trim();
+    if (!name) throw new Error(`Station ${stationId} metadata did not include a name.`);
     stationNameCache.set(cacheKey, name);
     return name;
   }
-  catch {
-    return `Station ${stationId}`;
+  catch (error) {
+    throw error instanceof Error
+      ? error
+      : new Error(`Station ${stationId} metadata request failed.`);
   }
 }
 

@@ -20,6 +20,7 @@ import {
 } from "./generated";
 
 const processedDir = resolve("sde/processed");
+const rigSizeAttribute = 1547;
 export type LoadedType = TypesRecord & { packagedVolume?: number };
 let sdeBuildNumber = "unknown";
 const typeById = new Map<number, LoadedType>();
@@ -195,15 +196,13 @@ export function getBlueprints() {
   );
 }
 
-export function getCompressibleTypes() {
+export async function getCompressibleTypes() {
+  const types = await getTypes();
   return getOnce(
     "compressibleTypes",
     () => {
-      const typeNames = new Map(
-        records<TypesRecord>("types.json").map((record) => [record._key, record.name.en] as const),
-      );
       for (const record of records<CompressibleTypesRecord>("compressibleTypes.json")) {
-        if (typeNames.get(record.compressedTypeID)?.startsWith("Batch Compressed ")) continue;
+        if (types.get(record.compressedTypeID)?.name.en.startsWith("Batch Compressed ")) continue;
         compressibleTypeByTypeId.set(record._key, record.compressedTypeID);
       }
       return compressibleTypeByTypeId;
@@ -234,7 +233,7 @@ export function getActivityInputTypeIds() {
       for (const materials of indexes.reactionMaterialsByBlueprintId.values()) {
         for (const material of materials) activityInputTypeIds.add(material.typeID);
       }
-      for (const blueprint of records<BlueprintsRecord>("blueprints.json")) {
+      for (const blueprint of indexes.byBlueprintId.values()) {
         for (const material of blueprint.activities.invention?.materials ?? []) {
           activityInputTypeIds.add(material.typeID);
         }
@@ -268,12 +267,17 @@ export function getStations() {
   );
 }
 
-export function getRigDogma() {
+export async function getRigDogma() {
   return getOnce(
     "rigDogma",
-    () => {
-      for (const record of records<TypeDogmaRecord>("typeDogma.json")) {
-        rigDogmaByTypeId.set(record._key, record);
+    async () => {
+      const typeDogma = await getTypeDogma();
+      for (const [typeId, record] of typeDogma) {
+        if (
+          record.dogmaAttributes.some((attribute) => attribute.attributeID === rigSizeAttribute)
+        ) {
+          rigDogmaByTypeId.set(typeId, record);
+        }
       }
       return rigDogmaByTypeId;
     },
@@ -292,11 +296,12 @@ export function getTypeDogma() {
   );
 }
 
-export function getBonusDogmaAttributes() {
+export async function getBonusDogmaAttributes() {
+  const dogmaAttributes = await getDogmaAttributes();
   return getOnce(
     "bonusDogmaAttributes",
     () => {
-      for (const record of records<DogmaAttributesRecord>("dogmaAttributes.json")) {
+      for (const record of dogmaAttributes.values()) {
         if (record.attributeCategoryID === 37) bonusDogmaAttributesById.set(record._key, record);
       }
       return bonusDogmaAttributesById;

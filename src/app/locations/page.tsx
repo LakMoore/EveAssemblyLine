@@ -12,6 +12,11 @@ import {
 import type { SdeLanguage } from "@/lib/reference/languages";
 import { loadClientSession, loadClientStock } from "@/lib/client/requestCache";
 import { fetchRigs } from "@/lib/reference/rigs";
+import {
+  fetchStructureTypes,
+  type StructureSize,
+  type StructureType,
+} from "@/lib/reference/structureTypes";
 import { loadStructures, saveStructures } from "@/lib/planning/structureStore";
 import {
   emptyStructureRigs,
@@ -26,192 +31,6 @@ import {
   structureRigsFromStructures,
 } from "@/lib/planning/structureRigsStore";
 import styles from "../page.module.css";
-
-type StructureSize = "Small" | "Medium" | "Large" | "Extra Large";
-type StructureType = { name: string; size: StructureSize; typeId: number; sizeId: number };
-
-const structureTypes: StructureType[] = [
-  { name: "Athanor", size: "Medium", typeId: 35835, sizeId: 2 },
-  { name: "Raitaru", size: "Medium", typeId: 35825, sizeId: 2 },
-  { name: "Astrahus", size: "Medium", typeId: 35832, sizeId: 2 },
-  { name: "Tatara", size: "Large", typeId: 35836, sizeId: 3 },
-  { name: "Sotiyo", size: "Extra Large", typeId: 35827, sizeId: 4 },
-  { name: "Azbel", size: "Large", typeId: 35826, sizeId: 3 },
-  { name: "Fortizar", size: "Large", typeId: 35833, sizeId: 3 },
-  { name: "Keepstar", size: "Extra Large", typeId: 35834, sizeId: 4 },
-  { name: "'Draccous' Fortizar", size: "Large", typeId: 35833, sizeId: 3 },
-  { name: "'Horizon' Fortizar", size: "Large", typeId: 35833, sizeId: 3 },
-  { name: "'Marginis' Fortizar", size: "Large", typeId: 35833, sizeId: 3 },
-  { name: "'Moreau' Fortizar", size: "Large", typeId: 35833, sizeId: 3 },
-  { name: "'Prometheus' Fortizar", size: "Large", typeId: 35833, sizeId: 3 },
-  { name: "Upwell Palatine Keepstar", size: "Extra Large", typeId: 35834, sizeId: 4 },
-];
-const structureTypeNames = new Map(
-  structureTypes.map((structure) => [structure.typeId, structure.name]),
-);
-const fallbackRigOptionsBySize: Record<StructureSize, string[]> = {
-  Small: [
-    "No Rig",
-    "Standup M-Set Basic Small Ship Manufacturing Material Efficiency I",
-    "Standup M-Set Basic Small Ship Manufacturing Time Efficiency I",
-    "Standup M-Set Basic Small Ship Manufacturing Material Efficiency II",
-    "Standup M-Set Basic Small Ship Manufacturing Time Efficiency II",
-    "Standup M-Set Advanced Small Ship Manufacturing Material Efficiency I",
-    "Standup M-Set Advanced Small Ship Manufacturing Time Efficiency I",
-    "Standup M-Set Advanced Small Ship Manufacturing Material Efficiency II",
-    "Standup M-Set Advanced Small Ship Manufacturing Time Efficiency II",
-    "Standup M-Set Small Ship Manufacturing Material Efficiency I",
-    "Standup M-Set Small Ship Manufacturing Time Efficiency I",
-  ],
-  Medium: [
-    "No Rig",
-    "Standup M-Set Basic Medium Ship Manufacturing Material Efficiency I",
-    "Standup M-Set Basic Medium Ship Manufacturing Material Efficiency II",
-    "Standup M-Set Basic Medium Ship Manufacturing Time Efficiency I",
-    "Standup M-Set Basic Medium Ship Manufacturing Time Efficiency II",
-    "Standup M-Set Basic Small Ship Manufacturing Material Efficiency I",
-    "Standup M-Set Basic Small Ship Manufacturing Material Efficiency II",
-    "Standup M-Set Basic Small Ship Manufacturing Time Efficiency I",
-    "Standup M-Set Basic Small Ship Manufacturing Time Efficiency II",
-    "Standup M-Set Basic Large Ship Manufacturing Material Efficiency I",
-    "Standup M-Set Basic Large Ship Manufacturing Material Efficiency II",
-    "Standup M-Set Basic Large Ship Manufacturing Time Efficiency I",
-    "Standup M-Set Basic Large Ship Manufacturing Time Efficiency II",
-    "Standup M-Set Advanced Medium Ship Manufacturing Material Efficiency I",
-    "Standup M-Set Advanced Medium Ship Manufacturing Material Efficiency II",
-    "Standup M-Set Advanced Medium Ship Manufacturing Time Efficiency I",
-    "Standup M-Set Advanced Medium Ship Manufacturing Time Efficiency II",
-    "Standup M-Set Advanced Small Ship Manufacturing Material Efficiency I",
-    "Standup M-Set Advanced Small Ship Manufacturing Material Efficiency II",
-    "Standup M-Set Advanced Small Ship Manufacturing Time Efficiency I",
-    "Standup M-Set Advanced Small Ship Manufacturing Time Efficiency II",
-    "Standup M-Set Advanced Large Ship Manufacturing Material Efficiency I",
-    "Standup M-Set Advanced Large Ship Manufacturing Material Efficiency II",
-    "Standup M-Set Advanced Large Ship Manufacturing Time Efficiency I",
-    "Standup M-Set Advanced Large Ship Manufacturing Time Efficiency II",
-    "Standup M-Set Advanced Component Manufacturing Material Efficiency I",
-    "Standup M-Set Advanced Component Manufacturing Material Efficiency II",
-    "Standup M-Set Advanced Component Manufacturing Time Efficiency I",
-    "Standup M-Set Advanced Component Manufacturing Time Efficiency II",
-    "Standup M-Set Drone and Fighter Manufacturing Material Efficiency I",
-    "Standup M-Set Drone and Fighter Manufacturing Material Efficiency II",
-    "Standup M-Set Drone and Fighter Manufacturing Time Efficiency I",
-    "Standup M-Set Drone and Fighter Manufacturing Time Efficiency II",
-    "Standup M-Set Ammunition Manufacturing Material Efficiency I",
-    "Standup M-Set Ammunition Manufacturing Material Efficiency II",
-    "Standup M-Set Ammunition Manufacturing Time Efficiency I",
-    "Standup M-Set Ammunition Manufacturing Time Efficiency II",
-    "Standup M-Set Equipment Manufacturing Material Efficiency I",
-    "Standup M-Set Equipment Manufacturing Material Efficiency II",
-    "Standup M-Set Equipment Manufacturing Time Efficiency I",
-    "Standup M-Set Equipment Manufacturing Time Efficiency II",
-    "Standup M-Set Basic Capital Component Manufacturing Material Efficiency I",
-    "Standup M-Set Basic Capital Component Manufacturing Material Efficiency II",
-    "Standup M-Set Basic Capital Component Manufacturing Time Efficiency I",
-    "Standup M-Set Basic Capital Component Manufacturing Time Efficiency II",
-    "Standup M-Set Structure Manufacturing Material Efficiency I",
-    "Standup M-Set Structure Manufacturing Material Efficiency II",
-    "Standup M-Set Structure Manufacturing Time Efficiency I",
-    "Standup M-Set Structure Manufacturing Time Efficiency II",
-    "Standup M-Set Thukker Basic Capital Component Manufacturing Material Efficiency",
-    "Standup M-Set Thukker Advanced Component Manufacturing Material Efficiency",
-    "Standup M-Set Composite Reactor Material Efficiency I",
-    "Standup M-Set Composite Reactor Material Efficiency II",
-    "Standup M-Set Composite Reactor Time Efficiency I",
-    "Standup M-Set Composite Reactor Time Efficiency II",
-    "Standup M-Set Hybrid Reactor Material Efficiency I",
-    "Standup M-Set Hybrid Reactor Material Efficiency II",
-    "Standup M-Set Hybrid Reactor Time Efficiency I",
-    "Standup M-Set Hybrid Reactor Time Efficiency II",
-    "Standup M-Set Biochemical Reactor Material Efficiency I",
-    "Standup M-Set Biochemical Reactor Material Efficiency II",
-    "Standup M-Set Biochemical Reactor Time Efficiency I",
-    "Standup M-Set Biochemical Reactor Time Efficiency II",
-  ],
-  Large: [
-    "No Rig",
-    "Standup L-Set Ammunition Manufacturing Efficiency I",
-    "Standup L-Set Ammunition Manufacturing Efficiency II",
-    "Standup L-Set Basic Large Ship Manufacturing Efficiency I",
-    "Standup L-Set Basic Large Ship Manufacturing Efficiency II",
-    "Standup L-Set Advanced Large Ship Manufacturing Efficiency I",
-    "Standup L-Set Advanced Large Ship Manufacturing Efficiency II",
-    "Standup L-Set Equipment Manufacturing Efficiency I",
-    "Standup L-Set Equipment Manufacturing Efficiency II",
-    "Standup L-Set Capital Ship Manufacturing Efficiency I",
-    "Standup L-Set Capital Ship Manufacturing Efficiency II",
-    "Standup L-Set Advanced Component Manufacturing Efficiency I",
-    "Standup L-Set Advanced Component Manufacturing Efficiency II",
-    "Standup L-Set Missile Flight Processor I",
-    "Standup L-Set Missile Flight Processor II",
-    "Standup L-Set Energy Neutralizer Feedback Control I",
-    "Standup L-Set Energy Neutralizer Feedback Control II",
-    "Standup L-Set Fighter Mission Control I",
-    "Standup L-Set Fighter Mission Control II",
-    "Standup L-Set EW Command System I",
-    "Standup L-Set EW Command System II",
-    "Standup L-Set Bomb Aimer I",
-    "Standup L-Set Bomb Aimer II",
-    "Standup L-Set Point Defense Battery Control I",
-    "Standup L-Set Point Defense Battery Control II",
-    "Standup L-Set Target Acquisition Array I",
-    "Standup L-Set Target Acquisition Array II",
-    "Standup L-Set Advanced Small Ship Manufacturing Efficiency I",
-    "Standup L-Set Advanced Small Ship Manufacturing Efficiency II",
-    "Standup L-Set Advanced Medium Ship Manufacturing Efficiency I",
-    "Standup L-Set Advanced Medium Ship Manufacturing Efficiency II",
-    "Standup L-Set Drone and Fighter Manufacturing Efficiency I",
-    "Standup L-Set Drone and Fighter Manufacturing Efficiency II",
-    "Standup L-Set Basic Small Ship Manufacturing Efficiency I",
-    "Standup L-Set Basic Small Ship Manufacturing Efficiency II",
-    "Standup L-Set Basic Medium Ship Manufacturing Efficiency I",
-    "Standup L-Set Basic Medium Ship Manufacturing Efficiency II",
-    "Standup L-Set Basic Capital Component Manufacturing Efficiency I",
-    "Standup L-Set Basic Capital Component Manufacturing Efficiency II",
-    "Standup L-Set Structure Manufacturing Efficiency I",
-    "Standup L-Set Structure Manufacturing Efficiency II",
-    "Standup L-Set Invention Optimization I",
-    "Standup L-Set Invention Optimization II",
-    "Standup L-Set ME Research Optimization I",
-    "Standup L-Set ME Research Optimization II",
-    "Standup L-Set TE Research Optimization I",
-    "Standup L-Set TE Research Optimization II",
-    "Standup L-Set Thukker Basic Capital Component Manufacturing Efficiency",
-    "Standup L-Set Thukker Advanced Component Manufacturing Efficiency",
-    "Standup L-Set Moon Drilling Proficiency I",
-    "Standup L-Set Moon Drilling Proficiency II",
-    "Standup L-Set Reactor Efficiency I",
-    "Standup L-Set Reactor Efficiency II",
-    "Standup L-Set Reprocessing Monitor I",
-    "Standup L-Set Reprocessing Monitor II",
-  ],
-  "Extra Large": [
-    "No Rig",
-    "Standup XL-Set Equipment and Consumable Manufacturing Efficiency I",
-    "Standup XL-Set Equipment and Consumable Manufacturing Efficiency II",
-    "Standup XL-Set Ship Manufacturing Efficiency I",
-    "Standup XL-Set Ship Manufacturing Efficiency II",
-    "Standup XL-Set Laboratory Optimization I",
-    "Standup XL-Set Laboratory Optimization II",
-    "Standup XL-Set Missile Fire Control Computer I",
-    "Standup XL-Set Missile Fire Control Computer II",
-    "Standup XL-Set Integrated Fighter and PD Network I",
-    "Standup XL-Set Integrated Fighter and PD Network II",
-    "Standup XL-Set EW and Emissions Co-ordinator I",
-    "Standup XL-Set EW and Emissions Co-ordinator II",
-    "Standup XL-Set Extinction Level Weapons Suite I",
-    "Standup XL-Set Extinction Level Weapons Suite II",
-    "Standup XL-Set Structure and Component Manufacturing Efficiency I",
-    "Standup XL-Set Structure and Component Manufacturing Efficiency II",
-    "Standup XL-Set Thukker Structure and Component Manufacturing Efficiency",
-    "Standup XL-Set Reprocessing Monitor I",
-    "Standup XL-Set Reprocessing Monitor II",
-  ],
-};
-
-function typeForName(name: string) {
-  return structureTypes.find((structure) => structure.name === name) ?? structureTypes[0];
-}
 
 type SystemMatch = { systemId: number; name: string };
 type EsiStructure = {
@@ -320,13 +139,19 @@ function readLegacyStructures() {
 
 export default function LocationsPage() {
   const { language } = useAppLanguage();
+  const [structureTypes, setStructureTypes] = useState<StructureType[]>([]);
   const [locations, setLocations] = useState<PlannerLocations>(() => ({
     ...defaultLocations,
     structures: [],
   }));
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingStructure, setEditingStructure] = useState<KnownStructure | null>(null);
-  const [rigOptionsBySize, setRigOptionsBySize] = useState(fallbackRigOptionsBySize);
+  const [rigOptionsBySize, setRigOptionsBySize] = useState<Record<StructureSize, string[]>>({
+    Small: [],
+    Medium: [],
+    Large: [],
+    "Extra Large": [],
+  });
   const [rigTypeIdsByName, setRigTypeIdsByName] = useState<Record<string, number>>({});
   const [rigNamesByTypeId, setRigNamesByTypeId] = useState<Record<number, string>>({});
   const [structureRigs, setStructureRigs] = useState<StructureRigsPayload>(emptyStructureRigs);
@@ -334,6 +159,13 @@ export default function LocationsPage() {
   const [esiConnected, setEsiConnected] = useState(false);
   const [esiRateLimitedUntil, setEsiRateLimitedUntil] = useState<string | null>(null);
   const [locationSort, setLocationSort] = useState<LocationSort>("alphabetical");
+  const typeForName = (name: string): StructureType | undefined =>
+    structureTypes.find((structure) => structure.name === name);
+  useEffect(() => {
+    fetchStructureTypes(language)
+      .then(setStructureTypes)
+      .catch(() => setStructureTypes([]));
+  }, [language]);
   useEffect(() => {
     let cancelled = false;
 
@@ -417,7 +249,10 @@ export default function LocationsPage() {
               systemName: location.systemName,
               securityStatus: location.securityStatus,
               type: location.typeId
-                ? (structureTypeNames.get(location.typeId) ?? `Type ${location.typeId}`)
+                ? (
+                    structureTypes.find((structure) => structure.typeId === location.typeId)?.name
+                    ?? `Type ${location.typeId}`
+                  )
                 : undefined,
               assetCount: location.assetCount,
               personalAssetCount: location.personalAssetCount,
@@ -453,12 +288,11 @@ export default function LocationsPage() {
       cancelled = true;
       window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
     };
-  }, [esiConnected, language]);
+  }, [esiConnected, language, structureTypes]);
 
   useEffect(() => {
     fetchRigs(language)
       .then((rigs) => {
-        if (!rigs.length) return;
         const options: Record<StructureSize, string[]> = {
           Small: ["No Rig"],
           Medium: ["No Rig"],
@@ -470,7 +304,7 @@ export default function LocationsPage() {
         setRigTypeIdsByName(Object.fromEntries(rigs.map((rig) => [rig.name, rig.typeId])));
         setRigNamesByTypeId(Object.fromEntries(rigs.map((rig) => [rig.typeId, rig.name])));
       })
-      .catch(() => undefined);
+      .catch(() => setRigOptionsBySize({ Small: [], Medium: [], Large: [], "Extra Large": [] }));
   }, [language]);
 
   useEffect(() => {
@@ -576,7 +410,8 @@ export default function LocationsPage() {
   function openEsiEditDialog(esiStructure: EsiStructure) {
     if (esiStructure.locationType !== "structure") return;
     const localOverride = findLocalOverride(esiStructure);
-    const type = typeForName(localOverride?.type ?? esiStructure.type ?? structureTypes[0].name);
+    const type = typeForName(localOverride?.type ?? esiStructure.type ?? "");
+    if (!type) return;
     setEditingStructure({
       id: localOverride?.id ?? `esi:${esiStructure.structureId}`,
       esiStructureId: esiStructure.structureId,
@@ -719,6 +554,7 @@ export default function LocationsPage() {
             type="button"
             className={`actionButton ${styles.importButton}`}
             onClick={openAddDialog}
+            disabled={structureTypes.length === 0}
           >
             <Plus aria-hidden="true" />
             <span>Add structure</span>
@@ -780,6 +616,7 @@ export default function LocationsPage() {
       {isDialogOpen && (
         <StructureDialog
           language={language}
+          structureTypes={structureTypes}
           structure={editingStructure}
           rigOptionsBySize={rigOptionsBySize}
           rigTypeIdsByName={rigTypeIdsByName}
@@ -814,6 +651,7 @@ export default function LocationsPage() {
 
 function StructureDialog({
   language,
+  structureTypes,
   onCancel,
   onSave,
   structure,
@@ -821,6 +659,7 @@ function StructureDialog({
   rigTypeIdsByName,
 }: {
   language: SdeLanguage;
+  structureTypes: StructureType[];
   onCancel: () => void;
   onSave: (structure: KnownStructure) => void;
   structure: KnownStructure | null;
@@ -838,7 +677,7 @@ function StructureDialog({
   const [type, setType] = useState(structure?.type ?? structureTypes[0].name);
   const [name, setName] = useState(structure?.name ?? "");
   const [rigs, setRigs] = useState(structure?.rigs ?? ["No Rig", "No Rig", "No Rig"]);
-  const selectedType = typeForName(type);
+  const selectedType = structureTypes.find((structureType) => structureType.name === type);
 
   useEffect(() => {
     if (systemName.trim().length < 2 || !isOpen) return;
@@ -864,7 +703,7 @@ function StructureDialog({
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!system || !name.trim()) return;
+    if (!system || !name.trim() || !selectedType) return;
     onSave({
       id: structure?.id ?? `local:${crypto.randomUUID()}`,
       systemId: system.systemId,
@@ -879,6 +718,8 @@ function StructureDialog({
       ...(structure?.esiStructureId ? { esiStructureId: structure.esiStructureId } : {}),
     });
   }
+
+  if (!selectedType) return null;
 
   return (
     <div
@@ -964,7 +805,8 @@ function StructureDialog({
             label: `${option.name} (${option.size})`,
           }))}
           onChange={(value) => {
-            const nextType = typeForName(value);
+            const nextType = structureTypes.find((structureType) => structureType.name === value);
+            if (!nextType) return;
             setType(nextType.name);
             setRigs((current) =>
               current.map((rig) =>

@@ -6,8 +6,13 @@ import { jsonrepair } from "jsonrepair";
 
 const rawDir = resolve(".next/cache/assemblyline-sde/raw");
 const processedDir = resolve("sde/processed");
+const excludedTypeFields = new Set(["description"]);
 
-async function parseJsonl(filePath: string) {
+async function parseJsonl(
+  filePath: string,
+  excludedFields = new Set<string>(),
+  shouldIncludeRecord: (record: unknown) => boolean = () => true,
+) {
   const records: unknown[] = [];
   const lines = createInterface({ input: createReadStream(filePath), crlfDelay: Infinity });
   let pending = "";
@@ -20,11 +25,15 @@ async function parseJsonl(filePath: string) {
     pending += line;
     if (!line.trimEnd().endsWith("}")) continue;
     try {
-      records.push(JSON.parse(pending));
+      const record: unknown = JSON.parse(pending);
+      const filteredRecord = excludeFields(record, excludedFields);
+      if (shouldIncludeRecord(record)) records.push(filteredRecord);
     }
     catch {
       try {
-        records.push(JSON.parse(jsonrepair(pending)));
+        const record: unknown = JSON.parse(jsonrepair(pending));
+        const filteredRecord = excludeFields(record, excludedFields);
+        if (shouldIncludeRecord(record)) records.push(filteredRecord);
       }
       catch (error) {
         throw new Error(
@@ -40,6 +49,22 @@ async function parseJsonl(filePath: string) {
   return records;
 }
 
+function excludeFields(record: unknown, excludedFields: ReadonlySet<string>): unknown {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return record;
+  return Object.fromEntries(
+    Object.entries(record).filter(([fieldName]) => !excludedFields.has(fieldName)),
+  );
+}
+
+function isPublishedType(record: unknown) {
+  return (
+    !record
+    || typeof record !== "object"
+    || Array.isArray(record)
+    || (record as { published?: unknown }).published !== false
+  );
+}
+
 async function main() {
   if (!existsSync(rawDir)) {
     throw new Error("SDE raw directory is missing. Run npm run fetch-sde first.");
@@ -52,11 +77,20 @@ async function main() {
     );
   }
   for (const file of files) {
+    const isTypesFile = basename(file, ".jsonl") === "types";
+    const records = await parseJsonl(
+      join(rawDir, file),
+      isTypesFile ? excludedTypeFields : undefined,
+      isTypesFile ? isPublishedType : undefined,
+    );
     await writeFile(
       join(processedDir, `${basename(file, ".jsonl")}.json`),
-      JSON.stringify(await parseJsonl(join(rawDir, file))),
+      JSON.stringify(records),
     );
     console.log(`Parsed ${file}`);
+    if (isTypesFile) {
+      console.log(`Excluded types fields: ${[...excludedTypeFields].sort().join(", ")}`);
+    }
   }
   const repackagedVolumesPath = join(rawDir, "repackagedvolumes.json");
   if (!existsSync(repackagedVolumesPath)) {
