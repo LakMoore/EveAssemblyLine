@@ -24,22 +24,29 @@ export async function GET(request: Request) {
   const redirectUri =
     process.env.EVE_CALLBACK_URL ?? `${getPublicOrigin(request)}/api/auth/eve/callback`;
   const sessionId = getRequestCookie(request, sessionCookieName);
-  await savePendingAuth(state, {
-    scopes: authorizationScopes,
-    redirectUri,
-    codeVerifier,
-    sessionId,
-    expiresAt: new Date(Date.now() + pendingAuthTtlMs).toISOString(),
-  });
+  await savePendingAuth(
+    state,
+    {
+      scopes: authorizationScopes,
+      redirectUri,
+      codeVerifier,
+      sessionId,
+      expiresAt: new Date(Date.now() + pendingAuthTtlMs).toISOString(),
+    },
+  );
   const response = NextResponse.redirect(
     getAuthorizeUrl(state, codeVerifier, authorizationScopes, redirectUri),
   );
-  response.cookies.set("assembly_line_sso_state", state, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: Math.floor(pendingAuthTtlMs / 1000),
-  });
+  response.cookies.set(
+    "assembly_line_sso_state",
+    state,
+    {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: Math.floor(pendingAuthTtlMs / 1000),
+    },
+  );
   return response;
 }

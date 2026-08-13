@@ -18,9 +18,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const nextId = useRef(0);
 
-  const dismissToast = useCallback((id: number) => {
-    setToasts((current) => current.filter((toast) => toast.id !== id));
-  }, []);
+  const dismissToast = useCallback(
+    (id: number) => {
+      setToasts((current) => current.filter((toast) => toast.id !== id));
+    },
+    [],
+  );
 
   const showToast = useCallback(
     (message: string) => {

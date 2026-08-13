@@ -23,7 +23,8 @@ export class UpstashRedisCacheProvider implements ICacheProvider {
 
     try {
       return JSON.parse(raw) as T;
-    } catch {
+    }
+    catch {
       return null;
     }
   }
@@ -35,7 +36,8 @@ export class UpstashRedisCacheProvider implements ICacheProvider {
       if (raw == null) return null;
       try {
         return JSON.parse(raw) as T;
-      } catch {
+      }
+      catch {
         return null;
       }
     });
@@ -63,7 +65,8 @@ export class UpstashRedisCacheProvider implements ICacheProvider {
         if (serialized === undefined) throw new Error("Cache values must be JSON serializable.");
         if (entry.ttlMs != null && entry.ttlMs > 0) {
           pipeline.set(entry.key, serialized, { ex: Math.ceil(entry.ttlMs / 1000) });
-        } else {
+        }
+        else {
           pipeline.set(entry.key, serialized);
         }
       }
@@ -84,10 +87,13 @@ export class UpstashRedisCacheProvider implements ICacheProvider {
     let cursor = "0";
 
     do {
-      const [nextCursor, batch] = await this.client.scan(cursor, {
-        match: pattern,
-        count: 1000,
-      });
+      const [nextCursor, batch] = await this.client.scan(
+        cursor,
+        {
+          match: pattern,
+          count: 1000,
+        },
+      );
       for (const key of batch) yield key;
       cursor = nextCursor;
     } while (cursor !== "0");

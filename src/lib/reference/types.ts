@@ -60,7 +60,8 @@ async function fetchTypeMetadataRequests(uniqueTypeIds: number[], language: SdeL
       });
       requests.push(`/api/reference/types?${current}`);
       currentTypeIds = [typeId];
-    } else {
+    }
+    else {
       currentTypeIds = candidateTypeIds;
     }
   }

@@ -18,7 +18,8 @@ export default function SettingsPage() {
     try {
       const stored = window.localStorage.getItem(settingsStorageKey);
       return stored ? { ...defaultSettings, ...JSON.parse(stored) } : defaultSettings;
-    } catch {
+    }
+    catch {
       return defaultSettings;
     }
   });

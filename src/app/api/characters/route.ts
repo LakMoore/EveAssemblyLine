@@ -14,7 +14,8 @@ export async function GET(request: Request) {
     corporationNames = await fetchUniverseNames(
       sessionRecords.flatMap((record) => record.corporationId ?? []),
     );
-  } catch {}
+  }
+  catch {}
   return NextResponse.json(
     sessionRecords.map(
       ({

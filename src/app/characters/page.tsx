@@ -69,12 +69,11 @@ function statusLabel(status: EndpointStatus | undefined, noAccess = false) {
   if (currentStatus?.status === "error") return "Reauthorize required";
   if (!currentStatus || !currentStatus.hasBody) return "Unknown";
   if (
-    currentStatus.status !== "rate_limited" &&
-    !currentStatus.lastUpdated &&
-    !currentStatus.expires &&
-    !currentStatus.nextRefreshAllowed
-  )
-    return "Refresh required";
+    currentStatus.status !== "rate_limited"
+    && !currentStatus.lastUpdated
+    && !currentStatus.expires
+    && !currentStatus.nextRefreshAllowed
+  ) return "Refresh required";
   if (currentStatus.status === "fresh") return "Fresh";
   if (currentStatus.status === "stale") return "Stale";
   if (currentStatus.status === "rate_limited") return "Rate limited";
@@ -86,8 +85,9 @@ function statusClass(status: EndpointStatus | undefined) {
   if (!currentStatus || !currentStatus.hasBody) return styles.statusError;
   if (currentStatus?.status === "fresh") return styles.statusFresh;
   if (currentStatus?.status === "stale") return styles.statusError;
-  if (currentStatus?.status === "rate_limited" || currentStatus?.status === "error")
+  if (currentStatus?.status === "rate_limited" || currentStatus?.status === "error") {
     return styles.statusError;
+  }
   return styles.statusCached;
 }
 
@@ -135,11 +135,14 @@ function missingScopes(statuses: CharacterStatus[]) {
 async function refreshStockAfterCharacterRemoval() {
   const savedLanguage = window.localStorage.getItem(languageStorageKey);
   const language: SdeLanguage = isSdeLanguage(savedLanguage) ? savedLanguage : "en";
-  const response = await fetch("/api/state/refresh", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
-  });
+  const response = await fetch(
+    "/api/state/refresh",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
 
   if (response.status === 401) {
     clearClientStockCache(language);
@@ -170,7 +173,8 @@ async function refreshStockAfterCharacterRemoval() {
     settings = savedSettings
       ? { ...defaultSettings, ...JSON.parse(savedSettings) }
       : defaultSettings;
-  } catch {}
+  }
+  catch {}
   const marketOrders = await loadClientMarketOrders(settings);
   await replaceMarketOrderStock(marketOrders?.marketOrderStock ?? []);
   window.dispatchEvent(
@@ -230,10 +234,10 @@ export default function CharactersPage() {
       )
       .then((data) => {
         if (
-          data.mergeRequired &&
-          data.incomingCharacter &&
-          data.currentCharacters &&
-          data.incomingCharacters
+          data.mergeRequired
+          && data.incomingCharacter
+          && data.currentCharacters
+          && data.incomingCharacters
         ) {
           setMergeDetails({
             incomingCharacter: data.incomingCharacter,
@@ -255,7 +259,8 @@ export default function CharactersPage() {
         throw new Error(data.error ?? "Could not merge character collections.");
       }
       window.location.assign("/characters?refresh=1");
-    } catch (mergeError) {
+    }
+    catch (mergeError) {
       setError(
         mergeError instanceof Error ? mergeError.message : "Could not merge character collections.",
       );
@@ -280,9 +285,12 @@ export default function CharactersPage() {
     setRemovingId(character.characterId);
     setError(null);
     try {
-      const response = await fetch(`/api/characters/${character.characterId}`, {
-        method: "DELETE",
-      });
+      const response = await fetch(
+        `/api/characters/${character.characterId}`,
+        {
+          method: "DELETE",
+        },
+      );
       if (!response.ok) {
         const data = (await response.json()) as { error?: string };
         throw new Error(data.error ?? "Could not remove character.");
@@ -296,12 +304,15 @@ export default function CharactersPage() {
       invalidateClientCharacterData();
       try {
         await refreshStockAfterCharacterRemoval();
-      } catch {
+      }
+      catch {
         setError("Character removed, but stock could not be refreshed.");
       }
-    } catch (removeError) {
+    }
+    catch (removeError) {
       setError(removeError instanceof Error ? removeError.message : "Could not remove character.");
-    } finally {
+    }
+    finally {
       setRemovingId(null);
     }
   }
@@ -430,8 +441,8 @@ export default function CharactersPage() {
                   <span className={styles.characterIdentity}>
                     <strong>{character.characterName}</strong>
                     <small>
-                      {character.corporationName ??
-                        (character.corporationId
+                      {character.corporationName
+                        ?? (character.corporationId
                           ? `Corporation ${character.corporationId}`
                           : "Corporation unavailable")}{" "}
                       / {hasCorpAccess ? "Director access" : "Character access only"}
@@ -535,8 +546,8 @@ export default function CharactersPage() {
           </>
         )}
       </section>
-      {selectedCharacter &&
-        (() => {
+      {selectedCharacter
+        && (() => {
           const selectedStatus = statuses.find(
             (entry) => entry.characterId === selectedCharacter.characterId,
           );
@@ -582,8 +593,8 @@ export default function CharactersPage() {
                       />
                     )}
                     <span>
-                      {selectedCharacter.corporationName ??
-                        (selectedCharacter.corporationId
+                      {selectedCharacter.corporationName
+                        ?? (selectedCharacter.corporationId
                           ? `Corporation ${selectedCharacter.corporationId}`
                           : "Corporation unavailable")}
                     </span>
@@ -790,8 +801,8 @@ export default function CharactersPage() {
           </div>
         )}
       </section>
-      {selectedCorporationId !== null &&
-        (() => {
+      {selectedCorporationId !== null
+        && (() => {
           const corporation = corporations.find(
             (entry) => entry.corporationId === selectedCorporationId,
           );

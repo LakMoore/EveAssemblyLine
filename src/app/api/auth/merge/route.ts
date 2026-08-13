@@ -14,16 +14,15 @@ import {
 async function getPending(request: Request) {
   const session = await getSessionFromRequest(request);
   const mergeId =
-    request.headers.get("x-assembly-line-merge") ??
-    request.headers.get("cookie")?.match(/(?:^|; )assembly_line_merge=([^;]+)/)?.[1];
+    request.headers.get("x-assembly-line-merge")
+    ?? request.headers.get("cookie")?.match(/(?:^|; )assembly_line_merge=([^;]+)/)?.[1];
   const pending = mergeId ? await getPendingMerge(decodeURIComponent(mergeId)) : undefined;
   if (
-    !session ||
-    !pending ||
-    pending.sessionId !== session.sessionId ||
-    Date.parse(pending.expiresAt) < Date.now()
-  )
-    return null;
+    !session
+    || !pending
+    || pending.sessionId !== session.sessionId
+    || Date.parse(pending.expiresAt) < Date.now()
+  ) return null;
   return { session, mergeId: decodeURIComponent(mergeId!), pending };
 }
 
@@ -88,7 +87,8 @@ export async function POST(request: Request) {
     const response = NextResponse.json({ success: true });
     response.cookies.set("assembly_line_merge", "", { httpOnly: true, path: "/", maxAge: 0 });
     return response;
-  } catch (error) {
+  }
+  catch (error) {
     console.error(
       "Account collection merge failed",
       error instanceof Error ? error.message : "unknown error",

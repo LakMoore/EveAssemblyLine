@@ -291,7 +291,8 @@ function readLegacyStructures() {
     const stored = window.localStorage.getItem(locationsStorageKey);
     const parsed = stored ? (JSON.parse(stored) as Partial<PlannerLocations>) : {};
     return Array.isArray(parsed.structures) ? parsed.structures : [];
-  } catch {
+  }
+  catch {
     return [];
   }
 }
@@ -327,7 +328,8 @@ export default function LocationsPage() {
         if (!cancelled) {
           setLocations((current) => ({ ...current, structures }));
         }
-      } catch {}
+      }
+      catch {}
     }
 
     void loadKnownStructures();
@@ -383,33 +385,36 @@ export default function LocationsPage() {
               locationType: "structure" | "station";
             } => location.locationType !== "anchored",
           )
-          .map((location): EsiStructure => ({
-            structureId: location.locationId,
-            name: location.name,
-            locationType: location.locationType,
-            systemId: location.systemId,
-            systemName: location.systemName,
-            securityStatus: location.securityStatus,
-            type: location.typeId
-              ? (structureTypeNames.get(location.typeId) ?? `Type ${location.typeId}`)
-              : undefined,
-            assetCount: location.assetCount,
-            personalAssetCount: location.personalAssetCount,
-            corporationAssetCount: location.corporationAssetCount,
-            resolved: location.resolved,
-            ownedByCorporation: false,
-            rigs: [],
-            totalCount: location.totalCount,
-            totalVolume: location.totalVolume,
-            bonuses: {
-              manufacturing: { me: 0, te: 0, cost: 0 },
-              research: { me: 0, te: 0, cost: 0 },
-              reactions: { me: 0, te: 0, cost: 0 },
-              invention: { me: 0, te: 0, cost: 0 },
-            },
-          }));
+          .map(
+            (location): EsiStructure => ({
+              structureId: location.locationId,
+              name: location.name,
+              locationType: location.locationType,
+              systemId: location.systemId,
+              systemName: location.systemName,
+              securityStatus: location.securityStatus,
+              type: location.typeId
+                ? (structureTypeNames.get(location.typeId) ?? `Type ${location.typeId}`)
+                : undefined,
+              assetCount: location.assetCount,
+              personalAssetCount: location.personalAssetCount,
+              corporationAssetCount: location.corporationAssetCount,
+              resolved: location.resolved,
+              ownedByCorporation: false,
+              rigs: [],
+              totalCount: location.totalCount,
+              totalVolume: location.totalVolume,
+              bonuses: {
+                manufacturing: { me: 0, te: 0, cost: 0 },
+                research: { me: 0, te: 0, cost: 0 },
+                reactions: { me: 0, te: 0, cost: 0 },
+                invention: { me: 0, te: 0, cost: 0 },
+              },
+            }),
+          );
         if (!cancelled) setEsiStructures(locations);
-      } catch {
+      }
+      catch {
         if (!cancelled) setEsiStructures([]);
       }
     }
@@ -452,10 +457,10 @@ export default function LocationsPage() {
 
   function findLocalOverride(esiStructure: EsiStructure) {
     return (
-      locations.structures.find((known) => known.esiStructureId === esiStructure.structureId) ??
-      knownStructuresByKey.get(structureMatchKey(esiStructure.systemName, esiStructure.name)) ??
-      knownStructuresByKey.get(structureMatchKey(undefined, esiStructure.name)) ??
-      locations.structures.find((known) => {
+      locations.structures.find((known) => known.esiStructureId === esiStructure.structureId)
+      ?? knownStructuresByKey.get(structureMatchKey(esiStructure.systemName, esiStructure.name))
+      ?? knownStructuresByKey.get(structureMatchKey(undefined, esiStructure.name))
+      ?? locations.structures.find((known) => {
         const esiName = normalizedStructureName(esiStructure.name);
         const localNames = [
           known.name,
@@ -513,8 +518,8 @@ export default function LocationsPage() {
       sizeId: type.sizeId,
       name: localOverride?.name ?? esiStructure.name,
       rigs:
-        localOverride?.rigs ??
-        (esiStructure.rigs.length > 0 ? esiStructure.rigs : ["No Rig", "No Rig", "No Rig"]),
+        localOverride?.rigs
+        ?? (esiStructure.rigs.length > 0 ? esiStructure.rigs : ["No Rig", "No Rig", "No Rig"]),
     });
     setIsDialogOpen(true);
   }
@@ -583,9 +588,12 @@ export default function LocationsPage() {
                       {" · "}
                       {structure.assetCount.toLocaleString()} records ·{" "}
                       {structure.totalCount.toLocaleString()} quantity ·{" "}
-                      {structure.totalVolume.toLocaleString(undefined, {
-                        maximumFractionDigits: 2,
-                      })}{" "}
+                      {structure.totalVolume.toLocaleString(
+                        undefined,
+                        {
+                          maximumFractionDigits: 2,
+                        },
+                      )}{" "}
                       m³ Volume · {structure.personalAssetCount.toLocaleString()} character ·{" "}
                       {structure.corporationAssetCount.toLocaleString()} corp
                       {structure.locationType === "structure"

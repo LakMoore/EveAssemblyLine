@@ -13,7 +13,8 @@ export function esiKey(
   let key = `${ESI_PREFIX}:${path}`;
 
   if (queryParams && Object.keys(queryParams).length > 0) {
-    const sorted = Object.entries(queryParams)
+    const sorted = Object
+      .entries(queryParams)
       .filter(([, value]) => value !== undefined)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([name, value]) => `${name}=${value}`)

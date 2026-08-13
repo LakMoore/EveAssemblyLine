@@ -72,19 +72,17 @@ export async function POST(request: Request) {
     }
     const assets = input.assets;
     if (
-      !Array.isArray(assets.items) ||
-      !Array.isArray(assets.blueprints) ||
-      !Array.isArray(assets.industry) ||
-      !Array.isArray(assets.market)
+      !Array.isArray(assets.items)
+      || !Array.isArray(assets.blueprints)
+      || !Array.isArray(assets.industry)
+      || !Array.isArray(assets.market)
     ) {
       return NextResponse.json({ error: "The assets payload is incomplete." }, { status: 400 });
     }
     const allRows = [...assets.items, ...assets.blueprints, ...assets.industry, ...assets.market];
     if (
-      input.toBuild.some(
-        (item) => !Number.isInteger(item.typeId) || !validQuantity(item.quantity),
-      ) ||
-      allRows.some(
+      input.toBuild.some((item) => !Number.isInteger(item.typeId) || !validQuantity(item.quantity))
+      || allRows.some(
         (item) =>
           !Number.isInteger(item.typeId) || !validQuantity(item.quantity) || !validLocation(item),
       )
@@ -115,9 +113,9 @@ export async function POST(request: Request) {
     const buildItems: BuildItem[] = input.toBuild.map((item) => ({
       ...item,
       name:
-        types.get(item.typeId)?.name[input.language ?? "en"] ??
-        types.get(item.typeId)?.name.en ??
-        `Type ${item.typeId}`,
+        types.get(item.typeId)?.name[input.language ?? "en"]
+        ?? types.get(item.typeId)?.name.en
+        ?? `Type ${item.typeId}`,
     }));
     const normalizedBlueprints = assets.blueprints.map((blueprint) => ({ ...blueprint }));
     const industryStock: PlanStockItem[] = [];
@@ -140,17 +138,23 @@ export async function POST(request: Request) {
       if (remainingRuns !== undefined && job.blueprintTypeId !== undefined) {
         const matchingBlueprint = normalizedBlueprints.find(
           (candidate) =>
-            (job.blueprintId !== undefined && candidate.itemId === job.blueprintId) ||
-            (candidate.typeId === job.blueprintTypeId &&
-              candidate.locationId === job.locationId &&
-              candidate.rootLocationId === job.rootLocationId &&
-              candidate.type === (job.blueprintRunsAtInstall === -1 ? "bpo" : "bpc") &&
-              candidate.runs !== remainingRuns),
+            (job.blueprintId !== undefined && candidate.itemId === job.blueprintId)
+            || (
+              candidate.typeId === job.blueprintTypeId
+              && candidate.locationId === job.locationId
+              && candidate.rootLocationId === job.rootLocationId
+              && candidate.type === (job.blueprintRunsAtInstall === -1 ? "bpo" : "bpc")
+              && candidate.runs !== remainingRuns
+            ),
         );
         if (matchingBlueprint) matchingBlueprint.runs = remainingRuns;
         else if (
-          job.blueprintId !== undefined &&
-          (remainingRuns === -1 || job.activity === "Manufacturing" || job.activity === "Copying")
+          job.blueprintId !== undefined
+          && (
+            remainingRuns === -1
+            || job.activity === "Manufacturing"
+            || job.activity === "Copying"
+          )
         ) {
           normalizedBlueprints.push({
             itemId: job.blueprintId,
@@ -204,19 +208,22 @@ export async function POST(request: Request) {
       ...assets.items.map((item) => stockItem(item)),
       ...assets.market.map((item) => stockItem(item, { source: "marketOrder" })),
       ...normalizedBlueprints.map((blueprint, index) =>
-        stockItem(blueprint, {
-          category: "bp",
-          type: blueprint.type,
-          blueprintPrints: [
-            {
-              itemId: blueprint.itemId ?? -(index + 1),
-              runs: blueprint.runs,
-              type: blueprint.type,
-              me: blueprint.me,
-              te: blueprint.te,
-            },
-          ],
-        }),
+        stockItem(
+          blueprint,
+          {
+            category: "bp",
+            type: blueprint.type,
+            blueprintPrints: [
+              {
+                itemId: blueprint.itemId ?? -(index + 1),
+                runs: blueprint.runs,
+                type: blueprint.type,
+                me: blueprint.me,
+                te: blueprint.te,
+              },
+            ],
+          },
+        ),
       ),
       ...industryStock,
     ];
@@ -230,7 +237,8 @@ export async function POST(request: Request) {
     });
     result.metadata.unresolvedAssetCount = 0;
     return NextResponse.json(result);
-  } catch {
+  }
+  catch {
     return NextResponse.json({ error: "The plan request was not valid JSON." }, { status: 400 });
   }
 }

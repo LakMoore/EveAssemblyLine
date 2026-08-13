@@ -68,8 +68,8 @@ function formatVolume(volume: number) {
 
 function stockItemVolume(item: StockItem) {
   return (
-    item.quantity *
-    (item.isPackaged
+    item.quantity
+    * (item.isPackaged
       ? (item.packagedVolume ?? item.assembledVolume ?? 0)
       : (item.assembledVolume ?? 0))
   );
@@ -77,10 +77,10 @@ function stockItemVolume(item: StockItem) {
 
 function isBlueprintStockItem(item: StockItem) {
   return (
-    item.category === "blueprint" ||
-    item.category === "bp" ||
-    item.category === "bpo" ||
-    item.category === "bpc"
+    item.category === "blueprint"
+    || item.category === "bp"
+    || item.category === "bpo"
+    || item.category === "bpc"
   );
 }
 
@@ -178,14 +178,17 @@ export default function StockPage() {
             .filter((structureId): structureId is number => structureId !== undefined),
         );
         const isEsiRecord = (record: StockRecord) =>
-          esiKeys.has(locationKey(record)) ||
-          esiLocationIds.has(record.structureId ?? "") ||
-          filteredEsiLocationIds.has(Number(record.structureId)) ||
-          esiStructureIds.has(Number(record.structureId)) ||
-          record.items.some((item) =>
+          esiKeys.has(locationKey(record))
+          || esiLocationIds.has(record.structureId ?? "")
+          || filteredEsiLocationIds.has(Number(record.structureId))
+          || esiStructureIds.has(Number(record.structureId))
+          || record.items.some((item) =>
             item.blueprintPrints?.some((print) => esiBlueprintItemIds.has(print.itemId)),
-          ) ||
-          (record.systemName === "Unknown system" && record.structureName.startsWith("Location "));
+          )
+          || (
+            record.systemName === "Unknown system"
+            && record.structureName.startsWith("Location ")
+          );
         const combinedRecords = esiResponse.ok
           ? [...esiRecords, ...correctedRecords.filter((record) => !isEsiRecord(record))]
           : correctedRecords;
@@ -223,8 +226,8 @@ export default function StockPage() {
         setViewing((current) => {
           if (!current) return current;
           return (
-            sortedHydratedRecords.find((record) => locationKey(record) === locationKey(current)) ??
-            current
+            sortedHydratedRecords.find((record) => locationKey(record) === locationKey(current))
+            ?? current
           );
         });
         const previousByLocation = new Map(records.map((record) => [locationKey(record), record]));
@@ -235,8 +238,9 @@ export default function StockPage() {
           ...recordsWithMarketQuantities.flatMap((record) => {
             const previous = previousByLocation.get(locationKey(record));
             const writes = record !== previous ? [saveStock(record)] : [];
-            if (previous && locationKey(previous) !== locationKey(record))
+            if (previous && locationKey(previous) !== locationKey(record)) {
               writes.push(deleteStock(previous));
+            }
             return writes;
           }),
           ...(esiResponse.ok
@@ -245,10 +249,12 @@ export default function StockPage() {
                 .map((record) => deleteStock(record))
             : []),
         ]);
-      } catch {
+      }
+      catch {
         setEsiLocationIds(new Set());
         setLocations([]);
-      } finally {
+      }
+      finally {
         setIsHydratingVolumes(false);
       }
     }
@@ -444,9 +450,12 @@ function AddLocationModal({
     const localStructures = knownStructures
       .filter((structure) => structure.systemId === system.id)
       .map((structure) => ({ id: structure.id, name: structure.name }));
-    fetch(`/api/reference/structures?systemId=${system.id}&language=${language}`, {
-      signal: controller.signal,
-    })
+    fetch(
+      `/api/reference/structures?systemId=${system.id}&language=${language}`,
+      {
+        signal: controller.signal,
+      },
+    )
       .then(
         (response) =>
           response.json() as Promise<{
@@ -464,8 +473,9 @@ function AddLocationModal({
         ]);
       })
       .catch((error: unknown) => {
-        if (!(error instanceof DOMException && error.name === "AbortError"))
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
           setStructures(localStructures);
+        }
       });
     return () => controller.abort();
   }, [knownStructures, language, system.id]);
@@ -473,25 +483,31 @@ function AddLocationModal({
   useEffect(() => {
     if (!isOpen || systemName.trim().length < 2) return;
     const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      fetch(`/api/reference/systems?query=${encodeURIComponent(systemName)}&language=${language}`, {
-        signal: controller.signal,
-      })
-        .then(
-          (response) =>
-            response.json() as Promise<{
-              items?: Array<{ systemId: number; name: string }>;
-            }>,
+    const timer = window.setTimeout(
+      () => {
+        fetch(
+          `/api/reference/systems?query=${encodeURIComponent(systemName)}&language=${language}`,
+          {
+            signal: controller.signal,
+          },
         )
-        .then((data) =>
-          setSuggestions(
-            (data.items ?? []).map((entry) => ({ id: entry.systemId, name: entry.name })),
-          ),
-        )
-        .catch((error: unknown) => {
-          if (!(error instanceof DOMException && error.name === "AbortError")) setSuggestions([]);
-        });
-    }, 180);
+          .then(
+            (response) =>
+              response.json() as Promise<{
+                items?: Array<{ systemId: number; name: string }>;
+              }>,
+          )
+          .then((data) =>
+            setSuggestions(
+              (data.items ?? []).map((entry) => ({ id: entry.systemId, name: entry.name })),
+            ),
+          )
+          .catch((error: unknown) => {
+            if (!(error instanceof DOMException && error.name === "AbortError")) setSuggestions([]);
+          });
+      },
+      180,
+    );
     return () => {
       window.clearTimeout(timer);
       controller.abort();
@@ -756,9 +772,10 @@ function ViewItemsModal({
     if (item.type === "bpo" || item.category === "bpo") counts.bpo += item.quantity;
     else {
       counts.bpc += item.quantity;
-      counts.runs += (item.blueprintPrints ?? [])
-        .filter((print) => print.type === "bpc" && print.runs >= 0)
-        .reduce((total, print) => total + print.runs, 0);
+      counts.runs
+        += (item.blueprintPrints ?? [])
+          .filter((print) => print.type === "bpc" && print.runs >= 0)
+          .reduce((total, print) => total + print.runs, 0);
     }
     blueprintCounts.set(item.typeId, counts);
   }
@@ -890,16 +907,17 @@ function ViewItemsModal({
                         return;
                       }
                       existing.copies += detail.copies;
-                      if (detail.runs !== undefined)
+                      if (detail.runs !== undefined) {
                         existing.runs = (existing.runs ?? 0) + detail.runs;
+                      }
                     };
 
                     for (const blueprint of blueprints) {
                       const kind =
                         blueprint.type === "bpo" || blueprint.category === "bpo" ? "BPO" : "BPC";
                       const source = blueprint.inBuild
-                        ? blueprint.activityName === "Invention" &&
-                          !blueprint.blueprintPrints?.length
+                        ? blueprint.activityName === "Invention"
+                          && !blueprint.blueprintPrints?.length
                           ? "In Progress"
                           : "In use"
                         : "Asset";
@@ -968,15 +986,21 @@ function ViewItemsModal({
                     <small className={styles.stockCompletion}>
                       <span>{item.activityName ?? "Industry job"} completes</span>
                       <span>
-                        {new Date(item.endDate).toLocaleDateString("en-GB", {
-                          day: "2-digit",
-                          month: "short",
-                        })}{" "}
-                        {new Date(item.endDate).toLocaleTimeString("en-GB", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          hour12: false,
-                        })}
+                        {new Date(item.endDate).toLocaleDateString(
+                          "en-GB",
+                          {
+                            day: "2-digit",
+                            month: "short",
+                          },
+                        )}{" "}
+                        {new Date(item.endDate).toLocaleTimeString(
+                          "en-GB",
+                          {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            hour12: false,
+                          },
+                        )}
                       </span>
                     </small>
                   )}
@@ -1130,11 +1154,14 @@ function StockPasteModal({
     setIsResolving(true);
     setError("");
     try {
-      const response = await fetch("/api/reference/types", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ language, items: parsed }),
-      });
+      const response = await fetch(
+        "/api/reference/types",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ language, items: parsed }),
+        },
+      );
       const data = (await response.json()) as { items?: PasteResult[]; error?: string };
       if (!response.ok) throw new Error(data.error ?? "Could not resolve the pasted stock.");
       const resolved = data.items ?? [];
@@ -1152,14 +1179,16 @@ function StockPasteModal({
         const normalized = mergeItems([], imported);
         onImport(mode === "replace" ? normalized : mergeItems(location.items, normalized));
       }
-    } catch (resolveError) {
+    }
+    catch (resolveError) {
       setResults([]);
       setError(
         resolveError instanceof Error
           ? resolveError.message
           : "Could not resolve the pasted stock.",
       );
-    } finally {
+    }
+    finally {
       setIsResolving(false);
     }
   }
@@ -1266,9 +1295,9 @@ function mergeItems(existing: StockItem[], imported: StockItem[]) {
   for (const item of imported) {
     const current = items.find(
       (entry) =>
-        entry.typeId === item.typeId &&
-        entry.isPackaged === item.isPackaged &&
-        (entry.category ?? "item") === (item.category ?? "item"),
+        entry.typeId === item.typeId
+        && entry.isPackaged === item.isPackaged
+        && (entry.category ?? "item") === (item.category ?? "item"),
     );
     if (current) {
       current.quantity += item.quantity;
@@ -1280,7 +1309,8 @@ function mergeItems(existing: StockItem[], imported: StockItem[]) {
       }
       current.assembledVolume = item.assembledVolume;
       current.packagedVolume = item.packagedVolume;
-    } else {
+    }
+    else {
       items.push(item);
     }
   }
@@ -1292,11 +1322,11 @@ async function hydrateVolumes(records: StockRecord[], language: SdeLanguage) {
     record.items
       .filter(
         (item) =>
-          item.assembledVolume === undefined ||
-          (item.isPackaged && item.packagedVolume === undefined) ||
-          item.techLevel === undefined ||
-          item.category === undefined ||
-          item.marketCategory === undefined,
+          item.assembledVolume === undefined
+          || (item.isPackaged && item.packagedVolume === undefined)
+          || item.techLevel === undefined
+          || item.category === undefined
+          || item.marketCategory === undefined,
       )
       .map((item) => item.typeId),
   );
@@ -1304,7 +1334,8 @@ async function hydrateVolumes(records: StockRecord[], language: SdeLanguage) {
   let metadata: Awaited<ReturnType<typeof fetchTypeMetadata>> = [];
   try {
     metadata = await fetchTypeMetadata(typeIdsNeedingMetadata, language);
-  } catch {
+  }
+  catch {
     return records;
   }
   const metadataByTypeId = new Map(metadata.map((item) => [item.typeId, item]));

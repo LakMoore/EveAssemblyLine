@@ -12,13 +12,16 @@ export async function GET(request: Request) {
     .map(Number)
     .filter((id) => Number.isInteger(id) && sessionCharacterIds.includes(id));
   const characterIds = requested.length > 0 ? requested : sessionCharacterIds;
-  const marketOrderStock = await getMarketOrderStock(characterIds, {
-    personalSellOrdersAsStock: url.searchParams.get("personalSellOrdersAsStock") === "true",
-    allCorporationSellOrdersAsStock:
-      url.searchParams.get("allCorporationSellOrdersAsStock") === "true",
-    myCorporationSellOrdersAsStock:
-      url.searchParams.get("myCorporationSellOrdersAsStock") === "true",
-  });
+  const marketOrderStock = await getMarketOrderStock(
+    characterIds,
+    {
+      personalSellOrdersAsStock: url.searchParams.get("personalSellOrdersAsStock") === "true",
+      allCorporationSellOrdersAsStock:
+        url.searchParams.get("allCorporationSellOrdersAsStock") === "true",
+      myCorporationSellOrdersAsStock:
+        url.searchParams.get("myCorporationSellOrdersAsStock") === "true",
+    },
+  );
   if (marketOrderStock === null) {
     return NextResponse.json(
       { error: "Market order data is not currently available from ESI." },

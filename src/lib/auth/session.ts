@@ -37,13 +37,17 @@ export async function getSessionFromRequest(request: Request) {
 }
 
 export function setSessionCookie(response: NextResponse, sessionId: string) {
-  response.cookies.set(sessionCookieName, sessionId, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 30,
-  });
+  response.cookies.set(
+    sessionCookieName,
+    sessionId,
+    {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 30,
+    },
+  );
 }
 
 export function clearSessionCookie(response: NextResponse) {

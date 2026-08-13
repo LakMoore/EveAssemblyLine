@@ -45,9 +45,11 @@ export function categorizeType(
   let marketCategory = rootName;
   if (type.groupID !== undefined && reactionFormulaGroupIds.has(type.groupID)) {
     marketCategory = "Reaction Formulas";
-  } else if (categoryId === blueprintCategoryId) {
+  }
+  else if (categoryId === blueprintCategoryId) {
     marketCategory = "Blueprints";
-  } else if (categoryName(root, "en") === "Manufacture & Research") {
+  }
+  else if (categoryName(root, "en") === "Manufacture & Research") {
     marketCategory = categoryName(path[2], language) ?? rootName;
   }
 

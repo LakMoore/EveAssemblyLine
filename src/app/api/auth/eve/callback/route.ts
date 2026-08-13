@@ -32,18 +32,21 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
-  if (!code || !state)
+  if (!code || !state) {
     return NextResponse.json({ error: "Missing SSO callback parameters." }, { status: 400 });
+  }
   const cookieState = getRequestCookie(request, "assembly_line_sso_state");
-  if (!cookieState || !sameState(cookieState, state))
+  if (!cookieState || !sameState(cookieState, state)) {
     return NextResponse.json({ error: "Invalid SSO state." }, { status: 400 });
+  }
 
   const pending = await consumePendingAuth(state);
-  if (!pending)
+  if (!pending) {
     return NextResponse.json(
       { error: "The SSO authorization expired or was already used." },
       { status: 400 },
     );
+  }
 
   try {
     const tokenSet = await exchangeCodeForTokens(code, pending.codeVerifier, pending.redirectUri);
@@ -54,38 +57,45 @@ export async function GET(request: Request) {
     const currentCollectionId = existingSession?.collectionId;
     const characterCollection = await getCollectionForCharacter(identity.characterId);
     if (
-      currentCollectionId &&
-      characterCollection &&
-      currentCollectionId !== characterCollection.collectionId
+      currentCollectionId
+      && characterCollection
+      && currentCollectionId !== characterCollection.collectionId
     ) {
       const mergeId = randomUUID();
-      await savePendingMerge(mergeId, {
-        sessionId: existingSession!.sessionId,
-        targetCollectionId: currentCollectionId,
-        sourceCollectionId: characterCollection.collectionId,
-        characterId: identity.characterId,
-        characterName: identity.characterName,
-        tokenSet,
-        scopes: tokenSet.scopes,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
-      });
+      await savePendingMerge(
+        mergeId,
+        {
+          sessionId: existingSession!.sessionId,
+          targetCollectionId: currentCollectionId,
+          sourceCollectionId: characterCollection.collectionId,
+          characterId: identity.characterId,
+          characterName: identity.characterName,
+          tokenSet,
+          scopes: tokenSet.scopes,
+          expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+        },
+      );
       const response = NextResponse.redirect(
         `${getPublicOrigin(request, pending.redirectUri)}/characters?merge=1`,
       );
-      response.cookies.set("assembly_line_merge", mergeId, {
-        httpOnly: true,
-        sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
-        path: "/",
-        maxAge: 600,
-      });
+      response.cookies.set(
+        "assembly_line_merge",
+        mergeId,
+        {
+          httpOnly: true,
+          sameSite: "lax",
+          secure: process.env.NODE_ENV === "production",
+          path: "/",
+          maxAge: 600,
+        },
+      );
       response.cookies.set("assembly_line_sso_state", "", { httpOnly: true, path: "/", maxAge: 0 });
       return response;
     }
     const resolvedCollectionId =
-      currentCollectionId ??
-      characterCollection?.collectionId ??
-      (await createCollection()).collectionId;
+      currentCollectionId
+      ?? characterCollection?.collectionId
+      ?? (await createCollection()).collectionId;
     const session = existingSession ?? (await createSession(resolvedCollectionId));
     const corporationId = await fetchCharacterCorporationId(identity.characterId);
     const roles = tokenSet.scopes.includes("esi-characters.read_corporation_roles.v1")
@@ -112,7 +122,8 @@ export async function GET(request: Request) {
     setSessionCookie(response, session.sessionId);
     response.cookies.set("assembly_line_sso_state", "", { httpOnly: true, path: "/", maxAge: 0 });
     return response;
-  } catch (error) {
+  }
+  catch (error) {
     console.error(
       "EVE SSO callback failed",
       error instanceof Error ? error.message : "unknown error",

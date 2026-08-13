@@ -20,7 +20,8 @@ async function stationName(stationId: number, language: SdeLanguage, sdeBuildNum
     const name = data.name?.trim() || `Station ${stationId}`;
     stationNameCache.set(cacheKey, name);
     return name;
-  } catch {
+  }
+  catch {
     return `Station ${stationId}`;
   }
 }
@@ -32,8 +33,9 @@ export async function GET(request: Request) {
   const requestedLanguage = searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
 
-  if (systemId === null)
+  if (systemId === null) {
     return NextResponse.json({ error: "A valid system ID is required." }, { status: 400 });
+  }
 
   try {
     const [sdeBuildNumber, stationById] = await Promise.all([getSdeBuildNumber(), getStations()]);
@@ -47,7 +49,8 @@ export async function GET(request: Request) {
       })),
     );
     return NextResponse.json({ items });
-  } catch (error) {
+  }
+  catch (error) {
     const message = error instanceof Error ? error.message : "SDE reference data is unavailable.";
     return NextResponse.json({ error: message }, { status: 503 });
   }

@@ -10,7 +10,10 @@ export async function GET(request: Request) {
       { status: 401, headers: { "Cache-Control": "no-store" } },
     );
   }
-  return NextResponse.json(await getStateStatus(await getSessionCharacterIds(session)), {
-    headers: { "Cache-Control": "no-store" },
-  });
+  return NextResponse.json(
+    await getStateStatus(await getSessionCharacterIds(session)),
+    {
+      headers: { "Cache-Control": "no-store" },
+    },
+  );
 }

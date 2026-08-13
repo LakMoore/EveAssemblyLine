@@ -30,7 +30,8 @@ export async function GET(request: Request) {
         }),
       );
     return NextResponse.json({ authenticated: characters.length > 0, characters });
-  } catch {
+  }
+  catch {
     return NextResponse.json({ authenticated: false, characters: [] });
   }
 }

@@ -109,7 +109,8 @@ async function tokenRequest(body: URLSearchParams, useClientSecret = true) {
   const headers: HeadersInit = { "content-type": "application/x-www-form-urlencoded" };
   if (useClientSecret && clientSecret) {
     headers.authorization = `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`;
-  } else {
+  }
+  else {
     body.set("client_id", clientId);
   }
   const response = await fetch(`${ssoBaseUrl}/v2/oauth/token`, { method: "POST", headers, body });
@@ -167,18 +168,20 @@ async function verifyJwt(token: string) {
   if (!encodedHeader || !encodedPayload || !encodedSignature) throw new Error("Invalid EVE token");
   const header = decodePart(encodedHeader);
   const payload = decodePart(encodedPayload);
-  if (header.alg !== "RS256" || typeof header.kid !== "string")
+  if (header.alg !== "RS256" || typeof header.kid !== "string") {
     throw new Error("Unsupported EVE token");
+  }
   if (
-    payload.iss !== issuer ||
-    (typeof payload.exp === "number" && payload.exp * 1000 <= Date.now())
+    payload.iss !== issuer
+    || (typeof payload.exp === "number" && payload.exp * 1000 <= Date.now())
   ) {
     throw new Error("Expired or invalid EVE token");
   }
   const config = getConfig();
   const audiences = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-  if (!audiences.includes(config.clientId) && !audiences.includes("EVE Online"))
+  if (!audiences.includes(config.clientId) && !audiences.includes("EVE Online")) {
     throw new Error("Invalid EVE token audience");
+  }
   const jwksResponse = await fetch(`${ssoBaseUrl}/oauth/jwks`);
   if (!jwksResponse.ok) throw new Error("Could not load EVE token keys");
   const jwks = (await jwksResponse.json()) as { keys?: Array<Record<string, unknown>> };

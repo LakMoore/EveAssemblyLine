@@ -36,9 +36,10 @@ test("compresses exact Tritanium into one compressed Veldspar", () => {
     names,
   );
   assert.deepEqual(result.toBuy, [{ typeId: 62516, name: "Compressed Veldspar", quantity: 100 }]);
-  assert.deepEqual(result.plan, [
-    { typeId: 34, name: "Tritanium", quantity: 400, fromReprocessing: 400, surplus: 0 },
-  ]);
+  assert.deepEqual(
+    result.plan,
+    [{ typeId: 34, name: "Tritanium", quantity: 400, fromReprocessing: 400, surplus: 0 }],
+  );
   assert.deepEqual(result.surplus, []);
 });
 
@@ -95,12 +96,14 @@ test("keeps fractional gas output instead of discarding compressed gas", () => {
     ],
     new Map([[62377, "Compressed Amber Mykoserocin"]]),
   );
-  assert.deepEqual(result.toBuy, [
-    { typeId: 62377, name: "Compressed Amber Mykoserocin", quantity: 2 },
-  ]);
-  assert.deepEqual(result.plan, [
-    { typeId: 28694, name: "Amber Mykoserocin", quantity: 1, fromReprocessing: 1, surplus: 0 },
-  ]);
+  assert.deepEqual(
+    result.toBuy,
+    [{ typeId: 62377, name: "Compressed Amber Mykoserocin", quantity: 2 }],
+  );
+  assert.deepEqual(
+    result.plan,
+    [{ typeId: 28694, name: "Amber Mykoserocin", quantity: 1, fromReprocessing: 1, surplus: 0 }],
+  );
 });
 
 test("does not exceed a candidate's market volume limit", () => {

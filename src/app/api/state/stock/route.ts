@@ -196,7 +196,8 @@ async function resolveLocation(
         const usable = [];
         try {
           usable.push(await getUsableToken(character, "personal"));
-        } catch {}
+        }
+        catch {}
         return usable;
       }),
     )
@@ -215,21 +216,28 @@ async function resolveLocation(
           regionId: result.data.region_id,
         };
         if (!resolved.typeId || !structureTypeIds.has(resolved.typeId)) {
-          console.warn("[stock] Could not resolve root location", {
-            locationId,
-            locationType: resolved.kind,
-            typeId: resolved.typeId,
-            typeName: resolved.typeId ? types.get(resolved.typeId)?.name.en : undefined,
-          });
+          console.warn(
+            "[stock] Could not resolve root location",
+            {
+              locationId,
+              locationType: resolved.kind,
+              typeId: resolved.typeId,
+              typeName: resolved.typeId ? types.get(resolved.typeId)?.name.en : undefined,
+            },
+          );
         }
         return resolved;
       }
-    } catch {}
+    }
+    catch {}
   }
-  console.warn("[stock] Could not resolve root location", {
-    locationId,
-    locationType: "structure",
-  });
+  console.warn(
+    "[stock] Could not resolve root location",
+    {
+      locationId,
+      locationType: "structure",
+    },
+  );
   return undefined;
 }
 
@@ -253,8 +261,8 @@ function addContribution(
       ? (contribution.blueprintType ?? (contribution.runCount === -1 ? "bpo" : "bpc"))
       : undefined;
   const bucket =
-    buckets.get(location.locationId) ??
-    ({
+    buckets.get(location.locationId)
+    ?? ({
       locationId: location.locationId,
       name:
         location.kind === "anchored"
@@ -297,8 +305,8 @@ function addContribution(
     ...(blueprintType ? { type: blueprintType } : {}),
   };
   const sameBlueprint =
-    contribution.blueprintPrint !== undefined &&
-    item.blueprintPrints?.some((print) => print.itemId === contribution.blueprintPrint?.itemId);
+    contribution.blueprintPrint !== undefined
+    && item.blueprintPrints?.some((print) => print.itemId === contribution.blueprintPrint?.itemId);
   if (!sameBlueprint) item.quantity += contribution.quantity;
   if (category !== "bp") {
     item.me ??= contribution.me;
@@ -310,7 +318,8 @@ function addContribution(
     );
     if (existingPrint) {
       Object.assign(existingPrint, contribution.blueprintPrint);
-    } else {
+    }
+    else {
       item.blueprintPrints = [...(item.blueprintPrints ?? []), contribution.blueprintPrint];
     }
   }
@@ -335,9 +344,9 @@ function addContribution(
   }
   bucket.items.set(itemKey, item);
   bucket.totalCount += contribution.quantity;
-  bucket.totalVolume +=
-    contribution.quantity *
-    (contribution.isPackaged ? (type.packagedVolume ?? type.volume ?? 0) : (type.volume ?? 0));
+  bucket.totalVolume
+    += contribution.quantity
+    * (contribution.isPackaged ? (type.packagedVolume ?? type.volume ?? 0) : (type.volume ?? 0));
   buckets.set(location.locationId, bucket);
 }
 
@@ -507,10 +516,9 @@ export async function GET(request: Request) {
     if (!shouldIncludeAsset(asset, shipTypeIds) || !isDirectLocation(asset)) continue;
     const rootLocation = rootLocationFromAssetLocation(asset.rootLocation);
     if (
-      !rootLocation ||
-      (rootLocation.typeId !== undefined && shipTypeIds.has(rootLocation.typeId))
-    )
-      continue;
+      !rootLocation
+      || (rootLocation.typeId !== undefined && shipTypeIds.has(rootLocation.typeId))
+    ) continue;
     addContribution(
       buckets,
       {
@@ -548,18 +556,17 @@ export async function GET(request: Request) {
   for (const job of jobs) {
     if (job.status === "cancelled" || job.status === "delivered") continue;
     const blueprint =
-      allAssetIndex.get(job.blueprintId) ??
-      assets.find((asset) => asset.itemId === job.blueprintId);
+      allAssetIndex.get(job.blueprintId)
+      ?? assets.find((asset) => asset.itemId === job.blueprintId);
     const preferredBlueprintLocation =
       blueprint && isDirectLocation(blueprint)
         ? rootLocationFromAssetLocation(blueprint.rootLocation)
         : (jobLocations.get(job.blueprintLocationId) ?? jobLocations.get(job.locationId));
     const blueprintLocation = preferredBlueprintLocation ?? jobLocations.get(job.locationId);
     if (
-      !blueprintLocation ||
-      (blueprintLocation.typeId !== undefined && shipTypeIds.has(blueprintLocation.typeId))
-    )
-      continue;
+      !blueprintLocation
+      || (blueprintLocation.typeId !== undefined && shipTypeIds.has(blueprintLocation.typeId))
+    ) continue;
     for (const [index, contribution] of jobContributions(
       job,
       blueprint,
@@ -569,8 +576,9 @@ export async function GET(request: Request) {
         index === 0
           ? blueprintLocation
           : (jobLocations.get(job.outputLocationId) ?? jobLocations.get(job.locationId));
-      if (!location || (location.typeId !== undefined && shipTypeIds.has(location.typeId)))
+      if (!location || (location.typeId !== undefined && shipTypeIds.has(location.typeId))) {
         continue;
+      }
       addContribution(
         buckets,
         {
@@ -598,15 +606,18 @@ export async function GET(request: Request) {
     `total;dur=${totalMs}`,
     ...Object.entries(phaseDurations).map(([name, duration]) => `${name};dur=${duration}`),
   ].join(", ");
-  console.info("[state/stock] timing", {
-    totalMs,
-    phasesMs: phaseDurations,
-    characters: characterIds.length,
-    assets: assets.length,
-    jobs: jobs.length,
-    jobLocations: jobLocations.size,
-    locations: payload.locations.length,
-  });
+  console.info(
+    "[state/stock] timing",
+    {
+      totalMs,
+      phasesMs: phaseDurations,
+      characters: characterIds.length,
+      assets: assets.length,
+      jobs: jobs.length,
+      jobLocations: jobLocations.size,
+      locations: payload.locations.length,
+    },
+  );
   const response = NextResponse.json(payload);
   response.headers.set("Server-Timing", timingHeader);
   return response;

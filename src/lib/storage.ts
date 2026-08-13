@@ -29,7 +29,8 @@ function withoutUndefined(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(withoutUndefined);
   if (!value || typeof value !== "object" || value instanceof Date) return value;
   return Object.fromEntries(
-    Object.entries(value)
+    Object
+      .entries(value)
       .filter(([, entry]) => entry !== undefined)
       .map(([key, entry]) => [key, withoutUndefined(entry)]),
   );
@@ -70,10 +71,13 @@ export async function initStorage() {
             return snapshot.exists ? (snapshot.data()?.value as K) : undefined;
           },
           setItem<K>(key: string, value: K) {
-            transaction.set(database.collection(storageCollection).doc(key), {
-              value: withoutUndefined(value),
-              updatedAt: new Date(),
-            });
+            transaction.set(
+              database.collection(storageCollection).doc(key),
+              {
+                value: withoutUndefined(value),
+                updatedAt: new Date(),
+              },
+            );
           },
         }),
       );

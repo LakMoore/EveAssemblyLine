@@ -21,10 +21,12 @@ async function parseJsonl(filePath: string) {
     if (!line.trimEnd().endsWith("}")) continue;
     try {
       records.push(JSON.parse(pending));
-    } catch {
+    }
+    catch {
       try {
         records.push(JSON.parse(jsonrepair(pending)));
-      } catch (error) {
+      }
+      catch (error) {
         throw new Error(
           `Invalid JSONL in ${filePath} line ${startLine}: ${error instanceof Error ? error.message : error}`,
         );
@@ -32,20 +34,23 @@ async function parseJsonl(filePath: string) {
     }
     pending = "";
   }
-  if (pending.trim())
+  if (pending.trim()) {
     throw new Error(`Invalid JSONL in ${filePath} line ${startLine}: record was not terminated`);
+  }
   return records;
 }
 
 async function main() {
-  if (!existsSync(rawDir))
+  if (!existsSync(rawDir)) {
     throw new Error("SDE raw directory is missing. Run npm run fetch-sde first.");
+  }
   await mkdir(processedDir, { recursive: true });
   const files = (await readdir(rawDir)).filter((file) => extname(file) === ".jsonl");
-  if (files.length === 0)
+  if (files.length === 0) {
     throw new Error(
       "No .jsonl files found in .next/cache/assemblyline-sde/raw. Run npm run fetch-sde first.",
     );
+  }
   for (const file of files) {
     await writeFile(
       join(processedDir, `${basename(file, ".jsonl")}.json`),
@@ -54,15 +59,15 @@ async function main() {
     console.log(`Parsed ${file}`);
   }
   const repackagedVolumesPath = join(rawDir, "repackagedvolumes.json");
-  if (!existsSync(repackagedVolumesPath))
+  if (!existsSync(repackagedVolumesPath)) {
     throw new Error("HoboLeaks repackaged volumes are missing. Run npm run fetch-sde first.");
+  }
   const repackagedVolumes: unknown = JSON.parse(readFileSync(repackagedVolumesPath, "utf8"));
   if (
-    !repackagedVolumes ||
-    typeof repackagedVolumes !== "object" ||
-    Array.isArray(repackagedVolumes)
-  )
-    throw new Error("HoboLeaks repackaged volumes must be a JSON object.");
+    !repackagedVolumes
+    || typeof repackagedVolumes !== "object"
+    || Array.isArray(repackagedVolumes)
+  ) throw new Error("HoboLeaks repackaged volumes must be a JSON object.");
   await writeFile(join(processedDir, "repackagedvolumes.json"), JSON.stringify(repackagedVolumes));
   console.log("Parsed HoboLeaks repackaged volumes.");
 }

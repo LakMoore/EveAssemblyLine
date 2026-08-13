@@ -40,7 +40,8 @@ export async function loadCompressSettings(): Promise<CompressSettings> {
       request.onerror = () =>
         reject(request.error ?? new Error("Could not load compression settings."));
     });
-  } catch {
+  }
+  catch {
     return defaults;
   }
 }
@@ -55,5 +56,6 @@ export async function saveCompressSettings(settings: CompressSettings) {
       transaction.onerror = () =>
         reject(transaction.error ?? new Error("Could not save compression settings."));
     });
-  } catch {}
+  }
+  catch {}
 }

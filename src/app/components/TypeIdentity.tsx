@@ -31,7 +31,8 @@ export default function TypeIdentity({
     try {
       await navigator.clipboard.writeText(value);
       showToast(`${label} copied`);
-    } catch {
+    }
+    catch {
       showToast(`Could not copy ${label.toLowerCase()}`);
     }
   }

@@ -55,9 +55,9 @@ function isStockRecord(value: unknown): value is StockRecord {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
   return (
-    Number.isInteger(record.systemId) &&
-    typeof record.systemName === "string" &&
-    Array.isArray(record.items)
+    Number.isInteger(record.systemId)
+    && typeof record.systemName === "string"
+    && Array.isArray(record.items)
   );
 }
 

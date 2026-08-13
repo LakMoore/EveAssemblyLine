@@ -33,7 +33,8 @@ export async function GET(request: Request) {
           ? publishedTypes[startIndex + typeLimit]._key
           : null,
     });
-  } catch (error) {
+  }
+  catch (error) {
     const message = error instanceof Error ? error.message : "SDE reference data is unavailable.";
     return NextResponse.json({ error: message }, { status: 503 });
   }

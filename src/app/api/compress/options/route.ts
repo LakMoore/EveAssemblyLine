@@ -125,8 +125,9 @@ async function getOptions(
     assetStructures.map(async (location) => {
       const structureId = Number(location.id.slice("structure:".length));
       const cached = structureServiceCache.get(structureId);
-      if (cached && cached.expiresAt > now)
+      if (cached && cached.expiresAt > now) {
         return { ...location, canReprocess: cached.canReprocess };
+      }
       const metadata = await Promise.all(
         structureTokens.map((token) =>
           fetchLocationMetadata(
@@ -141,10 +142,13 @@ async function getOptions(
       const canReprocess = structure.services.some(
         (service) => service.name.toLowerCase().includes("reprocess") && service.state === "online",
       );
-      structureServiceCache.set(structureId, {
-        canReprocess,
-        expiresAt: now + structureServiceCacheTtlMs,
-      });
+      structureServiceCache.set(
+        structureId,
+        {
+          canReprocess,
+          expiresAt: now + structureServiceCacheTtlMs,
+        },
+      );
       return { ...location, canReprocess };
     }),
   );
@@ -265,15 +269,18 @@ async function getOptions(
     `total;dur=${totalMs}`,
     ...Object.entries(phaseDurations).map(([name, duration]) => `${name};dur=${duration}`),
   ].join(", ");
-  console.info("[compress/options] timing", {
-    totalMs,
-    phasesMs: phaseDurations,
-    assetLocations: assetLocations.length,
-    structures: assetStructures.length,
-    structureTokens: structureTokens.length,
-    characters: records.length,
-    suppliedStructures: suppliedStructures.length,
-  });
+  console.info(
+    "[compress/options] timing",
+    {
+      totalMs,
+      phasesMs: phaseDurations,
+      assetLocations: assetLocations.length,
+      structures: assetStructures.length,
+      structureTokens: structureTokens.length,
+      characters: records.length,
+      suppliedStructures: suppliedStructures.length,
+    },
+  );
   const response = NextResponse.json({
     locations,
     characters,
@@ -294,18 +301,20 @@ export async function POST(request: Request) {
     const requestedLanguage = body.language ?? null;
     const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
     if (
-      body.structures !== undefined &&
-      (!Array.isArray(body.structures) ||
-        body.structures.some(
+      body.structures !== undefined
+      && (
+        !Array.isArray(body.structures)
+        || body.structures.some(
           (structure) =>
-            !structure ||
-            typeof structure.id !== "string" ||
-            !Number.isInteger(structure.type) ||
-            !Number.isSafeInteger(structure.systemId) ||
-            structure.systemId <= 0 ||
-            !Array.isArray(structure.rigs) ||
-            structure.rigs.some((rig) => !Number.isInteger(rig) || rig < 0),
-        ))
+            !structure
+            || typeof structure.id !== "string"
+            || !Number.isInteger(structure.type)
+            || !Number.isSafeInteger(structure.systemId)
+            || structure.systemId <= 0
+            || !Array.isArray(structure.rigs)
+            || structure.rigs.some((rig) => !Number.isInteger(rig) || rig < 0),
+        )
+      )
     ) {
       return NextResponse.json(
         { error: "structures must be a valid structure list." },
@@ -313,17 +322,19 @@ export async function POST(request: Request) {
       );
     }
     if (
-      body.assetLocations !== undefined &&
-      (!Array.isArray(body.assetLocations) ||
-        body.assetLocations.some(
+      body.assetLocations !== undefined
+      && (
+        !Array.isArray(body.assetLocations)
+        || body.assetLocations.some(
           (location) =>
-            !location ||
-            !Number.isSafeInteger(location.locationId) ||
-            typeof location.name !== "string" ||
-            (location.locationType !== "station" && location.locationType !== "structure") ||
-            (location.typeId !== undefined && !Number.isSafeInteger(location.typeId)) ||
-            (location.systemId !== undefined && !Number.isSafeInteger(location.systemId)),
-        ))
+            !location
+            || !Number.isSafeInteger(location.locationId)
+            || typeof location.name !== "string"
+            || (location.locationType !== "station" && location.locationType !== "structure")
+            || (location.typeId !== undefined && !Number.isSafeInteger(location.typeId))
+            || (location.systemId !== undefined && !Number.isSafeInteger(location.systemId)),
+        )
+      )
     ) {
       return NextResponse.json(
         { error: "assetLocations must be a valid location list." },
@@ -331,7 +342,8 @@ export async function POST(request: Request) {
       );
     }
     return await getOptions(request, language, body.structures ?? [], body.assetLocations ?? []);
-  } catch (error) {
+  }
+  catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Invalid options request." },
       { status: 400 },

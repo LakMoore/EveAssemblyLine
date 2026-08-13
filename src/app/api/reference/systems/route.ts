@@ -39,9 +39,9 @@ export async function GET(request: Request) {
         const leftName = (left.name[language] ?? left.name.en).toLocaleLowerCase(language);
         const rightName = (right.name[language] ?? right.name.en).toLocaleLowerCase(language);
         return (
-          Number(!leftName.startsWith(normalizedQuery)) -
-            Number(!rightName.startsWith(normalizedQuery)) ||
-          leftName.localeCompare(rightName, language)
+          Number(!leftName.startsWith(normalizedQuery))
+            - Number(!rightName.startsWith(normalizedQuery))
+          || leftName.localeCompare(rightName, language)
         );
       })
       .slice(0, resultLimit)
@@ -52,7 +52,8 @@ export async function GET(request: Request) {
       }));
 
     return NextResponse.json({ items: matches });
-  } catch (error) {
+  }
+  catch (error) {
     const message = error instanceof Error ? error.message : "SDE reference data is unavailable.";
     return NextResponse.json({ error: message }, { status: 503 });
   }

@@ -70,19 +70,19 @@ const corporationCaches = new Map<number, OwnerCache>();
 function hasUsableMarketOrders(cache: OwnerCache | undefined) {
   const marketOrders = cache?.marketOrders;
   return Boolean(
-    marketOrders &&
-    Array.isArray(marketOrders.lastBody) &&
-    marketOrders.status !== "error" &&
-    marketOrders.status !== "rate_limited",
+    marketOrders
+      && Array.isArray(marketOrders.lastBody)
+      && marketOrders.status !== "error"
+      && marketOrders.status !== "rate_limited",
   );
 }
 
 function getUsableMarketOrdersEtag(cache: OwnerCache | undefined) {
   const marketOrders = cache?.marketOrders;
-  return marketOrders &&
-    Array.isArray(marketOrders.lastBody) &&
-    marketOrders.status !== "error" &&
-    marketOrders.status !== "rate_limited"
+  return marketOrders
+    && Array.isArray(marketOrders.lastBody)
+    && marketOrders.status !== "error"
+    && marketOrders.status !== "rate_limited"
     ? marketOrders.etag
     : undefined;
 }
@@ -230,8 +230,8 @@ async function indexAssetsByPurpose(rawAssets: AssetRecord[]) {
     rawAssets
       .filter(
         (asset) =>
-          asset.isSingleton && // assembled
-          shipTypeIds.has(asset.typeId), // ship type
+          asset.isSingleton // assembled
+          && shipTypeIds.has(asset.typeId), // ship type
       )
       .map((asset) => [asset.itemId, asset]),
   );
@@ -273,9 +273,9 @@ async function indexAssetsByPurpose(rawAssets: AssetRecord[]) {
       .values()
       .filter(
         (asset) =>
-          asset.ownerType === "corporation" &&
-          asset.locationType === "structure" &&
-          asset.locationFlag.startsWith("RigSlot"),
+          asset.ownerType === "corporation"
+          && asset.locationType === "structure"
+          && asset.locationFlag.startsWith("RigSlot"),
       ),
   ];
 
@@ -345,12 +345,16 @@ async function cacheResolvedAssets(
       try {
         const rootLocation = await inferRoot(asset.locationId, asset);
         return rootLocation ? { ...asset, rootLocation } : asset;
-      } catch (error) {
-        console.warn("Could not resolve stock asset location", {
-          itemId: asset.itemId,
-          locationId: asset.locationId,
-          error,
-        });
+      }
+      catch (error) {
+        console.warn(
+          "Could not resolve stock asset location",
+          {
+            itemId: asset.itemId,
+            locationId: asset.locationId,
+            error,
+          },
+        );
         return asset;
       }
     }),
@@ -370,11 +374,12 @@ async function cacheResolvedAssets(
     cache.allAssetsRaw.lastModified = previous.lastModified;
   }
   if (refreshedAt) cache.allAssetsRaw.lastModified = refreshedAt;
-  if (refreshedAt)
+  if (refreshedAt) {
     cache.allAssetsRaw.status = endpointDataStatus(
       cache.allAssetsRaw.lastModified,
       cache.allAssetsRaw.nextRefreshAllowed,
     );
+  }
   cache.stockAssetsByItemId = resolvedByItemId;
   const resolvedShipAssets = await Promise.all(
     [...assetIndexes.shipAssetsByItemId.values()].map(async (asset) => {
@@ -384,7 +389,8 @@ async function cacheResolvedAssets(
       try {
         const rootLocation = await inferRoot(asset.locationId, asset);
         return rootLocation ? { ...asset, rootLocation } : asset;
-      } catch {
+      }
+      catch {
         return asset;
       }
     }),
@@ -416,11 +422,13 @@ async function mergeAssetNames(
   const nameableItemIds = assets
     .filter(
       (asset) =>
-        asset.isSingleton &&
-        !excludedItemIds.has(asset.itemId) &&
-        (shipTypeIds.has(asset.typeId) ||
-          isCargoContainerType(asset.typeId, types, groups, marketGroups)) &&
-        !asset.name,
+        asset.isSingleton
+        && !excludedItemIds.has(asset.itemId)
+        && (
+          shipTypeIds.has(asset.typeId)
+          || isCargoContainerType(asset.typeId, types, groups, marketGroups)
+        )
+        && !asset.name,
     )
     .map((asset) => asset.itemId);
   if (nameableItemIds.length === 0) return assets;
@@ -431,15 +439,16 @@ async function mergeAssetNames(
       const name = names.get(asset.itemId);
       return name === undefined ? asset : { ...asset, name };
     });
-  } catch {
+  }
+  catch {
     return assets;
   }
 }
 
 function needsCompleteAssetGraph(cache: OwnerCache) {
   return (
-    (cache.stockAssetsByItemId == undefined || cache.stockAssetsByItemId?.size === 0) &&
-    Array.isArray(cache.allAssetsRaw?.lastBody)
+    (cache.stockAssetsByItemId == undefined || cache.stockAssetsByItemId?.size === 0)
+    && Array.isArray(cache.allAssetsRaw?.lastBody)
   );
 }
 
@@ -466,9 +475,9 @@ function isCargoContainerType(
 
 function directKind(locationType: AssetRecord["locationType"]): AssetLocation["kind"] | null {
   if (
-    locationType === "station" ||
-    locationType === "solar_system" ||
-    locationType === "structure"
+    locationType === "station"
+    || locationType === "solar_system"
+    || locationType === "structure"
   ) {
     return locationType;
   }
@@ -483,7 +492,8 @@ async function getRealParent(current: AssetRecord, token: TokenSet): Promise<Ass
     let name: string | undefined;
     try {
       name = (await fetchLocationMetadata(locationId, "station", token)).data?.name;
-    } catch {
+    }
+    catch {
       // SDE still provides the station identity when ESI name lookup is unavailable.
     }
     return {
@@ -570,15 +580,20 @@ async function resolveRootContainers(
   for (const result of results) {
     if (result.status === "fulfilled" && result.value[1].rootLocation) {
       roots.push(result.value as readonly [number, AssetRecord]);
-    } else if (result.status === "fulfilled") {
+    }
+    else if (result.status === "fulfilled") {
       const asset = result.value[1];
       if (asset.locationType === "item") continue;
-      console.warn("Could not resolve a container root", {
-        itemId: asset.itemId,
-        locationId: asset.locationId,
-        locationType: asset.locationType,
-      });
-    } else {
+      console.warn(
+        "Could not resolve a container root",
+        {
+          itemId: asset.itemId,
+          locationId: asset.locationId,
+          locationType: asset.locationType,
+        },
+      );
+    }
+    else {
       console.warn("Could not resolve a container root", result.reason);
     }
   }
@@ -590,8 +605,9 @@ async function rebuildResolvedAssets(
   record: Awaited<ReturnType<typeof getCharacter>>,
   purpose: "personal" | "corp",
 ) {
-  if (!record || !needsCompleteAssetGraph(cache) || !Array.isArray(cache.allAssetsRaw?.lastBody))
+  if (!record || !needsCompleteAssetGraph(cache) || !Array.isArray(cache.allAssetsRaw?.lastBody)) {
     return;
+  }
   try {
     const token = await getUsableToken(record, purpose);
     const ownerPath =
@@ -606,7 +622,8 @@ async function rebuildResolvedAssets(
       cache.allAssetsRaw,
       ownerPath,
     );
-  } catch {
+  }
+  catch {
     // Keep raw assets available when ESI is paused or unavailable.
   }
 }
@@ -633,8 +650,8 @@ export async function refreshCharacterState(characterIds: number[]) {
     const characterSummary: (typeof summary)[number] = { characterId };
     try {
       if (
-        cache.allAssetsRaw?.nextRefreshAllowed &&
-        Date.parse(cache.allAssetsRaw.nextRefreshAllowed) > Date.now()
+        cache.allAssetsRaw?.nextRefreshAllowed
+        && Date.parse(cache.allAssetsRaw.nextRefreshAllowed) > Date.now()
       ) {
         characterSummary.assets = {
           ...cache.allAssetsRaw,
@@ -658,7 +675,8 @@ export async function refreshCharacterState(characterIds: number[]) {
             true,
           );
         }
-      } else {
+      }
+      else {
         const previousAssetTiming = cache.allAssetsRaw && {
           lastUpdated: cache.allAssetsRaw.lastUpdated,
           nextRefreshAllowed: cache.allAssetsRaw.nextRefreshAllowed,
@@ -688,7 +706,8 @@ export async function refreshCharacterState(characterIds: number[]) {
             cache.allAssetsRaw.lastModified,
             cache.allAssetsRaw.nextRefreshAllowed,
           );
-        } else if (result.assets) {
+        }
+        else if (result.assets) {
           await cacheResolvedAssets(
             cache,
             result.assets,
@@ -715,7 +734,8 @@ export async function refreshCharacterState(characterIds: number[]) {
         characterSummary.assets = cache.allAssetsRaw;
         characterSummary.rootContainersByItemId = cache.rootContainersByItemId;
       }
-    } catch (error) {
+    }
+    catch (error) {
       await rebuildResolvedAssets(cache, character, "personal");
       cache.allAssetsRaw = {
         ...(cache.allAssetsRaw ?? { lastBody: [] }),
@@ -727,9 +747,9 @@ export async function refreshCharacterState(characterIds: number[]) {
     }
     try {
       if (
-        !cache.jobs ||
-        !cache.jobs.nextRefreshAllowed ||
-        Date.parse(cache.jobs.nextRefreshAllowed) <= Date.now()
+        !cache.jobs
+        || !cache.jobs.nextRefreshAllowed
+        || Date.parse(cache.jobs.nextRefreshAllowed) <= Date.now()
       ) {
         const jobs = await fetchCharacterIndustryJobs(character, true);
         cache.jobs =
@@ -739,14 +759,16 @@ export async function refreshCharacterState(characterIds: number[]) {
                 status: endpointDataStatus(cache.jobs.lastModified, cache.jobs.nextRefreshAllowed),
               }
             : setFresh(jobs.jobs, jobs.headers, cache.jobs);
-      } else {
+      }
+      else {
         cache.jobs.status = endpointDataStatus(
           cache.jobs.lastModified,
           cache.jobs.nextRefreshAllowed,
         );
       }
       characterSummary.jobs = cache.jobs;
-    } catch (error) {
+    }
+    catch (error) {
       cache.jobs = {
         ...(cache.jobs ?? { lastBody: [] }),
         ...endpointStatus(error),
@@ -755,10 +777,10 @@ export async function refreshCharacterState(characterIds: number[]) {
     }
     try {
       if (
-        cache.marketOrders?.status === "stale" ||
-        !cache.marketOrders ||
-        !cache.marketOrders.nextRefreshAllowed ||
-        Date.parse(cache.marketOrders.nextRefreshAllowed) <= Date.now()
+        cache.marketOrders?.status === "stale"
+        || !cache.marketOrders
+        || !cache.marketOrders.nextRefreshAllowed
+        || Date.parse(cache.marketOrders.nextRefreshAllowed) <= Date.now()
       ) {
         const orders = await fetchCharacterMarketOrders(
           character,
@@ -778,9 +800,11 @@ export async function refreshCharacterState(characterIds: number[]) {
             cache.marketOrders.lastModified,
             cache.marketOrders.nextRefreshAllowed,
           );
-        } else if (orders.notModified) {
+        }
+        else if (orders.notModified) {
           cache.marketOrders = setFresh([], orders.headers);
-        } else if (orders.orders) {
+        }
+        else if (orders.orders) {
           cache.marketOrders =
             orders.fromCache && cache.marketOrders
               ? {
@@ -798,14 +822,16 @@ export async function refreshCharacterState(characterIds: number[]) {
                   orders.fromCache,
                 );
         }
-      } else {
+      }
+      else {
         cache.marketOrders.status = endpointDataStatus(
           cache.marketOrders.lastModified,
           cache.marketOrders.nextRefreshAllowed,
         );
       }
       characterSummary.marketOrders = cache.marketOrders;
-    } catch (error) {
+    }
+    catch (error) {
       cache.marketOrders = {
         ...(cache.marketOrders ?? { lastBody: [] }),
         ...endpointStatus(error),
@@ -816,9 +842,9 @@ export async function refreshCharacterState(characterIds: number[]) {
     }
 
     if (
-      character.hasDirectorRole &&
-      character.corporationId &&
-      !refreshedCorporationIds.has(character.corporationId)
+      character.hasDirectorRole
+      && character.corporationId
+      && !refreshedCorporationIds.has(character.corporationId)
     ) {
       refreshedCorporationIds.add(character.corporationId);
       const corpCache = getCache(corporationCaches, character.corporationId);
@@ -831,8 +857,8 @@ export async function refreshCharacterState(characterIds: number[]) {
       } = { corporationId: character.corporationId };
       try {
         if (
-          corpCache.allAssetsRaw?.nextRefreshAllowed &&
-          Date.parse(corpCache.allAssetsRaw.nextRefreshAllowed) > Date.now()
+          corpCache.allAssetsRaw?.nextRefreshAllowed
+          && Date.parse(corpCache.allAssetsRaw.nextRefreshAllowed) > Date.now()
         ) {
           corpSummary.assets = {
             ...corpCache.allAssetsRaw,
@@ -856,7 +882,8 @@ export async function refreshCharacterState(characterIds: number[]) {
               true,
             );
           }
-        } else {
+        }
+        else {
           const previousAssetTiming = corpCache.allAssetsRaw && {
             lastUpdated: corpCache.allAssetsRaw.lastUpdated,
             nextRefreshAllowed: corpCache.allAssetsRaw.nextRefreshAllowed,
@@ -890,7 +917,8 @@ export async function refreshCharacterState(characterIds: number[]) {
               corpCache.allAssetsRaw.lastModified,
               corpCache.allAssetsRaw.nextRefreshAllowed,
             );
-          } else if (result.assets) {
+          }
+          else if (result.assets) {
             await cacheResolvedAssets(
               corpCache,
               result.assets,
@@ -917,7 +945,8 @@ export async function refreshCharacterState(characterIds: number[]) {
             );
           }
         }
-      } catch (error) {
+      }
+      catch (error) {
         corpCache.allAssetsRaw = {
           ...(corpCache.allAssetsRaw ?? { lastBody: [] }),
           ...endpointStatus(error),
@@ -929,9 +958,9 @@ export async function refreshCharacterState(characterIds: number[]) {
       }
       try {
         if (
-          !corpCache.jobs ||
-          !corpCache.jobs.nextRefreshAllowed ||
-          Date.parse(corpCache.jobs.nextRefreshAllowed) <= Date.now()
+          !corpCache.jobs
+          || !corpCache.jobs.nextRefreshAllowed
+          || Date.parse(corpCache.jobs.nextRefreshAllowed) <= Date.now()
         ) {
           const jobs = await fetchCorporationIndustryJobs(character, true);
           corpCache.jobs =
@@ -944,14 +973,16 @@ export async function refreshCharacterState(characterIds: number[]) {
                   ),
                 }
               : setFresh(jobs.jobs, jobs.headers, corpCache.jobs, 5 * 60 * 1000, jobs.fromCache);
-        } else {
+        }
+        else {
           corpCache.jobs.status = endpointDataStatus(
             corpCache.jobs.lastModified,
             corpCache.jobs.nextRefreshAllowed,
           );
         }
         corpSummary.jobs = corpCache.jobs;
-      } catch (error) {
+      }
+      catch (error) {
         corpCache.jobs = {
           ...(corpCache.jobs ?? { lastBody: [] }),
           ...endpointStatus(error),
@@ -962,10 +993,10 @@ export async function refreshCharacterState(characterIds: number[]) {
       }
       try {
         if (
-          corpCache.marketOrders?.status === "stale" ||
-          !corpCache.marketOrders ||
-          !corpCache.marketOrders.nextRefreshAllowed ||
-          Date.parse(corpCache.marketOrders.nextRefreshAllowed) <= Date.now()
+          corpCache.marketOrders?.status === "stale"
+          || !corpCache.marketOrders
+          || !corpCache.marketOrders.nextRefreshAllowed
+          || Date.parse(corpCache.marketOrders.nextRefreshAllowed) <= Date.now()
         ) {
           const orders = await fetchCorporationMarketOrders(
             character,
@@ -985,9 +1016,11 @@ export async function refreshCharacterState(characterIds: number[]) {
               corpCache.marketOrders.lastModified,
               corpCache.marketOrders.nextRefreshAllowed,
             );
-          } else if (orders.notModified) {
+          }
+          else if (orders.notModified) {
             corpCache.marketOrders = setFresh([], orders.headers);
-          } else if (orders.orders) {
+          }
+          else if (orders.orders) {
             corpCache.marketOrders = setFresh(
               orders.orders,
               orders.headers,
@@ -996,14 +1029,16 @@ export async function refreshCharacterState(characterIds: number[]) {
               orders.fromCache,
             );
           }
-        } else {
+        }
+        else {
           corpCache.marketOrders.status = endpointDataStatus(
             corpCache.marketOrders.lastModified,
             corpCache.marketOrders.nextRefreshAllowed,
           );
         }
         corpSummary.marketOrders = corpCache.marketOrders;
-      } catch (error) {
+      }
+      catch (error) {
         corpCache.marketOrders = {
           ...(corpCache.marketOrders ?? { lastBody: [] }),
           ...endpointStatus(error),
@@ -1033,9 +1068,9 @@ export async function getRunningIndustryJobs(
     characters
       .filter(
         (character) =>
-          characterIds.includes(character.characterId) &&
-          character.hasDirectorRole &&
-          character.corporationId,
+          characterIds.includes(character.characterId)
+          && character.hasDirectorRole
+          && character.corporationId,
       )
       .map((character) => character.corporationId!),
   );
@@ -1063,9 +1098,9 @@ export async function getResolvedAssets(
     characters
       .filter(
         (character) =>
-          characterIds.includes(character.characterId) &&
-          character.hasDirectorRole &&
-          character.corporationId,
+          characterIds.includes(character.characterId)
+          && character.hasDirectorRole
+          && character.corporationId,
       )
       .map((character) => character.corporationId!),
   );
@@ -1092,9 +1127,9 @@ export async function getShipAssets(
     characters
       .filter(
         (character) =>
-          characterIds.includes(character.characterId) &&
-          character.hasDirectorRole &&
-          character.corporationId,
+          characterIds.includes(character.characterId)
+          && character.hasDirectorRole
+          && character.corporationId,
       )
       .map((character) => character.corporationId!),
   );
@@ -1117,9 +1152,9 @@ export async function getAllAssetsRaw(characterIds: number[], includeCorporation
     characters
       .filter(
         (character) =>
-          characterIds.includes(character.characterId) &&
-          character.hasDirectorRole &&
-          character.corporationId,
+          characterIds.includes(character.characterId)
+          && character.hasDirectorRole
+          && character.corporationId,
       )
       .map((character) => character.corporationId!),
   );
@@ -1142,22 +1177,22 @@ export async function getResolvedAssetIndex(
         characters
           .filter(
             (character) =>
-              characterIds.includes(character.characterId) &&
-              character.hasDirectorRole &&
-              character.corporationId,
+              characterIds.includes(character.characterId)
+              && character.hasDirectorRole
+              && character.corporationId,
           )
           .map((character) => character.corporationId!),
       )
     : new Set<number>();
   for (const characterId of characterIds) {
-    for (const asset of getCache(characterCaches, characterId).stockAssetsByItemId?.values() ??
-      []) {
+    for (const asset of getCache(characterCaches, characterId).stockAssetsByItemId?.values()
+      ?? []) {
       index.set(asset.itemId, asset);
     }
   }
   for (const corporationId of corporationIds) {
-    for (const asset of getCache(corporationCaches, corporationId).stockAssetsByItemId?.values() ??
-      []) {
+    for (const asset of getCache(corporationCaches, corporationId).stockAssetsByItemId?.values()
+      ?? []) {
       index.set(asset.itemId, asset);
     }
   }
@@ -1177,9 +1212,9 @@ export async function getRootContainersByItemId(
     characters
       .filter(
         (character) =>
-          characterIds.includes(character.characterId) &&
-          character.hasDirectorRole &&
-          character.corporationId,
+          characterIds.includes(character.characterId)
+          && character.hasDirectorRole
+          && character.corporationId,
       )
       .map((character) => character.corporationId!),
   );
@@ -1193,10 +1228,13 @@ export async function getRootContainersByItemId(
     ),
   ]
     .map(([itemId, asset]) => [itemId, asset] as [number, AssetRecord])
-    .reduce((map, [itemId, asset]) => {
-      map.set(itemId, asset);
-      return map;
-    }, new Map<number, AssetRecord>());
+    .reduce(
+      (map, [itemId, asset]) => {
+        map.set(itemId, asset);
+        return map;
+      },
+      new Map<number, AssetRecord>(),
+    );
 }
 
 export async function getAssembledStructureRigAssets(
@@ -1209,9 +1247,9 @@ export async function getAssembledStructureRigAssets(
     characters
       .filter(
         (character) =>
-          characterIds.includes(character.characterId) &&
-          character.hasDirectorRole &&
-          character.corporationId,
+          characterIds.includes(character.characterId)
+          && character.hasDirectorRole
+          && character.corporationId,
       )
       .map((character) => character.corporationId!),
   );
@@ -1233,9 +1271,9 @@ export async function getAssembledShipAssets(
     characters
       .filter(
         (character) =>
-          characterIds.includes(character.characterId) &&
-          character.hasDirectorRole &&
-          character.corporationId,
+          characterIds.includes(character.characterId)
+          && character.hasDirectorRole
+          && character.corporationId,
       )
       .map((character) => character.corporationId!),
   );
@@ -1259,9 +1297,9 @@ export async function getAssetCacheMetadata(
           characters
             .filter(
               (character) =>
-                characterIds.includes(character.characterId) &&
-                character.hasDirectorRole &&
-                character.corporationId,
+                characterIds.includes(character.characterId)
+                && character.hasDirectorRole
+                && character.corporationId,
             )
             .map((character) => character.corporationId!),
         ),
@@ -1356,8 +1394,8 @@ export async function getMarketOrderStock(
     for (const order of orders as MarketOrderRecord[]) {
       if (order.isBuyOrder || order.volumeRemain <= 0) continue;
       const isMyCorporationOrder =
-        order.issuedBy !== undefined &&
-        selectedCharacters.some(
+        order.issuedBy !== undefined
+        && selectedCharacters.some(
           (character) =>
             character.characterId === order.issuedBy && character.corporationId === corporationId,
         );
@@ -1384,11 +1422,10 @@ export async function getStateStatus(characterIds: number[]) {
   const corporationsByCharacter = new Map<number, number[]>();
   for (const character of characters) {
     if (
-      !characterIds.includes(character.characterId) ||
-      !character.corporationId ||
-      !character.hasDirectorRole
-    )
-      continue;
+      !characterIds.includes(character.characterId)
+      || !character.corporationId
+      || !character.hasDirectorRole
+    ) continue;
     const corporationIds = corporationsByCharacter.get(character.characterId) ?? [];
     corporationIds.push(character.corporationId);
     corporationsByCharacter.set(character.characterId, corporationIds);

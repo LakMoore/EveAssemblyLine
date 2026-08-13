@@ -79,7 +79,8 @@ function loadPlannerSettings(): PlannerSettings {
   try {
     const stored = window.localStorage.getItem(settingsStorageKey);
     return stored ? { ...defaultPlannerSettings, ...JSON.parse(stored) } : defaultPlannerSettings;
-  } catch {
+  }
+  catch {
     return defaultPlannerSettings;
   }
 }
@@ -97,11 +98,10 @@ function hasExpiredEndpoint(statuses: ClientCharacterStatus[]) {
       if (endpoint.status === "error") return true;
       const now = Date.now();
       if (
-        endpoint.status === "rate_limited" &&
-        endpoint.rateLimitedUntil &&
-        Date.parse(endpoint.rateLimitedUntil) > now
-      )
-        return false;
+        endpoint.status === "rate_limited"
+        && endpoint.rateLimitedUntil
+        && Date.parse(endpoint.rateLimitedUntil) > now
+      ) return false;
       const expiresAt = Date.parse(endpoint.expires ?? endpoint.nextRefreshAllowed ?? "");
       return endpoint.status === "stale" || !Number.isFinite(expiresAt) || expiresAt <= now;
     });
@@ -169,16 +169,16 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   ? "characters"
                   : "planner";
   const hasExpiredState =
-    authenticated &&
-    characters.length > 0 &&
-    hasLoadedStateStatuses &&
-    statusCheckAt > 0 &&
-    hasExpiredEndpoint(stateStatuses);
+    authenticated
+    && characters.length > 0
+    && hasLoadedStateStatuses
+    && statusCheckAt > 0
+    && hasExpiredEndpoint(stateStatuses);
   const hasStateErrors =
-    authenticated &&
-    characters.length > 0 &&
-    hasLoadedStateStatuses &&
-    hasEndpointErrors(stateStatuses);
+    authenticated
+    && characters.length > 0
+    && hasLoadedStateStatuses
+    && hasEndpointErrors(stateStatuses);
 
   useEffect(() => {
     const pilotListSentinel = pilotListSentinelRef.current;
@@ -250,7 +250,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
     const handleViewportChange = () => {
       if (mediaQuery.matches) {
         setIsSidebarCollapsed(true);
-      } else {
+      }
+      else {
         const savedState = window.localStorage.getItem(sidebarStorageKey);
         setIsSidebarCollapsed(savedState === "true");
       }
@@ -285,11 +286,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
     setIsRefreshingData(true);
     let stockLocations: EsiStockResponse["locations"] | undefined;
     try {
-      const response = await fetch("/api/state/refresh", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
+      const response = await fetch(
+        "/api/state/refresh",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
       const data = (await response.json()) as {
         success?: boolean;
         refreshedAt?: string;
@@ -299,7 +303,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
       let shipsResponse;
       try {
         shipsResponse = await loadClientShips(true);
-      } catch {}
+      }
+      catch {}
       try {
         const stockData = await loadClientStock(language, true);
         stockLocations = stockData.locations ?? [];
@@ -315,28 +320,35 @@ export default function AppShell({ children }: { children: ReactNode }) {
             })),
           );
         }
-      } catch {}
+      }
+      catch {}
       try {
         const settings = loadPlannerSettings();
         const marketOrders = await loadClientMarketOrders(settings);
         if (marketOrders) {
           await replaceMarketOrderStock(marketOrders.marketOrderStock ?? []);
         }
-      } catch {}
+      }
+      catch {}
       window.dispatchEvent(
-        new CustomEvent("assembly-line-esi-refreshed", {
-          detail: {
-            refreshedAt: data.refreshedAt ?? null,
-            rateLimitedUntil: data.rateLimitedUntil ?? null,
-            stockLocations,
-            ships: shipsResponse ?? null,
+        new CustomEvent(
+          "assembly-line-esi-refreshed",
+          {
+            detail: {
+              refreshedAt: data.refreshedAt ?? null,
+              rateLimitedUntil: data.rateLimitedUntil ?? null,
+              stockLocations,
+              ships: shipsResponse ?? null,
+            },
           },
-        }),
+        ),
       );
       return true;
-    } catch {
+    }
+    catch {
       return false;
-    } finally {
+    }
+    finally {
       setIsRefreshingData(false);
     }
   }, [authenticated, characters.length, isRefreshingData, language]);
@@ -348,15 +360,21 @@ export default function AppShell({ children }: { children: ReactNode }) {
     if (mobileMetaCollapseAnimationTimer.current !== null) {
       window.clearTimeout(mobileMetaCollapseAnimationTimer.current);
     }
-    mobileMetaCollapseTimer.current = window.setTimeout(() => {
-      setIsMobileMetaCollapsing(true);
-      mobileMetaCollapseTimer.current = null;
-      mobileMetaCollapseAnimationTimer.current = window.setTimeout(() => {
-        setIsMobileMetaExpanded(false);
-        setIsMobileMetaCollapsing(false);
-        mobileMetaCollapseAnimationTimer.current = null;
-      }, 220);
-    }, 900);
+    mobileMetaCollapseTimer.current = window.setTimeout(
+      () => {
+        setIsMobileMetaCollapsing(true);
+        mobileMetaCollapseTimer.current = null;
+        mobileMetaCollapseAnimationTimer.current = window.setTimeout(
+          () => {
+            setIsMobileMetaExpanded(false);
+            setIsMobileMetaCollapsing(false);
+            mobileMetaCollapseAnimationTimer.current = null;
+          },
+          220,
+        );
+      },
+      900,
+    );
   }, []);
 
   const handleMobileMetaAction = useCallback(async () => {

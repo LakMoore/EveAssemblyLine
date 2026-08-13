@@ -20,11 +20,14 @@ export class InMemoryCacheProvider implements ICacheProvider {
   }
 
   async set<T>(key: string, value: T, ttlMs?: number | null): Promise<void> {
-    this.store.set(key, {
-      value,
-      ttlMs: ttlMs ?? null,
-      createdAtMs: Date.now(),
-    });
+    this.store.set(
+      key,
+      {
+        value,
+        ttlMs: ttlMs ?? null,
+        createdAtMs: Date.now(),
+      },
+    );
   }
 
   async setMany(entries: readonly CacheSetEntry[]): Promise<void> {

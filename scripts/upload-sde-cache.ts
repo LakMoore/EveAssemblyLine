@@ -29,8 +29,9 @@ async function main() {
   } = await import("../src/lib/sde/loader");
 
   const version = await getSdeBuildNumber();
-  if (!/^\d+$/.test(version))
+  if (!/^\d+$/.test(version)) {
     throw new Error(`Cannot upload SDE cache: build number is "${version}".`);
+  }
 
   if ((await cache.getVersion(SDE_VERSION_KEY)) === version) {
     console.log(`SDE cache for build ${version} is already uploaded; nothing to do.`);

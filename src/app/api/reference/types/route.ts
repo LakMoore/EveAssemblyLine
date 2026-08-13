@@ -32,10 +32,10 @@ export async function GET(request: Request) {
             packagedVolume: item.packagedVolume,
             ...categorizeType(item, language, marketGroupById, groupById),
             name:
-              item.name[language] ??
-              item.name.en ??
-              Object.values(item.name).find(Boolean) ??
-              `Type ${item._key}`,
+              item.name[language]
+              ?? item.name.en
+              ?? Object.values(item.name).find(Boolean)
+              ?? `Type ${item._key}`,
           },
         ];
       });
@@ -51,18 +51,18 @@ export async function GET(request: Request) {
       .filter((item) => {
         if (!item.published) return false;
         if (numericQuery !== null) return item._key.toString().startsWith(query);
-        return Object.values(item.name).some((name) =>
-          name?.toLocaleLowerCase(language).includes(normalizedQuery),
-        );
+        return Object
+          .values(item.name)
+          .some((name) => name?.toLocaleLowerCase(language).includes(normalizedQuery));
       })
       .sort((left, right) => {
         if (numericQuery !== null) return left._key - right._key;
         const leftName =
-          left.name[language]?.toLocaleLowerCase(language) ??
-          left.name.en.toLocaleLowerCase(language);
+          left.name[language]?.toLocaleLowerCase(language)
+          ?? left.name.en.toLocaleLowerCase(language);
         const rightName =
-          right.name[language]?.toLocaleLowerCase(language) ??
-          right.name.en.toLocaleLowerCase(language);
+          right.name[language]?.toLocaleLowerCase(language)
+          ?? right.name.en.toLocaleLowerCase(language);
         const leftStarts = leftName.startsWith(normalizedQuery) ? 0 : 1;
         const rightStarts = rightName.startsWith(normalizedQuery) ? 0 : 1;
         return leftStarts - rightStarts || leftName.localeCompare(rightName);
@@ -72,14 +72,15 @@ export async function GET(request: Request) {
         typeId: item._key,
         ...categorizeType(item, language, marketGroupById, groupById),
         name:
-          item.name[language] ??
-          item.name.en ??
-          Object.values(item.name).find(Boolean) ??
-          `Type ${item._key}`,
+          item.name[language]
+          ?? item.name.en
+          ?? Object.values(item.name).find(Boolean)
+          ?? `Type ${item._key}`,
       }));
 
     return NextResponse.json({ items: matches });
-  } catch (error) {
+  }
+  catch (error) {
     const message = error instanceof Error ? error.message : "SDE reference data is unavailable.";
     return NextResponse.json({ error: message }, { status: 503 });
   }
@@ -93,11 +94,12 @@ export async function POST(request: Request) {
     };
     const requestedLanguage = body.language ?? null;
     const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
-    if (!Array.isArray(body.items))
+    if (!Array.isArray(body.items)) {
       return NextResponse.json(
         { error: "A list of item names and quantities is required." },
         { status: 400 },
       );
+    }
 
     const [typeById, marketGroupById, groupById] = await Promise.all([
       getTypes(),
@@ -118,14 +120,18 @@ export async function POST(request: Request) {
     for (const item of typeById.values()) {
       if (!item.published) continue;
       const name = item.name[language] ?? item.name.en ?? Object.values(item.name).find(Boolean);
-      if (name)
-        byName.set(name.toLocaleLowerCase(language), {
-          typeId: item._key,
-          name,
-          assembledVolume: item.volume ?? 0,
-          packagedVolume: item.packagedVolume,
-          ...categorizeType(item, language, marketGroupById, groupById),
-        });
+      if (name) {
+        byName.set(
+          name.toLocaleLowerCase(language),
+          {
+            typeId: item._key,
+            name,
+            assembledVolume: item.volume ?? 0,
+            packagedVolume: item.packagedVolume,
+            ...categorizeType(item, language, marketGroupById, groupById),
+          },
+        );
+      }
     }
 
     const resolved = body.items.map((item) => {
@@ -133,16 +139,18 @@ export async function POST(request: Request) {
       const quantity = item.quantity;
       const match = byName.get(name.toLocaleLowerCase(language));
       const validQuantity = quantity === undefined || (Number.isInteger(quantity) && quantity > 0);
-      if (!match || !validQuantity)
+      if (!match || !validQuantity) {
         return {
           name,
           quantity,
           error: !match ? "Item name was not found." : "Quantity must be a positive whole number.",
         };
+      }
       return { ...match, quantity: quantity ?? 1 };
     });
     return NextResponse.json({ items: resolved });
-  } catch (error) {
+  }
+  catch (error) {
     const message = error instanceof Error ? error.message : "The item list was not valid JSON.";
     return NextResponse.json({ error: message }, { status: 400 });
   }

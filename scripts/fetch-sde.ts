@@ -40,30 +40,34 @@ function readLocalBuildNumber() {
   try {
     const value = JSON.parse(readFileSync(versionPath, "utf8")) as { buildNumber?: unknown };
     return typeof value.buildNumber === "number" ? value.buildNumber : undefined;
-  } catch {
+  }
+  catch {
     return undefined;
   }
 }
 
 async function fetchManifest(): Promise<LatestSdeManifest> {
   const response = await fetch(manifestUrl, { headers: requestHeaders });
-  if (!response.ok)
+  if (!response.ok) {
     throw new Error(
       `Official EVE SDE manifest failed: HTTP ${response.status} from ${manifestUrl}`,
     );
+  }
   const value = (await response.json()) as Partial<LatestSdeManifest>;
   const buildNumber = value.buildNumber;
-  if (typeof buildNumber !== "number" || !Number.isInteger(buildNumber))
+  if (typeof buildNumber !== "number" || !Number.isInteger(buildNumber)) {
     throw new Error(
       `Official EVE SDE manifest did not contain a valid buildNumber: ${manifestUrl}`,
     );
+  }
   return { buildNumber, releaseDate: value.releaseDate };
 }
 
 async function downloadAndExtract(destination: string, localArchive?: string) {
   if (localArchive) {
-    if (!existsSync(resolve(localArchive)))
+    if (!existsSync(resolve(localArchive))) {
       throw new Error(`SDE_ARCHIVE does not exist: ${resolve(localArchive)}`);
+    }
     await execFileAsync("unzip", ["-q", "-o", resolve(localArchive), "-d", destination]);
     return;
   }
@@ -100,10 +104,12 @@ async function validateJsonlFiles(directory: string) {
       if (!line.trimEnd().endsWith("}")) continue;
       try {
         JSON.parse(pending);
-      } catch {
+      }
+      catch {
         try {
           JSON.parse(jsonrepair(pending));
-        } catch (error) {
+        }
+        catch (error) {
           throw new Error(
             `Downloaded SDE file is invalid: ${file} line ${startLine}: ${error instanceof Error ? error.message : error}`,
           );
@@ -111,19 +117,24 @@ async function validateJsonlFiles(directory: string) {
       }
       pending = "";
     }
-    if (pending.trim())
+    if (pending.trim()) {
       throw new Error(
         `Downloaded SDE file is invalid: ${file} line ${startLine}: record was not terminated`,
       );
+    }
   }
 }
 
 async function fetchRepackagedVolumes() {
-  const metadataResponse = await fetch(`${hoboLeaksBaseUrl}/meta.json`, {
-    headers: requestHeaders,
-  });
-  if (!metadataResponse.ok)
+  const metadataResponse = await fetch(
+    `${hoboLeaksBaseUrl}/meta.json`,
+    {
+      headers: requestHeaders,
+    },
+  );
+  if (!metadataResponse.ok) {
     throw new Error(`HoboLeaks metadata failed: HTTP ${metadataResponse.status}`);
+  }
   const metadata = (await metadataResponse.json()) as {
     files?: Record<
       string,
@@ -131,26 +142,31 @@ async function fetchRepackagedVolumes() {
     >;
   };
   const fileMetadata = metadata.files?.["repackagedvolumes.json"];
-  if (!fileMetadata)
+  if (!fileMetadata) {
     throw new Error("HoboLeaks metadata does not describe repackagedvolumes.json.");
-  if (fileMetadata.deprecated || fileMetadata.stale)
+  }
+  if (fileMetadata.deprecated || fileMetadata.stale) {
     throw new Error("HoboLeaks repackagedvolumes.json is marked deprecated or stale.");
+  }
 
-  const response = await fetch(`${hoboLeaksBaseUrl}/repackagedvolumes.json`, {
-    headers: requestHeaders,
-  });
+  const response = await fetch(
+    `${hoboLeaksBaseUrl}/repackagedvolumes.json`,
+    {
+      headers: requestHeaders,
+    },
+  );
   if (!response.ok) throw new Error(`HoboLeaks repackaged volumes failed: HTTP ${response.status}`);
   const value: unknown = await response.json();
-  if (!value || typeof value !== "object" || Array.isArray(value))
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("HoboLeaks repackagedvolumes.json must be an object.");
+  }
   for (const [typeId, volume] of Object.entries(value)) {
     if (
-      !/^\d+$/.test(typeId) ||
-      typeof volume !== "number" ||
-      !Number.isFinite(volume) ||
-      volume < 0
-    )
-      throw new Error(`HoboLeaks repackagedvolumes.json contains an invalid entry for ${typeId}.`);
+      !/^\d+$/.test(typeId)
+      || typeof volume !== "number"
+      || !Number.isFinite(volume)
+      || volume < 0
+    ) throw new Error(`HoboLeaks repackagedvolumes.json contains an invalid entry for ${typeId}.`);
   }
 
   writeFileSync(join(rawDir, "repackagedvolumes.json"), JSON.stringify(value));
@@ -202,7 +218,8 @@ async function main() {
       await fetchRepackagedVolumes();
       console.log(`SDE build ${manifest.buildNumber} extracted to ${rawDir}`);
       return;
-    } catch (error) {
+    }
+    catch (error) {
       lastError = error;
       await rm(stagingDir, { recursive: true, force: true });
       if (attempt < attempts) console.warn(`SDE download attempt ${attempt} failed; retrying.`);

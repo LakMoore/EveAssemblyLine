@@ -51,10 +51,10 @@ export async function getMarketSellOrders(
   return orders
     .filter(
       (order) =>
-        !order.is_buy_order &&
-        order.volume_remain > 0 &&
-        Number.isFinite(order.price) &&
-        order.price >= 0,
+        !order.is_buy_order
+        && order.volume_remain > 0
+        && Number.isFinite(order.price)
+        && order.price >= 0,
     )
     .map((order) => ({
       orderId: order.order_id,

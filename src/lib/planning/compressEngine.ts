@@ -88,9 +88,9 @@ export function compressMaterials(
       )
       .sort(
         (left, right) =>
-          candidateScore(right, remaining) - candidateScore(left, remaining) ||
-          (left.price ?? Number.POSITIVE_INFINITY) - (right.price ?? Number.POSITIVE_INFINITY) ||
-          left.typeId - right.typeId,
+          candidateScore(right, remaining) - candidateScore(left, remaining)
+          || (left.price ?? Number.POSITIVE_INFINITY) - (right.price ?? Number.POSITIVE_INFINITY)
+          || left.typeId - right.typeId,
       )[0];
     if (!candidate) {
       break;
@@ -130,12 +130,13 @@ export function compressMaterials(
     };
   });
   for (const [typeId, quantity] of remaining) {
-    if (quantity > 0)
+    if (quantity > 0) {
       toBuy.push({
         typeId,
         name: requestNames.get(typeId) ?? names.get(typeId) ?? `Type ${typeId}`,
         quantity,
       });
+    }
   }
   const surplus = [...recovered]
     .map(([typeId, quantity]) => [typeId, Math.floor(quantity)] as const)

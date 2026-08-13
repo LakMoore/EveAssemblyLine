@@ -36,7 +36,13 @@ export interface AssetRecord {
   te?: number;
   locationId: number;
   locationType:
-    "facility" | "station" | "solar_system" | "item" | "structure" | "container" | "other"; // ESI location type
+    | "facility"
+    | "station"
+    | "solar_system"
+    | "item"
+    | "structure"
+    | "container"
+    | "other"; // ESI location type
   // ESI location_flag = AssetSafety, AutoFit, Bonus, Booster, BoosterBay, Capsule, CapsuleerDeliveries, Cargo, CorpDeliveries,
   // CorpSAG1, CorpSAG2, CorpSAG3, CorpSAG4, CorpSAG5, CorpSAG6, CorpSAG7, CorporationGoalDeliveries, CrateLoot, Deliveries,
   // DroneBay, DustBattle, DustDatabank, ExpeditionHold, FighterBay, FighterTube0, FighterTube1, FighterTube2, FighterTube3,

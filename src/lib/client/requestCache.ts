@@ -130,12 +130,13 @@ function loadJson<T>(
 }
 
 export function loadClientSession() {
-  sessionRequest ??= fetch("/api/auth/session")
-    .then((response) => response.json() as Promise<ClientSession>)
-    .catch((error) => {
-      sessionRequest = undefined;
-      throw error;
-    });
+  sessionRequest
+    ??= fetch("/api/auth/session")
+      .then((response) => response.json() as Promise<ClientSession>)
+      .catch((error) => {
+        sessionRequest = undefined;
+        throw error;
+      });
   return sessionRequest;
 }
 
@@ -175,9 +176,12 @@ export function loadClientStock(language: SdeLanguage, force = false) {
   const cached = stockResponses.get(language);
   if (!force && cached) return Promise.resolve(cached);
 
-  const request = fetch(`/api/state/stock?language=${encodeURIComponent(language)}`, {
-    cache: "no-store",
-  })
+  const request = fetch(
+    `/api/state/stock?language=${encodeURIComponent(language)}`,
+    {
+      cache: "no-store",
+    },
+  )
     .then(async (response) => {
       const data = (await response.json()) as ClientStockResponse;
       if (!response.ok) throw new Error("Could not load stock.");
@@ -195,24 +199,29 @@ export function clearClientStockCache(language: SdeLanguage) {
 
 export function loadClientShips(force = false) {
   if (!force && shipsResponse) return Promise.resolve(shipsResponse);
-  shipsRequest ??= fetch("/api/state/ships", { cache: "no-store" })
-    .then(async (response) => {
-      const data = (await response.json()) as ClientShipsResponse;
-      if (!response.ok) throw new Error("Could not load ships.");
-      shipsResponse = data;
-      return data;
-    })
-    .finally(() => {
-      shipsRequest = undefined;
-    });
+  shipsRequest
+    ??= fetch("/api/state/ships", { cache: "no-store" })
+      .then(async (response) => {
+        const data = (await response.json()) as ClientShipsResponse;
+        if (!response.ok) throw new Error("Could not load ships.");
+        shipsResponse = data;
+        return data;
+      })
+      .finally(() => {
+        shipsRequest = undefined;
+      });
   return shipsRequest;
 }
 
 export function loadClientCharacters() {
   if (charactersResponse) return Promise.resolve(charactersResponse);
-  charactersRequest = loadJson("/api/characters", charactersRequest, (value) => {
-    charactersRequest = value;
-  }).then((data) => {
+  charactersRequest = loadJson(
+    "/api/characters",
+    charactersRequest,
+    (value) => {
+      charactersRequest = value;
+    },
+  ).then((data) => {
     charactersResponse = data;
     return data;
   });
@@ -221,9 +230,13 @@ export function loadClientCharacters() {
 
 export function loadClientCorpStatus() {
   if (corpStatusResponse) return Promise.resolve(corpStatusResponse);
-  corpStatusRequest = loadJson("/api/auth/corp/status", corpStatusRequest, (value) => {
-    corpStatusRequest = value;
-  }).then((data) => {
+  corpStatusRequest = loadJson(
+    "/api/auth/corp/status",
+    corpStatusRequest,
+    (value) => {
+      corpStatusRequest = value;
+    },
+  ).then((data) => {
     corpStatusResponse = data;
     return data;
   });
@@ -233,9 +246,13 @@ export function loadClientCorpStatus() {
 export function loadClientStateStatus(force = false) {
   if (force) stateStatusRequest = undefined;
   if (!force && stateStatusResponse) return Promise.resolve(stateStatusResponse);
-  stateStatusRequest = loadJson("/api/state/status", stateStatusRequest, (value) => {
-    stateStatusRequest = value;
-  }).then((data) => {
+  stateStatusRequest = loadJson(
+    "/api/state/status",
+    stateStatusRequest,
+    (value) => {
+      stateStatusRequest = value;
+    },
+  ).then((data) => {
     stateStatusResponse = data;
     return data;
   });

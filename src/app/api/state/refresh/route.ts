@@ -34,7 +34,8 @@ export async function POST(request: Request) {
   let session;
   try {
     session = await getSessionFromRequest(request);
-  } catch {
+  }
+  catch {
     return NextResponse.json({ error: "ESI is not connected." }, { status: 401 });
   }
   if (!session) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
@@ -45,7 +46,8 @@ export async function POST(request: Request) {
   let characters;
   try {
     characters = await getCharacters();
-  } catch {
+  }
+  catch {
     return NextResponse.json({ error: "ESI is not connected." }, { status: 401 });
   }
   const connectedCharacterIds = new Set(

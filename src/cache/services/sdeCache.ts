@@ -139,70 +139,76 @@ let haulerShipTypeIdsPromise: Promise<Set<number>> | undefined;
 let structureTypeIdsPromise: Promise<Set<number>> | undefined;
 
 export function getShipTypeIds(): Promise<Set<number>> {
-  shipTypeIdsPromise ??= Promise.all([getTypes(), getGroups()])
-    .then(
-      ([types, groups]) =>
-        new Set(
-          [...types.values()]
-            .filter((type) => groups.get(type.groupID)?.categoryID === 6)
-            .map((type) => type._key),
-        ),
-    )
-    .catch((error) => {
-      shipTypeIdsPromise = undefined;
-      throw error;
-    });
+  shipTypeIdsPromise
+    ??= Promise
+      .all([getTypes(), getGroups()])
+      .then(
+        ([types, groups]) =>
+          new Set(
+            [...types.values()]
+              .filter((type) => groups.get(type.groupID)?.categoryID === 6)
+              .map((type) => type._key),
+          ),
+      )
+      .catch((error) => {
+        shipTypeIdsPromise = undefined;
+        throw error;
+      });
   return shipTypeIdsPromise;
 }
 
 export function getHaulerShipTypeIds(): Promise<Set<number>> {
-  haulerShipTypeIdsPromise ??= Promise.all([getTypes(), getMarketGroups(), getShipTypeIds()])
-    .then(([types, marketGroups, shipTypeIds]) => {
-      return new Set(
-        [...types.values()]
-          .filter((type) => {
-            if (!shipTypeIds.has(type._key) || type.marketGroupID === undefined) return false;
-            let descendsFromShips = false;
-            let descendsFromIndustrialOrFreighter = false;
-            let group =
-              type.marketGroupID === undefined ? undefined : marketGroups.get(type.marketGroupID);
-            while (group) {
-              const name = group.name.en.toLocaleLowerCase("en");
-              if (name === "ships") descendsFromShips = true;
-              if (name.includes("industrial") || name.includes("freighter")) {
-                descendsFromIndustrialOrFreighter = true;
+  haulerShipTypeIdsPromise
+    ??= Promise
+      .all([getTypes(), getMarketGroups(), getShipTypeIds()])
+      .then(([types, marketGroups, shipTypeIds]) => {
+        return new Set(
+          [...types.values()]
+            .filter((type) => {
+              if (!shipTypeIds.has(type._key) || type.marketGroupID === undefined) return false;
+              let descendsFromShips = false;
+              let descendsFromIndustrialOrFreighter = false;
+              let group =
+                type.marketGroupID === undefined ? undefined : marketGroups.get(type.marketGroupID);
+              while (group) {
+                const name = group.name.en.toLocaleLowerCase("en");
+                if (name === "ships") descendsFromShips = true;
+                if (name.includes("industrial") || name.includes("freighter")) {
+                  descendsFromIndustrialOrFreighter = true;
+                }
+                group =
+                  group.parentGroupID === undefined
+                    ? undefined
+                    : marketGroups.get(group.parentGroupID);
               }
-              group =
-                group.parentGroupID === undefined
-                  ? undefined
-                  : marketGroups.get(group.parentGroupID);
-            }
-            return descendsFromShips && descendsFromIndustrialOrFreighter;
-          })
-          .map((type) => type._key),
-      );
-    })
-    .catch((error) => {
-      haulerShipTypeIdsPromise = undefined;
-      throw error;
-    });
+              return descendsFromShips && descendsFromIndustrialOrFreighter;
+            })
+            .map((type) => type._key),
+        );
+      })
+      .catch((error) => {
+        haulerShipTypeIdsPromise = undefined;
+        throw error;
+      });
   return haulerShipTypeIdsPromise;
 }
 
 export function getStructureTypeIds(): Promise<Set<number>> {
-  structureTypeIdsPromise ??= Promise.all([getTypes(), getGroups()])
-    .then(
-      ([types, groups]) =>
-        new Set(
-          [...types.values()]
-            .filter((type) => groups.get(type.groupID)?.categoryID === 65)
-            .map((type) => type._key),
-        ),
-    )
-    .catch((error) => {
-      structureTypeIdsPromise = undefined;
-      throw error;
-    });
+  structureTypeIdsPromise
+    ??= Promise
+      .all([getTypes(), getGroups()])
+      .then(
+        ([types, groups]) =>
+          new Set(
+            [...types.values()]
+              .filter((type) => groups.get(type.groupID)?.categoryID === 65)
+              .map((type) => type._key),
+          ),
+      )
+      .catch((error) => {
+        structureTypeIdsPromise = undefined;
+        throw error;
+      });
   return structureTypeIdsPromise;
 }
 

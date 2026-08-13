@@ -48,9 +48,9 @@ export async function GET(request: Request) {
         asset.rootLocation && "kind" in asset.rootLocation ? asset.rootLocation : undefined;
       const station = asset.locationType === "station" ? stations.get(asset.locationId) : undefined;
       const systemId =
-        root?.systemId ??
-        station?.solarSystemID ??
-        (asset.locationType === "solar_system" ? asset.locationId : undefined);
+        root?.systemId
+        ?? station?.solarSystemID
+        ?? (asset.locationType === "solar_system" ? asset.locationId : undefined);
       return {
         itemId: asset.itemId,
         typeId: asset.typeId,

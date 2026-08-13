@@ -161,7 +161,8 @@ async function localizeItems(buildItems: BuildItem[], targetLanguage: SdeLanguag
         ? { ...item, name: localizedItem.name, category: localizedItem.category }
         : item;
     });
-  } catch {
+  }
+  catch {
     return buildItems;
   }
 }
@@ -186,7 +187,8 @@ export default function Home() {
     try {
       const stored = window.localStorage.getItem(locationsStorageKey);
       return stored ? { ...defaultLocations, ...JSON.parse(stored) } : defaultLocations;
-    } catch {
+    }
+    catch {
       return defaultLocations;
     }
   });
@@ -195,7 +197,8 @@ export default function Home() {
     try {
       const stored = window.localStorage.getItem(settingsStorageKey);
       return stored ? { ...defaultSettings, ...JSON.parse(stored) } : defaultSettings;
-    } catch {
+    }
+    catch {
       return defaultSettings;
     }
   });
@@ -214,7 +217,8 @@ export default function Home() {
         if (data) {
           await replaceMarketOrderStock(data.marketOrderStock ?? []);
         }
-      } catch {
+      }
+      catch {
         // Keep cached stock available when market orders cannot be loaded.
       }
       const stockLoad = loadStockRecords();
@@ -299,19 +303,18 @@ export default function Home() {
           const locationId = item.locationId ?? recordLocationId;
           const rootLocationId = item.rootLocationId ?? recordLocationId;
           if (
-            locationId === undefined ||
-            rootLocationId === undefined ||
-            !Number.isInteger(locationId) ||
-            !Number.isInteger(rootLocationId)
-          )
-            continue;
+            locationId === undefined
+            || rootLocationId === undefined
+            || !Number.isInteger(locationId)
+            || !Number.isInteger(rootLocationId)
+          ) continue;
           const location = { locationId, rootLocationId };
           const jobActivity =
-            item.activityName ??
-            item.blueprintPrints?.find(
+            item.activityName
+            ?? item.blueprintPrints?.find(
               (print) => print.activity === "Copying" || print.activity === "Invention",
-            )?.activity ??
-            (item.inBuild && item.jobId !== undefined && item.typeId !== item.blueprintTypeId
+            )?.activity
+            ?? (item.inBuild && item.jobId !== undefined && item.typeId !== item.blueprintTypeId
               ? "Manufacturing"
               : undefined);
           if (record.source === "marketOrder" || item.source === "marketOrder") {
@@ -334,8 +337,11 @@ export default function Home() {
             const existingIndustryRow = industryByJobId.get(item.jobId);
             const isOutputRow = item.typeId !== item.blueprintTypeId;
             const shouldReplace =
-              !existingIndustryRow ||
-              (isOutputRow && existingIndustryRow.typeId === existingIndustryRow.blueprintTypeId);
+              !existingIndustryRow
+              || (
+                isOutputRow
+                && existingIndustryRow.typeId === existingIndustryRow.blueprintTypeId
+              );
             if (shouldReplace) industryByJobId.set(item.jobId, industryRow);
           }
           if (item.category === "bp" && item.type) {
@@ -362,26 +368,29 @@ export default function Home() {
         }
       }
       assets.industry.push(...industryByJobId.values());
-      const response = await fetch("/api/plan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          language,
-          toBuild: items.map(({ typeId, quantity, me, te }) => ({ typeId, quantity, me, te })),
-          assets,
-          locations,
-          settings: {
-            includeCorporationAssets: settings.includeCorporationAssets,
-            personalSellOrdersAsStock: settings.personalSellOrdersAsStock,
-            allCorporationSellOrdersAsStock: settings.allCorporationSellOrdersAsStock,
-            myCorporationSellOrdersAsStock: settings.myCorporationSellOrdersAsStock,
-            buildBlacklist: [],
-            buyBlacklist: [],
-            defaultMe: settings.defaultMe,
-            defaultTe: settings.defaultTe,
-          },
-        }),
-      });
+      const response = await fetch(
+        "/api/plan",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            language,
+            toBuild: items.map(({ typeId, quantity, me, te }) => ({ typeId, quantity, me, te })),
+            assets,
+            locations,
+            settings: {
+              includeCorporationAssets: settings.includeCorporationAssets,
+              personalSellOrdersAsStock: settings.personalSellOrdersAsStock,
+              allCorporationSellOrdersAsStock: settings.allCorporationSellOrdersAsStock,
+              myCorporationSellOrdersAsStock: settings.myCorporationSellOrdersAsStock,
+              buildBlacklist: [],
+              buyBlacklist: [],
+              defaultMe: settings.defaultMe,
+              defaultTe: settings.defaultTe,
+            },
+          }),
+        },
+      );
       const data = (await response.json()) as PlanResult | { error?: string };
       if (!response.ok) {
         setPlanStatus(
@@ -391,9 +400,11 @@ export default function Home() {
       }
       setPlan(data as PlanResult);
       setPlanStatus("Plan updated just now");
-    } catch {
+    }
+    catch {
       setPlanStatus("Could not reach the planning service");
-    } finally {
+    }
+    finally {
       setIsPlanLoading(false);
     }
   }
@@ -424,7 +435,8 @@ export default function Home() {
         items.map((item) => `${item.name}\t${item.quantity}`).join("\n"),
       );
       showToast("Build list multibuy copied");
-    } catch {
+    }
+    catch {
       showToast("Could not copy build list multibuy");
     }
   }
@@ -672,11 +684,14 @@ function PasteListModal({
     setIsResolving(true);
     setError("");
     try {
-      const response = await fetch("/api/reference/types", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ language, items: parsed }),
-      });
+      const response = await fetch(
+        "/api/reference/types",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ language, items: parsed }),
+        },
+      );
       const data = (await response.json()) as { items?: PasteResult[]; error?: string };
       if (!response.ok) throw new Error(data.error ?? "Could not resolve the pasted list.");
       const resolvedItems = data.items ?? [];
@@ -691,12 +706,14 @@ function PasteListModal({
           })),
         );
       }
-    } catch (resolveError) {
+    }
+    catch (resolveError) {
       setResults([]);
       setError(
         resolveError instanceof Error ? resolveError.message : "Could not resolve the pasted list.",
       );
-    } finally {
+    }
+    finally {
       setIsResolving(false);
     }
   }
@@ -809,26 +826,31 @@ function TypeSearch({
     if (trimmedQuery.length < 2) return;
     const currentRequestId = ++requestId.current;
     const controller = new AbortController();
-    const timeout = window.setTimeout(async () => {
-      setIsLoading(true);
-      try {
-        const response = await fetch(
-          `/api/reference/types?query=${encodeURIComponent(trimmedQuery)}&language=${language}`,
-          { signal: controller.signal },
-        );
-        const data = (await response.json()) as { items?: TypeResult[] };
-        if (currentRequestId === requestId.current) {
-          setResults(data.items ?? []);
-          setHighlightedIndex(0);
-          setIsOpen(true);
+    const timeout = window.setTimeout(
+      async () => {
+        setIsLoading(true);
+        try {
+          const response = await fetch(
+            `/api/reference/types?query=${encodeURIComponent(trimmedQuery)}&language=${language}`,
+            { signal: controller.signal },
+          );
+          const data = (await response.json()) as { items?: TypeResult[] };
+          if (currentRequestId === requestId.current) {
+            setResults(data.items ?? []);
+            setHighlightedIndex(0);
+            setIsOpen(true);
+          }
         }
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        setResults([]);
-      } finally {
-        if (currentRequestId === requestId.current) setIsLoading(false);
-      }
-    }, 180);
+        catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          setResults([]);
+        }
+        finally {
+          if (currentRequestId === requestId.current) setIsLoading(false);
+        }
+      },
+      180,
+    );
     return () => {
       window.clearTimeout(timeout);
       controller.abort();
@@ -846,13 +868,16 @@ function TypeSearch({
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setHighlightedIndex((index) => Math.min(index + 1, results.length - 1));
-    } else if (event.key === "ArrowUp") {
+    }
+    else if (event.key === "ArrowUp") {
       event.preventDefault();
       setHighlightedIndex((index) => Math.max(index - 1, 0));
-    } else if (event.key === "Enter" && isOpen && results[highlightedIndex]) {
+    }
+    else if (event.key === "Enter" && isOpen && results[highlightedIndex]) {
       event.preventDefault();
       selectItem(results[highlightedIndex]);
-    } else if (event.key === "Escape") {
+    }
+    else if (event.key === "Escape") {
       setIsOpen(false);
     }
   }
@@ -1031,12 +1056,13 @@ function PlanList({
       await navigator.clipboard.writeText(lines.join("\n"));
       setCopyStatus("Copied");
       window.setTimeout(() => setCopyStatus(""), 1600);
-    } catch {
+    }
+    catch {
       setCopyStatus("Copy failed");
     }
   }
 
-  if (list.length === 0)
+  if (list.length === 0) {
     return (
       <div className={styles.emptyResult}>
         <div className={styles.resultGlyph}>✓</div>
@@ -1044,6 +1070,7 @@ function PlanList({
         <p>The current project has no work in this category.</p>
       </div>
     );
+  }
   return (
     <>
       <div className={styles.planActions}>
@@ -1095,8 +1122,8 @@ function PlanList({
           const totalTime =
             "totalTime" in entry && typeof entry.totalTime === "number" ? entry.totalTime : null;
           const materialEntry =
-            (activeTab === "Buy" && !isBpcPurchase && "quantity" in entry) ||
-            (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
+            (activeTab === "Buy" && !isBpcPurchase && "quantity" in entry)
+            || (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
               ? (entry as PlanResult["lists"]["materialsToBuy"][number])
               : null;
           const amount =
@@ -1118,8 +1145,8 @@ function PlanList({
                             ? `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
                             : "";
           const imageVariation =
-            planBlueprintVariation ??
-            ("imageVariation" in entry && entry.imageVariation
+            planBlueprintVariation
+            ?? ("imageVariation" in entry && entry.imageVariation
               ? entry.imageVariation === "icon" && isBlueprintName
                 ? "bp"
                 : entry.imageVariation === "icon" && isReactionFormulaName
@@ -1131,13 +1158,13 @@ function PlanList({
                   ? "bp"
                   : isReactionFormulaName
                     ? "bpc"
-                    : activeTab === "Manufacture" ||
-                        activeTab === "React" ||
-                        isPlanBpc ||
-                        isBpcPurchase ||
-                        isPlanReaction ||
-                        activeTab === "Copy" ||
-                        activeTab === "Invent"
+                    : activeTab === "Manufacture"
+                        || activeTab === "React"
+                        || isPlanBpc
+                        || isBpcPurchase
+                        || isPlanReaction
+                        || activeTab === "Copy"
+                        || activeTab === "Invent"
                       ? "bpc"
                       : "icon");
           const planCells =

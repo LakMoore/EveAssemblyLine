@@ -39,29 +39,34 @@ export default function ImageCheckerPage() {
   const [previousStartTypeId, setPreviousStartTypeId] = useState<number | null>(null);
   const [nextStartTypeId, setNextStartTypeId] = useState<number | null>(null);
 
-  const loadBatch = useCallback(async (requestedStartId: number) => {
-    setIsLoading(true);
-    setError("");
-    try {
-      const response = await fetch(`/api/imagechecker?startTypeId=${requestedStartId}`);
-      const data = (await response.json()) as BatchResponse;
-      if (!response.ok) throw new Error(data.error ?? "Could not load item types.");
-      const loadedItems = data.items ?? [];
-      const canonicalStartTypeId = data.startTypeId ?? requestedStartId;
-      setItems(loadedItems);
-      setResults(Object.fromEntries(loadedItems.map((item) => [item.typeId, emptyResults()])));
-      setStartTypeId(String(canonicalStartTypeId));
-      setPreviousStartTypeId(data.previousStartTypeId ?? null);
-      setNextStartTypeId(data.nextStartTypeId ?? null);
-      const url = new URL(window.location.href);
-      url.searchParams.set("startTypeId", String(canonicalStartTypeId));
-      window.history.replaceState(null, "", url);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Could not load item types.");
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+  const loadBatch = useCallback(
+    async (requestedStartId: number) => {
+      setIsLoading(true);
+      setError("");
+      try {
+        const response = await fetch(`/api/imagechecker?startTypeId=${requestedStartId}`);
+        const data = (await response.json()) as BatchResponse;
+        if (!response.ok) throw new Error(data.error ?? "Could not load item types.");
+        const loadedItems = data.items ?? [];
+        const canonicalStartTypeId = data.startTypeId ?? requestedStartId;
+        setItems(loadedItems);
+        setResults(Object.fromEntries(loadedItems.map((item) => [item.typeId, emptyResults()])));
+        setStartTypeId(String(canonicalStartTypeId));
+        setPreviousStartTypeId(data.previousStartTypeId ?? null);
+        setNextStartTypeId(data.nextStartTypeId ?? null);
+        const url = new URL(window.location.href);
+        url.searchParams.set("startTypeId", String(canonicalStartTypeId));
+        window.history.replaceState(null, "", url);
+      }
+      catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : "Could not load item types.");
+      }
+      finally {
+        setIsLoading(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadBatch(requestedStartTypeId()), 0);
@@ -89,15 +94,20 @@ export default function ImageCheckerPage() {
     }));
   }
 
-  const checkedCount = Object.values(results).reduce(
-    (total, result) =>
-      total + variations.filter((variation) => result[variation] !== "checking").length,
-    0,
-  );
-  const availableCount = Object.values(results).reduce(
-    (total, result) => total + variations.filter((variation) => result[variation] === "ok").length,
-    0,
-  );
+  const checkedCount = Object
+    .values(results)
+    .reduce(
+      (total, result) =>
+        total + variations.filter((variation) => result[variation] !== "checking").length,
+      0,
+    );
+  const availableCount = Object
+    .values(results)
+    .reduce(
+      (total, result) =>
+        total + variations.filter((variation) => result[variation] === "ok").length,
+      0,
+    );
 
   return (
     <>

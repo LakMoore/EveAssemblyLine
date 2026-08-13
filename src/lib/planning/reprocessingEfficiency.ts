@@ -30,8 +30,8 @@ export function reprocessingRigModifier(
   const rigDogma = reprocessingRigTypeId(maps, structure, rig);
   const record = rigDogma === undefined ? undefined : maps.typeDogma.get(rigDogma);
   return (
-    dogmaValue(record, refiningYieldMutatorAttribute) ??
-    (dogmaValue(record, refiningYieldMultiplierAttribute) ?? 0.5) * 100 - 50
+    dogmaValue(record, refiningYieldMutatorAttribute)
+    ?? (dogmaValue(record, refiningYieldMultiplierAttribute) ?? 0.5) * 100 - 50
   );
 }
 
@@ -118,11 +118,11 @@ export function calculateReprocessingEfficiency(
   const normalBase =
     maps.dogmaAttributes.get(attributeId(maps, "refiningYieldNormalOres") ?? -1)?.defaultValue ?? 0;
   const moonBase =
-    maps.dogmaAttributes.get(attributeId(maps, "refiningYieldMoonOres") ?? -1)?.defaultValue ??
-    normalBase;
+    maps.dogmaAttributes.get(attributeId(maps, "refiningYieldMoonOres") ?? -1)?.defaultValue
+    ?? normalBase;
   const iceBase =
-    maps.dogmaAttributes.get(attributeId(maps, "refiningYieldIce") ?? -1)?.defaultValue ??
-    normalBase;
+    maps.dogmaAttributes.get(attributeId(maps, "refiningYieldIce") ?? -1)?.defaultValue
+    ?? normalBase;
   const gasBase =
     maps.dogmaAttributes.get(attributeId(maps, "gasDecompressionBaseEfficiency") ?? -1)
       ?.defaultValue ?? 0;
@@ -137,16 +137,16 @@ export function calculateReprocessingEfficiency(
       .map((record) => dogmaValue(record, implantMutatorId))
       .find((value) => value === implantLevel) ?? 0;
   const multiplier =
-    securityMultiplier(maps, structure, securityStatus, reprocessingRig) *
-    structureMultiplier(maps, structure) *
-    skillMultiplier(
+    securityMultiplier(maps, structure, securityStatus, reprocessingRig)
+    * structureMultiplier(maps, structure)
+    * skillMultiplier(
       maps,
       [reprocessingId, reprocessingEfficiencyId].filter(
         (skillId): skillId is number => skillId !== undefined,
       ),
       skillLevels,
-    ) *
-    (1 + implant / 100);
+    )
+    * (1 + implant / 100);
   const normalOre = (normalBase * 100 + rigModifier) * multiplier;
   const moonOre = (moonBase * 100 + rigModifier) * multiplier;
   const ice = (iceBase * 100 + rigModifier) * multiplier;
@@ -154,10 +154,12 @@ export function calculateReprocessingEfficiency(
   const gasStructureBonus =
     structure === "NPC" || structureTypeId === undefined
       ? 0
-      : (dogmaValue(
-          maps.typeDogma.get(structureTypeId),
-          attributeId(maps, "structureGasDecompressionEfficiencyBonus"),
-        ) ?? 0);
+      : (
+          dogmaValue(
+            maps.typeDogma.get(structureTypeId),
+            attributeId(maps, "structureGasDecompressionEfficiencyBonus"),
+          ) ?? 0
+        );
   const gasSkillId = namedTypeId(maps, "Gas Decompression Efficiency");
   const gasSkillBonus = skillBonus(
     maps,
@@ -182,11 +184,13 @@ export function efficiencyForType(
   const group = type ? maps.groups.get(type.groupID) : undefined;
   const typeDogma = maps.typeDogma.get(typeId);
   const requiredSkillId = dogmaValue(typeDogma, attributeId(maps, "reprocessingSkillType"));
-  if (group?.categoryID === 2 || group?.name.en.toLowerCase().includes("gas"))
+  if (group?.categoryID === 2 || group?.name.en.toLowerCase().includes("gas")) {
     return calculated.gas;
+  }
   const typeName = type?.name.en;
-  if (typeName === "Metal Scraps" || typeName === "Reinforced Metal Scraps")
+  if (typeName === "Metal Scraps" || typeName === "Reinforced Metal Scraps") {
     return calculated.scrapMetal;
+  }
   if (requiredSkillId === namedTypeId(maps, "Scrapmetal Processing")) return calculated.scrapMetal;
   if (requiredSkillId !== undefined) {
     const requiredSkillName = maps.types.get(requiredSkillId)?.name.en.toLowerCase() ?? "";

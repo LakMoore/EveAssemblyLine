@@ -158,59 +158,66 @@ function CompressContent() {
   useEffect(() => {
     if (optionsLoadLanguageRef.current === language) return;
     optionsLoadLanguageRef.current = language;
-    Promise.all([loadStructures(), loadCompressSettings(), loadClientStock(language)])
+    Promise
+      .all([loadStructures(), loadCompressSettings(), loadClientStock(language)])
       .then(async ([structures, loadedSettings, stock]) => {
-        const loadedOptions = await fetch("/api/compress/options", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
-          body: JSON.stringify({
-            language,
-            structures: structures
-              .filter(
-                (structure) =>
-                  structure.typeId !== undefined &&
-                  structure.rigTypeIds !== undefined &&
-                  Number.isSafeInteger(structure.systemId) &&
-                  structure.systemId > 0,
-              )
-              .map((structure) => ({
-                id:
-                  structure.esiStructureId === undefined
-                    ? structure.id
-                    : `structure:${structure.esiStructureId}`,
-                type: structure.typeId,
-                systemId: structure.systemId,
-                rigs: structure.rigTypeIds,
-              })),
-            assetLocations: (stock.locations ?? [])
-              .filter((location) => location.locationType !== "anchored")
-              .map(({ locationId, name, locationType, typeId, systemId }) => ({
-                locationId,
-                name,
-                locationType,
-                ...(typeId === undefined ? {} : { typeId }),
-                ...(systemId === undefined ? {} : { systemId }),
-              })),
-          }),
-        }).then((response) => response.json() as Promise<CompressOptions>);
+        const loadedOptions = await fetch(
+          "/api/compress/options",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            cache: "no-store",
+            body: JSON.stringify({
+              language,
+              structures: structures
+                .filter(
+                  (structure) =>
+                    structure.typeId !== undefined
+                    && structure.rigTypeIds !== undefined
+                    && Number.isSafeInteger(structure.systemId)
+                    && structure.systemId > 0,
+                )
+                .map((structure) => ({
+                  id:
+                    structure.esiStructureId === undefined
+                      ? structure.id
+                      : `structure:${structure.esiStructureId}`,
+                  type: structure.typeId,
+                  systemId: structure.systemId,
+                  rigs: structure.rigTypeIds,
+                })),
+              assetLocations: (stock.locations ?? [])
+                .filter((location) => location.locationType !== "anchored")
+                .map(({ locationId, name, locationType, typeId, systemId }) => ({
+                  locationId,
+                  name,
+                  locationType,
+                  ...(typeId === undefined ? {} : { typeId }),
+                  ...(systemId === undefined ? {} : { systemId }),
+                })),
+            }),
+          },
+        ).then((response) => response.json() as Promise<CompressOptions>);
         const structuresWithSecurity = structures.map((structure) => {
           const suppliedSecurityStatus = loadedOptions.locations.find(
             (location) => location.id === structure.id,
           )?.securityStatus;
-          if (suppliedSecurityStatus !== undefined)
+          if (suppliedSecurityStatus !== undefined) {
             return { ...structure, securityStatus: suppliedSecurityStatus };
+          }
           return structure;
         });
         const rawLocations: CompressOption[] = [
           ...loadedOptions.locations.map((location) => {
             const known = structuresWithSecurity.find(
               (structure) =>
-                location.id === `structure:${structure.esiStructureId}` ||
-                location.id === structure.id ||
-                (location.name !== undefined &&
-                  normalizeLocationName(location.name).toLocaleLowerCase() ===
-                    structureDisplayName(structure).toLocaleLowerCase()),
+                location.id === `structure:${structure.esiStructureId}`
+                || location.id === structure.id
+                || (
+                  location.name !== undefined
+                  && normalizeLocationName(location.name).toLocaleLowerCase()
+                    === structureDisplayName(structure).toLocaleLowerCase()
+                ),
             );
             return {
               ...location,
@@ -238,8 +245,8 @@ function CompressContent() {
             })),
         ].filter(
           (location, index, all) =>
-            all.findIndex((candidate) => locationKey(candidate) === locationKey(location)) ===
-            index,
+            all.findIndex((candidate) => locationKey(candidate) === locationKey(location))
+            === index,
         );
         const loadedLocations = rawLocations
           .map((location) => {
@@ -248,8 +255,8 @@ function CompressContent() {
           })
           .sort(
             (left, right) =>
-              right.rankBonus - left.rankBonus ||
-              (left.name ?? left.id).localeCompare(right.name ?? right.id),
+              right.rankBonus - left.rankBonus
+              || (left.name ?? left.id).localeCompare(right.name ?? right.id),
           );
         const normalizedSettings = {
           ...loadedSettings,
@@ -300,8 +307,8 @@ function CompressContent() {
         (structure) =>
           !options.locations.some(
             (location) =>
-              locationKey(location) ===
-              `structure:${structureDisplayName(structure).toLocaleLowerCase()}`,
+              locationKey(location)
+              === `structure:${structureDisplayName(structure).toLocaleLowerCase()}`,
           ),
       )
       .map((structure) => ({
@@ -325,8 +332,8 @@ function CompressContent() {
   const implantOptions = selectedCharacter
     ? options.implants.filter(
         (implant) =>
-          implant.id === "none" ||
-          (implant.typeId !== undefined && selectedCharacter.implants.includes(implant.typeId)),
+          implant.id === "none"
+          || (implant.typeId !== undefined && selectedCharacter.implants.includes(implant.typeId)),
       )
     : options.implants;
   const skillLevels =
@@ -350,11 +357,14 @@ function CompressContent() {
         return match ? { name: match[1].trim(), quantity: Number(match[2]) } : { name: line };
       });
     if (!parsed.length) return;
-    fetch("/api/reference/types", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ language, items: parsed }),
-    })
+    fetch(
+      "/api/reference/types",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ language, items: parsed }),
+      },
+    )
       .then(async (response) => {
         const data = (await response.json()) as { items?: PasteResult[]; error?: string };
         if (!response.ok) throw new Error(data.error ?? "Could not load the Buy list.");
@@ -362,8 +372,9 @@ function CompressContent() {
           (item): item is PasteResult & { typeId: number; quantity: number } =>
             Boolean(item.typeId && item.quantity && !item.error),
         );
-        if (resolved.length !== parsed.length)
+        if (resolved.length !== parsed.length) {
           throw new Error("Every Buy item must be a published item name and quantity.");
+        }
         updateItems(
           resolved.map(({ name, typeId, quantity, category }) => ({
             name,
@@ -401,23 +412,26 @@ function CompressContent() {
       const selectedLocation = locationOptions.find(
         (location) => location.id === settings.locationId,
       );
-      const response = await fetch("/api/compress", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          language,
-          items: items.map(({ typeId, name, quantity }) => ({ typeId, name, quantity })),
-          structureTypeId: selectedLocation?.structureTypeId ?? 0,
-          reprocessingRig: reprocessingRigLevel(selectedLocation?.rigs ?? []),
-          skillLevels,
-          implantLevel: selectedImplant.level,
-          securityStatus: selectedLocation?.securityStatus,
-          marketId:
-            marketHubs.find((market) => market.id === settings.marketId)?.regionId ??
-            marketHubs[0].regionId,
-          orderType: settings.orderType,
-        }),
-      });
+      const response = await fetch(
+        "/api/compress",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            language,
+            items: items.map(({ typeId, name, quantity }) => ({ typeId, name, quantity })),
+            structureTypeId: selectedLocation?.structureTypeId ?? 0,
+            reprocessingRig: reprocessingRigLevel(selectedLocation?.rigs ?? []),
+            skillLevels,
+            implantLevel: selectedImplant.level,
+            securityStatus: selectedLocation?.securityStatus,
+            marketId:
+              marketHubs.find((market) => market.id === settings.marketId)?.regionId
+              ?? marketHubs[0].regionId,
+            orderType: settings.orderType,
+          }),
+        },
+      );
       const contentType = response.headers.get("content-type") ?? "";
       const data = contentType.includes("application/json")
         ? ((await response.json()) as CompressResult & { error?: string })
@@ -428,11 +442,13 @@ function CompressContent() {
       if (!data) throw new Error("The compression service returned an invalid response.");
       setResult(data);
       setStatus("Compression complete");
-    } catch (error) {
+    }
+    catch (error) {
       setStatus(
         error instanceof Error ? error.message : "Could not reach the compression service.",
       );
-    } finally {
+    }
+    finally {
       setIsLoading(false);
     }
   }
@@ -487,9 +503,9 @@ function CompressContent() {
                       disabled={location.canReprocess === false}
                     >
                       {location.name ?? `Location ${location.id}`}
-                      {location.canReprocess !== false &&
-                      location.structureType !== "NPC" &&
-                      reprocessingRigLevel(location.rigs ?? []) === 0
+                      {location.canReprocess !== false
+                      && location.structureType !== "NPC"
+                      && reprocessingRigLevel(location.rigs ?? []) === 0
                         ? " [No Rigs]"
                         : ""}
                       {location.canReprocess === false ? " [No Reprocessing]" : ""} ·{" "}
@@ -769,7 +785,8 @@ function Results({ result }: { result: CompressResult }) {
         items.map((item) => `${item.name}\t${item.quantity}`).join("\n"),
       );
       showToast("To Buy multibuy list copied");
-    } catch {
+    }
+    catch {
       showToast("Could not copy To Buy multibuy list");
     }
   }
@@ -958,19 +975,23 @@ function PasteDialog({
       return;
     }
     try {
-      const response = await fetch("/api/reference/types", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ language, items: parsed }),
-      });
+      const response = await fetch(
+        "/api/reference/types",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ language, items: parsed }),
+        },
+      );
       const data = (await response.json()) as { items?: PasteResult[]; error?: string };
       if (!response.ok) throw new Error(data.error ?? "Could not resolve the pasted list.");
       const resolved = (data.items ?? []).filter(
         (item): item is PasteResult & { typeId: number; quantity: number } =>
           Boolean(item.typeId && item.quantity && !item.error),
       );
-      if (resolved.length !== parsed.length)
+      if (resolved.length !== parsed.length) {
         throw new Error("Every line must contain a published item name and quantity.");
+      }
       const imported = resolved.map(({ name, typeId, quantity, category }) => ({
         name,
         typeId,
@@ -985,8 +1006,10 @@ function PasteDialog({
           else merged.push(item);
         }
         onReplace(merged);
-      } else onReplace(imported);
-    } catch (resolveError) {
+      }
+      else onReplace(imported);
+    }
+    catch (resolveError) {
       setError(
         resolveError instanceof Error ? resolveError.message : "Could not resolve the pasted list.",
       );

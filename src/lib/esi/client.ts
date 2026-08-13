@@ -134,8 +134,8 @@ async function getUsableToken(record: CharacterTokenRecord, purpose: "personal" 
       const current = await getCharacter(record.characterId);
       const currentTokenSet = current?.personalAuth;
       if (
-        currentTokenSet &&
-        Date.parse(currentTokenSet.accessTokenExpiresAt) > Date.now() + 5 * 60 * 1000
+        currentTokenSet
+        && Date.parse(currentTokenSet.accessTokenExpiresAt) > Date.now() + 5 * 60 * 1000
       ) {
         tokenContexts.set(currentTokenSet, { characterId: record.characterId, purpose });
         return currentTokenSet;
@@ -195,23 +195,31 @@ export async function requestEsi<T>(
   // store last used date
   if (tokenSet) tokenSet.lastUsedAt = Date.now();
   const response = await fetch(`${esiBaseUrl}${path}`, { ...init, headers, cache: "no-store" });
-  if (response.status === 304)
+  if (response.status === 304) {
     return { data: null, headers: response.headers, status: response.status, fromCache: false };
+  }
   if (!response.ok) {
     if (response.status === 401 && tokenSet && options.retry401 !== false) {
       const context = tokenContexts.get(tokenSet);
       const current = context ? await getCharacter(context.characterId) : null;
       const currentTokenSet = context ? current?.personalAuth : undefined;
       const tokenChanged =
-        currentTokenSet &&
-        (currentTokenSet.accessToken !== tokenSet.accessToken ||
-          currentTokenSet.accessTokenExpiresAt !== tokenSet.accessTokenExpiresAt);
+        currentTokenSet
+        && (
+          currentTokenSet.accessToken !== tokenSet.accessToken
+          || currentTokenSet.accessTokenExpiresAt !== tokenSet.accessTokenExpiresAt
+        );
       if (tokenChanged) {
         tokenContexts.set(currentTokenSet, context!);
-        return requestEsi<T>(path, currentTokenSet, init, {
-          bypassCache: true,
-          retry401: false,
-        });
+        return requestEsi<T>(
+          path,
+          currentTokenSet,
+          init,
+          {
+            bypassCache: true,
+            retry401: false,
+          },
+        );
       }
     }
     const details = response.status === 401 ? await response.text() : "";
@@ -224,9 +232,11 @@ export async function requestEsi<T>(
     if (response.status === 401) {
       try {
         const body = JSON.parse(details) as { error?: unknown };
-        if (typeof body.error === "string")
+        if (typeof body.error === "string") {
           message = `ESI authorization failed (401): ${body.error}`;
-      } catch {
+        }
+      }
+      catch {
         // Keep the generic status when ESI does not return JSON.
       }
     }
@@ -285,20 +295,27 @@ export async function requestEsiConditional<T>(
 async function fetchPages<T>(path: string, tokenSet: TokenSet, etag?: string, bypassCache = false) {
   const first = await requestEsiConditional<T[]>(`${path}?page=1`, tokenSet, etag, bypassCache);
   const pageCount = Number(first.headers.get("x-pages") ?? "1");
-  if (first.status === 304)
+  if (first.status === 304) {
     return { data: null, headers: first.headers, notModified: true, fromCache: false };
-  if (pageCount <= 1)
+  }
+  if (pageCount <= 1) {
     return {
       data: first.data ?? [],
       headers: first.headers,
       notModified: false,
       fromCache: first.fromCache,
     };
+  }
   const rest: T[][] = [];
   for (let page = 2; page <= pageCount; page += 1) {
-    const result = await requestEsi<T[]>(`${path}?page=${page}`, tokenSet, undefined, {
-      bypassCache,
-    });
+    const result = await requestEsi<T[]>(
+      `${path}?page=${page}`,
+      tokenSet,
+      undefined,
+      {
+        bypassCache,
+      },
+    );
     rest.push(result.data ?? []);
   }
   return {
@@ -329,10 +346,10 @@ function mapAsset(
       : {}),
     locationId: asset.location_id,
     locationType:
-      asset.location_type === "station" ||
-      asset.location_type === "solar_system" ||
-      asset.location_type === "item" ||
-      asset.location_type === "structure"
+      asset.location_type === "station"
+      || asset.location_type === "solar_system"
+      || asset.location_type === "item"
+      || asset.location_type === "structure"
         ? asset.location_type
         : "other",
     locationFlag: asset.location_flag,
@@ -367,11 +384,15 @@ export function applyBlueprintMetadata(assets: AssetRecord[], blueprints: EsiBlu
 export async function fetchAssetNames(path: string, token: TokenSet, itemIds: number[]) {
   const names = new Map<number, string>();
   for (let index = 0; index < itemIds.length; index += 1000) {
-    const result = await requestEsi<EsiAssetName[]>(path, token, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(itemIds.slice(index, index + 1000)),
-    });
+    const result = await requestEsi<EsiAssetName[]>(
+      path,
+      token,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(itemIds.slice(index, index + 1000)),
+      },
+    );
     for (const asset of result.data ?? []) names.set(asset.item_id, asset.name);
   }
   return names;
@@ -395,7 +416,8 @@ export async function fetchCharacterAssets(
     const result = await fetchBlueprints(`/characters/${record.characterId}/blueprints/`, token);
     blueprintsByItemId = result.byItemId;
     blueprints = result.data;
-  } catch {}
+  }
+  catch {}
   return {
     assets:
       result.data?.map((asset) =>
@@ -433,7 +455,8 @@ export async function fetchCorporationAssets(
     );
     blueprintsByItemId = result.byItemId;
     blueprints = result.data;
-  } catch {}
+  }
+  catch {}
   return {
     assets:
       result.data?.map((asset) =>
@@ -575,8 +598,8 @@ export async function fetchCorporationMarketOrders(
   );
   return {
     orders:
-      result.data?.map((order) => mapMarketOrder(order, "corporation", record.corporationId!)) ??
-      null,
+      result.data?.map((order) => mapMarketOrder(order, "corporation", record.corporationId!))
+      ?? null,
     token,
     headers: result.headers,
     notModified: result.notModified,
@@ -609,19 +632,25 @@ export async function fetchAssetLocations(
       : `/corporations/${ownerId}/assets/locations/`;
   const batchSize = 1000;
   const uniqueItemIds = [...new Set(itemIds)];
-  const batches = Array.from({ length: Math.ceil(uniqueItemIds.length / batchSize) }, (_, index) =>
-    uniqueItemIds.slice(index * batchSize, (index + 1) * batchSize),
+  const batches = Array.from(
+    { length: Math.ceil(uniqueItemIds.length / batchSize) },
+    (_, index) => uniqueItemIds.slice(index * batchSize, (index + 1) * batchSize),
   );
   const locations: EsiAssetLocation[] = [];
   for (const batch of batches) {
     try {
-      const result = await requestEsi<EsiAssetLocation[]>(path, token, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(batch),
-      });
+      const result = await requestEsi<EsiAssetLocation[]>(
+        path,
+        token,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(batch),
+        },
+      );
       if (result.data) locations.push(...result.data);
-    } catch (error) {
+    }
+    catch (error) {
       if ((error as { status?: number }).status !== 429) throw error;
     }
   }
@@ -637,11 +666,15 @@ export async function fetchCharacterCorporationId(characterId: number) {
 export async function fetchUniverseNames(ids: number[]) {
   const uniqueIds = [...new Set(ids)];
   if (uniqueIds.length === 0) return new Map<number, string>();
-  const result = await requestEsi<EsiUniverseName[]>("/universe/names/", undefined, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(uniqueIds),
-  });
+  const result = await requestEsi<EsiUniverseName[]>(
+    "/universe/names/",
+    undefined,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(uniqueIds),
+    },
+  );
   return new Map((result.data ?? []).map((entry) => [entry.id, entry.name]));
 }
 
@@ -666,11 +699,15 @@ export async function fetchLocationMetadata(
   const cached = structureMetadataCache.get(locationId);
   if (cached && cached.expiresAt > Date.now()) return { ...cached.response, fromCache: true };
   const response = await requestEsi<LocationMetadata>(path, token);
-  if (response.data)
-    structureMetadataCache.set(locationId, {
-      expiresAt: Date.now() + structureMetadataCacheTtlMs,
-      response,
-    });
+  if (response.data) {
+    structureMetadataCache.set(
+      locationId,
+      {
+        expiresAt: Date.now() + structureMetadataCacheTtlMs,
+        response,
+      },
+    );
+  }
   return response;
 }
 

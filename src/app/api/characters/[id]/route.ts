@@ -15,14 +15,16 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   }
   const current = await getSession(session.sessionId);
   if (!current) return NextResponse.json({ error: "Session not found." }, { status: 404 });
-  if (!current.collectionId)
+  if (!current.collectionId) {
     return NextResponse.json({ error: "Collection not found." }, { status: 404 });
+  }
   try {
     await deleteCharacter(characterId, current.collectionId);
-  } catch (error) {
+  }
+  catch (error) {
     if (
-      error instanceof Error &&
-      error.message === "Character is not attached to this collection."
+      error instanceof Error
+      && error.message === "Character is not attached to this collection."
     ) {
       return NextResponse.json({ error: error.message }, { status: 404 });
     }

@@ -46,29 +46,30 @@ export async function GET(request: Request) {
           dogma.dogmaAttributes
             .filter(
               (attribute) =>
-                bonusAttributes.has(attribute.attributeID) &&
-                (attribute.attributeID === rigSizeAttribute ||
-                  bonusDogmaAttributesById.has(attribute.attributeID) ||
-                  attribute.attributeID === reprocessingYieldAttribute ||
-                  attribute.attributeID === refiningYieldMultiplierAttribute),
+                bonusAttributes.has(attribute.attributeID)
+                && (
+                  attribute.attributeID === rigSizeAttribute
+                  || bonusDogmaAttributesById.has(attribute.attributeID)
+                  || attribute.attributeID === reprocessingYieldAttribute
+                  || attribute.attributeID === refiningYieldMultiplierAttribute
+                ),
             )
             .map((attribute) => [attribute.attributeID, attribute.value]),
         );
         const size = sizeByValue[attributes.get(rigSizeAttribute) as keyof typeof sizeByValue];
         const type = typeById.get(dogma._key);
         if (
-          !type?.published ||
-          type.groupID === outpostRigGroupId ||
-          !size ||
-          ![
+          !type?.published
+          || type.groupID === outpostRigGroupId
+          || !size
+          || ![
             materialBonusAttribute,
             timeBonusAttribute,
             costBonusAttribute,
             reprocessingYieldAttribute,
             refiningYieldMultiplierAttribute,
           ].some((id) => (attributes.get(id) ?? 0) !== 0)
-        )
-          return [];
+        ) return [];
         return [
           {
             typeId: dogma._key,
@@ -80,8 +81,8 @@ export async function GET(request: Request) {
               cost: attributes.get(costBonusAttribute) ?? 0,
             },
             reprocessingBonus:
-              attributes.get(reprocessingYieldAttribute) ??
-              (attributes.get(refiningYieldMultiplierAttribute) ?? 0.5) * 100 - 50,
+              attributes.get(reprocessingYieldAttribute)
+              ?? (attributes.get(refiningYieldMultiplierAttribute) ?? 0.5) * 100 - 50,
             securityMultipliers: securityMultiplierAttributes.map((id) => attributes.get(id) ?? 1),
           },
         ];
@@ -92,13 +93,14 @@ export async function GET(request: Request) {
       items: rigs.map((rig) => ({
         ...rig,
         name:
-          rig.name[language] ??
-          rig.name.en ??
-          Object.values(rig.name).find(Boolean) ??
-          `Type ${rig.typeId}`,
+          rig.name[language]
+          ?? rig.name.en
+          ?? Object.values(rig.name).find(Boolean)
+          ?? `Type ${rig.typeId}`,
       })),
     });
-  } catch (error) {
+  }
+  catch (error) {
     const message = error instanceof Error ? error.message : "SDE reference data is unavailable.";
     return NextResponse.json({ error: message }, { status: 503 });
   }

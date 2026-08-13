@@ -21,8 +21,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "reprocessingRig must be 0, 1, or 2." }, { status: 400 });
   }
   if (
-    securityStatus !== undefined &&
-    (!Number.isFinite(securityStatus) || securityStatus < -1 || securityStatus > 1)
+    securityStatus !== undefined
+    && (!Number.isFinite(securityStatus) || securityStatus < -1 || securityStatus > 1)
   ) {
     return NextResponse.json(
       { error: "Security status must be between -1 and 1." },
@@ -45,7 +45,8 @@ export async function GET(request: Request) {
       reprocessingRig,
     );
     return NextResponse.json({ baseYield: efficiencies.normalOre });
-  } catch (error) {
+  }
+  catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "SDE reprocessing data is unavailable." },
       { status: 503 },
@@ -63,8 +64,9 @@ export async function POST(request: Request) {
         securityStatus?: number;
       }>;
     };
-    if (!Array.isArray(body.locations))
+    if (!Array.isArray(body.locations)) {
       return NextResponse.json({ error: "locations must be an array." }, { status: 400 });
+    }
     const [types, groups, typeDogma, dogmaAttributes] = await Promise.all([
       getTypes(),
       getGroups(),
@@ -76,15 +78,18 @@ export async function POST(request: Request) {
       const structure = location.structure ?? "NPC";
       const reprocessingRig = location.reprocessingRig ?? 0;
       if (
-        (structure !== "NPC" && structure !== "Athanor" && structure !== "Tatara") ||
-        !Number.isInteger(reprocessingRig) ||
-        ![0, 1, 2].includes(reprocessingRig) ||
-        (location.securityStatus !== undefined &&
-          (!Number.isFinite(location.securityStatus) ||
-            location.securityStatus < -1 ||
-            location.securityStatus > 1))
-      )
-        return null;
+        (structure !== "NPC" && structure !== "Athanor" && structure !== "Tatara")
+        || !Number.isInteger(reprocessingRig)
+        || ![0, 1, 2].includes(reprocessingRig)
+        || (
+          location.securityStatus !== undefined
+          && (
+            !Number.isFinite(location.securityStatus)
+            || location.securityStatus < -1
+            || location.securityStatus > 1
+          )
+        )
+      ) return null;
       const efficiencies = calculateReprocessingEfficiency(
         maps,
         structure,
@@ -95,13 +100,15 @@ export async function POST(request: Request) {
       );
       return { id: location.id, baseYield: efficiencies.normalOre };
     });
-    if (baseYields.some((value) => value === null))
+    if (baseYields.some((value) => value === null)) {
       return NextResponse.json(
         { error: "Invalid structure, rig, or security status." },
         { status: 400 },
       );
+    }
     return NextResponse.json({ baseYields });
-  } catch (error) {
+  }
+  catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "SDE reprocessing data is unavailable." },
       { status: 503 },

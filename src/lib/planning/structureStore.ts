@@ -8,14 +8,14 @@ function isKnownStructure(value: unknown): value is KnownStructure {
   if (!value || typeof value !== "object") return false;
   const structure = value as Record<string, unknown>;
   return (
-    typeof structure.id === "string" &&
-    Number.isInteger(structure.systemId) &&
-    typeof structure.systemName === "string" &&
-    typeof structure.type === "string" &&
-    typeof structure.size === "string" &&
-    typeof structure.name === "string" &&
-    Array.isArray(structure.rigs) &&
-    structure.rigs.every((rig) => typeof rig === "string")
+    typeof structure.id === "string"
+    && Number.isInteger(structure.systemId)
+    && typeof structure.systemName === "string"
+    && typeof structure.type === "string"
+    && typeof structure.size === "string"
+    && typeof structure.name === "string"
+    && Array.isArray(structure.rigs)
+    && structure.rigs.every((rig) => typeof rig === "string")
   );
 }
 
@@ -25,7 +25,8 @@ function loadLocalStructures() {
     const stored = window.localStorage.getItem(localStorageKey);
     const parsed: unknown = stored ? JSON.parse(stored) : [];
     return Array.isArray(parsed) ? parsed.filter(isKnownStructure) : [];
-  } catch {
+  }
+  catch {
     return [];
   }
 }
@@ -57,7 +58,8 @@ export async function loadStructures() {
       saveLocalStructures(structures);
       return structures;
     }
-  } catch {}
+  }
+  catch {}
   return loadLocalStructures();
 }
 
@@ -75,5 +77,6 @@ export async function saveStructures(structures: KnownStructure[]) {
         reject(transaction.error ?? new Error("Could not save known structures."));
       };
     });
-  } catch {}
+  }
+  catch {}
 }
