@@ -118,7 +118,10 @@ export default function ShipsPage() {
     setSelectedShipItemId(null);
   }
   const shipsBySystem = useMemo(() => {
-    const buckets = new Map<string, { systemId?: number; systemName: string; ships: ShipSummary[] }>();
+    const buckets = new Map<
+      string,
+      { systemId?: number; systemName: string; ships: ShipSummary[] }
+    >();
     for (const ship of data?.ships ?? []) {
       const key = ship.systemId === undefined ? `unknown:${ship.itemId}` : String(ship.systemId);
       const bucket = buckets.get(key) ?? {
@@ -130,7 +133,8 @@ export default function ShipsPage() {
       buckets.set(key, bucket);
     }
     return [...buckets.values()].sort(
-      (left, right) => right.ships.length - left.ships.length || left.systemName.localeCompare(right.systemName),
+      (left, right) =>
+        right.ships.length - left.ships.length || left.systemName.localeCompare(right.systemName),
     );
   }, [data]);
 
@@ -163,33 +167,31 @@ export default function ShipsPage() {
             <div className={styles.shipList}>
               {system.ships.map((ship) => {
                 const shipTypeName = typeNames.get(ship.typeId) ?? `Type ${ship.typeId}`;
-                const shipDisplayName = ship.name
-                  ? `${ship.name} - ${shipTypeName}`
-                  : shipTypeName;
+                const shipDisplayName = ship.name ? `${ship.name} - ${shipTypeName}` : shipTypeName;
                 return (
-                <div
-                  role="button"
-                  tabIndex={0}
-                  className={styles.shipCard}
-                  key={ship.itemId}
-                  onClick={() => selectShip(ship)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      selectShip(ship);
-                    }
-                  }}
-                >
-                  <TypeIdentity
-                    name={shipDisplayName}
-                    typeId={ship.typeId}
-                    variation="render"
-                    imageSize={54}
-                    className={styles.shipCardIdentity}
-                  />
-                  <span className={styles.shipCardMeta}>ITEM ID {ship.itemId}</span>
-                  <span className={styles.shipCardAction}>SHIP FITTING →</span>
-                </div>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className={styles.shipCard}
+                    key={ship.itemId}
+                    onClick={() => selectShip(ship)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        selectShip(ship);
+                      }
+                    }}
+                  >
+                    <TypeIdentity
+                      name={shipDisplayName}
+                      typeId={ship.typeId}
+                      variation="render"
+                      imageSize={54}
+                      className={styles.shipCardIdentity}
+                    />
+                    <span className={styles.shipCardMeta}>ITEM ID {ship.itemId}</span>
+                    <span className={styles.shipCardAction}>SHIP FITTING →</span>
+                  </div>
                 );
               })}
             </div>
@@ -297,9 +299,7 @@ function ShipContentsModal({
     }))
     .sort((left, right) => left.order - right.order || left.label.localeCompare(right.label));
   const shipTypeName = typeNames.get(ship.typeId) ?? `Type ${ship.typeId}`;
-  const shipDisplayName = ship.name
-    ? `${ship.name} - ${shipTypeName}`
-    : shipTypeName;
+  const shipDisplayName = ship.name ? `${ship.name} - ${shipTypeName}` : shipTypeName;
 
   return (
     <div
@@ -307,7 +307,13 @@ function ShipContentsModal({
       role="presentation"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
-      <div ref={modalRef} className={styles.shipModal} role="dialog" aria-modal="true" aria-label={`${shipDisplayName} ship fitting`}>
+      <div
+        ref={modalRef}
+        className={styles.shipModal}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${shipDisplayName} ship fitting`}
+      >
         <div className={styles.panelHeader}>
           <div className={styles.shipModalHeading}>
             <p className={styles.panelKicker}>SHIP FITTING</p>
@@ -318,7 +324,9 @@ function ShipContentsModal({
               imageSize={54}
               className={styles.shipModalIdentity}
             />
-            <p className={styles.shipModalSystem}>{ship.systemName ?? "Unknown system"} · ITEM ID {ship.itemId}</p>
+            <p className={styles.shipModalSystem}>
+              {ship.systemName ?? "Unknown system"} · ITEM ID {ship.itemId}
+            </p>
           </div>
           <button
             type="button"
@@ -348,7 +356,9 @@ function ShipContentsModal({
                           imageSize={32}
                         />
                         {asset.quantity > 1 && (
-                          <span className={styles.shipAssetQuantity}>×{asset.quantity.toLocaleString()}</span>
+                          <span className={styles.shipAssetQuantity}>
+                            ×{asset.quantity.toLocaleString()}
+                          </span>
                         )}
                       </div>
                       {(ammoByWeaponId.get(asset.itemId) ?? []).map((ammo) => (
@@ -360,7 +370,9 @@ function ShipContentsModal({
                             imageSize={32}
                           />
                           {ammo.quantity > 1 && (
-                            <span className={styles.shipAssetQuantity}>×{ammo.quantity.toLocaleString()}</span>
+                            <span className={styles.shipAssetQuantity}>
+                              ×{ammo.quantity.toLocaleString()}
+                            </span>
                           )}
                         </div>
                       ))}

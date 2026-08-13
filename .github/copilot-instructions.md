@@ -116,21 +116,22 @@ Run the narrowest relevant test or check first after an edit, then run the broad
 - Firestore is the durable store, not the full SDE cache. Keep processed SDE data in build/runtime inputs and process memory. Upstash Redis is not the production SDE cache because its observed latency was too high for that workload.
 - For one-off TypeScript probes, use `tsx -e` from the application root. Because the project uses CommonJS output, put asynchronous code in an async IIFE rather than using top-level `await`:
 
-	```bash
-	npx tsx -e '(async () => { const loaded = await import("./src/lib/storage.ts"); const api = loaded.initStorage ? loaded : loaded.default; const store = await api.initStorage(); console.log(await store.getItem("accounts")); })();'
-	```
+  ```bash
+  npx tsx -e '(async () => { const loaded = await import("./src/lib/storage.ts"); const api = loaded.initStorage ? loaded : loaded.default; const store = await api.initStorage(); console.log(await store.getItem("accounts")); })();'
+  ```
 
-	Dynamic imports from `tsx -e` may be exposed through a CommonJS default wrapper, so support both `loaded.initStorage` and `loaded.default` when probing local modules.
+  Dynamic imports from `tsx -e` may be exposed through a CommonJS default wrapper, so support both `loaded.initStorage` and `loaded.default` when probing local modules.
+
 - For isolated storage probes, use a separate Firebase project/database or emulator configuration. Do not point probes at production Firestore or attempt to recreate the old `STORAGE_DIR` behavior:
 
-	```bash
-	FIREBASE_PROJECT_ID=assembly-line-test npx tsx -e '/* async probe */'
-	```
+  ```bash
+  FIREBASE_PROJECT_ID=assembly-line-test npx tsx -e '/* async probe */'
+  ```
 
 - If `npm install` fails with an `EPERM` error because `/Users/stuart/.npm` contains root-owned cache files, do not change ownership or use `sudo` from the agent. Use a writable temporary cache instead:
 
-	```bash
-	npm_config_cache="$TMPDIR/assemblyline-npm-cache" npm install <package>
-	```
+  ```bash
+  npm_config_cache="$TMPDIR/assemblyline-npm-cache" npm install <package>
+  ```
 
 Required environment/configuration should be documented before use, including `EVE_CLIENT_ID`, `EVE_CLIENT_SECRET`, and `EVE_CALLBACK_URL`. Firebase App Hosting requires no Firebase-specific variables when its runtime service account and `FIREBASE_CONFIG` are available; local ADC or the optional `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY` variables may be used for development. Never commit secrets, downloaded SDE data, Firestore credentials, or generated local artifacts unless the repository explicitly changes that policy.

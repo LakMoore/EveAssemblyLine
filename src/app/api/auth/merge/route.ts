@@ -13,9 +13,17 @@ import {
 
 async function getPending(request: Request) {
   const session = await getSessionFromRequest(request);
-  const mergeId = request.headers.get("x-assembly-line-merge") ?? request.headers.get("cookie")?.match(/(?:^|; )assembly_line_merge=([^;]+)/)?.[1];
+  const mergeId =
+    request.headers.get("x-assembly-line-merge") ??
+    request.headers.get("cookie")?.match(/(?:^|; )assembly_line_merge=([^;]+)/)?.[1];
   const pending = mergeId ? await getPendingMerge(decodeURIComponent(mergeId)) : undefined;
-  if (!session || !pending || pending.sessionId !== session.sessionId || Date.parse(pending.expiresAt) < Date.now()) return null;
+  if (
+    !session ||
+    !pending ||
+    pending.sessionId !== session.sessionId ||
+    Date.parse(pending.expiresAt) < Date.now()
+  )
+    return null;
   return { session, mergeId: decodeURIComponent(mergeId!), pending };
 }
 
@@ -28,12 +36,23 @@ export async function GET(request: Request) {
     getCharacters(),
   ]);
   if (!target || !source) return NextResponse.json({ mergeRequired: false });
-  const names = new Map(characters.map((character) => [character.characterId, character.characterName]));
+  const names = new Map(
+    characters.map((character) => [character.characterId, character.characterName]),
+  );
   return NextResponse.json({
     mergeRequired: true,
-    incomingCharacter: { characterId: value.pending.characterId, characterName: value.pending.characterName ?? `Character ${value.pending.characterId}` },
-    currentCharacters: target.characterIds.map((id) => ({ characterId: id, characterName: names.get(id) ?? `Character ${id}` })),
-    incomingCharacters: source.characterIds.map((id) => ({ characterId: id, characterName: names.get(id) ?? `Character ${id}` })),
+    incomingCharacter: {
+      characterId: value.pending.characterId,
+      characterName: value.pending.characterName ?? `Character ${value.pending.characterId}`,
+    },
+    currentCharacters: target.characterIds.map((id) => ({
+      characterId: id,
+      characterName: names.get(id) ?? `Character ${id}`,
+    })),
+    incomingCharacters: source.characterIds.map((id) => ({
+      characterId: id,
+      characterName: names.get(id) ?? `Character ${id}`,
+    })),
   });
 }
 
@@ -49,7 +68,9 @@ export async function POST(request: Request) {
     const roles = pending.scopes.includes("esi-characters.read_corporation_roles.v1")
       ? await fetchCharacterRoles(pending.characterId, pending.tokenSet)
       : [];
-    const existing = (await getCharacters()).find((character) => character.characterId === pending.characterId);
+    const existing = (await getCharacters()).find(
+      (character) => character.characterId === pending.characterId,
+    );
     await upsertCharacter({
       ...existing,
       characterId: pending.characterId,
@@ -68,7 +89,10 @@ export async function POST(request: Request) {
     response.cookies.set("assembly_line_merge", "", { httpOnly: true, path: "/", maxAge: 0 });
     return response;
   } catch (error) {
-    console.error("Account collection merge failed", error instanceof Error ? error.message : "unknown error");
+    console.error(
+      "Account collection merge failed",
+      error instanceof Error ? error.message : "unknown error",
+    );
     return NextResponse.json({ error: "Could not merge character collections." }, { status: 500 });
   }
 }

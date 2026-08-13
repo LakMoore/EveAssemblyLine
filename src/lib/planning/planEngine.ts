@@ -61,11 +61,14 @@ class PlanProfiler {
     console.debug(
       "[plan] profile",
       Object.fromEntries(
-        [...this.entries.entries()].map(([name, entry]) => [name, {
-          count: entry.count,
-          totalMs: Number(entry.totalMs.toFixed(1)),
-          maxMs: Number(entry.maxMs.toFixed(1)),
-        }]),
+        [...this.entries.entries()].map(([name, entry]) => [
+          name,
+          {
+            count: entry.count,
+            totalMs: Number(entry.totalMs.toFixed(1)),
+            maxMs: Number(entry.maxMs.toFixed(1)),
+          },
+        ]),
       ),
     );
   }
@@ -95,12 +98,15 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
   const producedParts = new Map<number, number>();
   const sourceCountsByTypeId = new Map<number, Map<PlanSourceIcon, number>>();
   for (const stockItem of request.stock ?? []) {
-    const sourceCounts = sourceCountsByTypeId.get(stockItem.typeId) ?? new Map<PlanSourceIcon, number>();
+    const sourceCounts =
+      sourceCountsByTypeId.get(stockItem.typeId) ?? new Map<PlanSourceIcon, number>();
     const addSource = (source: PlanSourceIcon, quantityOverride?: number) => {
-      const quantity = quantityOverride ?? (source === "invention" || source === "copying"
-        ? (stockItem.jobRuns ?? stockItem.quantity) *
-          (source === "copying" ? stockItem.licensedRuns ?? 1 : 1)
-        : stockItem.quantity);
+      const quantity =
+        quantityOverride ??
+        (source === "invention" || source === "copying"
+          ? (stockItem.jobRuns ?? stockItem.quantity) *
+            (source === "copying" ? (stockItem.licensedRuns ?? 1) : 1)
+          : stockItem.quantity);
       sourceCounts.set(source, (sourceCounts.get(source) ?? 0) + quantity);
     };
     if (stockItem.category === "item" && stockItem.source === "marketOrder") {
@@ -118,11 +124,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     ) {
       addSource("invention");
     }
-    if (
-      stockItem.inBuild &&
-      stockItem.category === "bp" &&
-      stockItem.activityName === "Copying"
-    ) {
+    if (stockItem.inBuild && stockItem.category === "bp" && stockItem.activityName === "Copying") {
       addSource("copying");
     }
     if (sourceCounts.size > 0) sourceCountsByTypeId.set(stockItem.typeId, sourceCounts);
@@ -135,32 +137,35 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       counts: Object.fromEntries(counts) as PlanSourceCounts,
     };
   }
-  const standardStock = request.stock
-    ?.filter((item) => item.category === "item")
-    .filter((item) => item.source !== "marketOrder")
-    .reduce((map, item) => 
-      map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity), new Map<number, number>()
-    ) ?? new Map<number, number>() ;
-  const marketOrderStock = request.stock
-    ?.filter((item) => item.category === "item" && item.source === "marketOrder")
-    .reduce((map, item) =>
-      map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity), new Map<number, number>()
-    ) ?? new Map<number, number>();
+  const standardStock =
+    request.stock
+      ?.filter((item) => item.category === "item")
+      .filter((item) => item.source !== "marketOrder")
+      .reduce(
+        (map, item) => map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity),
+        new Map<number, number>(),
+      ) ?? new Map<number, number>();
+  const marketOrderStock =
+    request.stock
+      ?.filter((item) => item.category === "item" && item.source === "marketOrder")
+      .reduce(
+        (map, item) => map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity),
+        new Map<number, number>(),
+      ) ?? new Map<number, number>();
   const totalStock = new Map(standardStock);
   const initialBuildTypeIds = new Set(request.items.map((item) => item.typeId));
   for (const [typeId, quantity] of marketOrderStock) {
     if (!initialBuildTypeIds.has(typeId)) continue;
     totalStock.set(typeId, (totalStock.get(typeId) ?? 0) + quantity);
   }
-  const availableBlueprintCopies = request.stock
-    ?.filter((item) => item.category === "bp" && item.type === "bpc" && !item.inBuild
+  const availableBlueprintCopies =
+    request.stock?.filter(
+      (item) => item.category === "bp" && item.type === "bpc" && !item.inBuild,
     ) ?? [];
-  const availableBlueprintOriginals = request.stock
-    ?.filter((item) => item.category === "bp" && item.type === "bpo"
-    ) ?? [];
-  const availableReactionFormulas = request.stock
-    ?.filter((item) => item.category === "reaction"
-    ) ?? [];
+  const availableBlueprintOriginals =
+    request.stock?.filter((item) => item.category === "bp" && item.type === "bpo") ?? [];
+  const availableReactionFormulas =
+    request.stock?.filter((item) => item.category === "reaction") ?? [];
   const blueprintCopyStock = new Map<number, { copies: number; runs: number }>();
   const seenBlueprintPrints = new Set<number>();
   for (const item of availableBlueprintCopies) {
@@ -192,11 +197,17 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
   }
   const blueprintOriginalCounts = new Map<number, number>();
   for (const item of availableBlueprintOriginals) {
-    blueprintOriginalCounts.set(item.typeId, (blueprintOriginalCounts.get(item.typeId) ?? 0) + item.quantity);
+    blueprintOriginalCounts.set(
+      item.typeId,
+      (blueprintOriginalCounts.get(item.typeId) ?? 0) + item.quantity,
+    );
   }
   const reactionFormulaCounts = new Map<number, number>();
   for (const item of availableReactionFormulas) {
-    reactionFormulaCounts.set(item.typeId, (reactionFormulaCounts.get(item.typeId) ?? 0) + item.quantity);
+    reactionFormulaCounts.set(
+      item.typeId,
+      (reactionFormulaCounts.get(item.typeId) ?? 0) + item.quantity,
+    );
   }
   const usedRunsByBlueprint = new Map<number, number>();
   const consumedStock = new Map<number, number>();
@@ -212,11 +223,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     te: clampEfficiency(request.settings.defaultTe ?? 20, 20),
   };
 
-  function updateMaterial(
-    typeId: number,
-    fallbackName: string,
-    update: Partial<Material>,
-  ) {
+  function updateMaterial(typeId: number, fallbackName: string, update: Partial<Material>) {
     const existing = materials.get(typeId);
     materials.set(typeId, {
       typeId,
@@ -247,14 +254,16 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     return profiler.measure("addMaterial", async () => {
       const stockAvailable = standardStock.get(typeId) ?? 0;
       const stockConsumed = Math.min(stockAvailable, quantity);
-      if (stockConsumed > 0) consumedStock.set(typeId, (consumedStock.get(typeId) ?? 0) + stockConsumed);
+      if (stockConsumed > 0)
+        consumedStock.set(typeId, (consumedStock.get(typeId) ?? 0) + stockConsumed);
       const remainingStock = stockAvailable - stockConsumed;
       if (remainingStock > 0) standardStock.set(typeId, remainingStock);
       else if (stockConsumed > 0) standardStock.delete(typeId);
       const existing = materials.get(typeId);
       updateMaterial(typeId, fallbackName, {
         quantity: (existing?.quantity ?? 0) + quantity - stockConsumed,
-        requiredQuantity: (existing?.requiredQuantity ?? 0) + (demandAlreadyRecorded ? 0 : quantity),
+        requiredQuantity:
+          (existing?.requiredQuantity ?? 0) + (demandAlreadyRecorded ? 0 : quantity),
         stockQuantity: (existing?.stockQuantity ?? 0) + (demandAlreadyRecorded ? 0 : stockConsumed),
         buyQuantity: (existing?.buyQuantity ?? 0) + quantity - stockConsumed,
         remainingStockQuantity: remainingStock,
@@ -274,203 +283,217 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     let phase = "stock";
     let activity = "unknown";
     const requestedQuantity = quantity;
-    return profiler.measure("expand", async () => {
-      if (quantity <= 0) return;
+    return profiler.measure(
+      "expand",
+      async () => {
+        if (quantity <= 0) return;
 
-      const standardAvailable = standardStock.get(typeId) ?? 0;
-      const standardConsumed = Math.min(standardAvailable, quantity);
-      const marketAvailable = allowMarketOrderStock ? marketOrderStock.get(typeId) ?? 0 : 0;
-      const marketConsumed = Math.min(marketAvailable, quantity - standardConsumed);
-      const stockConsumed = standardConsumed + marketConsumed;
-      updateMaterial(typeId, fallbackName, {
-        requiredQuantity: (materials.get(typeId)?.requiredQuantity ?? 0) + requestedQuantity,
-        stockQuantity: (materials.get(typeId)?.stockQuantity ?? 0) + stockConsumed,
-      });
-      if (stockConsumed > 0) consumedStock.set(typeId, (consumedStock.get(typeId) ?? 0) + stockConsumed);
-      if (stockConsumed > 0) {
-        if (standardConsumed > 0) {
-          const remainingStandard = standardAvailable - standardConsumed;
-          if (remainingStandard > 0) standardStock.set(typeId, remainingStandard);
-          else standardStock.delete(typeId);
-        }
-        if (marketConsumed > 0) {
-          const remainingMarket = marketAvailable - marketConsumed;
-          if (remainingMarket > 0) marketOrderStock.set(typeId, remainingMarket);
-          else marketOrderStock.delete(typeId);
-          consumedMarketOrderStock.add(typeId);
-        }
-        quantity -= stockConsumed;
+        const standardAvailable = standardStock.get(typeId) ?? 0;
+        const standardConsumed = Math.min(standardAvailable, quantity);
+        const marketAvailable = allowMarketOrderStock ? (marketOrderStock.get(typeId) ?? 0) : 0;
+        const marketConsumed = Math.min(marketAvailable, quantity - standardConsumed);
+        const stockConsumed = standardConsumed + marketConsumed;
         updateMaterial(typeId, fallbackName, {
-          remainingStockQuantity:
-            (standardStock.get(typeId) ?? 0) + (marketOrderStock.get(typeId) ?? 0),
-          ...(marketConsumed > 0 ? { fromMarketOrder: true } : {}),
+          requiredQuantity: (materials.get(typeId)?.requiredQuantity ?? 0) + requestedQuantity,
+          stockQuantity: (materials.get(typeId)?.stockQuantity ?? 0) + stockConsumed,
         });
-      }
-      if (quantity <= 0) return;
+        if (stockConsumed > 0)
+          consumedStock.set(typeId, (consumedStock.get(typeId) ?? 0) + stockConsumed);
+        if (stockConsumed > 0) {
+          if (standardConsumed > 0) {
+            const remainingStandard = standardAvailable - standardConsumed;
+            if (remainingStandard > 0) standardStock.set(typeId, remainingStandard);
+            else standardStock.delete(typeId);
+          }
+          if (marketConsumed > 0) {
+            const remainingMarket = marketAvailable - marketConsumed;
+            if (remainingMarket > 0) marketOrderStock.set(typeId, remainingMarket);
+            else marketOrderStock.delete(typeId);
+            consumedMarketOrderStock.add(typeId);
+          }
+          quantity -= stockConsumed;
+          updateMaterial(typeId, fallbackName, {
+            remainingStockQuantity:
+              (standardStock.get(typeId) ?? 0) + (marketOrderStock.get(typeId) ?? 0),
+            ...(marketConsumed > 0 ? { fromMarketOrder: true } : {}),
+          });
+        }
+        if (quantity <= 0) return;
 
-      const available = producedParts.get(typeId) ?? 0;
-      const consumed = Math.min(available, quantity);
-      if (consumed > 0) {
-        const remaining = available - consumed;
-        if (remaining > 0) producedParts.set(typeId, remaining);
-        else producedParts.delete(typeId);
-        quantity -= consumed;
-      }
-      if (quantity <= 0) return;
+        const available = producedParts.get(typeId) ?? 0;
+        const consumed = Math.min(available, quantity);
+        if (consumed > 0) {
+          const remaining = available - consumed;
+          if (remaining > 0) producedParts.set(typeId, remaining);
+          else producedParts.delete(typeId);
+          quantity -= consumed;
+        }
+        if (quantity <= 0) return;
 
-      if (
-        stack.has(typeId) ||
-        buildBlacklist.has(typeId) ||
-        buyBlacklist.has(typeId)
-      ) {
-        await addMaterial(typeId, quantity, fallbackName);
-        return;
-      }
+        if (stack.has(typeId) || buildBlacklist.has(typeId) || buyBlacklist.has(typeId)) {
+          await addMaterial(typeId, quantity, fallbackName);
+          return;
+        }
 
-      phase = "blueprint lookup";
-      let buildBlueprint = buildBlueprintsByTypeId.get(typeId);
-      if (!buildBlueprintsByTypeId.has(typeId)) {
-        buildBlueprint = profiler.measure(
-          "expand.buildBlueprintLookup",
-          () => getBuildBlueprintByProductTypeId(typeId),
-          () => ({ typeId }),
-        );
-        buildBlueprintsByTypeId.set(typeId, buildBlueprint);
-      }
-      const candidate = await buildBlueprint;
-      const blueprint = candidate?.blueprint;
+        phase = "blueprint lookup";
+        let buildBlueprint = buildBlueprintsByTypeId.get(typeId);
+        if (!buildBlueprintsByTypeId.has(typeId)) {
+          buildBlueprint = profiler.measure(
+            "expand.buildBlueprintLookup",
+            () => getBuildBlueprintByProductTypeId(typeId),
+            () => ({ typeId }),
+          );
+          buildBlueprintsByTypeId.set(typeId, buildBlueprint);
+        }
+        const candidate = await buildBlueprint;
+        const blueprint = candidate?.blueprint;
 
-      if (!blueprint) {
-        await addMaterial(typeId, quantity, fallbackName, true);
-        return;
-      }
+        if (!blueprint) {
+          await addMaterial(typeId, quantity, fallbackName, true);
+          return;
+        }
 
-      updateMaterial(typeId, fallbackName, {
-        buildQuantity: (materials.get(typeId)?.buildQuantity ?? 0) + quantity,
-      });
+        updateMaterial(typeId, fallbackName, {
+          buildQuantity: (materials.get(typeId)?.buildQuantity ?? 0) + quantity,
+        });
 
-      activity = candidate.activity;
-      const productQuantity =
-        candidate.activity === "manufacturing"
-          ? candidate.blueprint.activities.manufacturing!.products!.find(
-            (product) => product.typeID === typeId,
-          )!.quantity
-          : candidate.blueprint.activities.reaction!.products!.find(
-            (product) => product.typeID === typeId,
-          )!.quantity;
-      const runsNeeded = Math.ceil(quantity / productQuantity);
-      const producedQuantity = runsNeeded * productQuantity;
-      updateMaterial(typeId, fallbackName, {
-        productionQuantity:
-          (materials.get(typeId)?.productionQuantity ?? 0) + producedQuantity,
-      });
-      const surplus = producedQuantity - quantity;
-      if (surplus > 0) producedParts.set(typeId, (producedParts.get(typeId) ?? 0) + surplus);
-      const nextStack = new Set(stack).add(typeId);
+        activity = candidate.activity;
+        const productQuantity =
+          candidate.activity === "manufacturing"
+            ? candidate.blueprint.activities.manufacturing!.products!.find(
+                (product) => product.typeID === typeId,
+              )!.quantity
+            : candidate.blueprint.activities.reaction!.products!.find(
+                (product) => product.typeID === typeId,
+              )!.quantity;
+        const runsNeeded = Math.ceil(quantity / productQuantity);
+        const producedQuantity = runsNeeded * productQuantity;
+        updateMaterial(typeId, fallbackName, {
+          productionQuantity: (materials.get(typeId)?.productionQuantity ?? 0) + producedQuantity,
+        });
+        const surplus = producedQuantity - quantity;
+        if (surplus > 0) producedParts.set(typeId, (producedParts.get(typeId) ?? 0) + surplus);
+        const nextStack = new Set(stack).add(typeId);
 
-      let remainingRuns = runsNeeded;
-      const copyStock = blueprintCopyStock.get(blueprint._key);
-      const alreadyUsedRuns = usedRunsByBlueprint.get(blueprint._key) ?? 0;
-      const availableRuns = Math.max(0, (copyStock?.runs ?? 0) - alreadyUsedRuns);
-      const runsFromStock = Math.min(remainingRuns, availableRuns);
-      remainingRuns -= runsFromStock;
-      usedRunsByBlueprint.set(blueprint._key, alreadyUsedRuns + runsFromStock);
+        let remainingRuns = runsNeeded;
+        const copyStock = blueprintCopyStock.get(blueprint._key);
+        const alreadyUsedRuns = usedRunsByBlueprint.get(blueprint._key) ?? 0;
+        const availableRuns = Math.max(0, (copyStock?.runs ?? 0) - alreadyUsedRuns);
+        const runsFromStock = Math.min(remainingRuns, availableRuns);
+        remainingRuns -= runsFromStock;
+        usedRunsByBlueprint.set(blueprint._key, alreadyUsedRuns + runsFromStock);
 
-      if (activity === "manufacturing") {
-        const existing = manufacturingJobs.get(blueprint._key);
-        manufacturingJobs.set(blueprint._key, {
+        if (activity === "manufacturing") {
+          const existing = manufacturingJobs.get(blueprint._key);
+          manufacturingJobs.set(blueprint._key, {
+            typeId: blueprint._key,
+            name: typeName(blueprint._key, `${fallbackName} Blueprint`),
+            runs: (existing?.runs ?? 0) + runsNeeded,
+            totalTime:
+              (existing?.totalTime ?? 0) +
+              blueprint.activities.manufacturing!.time * (1 - efficiency.te / 100) * runsNeeded,
+            ...(request.locations ? { locationId: request.locations.manufacturing } : {}),
+          });
+          phase = "manufacturing materials";
+          await profiler.measure("expand.materials", async () => {
+            for (const material of blueprint.activities.manufacturing?.materials ?? []) {
+              const materialQuantity = Math.ceil(
+                material.quantity * runsNeeded * (1 - efficiency.me / 100),
+              );
+              await expand(
+                material.typeID,
+                materialQuantity,
+                typeName(material.typeID, `Type ${material.typeID}`),
+                nextStack,
+                defaultEfficiency,
+              );
+            }
+          });
+          const bpoCount = blueprintOriginalCounts.get(blueprint._key) ?? 0;
+          const bpcBuyQuantity =
+            bpoCount > 0
+              ? Math.ceil(Math.max(0, remainingRuns) / blueprint.maxProductionLimit)
+              : Math.max(0, remainingRuns);
+          bpcs.set(blueprint._key, {
+            typeId: blueprint._key,
+            name: typeName(blueprint._key, `${fallbackName} Blueprint`),
+            quantity: (bpcs.get(blueprint._key)?.quantity ?? 0) + runsNeeded,
+            neededQuantity: (bpcs.get(blueprint._key)?.neededQuantity ?? 0) + runsNeeded,
+            stockQuantity: copyStock?.copies ?? 0,
+            stockRuns: copyStock?.runs ?? 0,
+            availableSourceCounts: sourceMetadata(blueprint._key)?.counts,
+            bpoCount,
+            buyQuantity: (bpcs.get(blueprint._key)?.buyQuantity ?? 0) + bpcBuyQuantity,
+          });
+          return;
+        }
+
+        const existing = reactionJobs.get(blueprint._key);
+        reactionJobs.set(blueprint._key, {
           typeId: blueprint._key,
           name: typeName(blueprint._key, `${fallbackName} Blueprint`),
           runs: (existing?.runs ?? 0) + runsNeeded,
           totalTime:
             (existing?.totalTime ?? 0) +
-            blueprint.activities.manufacturing!.time * (1 - efficiency.te / 100) * runsNeeded,
-          ...(request.locations ? { locationId: request.locations.manufacturing } : {}),
+            blueprint.activities.reaction!.time * (1 - efficiency.te / 100) * runsNeeded,
+          ...(request.locations ? { locationId: request.locations.reactions } : {}),
         });
-        phase = "manufacturing materials";
+        const existingFormula = reactionFormulas.get(blueprint._key);
+        const formulaCount = reactionFormulaCounts.get(blueprint._key) ?? 0;
+        reactionFormulas.set(blueprint._key, {
+          kind: "reaction",
+          typeId: blueprint._key,
+          name: typeName(blueprint._key, `${fallbackName} Formula`),
+          runsNeeded:
+            (existingFormula && existingFormula.kind === "reaction"
+              ? existingFormula.runsNeeded
+              : 0) + runsNeeded,
+          availableQuantity: formulaCount,
+        });
+        if (runsNeeded > 0 && formulaCount === 0) {
+          await addMaterial(blueprint._key, 1, `${fallbackName} Formula`, false, "bpc");
+        }
+        phase = "reaction materials";
         await profiler.measure("expand.materials", async () => {
-          for (const material of blueprint.activities.manufacturing?.materials ?? []) {
-            const materialQuantity = Math.ceil(material.quantity * runsNeeded * (1 - efficiency.me / 100));
+          for (const material of blueprint.activities.reaction?.materials ?? []) {
             await expand(
               material.typeID,
-              materialQuantity,
+              material.quantity * runsNeeded,
               typeName(material.typeID, `Type ${material.typeID}`),
               nextStack,
               defaultEfficiency,
             );
           }
         });
-        const bpoCount = blueprintOriginalCounts.get(blueprint._key) ?? 0;
-        const bpcBuyQuantity = bpoCount > 0
-          ? Math.ceil(Math.max(0, remainingRuns) / blueprint.maxProductionLimit)
-          : Math.max(0, remainingRuns);
-        bpcs.set(blueprint._key, {
-          typeId: blueprint._key,
-          name: typeName(blueprint._key, `${fallbackName} Blueprint`),
-          quantity: (bpcs.get(blueprint._key)?.quantity ?? 0) + runsNeeded,
-          neededQuantity: (bpcs.get(blueprint._key)?.neededQuantity ?? 0) + runsNeeded,
-          stockQuantity: copyStock?.copies ?? 0,
-          stockRuns: copyStock?.runs ?? 0,
-          availableSourceCounts: sourceMetadata(blueprint._key)?.counts,
-          bpoCount,
-          buyQuantity: (bpcs.get(blueprint._key)?.buyQuantity ?? 0) + bpcBuyQuantity,
-        });
-        return;
-      }
-
-      const existing = reactionJobs.get(blueprint._key);
-      reactionJobs.set(blueprint._key, {
-        typeId: blueprint._key,
-        name: typeName(blueprint._key, `${fallbackName} Blueprint`),
-        runs: (existing?.runs ?? 0) + runsNeeded,
-        totalTime:
-          (existing?.totalTime ?? 0) +
-          blueprint.activities.reaction!.time * (1 - efficiency.te / 100) * runsNeeded,
-        ...(request.locations ? { locationId: request.locations.reactions } : {}),
-      });
-      const existingFormula = reactionFormulas.get(blueprint._key);
-      const formulaCount = reactionFormulaCounts.get(blueprint._key) ?? 0;
-      reactionFormulas.set(blueprint._key, {
-        kind: "reaction",
-        typeId: blueprint._key,
-        name: typeName(blueprint._key, `${fallbackName} Formula`),
-        runsNeeded: (existingFormula && existingFormula.kind === "reaction" ? existingFormula.runsNeeded : 0) + runsNeeded,
-        availableQuantity: formulaCount,
-      });
-      if (runsNeeded > 0 && formulaCount === 0) {
-        await addMaterial(blueprint._key, 1, `${fallbackName} Formula`, false, "bpc");
-      }
-      phase = "reaction materials";
-      await profiler.measure("expand.materials", async () => {
-        for (const material of blueprint.activities.reaction?.materials ?? []) {
-          await expand(
-            material.typeID,
-            material.quantity * runsNeeded,
-            typeName(material.typeID, `Type ${material.typeID}`),
-            nextStack,
-            defaultEfficiency,
-          );
-        }
-      });
-    }, () => ({ typeId, quantity, depth: stack.size, activity, phase }));
+      },
+      () => ({ typeId, quantity, depth: stack.size, activity, phase }),
+    );
   }
 
   for (const item of request.items) {
-    await expand(item.typeId, item.quantity, item.name, new Set(), {
-      me: clampEfficiency(item.me, 10),
-      te: clampEfficiency(item.te, 20),
-    }, true);
+    await expand(
+      item.typeId,
+      item.quantity,
+      item.name,
+      new Set(),
+      {
+        me: clampEfficiency(item.me, 10),
+        te: clampEfficiency(item.te, 20),
+      },
+      true,
+    );
   }
 
   await profiler.measure("invention", async () => {
     for (const bpc of [...bpcs.values()]) {
-      const inventingBlueprints = await profiler.measure(
-        "inventionBlueprintLookup",
-        () => getBlueprintsByInventionProductId(bpc.typeId),
+      const inventingBlueprints = await profiler.measure("inventionBlueprintLookup", () =>
+        getBlueprintsByInventionProductId(bpc.typeId),
       );
       const inventingBlueprint = inventingBlueprints[0];
       const invention = inventingBlueprint?.activities.invention;
-      const inventionProduct = invention?.products?.find((product) => product.typeID === bpc.typeId);
+      const inventionProduct = invention?.products?.find(
+        (product) => product.typeID === bpc.typeId,
+      );
       if (!inventingBlueprint || !invention || !inventionProduct) continue;
 
       const successProbability = inventionProduct.probability ?? 1;
@@ -493,10 +516,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       const sourceBpoCount = blueprintOriginalCounts.get(inventingBlueprint._key) ?? 0;
       const sourceCopyStock = blueprintCopyStock.get(inventingBlueprint._key);
       const sourceNeededQuantity = (sourceBpc?.neededQuantity ?? 0) + inventionAttempts;
-      const sourceRemainingRuns = Math.max(
-        0,
-        sourceNeededQuantity - (sourceCopyStock?.runs ?? 0),
-      );
+      const sourceRemainingRuns = Math.max(0, sourceNeededQuantity - (sourceCopyStock?.runs ?? 0));
       bpcs.set(inventingBlueprint._key, {
         typeId: inventingBlueprint._key,
         name: typeName(inventingBlueprint._key, "Blueprint Copy"),
@@ -506,9 +526,10 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
         stockRuns: sourceBpc?.stockRuns ?? 0,
         availableSourceCounts: sourceMetadata(inventingBlueprint._key)?.counts,
         bpoCount: sourceBpoCount,
-        buyQuantity: sourceBpoCount > 0
-          ? Math.ceil(sourceRemainingRuns / inventingBlueprint.maxProductionLimit)
-          : sourceRemainingRuns,
+        buyQuantity:
+          sourceBpoCount > 0
+            ? Math.ceil(sourceRemainingRuns / inventingBlueprint.maxProductionLimit)
+            : sourceRemainingRuns,
       });
       for (const material of invention.materials ?? []) {
         await addMaterial(
@@ -556,8 +577,16 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
   for (const stock of planningStock) {
     if (!stock.sourceLocationId) continue;
     const quantity = Math.min(stock.quantity, remainingConsumption.get(stock.typeId) ?? 0);
-    if (quantity <= 0 || !request.locations || stock.sourceLocationId === request.locations.manufacturing) continue;
-    remainingConsumption.set(stock.typeId, (remainingConsumption.get(stock.typeId) ?? 0) - quantity);
+    if (
+      quantity <= 0 ||
+      !request.locations ||
+      stock.sourceLocationId === request.locations.manufacturing
+    )
+      continue;
+    remainingConsumption.set(
+      stock.typeId,
+      (remainingConsumption.get(stock.typeId) ?? 0) - quantity,
+    );
     haulingTasks.push({
       itemTypeId: stock.typeId,
       name: resolvedName(stock.typeId),
@@ -576,7 +605,14 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       assetsLastUpdated: null,
       jobsLastUpdated: null,
       unresolvedAssetCount: planningStock.length,
-      corporationAssetSources: [...new Set(planningStock.filter((stock) => stock.ownerType === "corporation").map((stock) => stock.ownerId).filter((id): id is number => id !== undefined))],
+      corporationAssetSources: [
+        ...new Set(
+          planningStock
+            .filter((stock) => stock.ownerType === "corporation")
+            .map((stock) => stock.ownerId)
+            .filter((id): id is number => id !== undefined),
+        ),
+      ],
     },
     lists: {
       planItems,
@@ -590,12 +626,15 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     },
   };
   if (profiler.isEnabled) {
-    console.debug(`[plan] calculatePlan completed in ${(performance.now() - startedAt).toFixed(1)}ms`, {
-      items: request.items.length,
-      materials: materialsToBuy.length,
-      manufacturingJobs: manufacturingJobs.size,
-      reactionJobs: reactionJobs.size,
-    });
+    console.debug(
+      `[plan] calculatePlan completed in ${(performance.now() - startedAt).toFixed(1)}ms`,
+      {
+        items: request.items.length,
+        materials: materialsToBuy.length,
+        manufacturingJobs: manufacturingJobs.size,
+        reactionJobs: reactionJobs.size,
+      },
+    );
     profiler.logSummary();
   }
   return result;

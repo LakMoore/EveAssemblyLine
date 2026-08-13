@@ -150,24 +150,30 @@ export async function replaceMarketOrderStock(items: StockItem[]) {
       for (const record of records) {
         if (record.source === "marketOrder") store.delete(locationKey(record));
         else {
-          store.put({
-            ...record,
-            items: record.items.map((item) => ({
-              ...item,
-              marketOrderQuantity: marketOrderQuantities.get(item.typeId),
-            })),
-          }, locationKey(record));
+          store.put(
+            {
+              ...record,
+              items: record.items.map((item) => ({
+                ...item,
+                marketOrderQuantity: marketOrderQuantities.get(item.typeId),
+              })),
+            },
+            locationKey(record),
+          );
         }
       }
       if (items.length > 0) {
-        store.put({
-          systemId: 0,
-          systemName: "Market orders",
-          structureId: "market-orders",
-          structureName: "Market sell orders",
-          source: "marketOrder",
-          items: items.map((item) => ({ ...item, source: "marketOrder" as const })),
-        }, "0:market-orders");
+        store.put(
+          {
+            systemId: 0,
+            systemName: "Market orders",
+            structureId: "market-orders",
+            structureName: "Market sell orders",
+            source: "marketOrder",
+            items: items.map((item) => ({ ...item, source: "marketOrder" as const })),
+          },
+          "0:market-orders",
+        );
       }
     };
     request.onerror = () => {

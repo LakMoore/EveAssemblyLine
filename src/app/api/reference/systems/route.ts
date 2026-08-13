@@ -7,7 +7,8 @@ const resultLimit = 12;
 export async function GET(request: Request) {
   const searchParams = new URL(request.url).searchParams;
   const requestedSystemIdValue = searchParams.get("systemId");
-  const requestedSystemId = requestedSystemIdValue === null ? undefined : Number(requestedSystemIdValue);
+  const requestedSystemId =
+    requestedSystemIdValue === null ? undefined : Number(requestedSystemIdValue);
   const query = searchParams.get("query")?.trim() ?? "";
   const requestedLanguage = searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
@@ -18,7 +19,11 @@ export async function GET(request: Request) {
       const system = systemById.get(requestedSystemId);
       return NextResponse.json({
         item: system
-          ? { systemId: system._key, name: system.name[language] ?? system.name.en, securityStatus: system.securityStatus }
+          ? {
+              systemId: system._key,
+              name: system.name[language] ?? system.name.en,
+              securityStatus: system.securityStatus,
+            }
           : null,
       });
     }

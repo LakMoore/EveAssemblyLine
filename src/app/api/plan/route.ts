@@ -48,11 +48,12 @@ function industryProduct(
       runs: licensedRuns,
     };
   }
-  const activity = job.activity === "Invention"
-    ? blueprint.activities.invention
-    : job.activity === "Reactions"
-      ? blueprint.activities.reaction
-      : blueprint.activities.manufacturing;
+  const activity =
+    job.activity === "Invention"
+      ? blueprint.activities.invention
+      : job.activity === "Reactions"
+        ? blueprint.activities.reaction
+        : blueprint.activities.manufacturing;
   const product = activity?.products?.[0];
   if (!product) return undefined;
   return {
@@ -70,36 +71,67 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Add at least one build item." }, { status: 400 });
     }
     const assets = input.assets;
-    if (!assets || !Array.isArray(assets.items) || !Array.isArray(assets.blueprints) ||
-      !Array.isArray(assets.industry) || !Array.isArray(assets.market)) {
+    if (
+      !assets ||
+      !Array.isArray(assets.items) ||
+      !Array.isArray(assets.blueprints) ||
+      !Array.isArray(assets.industry) ||
+      !Array.isArray(assets.market)
+    ) {
       return NextResponse.json({ error: "The assets payload is incomplete." }, { status: 400 });
     }
-    const allRows = [
-      ...assets.items,
-      ...assets.blueprints,
-      ...assets.industry,
-      ...assets.market,
-    ];
-    if (input.toBuild.some((item) => !Number.isInteger(item.typeId) || !validQuantity(item.quantity)) ||
-      allRows.some((item) => !Number.isInteger(item.typeId) || !validQuantity(item.quantity) || !validLocation(item))) {
-      return NextResponse.json({ error: "Every plan input needs valid IDs and a positive quantity." }, { status: 400 });
+    const allRows = [...assets.items, ...assets.blueprints, ...assets.industry, ...assets.market];
+    if (
+      input.toBuild.some(
+        (item) => !Number.isInteger(item.typeId) || !validQuantity(item.quantity),
+      ) ||
+      allRows.some(
+        (item) =>
+          !Number.isInteger(item.typeId) || !validQuantity(item.quantity) || !validLocation(item),
+      )
+    ) {
+      return NextResponse.json(
+        { error: "Every plan input needs valid IDs and a positive quantity." },
+        { status: 400 },
+      );
     }
-    if (assets.blueprints.some((blueprint) =>
-      !Number.isInteger(blueprint.runs) || blueprint.runs < -1 ||
-      (blueprint.type !== "bpc" && blueprint.type !== "bpo"))) {
-      return NextResponse.json({ error: "Every blueprint needs a valid type and run count." }, { status: 400 });
+    if (
+      assets.blueprints.some(
+        (blueprint) =>
+          !Number.isInteger(blueprint.runs) ||
+          blueprint.runs < -1 ||
+          (blueprint.type !== "bpc" && blueprint.type !== "bpo"),
+      )
+    ) {
+      return NextResponse.json(
+        { error: "Every blueprint needs a valid type and run count." },
+        { status: 400 },
+      );
     }
-    if (assets.industry.some((job) => !Number.isInteger(job.jobId) || !Number.isFinite(job.runs) || job.runs < 0)) {
-      return NextResponse.json({ error: "Every industry entry needs a valid job and run count." }, { status: 400 });
+    if (
+      assets.industry.some(
+        (job) => !Number.isInteger(job.jobId) || !Number.isFinite(job.runs) || job.runs < 0,
+      )
+    ) {
+      return NextResponse.json(
+        { error: "Every industry entry needs a valid job and run count." },
+        { status: 400 },
+      );
     }
     const typeIds = [
       ...input.toBuild.map((item) => item.typeId),
-      ...allRows.flatMap((item) => [item.typeId, "blueprintTypeId" in item ? item.blueprintTypeId : undefined]),
+      ...allRows.flatMap((item) => [
+        item.typeId,
+        "blueprintTypeId" in item ? item.blueprintTypeId : undefined,
+      ]),
     ].filter((typeId): typeId is number => typeId !== undefined);
     const types = await getTypesByIds([...new Set(typeIds)]);
     const buildItems: BuildItem[] = input.toBuild.map((item) => ({
       ...item,
-      name: types.get(item.typeId)?.name[input.language ?? "en"] ?? types.get(item.typeId)?.name.en ?? `Type ${item.typeId}`,
+      name:
+        types.get(item.typeId)?.name[input.language ?? "en"] ??
+        types.get(item.typeId)?.name.en ??
+        `Type ${item.typeId}`,
     }));
     const normalizedBlueprints = assets.blueprints.map((blueprint) => ({ ...blueprint }));
     const industryStock: PlanStockItem[] = [];
@@ -107,25 +139,27 @@ export async function POST(request: Request) {
       const blueprint = await getBlueprintById(job.blueprintTypeId ?? job.typeId);
       const product = industryProduct(job, blueprint);
       if (!product) continue;
-      const remainingRuns = job.blueprintRunsAtInstall === undefined
-        ? job.activity === "Copying"
-          ? -1
-          : job.activity === "Manufacturing" && job.licensedRuns !== undefined
-            ? Math.max(0, job.licensedRuns - job.runs)
-            : undefined
-        : job.blueprintRunsAtInstall === -1
-          ? -1
-          : job.activity === "Invention"
-            ? 0
-          : Math.max(0, job.blueprintRunsAtInstall - job.runs);
+      const remainingRuns =
+        job.blueprintRunsAtInstall === undefined
+          ? job.activity === "Copying"
+            ? -1
+            : job.activity === "Manufacturing" && job.licensedRuns !== undefined
+              ? Math.max(0, job.licensedRuns - job.runs)
+              : undefined
+          : job.blueprintRunsAtInstall === -1
+            ? -1
+            : job.activity === "Invention"
+              ? 0
+              : Math.max(0, job.blueprintRunsAtInstall - job.runs);
       if (remainingRuns !== undefined && job.blueprintTypeId !== undefined) {
         const matchingBlueprint = normalizedBlueprints.find(
-          (candidate) => (job.blueprintId !== undefined && candidate.itemId === job.blueprintId) ||
+          (candidate) =>
+            (job.blueprintId !== undefined && candidate.itemId === job.blueprintId) ||
             (candidate.typeId === job.blueprintTypeId &&
-            candidate.locationId === job.locationId &&
-            candidate.rootLocationId === job.rootLocationId &&
-            candidate.type === (job.blueprintRunsAtInstall === -1 ? "bpo" : "bpc") &&
-            candidate.runs !== remainingRuns),
+              candidate.locationId === job.locationId &&
+              candidate.rootLocationId === job.rootLocationId &&
+              candidate.type === (job.blueprintRunsAtInstall === -1 ? "bpo" : "bpc") &&
+              candidate.runs !== remainingRuns),
         );
         if (matchingBlueprint) matchingBlueprint.runs = remainingRuns;
         else if (
@@ -147,47 +181,59 @@ export async function POST(request: Request) {
       }
       industryStock.push(
         product.blueprint
-          ? stockItem({ ...job, typeId: product.typeId, quantity: product.quantity }, {
-              category: "bp",
-              type: "bpc",
-              blueprintPrints: [{
-                itemId: -job.jobId,
-                runs: product.runs ?? 1,
+          ? stockItem(
+              { ...job, typeId: product.typeId, quantity: product.quantity },
+              {
+                category: "bp",
                 type: "bpc",
-              }],
-              inBuild: true,
-              inBuildQuantity: product.quantity,
-              jobId: job.jobId,
-              jobRuns: job.runs,
-              activityName: job.activity,
-              blueprintTypeId: job.blueprintTypeId,
-              blueprintRunsAtInstall: job.blueprintRunsAtInstall,
-              licensedRuns: job.licensedRuns,
-            })
-          : stockItem({ ...job, typeId: product.typeId, quantity: product.quantity }, {
-              category: "item",
-              inBuild: true,
-              inBuildQuantity: product.quantity,
-              jobId: job.jobId,
-              jobRuns: job.runs,
-              activityName: job.activity,
-            }),
+                blueprintPrints: [
+                  {
+                    itemId: -job.jobId,
+                    runs: product.runs ?? 1,
+                    type: "bpc",
+                  },
+                ],
+                inBuild: true,
+                inBuildQuantity: product.quantity,
+                jobId: job.jobId,
+                jobRuns: job.runs,
+                activityName: job.activity,
+                blueprintTypeId: job.blueprintTypeId,
+                blueprintRunsAtInstall: job.blueprintRunsAtInstall,
+                licensedRuns: job.licensedRuns,
+              },
+            )
+          : stockItem(
+              { ...job, typeId: product.typeId, quantity: product.quantity },
+              {
+                category: "item",
+                inBuild: true,
+                inBuildQuantity: product.quantity,
+                jobId: job.jobId,
+                jobRuns: job.runs,
+                activityName: job.activity,
+              },
+            ),
       );
     }
     const rawStock: PlanStockItem[] = [
       ...assets.items.map((item) => stockItem(item)),
       ...assets.market.map((item) => stockItem(item, { source: "marketOrder" })),
-      ...normalizedBlueprints.map((blueprint, index) => stockItem(blueprint, {
-        category: "bp",
-        type: blueprint.type,
-        blueprintPrints: [{
-          itemId: -(index + 1),
-          runs: blueprint.runs,
+      ...normalizedBlueprints.map((blueprint, index) =>
+        stockItem(blueprint, {
+          category: "bp",
           type: blueprint.type,
-          me: blueprint.me,
-          te: blueprint.te,
-        }],
-      })),
+          blueprintPrints: [
+            {
+              itemId: -(index + 1),
+              runs: blueprint.runs,
+              type: blueprint.type,
+              me: blueprint.me,
+              te: blueprint.te,
+            },
+          ],
+        }),
+      ),
       ...industryStock,
     ];
     const stock = await hydrateStockCategories(rawStock);
@@ -200,5 +246,7 @@ export async function POST(request: Request) {
     });
     result.metadata.unresolvedAssetCount = 0;
     return NextResponse.json(result);
-  } catch { return NextResponse.json({ error: "The plan request was not valid JSON." }, { status: 400 }); }
+  } catch {
+    return NextResponse.json({ error: "The plan request was not valid JSON." }, { status: 400 });
+  }
 }

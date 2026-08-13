@@ -15,7 +15,9 @@ function toClientRefreshResult(result: Awaited<ReturnType<typeof refreshCharacte
       characterId: character.characterId,
       ...(character.assets ? { assets: toClientEndpointStatus(character.assets) } : {}),
       ...(character.jobs ? { jobs: toClientEndpointStatus(character.jobs) } : {}),
-      ...(character.marketOrders ? { marketOrders: toClientEndpointStatus(character.marketOrders) } : {}),
+      ...(character.marketOrders
+        ? { marketOrders: toClientEndpointStatus(character.marketOrders) }
+        : {}),
       ...(character.corporations
         ? {
             corporations: character.corporations.map((corporation) => ({

@@ -109,7 +109,11 @@ let stateStatusRequest: Promise<{ characters?: ClientCharacterStatus[] }> | unde
 let stateStatusResponse: { characters?: ClientCharacterStatus[] } | undefined;
 const marketOrderRequests = new Map<string, Promise<ClientMarketOrderResponse | null>>();
 
-function loadJson<T>(url: string, pending: Promise<T> | undefined, setPending: (value: Promise<T> | undefined) => void) {
+function loadJson<T>(
+  url: string,
+  pending: Promise<T> | undefined,
+  setPending: (value: Promise<T> | undefined) => void,
+) {
   if (pending) return pending;
   const request = fetch(url, { cache: "no-store" })
     .then(async (response) => {
@@ -138,7 +142,9 @@ export function loadClientSession() {
 export async function loadClientMarketOrders(
   settings: Pick<
     PlannerSettings,
-    "personalSellOrdersAsStock" | "allCorporationSellOrdersAsStock" | "myCorporationSellOrdersAsStock"
+    | "personalSellOrdersAsStock"
+    | "allCorporationSellOrdersAsStock"
+    | "myCorporationSellOrdersAsStock"
   >,
 ) {
   const session = await loadClientSession();

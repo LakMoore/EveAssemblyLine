@@ -152,18 +152,15 @@ function shouldIncludeAsset(asset: AssetRecord, shipTypeIds: Set<number>) {
 function rootLocationFromAssetLocation(root: AssetLocation): RootLocation {
   return {
     locationId: root.locationId,
-    kind: root.kind === "solar_system"
-      ? "anchored"
-      : root.kind === "station"
-        ? "station"
-        : "structure",
-      ...(root.typeId !== undefined ? { typeId: root.typeId } : {}),
-      ...(root.name !== undefined ? { name: root.name } : {}),
-      ...(root.systemId !== undefined ? { systemId: root.systemId } : {}),
-      ...(root.regionId !== undefined ? { regionId: root.regionId } : {}),
-      ...(root.kind === "solar_system" && root.systemId === undefined
-        ? { systemId: root.locationId }
-        : {}),
+    kind:
+      root.kind === "solar_system" ? "anchored" : root.kind === "station" ? "station" : "structure",
+    ...(root.typeId !== undefined ? { typeId: root.typeId } : {}),
+    ...(root.name !== undefined ? { name: root.name } : {}),
+    ...(root.systemId !== undefined ? { systemId: root.systemId } : {}),
+    ...(root.regionId !== undefined ? { regionId: root.regionId } : {}),
+    ...(root.kind === "solar_system" && root.systemId === undefined
+      ? { systemId: root.locationId }
+      : {}),
   };
 }
 
@@ -250,13 +247,11 @@ function addContribution(
   const type = types.get(contribution.typeId);
   if (!type?.published) return;
   const categorized = categorizeType(type, language, marketGroups, groups);
-  const category =
-    categorized.category === "blueprint"
-      ? "bp"
-      : categorized.category;
-  const blueprintType = category === "bp"
-    ? contribution.blueprintType ?? (contribution.runCount === -1 ? "bpo" : "bpc")
-    : undefined;
+  const category = categorized.category === "blueprint" ? "bp" : categorized.category;
+  const blueprintType =
+    category === "bp"
+      ? (contribution.blueprintType ?? (contribution.runCount === -1 ? "bpo" : "bpc"))
+      : undefined;
   const bucket =
     buckets.get(location.locationId) ??
     ({
@@ -269,7 +264,10 @@ function addContribution(
       typeId: location.typeId,
       systemId: location.systemId,
       systemName: location.systemId ? systems.get(location.systemId)?.name.en : undefined,
-      securityStatus: location.systemId === undefined ? undefined : systems.get(location.systemId)?.securityStatus,
+      securityStatus:
+        location.systemId === undefined
+          ? undefined
+          : systems.get(location.systemId)?.securityStatus,
       regionId: location.regionId,
       resolved: true,
       assetCount: 0,
@@ -282,9 +280,7 @@ function addContribution(
   bucket.assetCount += 1;
   if (contribution.ownerType === "corporation") bucket.corporationAssetCount += 1;
   else bucket.personalAssetCount += 1;
-  const jobKey = contribution.inBuild && contribution.job
-    ? `:job:${contribution.job.jobId}`
-    : "";
+  const jobKey = contribution.inBuild && contribution.job ? `:job:${contribution.job.jobId}` : "";
   const itemKey = `${contribution.typeId}:${category}:${blueprintType ?? "item"}:${contribution.locationId ?? location.locationId}:${contribution.rootLocationId ?? location.locationId}${jobKey}`;
   const item: StockItem = bucket.items.get(itemKey) ?? {
     typeId: contribution.typeId,
@@ -300,9 +296,9 @@ function addContribution(
     category,
     ...(blueprintType ? { type: blueprintType } : {}),
   };
-  const sameBlueprint = contribution.blueprintPrint !== undefined && item.blueprintPrints?.some(
-    (print) => print.itemId === contribution.blueprintPrint?.itemId,
-  );
+  const sameBlueprint =
+    contribution.blueprintPrint !== undefined &&
+    item.blueprintPrints?.some((print) => print.itemId === contribution.blueprintPrint?.itemId);
   if (!sameBlueprint) item.quantity += contribution.quantity;
   if (category !== "bp") {
     item.me ??= contribution.me;
@@ -354,9 +350,7 @@ function jobContributions(
   const blueprintRunCount = blueprint?.runCount;
   const hasKnownBlueprintRuns = blueprintRunCount !== undefined;
   const isOriginal = blueprintRunCount === -1;
-  const blueprintRunsUsed = isCopying
-    ? job.licensedRuns ?? job.runs
-    : job.runs;
+  const blueprintRunsUsed = isCopying ? (job.licensedRuns ?? job.runs) : job.runs;
   const remainingRuns = isOriginal
     ? -1
     : hasKnownBlueprintRuns
@@ -393,9 +387,10 @@ function jobContributions(
   }
   const outputRuns = job.successfulRuns && job.successfulRuns > 0 ? job.successfulRuns : job.runs;
   if (job.productTypeId && outputRuns > 0) {
-    const outputQuantity = job.activityId === 5 || job.activityId === 8
-      ? outputRuns
-      : outputRuns * productQuantityPerRun;
+    const outputQuantity =
+      job.activityId === 5 || job.activityId === 8
+        ? outputRuns
+        : outputRuns * productQuantityPerRun;
     contributions.push({
       itemId: job.jobId,
       typeId: job.productTypeId,
@@ -429,18 +424,27 @@ export async function GET(request: Request) {
   const requestedLanguage = url.searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
   markPhase("session");
-  const [assets, jobs, shipTypeIds, structureTypeIds, groups, marketGroups, stations, systems, rootContainersByItemId] =
-    await Promise.all([
-      getResolvedAssets(characterIds, true),
-      getRunningIndustryJobs(characterIds, true),
-      getShipTypeIds(),
-      getStructureTypeIds(),
-      getGroups(),
-      getMarketGroups(),
-      getStations(),
-      getSystems(),
-      getRootContainersByItemId(characterIds, true),
-    ]);
+  const [
+    assets,
+    jobs,
+    shipTypeIds,
+    structureTypeIds,
+    groups,
+    marketGroups,
+    stations,
+    systems,
+    rootContainersByItemId,
+  ] = await Promise.all([
+    getResolvedAssets(characterIds, true),
+    getRunningIndustryJobs(characterIds, true),
+    getShipTypeIds(),
+    getStructureTypeIds(),
+    getGroups(),
+    getMarketGroups(),
+    getStations(),
+    getSystems(),
+    getRootContainersByItemId(characterIds, true),
+  ]);
   markPhase("data");
   const types = await getTypesByIds([
     ...new Set([
@@ -451,39 +455,47 @@ export async function GET(request: Request) {
     ]),
   ]);
   markPhase("types");
-  const jobLocationIds = [...new Set(jobs.flatMap((job) => [
-    job.blueprintLocationId,
-    job.locationId,
-    job.outputLocationId,
-  ]))];
+  const jobLocationIds = [
+    ...new Set(
+      jobs.flatMap((job) => [job.blueprintLocationId, job.locationId, job.outputLocationId]),
+    ),
+  ];
   const jobLocations = new Map(
-    await Promise.all(jobLocationIds.map(async (locationId) => [
-      locationId,
-      await resolveLocation(
-        locationId,
-        rootContainersByItemId,
-        structureTypeIds,
-        stations,
-        types,
-        characterIds,
+    await Promise.all(
+      jobLocationIds.map(
+        async (locationId) =>
+          [
+            locationId,
+            await resolveLocation(
+              locationId,
+              rootContainersByItemId,
+              structureTypeIds,
+              stations,
+              types,
+              characterIds,
+            ),
+          ] as const,
       ),
-    ] as const)),
+    ),
   );
   markPhase("locations");
   const buckets = new Map<number, StockBucket>();
   const productQuantities = new Map<number, number>();
   await Promise.all(
-    [...new Set(jobs.flatMap((job) =>
-      job.productTypeId !== undefined ? [job.productTypeId] : [],
-    ))].map(async (productTypeId) => {
+    [
+      ...new Set(
+        jobs.flatMap((job) => (job.productTypeId !== undefined ? [job.productTypeId] : [])),
+      ),
+    ].map(async (productTypeId) => {
       const buildBlueprint = await getBuildBlueprintByProductTypeId(productTypeId);
-      const product = buildBlueprint?.activity === "manufacturing"
-        ? buildBlueprint.blueprint.activities.manufacturing?.products?.find(
-            (candidate) => candidate.typeID === productTypeId,
-          )
-        : buildBlueprint?.blueprint.activities.reaction?.products?.find(
-            (candidate) => candidate.typeID === productTypeId,
-          );
+      const product =
+        buildBlueprint?.activity === "manufacturing"
+          ? buildBlueprint.blueprint.activities.manufacturing?.products?.find(
+              (candidate) => candidate.typeID === productTypeId,
+            )
+          : buildBlueprint?.blueprint.activities.reaction?.products?.find(
+              (candidate) => candidate.typeID === productTypeId,
+            );
       if (product?.quantity && product.quantity > 0) {
         productQuantities.set(productTypeId, product.quantity);
       }
@@ -494,7 +506,11 @@ export async function GET(request: Request) {
   for (const asset of assets) {
     if (!shouldIncludeAsset(asset, shipTypeIds) || !isDirectLocation(asset)) continue;
     const rootLocation = rootLocationFromAssetLocation(asset.rootLocation);
-    if (!rootLocation || (rootLocation.typeId !== undefined && shipTypeIds.has(rootLocation.typeId))) continue;
+    if (
+      !rootLocation ||
+      (rootLocation.typeId !== undefined && shipTypeIds.has(rootLocation.typeId))
+    )
+      continue;
     addContribution(
       buckets,
       {
@@ -509,17 +525,17 @@ export async function GET(request: Request) {
         runCount: asset.runCount,
         me: asset.me,
         te: asset.te,
-          ...(asset.runCount !== undefined
-            ? {
-                blueprintPrint: {
-                  itemId: asset.itemId,
-                  runs: asset.runCount,
-                  me: asset.me,
-                  te: asset.te,
-                  type: asset.runCount === -1 ? "bpo" : "bpc",
-                },
-              }
-            : {}),
+        ...(asset.runCount !== undefined
+          ? {
+              blueprintPrint: {
+                itemId: asset.itemId,
+                runs: asset.runCount,
+                me: asset.me,
+                te: asset.te,
+                type: asset.runCount === -1 ? "bpo" : "bpc",
+              },
+            }
+          : {}),
       },
       rootLocation,
       types,
@@ -531,12 +547,13 @@ export async function GET(request: Request) {
   }
   for (const job of jobs) {
     if (job.status === "cancelled" || job.status === "delivered") continue;
-    const blueprint = allAssetIndex.get(job.blueprintId) ?? assets.find(
-      (asset) => asset.itemId === job.blueprintId,
-    );
-    const preferredBlueprintLocation = blueprint && isDirectLocation(blueprint)
-      ? rootLocationFromAssetLocation(blueprint.rootLocation)
-      : jobLocations.get(job.blueprintLocationId) ?? jobLocations.get(job.locationId);
+    const blueprint =
+      allAssetIndex.get(job.blueprintId) ??
+      assets.find((asset) => asset.itemId === job.blueprintId);
+    const preferredBlueprintLocation =
+      blueprint && isDirectLocation(blueprint)
+        ? rootLocationFromAssetLocation(blueprint.rootLocation)
+        : (jobLocations.get(job.blueprintLocationId) ?? jobLocations.get(job.locationId));
     const blueprintLocation = preferredBlueprintLocation ?? jobLocations.get(job.locationId);
     if (
       !blueprintLocation ||
@@ -577,7 +594,10 @@ export async function GET(request: Request) {
       .sort((left, right) => left.name.localeCompare(right.name)),
   };
   const totalMs = Math.round(performance.now() - startedAt);
-  const timingHeader = [`total;dur=${totalMs}`, ...Object.entries(phaseDurations).map(([name, duration]) => `${name};dur=${duration}`)].join(", ");
+  const timingHeader = [
+    `total;dur=${totalMs}`,
+    ...Object.entries(phaseDurations).map(([name, duration]) => `${name};dur=${duration}`),
+  ].join(", ");
   console.info("[state/stock] timing", {
     totalMs,
     phasesMs: phaseDurations,

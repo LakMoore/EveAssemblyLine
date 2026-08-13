@@ -1,10 +1,22 @@
 "use client";
 
-import { createContext, ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { isSdeLanguage, sdeLanguages, type SdeLanguage } from "@/lib/reference/languages";
-import { replaceEsiStock, replaceMarketOrderStock, type StockItem } from "@/lib/planning/stockStore";
+import {
+  replaceEsiStock,
+  replaceMarketOrderStock,
+  type StockItem,
+} from "@/lib/planning/stockStore";
 import { settingsStorageKey, type PlannerSettings } from "@/lib/planning/preferences";
 import {
   loadClientSession,
@@ -15,12 +27,34 @@ import {
   type ClientCharacterStatus,
 } from "@/lib/client/requestCache";
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
-import { Activity, ArrowUp, Boxes, Factory, Image as ImageIcon, MapPinned, Minimize2, PanelLeftClose, PanelLeftOpen, Rocket, Settings2, UserRoundPlus, UsersRound } from "lucide-react";
+import {
+  Activity,
+  ArrowUp,
+  Boxes,
+  Factory,
+  Image as ImageIcon,
+  MapPinned,
+  Minimize2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Rocket,
+  Settings2,
+  UserRoundPlus,
+  UsersRound,
+} from "lucide-react";
 import styles from "./page.module.css";
 
 const languageStorageKey = "assembly-line-language";
 const sidebarStorageKey = "assembly-line-sidebar-collapsed";
-type ActivePage = "planner" | "compress" | "stock" | "ships" | "locations" | "settings" | "imagechecker" | "characters";
+type ActivePage =
+  | "planner"
+  | "compress"
+  | "stock"
+  | "ships"
+  | "locations"
+  | "settings"
+  | "imagechecker"
+  | "characters";
 type LanguageContextValue = { language: SdeLanguage; setLanguage: (language: SdeLanguage) => void };
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 type CharacterSummary = {
@@ -54,7 +88,9 @@ function hasExpiredEndpoint(statuses: ClientCharacterStatus[]) {
   return statuses.some((character) => {
     const endpoints = [
       ...stateEndpoints.map((endpoint) => character[endpoint]),
-      ...(character.corporations ?? []).flatMap((corporation) => stateEndpoints.map((endpoint) => corporation[endpoint])),
+      ...(character.corporations ?? []).flatMap((corporation) =>
+        stateEndpoints.map((endpoint) => corporation[endpoint]),
+      ),
     ];
     return endpoints.some((endpoint) => {
       if (!endpoint) return true;
@@ -64,7 +100,8 @@ function hasExpiredEndpoint(statuses: ClientCharacterStatus[]) {
         endpoint.status === "rate_limited" &&
         endpoint.rateLimitedUntil &&
         Date.parse(endpoint.rateLimitedUntil) > now
-      ) return false;
+      )
+        return false;
       const expiresAt = Date.parse(endpoint.expires ?? endpoint.nextRefreshAllowed ?? "");
       return endpoint.status === "stale" || !Number.isFinite(expiresAt) || expiresAt <= now;
     });
@@ -72,10 +109,14 @@ function hasExpiredEndpoint(statuses: ClientCharacterStatus[]) {
 }
 
 function hasEndpointErrors(statuses: ClientCharacterStatus[]) {
-  return statuses.some((character) => [
-    ...stateEndpoints.map((endpoint) => character[endpoint]),
-    ...(character.corporations ?? []).flatMap((corporation) => stateEndpoints.map((endpoint) => corporation[endpoint])),
-  ].some((endpoint) => endpoint?.status === "error"));
+  return statuses.some((character) =>
+    [
+      ...stateEndpoints.map((endpoint) => character[endpoint]),
+      ...(character.corporations ?? []).flatMap((corporation) =>
+        stateEndpoints.map((endpoint) => corporation[endpoint]),
+      ),
+    ].some((endpoint) => endpoint?.status === "error"),
+  );
 }
 
 const defaultPlannerSettings: PlannerSettings = {
@@ -88,11 +129,7 @@ const defaultPlannerSettings: PlannerSettings = {
   defaultTe: 20,
 };
 
-export default function AppShell({
-  children,
-}: {
-  children: ReactNode;
-}) {
+export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [localLanguage, setLocalLanguage] = useState<SdeLanguage>(() => {
     if (typeof window === "undefined") return "en";
@@ -115,23 +152,33 @@ export default function AppShell({
   const mobileMetaCollapseAnimationTimer = useRef<number | null>(null);
   const pilotListSentinelRef = useRef<HTMLSpanElement | null>(null);
   const language = localLanguage;
-  const activePage: ActivePage = pathname === "/compress"
-    ? "compress"
-    : pathname === "/stock"
-      ? "stock"
-      : pathname === "/ships"
-        ? "ships"
-        : pathname === "/locations"
-          ? "locations"
-          : pathname === "/settings"
-            ? "settings"
-            : pathname === "/imagechecker"
-              ? "imagechecker"
-              : pathname === "/characters"
-                ? "characters"
-                : "planner";
-  const hasExpiredState = authenticated && characters.length > 0 && hasLoadedStateStatuses && statusCheckAt > 0 && hasExpiredEndpoint(stateStatuses);
-  const hasStateErrors = authenticated && characters.length > 0 && hasLoadedStateStatuses && hasEndpointErrors(stateStatuses);
+  const activePage: ActivePage =
+    pathname === "/compress"
+      ? "compress"
+      : pathname === "/stock"
+        ? "stock"
+        : pathname === "/ships"
+          ? "ships"
+          : pathname === "/locations"
+            ? "locations"
+            : pathname === "/settings"
+              ? "settings"
+              : pathname === "/imagechecker"
+                ? "imagechecker"
+                : pathname === "/characters"
+                  ? "characters"
+                  : "planner";
+  const hasExpiredState =
+    authenticated &&
+    characters.length > 0 &&
+    hasLoadedStateStatuses &&
+    statusCheckAt > 0 &&
+    hasExpiredEndpoint(stateStatuses);
+  const hasStateErrors =
+    authenticated &&
+    characters.length > 0 &&
+    hasLoadedStateStatuses &&
+    hasEndpointErrors(stateStatuses);
 
   useEffect(() => {
     const pilotListSentinel = pilotListSentinelRef.current;
@@ -252,8 +299,7 @@ export default function AppShell({
       let shipsResponse;
       try {
         shipsResponse = await loadClientShips(true);
-      } catch {
-      }
+      } catch {}
       try {
         const stockData = await loadClientStock(language, true);
         stockLocations = stockData.locations ?? [];
@@ -269,16 +315,14 @@ export default function AppShell({
             })),
           );
         }
-      } catch {
-      }
+      } catch {}
       try {
         const settings = loadPlannerSettings();
         const marketOrders = await loadClientMarketOrders(settings);
         if (marketOrders) {
           await replaceMarketOrderStock(marketOrders.marketOrderStock ?? []);
         }
-      } catch {
-      }
+      } catch {}
       window.dispatchEvent(
         new CustomEvent("assembly-line-esi-refreshed", {
           detail: {
@@ -324,14 +368,17 @@ export default function AppShell({
     scheduleMobileMetaCollapse();
   }, [authenticated, hasExpiredState, refreshData, scheduleMobileMetaCollapse]);
 
-  useEffect(() => () => {
-    if (mobileMetaCollapseTimer.current !== null) {
-      window.clearTimeout(mobileMetaCollapseTimer.current);
-    }
-    if (mobileMetaCollapseAnimationTimer.current !== null) {
-      window.clearTimeout(mobileMetaCollapseAnimationTimer.current);
-    }
-  }, []);
+  useEffect(
+    () => () => {
+      if (mobileMetaCollapseTimer.current !== null) {
+        window.clearTimeout(mobileMetaCollapseTimer.current);
+      }
+      if (mobileMetaCollapseAnimationTimer.current !== null) {
+        window.clearTimeout(mobileMetaCollapseAnimationTimer.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!authenticated || characters.length === 0 || refreshAfterCharacterAdd.current) return;
@@ -344,224 +391,269 @@ export default function AppShell({
   }, [authenticated, characters.length, refreshData]);
 
   return (
-    <LanguageContext.Provider value={{ language, setLanguage: (nextLanguage) => changeLanguage(nextLanguage) }}>
+    <LanguageContext.Provider
+      value={{ language, setLanguage: (nextLanguage) => changeLanguage(nextLanguage) }}
+    >
       <main className={styles.shell}>
-      <header className={styles.topbar}>
-        <Link className={styles.brand} href="/">
-          <span className={styles.brandMark}>E</span>
-          <span>
-            Eve <span className={styles.brandAccent}>AssemblyLine</span>
-          </span>
-        </Link>
-        <div className={`${styles.topMeta} ${isMobileMetaExpanded || isMobileMetaCollapsing ? styles.topMetaExpanded : ""} ${isMobileMetaCollapsing ? styles.topMetaCollapsing : ""}`}>
-          <label className={styles.languageControl}>
-            <span>LANGUAGE</span>
-            <select
-              className={styles.languageSelectFull}
-              aria-label="Language"
-              value={language}
-              onChange={(event) => changeLanguage(event.target.value)}
-            >
-              {sdeLanguages.map(({ code, label }) => (
-                <option key={code} value={code}>{label}</option>
-              ))}
-            </select>
-            <select
-              className={styles.languageSelectCompact}
-              aria-label="Language"
-              value={language}
-              onChange={(event) => changeLanguage(event.target.value)}
-            >
-              {sdeLanguages.map(({ code }) => (
-                <option key={code} value={code}>{code.toUpperCase()}</option>
-              ))}
-            </select>
-          </label>
-          {authenticated ? (
-            <span
-              className={styles.esiStatus}
-              aria-label="ESI connected"
-              title="ESI connected"
-            >
-              <span className={`${styles.onlineDot} ${styles.onlineDotCompact}`} />
-              <span className={styles.esiStatusLabel}>ESI CONNECTED</span>
+        <header className={styles.topbar}>
+          <Link className={styles.brand} href="/">
+            <span className={styles.brandMark}>E</span>
+            <span>
+              Eve <span className={styles.brandAccent}>AssemblyLine</span>
             </span>
-          ) : (
-            <button
-              type="button"
-              className={styles.esiStatus}
-              onClick={() => void handleMobileMetaAction()}
-              aria-label="ESI not connected"
-              title="ESI not connected"
-            >
-              <span className={`${styles.onlineDot} ${styles.offlineDot}`} />
-              <span className={styles.esiStatusLabel}>NOT CONNECTED</span>
-            </button>
-          )}
-          {authenticated && (
-            <button
-              type="button"
-              className={`${styles.refresh} ${!hasExpiredState ? styles.refreshCurrent : ""}`}
-              onClick={() => void handleMobileMetaAction()}
-              disabled={isRefreshingData}
-              aria-label={hasExpiredState ? "Refresh data" : "Up to date"}
-              title={hasStateErrors ? "Refresh data; one or more endpoints failed" : hasExpiredState ? "Refresh data" : "Up to date"}
-            >
-              {hasStateErrors ? (
-                <span className={styles.refreshIconError} aria-hidden="true">!</span>
-              ) : hasExpiredState ? (
-                <span className={styles.refreshIconWarning} aria-hidden="true">↻</span>
-              ) : (
-                <span className={styles.refreshStatusDot} aria-hidden="true" />
-              )}
-              <span>{isRefreshingData ? "Refreshing..." : hasExpiredState ? "Refresh Data" : "Up To Date"}</span>
-            </button>
-          )}
-        </div>
-      </header>
-      <div className={`${styles.layout} ${isSidebarCollapsed ? styles.layoutCollapsed : ""} ${!isSidebarReady ? styles.sidebarInitialising : ""}`}>
-        <aside className={styles.sidebar}>
-          <button
-            type="button"
-            className={styles.sidebarToggle}
-            aria-label={isSidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
-            onClick={() => setIsSidebarCollapsed((collapsed) => {
-              const nextState = !collapsed;
-              if (window.matchMedia("(min-width: 901px)").matches) {
-                window.localStorage.setItem(sidebarStorageKey, String(nextState));
-              }
-              return nextState;
-            })}
-          >
-            {isSidebarCollapsed ? <PanelLeftOpen size={16} strokeWidth={1.8} aria-hidden="true" /> : <PanelLeftClose size={16} strokeWidth={1.8} aria-hidden="true" />}
-          </button>
-          {showSidebarScrollTop && (
-            <button
-              type="button"
-              className={styles.sidebarScrollTop}
-              aria-label="Scroll to top"
-              title="Scroll to top"
-              onClick={scrollSidebarToTop}
-            >
-              <ArrowUp size={16} strokeWidth={1.8} aria-hidden="true" />
-            </button>
-          )}
-          <div className={styles.sectionLabel}>WORKSPACE</div>
-          <Link
-            className={`${styles.navItem} ${activePage === "planner" ? styles.navActive : ""}`}
-            href="/"
-            onClick={closeSidebarOnNavigation}
-          >
-            <span><Factory size={17} strokeWidth={1.8} aria-hidden="true" /></span>
-            <span className={styles.navText}>Production planner</span>
           </Link>
-          <Link
-            className={`${styles.navItem} ${activePage === "compress" ? styles.navActive : ""}`}
-            href="/compress"
-            onClick={closeSidebarOnNavigation}
+          <div
+            className={`${styles.topMeta} ${isMobileMetaExpanded || isMobileMetaCollapsing ? styles.topMetaExpanded : ""} ${isMobileMetaCollapsing ? styles.topMetaCollapsing : ""}`}
           >
-            <span><Minimize2 size={17} strokeWidth={1.8} aria-hidden="true" /></span>
-            <span className={styles.navText}>Compress</span>
-          </Link>
-          <Link
-            className={`${styles.navItem} ${activePage === "stock" ? styles.navActive : ""}`}
-            href="/stock"
-            onClick={closeSidebarOnNavigation}
-          >
-            <span><Boxes size={17} strokeWidth={1.8} aria-hidden="true" /></span>
-            <span className={styles.navText}>Stock</span>
-          </Link>
-          <Link
-            className={`${styles.navItem} ${activePage === "ships" ? styles.navActive : ""}`}
-            href="/ships"
-            onClick={closeSidebarOnNavigation}
-          >
-            <span><Rocket size={17} strokeWidth={1.8} aria-hidden="true" /></span>
-            <span className={styles.navText}>Ships</span>
-          </Link>
-          <div className={styles.sectionLabel}>CONFIGURATION</div>
-          <Link
-            className={`${styles.navItem} ${activePage === "locations" ? styles.navActive : ""}`}
-            href="/locations"
-            onClick={closeSidebarOnNavigation}
-          >
-            <span><MapPinned size={17} strokeWidth={1.8} aria-hidden="true" /></span>
-            <span className={styles.navText}>Locations</span>
-          </Link>
-          <Link
-            className={`${styles.navItem} ${activePage === "settings" ? styles.navActive : ""}`}
-            href="/settings"
-            onClick={closeSidebarOnNavigation}
-          >
-            <span><Settings2 size={17} strokeWidth={1.8} aria-hidden="true" /></span>
-            <span className={styles.navText}>Settings</span>
-          </Link>
-          <Link
-            className={`${styles.navItem} ${activePage === "imagechecker" ? styles.navActive : ""}`}
-            href="/imagechecker"
-            onClick={closeSidebarOnNavigation}
-          >
-            <span><ImageIcon size={17} strokeWidth={1.8} aria-hidden="true" /></span>
-            <span className={styles.navText}>Image checker</span>
-          </Link>
-          <Link
-            className={`${styles.navItem} ${activePage === "characters" ? styles.navActive : ""}`}
-            href="/characters"
-            onClick={closeSidebarOnNavigation}
-          >
-            <span><UsersRound size={17} strokeWidth={1.8} aria-hidden="true" /></span>
-            <span className={styles.navText}>Characters</span>
-            <b>{characters.length}</b>
-          </Link>
-          <button type="button" className={styles.navItem}>
-            <span><Activity size={17} strokeWidth={1.8} aria-hidden="true" /></span>
-            <span className={styles.navText}>Data status</span>
-          </button>
-          <div className={styles.sidebarBottom}>
-            <div className={styles.sectionLabel}>CONNECTED PILOTS</div>
-            <div className={styles.pilotList}>
-              {characters.map((character, index) => (
-                <div className={styles.pilot} key={character.characterId}>
-                  <span className={`${styles.pilotDot} ${index > 0 ? styles.pilotAlt : ""}`}>
-                    <img
-                      src={eveCharacterPortraitUrl(character.characterId, 64)}
-                      alt=""
-                    />
-                  </span>
-                  <span className={styles.navText}>
-                    <strong>{character.characterName}</strong>
-                    <small>
-                      {character.hasDirectorRole
-                        ? "Director access"
-                        : "Character access"}
-                    </small>
-                  </span>
-                  <i />
-                </div>
-              ))}
-              <span className={styles.sidebarSentinel} ref={pilotListSentinelRef} aria-hidden="true" />
-            </div>
-            <div className={styles.sidebarFooter}>
-              <span
-                className={`${styles.sidebarCount} ${styles.navText}`}
-                aria-label={`${characters.length} connected characters`}
-                data-tooltip={`${characters.length} connected character${characters.length === 1 ? "" : "s"}`}
-                tabIndex={0}
+            <label className={styles.languageControl}>
+              <span>LANGUAGE</span>
+              <select
+                className={styles.languageSelectFull}
+                aria-label="Language"
+                value={language}
+                onChange={(event) => changeLanguage(event.target.value)}
               >
-                {characters.length}
+                {sdeLanguages.map(({ code, label }) => (
+                  <option key={code} value={code}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <select
+                className={styles.languageSelectCompact}
+                aria-label="Language"
+                value={language}
+                onChange={(event) => changeLanguage(event.target.value)}
+              >
+                {sdeLanguages.map(({ code }) => (
+                  <option key={code} value={code}>
+                    {code.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {authenticated ? (
+              <span className={styles.esiStatus} aria-label="ESI connected" title="ESI connected">
+                <span className={`${styles.onlineDot} ${styles.onlineDotCompact}`} />
+                <span className={styles.esiStatusLabel}>ESI CONNECTED</span>
               </span>
-              <a
-                className={`${styles.addButton} ${styles.navText} ${!authenticated ? styles.addButtonDisconnected : ""}`}
-                href="/api/auth/eve/start"
+            ) : (
+              <button
+                type="button"
+                className={styles.esiStatus}
+                onClick={() => void handleMobileMetaAction()}
+                aria-label="ESI not connected"
+                title="ESI not connected"
               >
-                <UserRoundPlus size={16} strokeWidth={1.8} aria-hidden="true" />
-                <span>Add character</span>
-              </a>
-            </div>
+                <span className={`${styles.onlineDot} ${styles.offlineDot}`} />
+                <span className={styles.esiStatusLabel}>NOT CONNECTED</span>
+              </button>
+            )}
+            {authenticated && (
+              <button
+                type="button"
+                className={`${styles.refresh} ${!hasExpiredState ? styles.refreshCurrent : ""}`}
+                onClick={() => void handleMobileMetaAction()}
+                disabled={isRefreshingData}
+                aria-label={hasExpiredState ? "Refresh data" : "Up to date"}
+                title={
+                  hasStateErrors
+                    ? "Refresh data; one or more endpoints failed"
+                    : hasExpiredState
+                      ? "Refresh data"
+                      : "Up to date"
+                }
+              >
+                {hasStateErrors ? (
+                  <span className={styles.refreshIconError} aria-hidden="true">
+                    !
+                  </span>
+                ) : hasExpiredState ? (
+                  <span className={styles.refreshIconWarning} aria-hidden="true">
+                    ↻
+                  </span>
+                ) : (
+                  <span className={styles.refreshStatusDot} aria-hidden="true" />
+                )}
+                <span>
+                  {isRefreshingData
+                    ? "Refreshing..."
+                    : hasExpiredState
+                      ? "Refresh Data"
+                      : "Up To Date"}
+                </span>
+              </button>
+            )}
           </div>
-        </aside>
-        <section className={styles.content}>{children}</section>
-      </div>
+        </header>
+        <div
+          className={`${styles.layout} ${isSidebarCollapsed ? styles.layoutCollapsed : ""} ${!isSidebarReady ? styles.sidebarInitialising : ""}`}
+        >
+          <aside className={styles.sidebar}>
+            <button
+              type="button"
+              className={styles.sidebarToggle}
+              aria-label={isSidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
+              onClick={() =>
+                setIsSidebarCollapsed((collapsed) => {
+                  const nextState = !collapsed;
+                  if (window.matchMedia("(min-width: 901px)").matches) {
+                    window.localStorage.setItem(sidebarStorageKey, String(nextState));
+                  }
+                  return nextState;
+                })
+              }
+            >
+              {isSidebarCollapsed ? (
+                <PanelLeftOpen size={16} strokeWidth={1.8} aria-hidden="true" />
+              ) : (
+                <PanelLeftClose size={16} strokeWidth={1.8} aria-hidden="true" />
+              )}
+            </button>
+            {showSidebarScrollTop && (
+              <button
+                type="button"
+                className={styles.sidebarScrollTop}
+                aria-label="Scroll to top"
+                title="Scroll to top"
+                onClick={scrollSidebarToTop}
+              >
+                <ArrowUp size={16} strokeWidth={1.8} aria-hidden="true" />
+              </button>
+            )}
+            <div className={styles.sectionLabel}>WORKSPACE</div>
+            <Link
+              className={`${styles.navItem} ${activePage === "planner" ? styles.navActive : ""}`}
+              href="/"
+              onClick={closeSidebarOnNavigation}
+            >
+              <span>
+                <Factory size={17} strokeWidth={1.8} aria-hidden="true" />
+              </span>
+              <span className={styles.navText}>Production planner</span>
+            </Link>
+            <Link
+              className={`${styles.navItem} ${activePage === "compress" ? styles.navActive : ""}`}
+              href="/compress"
+              onClick={closeSidebarOnNavigation}
+            >
+              <span>
+                <Minimize2 size={17} strokeWidth={1.8} aria-hidden="true" />
+              </span>
+              <span className={styles.navText}>Compress</span>
+            </Link>
+            <Link
+              className={`${styles.navItem} ${activePage === "stock" ? styles.navActive : ""}`}
+              href="/stock"
+              onClick={closeSidebarOnNavigation}
+            >
+              <span>
+                <Boxes size={17} strokeWidth={1.8} aria-hidden="true" />
+              </span>
+              <span className={styles.navText}>Stock</span>
+            </Link>
+            <Link
+              className={`${styles.navItem} ${activePage === "ships" ? styles.navActive : ""}`}
+              href="/ships"
+              onClick={closeSidebarOnNavigation}
+            >
+              <span>
+                <Rocket size={17} strokeWidth={1.8} aria-hidden="true" />
+              </span>
+              <span className={styles.navText}>Ships</span>
+            </Link>
+            <div className={styles.sectionLabel}>CONFIGURATION</div>
+            <Link
+              className={`${styles.navItem} ${activePage === "locations" ? styles.navActive : ""}`}
+              href="/locations"
+              onClick={closeSidebarOnNavigation}
+            >
+              <span>
+                <MapPinned size={17} strokeWidth={1.8} aria-hidden="true" />
+              </span>
+              <span className={styles.navText}>Locations</span>
+            </Link>
+            <Link
+              className={`${styles.navItem} ${activePage === "settings" ? styles.navActive : ""}`}
+              href="/settings"
+              onClick={closeSidebarOnNavigation}
+            >
+              <span>
+                <Settings2 size={17} strokeWidth={1.8} aria-hidden="true" />
+              </span>
+              <span className={styles.navText}>Settings</span>
+            </Link>
+            <Link
+              className={`${styles.navItem} ${activePage === "imagechecker" ? styles.navActive : ""}`}
+              href="/imagechecker"
+              onClick={closeSidebarOnNavigation}
+            >
+              <span>
+                <ImageIcon size={17} strokeWidth={1.8} aria-hidden="true" />
+              </span>
+              <span className={styles.navText}>Image checker</span>
+            </Link>
+            <Link
+              className={`${styles.navItem} ${activePage === "characters" ? styles.navActive : ""}`}
+              href="/characters"
+              onClick={closeSidebarOnNavigation}
+            >
+              <span>
+                <UsersRound size={17} strokeWidth={1.8} aria-hidden="true" />
+              </span>
+              <span className={styles.navText}>Characters</span>
+              <b>{characters.length}</b>
+            </Link>
+            <button type="button" className={styles.navItem}>
+              <span>
+                <Activity size={17} strokeWidth={1.8} aria-hidden="true" />
+              </span>
+              <span className={styles.navText}>Data status</span>
+            </button>
+            <div className={styles.sidebarBottom}>
+              <div className={styles.sectionLabel}>CONNECTED PILOTS</div>
+              <div className={styles.pilotList}>
+                {characters.map((character, index) => (
+                  <div className={styles.pilot} key={character.characterId}>
+                    <span className={`${styles.pilotDot} ${index > 0 ? styles.pilotAlt : ""}`}>
+                      <img src={eveCharacterPortraitUrl(character.characterId, 64)} alt="" />
+                    </span>
+                    <span className={styles.navText}>
+                      <strong>{character.characterName}</strong>
+                      <small>
+                        {character.hasDirectorRole ? "Director access" : "Character access"}
+                      </small>
+                    </span>
+                    <i />
+                  </div>
+                ))}
+                <span
+                  className={styles.sidebarSentinel}
+                  ref={pilotListSentinelRef}
+                  aria-hidden="true"
+                />
+              </div>
+              <div className={styles.sidebarFooter}>
+                <span
+                  className={`${styles.sidebarCount} ${styles.navText}`}
+                  aria-label={`${characters.length} connected characters`}
+                  data-tooltip={`${characters.length} connected character${characters.length === 1 ? "" : "s"}`}
+                  tabIndex={0}
+                >
+                  {characters.length}
+                </span>
+                <a
+                  className={`${styles.addButton} ${styles.navText} ${!authenticated ? styles.addButtonDisconnected : ""}`}
+                  href="/api/auth/eve/start"
+                >
+                  <UserRoundPlus size={16} strokeWidth={1.8} aria-hidden="true" />
+                  <span>Add character</span>
+                </a>
+              </div>
+            </div>
+          </aside>
+          <section className={styles.content}>{children}</section>
+        </div>
       </main>
     </LanguageContext.Provider>
   );

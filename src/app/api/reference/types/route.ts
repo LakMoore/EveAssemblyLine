@@ -24,18 +24,20 @@ export async function GET(request: Request) {
       const items = requestedTypeIds.flatMap((typeId) => {
         const item = typeById.get(typeId);
         if (!item || !item.published) return [];
-        return [{
-          typeId: item._key,
-          techLevel: item.techLevel,
-          assembledVolume: item.volume ?? 0,
-          packagedVolume: item.packagedVolume,
-          ...categorizeType(item, language, marketGroupById, groupById),
-          name:
-            item.name[language] ??
-            item.name.en ??
-            Object.values(item.name).find(Boolean) ??
-            `Type ${item._key}`,
-        }];
+        return [
+          {
+            typeId: item._key,
+            techLevel: item.techLevel,
+            assembledVolume: item.volume ?? 0,
+            packagedVolume: item.packagedVolume,
+            ...categorizeType(item, language, marketGroupById, groupById),
+            name:
+              item.name[language] ??
+              item.name.en ??
+              Object.values(item.name).find(Boolean) ??
+              `Type ${item._key}`,
+          },
+        ];
       });
       return NextResponse.json({
         items,
@@ -97,7 +99,11 @@ export async function POST(request: Request) {
         { status: 400 },
       );
 
-    const [typeById, marketGroupById, groupById] = await Promise.all([getTypes(), getMarketGroups(), getGroups()]);
+    const [typeById, marketGroupById, groupById] = await Promise.all([
+      getTypes(),
+      getMarketGroups(),
+      getGroups(),
+    ]);
     const byName = new Map<
       string,
       {

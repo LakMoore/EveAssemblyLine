@@ -144,10 +144,7 @@ export function getShipTypeIds(): Promise<Set<number>> {
       ([types, groups]) =>
         new Set(
           [...types.values()]
-            .filter(
-              (type) =>
-                groups.get(type.groupID)?.categoryID === 6,
-            )
+            .filter((type) => groups.get(type.groupID)?.categoryID === 6)
             .map((type) => type._key),
         ),
     )
@@ -167,14 +164,18 @@ export function getHaulerShipTypeIds(): Promise<Set<number>> {
             if (!shipTypeIds.has(type._key) || type.marketGroupID === undefined) return false;
             let descendsFromShips = false;
             let descendsFromIndustrialOrFreighter = false;
-            let group = type.marketGroupID === undefined ? undefined : marketGroups.get(type.marketGroupID);
+            let group =
+              type.marketGroupID === undefined ? undefined : marketGroups.get(type.marketGroupID);
             while (group) {
               const name = group.name.en.toLocaleLowerCase("en");
               if (name === "ships") descendsFromShips = true;
               if (name.includes("industrial") || name.includes("freighter")) {
                 descendsFromIndustrialOrFreighter = true;
               }
-              group = group.parentGroupID === undefined ? undefined : marketGroups.get(group.parentGroupID);
+              group =
+                group.parentGroupID === undefined
+                  ? undefined
+                  : marketGroups.get(group.parentGroupID);
             }
             return descendsFromShips && descendsFromIndustrialOrFreighter;
           })

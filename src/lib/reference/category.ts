@@ -25,9 +25,7 @@ function marketGroupPath(
   while (current) {
     path.unshift(current);
     current =
-      current.parentGroupID === undefined
-        ? undefined
-        : marketGroupById.get(current.parentGroupID);
+      current.parentGroupID === undefined ? undefined : marketGroupById.get(current.parentGroupID);
   }
   return path;
 }
@@ -38,7 +36,8 @@ export function categorizeType(
   marketGroupById: Map<number, MarketGroupsRecord>,
   groupById: Map<number, GroupsRecord>,
 ) {
-  const categoryId = type.groupID === undefined ? undefined : groupById.get(type.groupID)?.categoryID;
+  const categoryId =
+    type.groupID === undefined ? undefined : groupById.get(type.groupID)?.categoryID;
   const path = marketGroupPath(type.marketGroupID, marketGroupById);
   const root = path[0];
   const rootName = categoryName(root, language);

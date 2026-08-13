@@ -20,10 +20,12 @@ export function fetchTypeMetadata(typeIds: number[], language: SdeLanguage) {
   resolvedMetadata.set(language, languageCache);
   const missingTypeIds = uniqueTypeIds.filter((typeId) => !languageCache.has(typeId));
   if (missingTypeIds.length === 0) {
-    return Promise.resolve(uniqueTypeIds.flatMap((typeId) => {
-      const metadata = languageCache.get(typeId);
-      return metadata ? [metadata] : [];
-    }));
+    return Promise.resolve(
+      uniqueTypeIds.flatMap((typeId) => {
+        const metadata = languageCache.get(typeId);
+        return metadata ? [metadata] : [];
+      }),
+    );
   }
   const cacheKey = `${language}:${missingTypeIds.join(",")}`;
   const cached = metadataCache.get(cacheKey);

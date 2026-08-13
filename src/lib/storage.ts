@@ -54,24 +54,29 @@ export async function initStorage() {
       return snapshot.exists ? (snapshot.data()?.value as T) : undefined;
     },
     async setItem<T>(key: string, value: T) {
-      await database.collection(storageCollection).doc(key).set({
-        value: withoutUndefined(value),
-        updatedAt: new Date(),
-      });
+      await database
+        .collection(storageCollection)
+        .doc(key)
+        .set({
+          value: withoutUndefined(value),
+          updatedAt: new Date(),
+        });
     },
     async runTransaction<T>(callback: (transaction: StorageTransaction) => Promise<T>) {
-      return database.runTransaction(async (transaction) => callback({
-        async getItem<K>(key: string) {
-          const snapshot = await transaction.get(database.collection(storageCollection).doc(key));
-          return snapshot.exists ? (snapshot.data()?.value as K) : undefined;
-        },
-        setItem<K>(key: string, value: K) {
-          transaction.set(database.collection(storageCollection).doc(key), {
-            value: withoutUndefined(value),
-            updatedAt: new Date(),
-          });
-        },
-      }));
+      return database.runTransaction(async (transaction) =>
+        callback({
+          async getItem<K>(key: string) {
+            const snapshot = await transaction.get(database.collection(storageCollection).doc(key));
+            return snapshot.exists ? (snapshot.data()?.value as K) : undefined;
+          },
+          setItem<K>(key: string, value: K) {
+            transaction.set(database.collection(storageCollection).doc(key), {
+              value: withoutUndefined(value),
+              updatedAt: new Date(),
+            });
+          },
+        }),
+      );
     },
   } satisfies Storage;
 }

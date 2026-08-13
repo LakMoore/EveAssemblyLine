@@ -60,9 +60,13 @@ export async function GET(request: Request) {
           !type?.published ||
           type.groupID === outpostRigGroupId ||
           !size ||
-          ![materialBonusAttribute, timeBonusAttribute, costBonusAttribute, reprocessingYieldAttribute, refiningYieldMultiplierAttribute].some(
-            (id) => (attributes.get(id) ?? 0) !== 0,
-          )
+          ![
+            materialBonusAttribute,
+            timeBonusAttribute,
+            costBonusAttribute,
+            reprocessingYieldAttribute,
+            refiningYieldMultiplierAttribute,
+          ].some((id) => (attributes.get(id) ?? 0) !== 0)
         )
           return [];
         return [

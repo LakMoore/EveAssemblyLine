@@ -90,7 +90,8 @@ export default function ImageCheckerPage() {
   }
 
   const checkedCount = Object.values(results).reduce(
-    (total, result) => total + variations.filter((variation) => result[variation] !== "checking").length,
+    (total, result) =>
+      total + variations.filter((variation) => result[variation] !== "checking").length,
     0,
   );
   const availableCount = Object.values(results).reduce(
@@ -159,10 +160,14 @@ export default function ImageCheckerPage() {
             <p className={styles.panelKicker}>LIVE PROBE</p>
             <h2>Endpoint results</h2>
           </div>
-          <span className={styles.statusNote}>{isLoading ? "Loading types..." : "Checks run in browser"}</span>
+          <span className={styles.statusNote}>
+            {isLoading ? "Loading types..." : "Checks run in browser"}
+          </span>
         </div>
         {error ? <div className={styles.error}>{error}</div> : null}
-        {!error && isLoading ? <div className={styles.empty}>Loading the selected batch...</div> : null}
+        {!error && isLoading ? (
+          <div className={styles.empty}>Loading the selected batch...</div>
+        ) : null}
         {!error && !isLoading ? (
           <div className={styles.tableWrap}>
             <table>
@@ -170,7 +175,11 @@ export default function ImageCheckerPage() {
                 <tr>
                   <th scope="col">TYPE ID</th>
                   <th scope="col">TYPE NAME</th>
-                  {variations.map((variation) => <th scope="col" key={variation}>/{variation}</th>)}
+                  {variations.map((variation) => (
+                    <th scope="col" key={variation}>
+                      /{variation}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -211,7 +220,9 @@ function ImageProbe({
   onStatusChange: (status: ImageStatus) => void;
 }) {
   return (
-    <div className={`${styles.probe} ${styles[`probe${status[0].toUpperCase()}${status.slice(1)}`]}`}>
+    <div
+      className={`${styles.probe} ${styles[`probe${status[0].toUpperCase()}${status.slice(1)}`]}`}
+    >
       <img
         src={eveTypeImageUrl(typeId, variation, 32)}
         alt=""

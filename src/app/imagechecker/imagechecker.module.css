@@ -1,255 +1,267 @@
 .pageIntro {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 28px;
-    margin-bottom: 28px
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 28px;
+  margin-bottom: 28px;
 }
 
 .eyebrow,
 .panelKicker,
 .typeId,
 .statusNote {
-    font: 10px 'DM Mono', monospace;
-    letter-spacing: .08em
+  font:
+    10px "DM Mono",
+    monospace;
+  letter-spacing: 0.08em;
 }
 
 .eyebrow,
 .panelKicker {
-    color: var(--cyan)
+  color: var(--cyan);
 }
 
 .pageIntro h1 {
-    margin-top: 7px;
-    color: var(--ink);
-    font-size: clamp(30px, 4vw, 48px);
-    letter-spacing: -.04em
+  margin-top: 7px;
+  color: var(--ink);
+  font-size: clamp(30px, 4vw, 48px);
+  letter-spacing: -0.04em;
 }
 
 .subtitle {
-    max-width: 570px;
-    margin-top: 9px;
-    color: var(--muted);
-    font-size: 13px
+  max-width: 570px;
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .paging {
-    display: flex;
-    align-items: flex-end;
-    gap: 8px;
-    margin-bottom: 18px
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: 18px;
 }
 
 .startField {
-    display: grid;
-    gap: 5px;
-    color: var(--muted);
-    font: 10px 'DM Mono', monospace;
-    letter-spacing: .08em
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font:
+    10px "DM Mono",
+    monospace;
+  letter-spacing: 0.08em;
 }
 
 .startField input {
-    width: 150px;
-    padding: 9px 10px;
-    border: 1px solid #31515d;
-    background: #09171d;
-    color: var(--ink);
-    outline: 0;
-    font: 12px 'DM Mono', monospace
+  width: 150px;
+  padding: 9px 10px;
+  border: 1px solid #31515d;
+  background: #09171d;
+  color: var(--ink);
+  outline: 0;
+  font:
+    12px "DM Mono",
+    monospace;
 }
 
 .startField input:focus {
-    border-color: var(--cyan);
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--cyan) 33%, transparent)
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cyan) 33%, transparent);
 }
 
 .pageButton,
 .loadButton {
-    height: 36px;
-    border: 1px solid #315863;
-    background: transparent;
-    color: var(--cyan);
-    padding: 0 12px;
-    font: 12px 'DM Mono', monospace
+  height: 36px;
+  border: 1px solid #315863;
+  background: transparent;
+  color: var(--cyan);
+  padding: 0 12px;
+  font:
+    12px "DM Mono",
+    monospace;
 }
 
 .pageButton {
-    width: 36px;
-    padding: 0;
-    font-size: 17px
+  width: 36px;
+  padding: 0;
+  font-size: 17px;
 }
 
 .loadButton {
-    border-color: var(--action);
-    background: var(--action);
-    color: var(--lime)
+  border-color: var(--action);
+  background: var(--action);
+  color: var(--lime);
 }
 
 .pageButton:disabled,
 .loadButton:disabled {
-    cursor: not-allowed;
-    opacity: .4
+  cursor: not-allowed;
+  opacity: 0.4;
 }
 
 .batchNote {
-    align-self: center;
-    margin-left: 4px;
-    color: var(--muted);
-    font-size: 11px
+  align-self: center;
+  margin-left: 4px;
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .summary {
-    display: grid;
-    grid-template-columns: auto auto;
-    gap: 3px 10px;
-    min-width: 190px;
-    padding: 14px 16px;
-    border-left: 2px solid var(--lime);
-    background: #10252b
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 3px 10px;
+  min-width: 190px;
+  padding: 14px 16px;
+  border-left: 2px solid var(--lime);
+  background: #10252b;
 }
 
 .summary strong {
-    color: var(--lime);
-    font: 18px 'DM Mono', monospace
+  color: var(--lime);
+  font:
+    18px "DM Mono",
+    monospace;
 }
 
 .summary span {
-    align-self: center;
-    color: var(--muted);
-    font-size: 10px
+  align-self: center;
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .panel {
-    overflow: hidden;
-    border: 1px solid var(--line);
-    background: color-mix(in srgb, var(--white) 88%, transparent)
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--white) 88%, transparent);
 }
 
 .panelHeader {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 20px 22px;
-    border-bottom: 1px solid var(--line)
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px;
+  border-bottom: 1px solid var(--line);
 }
 
 .panelHeader h2 {
-    margin-top: 5px;
-    color: var(--ink);
-    font-size: 17px
+  margin-top: 5px;
+  color: var(--ink);
+  font-size: 17px;
 }
 
 .statusNote {
-    color: var(--muted);
-    white-space: nowrap
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 .tableWrap {
-    overflow-x: auto
+  overflow-x: auto;
 }
 
 .tableWrap table {
-    width: 100%;
-    border-collapse: collapse;
-    min-width: 760px
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 760px;
 }
 
 .tableWrap th {
-    padding: 12px 16px;
-    color: #789ca4;
-    background: #0a1b21;
-    text-align: left
+  padding: 12px 16px;
+  color: #789ca4;
+  background: #0a1b21;
+  text-align: left;
 }
 
 .tableWrap td {
-    padding: 8px 16px;
-    border-top: 1px solid #18313a;
-    color: var(--ink);
-    font-size: 12px
+  padding: 8px 16px;
+  border-top: 1px solid #18313a;
+  color: var(--ink);
+  font-size: 12px;
 }
 
 .tableWrap tbody tr:hover {
-    background: #122b32
+  background: #122b32;
 }
 
 .typeId {
-    width: 100px;
-    color: var(--amber)
+  width: 100px;
+  color: var(--amber);
 }
 
 .typeName {
-    min-width: 250px;
-    font-weight: 600
+  min-width: 250px;
+  font-weight: 600;
 }
 
 .probe {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    min-width: 74px;
-    color: var(--muted);
-    font: 10px 'DM Mono', monospace
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 74px;
+  color: var(--muted);
+  font:
+    10px "DM Mono",
+    monospace;
 }
 
 .probe img {
-    display: block;
-    width: 32px;
-    height: 32px;
-    border: 1px solid #2b4b54;
-    background: #09171d;
-    object-fit: contain
+  display: block;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #2b4b54;
+  background: #09171d;
+  object-fit: contain;
 }
 
 .probeOk {
-    color: var(--green)
+  color: var(--green);
 }
 
 .probeOk img {
-    border-color: #26776d
+  border-color: #26776d;
 }
 
 .probeMissing {
-    color: #e47d78
+  color: #e47d78;
 }
 
 .probeMissing img {
-    opacity: .18;
-    border-color: #713e44
+  opacity: 0.18;
+  border-color: #713e44;
 }
 
 .empty,
 .error {
-    padding: 28px 22px;
-    color: var(--muted);
-    font-size: 12px
+  padding: 28px 22px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .error {
-    color: #f29a82
+  color: #f29a82;
 }
 
 @media (max-width: 640px) {
-    .pageIntro {
-        display: block
-    }
+  .pageIntro {
+    display: block;
+  }
 
-    .summary {
-        margin-top: 20px
-    }
+  .summary {
+    margin-top: 20px;
+  }
 
-    .paging {
-        align-items: stretch;
-        flex-wrap: wrap
-    }
+  .paging {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
 
-    .batchNote {
-        width: 100%;
-        margin: 2px 0 0
-    }
+  .batchNote {
+    width: 100%;
+    margin: 2px 0 0;
+  }
 
-    .panelHeader {
-        align-items: flex-start;
-        flex-direction: column
-    }
+  .panelHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }

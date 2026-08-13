@@ -1,8 +1,4 @@
-import {
-  getGroups,
-  getMarketGroups,
-  getTypesByIds,
-} from "@/cache/services/sdeCache";
+import { getGroups, getMarketGroups, getTypesByIds } from "@/cache/services/sdeCache";
 import { categorizeType } from "@/lib/reference/category";
 import type { PlanStockItem } from "./types";
 
@@ -20,9 +16,18 @@ export async function hydrateStockCategories(items: PlanStockItem[]) {
     if (!type) return { ...item, category: "item" as const };
 
     const categorized = categorizeType(type, "en", marketGroups, groups);
-    const category: NonNullable<PlanStockItem["category"]> = categorized.category === "blueprint"
-      ? item.category === "bp" ? "bp" : item.type === "bpo" ? "bpo" : "bpc"
-      : categorized.category;
-    return { ...item, category, ...(category === "bp" && !item.type ? { type: "bpc" as const } : {}) };
+    const category: NonNullable<PlanStockItem["category"]> =
+      categorized.category === "blueprint"
+        ? item.category === "bp"
+          ? "bp"
+          : item.type === "bpo"
+            ? "bpo"
+            : "bpc"
+        : categorized.category;
+    return {
+      ...item,
+      category,
+      ...(category === "bp" && !item.type ? { type: "bpc" as const } : {}),
+    };
   });
 }

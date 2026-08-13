@@ -44,9 +44,12 @@ export async function GET(request: Request) {
   const ships = annotatedAssets
     .filter((asset) => asset.isSingleton && shipTypeIds.has(asset.typeId))
     .map((asset) => {
-      const root = asset.rootLocation && "kind" in asset.rootLocation ? asset.rootLocation : undefined;
+      const root =
+        asset.rootLocation && "kind" in asset.rootLocation ? asset.rootLocation : undefined;
       const station = asset.locationType === "station" ? stations.get(asset.locationId) : undefined;
-      const systemId = root?.systemId ?? station?.solarSystemID ??
+      const systemId =
+        root?.systemId ??
+        station?.solarSystemID ??
         (asset.locationType === "solar_system" ? asset.locationId : undefined);
       return {
         itemId: asset.itemId,

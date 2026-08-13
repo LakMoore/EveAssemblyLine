@@ -34,7 +34,9 @@ const structureTypes: StructureType[] = [
   { name: "'Prometheus' Fortizar", size: "Large", typeId: 35833, sizeId: 3 },
   { name: "Upwell Palatine Keepstar", size: "Extra Large", typeId: 35834, sizeId: 4 },
 ];
-const structureTypeNames = new Map(structureTypes.map((structure) => [structure.typeId, structure.name]));
+const structureTypeNames = new Map(
+  structureTypes.map((structure) => [structure.typeId, structure.name]),
+);
 const fallbackRigOptionsBySize: Record<StructureSize, string[]> = {
   Small: [
     "No Rig",
@@ -400,7 +402,7 @@ export default function LocationsPage() {
             systemName: location.systemName,
             securityStatus: location.securityStatus,
             type: location.typeId
-              ? structureTypeNames.get(location.typeId) ?? `Type ${location.typeId}`
+              ? (structureTypeNames.get(location.typeId) ?? `Type ${location.typeId}`)
               : undefined,
             assetCount: location.assetCount,
             personalAssetCount: location.personalAssetCount,
@@ -592,7 +594,9 @@ export default function LocationsPage() {
                       {" · "}
                       {structure.assetCount.toLocaleString()} records ·{" "}
                       {structure.totalCount.toLocaleString()} quantity ·{" "}
-                      {structure.totalVolume.toLocaleString(undefined, { maximumFractionDigits: 2 })}{" "}
+                      {structure.totalVolume.toLocaleString(undefined, {
+                        maximumFractionDigits: 2,
+                      })}{" "}
                       m³ Volume · {structure.personalAssetCount.toLocaleString()} character ·{" "}
                       {structure.corporationAssetCount.toLocaleString()} corp
                       {structure.locationType === "structure"
@@ -642,7 +646,11 @@ export default function LocationsPage() {
             <p className={styles.panelKicker}>01 / STRUCTURES</p>
             <h2>Known structures</h2>
           </div>
-          <button type="button" className={`actionButton ${styles.importButton}`} onClick={openAddDialog}>
+          <button
+            type="button"
+            className={`actionButton ${styles.importButton}`}
+            onClick={openAddDialog}
+          >
             <Plus aria-hidden="true" />
             <span>Add structure</span>
           </button>

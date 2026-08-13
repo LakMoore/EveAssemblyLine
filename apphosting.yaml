@@ -11,10 +11,10 @@ runConfig:
 # DO NOT store secrets in this file. Use Cloud Secret Manager instead.
 # This file is checked into source control and can be read by anyone with access to the repository.
 
-  # Grant access to secrets in Cloud Secret Manager.
-  # You can create secrets with the CLI command `firebase apphosting:secrets:set <secretName>`.
-  # See https://firebase.google.com/docs/app-hosting/configure#secret-parameters
-  # - variable: MY_SECRET
-  #   secret: mySecretRef
+# Grant access to secrets in Cloud Secret Manager.
+# You can create secrets with the CLI command `firebase apphosting:secrets:set <secretName>`.
+# See https://firebase.google.com/docs/app-hosting/configure#secret-parameters
+# - variable: MY_SECRET
+#   secret: mySecretRef
 scripts:
   buildCommand: npm run sde:prepare && npm run build

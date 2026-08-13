@@ -25,7 +25,15 @@ import { useAppLanguage } from "./AppShell";
 import TypeIdentity from "./components/TypeIdentity";
 import { useToast } from "./components/ToastProvider";
 import styles from "./page.module.css";
-import { ChartLine, Clipboard, Copy as CopyIcon, Factory, Minimize2, Microscope, TestTubes } from "lucide-react";
+import {
+  ChartLine,
+  Clipboard,
+  Copy as CopyIcon,
+  Factory,
+  Minimize2,
+  Microscope,
+  TestTubes,
+} from "lucide-react";
 
 type PlannerTab = "Plan" | "Buy" | "Copy" | "Invent" | "React" | "Manufacture";
 const tabs: PlannerTab[] = ["Plan", "Buy", "Copy", "Invent", "React", "Manufacture"];
@@ -46,11 +54,7 @@ type PasteResult = {
   error?: string;
 };
 
-function AvailableSourceIcons({
-  counts,
-}: {
-  counts?: PlanSourceCounts;
-}) {
+function AvailableSourceIcons({ counts }: { counts?: PlanSourceCounts }) {
   const icons = (Object.keys(counts ?? {}) as PlanSourceIcon[]).filter(
     (icon) => (counts?.[icon] ?? 0) > 0,
   );
@@ -226,9 +230,7 @@ export default function Home() {
       setIsStockLoaded(false);
       const stockLoad = loadStockRecords();
       stockLoadPromiseRef.current = stockLoad;
-      stockLoad.finally(
-        () => setIsStockLoaded(true)
-      );
+      stockLoad.finally(() => setIsStockLoaded(true));
     };
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
     return () => window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
@@ -253,7 +255,12 @@ export default function Home() {
         industry: [],
         market: [],
       } as {
-        items: Array<{ typeId: number; locationId: number; rootLocationId: number; quantity: number }>;
+        items: Array<{
+          typeId: number;
+          locationId: number;
+          rootLocationId: number;
+          quantity: number;
+        }>;
         blueprints: Array<{
           itemId?: number;
           typeId: number;
@@ -278,7 +285,12 @@ export default function Home() {
           blueprintRunsAtInstall?: number;
           licensedRuns?: number;
         }>;
-        market: Array<{ typeId: number; locationId: number; rootLocationId: number; quantity: number }>;
+        market: Array<{
+          typeId: number;
+          locationId: number;
+          rootLocationId: number;
+          quantity: number;
+        }>;
       };
       const industryByJobId = new Map<number, (typeof assets.industry)[number]>();
       for (const record of localRecords) {
@@ -286,17 +298,22 @@ export default function Home() {
           const recordLocationId = record.structureId ? Number(record.structureId) : undefined;
           const locationId = item.locationId ?? recordLocationId;
           const rootLocationId = item.rootLocationId ?? recordLocationId;
-          if (locationId === undefined || rootLocationId === undefined || !Number.isInteger(locationId) || !Number.isInteger(rootLocationId)) continue;
+          if (
+            locationId === undefined ||
+            rootLocationId === undefined ||
+            !Number.isInteger(locationId) ||
+            !Number.isInteger(rootLocationId)
+          )
+            continue;
           const location = { locationId, rootLocationId };
-          const jobActivity = item.activityName ?? item.blueprintPrints?.find(
-            (print) => print.activity === "Copying" || print.activity === "Invention",
-          )?.activity ?? (
-            item.inBuild &&
-            item.jobId !== undefined &&
-            item.typeId !== item.blueprintTypeId
+          const jobActivity =
+            item.activityName ??
+            item.blueprintPrints?.find(
+              (print) => print.activity === "Copying" || print.activity === "Invention",
+            )?.activity ??
+            (item.inBuild && item.jobId !== undefined && item.typeId !== item.blueprintTypeId
               ? "Manufacturing"
-              : undefined
-          );
+              : undefined);
           if (record.source === "marketOrder" || item.source === "marketOrder") {
             assets.market.push({ typeId: item.typeId, ...location, quantity: item.quantity });
             continue;
@@ -316,7 +333,8 @@ export default function Home() {
             };
             const existingIndustryRow = industryByJobId.get(item.jobId);
             const isOutputRow = item.typeId !== item.blueprintTypeId;
-            const shouldReplace = !existingIndustryRow ||
+            const shouldReplace =
+              !existingIndustryRow ||
               (isOutputRow && existingIndustryRow.typeId === existingIndustryRow.blueprintTypeId);
             if (shouldReplace) industryByJobId.set(item.jobId, industryRow);
           }
@@ -427,7 +445,9 @@ export default function Home() {
           <div className={styles.panel}>
             <div className={styles.panelHeader}>
               <div>
-                <p className={styles.panelKicker} ref={requirementsHeaderRef}>01 / REQUIREMENTS</p>
+                <p className={styles.panelKicker} ref={requirementsHeaderRef}>
+                  01 / REQUIREMENTS
+                </p>
                 <h2>Build list</h2>
               </div>
               <div className={styles.panelHeaderActions}>
@@ -981,13 +1001,14 @@ function PlanList({
         typeId: "typeId" in entry ? entry.typeId : entry.itemTypeId,
         quantity: getListAmount(entry),
         category: "item" as const,
-        imageVariation: "bpoCount" in entry
-          ? "bpc" as const
-          : / blueprint$/i.test(entry.name)
-            ? "bp" as const
-            : / formula$/i.test(entry.name)
-              ? "bpc" as const
-              : "icon" as const,
+        imageVariation:
+          "bpoCount" in entry
+            ? ("bpc" as const)
+            : / blueprint$/i.test(entry.name)
+              ? ("bp" as const)
+              : / formula$/i.test(entry.name)
+                ? ("bpc" as const)
+                : ("icon" as const),
       })),
     });
     router.push("/compress");
@@ -1026,7 +1047,16 @@ function PlanList({
   return (
     <>
       <div className={styles.planActions}>
-        {activeTab === "Buy" && <button type="button" className={`actionButton ${styles.copyButton}`} onClick={() => void sendToCompress()}><Minimize2 aria-hidden="true" /><span>Send to Compress</span></button>}
+        {activeTab === "Buy" && (
+          <button
+            type="button"
+            className={`actionButton ${styles.copyButton}`}
+            onClick={() => void sendToCompress()}
+          >
+            <Minimize2 aria-hidden="true" />
+            <span>Send to Compress</span>
+          </button>
+        )}
         <button type="button" className={`actionButton ${styles.copyButton}`} onClick={copyList}>
           <CopyIcon aria-hidden="true" />
           {copyStatus || (activeTab === "Plan" ? "Copy table" : "Copy list")}
@@ -1082,11 +1112,11 @@ function PlanList({
                       ? `${(materialEntry.buildQuantity || materialEntry.buyQuantity).toLocaleString()} units`
                       : activeTab === "Copy" && "neededQuantity" in entry
                         ? `${Math.max(0, entry.neededQuantity - entry.stockRuns).toLocaleString()} runs`
-                      : "quantity" in entry
-                        ? `${entry.quantity.toLocaleString()} ${activeTab === "Copy" ? "runs" : "units"}`
-                        : "runs" in entry
-                          ? `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
-                          : "";
+                        : "quantity" in entry
+                          ? `${entry.quantity.toLocaleString()} ${activeTab === "Copy" ? "runs" : "units"}`
+                          : "runs" in entry
+                            ? `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
+                            : "";
           const imageVariation =
             planBlueprintVariation ??
             ("imageVariation" in entry && entry.imageVariation
@@ -1094,22 +1124,22 @@ function PlanList({
                 ? "bp"
                 : entry.imageVariation === "icon" && isReactionFormulaName
                   ? "bpc"
-                : entry.imageVariation
+                  : entry.imageVariation
               : isCopyOfBpo || (isPlanBpc && entry.bpoCount > 0)
                 ? "bp"
                 : isBlueprintName
                   ? "bp"
-                : isReactionFormulaName
-                  ? "bpc"
-                : activeTab === "Manufacture" ||
-                    activeTab === "React" ||
-                    isPlanBpc ||
-                    isBpcPurchase ||
-                    isPlanReaction ||
-                    activeTab === "Copy" ||
-                    activeTab === "Invent"
-                  ? "bpc"
-                  : "icon");
+                  : isReactionFormulaName
+                    ? "bpc"
+                    : activeTab === "Manufacture" ||
+                        activeTab === "React" ||
+                        isPlanBpc ||
+                        isBpcPurchase ||
+                        isPlanReaction ||
+                        activeTab === "Copy" ||
+                        activeTab === "Invent"
+                      ? "bpc"
+                      : "icon");
           const planCells =
             activeTab === "Plan"
               ? getPlanCells(entry as PlanResult["lists"]["planItems"][number])
@@ -1136,7 +1166,9 @@ function PlanList({
                         {column === "Available" && (
                           <AvailableSourceIcons
                             counts={
-                              "availableSourceCounts" in entry ? entry.availableSourceCounts : undefined
+                              "availableSourceCounts" in entry
+                                ? entry.availableSourceCounts
+                                : undefined
                             }
                           />
                         )}

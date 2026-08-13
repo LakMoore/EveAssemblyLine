@@ -101,7 +101,10 @@ export function getTypes() {
     const packagedVolumeByTypeId = packagedVolumes();
     for (const record of records<TypesRecord>("types.json")) {
       const packagedVolume = packagedVolumeByTypeId.get(record._key);
-      typeById.set(record._key, packagedVolume === undefined ? record : { ...record, packagedVolume });
+      typeById.set(
+        record._key,
+        packagedVolume === undefined ? record : { ...record, packagedVolume },
+      );
     }
     return typeById;
   });

@@ -56,7 +56,7 @@ export interface PlanMarketInput extends PlanAssetLocation {
 export interface PlanStockItem {
   typeId: number;
   name: string;
-  quantity: number;  // this is the number of items in the stack (not the number of runs)
+  quantity: number; // this is the number of items in the stack (not the number of runs)
   locationId?: number;
   rootLocationId?: number;
   techLevel?: number;

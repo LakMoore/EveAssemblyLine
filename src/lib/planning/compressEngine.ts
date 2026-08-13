@@ -1,6 +1,15 @@
 export type CompressionRequestItem = { typeId: number; name: string; quantity: number };
 
-export type CompressionCandidate = { typeId: number; name: string; unitsToReprocess: number; efficiency: number; yields: Map<number, number>; maxRuns?: number; price?: number; selectionId?: number };
+export type CompressionCandidate = {
+  typeId: number;
+  name: string;
+  unitsToReprocess: number;
+  efficiency: number;
+  yields: Map<number, number>;
+  maxRuns?: number;
+  price?: number;
+  selectionId?: number;
+};
 
 export type CompressionResultItem = {
   typeId?: number;
@@ -42,19 +51,25 @@ export function compressMaterials(
 
   const remaining = new Map(required);
   const selected = new Map<number, number>();
-  const candidateKey = (candidate: CompressionCandidate) => candidate.selectionId ?? candidate.typeId;
+  const candidateKey = (candidate: CompressionCandidate) =>
+    candidate.selectionId ?? candidate.typeId;
   const usableCandidates = candidates.filter((candidate) => {
     if (candidate.name.startsWith("Batch Compressed ")) {
       return false;
     }
-    const matchesRequest = [...candidate.yields].some(([typeId]) => (remaining.get(typeId) ?? 0) > 0);
+    const matchesRequest = [...candidate.yields].some(
+      ([typeId]) => (remaining.get(typeId) ?? 0) > 0,
+    );
     const hasMarketCapacity = candidate.maxRuns === undefined || candidate.maxRuns > 0;
     return matchesRequest && hasMarketCapacity;
   });
 
-  const adjustedYields = (candidate: CompressionCandidate) => new Map(
-    [...candidate.yields].map(([typeId, quantity]) => [typeId, quantity * candidate.efficiency / 100] as const),
-  );
+  const adjustedYields = (candidate: CompressionCandidate) =>
+    new Map(
+      [...candidate.yields].map(
+        ([typeId, quantity]) => [typeId, (quantity * candidate.efficiency) / 100] as const,
+      ),
+    );
   const runsNeeded = (candidate: CompressionCandidate, remainingMaterials: Map<number, number>) => {
     const yields = adjustedYields(candidate);
     let runs = 1;
@@ -68,8 +83,15 @@ export function compressMaterials(
   while ([...remaining.values()].some((quantity) => quantity > 0) && usableCandidates.length > 0) {
     const candidate = usableCandidates
       .filter((entry) => candidateScore({ ...entry, yields: adjustedYields(entry) }, remaining) > 0)
-      .filter((entry) => entry.maxRuns === undefined || runsNeeded(entry, remaining) <= entry.maxRuns)
-      .sort((left, right) => candidateScore(right, remaining) - candidateScore(left, remaining) || (left.price ?? Number.POSITIVE_INFINITY) - (right.price ?? Number.POSITIVE_INFINITY) || left.typeId - right.typeId)[0];
+      .filter(
+        (entry) => entry.maxRuns === undefined || runsNeeded(entry, remaining) <= entry.maxRuns,
+      )
+      .sort(
+        (left, right) =>
+          candidateScore(right, remaining) - candidateScore(left, remaining) ||
+          (left.price ?? Number.POSITIVE_INFINITY) - (right.price ?? Number.POSITIVE_INFINITY) ||
+          left.typeId - right.typeId,
+      )[0];
     if (!candidate) {
       break;
     }
@@ -102,13 +124,18 @@ export function compressMaterials(
     const candidate = candidates.find((entry) => candidateKey(entry) === selectionId);
     const typeId = candidate?.typeId ?? selectionId;
     return {
-    typeId,
-    name: names.get(typeId) ?? candidate?.name ?? `Type ${typeId}`,
-    quantity: quantity * (candidate?.unitsToReprocess ?? 1),
+      typeId,
+      name: names.get(typeId) ?? candidate?.name ?? `Type ${typeId}`,
+      quantity: quantity * (candidate?.unitsToReprocess ?? 1),
     };
   });
   for (const [typeId, quantity] of remaining) {
-    if (quantity > 0) toBuy.push({ typeId, name: requestNames.get(typeId) ?? names.get(typeId) ?? `Type ${typeId}`, quantity });
+    if (quantity > 0)
+      toBuy.push({
+        typeId,
+        name: requestNames.get(typeId) ?? names.get(typeId) ?? `Type ${typeId}`,
+        quantity,
+      });
   }
   const surplus = [...recovered]
     .map(([typeId, quantity]) => [typeId, Math.floor(quantity)] as const)

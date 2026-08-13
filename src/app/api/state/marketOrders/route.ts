@@ -14,8 +14,10 @@ export async function GET(request: Request) {
   const characterIds = requested.length > 0 ? requested : sessionCharacterIds;
   const marketOrderStock = await getMarketOrderStock(characterIds, {
     personalSellOrdersAsStock: url.searchParams.get("personalSellOrdersAsStock") === "true",
-    allCorporationSellOrdersAsStock: url.searchParams.get("allCorporationSellOrdersAsStock") === "true",
-    myCorporationSellOrdersAsStock: url.searchParams.get("myCorporationSellOrdersAsStock") === "true",
+    allCorporationSellOrdersAsStock:
+      url.searchParams.get("allCorporationSellOrdersAsStock") === "true",
+    myCorporationSellOrdersAsStock:
+      url.searchParams.get("myCorporationSellOrdersAsStock") === "true",
   });
   if (marketOrderStock === null) {
     return NextResponse.json(

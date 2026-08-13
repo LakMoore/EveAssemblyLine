@@ -1,63 +1,65 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap");
 
 :root {
-    --ink: #d8e8ec;
-    --muted: #78929d;
-    --line: #203842;
-    --paper: #071116;
-    --white: #0d1d25;
-    --green: #42c7b4;
-    --lime: #d6ef72;
-    --cyan: #5ed8ef;
-    --amber: #f2b35d;
-    --action: #197b78;
-    --action-accent: var(--lime);
+  --ink: #d8e8ec;
+  --muted: #78929d;
+  --line: #203842;
+  --paper: #071116;
+  --white: #0d1d25;
+  --green: #42c7b4;
+  --lime: #d6ef72;
+  --cyan: #5ed8ef;
+  --amber: #f2b35d;
+  --action: #197b78;
+  --action-accent: var(--lime);
 }
 
 * {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
 body {
-    background: var(--paper);
-    color: var(--ink);
-    font-family: 'Manrope', sans-serif;
-    background-image: linear-gradient(rgba(66, 199, 180, .035) 1px, transparent 1px), linear-gradient(90deg, rgba(66, 199, 180, .035) 1px, transparent 1px);
-    background-size: 32px 32px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Manrope", sans-serif;
+  background-image:
+    linear-gradient(rgba(66, 199, 180, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(66, 199, 180, 0.035) 1px, transparent 1px);
+  background-size: 32px 32px;
 }
 
 button,
 input,
 select {
-    font: inherit;
+  font: inherit;
 }
 
 button {
-    cursor: pointer;
+  cursor: pointer;
 }
 
 .actionButton {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    height: 28px;
-    min-height: 28px;
-    padding: 0 11px;
-    box-sizing: border-box;
-    font-size: 11px;
-    white-space: nowrap;
-    transition: filter .15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 11px;
+  box-sizing: border-box;
+  font-size: 11px;
+  white-space: nowrap;
+  transition: filter 0.15s ease;
 }
 
 .actionButton:hover:not(:disabled) {
-    filter: brightness(1.25);
+  filter: brightness(1.25);
 }
 
 .actionButton > svg {
-    width: 14px;
-    height: 14px;
-    flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
 }

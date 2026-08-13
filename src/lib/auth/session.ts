@@ -6,7 +6,8 @@ import { getCollection, getSession, saveSession } from "./tokensStore";
 export const sessionCookieName = "assembly_line_session";
 
 export function getRequestCookie(request: Request, name: string) {
-  return request.headers.get("cookie")
+  return request.headers
+    .get("cookie")
     ?.split(";")
     .map((part) => part.trim())
     .find((part) => part.startsWith(`${name}=`))

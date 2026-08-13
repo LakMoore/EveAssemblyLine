@@ -13,7 +13,12 @@ function openDatabase() {
     const request = indexedDB.open(databaseName, databaseVersion);
     request.onupgradeneeded = () => {
       const database = request.result;
-      for (const storeName of [buildStoreName, stockStoreName, structureStoreName, compressSettingsStoreName]) {
+      for (const storeName of [
+        buildStoreName,
+        stockStoreName,
+        structureStoreName,
+        compressSettingsStoreName,
+      ]) {
         if (!database.objectStoreNames.contains(storeName)) database.createObjectStore(storeName);
       }
     };
@@ -22,7 +27,8 @@ function openDatabase() {
       database.onversionchange = () => database.close();
       resolve(database);
     };
-    request.onerror = () => reject(request.error ?? new Error("Could not open the browser database."));
+    request.onerror = () =>
+      reject(request.error ?? new Error("Could not open the browser database."));
     request.onblocked = () => reject(new Error("The browser database upgrade is blocked."));
   });
 }

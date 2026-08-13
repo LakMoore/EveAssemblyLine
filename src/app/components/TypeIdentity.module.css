@@ -1,52 +1,52 @@
 .identity {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 9px
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
 }
 
 .image {
-    flex: 0 0 auto;
-    object-fit: cover;
-    border: 1px solid #315662;
-    background: #102b34
+  flex: 0 0 auto;
+  object-fit: cover;
+  border: 1px solid #315662;
+  background: #102b34;
 }
 
 .details {
-    display: grid;
-    min-width: 0;
-    justify-items: start
+  display: grid;
+  min-width: 0;
+  justify-items: start;
 }
 
 .name,
 .typeId {
-    max-width: 100%;
-    overflow: hidden;
-    border: 0;
-    background: transparent;
-    color: inherit;
-    cursor: copy;
-    padding: 0;
-    text-align: left;
-    text-overflow: ellipsis;
-    white-space: nowrap
+  max-width: 100%;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: copy;
+  padding: 0;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .name {
-    font: inherit;
-    font-weight: 700
+  font: inherit;
+  font-weight: 700;
 }
 
 .typeId {
-    margin-top: 3px;
-    color: #78959e;
-    font: 9px 'DM Mono'
+  margin-top: 3px;
+  color: #78959e;
+  font: 9px "DM Mono";
 }
 
 .name:hover,
 .name:focus-visible,
 .typeId:hover,
 .typeId:focus-visible {
-    color: var(--cyan);
-    outline: 0
+  color: var(--cyan);
+  outline: 0;
 }

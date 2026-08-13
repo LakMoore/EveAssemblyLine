@@ -76,7 +76,12 @@ function stockItemVolume(item: StockItem) {
 }
 
 function isBlueprintStockItem(item: StockItem) {
-  return item.category === "blueprint" || item.category === "bp" || item.category === "bpo" || item.category === "bpc";
+  return (
+    item.category === "blueprint" ||
+    item.category === "bp" ||
+    item.category === "bpo" ||
+    item.category === "bpc"
+  );
 }
 
 function stockTotalCount(location: StockRecord) {
@@ -182,10 +187,7 @@ export default function StockPage() {
           ) ||
           (record.systemName === "Unknown system" && record.structureName.startsWith("Location "));
         const combinedRecords = esiResponse.ok
-          ? [
-              ...esiRecords,
-              ...correctedRecords.filter((record) => !isEsiRecord(record)),
-            ]
+          ? [...esiRecords, ...correctedRecords.filter((record) => !isEsiRecord(record))]
           : correctedRecords;
         setLocations(
           [...combinedRecords].sort((left, right) =>
@@ -226,7 +228,9 @@ export default function StockPage() {
           );
         });
         const previousByLocation = new Map(records.map((record) => [locationKey(record), record]));
-        const currentKeys = new Set(recordsWithMarketQuantities.map((record) => locationKey(record)));
+        const currentKeys = new Set(
+          recordsWithMarketQuantities.map((record) => locationKey(record)),
+        );
         await Promise.all([
           ...recordsWithMarketQuantities.flatMap((record) => {
             const previous = previousByLocation.get(locationKey(record));
@@ -250,10 +254,12 @@ export default function StockPage() {
     }
     void loadPageData();
     const handleRefresh = (event: Event) => {
-      const detail = (event as CustomEvent<{
-        rateLimitedUntil?: string | null;
-        stockLocations?: EsiStockResponse["locations"];
-      }>).detail;
+      const detail = (
+        event as CustomEvent<{
+          rateLimitedUntil?: string | null;
+          stockLocations?: EsiStockResponse["locations"];
+        }>
+      ).detail;
       if (detail?.rateLimitedUntil) return;
       if (!detail?.stockLocations) {
         void loadPageData();
@@ -865,9 +871,10 @@ function ViewItemsModal({
               const marketOrderQuantity = item.marketOrderQuantity ?? 0;
               const isMarketOrder = item.source === "marketOrder";
               const isBlueprint = Boolean(blueprints);
-              const hasBlueprintOriginal = blueprints?.some(
-                (blueprint) => blueprint.type === "bpo" || blueprint.category === "bpo",
-              ) ?? false;
+              const hasBlueprintOriginal =
+                blueprints?.some(
+                  (blueprint) => blueprint.type === "bpo" || blueprint.category === "bpo",
+                ) ?? false;
               const isReaction = Boolean(reactionJobs);
               const reactionInUse =
                 reactionJobs?.reduce((total, job) => total + job.quantity, 0) ?? 0;
@@ -882,13 +889,16 @@ function ViewItemsModal({
                         return;
                       }
                       existing.copies += detail.copies;
-                      if (detail.runs !== undefined) existing.runs = (existing.runs ?? 0) + detail.runs;
+                      if (detail.runs !== undefined)
+                        existing.runs = (existing.runs ?? 0) + detail.runs;
                     };
 
                     for (const blueprint of blueprints) {
-                      const kind = blueprint.type === "bpo" || blueprint.category === "bpo" ? "BPO" : "BPC";
+                      const kind =
+                        blueprint.type === "bpo" || blueprint.category === "bpo" ? "BPO" : "BPC";
                       const source = blueprint.inBuild
-                        ? blueprint.activityName === "Invention" && !blueprint.blueprintPrints?.length
+                        ? blueprint.activityName === "Invention" &&
+                          !blueprint.blueprintPrints?.length
                           ? "In Progress"
                           : "In use"
                         : "Asset";
@@ -912,7 +922,12 @@ function ViewItemsModal({
                         source,
                         copies: blueprint.quantity,
                         ...(kind === "BPC"
-                          ? { runs: (blueprint.blueprintPrints ?? []).reduce((total, print) => total + Math.max(0, print.runs), 0) }
+                          ? {
+                              runs: (blueprint.blueprintPrints ?? []).reduce(
+                                (total, print) => total + Math.max(0, print.runs),
+                                0,
+                              ),
+                            }
                           : {}),
                         ...(source === "In Progress"
                           ? { estimated: true }
@@ -938,7 +953,9 @@ function ViewItemsModal({
                     className={styles.stockTypeIdentity}
                     variation={
                       isBlueprint
-                        ? hasBlueprintOriginal ? "bp" : "bpc"
+                        ? hasBlueprintOriginal
+                          ? "bp"
+                          : "bpc"
                         : item.category === "reaction"
                           ? "bpc"
                           : item.source !== "marketOrder" && item.techLevel === 1
@@ -1037,7 +1054,8 @@ function ViewItemsModal({
                               key={`${item.typeId}-${index}`}
                             >
                               <strong>
-                                {detail.copies.toLocaleString()} {detail.kind === "BPO"
+                                {detail.copies.toLocaleString()}{" "}
+                                {detail.kind === "BPO"
                                   ? detail.copies === 1
                                     ? "Original"
                                     : "Originals"
@@ -1284,10 +1302,7 @@ async function hydrateVolumes(records: StockRecord[], language: SdeLanguage) {
   if (typeIdsNeedingMetadata.length === 0) return records;
   let metadata: Awaited<ReturnType<typeof fetchTypeMetadata>> = [];
   try {
-    metadata = await fetchTypeMetadata(
-      typeIdsNeedingMetadata,
-      language,
-    );
+    metadata = await fetchTypeMetadata(typeIdsNeedingMetadata, language);
   } catch {
     return records;
   }
