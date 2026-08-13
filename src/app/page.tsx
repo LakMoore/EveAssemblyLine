@@ -121,9 +121,10 @@ function ScrollTopButton({
 
   useEffect(() => {
     function updateFloatingState() {
-      const isDesktop = window.matchMedia("(min-width: 901px)").matches;
+      // Must match the breakpoint where the table headers become sticky.
+      const isSticky = window.matchMedia("(min-width: 641px)").matches;
       const headerTop = headerRef.current?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY;
-      setIsFloating(isDesktop && headerTop <= 0);
+      setIsFloating(isSticky && headerTop <= 0);
     }
 
     updateFloatingState();

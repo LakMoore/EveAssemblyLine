@@ -234,7 +234,8 @@
 
 @media (max-width: 900px) {
   .shell {
-    overflow-x: hidden;
+    /* clip, not hidden: hidden would make .shell a scroll container and break sticky table headers */
+    overflow-x: clip;
   }
 
   .topbar {
@@ -2443,6 +2444,24 @@
 .sidebarFooter .addButton {
   flex: 1;
   margin-top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 6px 10px;
+  font-size: 12px;
+  letter-spacing: 0.2px;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.sidebarFooter .addButton:hover {
+  border-color: #3f7180;
+  background: #5ed8ef0f;
+  color: var(--cyan);
 }
 
 .layoutCollapsed .sidebarFooter {

@@ -97,7 +97,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
   const inventedBpcTypeIds = new Set<number>();
   const producedParts = new Map<number, number>();
   const sourceCountsByTypeId = new Map<number, Map<PlanSourceIcon, number>>();
-  for (const stockItem of request.stock ?? []) {
+  for (const stockItem of request.stock) {
     const sourceCounts =
       sourceCountsByTypeId.get(stockItem.typeId) ?? new Map<PlanSourceIcon, number>();
     const addSource = (source: PlanSourceIcon, quantityOverride?: number) => {
@@ -185,7 +185,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       },
     );
   }
-  for (const item of request.stock ?? []) {
+  for (const item of request.stock) {
     if (!item.inBuild || item.category !== "bp" || item.activityName !== "Copying") continue;
     const copiedRuns = (item.jobRuns ?? 0) * (item.licensedRuns ?? 1);
     if (copiedRuns <= 0) continue;
@@ -222,8 +222,8 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     ReturnType<typeof getBuildBlueprintByProductTypeId>
   >();
   const defaultEfficiency: Efficiency = {
-    me: clampEfficiency(request.settings.defaultMe ?? 10, 10),
-    te: clampEfficiency(request.settings.defaultTe ?? 20, 20),
+    me: clampEfficiency(request.settings.defaultMe, 10),
+    te: clampEfficiency(request.settings.defaultTe, 20),
   };
 
   function updateMaterial(typeId: number, fallbackName: string, update: Partial<Material>) {

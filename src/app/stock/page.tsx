@@ -266,8 +266,8 @@ export default function StockPage() {
           stockLocations?: EsiStockResponse["locations"];
         }>
       ).detail;
-      if (detail?.rateLimitedUntil) return;
-      if (!detail?.stockLocations) {
+      if (detail.rateLimitedUntil) return;
+      if (!detail.stockLocations) {
         void loadPageData();
         return;
       }
