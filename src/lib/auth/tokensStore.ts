@@ -36,13 +36,11 @@ function normalizeCharacter(value: unknown): CharacterTokenRecord | null {
 		characterName: record.characterName,
 		collectionId: record.collectionId ?? record.accountId,
 		personalAuth,
-		...(normalizeTokenSet(record.corpAuth) ? { corpAuth: normalizeTokenSet(record.corpAuth)! } : {}),
 		corporationId: record.corporationId,
 		corporationRoles: Array.isArray(record.corporationRoles) ? record.corporationRoles : [],
 		hasDirectorRole: record.hasDirectorRole,
 		hasAccountantRole: record.hasAccountantRole,
 		hasTraderRole: record.hasTraderRole,
-		corpAuthCompleted: record.corpAuthCompleted,
 	};
 }
 

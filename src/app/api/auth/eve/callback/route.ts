@@ -68,7 +68,6 @@ export async function GET(request: Request) {
       hasAccountantRole: roles.includes("Accountant"),
       hasTraderRole: roles.includes("Trader"),
       hasStationManagerRole: roles.includes("Station_Manager"),
-      corpAuthCompleted: roles.includes("Director") || roles.includes("Station_Manager"),
     });
     if (!session.collectionId) session.collectionId = resolvedCollectionId;
     await saveSession(session);

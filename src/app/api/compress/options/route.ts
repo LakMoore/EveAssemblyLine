@@ -61,7 +61,7 @@ async function getOptions(request: Request, language: SdeLanguage, suppliedStruc
   });
   const structureTokens = uncachedStructures.length === 0
     ? []
-    : (await Promise.all(records.flatMap((record) => [getUsableToken(record, "personal"), ...(record.corpAuth ? [getUsableToken(record, "corp")] : [])].map((promise) => promise.catch(() => null))))).filter((token): token is NonNullable<typeof token> => token !== null);
+    : (await Promise.all(records.map((record) => getUsableToken(record, "personal").catch(() => null)))).filter((token): token is NonNullable<typeof token> => token !== null);
   const resolvedStructures = await Promise.all(assetStructures.map(async (location) => {
     const structureId = Number(location.id.slice("structure:".length));
     const cached = structureServiceCache.get(structureId);
@@ -75,8 +75,13 @@ async function getOptions(request: Request, language: SdeLanguage, suppliedStruc
   }));
   markPhase("structures");
   const characters = await Promise.all(records.map(async (record) => {
-    const skills = await requestEsi<{ skills?: Array<{ skill_id: number; active_skill_level: number }> }>(`/characters/${record.characterId}/skills/`, await getUsableToken(record, "personal")).catch(() => ({ data: null }));
-    const clones = await requestEsi<{ active_clone_id?: number; clones?: Array<{ clone_id: number; implants?: number[] }> }>(`/characters/${record.characterId}/clones/`, await getUsableToken(record, "personal")).catch(() => ({ data: null }));
+    const token = await getUsableToken(record, "personal").catch(() => null);
+    const skills = token
+      ? await requestEsi<{ skills?: Array<{ skill_id: number; active_skill_level: number }> }>(`/characters/${record.characterId}/skills/`, token).catch(() => ({ data: null }))
+      : { data: null };
+    const clones = token
+      ? await requestEsi<{ active_clone_id?: number; clones?: Array<{ clone_id: number; implants?: number[] }> }>(`/characters/${record.characterId}/clones/`, token).catch(() => ({ data: null }))
+      : { data: null };
     return { id: `character:${record.characterId}`, characterId: record.characterId, name: record.characterName, skills: Object.fromEntries((skills.data?.skills ?? []).map((skill) => [skill.skill_id, skill.active_skill_level])), implants: [...new Set((clones.data?.clones ?? []).find((clone) => clone.clone_id === clones.data?.active_clone_id)?.implants ?? [])] };
   }));
   markPhase("characters");

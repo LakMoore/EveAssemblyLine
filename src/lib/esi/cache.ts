@@ -764,7 +764,6 @@ export async function refreshCharacterState(
     }
 
     if (
-      character.corpAuthCompleted &&
       character.hasDirectorRole &&
       character.corporationId &&
       !refreshedCorporationIds.has(character.corporationId)
@@ -959,7 +958,6 @@ export async function getRunningIndustryJobs(
       .filter(
         (character) =>
           characterIds.includes(character.characterId) &&
-          character.corpAuthCompleted &&
           character.hasDirectorRole &&
           character.corporationId,
       )
@@ -986,7 +984,6 @@ export async function getResolvedAssets(characterIds: number[], includeCorporati
       .filter(
         (character) =>
           characterIds.includes(character.characterId) &&
-          character.corpAuthCompleted &&
           character.hasDirectorRole &&
           character.corporationId,
       )
@@ -1014,7 +1011,6 @@ export async function getShipAssets(
       .filter(
         (character) =>
           characterIds.includes(character.characterId) &&
-          character.corpAuthCompleted &&
           character.hasDirectorRole &&
           character.corporationId,
       )
@@ -1041,7 +1037,6 @@ export async function getAllAssetsRaw(
       .filter(
         (character) =>
           characterIds.includes(character.characterId) &&
-          character.corpAuthCompleted &&
           character.hasDirectorRole &&
           character.corporationId,
       )
@@ -1065,7 +1060,6 @@ export async function getResolvedAssetIndex(
           .filter(
             (character) =>
               characterIds.includes(character.characterId) &&
-              character.corpAuthCompleted &&
               character.hasDirectorRole &&
               character.corporationId,
           )
@@ -1099,7 +1093,6 @@ export async function getRootContainersByItemId(
       .filter(
         (character) =>
           characterIds.includes(character.characterId) &&
-          character.corpAuthCompleted &&
           character.hasDirectorRole &&
           character.corporationId,
       )
@@ -1132,7 +1125,6 @@ export async function getAssembledStructureRigAssets(
       .filter(
         (character) =>
           characterIds.includes(character.characterId) &&
-          character.corpAuthCompleted &&
           character.hasDirectorRole &&
           character.corporationId,
       )
@@ -1157,7 +1149,6 @@ export async function getAssembledShipAssets(
       .filter(
         (character) =>
           characterIds.includes(character.characterId) &&
-          character.corpAuthCompleted &&
           character.hasDirectorRole &&
           character.corporationId,
       )
@@ -1184,7 +1175,6 @@ export async function getAssetCacheMetadata(
             .filter(
               (character) =>
                 characterIds.includes(character.characterId) &&
-                character.corpAuthCompleted &&
                 character.hasDirectorRole &&
                 character.corporationId,
             )
@@ -1269,7 +1259,7 @@ export async function getMarketOrderStock(
     selectedCharacters
       .filter(
         (character) =>
-          character.corpAuthCompleted && character.hasDirectorRole && character.corporationId,
+          character.hasDirectorRole && character.corporationId,
       )
       .map((character) => character.corporationId!),
   );
@@ -1314,7 +1304,6 @@ export async function getStateStatus(characterIds: number[]) {
     if (
       !characterIds.includes(character.characterId) ||
       !character.corporationId ||
-      !character.corpAuthCompleted ||
       !character.hasDirectorRole
     )
       continue;

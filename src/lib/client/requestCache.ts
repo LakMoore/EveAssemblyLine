@@ -8,7 +8,6 @@ export type ClientSession = {
     characterId: number;
     characterName: string;
     hasDirectorRole: boolean;
-    corpAuthCompleted: boolean;
   }>;
 };
 
@@ -71,7 +70,6 @@ export type ClientCharacter = {
   hasDirectorRole: boolean;
   hasAccountantRole: boolean;
   hasTraderRole: boolean;
-  corpAuthCompleted: boolean;
 };
 
 export type ClientCharacterStatus = {

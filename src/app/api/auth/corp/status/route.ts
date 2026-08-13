@@ -6,10 +6,10 @@ export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   const characterIds = await getSessionCharacterIds(session);
-  const records = await getCharacters();
-  return NextResponse.json(records
-    .filter((record) => characterIds.includes(record.characterId))
-    .map(({ characterId, characterName, corporationId, corporationRoles, hasDirectorRole, hasAccountantRole, hasTraderRole, corpAuthCompleted }) => ({
+  const characters = await getCharacters();
+  return NextResponse.json(characters
+    .filter((character) => characterIds.includes(character.characterId))
+    .map(({ characterId, characterName, corporationId, corporationRoles, hasDirectorRole, hasAccountantRole, hasTraderRole }) => ({
       characterId,
       characterName,
       corporationId,
@@ -17,6 +17,5 @@ export async function GET(request: Request) {
       hasDirectorRole: Boolean(hasDirectorRole),
       hasAccountantRole: Boolean(hasAccountantRole),
       hasTraderRole: Boolean(hasTraderRole),
-      corpAuthCompleted: Boolean(corpAuthCompleted),
     })));
 }

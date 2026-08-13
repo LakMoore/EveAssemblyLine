@@ -12,6 +12,7 @@ import { getCharacter, upsertCharacter } from "@/lib/auth/tokensStore";
 
 const esiBaseUrl = process.env.ESI_BASE_URL ?? "https://esi.evetech.net/latest";
 const refreshLocks = new Map<string, Promise<TokenSet>>();
+const tokenContexts = new WeakMap<TokenSet, { characterId: number; purpose: "personal" | "corp" }>();
 const structureMetadataCache = new Map<number, { expiresAt: number; response: LocationMetadataResponse }>();
 const structureMetadataCacheTtlMs = 6 * 60 * 60 * 1000;
 let esiRateLimitedUntil = 0;
@@ -116,22 +117,31 @@ type LocationMetadataResponse = {
 };
 
 async function getUsableToken(record: CharacterTokenRecord, purpose: "personal" | "corp") {
-  const usesCorporationToken = purpose === "corp" && Boolean(record.corpAuth);
-  const tokenSet = usesCorporationToken ? record.corpAuth : record.personalAuth;
-  if (!tokenSet) throw new Error(`Missing ${purpose} ESI authorization`);
+  const tokenSet = record.personalAuth;
+  tokenContexts.set(tokenSet, { characterId: record.characterId, purpose });
   if (Date.parse(tokenSet.accessTokenExpiresAt) > Date.now() + 5 * 60 * 1000) return tokenSet;
   const lockKey = `${record.characterId}:${purpose}`;
   const existing = refreshLocks.get(lockKey);
   if (existing) return existing;
-  const refresh = refreshTokenSet(tokenSet)
+  const refresh = Promise.resolve()
+    .then(async () => {
+      const current = await getCharacter(record.characterId);
+      const currentTokenSet = current?.personalAuth;
+      if (currentTokenSet && Date.parse(currentTokenSet.accessTokenExpiresAt) > Date.now() + 5 * 60 * 1000) {
+        tokenContexts.set(currentTokenSet, { characterId: record.characterId, purpose });
+        return currentTokenSet;
+      }
+      return refreshTokenSet(currentTokenSet ?? tokenSet);
+    })
     .then(async (updated) => {
       const current = await getCharacter(record.characterId);
       if (current) {
         await upsertCharacter({
           ...current,
-          ...(usesCorporationToken ? { corpAuth: updated } : { personalAuth: updated }),
+          personalAuth: updated,
         });
       }
+      tokenContexts.set(updated, { characterId: record.characterId, purpose });
       return updated;
     })
     .finally(() => refreshLocks.delete(lockKey));
@@ -143,7 +153,7 @@ export async function requestEsi<T>(
   path: string,
   tokenSet?: TokenSet,
   init?: RequestInit,
-  options: { bypassCache?: boolean } = {},
+  options: { bypassCache?: boolean; retry401?: boolean } = {},
 ): Promise<{ data: T | null; headers: Headers; status: number; fromCache: boolean }> {
   const body = typeof init?.body === "string" ? init.body : "";
   const cachePath = body
@@ -174,6 +184,22 @@ export async function requestEsi<T>(
   if (response.status === 304)
     return { data: null, headers: response.headers, status: response.status, fromCache: false };
   if (!response.ok) {
+    if (response.status === 401 && tokenSet && options.retry401 !== false) {
+      const context = tokenContexts.get(tokenSet);
+      const current = context ? await getCharacter(context.characterId) : null;
+      const currentTokenSet = context ? current?.personalAuth : undefined;
+      const tokenChanged = currentTokenSet && (
+        currentTokenSet.accessToken !== tokenSet.accessToken ||
+        currentTokenSet.accessTokenExpiresAt !== tokenSet.accessTokenExpiresAt
+      );
+      if (tokenChanged) {
+        tokenContexts.set(currentTokenSet, context!);
+        return requestEsi<T>(path, currentTokenSet, init, {
+          bypassCache: true,
+          retry401: false,
+        });
+      }
+    }
     const details = response.status === 401 ? await response.text() : "";
     if (response.status === 429) {
       const retryAfter = response.headers.get("retry-after");
@@ -354,7 +380,7 @@ export async function fetchCharacterAssets(record: CharacterTokenRecord, etag?: 
 }
 
 export async function fetchCorporationAssets(record: CharacterTokenRecord, etag?: string, bypassCache = false) {
-  if (!record.corporationId || !record.hasDirectorRole || !record.corpAuthCompleted) {
+  if (!record.corporationId || !record.hasDirectorRole) {
     throw new Error("Corporation authorization is incomplete");
   }
   const token = await getUsableToken(record, "corp");
@@ -429,7 +455,7 @@ export async function fetchCharacterIndustryJobs(record: CharacterTokenRecord, b
 }
 
 export async function fetchCorporationIndustryJobs(record: CharacterTokenRecord, bypassCache = false) {
-  if (!record.corporationId || !record.hasDirectorRole || !record.corpAuthCompleted) {
+  if (!record.corporationId || !record.hasDirectorRole) {
     throw new Error("Corporation authorization is incomplete");
   }
   const token = await getUsableToken(record, "corp");
@@ -493,7 +519,7 @@ export async function fetchCorporationMarketOrders(
   etag?: string,
   bypassCache = false,
 ) {
-  if (!record.corporationId || !record.hasDirectorRole || !record.corpAuthCompleted) {
+  if (!record.corporationId || !record.hasDirectorRole) {
     throw new Error("Corporation authorization is incomplete");
   }
   const token = await getUsableToken(record, "corp");

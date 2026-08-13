@@ -270,7 +270,7 @@ export default function CharactersPage() {
 
   const corporations = [...new Set(characters.map((character) => character.corporationId).filter(Boolean))].map((corporationId) => {
     const pilots = characters.filter((character) => character.corporationId === corporationId);
-    const eligible = pilots.filter((character) => character.corpAuthCompleted && character.hasDirectorRole);
+    const eligible = pilots.filter((character) => character.hasDirectorRole);
     const corpStatuses = pilots.flatMap((pilot) => statuses.find((status) => status.characterId === pilot.characterId)?.corporations ?? []).filter((status) => status.corporationId === corporationId);
     return { corporationId: corporationId!, corporationName: pilots[0]?.corporationName, pilots, eligible, status: corpStatuses[0]?.assets };
   });
@@ -320,7 +320,7 @@ export default function CharactersPage() {
                   corporation.orders,
                 ]),
               ].some((endpoint) => endpoint?.status === "error");
-              const hasCorpAccess = character.corpAuthCompleted && character.hasDirectorRole;
+              const hasCorpAccess = character.hasDirectorRole;
               return <div
                 className={`${styles.characterRow} ${hasAuthorizationError ? styles.characterRowWithReauthorize : ""}`}
                 key={character.characterId}
@@ -372,7 +372,7 @@ export default function CharactersPage() {
       </section>
       {selectedCharacter && (() => {
         const selectedStatus = statuses.find((entry) => entry.characterId === selectedCharacter.characterId);
-        const hasCorpAccess = selectedCharacter.corpAuthCompleted && selectedCharacter.hasDirectorRole;
+        const hasCorpAccess = selectedCharacter.hasDirectorRole;
         return <div className={styles.modalBackdrop} onClick={() => setSelectedCharacter(null)}>
           <div className={styles.importModal} role="dialog" aria-modal="true" aria-labelledby="character-dialog-title" onClick={(event) => event.stopPropagation()}>
             <div className={styles.panelHeader}>

@@ -200,9 +200,6 @@ async function resolveLocation(
         try {
           usable.push(await getUsableToken(character, "personal"));
         } catch {}
-        try {
-          if (character.corpAuth) usable.push(await getUsableToken(character, "corp"));
-        } catch {}
         return usable;
       }),
     )

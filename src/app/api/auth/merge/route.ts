@@ -62,7 +62,6 @@ export async function POST(request: Request) {
       hasAccountantRole: roles.includes("Accountant"),
       hasTraderRole: roles.includes("Trader"),
       hasStationManagerRole: roles.includes("Station_Manager"),
-      corpAuthCompleted: roles.includes("Director") || roles.includes("Station_Manager"),
     });
     await deletePendingMerge(value.mergeId);
     const response = NextResponse.json({ success: true });

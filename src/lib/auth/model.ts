@@ -11,14 +11,12 @@ export interface CharacterTokenRecord {
   characterName: string;
   collectionId?: string;
   personalAuth: TokenSet;
-  corpAuth?: TokenSet;
   corporationId?: number;
   corporationRoles?: string[];
   hasDirectorRole?: boolean;
   hasAccountantRole?: boolean;
   hasTraderRole?: boolean;
   hasStationManagerRole?: boolean;
-  corpAuthCompleted?: boolean;
 }
 
 export interface CharacterCollectionRecord {

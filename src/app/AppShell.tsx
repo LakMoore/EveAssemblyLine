@@ -27,7 +27,6 @@ type CharacterSummary = {
   characterId: number;
   characterName: string;
   hasDirectorRole: boolean;
-  corpAuthCompleted: boolean;
 };
 
 type EsiStockResponse = {
@@ -532,7 +531,7 @@ export default function AppShell({
                   <span className={styles.navText}>
                     <strong>{character.characterName}</strong>
                     <small>
-                      {character.corpAuthCompleted && character.hasDirectorRole
+                      {character.hasDirectorRole
                         ? "Director access"
                         : "Character access"}
                     </small>

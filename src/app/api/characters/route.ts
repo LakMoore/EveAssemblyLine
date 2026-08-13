@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   } catch {}
   return NextResponse.json(
     sessionRecords
-      .map(({ characterId, characterName, corporationId, corporationRoles, hasDirectorRole, hasAccountantRole, hasTraderRole, corpAuthCompleted }) => ({
+      .map(({ characterId, characterName, corporationId, corporationRoles, hasDirectorRole, hasAccountantRole, hasTraderRole }) => ({
         characterId,
         characterName,
         corporationId,
@@ -26,7 +26,6 @@ export async function GET(request: Request) {
         hasDirectorRole: Boolean(hasDirectorRole),
         hasAccountantRole: Boolean(hasAccountantRole),
         hasTraderRole: Boolean(hasTraderRole),
-        corpAuthCompleted: Boolean(corpAuthCompleted),
       })),
   );
 }
