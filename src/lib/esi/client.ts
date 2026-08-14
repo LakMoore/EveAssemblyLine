@@ -552,11 +552,12 @@ export async function fetchCharacterIndustryJobs(
     bypassCache,
   );
   return {
-    jobs: result.data === null
-      ? null
-      : result.data
-      .filter((job) => job.status !== "cancelled" && job.status !== "delivered")
-      .map((job) => mapIndustryJob(job, "character", record.characterId)),
+    jobs:
+      result.data === null
+        ? null
+        : result.data
+            .filter((job) => job.status !== "cancelled" && job.status !== "delivered")
+            .map((job) => mapIndustryJob(job, "character", record.characterId)),
     headers: result.headers,
     notModified: result.status === 304,
     fromCache: result.fromCache,
@@ -579,11 +580,12 @@ export async function fetchCorporationIndustryJobs(
     bypassCache,
   );
   return {
-    jobs: result.data === null
-      ? null
-      : result.data
-      .filter((job) => job.status !== "cancelled" && job.status !== "delivered")
-      .map((job) => mapIndustryJob(job, "corporation", record.corporationId!)),
+    jobs:
+      result.data === null
+        ? null
+        : result.data
+            .filter((job) => job.status !== "cancelled" && job.status !== "delivered")
+            .map((job) => mapIndustryJob(job, "corporation", record.corporationId!)),
     headers: result.headers,
     notModified: result.status === 304,
     fromCache: result.fromCache,

@@ -287,13 +287,16 @@ export async function getRigDogma() {
 export function getTypeDogma() {
   return getOnce(
     "typeDogma",
-    () => {
+    async () => {
+      const types = await getTypes();
       for (const record of records<TypeDogmaRecord>("typeDogma.json")) {
+        // don't load the dogma for types that don't exist in "our" SDE
+        if (!types.has(record._key)) continue;
         typeDogmaByTypeId.set(record._key, record);
       }
       return typeDogmaByTypeId;
     },
-  );
+  ).then((typeDogma) => typeDogma);
 }
 
 export async function getBonusDogmaAttributes() {

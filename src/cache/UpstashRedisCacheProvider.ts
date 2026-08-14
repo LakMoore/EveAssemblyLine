@@ -45,7 +45,6 @@ export class UpstashRedisCacheProvider implements ICacheProvider {
 
   async set<T>(key: string, value: T, ttlMs?: number | null): Promise<void> {
     const serialized = JSON.stringify(value);
-    if (serialized === undefined) throw new Error("Cache values must be JSON serializable.");
 
     if (ttlMs != null && ttlMs > 0) {
       await this.client.set(key, serialized, { ex: Math.ceil(ttlMs / 1000) });
@@ -62,7 +61,6 @@ export class UpstashRedisCacheProvider implements ICacheProvider {
       const batch = entries.slice(start, start + batchSize);
       for (const entry of batch) {
         const serialized = JSON.stringify(entry.value);
-        if (serialized === undefined) throw new Error("Cache values must be JSON serializable.");
         if (entry.ttlMs != null && entry.ttlMs > 0) {
           pipeline.set(entry.key, serialized, { ex: Math.ceil(entry.ttlMs / 1000) });
         }

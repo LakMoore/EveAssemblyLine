@@ -83,9 +83,9 @@ function statusLabel(status: EndpointStatus | undefined, noAccess = false) {
 function statusClass(status: EndpointStatus | undefined) {
   const currentStatus = renderedStatus(status);
   if (!currentStatus || !currentStatus.hasBody) return styles.statusError;
-  if (currentStatus?.status === "fresh") return styles.statusFresh;
-  if (currentStatus?.status === "stale") return styles.statusError;
-  if (currentStatus?.status === "rate_limited" || currentStatus?.status === "error") {
+  if (currentStatus.status === "fresh") return styles.statusFresh;
+  if (currentStatus.status === "stale") return styles.statusError;
+  if (currentStatus.status === "rate_limited" || currentStatus.status === "error") {
     return styles.statusError;
   }
   return styles.statusCached;

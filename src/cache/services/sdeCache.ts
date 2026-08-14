@@ -331,7 +331,7 @@ export function getRigDogma() {
 }
 
 export function getTypeDogma() {
-  return getMap(loadTypeDogma);
+  return getMap<TypeDogmaRecord>(loadTypeDogma);
 }
 
 export function getRigDogmaByTypeId(typeId: number): Promise<TypeDogmaRecord | null> {

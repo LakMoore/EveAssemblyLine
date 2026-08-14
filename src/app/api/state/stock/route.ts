@@ -515,10 +515,7 @@ export async function GET(request: Request) {
   for (const asset of assets) {
     if (!shouldIncludeAsset(asset, shipTypeIds) || !isDirectLocation(asset)) continue;
     const rootLocation = rootLocationFromAssetLocation(asset.rootLocation);
-    if (
-      rootLocation.typeId !== undefined 
-      && shipTypeIds.has(rootLocation.typeId)
-    ) continue;
+    if (rootLocation.typeId !== undefined && shipTypeIds.has(rootLocation.typeId)) continue;
     addContribution(
       buckets,
       {

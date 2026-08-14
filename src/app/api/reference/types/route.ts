@@ -31,11 +31,7 @@ export async function GET(request: Request) {
             assembledVolume: item.volume ?? 0,
             packagedVolume: item.packagedVolume,
             ...categorizeType(item, language, marketGroupById, groupById),
-            name:
-              item.name[language]
-              ?? item.name.en
-              ?? Object.values(item.name).find(Boolean)
-              ?? `Type ${item._key}`,
+            name: item.name[language] ?? item.name.en,
           },
         ];
       });
@@ -71,11 +67,7 @@ export async function GET(request: Request) {
       .map((item) => ({
         typeId: item._key,
         ...categorizeType(item, language, marketGroupById, groupById),
-        name:
-          item.name[language]
-          ?? item.name.en
-          ?? Object.values(item.name).find(Boolean)
-          ?? `Type ${item._key}`,
+        name: item.name[language] ?? item.name.en,
       }));
 
     return NextResponse.json({ items: matches });
@@ -119,7 +111,7 @@ export async function POST(request: Request) {
     >();
     for (const item of typeById.values()) {
       if (!item.published) continue;
-      const name = item.name[language] ?? item.name.en ?? Object.values(item.name).find(Boolean);
+      const name = item.name[language] ?? item.name.en;
       if (name) {
         byName.set(
           name.toLocaleLowerCase(language),

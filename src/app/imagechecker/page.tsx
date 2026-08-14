@@ -202,7 +202,7 @@ export default function ImageCheckerPage() {
                         <ImageProbe
                           typeId={item.typeId}
                           variation={variation}
-                          status={results[item.typeId]?.[variation] ?? "checking"}
+                          status={results[item.typeId][variation]}
                           onStatusChange={(status) => updateStatus(item.typeId, variation, status)}
                         />
                       </td>

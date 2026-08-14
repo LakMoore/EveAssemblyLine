@@ -448,7 +448,7 @@ async function mergeAssetNames(
 
 function needsCompleteAssetGraph(cache: OwnerCache) {
   return (
-    (cache.stockAssetsByItemId == undefined || cache.stockAssetsByItemId?.size === 0)
+    (cache.stockAssetsByItemId == undefined || cache.stockAssetsByItemId.size === 0)
     && Array.isArray(cache.allAssetsRaw?.lastBody)
   );
 }
@@ -544,11 +544,7 @@ async function resolveRootContainers(
 
     const visited = new Set<number>();
     let current = containerItemsByItemId.get(location);
-    if (!current) {
-      console.warn(`Location ${location} is not a container item`);
-      return null;
-    }
-    while (true) {
+    while (current) {
       if (visited.has(current.itemId)) {
         throw new Error(`Circular location hierarchy detected at ${current.itemId}`);
       }
@@ -569,6 +565,8 @@ async function resolveRootContainers(
       }
       current = parent;
     }
+    console.warn(`Location ${location} is not a container item`);
+    return null;
   }
 
   const results = await Promise.allSettled(
@@ -757,11 +755,14 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
           jobs.notModified && cache.jobs
             ? setFresh(cache.jobs.lastBody, jobs.headers, cache.jobs)
             : jobs.fromCache && cache.jobs
-            ? {
-                ...cache.jobs,
-                status: endpointDataStatus(cache.jobs.lastModified, cache.jobs.nextRefreshAllowed),
-              }
-            : setFresh(jobs.jobs ?? [], jobs.headers, cache.jobs);
+              ? {
+                  ...cache.jobs,
+                  status: endpointDataStatus(
+                    cache.jobs.lastModified,
+                    cache.jobs.nextRefreshAllowed,
+                  ),
+                }
+              : setFresh(jobs.jobs ?? [], jobs.headers, cache.jobs);
       }
       else {
         cache.jobs.status = endpointDataStatus(
@@ -970,14 +971,20 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
             jobs.notModified && corpCache.jobs
               ? setFresh(corpCache.jobs.lastBody, jobs.headers, corpCache.jobs)
               : jobs.fromCache && corpCache.jobs
-              ? {
-                  ...corpCache.jobs,
-                  status: endpointDataStatus(
-                    corpCache.jobs.lastModified,
-                    corpCache.jobs.nextRefreshAllowed,
-                  ),
-                }
-              : setFresh(jobs.jobs ?? [], jobs.headers, corpCache.jobs, 5 * 60 * 1000, jobs.fromCache);
+                ? {
+                    ...corpCache.jobs,
+                    status: endpointDataStatus(
+                      corpCache.jobs.lastModified,
+                      corpCache.jobs.nextRefreshAllowed,
+                    ),
+                  }
+                : setFresh(
+                    jobs.jobs ?? [],
+                    jobs.headers,
+                    corpCache.jobs,
+                    5 * 60 * 1000,
+                    jobs.fromCache,
+                  );
         }
         else {
           corpCache.jobs.status = endpointDataStatus(
@@ -1198,14 +1205,20 @@ export async function getResolvedAssetIndex(
       )
     : new Set<number>();
   for (const characterId of characterIds) {
-    for (const asset of getCache(characterCaches, characterId, sessionId).stockAssetsByItemId?.values()
-      ?? []) {
+    for (const asset of getCache(
+      characterCaches,
+      characterId,
+      sessionId,
+    ).stockAssetsByItemId?.values() ?? []) {
       index.set(asset.itemId, asset);
     }
   }
   for (const corporationId of corporationIds) {
-    for (const asset of getCache(corporationCaches, corporationId, sessionId).stockAssetsByItemId?.values()
-      ?? []) {
+    for (const asset of getCache(
+      corporationCaches,
+      corporationId,
+      sessionId,
+    ).stockAssetsByItemId?.values() ?? []) {
       index.set(asset.itemId, asset);
     }
   }
@@ -1235,10 +1248,9 @@ export async function getRootContainersByItemId(
   return [
     ...assets.map((asset) => [asset.itemId, asset]),
     ...[...corporations].flatMap((id) =>
-      [...getCache(corporationCaches, id, sessionId).rootContainersByItemId.values()].map((asset) => [
-        asset.itemId,
-        asset,
-      ]),
+      [...getCache(corporationCaches, id, sessionId).rootContainersByItemId.values()].map(
+        (asset) => [asset.itemId, asset],
+      ),
     ),
   ]
     .map(([itemId, asset]) => [itemId, asset] as [number, AssetRecord])
@@ -1322,7 +1334,9 @@ export async function getAssetCacheMetadata(
         ),
       ]
     : [];
-  const corporationCachesForPlan = corporations.map((id) => getCache(corporationCaches, id, sessionId));
+  const corporationCachesForPlan = corporations.map((id) =>
+    getCache(corporationCaches, id, sessionId),
+  );
   const allCaches = [...characterCachesForPlan, ...corporationCachesForPlan];
   return {
     assetsLastUpdated:
@@ -1451,7 +1465,9 @@ export async function getStateStatus(characterIds: number[], sessionId: string) 
   return {
     characters: characterIds.map((characterId) => ({
       characterId,
-      assets: toClientEndpointStatus(getCache(characterCaches, characterId, sessionId).allAssetsRaw) ?? {
+      assets: toClientEndpointStatus(
+        getCache(characterCaches, characterId, sessionId).allAssetsRaw,
+      ) ?? {
         status: "cached" as const,
         hasBody: false,
       },
@@ -1459,21 +1475,29 @@ export async function getStateStatus(characterIds: number[], sessionId: string) 
         status: "cached" as const,
         hasBody: false,
       },
-      orders: toClientEndpointStatus(getCache(characterCaches, characterId, sessionId).marketOrders) ?? {
+      orders: toClientEndpointStatus(
+        getCache(characterCaches, characterId, sessionId).marketOrders,
+      ) ?? {
         status: "cached" as const,
         hasBody: false,
       },
       corporations: (corporationsByCharacter.get(characterId) ?? []).map((corporationId) => ({
         corporationId,
-        assets: toClientEndpointStatus(getCache(corporationCaches, corporationId, sessionId).allAssetsRaw) ?? {
+        assets: toClientEndpointStatus(
+          getCache(corporationCaches, corporationId, sessionId).allAssetsRaw,
+        ) ?? {
           status: "cached" as const,
           hasBody: false,
         },
-        jobs: toClientEndpointStatus(getCache(corporationCaches, corporationId, sessionId).jobs) ?? {
+        jobs: toClientEndpointStatus(
+          getCache(corporationCaches, corporationId, sessionId).jobs,
+        ) ?? {
           status: "cached" as const,
           hasBody: false,
         },
-        orders: toClientEndpointStatus(getCache(corporationCaches, corporationId, sessionId).marketOrders) ?? {
+        orders: toClientEndpointStatus(
+          getCache(corporationCaches, corporationId, sessionId).marketOrders,
+        ) ?? {
           status: "cached" as const,
           hasBody: false,
         },

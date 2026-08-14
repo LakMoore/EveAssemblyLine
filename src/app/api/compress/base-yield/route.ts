@@ -1,34 +1,72 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { getDogmaAttributes, getGroups, getTypeDogma, getTypes } from "@/cache/services/sdeCache";
-import {
-  calculateReprocessingEfficiency,
-  type ReprocessingStructure,
-} from "@/lib/planning/reprocessingEfficiency";
+import { calculateReprocessingEfficiency } from "@/lib/planning/reprocessingEfficiency";
 
-export async function GET(request: Request) {
+// Zod schema for query parameters
+const baseYieldQuerySchema = z
+  .object({
+    structureTypeId: z
+      .string()
+      .optional()
+      .default("0")
+      .transform((val) => Number(val))
+      .refine((val) => Number.isSafeInteger(val) && val >= 0, "Must be a nonnegative integer"),
+    reprocessingRig: z
+      .string()
+      .optional()
+      .default("0")
+      .transform((val) => Number(val))
+      .refine((val) => [0, 1, 2].includes(val), "Must be 0, 1, or 2"),
+    securityStatus: z
+      .string()
+      .optional()
+      .transform((val) => (val ? Number(val) : undefined))
+      .refine(
+        (val) => val === undefined || (Number.isFinite(val) && val >= -1 && val <= 1),
+        "Must be between -1 and 1",
+      ),
+  })
+  .describe("Base yield query parameters");
+
+// Zod schema for POST request body
+const baseYieldPostSchema = z.object({
+  locations: z
+    .array(
+      z.object({
+        id: z.string().describe("Location ID"),
+        structureTypeId: z.number().int().nonnegative().optional().default(0),
+        reprocessingRig: z
+          .number()
+          .int()
+          .refine((val) => [0, 1, 2].includes(val), "Must be 0, 1, or 2")
+          .optional()
+          .default(0),
+        securityStatus: z.number().min(-1).max(1).optional(),
+      }),
+    )
+    .describe("Array of location configurations"),
+});
+
+export async function GET(request: NextRequest) {
   const params = new URL(request.url).searchParams;
-  const structure = params.get("structure") ?? "NPC";
-  const reprocessingRig = Number(params.get("reprocessingRig") ?? 0);
-  const securityStatusValue = params.get("securityStatus");
-  const securityStatus = securityStatusValue === null ? undefined : Number(securityStatusValue);
-  if (structure !== "NPC" && structure !== "Athanor" && structure !== "Tatara") {
-    return NextResponse.json(
-      { error: "Structure must be NPC, Athanor, or Tatara." },
-      { status: 400 },
-    );
+
+  // Parse and validate query parameters with Zod
+  const validationResult = baseYieldQuerySchema.safeParse({
+    structureTypeId: params.get("structureTypeId"),
+    reprocessingRig: params.get("reprocessingRig"),
+    securityStatus: params.get("securityStatus"),
+  });
+
+  if (!validationResult.success) {
+    const errorMessages = validationResult.error.issues.map((issue) => {
+      const path = issue.path.join(".");
+      return `${path || "query"}: ${issue.message}`;
+    });
+    return NextResponse.json({ error: errorMessages.join(" ") }, { status: 400 });
   }
-  if (!Number.isInteger(reprocessingRig) || ![0, 1, 2].includes(reprocessingRig)) {
-    return NextResponse.json({ error: "reprocessingRig must be 0, 1, or 2." }, { status: 400 });
-  }
-  if (
-    securityStatus !== undefined
-    && (!Number.isFinite(securityStatus) || securityStatus < -1 || securityStatus > 1)
-  ) {
-    return NextResponse.json(
-      { error: "Security status must be between -1 and 1." },
-      { status: 400 },
-    );
-  }
+
+  const { structureTypeId, reprocessingRig, securityStatus } = validationResult.data;
   try {
     const [types, groups, typeDogma, dogmaAttributes] = await Promise.all([
       getTypes(),
@@ -36,9 +74,12 @@ export async function GET(request: Request) {
       getTypeDogma(),
       getDogmaAttributes(),
     ]);
+    if (structureTypeId !== 0 && !types.has(structureTypeId)) {
+      return NextResponse.json({ error: "Unknown structure type ID." }, { status: 400 });
+    }
     const efficiencies = calculateReprocessingEfficiency(
       { types, groups, typeDogma, dogmaAttributes },
-      structure as ReprocessingStructure,
+      structureTypeId,
       {},
       0,
       securityStatus,
@@ -54,19 +95,21 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as {
-      locations?: Array<{
-        id: string;
-        structure?: string;
-        reprocessingRig?: number;
-        securityStatus?: number;
-      }>;
-    };
-    if (!Array.isArray(body.locations)) {
-      return NextResponse.json({ error: "locations must be an array." }, { status: 400 });
+    const rawBody = await request.json();
+
+    // Parse and validate request body with Zod
+    const validationResult = baseYieldPostSchema.safeParse(rawBody);
+    if (!validationResult.success) {
+      const errorMessages = validationResult.error.issues.map((issue) => {
+        const path = issue.path.join(".");
+        return `${path || "body"}: ${issue.message}`;
+      });
+      return NextResponse.json({ error: errorMessages.join(" ") }, { status: 400 });
     }
+
+    const body = validationResult.data;
     const [types, groups, typeDogma, dogmaAttributes] = await Promise.all([
       getTypes(),
       getGroups(),
@@ -75,28 +118,16 @@ export async function POST(request: Request) {
     ]);
     const maps = { types, groups, typeDogma, dogmaAttributes };
     const baseYields = body.locations.map((location) => {
-      const structure = location.structure ?? "NPC";
-      const reprocessingRig = location.reprocessingRig ?? 0;
-      if (
-        (structure !== "NPC" && structure !== "Athanor" && structure !== "Tatara")
-        || !Number.isInteger(reprocessingRig)
-        || ![0, 1, 2].includes(reprocessingRig)
-        || (
-          location.securityStatus !== undefined
-          && (
-            !Number.isFinite(location.securityStatus)
-            || location.securityStatus < -1
-            || location.securityStatus > 1
-          )
-        )
-      ) return null;
+      if (location.structureTypeId !== 0 && !types.has(location.structureTypeId)) {
+        return null;
+      }
       const efficiencies = calculateReprocessingEfficiency(
         maps,
-        structure,
+        location.structureTypeId,
         {},
         0,
         location.securityStatus,
-        reprocessingRig,
+        location.reprocessingRig,
       );
       return { id: location.id, baseYield: efficiencies.normalOre };
     });

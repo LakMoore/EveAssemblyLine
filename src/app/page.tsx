@@ -35,7 +35,8 @@ import {
   TestTubes,
 } from "lucide-react";
 
-type PlannerTab = "Plan" | "Buy" | "Copy" | "Invent" | "React" | "Manufacture";
+type PlannerTab = "Plan" | "Haul" | "Buy" | "Copy" | "Invent" | "React" | "Manufacture";
+// the hauling tab is purposefully not yet implemented
 const tabs: PlannerTab[] = ["Plan", "Buy", "Copy", "Invent", "React", "Manufacture"];
 type BuildItem = {
   name: string;
@@ -58,7 +59,7 @@ function AvailableSourceIcons({ counts }: { counts?: PlanSourceCounts }) {
   const icons = (Object.keys(counts ?? {}) as PlanSourceIcon[]).filter(
     (icon) => (counts?.[icon] ?? 0) > 0,
   );
-  if (!icons?.length) return null;
+  if (!icons.length) return null;
   return (
     <span className={styles.availableSourceIcons} aria-label="Available sources">
       {icons.map((icon) => {
@@ -394,9 +395,7 @@ export default function Home() {
       );
       const data = (await response.json()) as PlanResult | { error?: string };
       if (!response.ok) {
-        setPlanStatus(
-          data && "error" in data && data.error ? data.error : "Could not calculate plan",
-        );
+        setPlanStatus("error" in data && data.error ? data.error : "Could not calculate plan");
         return;
       }
       setPlan(data as PlanResult);

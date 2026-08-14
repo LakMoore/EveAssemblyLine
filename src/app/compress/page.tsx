@@ -57,7 +57,6 @@ type CompressOption = {
   id: string;
   name?: string;
   structureTypeId?: number;
-  structureType?: "NPC" | "Athanor" | "Tatara" | "Sotiyo";
   securityStatus?: number;
   rigs?: string[];
   rankBonus?: number;
@@ -115,7 +114,7 @@ function normalizeLocationName(name: string) {
 }
 
 function locationKey(location: CompressOption) {
-  return location.structureType && location.structureType !== "NPC" && location.name
+  return location.structureTypeId !== undefined && location.structureTypeId !== 0 && location.name
     ? `structure:${normalizeLocationName(location.name).toLocaleLowerCase()}`
     : location.id;
 }
@@ -229,17 +228,11 @@ function CompressContent() {
             };
           }),
           ...structuresWithSecurity
-            .filter((structure) => structure.type === "Athanor" || structure.type === "Tatara")
+            .filter((structure) => structure.typeId !== undefined)
             .map((structure) => ({
               id: structure.id,
               name: structureDisplayName(structure),
               structureTypeId: structure.typeId,
-              structureType:
-                structure.type === "Athanor"
-                  ? ("Athanor" as const)
-                  : structure.type === "Tatara"
-                    ? ("Tatara" as const)
-                    : ("NPC" as const),
               securityStatus: structure.securityStatus,
               rigs: structure.rigs,
             })),
@@ -315,10 +308,9 @@ function CompressContent() {
         id: structure.id,
         name: structureDisplayName(structure),
         structureTypeId: structure.typeId,
-        structureType: structure.type as CompressOption["structureType"],
         securityStatus: structure.securityStatus,
         rigs: structure.rigs,
-        canReprocess: structure.type === "Sotiyo" ? false : undefined,
+        canReprocess: undefined,
       })),
   ].filter(
     (location, index, all) =>
@@ -504,7 +496,8 @@ function CompressContent() {
                     >
                       {location.name ?? `Location ${location.id}`}
                       {location.canReprocess !== false
-                      && location.structureType !== "NPC"
+                      && location.structureTypeId !== undefined
+                      && location.structureTypeId !== 0
                       && reprocessingRigLevel(location.rigs ?? []) === 0
                         ? " [No Rigs]"
                         : ""}

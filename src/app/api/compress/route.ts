@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import {
   getCompressibleTypes,
   getDogmaAttributes,
@@ -17,6 +18,59 @@ import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { getMarketSellOrders, getSevenDayAverageVolume } from "@/lib/esi/marketHistory";
 import { marketHubs } from "@/lib/reference/marketHubs";
 import type { GroupsRecord, TypesRecord, TypeDogmaRecord } from "@/lib/sde/generated";
+
+const compressionRequestSchema = z.object({
+  language: z.string().optional(),
+  items: z
+    .array(
+      z.object({
+        typeId: z.number().int().safe().describe("Type ID"),
+        quantity: z.number().int().safe().positive().describe("Positive quantity"),
+        name: z.string().describe("Type name"),
+      }),
+    )
+    .nonempty("A non-empty list of raw materials is required."),
+  structureTypeId: z
+    .number()
+    .int()
+    .nonnegative()
+    .safe()
+    .optional()
+    .default(0)
+    .describe("SDE structure type ID, or 0 for an NPC station"),
+  reprocessingRig: z
+    .union([z.literal(0), z.literal(1), z.literal(2)])
+    .optional()
+    .default(0)
+    .describe("Reprocessing rig level"),
+  skillLevels: z
+    .record(
+      z.string().regex(/^\d+$/, "Skill IDs must be numeric strings"),
+      z.number().int().min(0).max(5),
+    )
+    .refine((obj) => Object.keys(obj).length > 0, "skillLevels must be a non-empty map")
+    .describe("Map of skill IDs to levels (0-5)"),
+  implantLevel: z
+    .union([z.literal(0), z.literal(1), z.literal(2), z.literal(4)])
+    .optional()
+    .default(0)
+    .describe("Implant level: 0, 1, 2, or 4"),
+  securityStatus: z.number().min(-1).max(1).optional().describe("Security status between -1 and 1"),
+  marketId: z
+    .number()
+    .int()
+    .refine(
+      (id) => marketHubs.some((market) => market.regionId === id),
+      "marketId must be a supported market region ID",
+    )
+    .optional()
+    .default(marketHubs[0].regionId)
+    .describe("Market region ID"),
+  orderType: z
+    .enum(["buy-1-day", "buy-5-day", "sell"])
+    .optional()
+    .describe("Order type for price calculations"),
+});
 
 type OreGroupCache = Map<string, { typeIds: number[]; baseTypeIds: number[] }>;
 type OreGroupMaps = {
@@ -66,115 +120,25 @@ function getOreGroupCache(maps: OreGroupMaps): OreGroupCache {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as {
-      language?: string;
-      items?: CompressionRequestItem[];
-      structureTypeId?: number;
-      reprocessingRig?: number;
-      skillLevels?: Record<string, number>;
-      implantLevel?: number;
-      securityStatus?: number;
-      marketId?: number;
-      orderType?: "buy-1-day" | "buy-5-day" | "sell";
-    };
-    if (!Array.isArray(body.items) || body.items.length === 0) {
-      return NextResponse.json(
-        { error: "A non-empty list of raw materials is required." },
-        { status: 400 },
-      );
+    const rawBody = await request.json();
+
+    // Parse and validate the request body with Zod
+    const validationResult = compressionRequestSchema.safeParse(rawBody);
+    if (!validationResult.success) {
+      const errorMessages = validationResult.error.issues.map((issue) => {
+        const path = issue.path.join(".");
+        return `${path || "request"}: ${issue.message}`;
+      });
+      return NextResponse.json({ error: errorMessages.join(" ") }, { status: 400 });
     }
-    if (
-      body.items.some(
-        (item) =>
-          !Number.isSafeInteger(item.typeId)
-          || !Number.isSafeInteger(item.quantity)
-          || item.quantity <= 0
-          || typeof item.name !== "string",
-      )
-    ) {
-      return NextResponse.json(
-        { error: "Each material requires a type ID, name, and positive whole quantity." },
-        { status: 400 },
-      );
-    }
-    const structureTypeId = body.structureTypeId ?? 0;
-    const structure =
-      structureTypeId === 0
-        ? "NPC"
-        : structureTypeId === 35835
-          ? "Athanor"
-          : structureTypeId === 35836
-            ? "Tatara"
-            : undefined;
-    const marketId = body.marketId ?? marketHubs[0].regionId;
-    const orderType = body.orderType ?? "buy-1-day";
-    if (orderType !== "buy-1-day" && orderType !== "buy-5-day" && orderType !== "sell") {
-      return NextResponse.json(
-        { error: "Order type must be Buy (1 Day), Buy (5 Day), or Sell." },
-        { status: 400 },
-      );
-    }
-    const implantLevel = body.implantLevel ?? 0;
-    if (structure === undefined) {
-      return NextResponse.json(
-        { error: "structureTypeId must be 0, Athanor (35835), or Tatara (35836)." },
-        { status: 400 },
-      );
-    }
-    if (
-      !Number.isSafeInteger(marketId)
-      || !marketHubs.some((market) => market.regionId === marketId)
-    ) {
-      return NextResponse.json(
-        { error: "marketId must be a supported market region ID." },
-        { status: 400 },
-      );
-    }
-    if (!Number.isInteger(implantLevel) || ![0, 1, 2, 4].includes(implantLevel)) {
-      return NextResponse.json({ error: "Implant level must be 0, 1, 2, or 4." }, { status: 400 });
-    }
-    if (
-      body.securityStatus !== undefined
-      && (
-        !Number.isFinite(body.securityStatus)
-        || body.securityStatus < -1
-        || body.securityStatus > 1
-      )
-    ) {
-      return NextResponse.json(
-        { error: "Security status must be between -1 and 1." },
-        { status: 400 },
-      );
-    }
-    const reprocessingRig = body.reprocessingRig ?? 0;
-    if (!Number.isInteger(reprocessingRig) || ![0, 1, 2].includes(reprocessingRig)) {
-      return NextResponse.json({ error: "reprocessingRig must be 0, 1, or 2." }, { status: 400 });
-    }
+
+    const body = validationResult.data;
+    const structureTypeId = body.structureTypeId;
+    const marketId = body.marketId;
+    const orderType = body.orderType;
+    const implantLevel = body.implantLevel;
+    const reprocessingRig = body.reprocessingRig;
     const skillLevels = body.skillLevels;
-    if (
-      !skillLevels
-      || Array.isArray(skillLevels)
-      || typeof skillLevels !== "object"
-      || Object.keys(skillLevels).length === 0
-    ) {
-      return NextResponse.json(
-        { error: "skillLevels must be a non-empty map of skill IDs to levels." },
-        { status: 400 },
-      );
-    }
-    if (
-      Object
-        .entries(skillLevels)
-        .some(
-          ([skillId, level]) =>
-            !/^\d+$/.test(skillId) || !Number.isInteger(level) || level < 0 || level > 5,
-        )
-    ) {
-      return NextResponse.json(
-        { error: "skillLevels must map numeric skill IDs to whole numbers from 0 through 5." },
-        { status: 400 },
-      );
-    }
 
     const requestedLanguage = body.language ?? null;
     const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
@@ -187,9 +151,12 @@ export async function POST(request: Request) {
         getCompressibleTypes(),
         getTypeMaterials(),
       ]);
+    if (structureTypeId !== 0 && !types.has(structureTypeId)) {
+      return NextResponse.json({ error: "Unknown structure type ID." }, { status: 400 });
+    }
     const calculatedEfficiency = calculateReprocessingEfficiency(
       { types, groups, typeDogma, dogmaAttributes },
-      structure,
+      structureTypeId,
       skillLevels,
       implantLevel,
       body.securityStatus,
@@ -197,7 +164,7 @@ export async function POST(request: Request) {
     );
     const names = new Map<number, string>();
     for (const type of types.values()) {
-      names.set(type._key, type.name[language] ?? type.name.en ?? `Type ${type._key}`);
+      names.set(type._key, type.name[language] ?? type.name.en);
     }
     const maps = { types, groups, typeDogma, dogmaAttributes };
     const oreGroups = getOreGroupCache(maps);
@@ -250,7 +217,7 @@ export async function POST(request: Request) {
     const baselineYields = new Map<string, Map<number, number>>();
     for (const [group, variants] of candidatesByGroup) {
       const baseline = variants.find((candidate) => candidate.name === group) ?? variants[0];
-      if (baseline) baselineYields.set(group, baseline.yields);
+      baselineYields.set(group, baseline.yields);
     }
     const candidates =
       orderType === "sell"
@@ -259,7 +226,7 @@ export async function POST(request: Request) {
               baseCandidates.map(async (candidate) => {
                 if (
                   ![...candidate.yields.keys()].some((typeId) =>
-                    (body.items ?? []).some((item) => item.typeId === typeId),
+                    body.items.some((item) => item.typeId === typeId),
                   )
                 ) return [];
                 const baseline = baselineYields.get(groupName(candidate.name));
@@ -294,7 +261,7 @@ export async function POST(request: Request) {
             baseCandidates.map(async (candidate) => {
               if (
                 ![...candidate.yields.keys()].some((typeId) =>
-                  (body.items ?? []).some((item) => item.typeId === typeId),
+                  body.items.some((item) => item.typeId === typeId),
                 )
               ) return candidate;
               const averageVolume = await getSevenDayAverageVolume(
@@ -324,9 +291,7 @@ export async function POST(request: Request) {
       const representativeTypeId = entries[0]?.typeId;
       const groupEfficiency =
         candidate?.efficiency
-        ?? (representativeTypeId === undefined
-          ? calculatedEfficiency.normalOre
-          : efficiencyForType(maps, representativeTypeId, calculatedEfficiency, skillLevels));
+        ?? efficiencyForType(maps, representativeTypeId, calculatedEfficiency, skillLevels);
       const baseTypeIds = oreGroups.get(key)?.baseTypeIds ?? [];
       return {
         skillId,

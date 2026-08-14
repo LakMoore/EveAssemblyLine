@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     const batch = publishedTypes.slice(startIndex, startIndex + typeLimit);
     const items = batch.map((type) => ({
       typeId: type._key,
-      name: type.name.en ?? Object.values(type.name).find(Boolean) ?? `Type ${type._key}`,
+      name: type.name.en,
     }));
 
     return NextResponse.json({

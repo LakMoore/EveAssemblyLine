@@ -21,7 +21,7 @@ export async function GET(request: Request) {
         item: system
           ? {
               systemId: system._key,
-              name: system.name[language] ?? system.name.en,
+              name: system.name[language],
               securityStatus: system.securityStatus,
             }
           : null,
@@ -32,12 +32,12 @@ export async function GET(request: Request) {
     const normalizedQuery = query.toLocaleLowerCase(language);
     const matches = [...systemById.values()]
       .filter((system) => {
-        const name = system.name[language] ?? system.name.en;
-        return name?.toLocaleLowerCase(language).includes(normalizedQuery);
+        const name = system.name[language];
+        return name.toLocaleLowerCase(language).includes(normalizedQuery);
       })
       .sort((left, right) => {
-        const leftName = (left.name[language] ?? left.name.en).toLocaleLowerCase(language);
-        const rightName = (right.name[language] ?? right.name.en).toLocaleLowerCase(language);
+        const leftName = left.name[language].toLocaleLowerCase(language);
+        const rightName = right.name[language].toLocaleLowerCase(language);
         return (
           Number(!leftName.startsWith(normalizedQuery))
             - Number(!rightName.startsWith(normalizedQuery))
@@ -47,7 +47,7 @@ export async function GET(request: Request) {
       .slice(0, resultLimit)
       .map((system) => ({
         systemId: system._key,
-        name: system.name[language] ?? system.name.en,
+        name: system.name[language],
         securityStatus: system.securityStatus,
       }));
 

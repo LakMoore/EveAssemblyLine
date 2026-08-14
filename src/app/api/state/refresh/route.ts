@@ -52,7 +52,7 @@ export async function POST(request: Request) {
   }
   const connectedCharacterIds = new Set(
     characters
-      .filter((character) => characterIds.includes(character.characterId) && character.personalAuth)
+      .filter((character) => characterIds.includes(character.characterId))
       .map((character) => character.characterId),
   );
   if (connectedCharacterIds.size === 0) {

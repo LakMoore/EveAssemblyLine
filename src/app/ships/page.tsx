@@ -62,7 +62,7 @@ export default function ShipsPage() {
         });
     };
     const handleRefresh = (event: Event) => {
-      const ships = (event as CustomEvent<{ ships?: ClientShipsResponse | null }>).detail?.ships;
+      const ships = (event as CustomEvent<{ ships?: ClientShipsResponse | null }>).detail.ships;
       load(ships ?? undefined);
     };
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);

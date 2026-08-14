@@ -70,7 +70,7 @@ async function getOptions(
     .map((location) => ({
       id: `npc:${location.locationId}`,
       name: location.name,
-      structure: "NPC" as const,
+      structureTypeId: 0,
       canReprocess: (stations.get(location.locationId)?.reprocessingEfficiency ?? 0) > 0,
       securityStatus:
         location.systemId === undefined
@@ -80,9 +80,7 @@ async function getOptions(
   const assetStructures = assetLocations
     .filter((location) => location.locationType === "structure")
     .map((location) => {
-      const typeName =
-        location.typeId === undefined ? undefined : types.get(location.typeId)?.name.en;
-      if (!typeName) return null;
+      if (location.typeId === undefined || !types.has(location.typeId)) return null;
       const suppliedStructure = suppliedStructures.find(
         (structure) => structure.id === `structure:${location.locationId}`,
       );
@@ -90,8 +88,7 @@ async function getOptions(
         id: `structure:${location.locationId}`,
         name: location.name,
         structureTypeId: location.typeId,
-        structure: typeName as "NPC" | "Athanor" | "Tatara",
-        canReprocess: typeName === "Athanor" || typeName === "Tatara" ? undefined : false,
+        canReprocess: undefined,
         securityStatus:
           location.systemId === undefined
             ? undefined
@@ -231,14 +228,13 @@ async function getOptions(
     ]),
   ];
   const suppliedLocations = suppliedStructures
-    .filter((structure) => structure.type === 35835 || structure.type === 35836)
+    .filter((structure) => types.has(structure.type))
     .map((structure) => {
       const securityStatus = systems.get(structure.systemId)?.securityStatus;
       if (securityStatus === undefined) throw new Error(`Unknown system ID ${structure.systemId}.`);
       return {
         id: structure.id,
         structureTypeId: structure.type,
-        structure: structure.type === 35835 ? ("Athanor" as const) : ("Tatara" as const),
         securityStatus,
         reprocessingRig: suppliedRigLevel(typeDogma, structure.rigs),
       };
@@ -246,16 +242,16 @@ async function getOptions(
   const locationRecords = [...npcLocations, ...resolvedStructures, ...suppliedLocations];
   const baseYieldMaps = { types, groups: await getGroups(), typeDogma, dogmaAttributes };
   const locations = locationRecords.map((location) => {
-    const { structure: structureType, ...locationData } = location;
+    const { structureTypeId, ...locationData } = location;
     return {
       ...locationData,
-      structureType,
+      structureTypeId,
       baseYield:
-        structureType === "NPC"
+        structureTypeId === 0
           ? 50
           : calculateReprocessingEfficiency(
               baseYieldMaps,
-              structureType,
+              structureTypeId,
               {},
               0,
               location.securityStatus,
