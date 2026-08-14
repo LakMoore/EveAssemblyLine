@@ -18,8 +18,13 @@ Do not present prototype data as live EVE data. When replacing a mock path, keep
 
 ## Working rules
 
+- Create well commented code.
+- Now the SDE is in place don't use hard-coded recipes or fallback values in production paths. Group IDs or Type IDs may be used when dealing with the large Dogma dataset in the SDE, but do not hard-code values or lists for build recipes, materials, or products.
 - Read the nearby implementation and relevant section of `FullPlan.md` before editing. Keep changes focused on the owning module.
 - Preserve existing user changes and avoid unrelated refactors.
+- Keep methods short, with low complexity and a single responsibility.
+- Name methods and variables clearly, using descriptive names that convey their purpose and intent.
+- Rename variables and methods when their purpose changes, rather than leaving misleading names in place.
 - Follow the existing TypeScript style: strict typing, double quotes, semicolons, the `@/*` alias, and small focused modules.
 - Generate well-commented code: add concise comments before non-obvious algorithms, data-flow boundaries, and important invariants.
 - Add JSDoc-style comments to all public functions, classes, and types. Include parameter and return types, and describe the purpose of the function or class. Add links to relevant EVE Online documentation or SDE/ESI references when applicable.
@@ -34,6 +39,10 @@ Do not present prototype data as live EVE data. When replacing a mock path, keep
 
 ## Formatting and readability rules
 
+- Add comments to explain non-obvious algorithms, data-flow boundaries, and important invariants and methods.
+- Keep methods short, with low complexity and a single responsibility.
+- Name methods and variables clearly, using descriptive names that convey their purpose and intent.
+- Rename variables and methods when their purpose changes, rather than leaving misleading names in place.
 - Keep code formatted in the repo's current style: semicolons, double quotes, trailing commas, and a 100-column line width.
 - Prefer the leading-operator layout for multiline boolean expressions so the condition reads naturally in review:
 
@@ -109,6 +118,7 @@ Keep each step independently testable. Avoid broad UI rewrites while server cont
 
 - Use `NextResponse.json` with appropriate status codes and stable error shapes.
 - Treat request JSON, query strings, ESI responses, and SDE records as untrusted external data.
+- Validate all external input at the API boundary and narrow it to a safe internal type before passing it to the plan engine or other internal modules. Use Zod's `safeParse` and associated methods for validation.
 - Persist and transmit stable numeric IDs rather than localized or display type names. Users may change language at any time, so names must never be the identifier used by a stored record or API request.
 - Do not expose internal token records. Map them to public character/session DTOs.
 - Keep `/api/plan` fast and side-effect free. Refresh belongs in `/api/state/refresh`.
@@ -122,7 +132,7 @@ From `eveassemblyline/` run:
 ```bash
 npm run typecheck
 npm run lint
-npm run format:check
+npm run format
 npm run build
 ```
 
@@ -130,7 +140,6 @@ Run the narrowest relevant test or check first after an edit, then run the broad
 
 ## Local development notes
 
-- The VS Code workspace may open the parent directory `/Users/stuart/Development/AssemblyLine`, but the application and Git repository root is `eveassemblyline/`. Run application commands from `eveassemblyline/`, or begin with `cd /Users/stuart/Development/AssemblyLine/eveassemblyline`.
 - The root contains the Next.js App Router project (`package.json`, `src/`, `scripts/`, `sde/`, `data/`, and `node_modules/`). Repository-level planning documents such as `FullPlan.md` and `CachingPlan.md` are one directory above the application root.
 - `src/lib/storage.ts` uses Firebase Admin Firestore and stores one document per logical key in the `assemblyLineStorage` collection. Firebase App Hosting may use Application Default Credentials; local development can use `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY`. Keep all service-account values server-only and never log tokens.
 - Firestore is the durable store, not the full SDE cache. Keep processed SDE data in build/runtime inputs and process memory. Upstash Redis is not the production SDE cache because its observed latency was too high for that workload.
@@ -148,7 +157,7 @@ Run the narrowest relevant test or check first after an edit, then run the broad
   FIREBASE_PROJECT_ID=assembly-line-test npx tsx -e '/* async probe */'
   ```
 
-- If `npm install` fails with an `EPERM` error because `/Users/stuart/.npm` contains root-owned cache files, do not change ownership or use `sudo` from the agent. Use a writable temporary cache instead:
+- `npm install` fails with an `EPERM` error because of root-owned cache files. Do not change ownership or use `sudo` from the agent. Use a writable temporary cache instead:
 
   ```bash
   npm_config_cache="$TMPDIR/assemblyline-npm-cache" npm install <package>

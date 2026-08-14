@@ -12,7 +12,6 @@ import {
 import {
   fetchCorporationStructures,
   fetchStationMetadata,
-  fetchUniverseNames,
   getUsableToken,
   requestCachedEsi,
 } from "@/lib/esi/client";
@@ -161,8 +160,25 @@ async function getOptions(
     ? (await getCharacters()).filter((record) => characterIds.includes(record.characterId))
     : [];
   markPhase("session");
+  const structureAuthorizationScope = "esi-corporations.read_structures.v1";
+  const authorizedStructureRecords = records
+    .filter(
+      (record) =>
+        record.corporationId !== undefined
+        && (record.hasStationManagerRole || record.hasDirectorRole)
+        && record.personalAuth.scopes.includes(structureAuthorizationScope),
+    )
+    .filter(
+      (record, index, authorizedRecords) =>
+        authorizedRecords.findIndex((candidate) => candidate.corporationId === record.corporationId)
+        === index,
+    );
   const corporationStructures = (
-    await Promise.all(records.map((record) => fetchCorporationStructures(record).catch(() => [])))
+    await Promise.all(
+      authorizedStructureRecords.map((record) =>
+        fetchCorporationStructures(record).catch(() => []),
+      ),
+    )
   ).flat();
   const structuresById = new Map(
     corporationStructures.map((structure) => [structure.structure_id, structure]),
@@ -294,6 +310,7 @@ async function getOptions(
       assetLocations: assetLocations.length,
       structures: structureLocations.length,
       corporationStructures: corporationStructures.length,
+      authorizedStructureCharacters: authorizedStructureRecords.length,
       characters: records.length,
       suppliedStructures: suppliedStructures.length,
     },
