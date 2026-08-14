@@ -19,6 +19,7 @@ import { getMarketSellOrders, getSevenDayAverageVolume } from "@/lib/esi/marketH
 import { marketHubs } from "@/lib/reference/marketHubs";
 import type { GroupsRecord, TypesRecord, TypeDogmaRecord } from "@/lib/sde/generated";
 
+// Zod schema for validating the compression request body
 const compressionRequestSchema = z.object({
   language: z.string().optional(),
   items: z
@@ -33,11 +34,11 @@ const compressionRequestSchema = z.object({
   structureTypeId: z
     .number()
     .int()
-    .nonnegative()
     .safe()
+    .nonnegative()
     .optional()
     .default(0)
-    .describe("SDE structure type ID, or 0 for an NPC station"),
+    .describe("Structure type ID, or 0 for an NPC station"),
   reprocessingRig: z
     .union([z.literal(0), z.literal(1), z.literal(2)])
     .optional()
@@ -243,17 +244,20 @@ export async function POST(request: Request) {
                 const orders = await getMarketSellOrders(marketId, candidate.typeId).catch(
                   () => [],
                 );
-                return orders.map((order) => ({
-                  ...candidate,
-                  selectionId: order.orderId,
-                  maxRuns: Math.floor(order.volumeRemain / candidate.unitsToReprocess),
-                  price: order.price / multiplier,
-                  yields: new Map(
+                return orders.map((order) => {
+                  const yields = new Map(
                     (baseline ?? candidate.yields)
                       .entries()
                       .map(([typeId, quantity]) => [typeId, quantity * multiplier] as const),
-                  ),
-                }));
+                  );
+                  return {
+                    ...candidate,
+                    selectionId: order.orderId,
+                    maxRuns: Math.floor(order.volumeRemain / candidate.unitsToReprocess),
+                    price: order.price / multiplier,
+                    yields,
+                  };
+                });
               }),
             )
           ).flat()

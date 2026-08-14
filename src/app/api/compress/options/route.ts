@@ -9,7 +9,13 @@ import {
   getTypeDogma,
   getTypes,
 } from "@/cache/services/sdeCache";
-import { requestEsi, fetchLocationMetadata, getUsableToken } from "@/lib/esi/client";
+import {
+  fetchCorporationStructures,
+  fetchStationMetadata,
+  fetchUniverseNames,
+  getUsableToken,
+  requestCachedEsi,
+} from "@/lib/esi/client";
 import { calculateReprocessingEfficiency } from "@/lib/planning/reprocessingEfficiency";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 
@@ -25,9 +31,14 @@ type OptionsRequest = {
   language?: string;
   structures?: SuppliedStructure[];
   assetLocations?: AssetLocation[];
+  stationIds?: number[];
 };
-const structureServiceCache = new Map<number, { canReprocess: boolean; expiresAt: number }>();
-const structureServiceCacheTtlMs = 6 * 60 * 60 * 1000;
+
+function getEsiStructureId(locationId: string) {
+  if (!locationId.startsWith("structure:")) return undefined;
+  const structureId = Number(locationId.slice("structure:".length));
+  return Number.isSafeInteger(structureId) && structureId > 0 ? structureId : undefined;
+}
 
 function suppliedRigLevel(
   typeDogma: Map<number, { dogmaAttributes: Array<{ attributeID: number; value: number }> }>,
@@ -64,87 +75,106 @@ async function getOptions(
     getStations(),
   ]);
   markPhase("sde");
-  markPhase("locations");
-  const npcLocations = assetLocations
-    .filter((location) => location.locationType === "station")
-    .map((location) => ({
+  const stationAssetLocations = assetLocations.filter(
+    (location) => location.locationType === "station",
+  );
+  const stationIds = [...new Set(stationAssetLocations.map((location) => location.locationId))];
+  const stationMetadata = await Promise.all(
+    stationIds.map((stationId) => fetchStationMetadata(stationId).catch(() => null)),
+  );
+  const stationMetadataById = new Map(
+    stationMetadata.flatMap((metadata, index) => {
+      const stationId = stationIds[index];
+      return metadata?.data === null || metadata?.data === undefined
+        ? []
+        : [[stationId, metadata.data] as const];
+    }),
+  );
+  const stationReprocessingById = new Map(
+    stationMetadata.flatMap((metadata, index) => {
+      const stationId = stationIds[index];
+      if (!metadata?.data?.services) return [];
+      return [
+        [
+          stationId,
+          metadata.data.services.some(
+            (service) => typeof service === "string" && service.toLowerCase().includes("reprocess"),
+          ),
+        ] as const,
+      ];
+    }),
+  );
+  const npcLocations = stationAssetLocations.map((location) => {
+    const station = stations.get(location.locationId);
+    const metadata = stationMetadataById.get(location.locationId);
+    return {
       id: `npc:${location.locationId}`,
-      name: location.name,
+      name: metadata?.name ?? location.name,
       structureTypeId: 0,
-      canReprocess: (stations.get(location.locationId)?.reprocessingEfficiency ?? 0) > 0,
+      ...(stationReprocessingById.has(location.locationId)
+        ? { canReprocess: stationReprocessingById.get(location.locationId) }
+        : {}),
       securityStatus:
         location.systemId === undefined
-          ? undefined
+          ? systems.get(station?.solarSystemID ?? 0)?.securityStatus
           : systems.get(location.systemId)?.securityStatus,
-    }));
-  const assetStructures = assetLocations
-    .filter((location) => location.locationType === "structure")
-    .map((location) => {
-      if (location.typeId === undefined || !types.has(location.typeId)) return null;
-      const suppliedStructure = suppliedStructures.find(
-        (structure) => structure.id === `structure:${location.locationId}`,
-      );
-      return {
-        id: `structure:${location.locationId}`,
-        name: location.name,
-        structureTypeId: location.typeId,
-        canReprocess: undefined,
-        securityStatus:
-          location.systemId === undefined
-            ? undefined
-            : systems.get(location.systemId)?.securityStatus,
-        ...(suppliedStructure
-          ? { reprocessingRig: suppliedRigLevel(typeDogma, suppliedStructure.rigs) }
-          : {}),
-      } as const;
-    })
-    .filter((location): location is NonNullable<typeof location> => location !== null);
+    };
+  });
+  markPhase("locations");
+  const structureSources = new Map<
+    string,
+    { assetLocation?: AssetLocation; suppliedStructure?: SuppliedStructure }
+  >();
+  for (const structure of suppliedStructures) {
+    structureSources.set(structure.id, { suppliedStructure: structure });
+  }
+  for (const location of assetLocations) {
+    if (location.locationType !== "structure") continue;
+    const id = `structure:${location.locationId}`;
+    structureSources.set(id, { ...structureSources.get(id), assetLocation: location });
+  }
+  const structureLocations = [...structureSources].flatMap(([id, source]) => {
+    const structureTypeId = source.assetLocation?.typeId ?? source.suppliedStructure?.type;
+    if (structureTypeId === undefined || !types.has(structureTypeId)) return [];
+    const systemId = source.assetLocation?.systemId ?? source.suppliedStructure?.systemId;
+    const reprocessingRig = source.suppliedStructure
+      ? suppliedRigLevel(typeDogma, source.suppliedStructure.rigs)
+      : 0;
+    return [
+      {
+        id,
+        name:
+          source.assetLocation?.name
+          ?? types.get(structureTypeId)?.name[language]
+          ?? types.get(structureTypeId)?.name.en
+          ?? `Structure ${id}`,
+        structureTypeId,
+        canReprocess: true,
+        securityStatus: systemId === undefined ? undefined : systems.get(systemId)?.securityStatus,
+        reprocessingRig,
+      },
+    ];
+  });
   const session = await getSessionFromRequest(request);
   const characterIds = session ? await getSessionCharacterIds(session) : [];
   const records = session
     ? (await getCharacters()).filter((record) => characterIds.includes(record.characterId))
     : [];
   markPhase("session");
-  const now = Date.now();
-  const uncachedStructures = assetStructures.filter((location) => {
-    const cached = structureServiceCache.get(Number(location.id.slice("structure:".length)));
-    return cached === undefined || cached.expiresAt <= now;
-  });
-  const structureTokens =
-    uncachedStructures.length === 0
-      ? []
-      : (
-          await Promise.all(
-            records.map((record) => getUsableToken(record, "personal").catch(() => null)),
-          )
-        ).filter((token): token is NonNullable<typeof token> => token !== null);
+  const corporationStructures = (
+    await Promise.all(records.map((record) => fetchCorporationStructures(record).catch(() => [])))
+  ).flat();
+  const structuresById = new Map(
+    corporationStructures.map((structure) => [structure.structure_id, structure]),
+  );
   const resolvedStructures = await Promise.all(
-    assetStructures.map(async (location) => {
-      const structureId = Number(location.id.slice("structure:".length));
-      const cached = structureServiceCache.get(structureId);
-      if (cached && cached.expiresAt > now) {
-        return { ...location, canReprocess: cached.canReprocess };
-      }
-      const metadata = await Promise.all(
-        structureTokens.map((token) =>
-          fetchLocationMetadata(
-            Number(location.id.slice("structure:".length)),
-            "structure",
-            token,
-          ).catch(() => null),
-        ),
-      );
-      const structure = metadata.find((entry) => entry?.data)?.data;
-      if (!structure?.services) return location;
-      const canReprocess = structure.services.some(
+    structureLocations.map((location) => {
+      const structureId = getEsiStructureId(location.id);
+      if (structureId === undefined) return location;
+      const structure = structuresById.get(structureId);
+      if (!structure) return location;
+      const canReprocess = (structure.services ?? []).some(
         (service) => service.name.toLowerCase().includes("reprocess") && service.state === "online",
-      );
-      structureServiceCache.set(
-        structureId,
-        {
-          canReprocess,
-          expiresAt: now + structureServiceCacheTtlMs,
-        },
       );
       return { ...location, canReprocess };
     }),
@@ -154,13 +184,12 @@ async function getOptions(
     records.map(async (record) => {
       const token = await getUsableToken(record, "personal").catch(() => null);
       const skills = token
-        ? await requestEsi<{ skills?: Array<{ skill_id: number; active_skill_level: number }> }>(
-            `/characters/${record.characterId}/skills/`,
-            token,
-          ).catch(() => ({ data: null }))
+        ? await requestCachedEsi<{
+            skills?: Array<{ skill_id: number; active_skill_level: number }>;
+          }>(`/characters/${record.characterId}/skills/`, token).catch(() => ({ data: null }))
         : { data: null };
       const clones = token
-        ? await requestEsi<{
+        ? await requestCachedEsi<{
             active_clone_id?: number;
             clones?: Array<{ clone_id: number; implants?: number[] }>;
           }>(`/characters/${record.characterId}/clones/`, token).catch(() => ({ data: null }))
@@ -227,19 +256,7 @@ async function getOptions(
       ...(scrapMetalSkillId === undefined ? [] : [scrapMetalSkillId]),
     ]),
   ];
-  const suppliedLocations = suppliedStructures
-    .filter((structure) => types.has(structure.type))
-    .map((structure) => {
-      const securityStatus = systems.get(structure.systemId)?.securityStatus;
-      if (securityStatus === undefined) throw new Error(`Unknown system ID ${structure.systemId}.`);
-      return {
-        id: structure.id,
-        structureTypeId: structure.type,
-        securityStatus,
-        reprocessingRig: suppliedRigLevel(typeDogma, structure.rigs),
-      };
-    });
-  const locationRecords = [...npcLocations, ...resolvedStructures, ...suppliedLocations];
+  const locationRecords = [...npcLocations, ...resolvedStructures];
   const baseYieldMaps = { types, groups: await getGroups(), typeDogma, dogmaAttributes };
   const locations = locationRecords.map((location) => {
     const { structureTypeId, ...locationData } = location;
@@ -247,16 +264,20 @@ async function getOptions(
       ...locationData,
       structureTypeId,
       baseYield:
-        structureTypeId === 0
-          ? 50
-          : calculateReprocessingEfficiency(
-              baseYieldMaps,
-              structureTypeId,
-              {},
-              0,
-              location.securityStatus,
-              "reprocessingRig" in location ? location.reprocessingRig : 0,
-            ).normalOre,
+        "canReprocess" in location && location.canReprocess === false
+          ? 0
+          : structureTypeId === 0
+            ? 50
+            : calculateReprocessingEfficiency(
+                baseYieldMaps,
+                structureTypeId,
+                {},
+                0,
+                location.securityStatus,
+                "reprocessingRig" in location && typeof location.reprocessingRig === "number"
+                  ? location.reprocessingRig
+                  : 0,
+              ).normalOre,
     };
   });
   markPhase("derived");
@@ -271,8 +292,8 @@ async function getOptions(
       totalMs,
       phasesMs: phaseDurations,
       assetLocations: assetLocations.length,
-      structures: assetStructures.length,
-      structureTokens: structureTokens.length,
+      structures: structureLocations.length,
+      corporationStructures: corporationStructures.length,
       characters: records.length,
       suppliedStructures: suppliedStructures.length,
     },

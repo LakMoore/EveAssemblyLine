@@ -19,6 +19,7 @@ export const authorizationScopes = [
   "esi-corporations.read_divisions.v1",
   "esi-contracts.read_corporation_contracts.v1",
   "esi-universe.read_structures.v1",
+  "esi-corporations.read_structures.v1",
   "esi-assets.read_assets.v1",
   "esi-industry.read_character_jobs.v1",
   "esi-markets.read_character_orders.v1",

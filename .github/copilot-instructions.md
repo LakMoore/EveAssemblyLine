@@ -2,7 +2,7 @@
 
 ## Project context
 
-AssemblyLine is a Next.js App Router application for planning large EVE Online manufacturing projects. The authoritative product and architecture plan is [FullPlan.md](../../FullPlan.md). The application must eventually support EVE SSO, multiple attached characters, server-side ESI calls, static SDE data, Firestore persistence, inventory-aware planning, and six plan output lists.
+AssemblyLine is a Next.js App Router application for planning large EVE Online manufacturing projects. The authoritative product and architecture plan is [FullPlan.md](../../FullPlan.md). The application supports EVE SSO, multiple attached characters, server-side ESI calls, static SDE data, Firestore persistence, inventory-aware planning, and six plan output lists.
 
 The repository root is the application root and contains `package.json`. Run project commands from this directory unless a task explicitly requires a different working directory.
 
@@ -21,9 +21,10 @@ Do not present prototype data as live EVE data. When replacing a mock path, keep
 - Read the nearby implementation and relevant section of `FullPlan.md` before editing. Keep changes focused on the owning module.
 - Preserve existing user changes and avoid unrelated refactors.
 - Follow the existing TypeScript style: strict typing, double quotes, semicolons, the `@/*` alias, and small focused modules.
-- Generate well-commented code: add concise comments before non-obvious algorithms, data-flow boundaries, and important invariants, while avoiding comments that merely restate the code.
+- Generate well-commented code: add concise comments before non-obvious algorithms, data-flow boundaries, and important invariants.
+- Add JSDoc-style comments to all public functions, classes, and types. Include parameter and return types, and describe the purpose of the function or class. Add links to relevant EVE Online documentation or SDE/ESI references when applicable.
 - Keep server-only code and secrets out of client components. Never send access tokens or refresh tokens to the browser, log them, or include them in error messages.
-- Validate and narrow all external input at API boundaries. Do not rely on a TypeScript cast as runtime validation. Reject malformed IDs, quantities, locations, settings, and character selections with useful 4xx responses.
+- Validate and narrow all external input at API boundaries by defining the API schema and using Zod's safeParse and associated methods. Do not rely on a TypeScript cast as runtime validation. Reject malformed IDs, quantities, locations, settings, and character selections with useful 4xx responses.
 - Use Next.js App Router conventions already in the project. This project uses Next.js 16; before changing framework APIs, consult the relevant guide under `node_modules/next/dist/docs/` as required by `AGENTS.md`.
 - Prefer existing platform and repository APIs over new abstractions. Firestore is the durable server-side store for accounts, sessions, tokens, and pending SSO state; SDE remains static build/runtime data.
 - Do not add fake ESI responses or silently fall back to hard-coded recipes in production paths. Test fixtures belong in tests or explicitly named fixture modules.
@@ -53,11 +54,11 @@ const allowed =
 
 Use HttpOnly, secure-in-production, same-site cookies for the app session. A session owns a list of attached character IDs; every character, corp, state, and plan operation must verify that requested IDs belong to the current session. Store character tokens only through the auth store and refresh/persist rotated refresh tokens.
 
-EVE SSO state and PKCE values must be unpredictable, bound to the initiating session/character, single-use, and checked on callback. Validate token issuer, audience, expiry, subject, and signature according to EVE documentation. Keep corp authorization separate from ordinary character login and verify the required corporation role before enabling corporation assets.
+EVE SSO state and PKCE values must be unpredictable, bound to the initiating session/character, single-use, and checked on callback. Validate token issuer, audience, expiry, subject, and signature according to EVE documentation. Corp authorization will be implicit based primarily on the Director Role.  There is no separate Corp Auth.Verify the required corporation role before enabling corporation assets.
 
 ### ESI and state cache
 
-All ESI calls are server-side. Centralize token refresh and ESI request behavior in the ESI client. Respect access-token expiry, ETags, `304`, `429`, `Retry-After`, cache-control, and ESI rate-limit/error-limit headers. `/api/plan` must use cached state only and must never call ESI synchronously.
+All ESI calls are server-side. Centralize token refresh and ESI request behavior in the ESI client. Respect access-token expiry, `304`, `429`, `Retry-After`, cache-control, and ESI rate-limit/error-limit headers.  ETag may be used in-memory only and should not be committed to the shared cache with tokens. `/api/plan` must use cached state only and must never call ESI synchronously.
 
 Cache entries must make freshness and rate limiting observable. A refresh response should distinguish `fresh`, `cached`, and `rate_limited` per character and endpoint. Avoid concurrent duplicate refreshes for the same character/endpoint where practical.
 

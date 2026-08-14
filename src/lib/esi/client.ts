@@ -17,10 +17,10 @@ const tokenContexts = new WeakMap<
   { characterId: number; purpose: "personal" | "corp" }
 >();
 const structureMetadataCache = new Map<
-  number,
+  string,
   { expiresAt: number; response: LocationMetadataResponse }
 >();
-const structureMetadataCacheTtlMs = 6 * 60 * 60 * 1000;
+const structureMetadataCacheTtlMs = 60 * 60 * 1000;
 let esiRateLimitedUntil = 0;
 
 export type EsiAssetLocation = {
@@ -112,7 +112,7 @@ type LocationMetadata = {
   solar_system_id?: number;
   constellation_id?: number;
   region_id?: number;
-  services?: Array<{ name: string; state: "online" | "offline" | "cleanup" }>;
+  services?: Array<string | { name: string; state: "online" | "offline" | "cleanup" }>;
 };
 
 type LocationMetadataResponse = {
@@ -175,11 +175,11 @@ async function refreshTokenAfterAuthorizationFailure(
   return refresh;
 }
 
-export async function requestEsi<T>(
+export async function requestCachedEsi<T>(
   path: string,
   tokenSet?: TokenSet,
   init?: RequestInit,
-  options: { bypassCache?: boolean; retryAuthorization?: boolean } = {},
+  options: { bypassCache?: boolean; skipCacheWrite?: boolean; retryAuthorization?: boolean } = {},
 ): Promise<{ data: T | null; headers: Headers; status: number; fromCache: boolean }> {
   const body = typeof init?.body === "string" ? init.body : "";
   const cachePath = body
@@ -232,7 +232,7 @@ export async function requestEsi<T>(
         );
       if (tokenChanged) {
         tokenContexts.set(currentTokenSet, context!);
-        return requestEsi<T>(
+        return requestCachedEsi<T>(
           path,
           currentTokenSet,
           init,
@@ -249,7 +249,7 @@ export async function requestEsi<T>(
             tokenSet,
             context.purpose,
           );
-          return requestEsi<T>(
+          return requestCachedEsi<T>(
             path,
             refreshedTokenSet,
             init,
@@ -299,16 +299,18 @@ export async function requestEsi<T>(
       Date.now() + Math.max(1, resetSeconds) * 1_000,
     );
   }
-  await setCachedEsiResponse(
-    cachePath,
-    {
-      data,
-      headers: Object.fromEntries(response.headers.entries()),
-      status: response.status,
-    },
-    response.headers.get("expires"),
-    response.headers.get("cache-control"),
-  );
+  if (!options.skipCacheWrite) {
+    await setCachedEsiResponse(
+      cachePath,
+      {
+        data,
+        headers: Object.fromEntries(response.headers.entries()),
+        status: response.status,
+      },
+      response.headers.get("expires"),
+      response.headers.get("cache-control"),
+    );
+  }
   return { data, headers: response.headers, status: response.status, fromCache: false };
 }
 
@@ -331,7 +333,7 @@ export async function requestEsiConditional<T>(
   bypassCache = false,
 ) {
   const headers = etag ? { "if-none-match": etag } : undefined;
-  return requestEsi<T>(path, tokenSet, { headers }, { bypassCache });
+  return requestCachedEsi<T>(path, tokenSet, { headers }, { bypassCache });
 }
 
 async function fetchPages<T>(path: string, tokenSet: TokenSet, etag?: string, bypassCache = false) {
@@ -350,7 +352,7 @@ async function fetchPages<T>(path: string, tokenSet: TokenSet, etag?: string, by
   }
   const rest: T[][] = [];
   for (let page = 2; page <= pageCount; page += 1) {
-    const result = await requestEsi<T[]>(
+    const result = await requestCachedEsi<T[]>(
       `${path}?page=${page}`,
       tokenSet,
       undefined,
@@ -426,7 +428,7 @@ export function applyBlueprintMetadata(assets: AssetRecord[], blueprints: EsiBlu
 export async function fetchAssetNames(path: string, token: TokenSet, itemIds: number[]) {
   const names = new Map<number, string>();
   for (let index = 0; index < itemIds.length; index += 1000) {
-    const result = await requestEsi<EsiAssetName[]>(
+    const result = await requestCachedEsi<EsiAssetName[]>(
       path,
       token,
       {
@@ -664,7 +666,7 @@ export async function fetchCorporationStructures(record: CharacterTokenRecord) {
     throw new Error("Corporation structure authorization is incomplete");
   }
   const token = await getUsableToken(record, "corp");
-  const result = await requestEsi<EsiCorporationStructure[]>(
+  const result = await requestCachedEsi<EsiCorporationStructure[]>(
     `/corporations/${record.corporationId}/structures/`,
     token,
   );
@@ -691,7 +693,7 @@ export async function fetchAssetLocations(
   const locations: EsiAssetLocation[] = [];
   for (const batch of batches) {
     try {
-      const result = await requestEsi<EsiAssetLocation[]>(
+      const result = await requestCachedEsi<EsiAssetLocation[]>(
         path,
         token,
         {
@@ -710,7 +712,7 @@ export async function fetchAssetLocations(
 }
 
 export async function fetchCharacterCorporationId(characterId: number) {
-  const result = await requestEsi<{ corporation_id: number }>(`/characters/${characterId}/`);
+  const result = await requestCachedEsi<{ corporation_id: number }>(`/characters/${characterId}/`);
   if (!result.data) throw new Error("Missing corporation verification response");
   return result.data.corporation_id;
 }
@@ -718,49 +720,96 @@ export async function fetchCharacterCorporationId(characterId: number) {
 export async function fetchUniverseNames(ids: number[]) {
   const uniqueIds = [...new Set(ids)];
   if (uniqueIds.length === 0) return new Map<number, string>();
-  const result = await requestEsi<EsiUniverseName[]>(
-    "/universe/names/",
-    undefined,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(uniqueIds),
-    },
+  const names = await Promise.all(
+    Array.from(
+      { length: Math.ceil(uniqueIds.length / 1_000) },
+      (_, index) =>
+        requestCachedEsi<EsiUniverseName[]>(
+          "/universe/names/",
+          undefined,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(uniqueIds.slice(index * 1_000, (index + 1) * 1_000)),
+          },
+        ),
+    ),
   );
-  return new Map((result.data ?? []).map((entry) => [entry.id, entry.name]));
+  return new Map(
+    names.flatMap((result) => (result.data ?? []).map((entry) => [entry.id, entry.name])),
+  );
 }
 
 export async function fetchCharacterRoles(characterId: number, token: TokenSet) {
-  const result = await requestEsi<{ roles?: string[] }>(`/characters/${characterId}/roles/`, token);
+  const result = await requestCachedEsi<{ roles?: string[] }>(
+    `/characters/${characterId}/roles/`,
+    token,
+  );
   if (!result.data) throw new Error("Missing roles verification response");
   return result.data.roles ?? [];
 }
 
-export async function fetchLocationMetadata(
-  locationId: number,
-  kind: "station" | "solar_system" | "structure",
-  token?: TokenSet,
-) {
-  const path =
-    kind === "station"
-      ? `/universe/stations/${locationId}/`
-      : kind === "solar_system"
-        ? `/universe/systems/${locationId}/`
-        : `/universe/structures/${locationId}/`;
-  if (kind !== "structure") return requestEsi<LocationMetadata>(path, token);
-  const cached = structureMetadataCache.get(locationId);
+function fetchPublicLocationMetadata(path: string, token?: TokenSet) {
+  return requestCachedEsi<LocationMetadata>(path, token);
+}
+
+export function fetchStationMetadata(stationId: number, token?: TokenSet) {
+  return fetchPublicLocationMetadata(`/universe/stations/${stationId}/`, token);
+}
+
+export function fetchSolarSystemMetadata(solarSystemId: number, token?: TokenSet) {
+  return fetchPublicLocationMetadata(`/universe/systems/${solarSystemId}/`, token);
+}
+
+/**
+ * Fetches structure metadata for a specific character.
+ * Response or 503 errors are cached for 1 hour to reduce ESI load.
+ * https://developers.eveonline.com/api-explorer#/operations/GetUniverseStructuresStructureId
+ *
+ * @param structureId The ID of the structure.
+ * @param token The token of the character.
+ * @returns The structure metadata response.
+ */
+export async function fetchStructureMetadataPerCharacter(structureId: number, token?: TokenSet) {
+  const characterId = token === undefined ? undefined : tokenContexts.get(token)?.characterId;
+  const cacheKey = characterId === undefined ? undefined : `${characterId}:${structureId}`;
+  const cached = cacheKey === undefined ? undefined : structureMetadataCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return { ...cached.response, fromCache: true };
-  const response = await requestEsi<LocationMetadata>(path, token);
-  if (response.data) {
+  try {
+    const response = await requestCachedEsi<LocationMetadata>(
+      `/universe/structures/${structureId}/`,
+      token,
+      undefined,
+      { bypassCache: true, skipCacheWrite: true },
+    );
+    if (response.data && cacheKey !== undefined) {
+      structureMetadataCache.set(
+        cacheKey,
+        {
+          expiresAt: Date.now() + structureMetadataCacheTtlMs,
+          response,
+        },
+      );
+    }
+    return response;
+  }
+  catch (error) {
+    if ((error as { status?: number }).status !== 403 || cacheKey === undefined) throw error;
+    const response: LocationMetadataResponse = {
+      data: null,
+      headers: new Headers(),
+      status: 403,
+      fromCache: false,
+    };
     structureMetadataCache.set(
-      locationId,
+      cacheKey,
       {
         expiresAt: Date.now() + structureMetadataCacheTtlMs,
         response,
       },
     );
+    return response;
   }
-  return response;
 }
 
 export { getUsableToken };

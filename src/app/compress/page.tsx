@@ -142,7 +142,6 @@ function CompressContent() {
     implants: [],
     relevantSkillIds: [],
   });
-  const [knownStructures, setKnownStructures] = useState<KnownStructure[]>([]);
   const [settings, setSettings] = useState<CompressSettings>({
     locationId: "npc",
     characterId: "all-zero",
@@ -151,12 +150,14 @@ function CompressContent() {
     orderType: "buy-1-day",
     items: [],
   });
+  const [optionsRefreshVersion, setOptionsRefreshVersion] = useState(0);
   const importedRef = useRef("");
-  const optionsLoadLanguageRef = useRef<SdeLanguage | null>(null);
+  const optionsLoadKeyRef = useRef("");
 
   useEffect(() => {
-    if (optionsLoadLanguageRef.current === language) return;
-    optionsLoadLanguageRef.current = language;
+    const optionsLoadKey = `${language}:${optionsRefreshVersion}`;
+    if (optionsLoadKeyRef.current === optionsLoadKey) return;
+    optionsLoadKeyRef.current = optionsLoadKey;
     Promise
       .all([loadStructures(), loadCompressSettings(), loadClientStock(language)])
       .then(async ([structures, loadedSettings, stock]) => {
@@ -227,15 +228,6 @@ function CompressContent() {
                   : {}),
             };
           }),
-          ...structuresWithSecurity
-            .filter((structure) => structure.typeId !== undefined)
-            .map((structure) => ({
-              id: structure.id,
-              name: structureDisplayName(structure),
-              structureTypeId: structure.typeId,
-              securityStatus: structure.securityStatus,
-              rigs: structure.rigs,
-            })),
         ].filter(
           (location, index, all) =>
             all.findIndex((candidate) => locationKey(candidate) === locationKey(location))
@@ -262,16 +254,24 @@ function CompressContent() {
             : "jita",
         };
         setOptions({ ...loadedOptions, locations: loadedLocations });
-        setKnownStructures(structuresWithSecurity);
         setSettings(normalizedSettings);
         setItems(normalizedSettings.items);
         void saveCompressSettings(normalizedSettings);
       })
       .catch(() => {
-        optionsLoadLanguageRef.current = null;
+        optionsLoadKeyRef.current = "";
         setStatus("Could not load compression options.");
       });
-  }, [language]);
+  }, [language, optionsRefreshVersion]);
+
+  useEffect(() => {
+    const handleRefresh = (event: Event) => {
+      const detail = (event as CustomEvent<{ rateLimitedUntil?: string | null }>).detail;
+      if (!detail.rateLimitedUntil) setOptionsRefreshVersion((version) => version + 1);
+    };
+    window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
+    return () => window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
+  }, []);
 
   function updateSettings(next: Partial<CompressSettings>) {
     setSettings((current) => {
@@ -293,29 +293,7 @@ function CompressContent() {
     });
   }
 
-  const locationOptions: CompressOption[] = [
-    ...options.locations,
-    ...knownStructures
-      .filter(
-        (structure) =>
-          !options.locations.some(
-            (location) =>
-              locationKey(location)
-              === `structure:${structureDisplayName(structure).toLocaleLowerCase()}`,
-          ),
-      )
-      .map((structure) => ({
-        id: structure.id,
-        name: structureDisplayName(structure),
-        structureTypeId: structure.typeId,
-        securityStatus: structure.securityStatus,
-        rigs: structure.rigs,
-        canReprocess: undefined,
-      })),
-  ].filter(
-    (location, index, all) =>
-      all.findIndex((candidate) => locationKey(candidate) === locationKey(location)) === index,
-  );
+  const locationOptions = options.locations;
   const selectedCharacter = options.characters.find(
     (character) => character.id === settings.characterId,
   );

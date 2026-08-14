@@ -1,4 +1,4 @@
-import { requestEsi } from "./client";
+import { requestCachedEsi } from "./client";
 
 type MarketHistoryEntry = { date: string; volume: number };
 export type MarketSellOrder = {
@@ -18,7 +18,7 @@ type EsiMarketOrder = {
 };
 
 export async function getSevenDayAverageVolume(regionId: number, typeId: number) {
-  const response = await requestEsi<MarketHistoryEntry[]>(
+  const response = await requestCachedEsi<MarketHistoryEntry[]>(
     `/markets/${regionId}/history/?type_id=${typeId}`,
   );
   const today = new Date();
@@ -37,13 +37,13 @@ export async function getMarketSellOrders(
   regionId: number,
   typeId: number,
 ): Promise<MarketSellOrder[]> {
-  const first = await requestEsi<EsiMarketOrder[]>(
+  const first = await requestCachedEsi<EsiMarketOrder[]>(
     `/markets/${regionId}/orders/?order_type=all&type_id=${typeId}&page=1`,
   );
   const pages = Number(first.headers.get("x-pages") ?? "1");
   const orders = [...(first.data ?? [])];
   for (let page = 2; page <= pages; page += 1) {
-    const response = await requestEsi<EsiMarketOrder[]>(
+    const response = await requestCachedEsi<EsiMarketOrder[]>(
       `/markets/${regionId}/orders/?order_type=all&type_id=${typeId}&page=${page}`,
     );
     orders.push(...(response.data ?? []));

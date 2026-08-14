@@ -81,7 +81,7 @@ export function compressMaterials(
   };
 
   while ([...remaining.values()].some((quantity) => quantity > 0) && usableCandidates.length > 0) {
-    const candidate = usableCandidates
+    const eligibleCandidates = usableCandidates
       .filter((entry) => candidateScore({ ...entry, yields: adjustedYields(entry) }, remaining) > 0)
       .filter(
         (entry) => entry.maxRuns === undefined || runsNeeded(entry, remaining) <= entry.maxRuns,
@@ -91,7 +91,9 @@ export function compressMaterials(
           candidateScore(right, remaining) - candidateScore(left, remaining)
           || (left.price ?? Number.POSITIVE_INFINITY) - (right.price ?? Number.POSITIVE_INFINITY)
           || left.typeId - right.typeId,
-      )[0];
+      );
+    const candidate = eligibleCandidates.at(0);
+    if (!candidate) break;
     const runs = runsNeeded(candidate, remaining);
     const yields = adjustedYields(candidate);
     selected.set(candidateKey(candidate), (selected.get(candidateKey(candidate)) ?? 0) + runs);

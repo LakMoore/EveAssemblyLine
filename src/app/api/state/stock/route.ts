@@ -6,7 +6,7 @@ import {
   getRootContainersByItemId,
   getRunningIndustryJobs,
 } from "@/lib/esi/cache";
-import { fetchLocationMetadata, getUsableToken } from "@/lib/esi/client";
+import { fetchStructureMetadataPerCharacter, getUsableToken } from "@/lib/esi/client";
 import { getCharacter } from "@/lib/auth/tokensStore";
 import {
   getGroups,
@@ -205,7 +205,7 @@ async function resolveLocation(
 
   for (const token of tokens) {
     try {
-      const result = await fetchLocationMetadata(locationId, "structure", token);
+      const result = await fetchStructureMetadataPerCharacter(locationId, token);
       if (result.data) {
         const resolved: RootLocation = {
           locationId,

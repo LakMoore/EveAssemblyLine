@@ -24,7 +24,9 @@ import {
   fetchCharacterMarketOrders,
   fetchCorporationMarketOrders,
   applyBlueprintMetadata,
-  fetchLocationMetadata,
+  fetchSolarSystemMetadata,
+  fetchStationMetadata,
+  fetchStructureMetadataPerCharacter,
   getUsableToken,
 } from "./client";
 import { getStation } from "@/cache/services/sdeCache";
@@ -492,7 +494,7 @@ async function getRealParent(current: AssetRecord, token: TokenSet): Promise<Ass
   if (station) {
     let name: string | undefined;
     try {
-      name = (await fetchLocationMetadata(locationId, "station", token)).data?.name;
+      name = (await fetchStationMetadata(locationId, token)).data?.name;
     }
     catch {
       // SDE still provides the station identity when ESI name lookup is unavailable.
@@ -507,10 +509,10 @@ async function getRealParent(current: AssetRecord, token: TokenSet): Promise<Ass
     };
   }
   if (kind === "solar_system" || kind === "structure" || kind === null) {
-    const result = await fetchLocationMetadata(
-      locationId,
-      kind === "solar_system" ? "solar_system" : "structure",
-      token,
+    const result = await (
+      kind === "solar_system"
+        ? fetchSolarSystemMetadata(locationId, token)
+        : fetchStructureMetadataPerCharacter(locationId, token)
     ).catch(() => null);
     if (!result?.data) return null;
     return {
