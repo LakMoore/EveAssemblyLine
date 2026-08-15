@@ -1,5 +1,7 @@
 import type { BlueprintPrint, BuildItem } from "./types";
-import { getPlanningDatabase, stockStoreName } from "./planningDatabase";
+import { getPlanningDatabase, stockMetadataStoreName, stockStoreName } from "./planningDatabase";
+
+const stockSnapshotKey = "last-refresh";
 
 export type StockLocation = {
   systemId: number;
@@ -24,6 +26,7 @@ export type StockItem = Pick<BuildItem, "typeId" | "name" | "quantity"> & {
   category?: "blueprint" | "bp" | "bpo" | "bpc" | "reaction" | "item";
   marketCategory?: string;
   inBuild?: boolean;
+  inProduction?: boolean;
   inBuildQuantity?: number;
   inUse?: boolean;
   jobId?: number;
@@ -35,6 +38,7 @@ export type StockItem = Pick<BuildItem, "typeId" | "name" | "quantity"> & {
   blueprintIsOriginal?: boolean;
   blueprintRunsAtInstall?: number;
   licensedRuns?: number;
+  installedRuns?: number;
   blueprintRunsUsed?: number;
   blueprintRunsRemaining?: number;
   activityName?: string;
@@ -124,6 +128,7 @@ export async function replaceEsiStock(records: StockRecord[]) {
       reject(request.error ?? new Error("Could not replace cached ESI stock."));
     };
     transaction.oncomplete = () => {
+      void saveStockSnapshotTime();
       resolve();
     };
     transaction.onerror = () => {
@@ -132,57 +137,26 @@ export async function replaceEsiStock(records: StockRecord[]) {
   });
 }
 
-export async function replaceMarketOrderStock(items: StockItem[]) {
+export async function loadStockSnapshotTime() {
+  const database = await getPlanningDatabase();
+  return new Promise<number | null>((resolve, reject) => {
+    const request = database
+      .transaction(stockMetadataStoreName, "readonly")
+      .objectStore(stockMetadataStoreName)
+      .get(stockSnapshotKey);
+    request.onsuccess = () => resolve(typeof request.result === "number" ? request.result : null);
+    request.onerror = () => reject(request.error ?? new Error("Could not load stock metadata."));
+  });
+}
+
+async function saveStockSnapshotTime() {
   const database = await getPlanningDatabase();
   return new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(stockStoreName, "readwrite");
-    const store = transaction.objectStore(stockStoreName);
-    const request = store.getAll();
-    request.onsuccess = () => {
-      const records = request.result.filter(isStockRecord);
-      const marketOrderQuantities = new Map<number, number>();
-      for (const item of items) {
-        marketOrderQuantities.set(
-          item.typeId,
-          (marketOrderQuantities.get(item.typeId) ?? 0) + item.quantity,
-        );
-      }
-      for (const record of records) {
-        if (record.source === "marketOrder") store.delete(locationKey(record));
-        else {
-          store.put(
-            {
-              ...record,
-              items: record.items.map((item) => ({
-                ...item,
-                marketOrderQuantity: marketOrderQuantities.get(item.typeId),
-              })),
-            },
-            locationKey(record),
-          );
-        }
-      }
-      if (items.length > 0) {
-        store.put(
-          {
-            systemId: 0,
-            systemName: "Market orders",
-            structureId: "market-orders",
-            structureName: "Market sell orders",
-            source: "marketOrder",
-            items: items.map((item) => ({ ...item, source: "marketOrder" as const })),
-          },
-          "0:market-orders",
-        );
-      }
-    };
-    request.onerror = () => {
-      reject(request.error ?? new Error("Could not replace cached market orders."));
-    };
+    const transaction = database.transaction(stockMetadataStoreName, "readwrite");
+    transaction.objectStore(stockMetadataStoreName).put(Date.now(), stockSnapshotKey);
     transaction.oncomplete = () => resolve();
-    transaction.onerror = () => {
-      reject(transaction.error ?? new Error("Could not replace cached market orders."));
-    };
+    transaction.onerror = () =>
+      reject(transaction.error ?? new Error("Could not save stock metadata."));
   });
 }
 

@@ -1,10 +1,12 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
 import {
   getResolvedAssetIndex,
   getResolvedAssets,
-  getRootContainersByItemId,
+  getBlueprintInstances,
+  getRootLocationsByItemId,
   getRunningIndustryJobs,
+  getMarketOrderStock,
 } from "@/lib/esi/cache";
 import { fetchStructureMetadataPerCharacter, getUsableToken } from "@/lib/esi/client";
 import { getCharacter } from "@/lib/auth/tokensStore";
@@ -20,7 +22,13 @@ import {
 } from "@/cache/services/sdeCache";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { categorizeType } from "@/lib/reference/category";
-import type { AssetLocation, AssetRecord, IndustryJobRecord } from "@/lib/auth/model";
+import type {
+  AssetLocation,
+  AssetRecord,
+  BlueprintInstanceRecord,
+  IndustryJobRecord,
+} from "@/lib/auth/model";
+import type { PlanStockItem } from "@/lib/planning/types";
 
 type RootLocation = {
   locationId: number;
@@ -66,6 +74,7 @@ type StockItem = {
   blueprintIsOriginal?: boolean;
   blueprintRunsAtInstall?: number;
   licensedRuns?: number;
+  installedRuns?: number;
   blueprintRunsUsed?: number;
   blueprintRunsRemaining?: number;
   activityName?: string;
@@ -144,6 +153,12 @@ function activityName(activityId: number) {
   );
 }
 
+function jobUsesOriginalWithoutAssetMetadata(job: IndustryJobRecord, isCopying: boolean) {
+  return (
+    (job.activityId === 1 || isCopying) && (job.licensedRuns === undefined || job.licensedRuns <= 0)
+  );
+}
+
 function shouldIncludeAsset(asset: AssetRecord, shipTypeIds: Set<number>) {
   if (asset.isSingleton && shipTypeIds.has(asset.typeId)) return false;
   return true;
@@ -166,16 +181,14 @@ function rootLocationFromAssetLocation(root: AssetLocation): RootLocation {
 
 async function resolveLocation(
   locationId: number,
-  containersByItemId: Map<number, AssetRecord>,
+  rootLocationsByItemId: Map<number, AssetLocation>,
   structureTypeIds: Set<number>,
   stations: Awaited<ReturnType<typeof getStations>>,
   types: Awaited<ReturnType<typeof getTypesByIds>>,
   characterIds: number[],
 ): Promise<RootLocation | undefined> {
-  const container = containersByItemId.get(locationId);
-  if (container && isDirectLocation(container)) {
-    return rootLocationFromAssetLocation(container.rootLocation);
-  }
+  const cachedRoot = rootLocationsByItemId.get(locationId);
+  if (cachedRoot) return rootLocationFromAssetLocation(cachedRoot);
 
   const station = stations.get(locationId);
   if (station) {
@@ -241,7 +254,7 @@ async function resolveLocation(
   return undefined;
 }
 
-function addContribution(
+function addStockContribution(
   buckets: Map<number, StockBucket>,
   contribution: StockContribution,
   location: RootLocation,
@@ -251,7 +264,6 @@ function addContribution(
   language: SdeLanguage,
   systems: Awaited<ReturnType<typeof getSystems>>,
 ) {
-  if (location.kind !== "anchored" && location.typeId === undefined) return;
   const type = types.get(contribution.typeId);
   if (!type?.published) return;
   const categorized = categorizeType(type, language, marketGroups, groups);
@@ -337,6 +349,7 @@ function addContribution(
     item.blueprintIsOriginal = contribution.blueprintIsOriginal;
     item.blueprintRunsAtInstall = contribution.blueprintRunsAtInstall;
     item.licensedRuns = contribution.job?.licensedRuns;
+    item.installedRuns = contribution.job?.installedRuns;
     item.blueprintRunsUsed = contribution.blueprintRunsUsed;
     item.blueprintRunsRemaining = contribution.blueprintRunsRemaining;
     item.activityName = contribution.activityName;
@@ -350,65 +363,83 @@ function addContribution(
   buckets.set(location.locationId, bucket);
 }
 
-function jobContributions(
+/**
+ * Converts an active industry job into the installed blueprint and its current output.
+ * Blueprint run metadata is authoritative when the installed item is present in the asset
+ * cache. Manufacturing and copying jobs without that metadata are treated as BPO-backed
+ * because an original remains reusable while a copy requires finite run accounting.
+ */
+function installedJobContributions(
   job: IndustryJobRecord,
   blueprint: AssetRecord | undefined,
-  productQuantityPerRun = 1,
+  blueprintInstance: BlueprintInstanceRecord | undefined,
+  productQuantityPerRun?: number,
 ): StockContribution[] {
   const isCopying = job.activityId === 5;
-  const blueprintRunCount = blueprint?.runCount;
-  const hasKnownBlueprintRuns = blueprintRunCount !== undefined;
-  const isOriginal = blueprintRunCount === -1;
-  const blueprintRunsUsed = isCopying ? (job.licensedRuns ?? job.runs) : job.runs;
-  const remainingRuns = isOriginal
+  const installedRunCount = blueprintInstance?.runs ?? blueprint?.runCount;
+  const installedBlueprintIsOriginal =
+    blueprintInstance?.quantity === -1
+    || (blueprintInstance === undefined && installedRunCount === -1)
+    || (
+      blueprintInstance === undefined
+      && installedRunCount === undefined
+      && jobUsesOriginalWithoutAssetMetadata(job, isCopying)
+    );
+  const installedBlueprintRunsUsed = job.installedRuns ?? getInstalledJobRuns(job);
+  const installedBlueprintRemainingRuns = installedBlueprintIsOriginal
     ? -1
-    : hasKnownBlueprintRuns
-      ? Math.max(0, blueprintRunCount - blueprintRunsUsed)
+    : installedRunCount !== undefined
+      ? Math.max(0, installedRunCount - installedBlueprintRunsUsed)
       : 0;
   const contributions: StockContribution[] = [];
-  if (isOriginal || (hasKnownBlueprintRuns && remainingRuns > 0)) {
+  if (
+    installedBlueprintIsOriginal
+    || installedBlueprintRemainingRuns > 0
+    // Research jobs may have no product output. Keep their installed blueprint visible
+    // even when all finite runs are consumed so the active job remains trackable.
+    || job.productTypeId === undefined
+  ) {
     contributions.push({
       itemId: job.blueprintId,
       typeId: job.blueprintTypeId,
       quantity: 1,
       isPackaged: true,
       ownerType: job.ownerType,
-      blueprintType: isOriginal ? "bpo" : "bpc",
-      runCount: remainingRuns,
+      blueprintType: installedBlueprintIsOriginal ? "bpo" : "bpc",
+      runCount: installedBlueprintRemainingRuns,
       inBuild: true,
       inUse: true,
       job,
-      blueprintIsOriginal: isOriginal,
-      blueprintRunsAtInstall: blueprintRunCount,
-      blueprintRunsUsed,
-      blueprintRunsRemaining: remainingRuns,
+      blueprintIsOriginal: installedBlueprintIsOriginal,
+      blueprintRunsAtInstall: installedRunCount,
+      blueprintRunsUsed: installedBlueprintRunsUsed,
+      blueprintRunsRemaining: installedBlueprintRemainingRuns,
       activityName: activityName(job.activityId),
       blueprintPrint: {
         itemId: job.blueprintId,
-        runs: remainingRuns,
-        me: blueprint?.me,
-        te: blueprint?.te,
+        runs: installedBlueprintRemainingRuns,
+        me: blueprintInstance?.me ?? blueprint?.me,
+        te: blueprintInstance?.te ?? blueprint?.te,
         activity: activityName(job.activityId),
         endDate: job.endDate,
-        type: isOriginal ? "bpo" : "bpc",
+        type: installedBlueprintIsOriginal ? "bpo" : "bpc",
       },
     });
   }
-  const outputRuns = job.successfulRuns && job.successfulRuns > 0 ? job.successfulRuns : job.runs;
-  if (job.productTypeId && outputRuns > 0) {
-    const outputQuantity =
-      job.activityId === 5 || job.activityId === 8
-        ? outputRuns
-        : outputRuns * productQuantityPerRun;
+  const productionRuns = job.installedRuns ?? getInstalledJobRuns(job);
+  const isProduction = job.activityId === 1 || job.activityId === 9;
+  if (
+    job.productTypeId
+    && productionRuns > 0
+    && (!isProduction || productQuantityPerRun !== undefined)
+  ) {
+    const outputQuantity = !isProduction ? productionRuns : productionRuns * productQuantityPerRun!;
     contributions.push({
       itemId: job.jobId,
       typeId: job.productTypeId,
       quantity: outputQuantity,
       isPackaged: false,
       ownerType: job.ownerType,
-      ...(job.activityId === 5 && job.licensedRuns !== undefined
-        ? { runCount: outputQuantity * job.licensedRuns }
-        : {}),
       inBuild: true,
       job,
       activityName: activityName(job.activityId),
@@ -417,7 +448,11 @@ function jobContributions(
   return contributions;
 }
 
-export async function GET(request: Request) {
+function getInstalledJobRuns(job: IndustryJobRecord) {
+  return job.successfulRuns ?? Math.floor(job.runs * (job.probability ?? 1));
+}
+
+export async function GET(request: NextRequest) {
   const startedAt = performance.now();
   let lastPhaseAt = startedAt;
   const phaseDurations: Record<string, number> = {};
@@ -432,27 +467,38 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const requestedLanguage = url.searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
+  const marketStock = await getMarketOrderStock(
+    characterIds,
+    {
+      personalSellOrdersAsStock: true,
+      allCorporationSellOrdersAsStock: true,
+      myCorporationSellOrdersAsStock: true,
+    },
+    session.sessionId,
+  );
   markPhase("session");
   const [
     assets,
     jobs,
+    blueprintInstances,
     shipTypeIds,
     structureTypeIds,
     groups,
     marketGroups,
     stations,
     systems,
-    rootContainersByItemId,
+    rootLocationsByItemId,
   ] = await Promise.all([
     getResolvedAssets(characterIds, true, session.sessionId),
     getRunningIndustryJobs(characterIds, true),
+    getBlueprintInstances(characterIds, true, session.sessionId),
     getShipTypeIds(),
     getStructureTypeIds(),
     getGroups(),
     getMarketGroups(),
     getStations(),
     getSystems(),
-    getRootContainersByItemId(characterIds, true, session.sessionId),
+    getRootLocationsByItemId(characterIds, true, session.sessionId),
   ]);
   markPhase("data");
   const types = await getTypesByIds([
@@ -465,26 +511,27 @@ export async function GET(request: Request) {
   ]);
   markPhase("types");
   const jobLocationIds = [
-    ...new Set(
-      jobs.flatMap((job) => [job.blueprintLocationId, job.locationId, job.outputLocationId]),
-    ),
+    ...new Set([
+      ...jobs.flatMap((job) => [job.blueprintLocationId, job.locationId, job.outputLocationId]),
+      ...blueprintInstances.map((blueprint) => blueprint.locationId),
+    ]),
   ];
   const jobLocations = new Map(
     await Promise.all(
-      jobLocationIds.map(
-        async (locationId) =>
-          [
-            locationId,
-            await resolveLocation(
+      jobLocationIds.map(async (locationId) => {
+        const cachedRoot = rootLocationsByItemId.get(locationId);
+        const location = cachedRoot
+          ? rootLocationFromAssetLocation(cachedRoot)
+          : await resolveLocation(
               locationId,
-              rootContainersByItemId,
+              rootLocationsByItemId,
               structureTypeIds,
               stations,
               types,
               characterIds,
-            ),
-          ] as const,
-      ),
+            );
+        return [locationId, location] as const;
+      }),
     ),
   );
   markPhase("locations");
@@ -512,11 +559,28 @@ export async function GET(request: Request) {
   );
   const allAssetIndex = await getResolvedAssetIndex(characterIds, true, session.sessionId);
   markPhase("indexes");
+  const blueprintInstancesByOwnerAndItemId = new Map(
+    blueprintInstances.map((blueprint) => [
+      `${blueprint.ownerType}:${blueprint.ownerId}:${blueprint.itemId}`,
+      blueprint,
+    ]),
+  );
+
+  // Add ordinary assets first. Job contributions are added afterwards with a job-specific key,
+  // so an installed blueprint and its output remain visible alongside physical stock.
   for (const asset of assets) {
     if (!shouldIncludeAsset(asset, shipTypeIds) || !isDirectLocation(asset)) continue;
     const rootLocation = rootLocationFromAssetLocation(asset.rootLocation);
     if (rootLocation.typeId !== undefined && shipTypeIds.has(rootLocation.typeId)) continue;
-    addContribution(
+    const blueprintInstance = blueprintInstancesByOwnerAndItemId.get(
+      `${asset.ownerType}:${asset.ownerId}:${asset.itemId}`,
+    );
+    const blueprintType = blueprintInstance
+      ? blueprintInstance.quantity === -1
+        ? "bpo"
+        : "bpc"
+      : undefined;
+    addStockContribution(
       buckets,
       {
         itemId: asset.itemId,
@@ -526,18 +590,18 @@ export async function GET(request: Request) {
         rootLocationId: asset.rootLocation.locationId,
         isPackaged: !asset.isSingleton,
         ownerType: asset.ownerType,
-        blueprintType: asset.runCount === -1 ? "bpo" : "bpc",
-        runCount: asset.runCount,
-        me: asset.me,
-        te: asset.te,
-        ...(asset.runCount !== undefined
+        blueprintType,
+        runCount: blueprintInstance?.runs,
+        me: blueprintInstance?.me,
+        te: blueprintInstance?.te,
+        ...(blueprintInstance
           ? {
               blueprintPrint: {
                 itemId: asset.itemId,
-                runs: asset.runCount,
-                me: asset.me,
-                te: asset.te,
-                type: asset.runCount === -1 ? "bpo" : "bpc",
+                runs: blueprintInstance.runs,
+                me: blueprintInstance.me,
+                te: blueprintInstance.te,
+                type: blueprintType!,
               },
             }
           : {}),
@@ -550,38 +614,50 @@ export async function GET(request: Request) {
       systems,
     );
   }
+
+  // Jobs can contain the only usable copy of a blueprint. Preserve that installed blueprint even
+  // when its asset record is unavailable or its structure metadata is only partially resolved.
   for (const job of jobs) {
     if (job.status === "cancelled" || job.status === "delivered") continue;
     const blueprint =
       allAssetIndex.get(job.blueprintId)
       ?? assets.find((asset) => asset.itemId === job.blueprintId);
+    const blueprintInstance = blueprintInstances.find(
+      (instance) =>
+        instance.itemId === job.blueprintId
+        && instance.ownerType === job.ownerType
+        && instance.ownerId === job.ownerId,
+    );
     const preferredBlueprintLocation =
-      blueprint && isDirectLocation(blueprint)
+      (blueprintInstance && jobLocations.get(blueprintInstance.locationId))
+      ?? (blueprint && isDirectLocation(blueprint)
         ? rootLocationFromAssetLocation(blueprint.rootLocation)
-        : (jobLocations.get(job.blueprintLocationId) ?? jobLocations.get(job.locationId));
-    const blueprintLocation = preferredBlueprintLocation ?? jobLocations.get(job.locationId);
-    if (
-      !blueprintLocation
-      || (blueprintLocation.typeId !== undefined && shipTypeIds.has(blueprintLocation.typeId))
-    ) continue;
-    for (const [index, contribution] of jobContributions(
+        : (jobLocations.get(job.blueprintLocationId) ?? jobLocations.get(job.locationId)));
+    const blueprintLocation = preferredBlueprintLocation
+      ?? jobLocations.get(job.locationId) ?? {
+        locationId: job.blueprintLocationId,
+        kind: "anchored" as const,
+      };
+    if (blueprintLocation.typeId !== undefined && shipTypeIds.has(blueprintLocation.typeId)) {
+      continue;
+    }
+    for (const contribution of installedJobContributions(
       job,
       blueprint,
+      blueprintInstance,
       job.productTypeId !== undefined ? productQuantities.get(job.productTypeId) : undefined,
-    ).entries()) {
-      const location =
-        index === 0
-          ? blueprintLocation
-          : (jobLocations.get(job.outputLocationId) ?? jobLocations.get(job.locationId));
-      if (!location || (location.typeId !== undefined && shipTypeIds.has(location.typeId))) {
-        continue;
-      }
-      addContribution(
+    )) {
+      const location = jobLocations.get(job.outputLocationId)
+        ?? jobLocations.get(job.locationId) ?? {
+          locationId: job.outputLocationId,
+          kind: "anchored" as const,
+        };
+      addStockContribution(
         buckets,
         {
           ...contribution,
-          locationId: index === 0 ? job.blueprintLocationId : job.outputLocationId,
-          rootLocationId: index === 0 ? job.blueprintLocationId : job.outputLocationId,
+          locationId: job.outputLocationId,
+          rootLocationId: job.facilityId,
         },
         location,
         types,
@@ -595,8 +671,17 @@ export async function GET(request: Request) {
   markPhase("aggregate");
   const payload = {
     locations: [...buckets.values()]
-      .map((bucket) => ({ ...bucket, items: [...bucket.items.values()] }))
+      .map(({ items: _items, ...location }) => location)
       .sort((left, right) => left.name.localeCompare(right.name)),
+    workingStock: [
+      ...[...buckets.values()].flatMap((bucket) =>
+        [...bucket.items.values()].map((item) => ({
+          ...item,
+          category: item.category as PlanStockItem["category"],
+        })),
+      ),
+      ...(marketStock ?? []),
+    ] satisfies PlanStockItem[],
   };
   const totalMs = Math.round(performance.now() - startedAt);
   const timingHeader = [

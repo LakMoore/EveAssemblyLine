@@ -1,6 +1,8 @@
 import type {
   AssetLocation,
   AssetRecord,
+  BlueprintInstanceRecord,
+  CharacterTokenRecord,
   IndustryJobRecord,
   MarketOrderRecord,
   TokenSet,
@@ -19,11 +21,12 @@ import {
   fetchCharacterAssets,
   fetchAssetNames,
   fetchCorporationAssets,
+  fetchCharacterBlueprints,
+  fetchCorporationBlueprints,
   fetchCharacterIndustryJobs,
   fetchCorporationIndustryJobs,
   fetchCharacterMarketOrders,
   fetchCorporationMarketOrders,
-  applyBlueprintMetadata,
   fetchSolarSystemMetadata,
   fetchStationMetadata,
   fetchStructureMetadataPerCharacter,
@@ -56,9 +59,10 @@ export function toClientEndpointStatus<T>(cache: EndpointCache<T> | undefined) {
 
 type OwnerCache = {
   allAssetsRaw?: EndpointCache<AssetRecord[]>;
+  blueprintInstances?: EndpointCache<BlueprintInstanceRecord[]>;
   stockAssetsByItemId?: Map<number, AssetRecord>;
+  rootLocationsByItemId: Map<number, AssetLocation>;
   shipAssetsByItemId: Map<number, AssetRecord>;
-  rootContainersByItemId: Map<number, AssetRecord>;
   assembledShipsByItemId: Map<number, AssetRecord>;
   assembledStructureRigs: AssetRecord[];
   jobs?: EndpointCache<IndustryJobRecord[]>;
@@ -89,14 +93,53 @@ function getUsableMarketOrdersEtag(cache: OwnerCache | undefined) {
     : undefined;
 }
 
+async function refreshBlueprintInstances(
+  cache: OwnerCache,
+  character: CharacterTokenRecord,
+  fetchBlueprints: typeof fetchCharacterBlueprints,
+) {
+  if (
+    cache.blueprintInstances
+    && cache.blueprintInstances.nextRefreshAllowed
+    && Date.parse(cache.blueprintInstances.nextRefreshAllowed) > Date.now()
+  ) {
+    cache.blueprintInstances.status = endpointDataStatus(
+      cache.blueprintInstances.lastModified,
+      cache.blueprintInstances.nextRefreshAllowed,
+    );
+    return cache.blueprintInstances;
+  }
+  const result = await fetchBlueprints(character, cache.blueprintInstances?.etag, true);
+  cache.blueprintInstances =
+    result.notModified && cache.blueprintInstances
+      ? setFresh(cache.blueprintInstances.lastBody, result.headers, cache.blueprintInstances)
+      : result.fromCache && cache.blueprintInstances
+        ? {
+            ...cache.blueprintInstances,
+            status: endpointDataStatus(
+              cache.blueprintInstances.lastModified,
+              cache.blueprintInstances.nextRefreshAllowed,
+            ),
+          }
+        : setFresh(
+            result.blueprints ?? [],
+            result.headers,
+            cache.blueprintInstances,
+            20 * 60 * 1000,
+            false,
+            true,
+          );
+  return cache.blueprintInstances;
+}
+
 function getCache(map: Map<string, OwnerCache>, id: number, sessionId: string): OwnerCache {
   const key = `${sessionId}:${id}`;
   const existing = map.get(key);
   if (existing) return existing;
   const created: OwnerCache = {
     assembledStructureRigs: [],
+    rootLocationsByItemId: new Map(),
     shipAssetsByItemId: new Map(),
-    rootContainersByItemId: new Map(),
     assembledShipsByItemId: new Map(),
     unresolvedAssetCount: 0,
   };
@@ -324,7 +367,7 @@ async function cacheResolvedAssets(
     }
   }
 
-  const rootContainersByItemId = await resolveRootContainers(
+  const rootLocationsByItemId = await resolveRootLocations(
     assetIndexes.stockLocationItemsByItemId,
     assetIndexes.shipTypeIds,
     token,
@@ -342,9 +385,8 @@ async function cacheResolvedAssets(
   // add locations to stock assets
   const resolvedStockAssets = await Promise.all(
     [...assetIndexes.stockAssetsByItemId.values()].map(async (asset) => {
-      const rootContainer = rootContainersByItemId.get(asset.locationId);
-      const containerRoot = rootContainer?.rootLocation;
-      if (containerRoot) return { ...asset, rootLocation: containerRoot };
+      const cachedRoot = rootLocationsByItemId.get(asset.locationId);
+      if (cachedRoot) return { ...asset, rootLocation: cachedRoot };
       try {
         const rootLocation = await inferRoot(asset.locationId, asset);
         return rootLocation ? { ...asset, rootLocation } : asset;
@@ -362,6 +404,11 @@ async function cacheResolvedAssets(
       }
     }),
   );
+  for (const asset of resolvedStockAssets) {
+    if (asset.rootLocation && "kind" in asset.rootLocation) {
+      rootLocationsByItemId.set(asset.locationId, asset.rootLocation);
+    }
+  }
   const resolvedByItemId = new Map(resolvedStockAssets.map((asset) => [asset.itemId, asset]));
 
   const refreshedAt = markRefreshed ? new Date().toISOString() : undefined;
@@ -384,11 +431,11 @@ async function cacheResolvedAssets(
     );
   }
   cache.stockAssetsByItemId = resolvedByItemId;
+  cache.rootLocationsByItemId = rootLocationsByItemId;
   const resolvedShipAssets = await Promise.all(
     [...assetIndexes.shipAssetsByItemId.values()].map(async (asset) => {
-      const rootContainer = rootContainersByItemId.get(asset.locationId);
-      const containerRoot = rootContainer?.rootLocation;
-      if (containerRoot) return { ...asset, rootLocation: containerRoot };
+      const cachedRoot = rootLocationsByItemId.get(asset.locationId);
+      if (cachedRoot) return { ...asset, rootLocation: cachedRoot };
       try {
         const rootLocation = await inferRoot(asset.locationId, asset);
         return rootLocation ? { ...asset, rootLocation } : asset;
@@ -399,7 +446,6 @@ async function cacheResolvedAssets(
     }),
   );
   cache.shipAssetsByItemId = new Map(resolvedShipAssets.map((asset) => [asset.itemId, asset]));
-  cache.rootContainersByItemId = rootContainersByItemId;
   cache.assembledShipsByItemId = assetIndexes.assembledShipsByItemId;
   cache.assembledStructureRigs = assetIndexes.installedStructureRigs;
 
@@ -530,7 +576,7 @@ async function getRealParent(current: AssetRecord, token: TokenSet): Promise<Ass
   return null;
 }
 
-async function resolveRootContainers(
+async function resolveRootLocations(
   containerItemsByItemId: Map<number, AssetRecord>,
   shipTypeIds: Set<number>,
   token: TokenSet,
@@ -577,10 +623,10 @@ async function resolveRootContainers(
         [asset.itemId, { ...asset, rootLocation: await findRoot(asset.itemId) }] as const,
     ),
   );
-  const roots: Array<readonly [number, AssetRecord]> = [];
+  const roots: Array<readonly [number, AssetLocation]> = [];
   for (const result of results) {
     if (result.status === "fulfilled" && result.value[1].rootLocation) {
-      roots.push(result.value as readonly [number, AssetRecord]);
+      roots.push([result.value[0], result.value[1].rootLocation]);
     }
     else if (result.status === "fulfilled") {
       const asset = result.value[1];
@@ -598,7 +644,7 @@ async function resolveRootContainers(
       console.warn("Could not resolve a container root", result.reason);
     }
   }
-  return new Map<number, AssetRecord>(roots);
+  return new Map<number, AssetLocation>(roots);
 }
 
 async function rebuildResolvedAssets(
@@ -635,13 +681,13 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
   const summary: {
     characterId: number;
     assets?: EndpointCache<AssetRecord[] | null>;
-    rootContainersByItemId?: Map<number, AssetRecord>;
+    blueprints?: EndpointCache<BlueprintInstanceRecord[] | null>;
     jobs?: EndpointCache<IndustryJobRecord[] | null>;
     marketOrders?: EndpointCache<MarketOrderRecord[] | null>;
     corporations?: Array<{
       corporationId: number;
       assets?: EndpointCache<AssetRecord[] | null>;
-      rootContainersByItemId?: Map<number, AssetRecord>;
+      blueprints?: EndpointCache<BlueprintInstanceRecord[] | null>;
     }>;
   }[] = [];
   for (const characterId of characterIds) {
@@ -684,16 +730,9 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
         };
         const result = await fetchCharacterAssets(character, cache.allAssetsRaw?.etag, true);
         if (result.notModified && cache.allAssetsRaw) {
-          const assets =
-            result.blueprints.length > 0
-              ? applyBlueprintMetadata(
-                  cache.allAssetsRaw.lastBody as AssetRecord[],
-                  result.blueprints,
-                )
-              : cache.allAssetsRaw.lastBody;
           await cacheResolvedAssets(
             cache,
-            assets as AssetRecord[],
+            cache.allAssetsRaw.lastBody as AssetRecord[],
             result.token,
             result.headers,
             cache.allAssetsRaw,
@@ -733,7 +772,6 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
           );
         }
         characterSummary.assets = cache.allAssetsRaw;
-        characterSummary.rootContainersByItemId = cache.rootContainersByItemId;
       }
     }
     catch (error) {
@@ -745,6 +783,20 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
       characterSummary.assets = {
         ...cache.allAssetsRaw,
       };
+    }
+    try {
+      characterSummary.blueprints = await refreshBlueprintInstances(
+        cache,
+        character,
+        fetchCharacterBlueprints,
+      );
+    }
+    catch (error) {
+      cache.blueprintInstances = {
+        ...(cache.blueprintInstances ?? { lastBody: [] }),
+        ...endpointStatus(error),
+      };
+      characterSummary.blueprints = cache.blueprintInstances;
     }
     try {
       if (
@@ -857,7 +909,7 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
       const corpSummary: {
         corporationId: number;
         assets?: EndpointCache<AssetRecord[] | null>;
-        rootContainersByItemId?: Map<number, AssetRecord>;
+        blueprints?: EndpointCache<BlueprintInstanceRecord[] | null>;
         jobs?: EndpointCache<IndustryJobRecord[] | null>;
         marketOrders?: EndpointCache<MarketOrderRecord[] | null>;
       } = { corporationId: character.corporationId };
@@ -900,16 +952,9 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
             true,
           );
           if (result.notModified && corpCache.allAssetsRaw) {
-            const assets =
-              result.blueprints.length > 0
-                ? applyBlueprintMetadata(
-                    corpCache.allAssetsRaw.lastBody as AssetRecord[],
-                    result.blueprints,
-                  )
-                : corpCache.allAssetsRaw.lastBody;
             await cacheResolvedAssets(
               corpCache,
-              assets as AssetRecord[],
+              corpCache.allAssetsRaw.lastBody as AssetRecord[],
               result.token,
               result.headers,
               corpCache.allAssetsRaw,
@@ -938,7 +983,6 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
             );
           }
           corpSummary.assets = corpCache.allAssetsRaw;
-          corpSummary.rootContainersByItemId = corpCache.rootContainersByItemId;
           if (result.fromCache && corpCache.allAssetsRaw) {
             if (previousAssetTiming) {
               corpCache.allAssetsRaw.lastUpdated = previousAssetTiming.lastUpdated;
@@ -961,6 +1005,20 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
         corpSummary.assets = {
           ...corpCache.allAssetsRaw,
         };
+      }
+      try {
+        corpSummary.blueprints = await refreshBlueprintInstances(
+          corpCache,
+          character,
+          fetchCorporationBlueprints,
+        );
+      }
+      catch (error) {
+        corpCache.blueprintInstances = {
+          ...(corpCache.blueprintInstances ?? { lastBody: [] }),
+          ...endpointStatus(error),
+        };
+        corpSummary.blueprints = corpCache.blueprintInstances;
       }
       try {
         if (
@@ -1227,15 +1285,15 @@ export async function getResolvedAssetIndex(
   return index;
 }
 
-export async function getRootContainersByItemId(
+export async function getRootLocationsByItemId(
   characterIds: number[],
   includeCorporationAssets: boolean,
   sessionId = "default",
-): Promise<Map<number, AssetRecord>> {
-  const assets = characterIds.flatMap((id) => [
-    ...getCache(characterCaches, id, sessionId).rootContainersByItemId.values(),
+): Promise<Map<number, AssetLocation>> {
+  const locations = characterIds.flatMap((id) => [
+    ...getCache(characterCaches, id, sessionId).rootLocationsByItemId.entries(),
   ]);
-  if (!includeCorporationAssets) return new Map(assets.map((asset) => [asset.itemId, asset]));
+  if (!includeCorporationAssets) return new Map(locations);
   const characters = await getCharacters();
   const corporations = new Set(
     characters
@@ -1248,21 +1306,17 @@ export async function getRootContainersByItemId(
       .map((character) => character.corporationId!),
   );
   return [
-    ...assets.map((asset) => [asset.itemId, asset]),
-    ...[...corporations].flatMap((id) =>
-      [...getCache(corporationCaches, id, sessionId).rootContainersByItemId.values()].map(
-        (asset) => [asset.itemId, asset],
-      ),
-    ),
-  ]
-    .map(([itemId, asset]) => [itemId, asset] as [number, AssetRecord])
-    .reduce(
-      (map, [itemId, asset]) => {
-        map.set(itemId, asset);
-        return map;
-      },
-      new Map<number, AssetRecord>(),
-    );
+    ...locations,
+    ...[...corporations].flatMap((id) => [
+      ...getCache(corporationCaches, id, sessionId).rootLocationsByItemId.entries(),
+    ]),
+  ].reduce(
+    (map, [locationId, location]) => {
+      map.set(locationId, location);
+      return map;
+    },
+    new Map<number, AssetLocation>(),
+  );
 }
 
 export async function getAssembledStructureRigAssets(
@@ -1451,6 +1505,36 @@ export async function getMarketOrderStock(
   return resolveNames();
 }
 
+export async function getBlueprintInstances(
+  characterIds: number[],
+  includeCorporationBlueprints: boolean,
+  sessionId = "default",
+) {
+  const instances = characterIds.flatMap(
+    (characterId) =>
+      getCache(characterCaches, characterId, sessionId).blueprintInstances?.lastBody ?? [],
+  );
+  if (!includeCorporationBlueprints) return instances;
+  const characters = await getCharacters();
+  const corporationIds = new Set(
+    characters
+      .filter(
+        (character) =>
+          characterIds.includes(character.characterId)
+          && character.hasDirectorRole
+          && character.corporationId,
+      )
+      .map((character) => character.corporationId!),
+  );
+  return [
+    ...instances,
+    ...[...corporationIds].flatMap(
+      (corporationId) =>
+        getCache(corporationCaches, corporationId, sessionId).blueprintInstances?.lastBody ?? [],
+    ),
+  ];
+}
+
 export async function getStateStatus(characterIds: number[], sessionId: string) {
   const characters = await getCharacters();
   const corporationsByCharacter = new Map<number, number[]>();
@@ -1473,6 +1557,12 @@ export async function getStateStatus(characterIds: number[], sessionId: string) 
         status: "cached" as const,
         hasBody: false,
       },
+      blueprints: toClientEndpointStatus(
+        getCache(characterCaches, characterId, sessionId).blueprintInstances,
+      ) ?? {
+        status: "cached" as const,
+        hasBody: false,
+      },
       jobs: toClientEndpointStatus(getCache(characterCaches, characterId, sessionId).jobs) ?? {
         status: "cached" as const,
         hasBody: false,
@@ -1487,6 +1577,12 @@ export async function getStateStatus(characterIds: number[], sessionId: string) 
         corporationId,
         assets: toClientEndpointStatus(
           getCache(corporationCaches, corporationId, sessionId).allAssetsRaw,
+        ) ?? {
+          status: "cached" as const,
+          hasBody: false,
+        },
+        blueprints: toClientEndpointStatus(
+          getCache(corporationCaches, corporationId, sessionId).blueprintInstances,
         ) ?? {
           status: "cached" as const,
           hasBody: false,

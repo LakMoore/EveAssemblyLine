@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import Image from "next/image";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import styles from "./imagechecker.module.css";
 
@@ -233,7 +234,7 @@ function ImageProbe({
     <div
       className={`${styles.probe} ${styles[`probe${status[0].toUpperCase()}${status.slice(1)}`]}`}
     >
-      <img
+      <Image
         src={eveTypeImageUrl(typeId, variation, 32)}
         alt=""
         width={32}

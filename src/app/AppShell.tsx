@@ -10,20 +10,17 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { isSdeLanguage, sdeLanguages, type SdeLanguage } from "@/lib/reference/languages";
+import { loadStockSnapshotTime, replaceEsiStock, type StockItem } from "@/lib/planning/stockStore";
 import {
-  replaceEsiStock,
-  replaceMarketOrderStock,
-  type StockItem,
-} from "@/lib/planning/stockStore";
-import { settingsStorageKey, type PlannerSettings } from "@/lib/planning/preferences";
-import {
+  groupClientStockByLocation,
+  loadClientJobs,
   loadClientSession,
   loadClientShips,
   loadClientStateStatus,
   loadClientStock,
-  loadClientMarketOrders,
   type ClientCharacterStatus,
 } from "@/lib/client/requestCache";
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
@@ -50,6 +47,7 @@ type ActivePage =
   | "planner"
   | "compress"
   | "stock"
+  | "jobs"
   | "ships"
   | "locations"
   | "settings"
@@ -74,16 +72,6 @@ type EsiStockResponse = {
 };
 type StateEndpoint = keyof Pick<ClientCharacterStatus, "assets" | "jobs" | "orders">;
 const stateEndpoints: StateEndpoint[] = ["assets", "jobs", "orders"];
-
-function loadPlannerSettings(): PlannerSettings {
-  try {
-    const stored = window.localStorage.getItem(settingsStorageKey);
-    return stored ? { ...defaultPlannerSettings, ...JSON.parse(stored) } : defaultPlannerSettings;
-  }
-  catch {
-    return defaultPlannerSettings;
-  }
-}
 
 function hasExpiredEndpoint(statuses: ClientCharacterStatus[]) {
   return statuses.some((character) => {
@@ -119,16 +107,6 @@ function hasEndpointErrors(statuses: ClientCharacterStatus[]) {
   );
 }
 
-const defaultPlannerSettings: PlannerSettings = {
-  includeCorporationAssets: true,
-  personalSellOrdersAsStock: true,
-  allCorporationSellOrdersAsStock: true,
-  myCorporationSellOrdersAsStock: true,
-  respectActiveJobs: true,
-  defaultMe: 10,
-  defaultTe: 20,
-};
-
 export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [localLanguage, setLocalLanguage] = useState<SdeLanguage>(() => {
@@ -157,17 +135,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
       ? "compress"
       : pathname === "/stock"
         ? "stock"
-        : pathname === "/ships"
-          ? "ships"
-          : pathname === "/locations"
-            ? "locations"
-            : pathname === "/settings"
-              ? "settings"
-              : pathname === "/imagechecker"
-                ? "imagechecker"
-                : pathname === "/characters"
-                  ? "characters"
-                  : "planner";
+        : pathname === "/jobs"
+          ? "jobs"
+          : pathname === "/ships"
+            ? "ships"
+            : pathname === "/locations"
+              ? "locations"
+              : pathname === "/settings"
+                ? "settings"
+                : pathname === "/imagechecker"
+                  ? "imagechecker"
+                  : pathname === "/characters"
+                    ? "characters"
+                    : "planner";
   const hasExpiredState =
     authenticated
     && characters.length > 0
@@ -305,9 +285,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
         shipsResponse = await loadClientShips(true);
       }
       catch {}
+      let jobsResponse;
+      try {
+        jobsResponse = await loadClientJobs(true);
+      }
+      catch {}
       try {
         const stockData = await loadClientStock(language, true);
-        stockLocations = stockData.locations ?? [];
+        stockLocations = groupClientStockByLocation(stockData);
         {
           await replaceEsiStock(
             stockLocations.map((location) => ({
@@ -322,14 +307,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
         }
       }
       catch {}
-      try {
-        const settings = loadPlannerSettings();
-        const marketOrders = await loadClientMarketOrders(settings);
-        if (marketOrders) {
-          await replaceMarketOrderStock(marketOrders.marketOrderStock ?? []);
-        }
-      }
-      catch {}
       window.dispatchEvent(
         new CustomEvent(
           "assembly-line-esi-refreshed",
@@ -339,6 +316,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
               rateLimitedUntil: data.rateLimitedUntil ?? null,
               stockLocations,
               ships: shipsResponse ?? null,
+              jobs: jobsResponse ?? null,
             },
           },
         ),
@@ -352,6 +330,23 @@ export default function AppShell({ children }: { children: ReactNode }) {
       setIsRefreshingData(false);
     }
   }, [authenticated, characters.length, isRefreshingData, language]);
+
+  useEffect(() => {
+    if (!authenticated || characters.length === 0) return;
+    let cancelled = false;
+    void loadStockSnapshotTime()
+      .then(async (snapshotTime) => {
+        if (cancelled) return;
+        const isRecent = snapshotTime !== null && Date.now() - snapshotTime < 5 * 60 * 1000;
+        if (!isRecent) await refreshData();
+      })
+      .catch(() => {
+        if (!cancelled) void refreshData();
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticated, characters.length, language, refreshData]);
 
   const scheduleMobileMetaCollapse = useCallback(() => {
     if (mobileMetaCollapseTimer.current !== null) {
@@ -384,7 +379,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       await refreshData();
     }
     scheduleMobileMetaCollapse();
-  }, [authenticated, hasExpiredState, refreshData, scheduleMobileMetaCollapse]);
+  }, [authenticated, refreshData, scheduleMobileMetaCollapse]);
 
   useEffect(
     () => () => {
@@ -571,6 +566,16 @@ export default function AppShell({ children }: { children: ReactNode }) {
               <span className={styles.navText}>Stock</span>
             </Link>
             <Link
+              className={`${styles.navItem} ${activePage === "jobs" ? styles.navActive : ""}`}
+              href="/jobs"
+              onClick={closeSidebarOnNavigation}
+            >
+              <span>
+                <Activity size={17} strokeWidth={1.8} aria-hidden="true" />
+              </span>
+              <span className={styles.navText}>Jobs</span>
+            </Link>
+            <Link
               className={`${styles.navItem} ${activePage === "ships" ? styles.navActive : ""}`}
               href="/ships"
               onClick={closeSidebarOnNavigation}
@@ -634,7 +639,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 {characters.map((character, index) => (
                   <div className={styles.pilot} key={character.characterId}>
                     <span className={`${styles.pilotDot} ${index > 0 ? styles.pilotAlt : ""}`}>
-                      <img src={eveCharacterPortraitUrl(character.characterId, 64)} alt="" />
+                      <Image
+                        src={eveCharacterPortraitUrl(character.characterId, 64)}
+                        alt=""
+                        width={32}
+                        height={32}
+                      />
                     </span>
                     <span className={styles.navText}>
                       <strong>{character.characterName}</strong>

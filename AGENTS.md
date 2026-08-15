@@ -23,7 +23,7 @@ Use the project commands from the repository root:
 ```bash
 npm run lint
 npm run format
-npm run format:check
+npm run format
 npm run typecheck
 npm run build
 ```

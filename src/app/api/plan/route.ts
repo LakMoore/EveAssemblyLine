@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { calculatePlan } from "@/lib/planning/planEngine";
 import { hydrateStockCategories } from "@/lib/planning/stockHydration";
-import { getBlueprintById, getTypesByIds } from "@/cache/services/sdeCache";
+import {
+  getBlueprintById,
+  getBuildBlueprintByProductTypeId,
+  getTypesByIds,
+} from "@/cache/services/sdeCache";
 import type {
   BuildItem,
   PlanBlueprintInput,
@@ -64,15 +68,41 @@ function industryProduct(
   };
 }
 
+async function calculateWorkingStockPlan(input: PlanRequest, stock: PlanStockItem[]) {
+  const types = await getTypesByIds([
+    ...new Set([...input.toBuild.map((item) => item.typeId), ...stock.map((item) => item.typeId)]),
+  ]);
+  const buildItems: BuildItem[] = input.toBuild.map((item) => ({
+    ...item,
+    name:
+      types.get(item.typeId)?.name[input.language ?? "en"]
+      ?? types.get(item.typeId)?.name.en
+      ?? `Type ${item.typeId}`,
+  }));
+  const result = await calculatePlan({
+    language: input.language,
+    items: buildItems,
+    stock: await hydrateStockCategories(stock),
+    locations: input.locations,
+    settings: input.settings,
+  });
+  result.metadata.unresolvedAssetCount = 0;
+  return result;
+}
+
 export async function POST(request: Request) {
   try {
     const input = (await request.json()) as PlanRequest;
     if (!Array.isArray(input.toBuild) || input.toBuild.length === 0) {
       return NextResponse.json({ error: "Add at least one build item." }, { status: 400 });
     }
+    if (Array.isArray(input.stock)) {
+      return NextResponse.json(await calculateWorkingStockPlan(input, input.stock));
+    }
     const assets = input.assets;
     if (
-      !Array.isArray(assets.items)
+      !assets
+      || !Array.isArray(assets.items)
       || !Array.isArray(assets.blueprints)
       || !Array.isArray(assets.industry)
       || !Array.isArray(assets.market)
@@ -120,7 +150,10 @@ export async function POST(request: Request) {
     const normalizedBlueprints = assets.blueprints.map((blueprint) => ({ ...blueprint }));
     const industryStock: PlanStockItem[] = [];
     for (const job of assets.industry) {
-      const blueprint = await getBlueprintById(job.blueprintTypeId ?? job.typeId);
+      const blueprint =
+        job.blueprintTypeId !== undefined
+          ? await getBlueprintById(job.blueprintTypeId)
+          : ((await getBuildBlueprintByProductTypeId(job.typeId))?.blueprint ?? null);
       const product = industryProduct(job, blueprint);
       if (!product) continue;
       const remainingRuns =
@@ -144,20 +177,18 @@ export async function POST(request: Request) {
               && candidate.locationId === job.locationId
               && candidate.rootLocationId === job.rootLocationId
               && candidate.type === (job.blueprintRunsAtInstall === -1 ? "bpo" : "bpc")
-              && candidate.runs !== remainingRuns
             ),
         );
-        if (matchingBlueprint) matchingBlueprint.runs = remainingRuns;
+        if (matchingBlueprint) {
+          if (matchingBlueprint.type === "bpc") matchingBlueprint.runs = remainingRuns;
+        }
         else if (
-          job.blueprintId !== undefined
-          && (
-            remainingRuns === -1
-            || job.activity === "Manufacturing"
-            || job.activity === "Copying"
-          )
+          remainingRuns === -1
+          || job.activity === "Manufacturing"
+          || job.activity === "Copying"
         ) {
           normalizedBlueprints.push({
-            itemId: job.blueprintId,
+            ...(job.blueprintId !== undefined ? { itemId: job.blueprintId } : {}),
             typeId: job.blueprintTypeId,
             type: remainingRuns === -1 ? "bpo" : "bpc",
             locationId: job.locationId,

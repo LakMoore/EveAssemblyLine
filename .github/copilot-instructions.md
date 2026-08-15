@@ -20,6 +20,7 @@ Do not present prototype data as live EVE data. When replacing a mock path, keep
 
 - Create well commented code.
 - Now the SDE is in place don't use hard-coded recipes or fallback values in production paths. Group IDs or Type IDs may be used when dealing with the large Dogma dataset in the SDE, but do not hard-code values or lists for build recipes, materials, or products.
+- Prioritise readability of the main function over local convenience. Nested helper functions are acceptable only when they are very small and obvious; otherwise, extract them so the caller reads linearly from top to bottom. Treat closures as a useful tool, not the default, and prefer explicit parameters if that makes the code easier to follow.
 - Read the nearby implementation and relevant section of `FullPlan.md` before editing. Keep changes focused on the owning module.
 - Preserve existing user changes and avoid unrelated refactors.
 - Keep methods short, with low complexity and a single responsibility.

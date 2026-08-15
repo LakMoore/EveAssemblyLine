@@ -19,6 +19,8 @@ import {
 } from "@/lib/planning/compressSettingsStore";
 import type { KnownStructure } from "@/lib/planning/preferences";
 import { loadClientStock } from "@/lib/client/requestCache";
+import { structureRigsKey, structureRigsName } from "@/lib/planning/structureRigs";
+import { fetchStructureRigs } from "@/lib/planning/structureRigsStore";
 import styles from "./compress.module.css";
 import { marketHubs } from "@/lib/reference/marketHubs";
 
@@ -159,8 +161,27 @@ function CompressContent() {
     if (optionsLoadKeyRef.current === optionsLoadKey) return;
     optionsLoadKeyRef.current = optionsLoadKey;
     Promise
-      .all([loadStructures(), loadCompressSettings(), loadClientStock(language)])
-      .then(async ([structures, loadedSettings, stock]) => {
+      .all([
+        loadStructures(),
+        loadCompressSettings(),
+        loadClientStock(language),
+        fetchStructureRigs(),
+      ])
+      .then(async ([loadedStructures, loadedSettings, stock, structureRigs]) => {
+        const structures = loadedStructures.map((structure) => {
+          const sharedRigKey = structureRigsKey(
+            structure.systemId,
+            structureRigsName(structure.systemName, structure.name),
+          );
+          const sharedEntry = Object.hasOwn(structureRigs.structures, sharedRigKey)
+            ? structureRigs.structures[sharedRigKey]
+            : undefined;
+          if (!sharedEntry) return structure;
+          return {
+            ...structure,
+            rigTypeIds: sharedEntry.rigTypeIds,
+          };
+        });
         const loadedOptions = await fetch(
           "/api/compress/options",
           {

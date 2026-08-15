@@ -1,5 +1,4 @@
-import type { StockItem } from "@/lib/planning/stockStore";
-import type { PlannerSettings } from "@/lib/planning/preferences";
+import type { PlanStockItem } from "@/lib/planning/types";
 import type { SdeLanguage } from "@/lib/reference/languages";
 
 export type ClientSession = {
@@ -12,6 +11,7 @@ export type ClientSession = {
 };
 
 export type ClientStockResponse = {
+  workingStock?: PlanStockItem[];
   locations?: Array<{
     locationId: number;
     name: string;
@@ -19,14 +19,20 @@ export type ClientStockResponse = {
     systemId?: number;
     systemName?: string;
     typeId?: number;
-    items: StockItem[];
   }>;
   filteredLocationIds?: number[];
 };
 
-export type ClientMarketOrderResponse = {
-  marketOrderStock?: StockItem[];
-};
+export function groupClientStockByLocation(data: ClientStockResponse) {
+  return (data.locations ?? []).map((location) => ({
+    ...location,
+    items: (data.workingStock ?? []).filter(
+      (item) =>
+        item.rootLocationId === location.locationId
+        || item.sourceLocationId === location.locationId,
+    ),
+  }));
+}
 
 export type ClientShipsResponse = {
   assets?: Array<{
@@ -61,6 +67,33 @@ export type ClientShipsResponse = {
   types?: Array<{ typeId: number; name: string }>;
 };
 
+export type ClientJobsResponse = {
+  characters?: Array<{
+    characterId: number;
+    characterName: string;
+    slots: Record<string, number>;
+  }>;
+  jobs?: Array<{
+    jobId: number;
+    characterId: number;
+    characterName: string;
+    ownerType: "character" | "corporation";
+    activity: string;
+    status: string;
+    runs: number;
+    outputQuantity: number;
+    startDate: string;
+    endDate: string;
+    facilityId: number;
+    outputLocationId: number;
+    outputLocationName: string;
+    blueprintTypeId: number;
+    blueprintTypeName?: string;
+    productTypeId?: number;
+    productTypeName?: string;
+  }>;
+};
+
 export type ClientCharacter = {
   characterId: number;
   characterName: string;
@@ -75,11 +108,13 @@ export type ClientCharacter = {
 export type ClientCharacterStatus = {
   characterId: number;
   assets?: ClientEndpointStatus;
+  blueprints?: ClientEndpointStatus;
   jobs?: ClientEndpointStatus;
   orders?: ClientEndpointStatus;
   corporations?: Array<{
     corporationId: number;
     assets?: ClientEndpointStatus;
+    blueprints?: ClientEndpointStatus;
     jobs?: ClientEndpointStatus;
     orders?: ClientEndpointStatus;
   }>;
@@ -97,17 +132,18 @@ export type ClientEndpointStatus = {
 };
 
 let sessionRequest: Promise<ClientSession> | undefined;
-const stockRequests = new Map<SdeLanguage, Promise<ClientStockResponse>>();
-const stockResponses = new Map<SdeLanguage, ClientStockResponse>();
+const stockRequests = new Map<string, Promise<ClientStockResponse>>();
+const stockResponses = new Map<string, ClientStockResponse>();
 let shipsRequest: Promise<ClientShipsResponse> | undefined;
 let shipsResponse: ClientShipsResponse | undefined;
+let jobsRequest: Promise<ClientJobsResponse> | undefined;
+let jobsResponse: ClientJobsResponse | undefined;
 let charactersRequest: Promise<ClientCharacter[]> | undefined;
 let charactersResponse: ClientCharacter[] | undefined;
 let corpStatusRequest: Promise<ClientCharacter[]> | undefined;
 let corpStatusResponse: ClientCharacter[] | undefined;
 let stateStatusRequest: Promise<{ characters?: ClientCharacterStatus[] }> | undefined;
 let stateStatusResponse: { characters?: ClientCharacterStatus[] } | undefined;
-const marketOrderRequests = new Map<string, Promise<ClientMarketOrderResponse | null>>();
 
 function loadJson<T>(
   url: string,
@@ -140,44 +176,16 @@ export function loadClientSession() {
   return sessionRequest;
 }
 
-export async function loadClientMarketOrders(
-  settings: Pick<
-    PlannerSettings,
-    | "personalSellOrdersAsStock"
-    | "allCorporationSellOrdersAsStock"
-    | "myCorporationSellOrdersAsStock"
-  >,
-) {
-  const session = await loadClientSession();
-  if (!session.authenticated || !session.characters?.length) return null;
-
-  const query = new URLSearchParams({
-    personalSellOrdersAsStock: String(settings.personalSellOrdersAsStock),
-    allCorporationSellOrdersAsStock: String(settings.allCorporationSellOrdersAsStock),
-    myCorporationSellOrdersAsStock: String(settings.myCorporationSellOrdersAsStock),
-  }).toString();
-  const pending = marketOrderRequests.get(query);
-  if (pending) return pending;
-
-  const request = fetch(`/api/state/marketOrders?${query}`, { cache: "no-store" })
-    .then(async (response) => {
-      const data = (await response.json()) as ClientMarketOrderResponse;
-      if (!response.ok) throw new Error("Could not load market orders.");
-      return data;
-    })
-    .finally(() => marketOrderRequests.delete(query));
-  marketOrderRequests.set(query, request);
-  return request;
-}
-
 export function loadClientStock(language: SdeLanguage, force = false) {
-  const pending = stockRequests.get(language);
+  const key = language;
+  const pending = stockRequests.get(key);
   if (pending) return pending;
-  const cached = stockResponses.get(language);
+  const cached = stockResponses.get(key);
   if (!force && cached) return Promise.resolve(cached);
 
+  const query = new URLSearchParams({ language });
   const request = fetch(
-    `/api/state/stock?language=${encodeURIComponent(language)}`,
+    `/api/state/stock?${query.toString()}`,
     {
       cache: "no-store",
     },
@@ -185,16 +193,18 @@ export function loadClientStock(language: SdeLanguage, force = false) {
     .then(async (response) => {
       const data = (await response.json()) as ClientStockResponse;
       if (!response.ok) throw new Error("Could not load stock.");
-      stockResponses.set(language, data);
+      stockResponses.set(key, data);
       return data;
     })
-    .finally(() => stockRequests.delete(language));
-  stockRequests.set(language, request);
+    .finally(() => stockRequests.delete(key));
+  stockRequests.set(key, request);
   return request;
 }
 
 export function clearClientStockCache(language: SdeLanguage) {
-  stockResponses.set(language, { locations: [] });
+  for (const key of stockResponses.keys()) {
+    if (key.startsWith(`${language}:`)) stockResponses.set(key, { locations: [] });
+  }
 }
 
 export function loadClientShips(force = false) {
@@ -211,6 +221,22 @@ export function loadClientShips(force = false) {
         shipsRequest = undefined;
       });
   return shipsRequest;
+}
+
+export function loadClientJobs(force = false) {
+  if (!force && jobsResponse) return Promise.resolve(jobsResponse);
+  jobsRequest
+    ??= fetch("/api/state/jobs", { cache: "no-store" })
+      .then(async (response) => {
+        const data = (await response.json()) as ClientJobsResponse;
+        if (!response.ok) throw new Error("Could not load industry jobs.");
+        jobsResponse = data;
+        return data;
+      })
+      .finally(() => {
+        jobsRequest = undefined;
+      });
+  return jobsRequest;
 }
 
 export function loadClientCharacters() {

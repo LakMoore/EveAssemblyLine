@@ -81,22 +81,37 @@ export interface AssetLocation {
 }
 
 export interface IndustryJobRecord {
-  jobId: number;
-  installerId: number;
-  facilityId: number;
-  locationId: number;
-  outputLocationId: number;
   activityId: number;
   blueprintId: number;
-  blueprintTypeId: number;
   blueprintLocationId: number;
-  runs: number;
+  blueprintTypeId: number;
+  endDate: string;
+  facilityId: number;
+  installerId: number;
+  jobId: number;
+  installedRuns?: number;
   licensedRuns?: number;
+  locationId: number;
+  outputLocationId: number;
+  ownerType: "character" | "corporation";
+  ownerId: number;
+  probability?: number;
   productTypeId?: number;
+  runs: number;
+  startDate: string;
   status: string;
   successfulRuns?: number;
-  startDate: string;
-  endDate: string;
+}
+
+export interface BlueprintInstanceRecord {
+  itemId: number;
+  typeId: number;
+  locationId: number;
+  locationFlag: string;
+  quantity: number;
+  runs: number;
+  me: number;
+  te: number;
   ownerType: "character" | "corporation";
   ownerId: number;
 }

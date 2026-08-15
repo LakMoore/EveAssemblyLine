@@ -5,12 +5,7 @@ import { useRouter } from "next/navigation";
 import type { PlanResult, PlanSourceCounts, PlanSourceIcon } from "@/lib/planning/types";
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
 import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
-import {
-  loadStockRecords,
-  replaceMarketOrderStock,
-  type StockRecord,
-} from "@/lib/planning/stockStore";
-import { loadClientMarketOrders } from "@/lib/client/requestCache";
+import { loadClientStock } from "@/lib/client/requestCache";
 import {
   defaultLocations,
   defaultSettings,
@@ -174,11 +169,9 @@ export default function Home() {
   const requirementsHeaderRef = useRef<HTMLParagraphElement>(null);
   const buildListHeaderRef = useRef<HTMLDivElement>(null);
   const resultsHeaderRef = useRef<HTMLDivElement>(null);
-  const stockLoadPromiseRef = useRef<Promise<StockRecord[]> | null>(null);
   const { language } = useAppLanguage();
   const { showToast } = useToast();
   const [isBuildListLoaded, setIsBuildListLoaded] = useState(false);
-  const [isStockLoaded, setIsStockLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState<PlannerTab>("Plan");
   const [planStatus, setPlanStatus] = useState("Ready to calculate");
   const [isPlanLoading, setIsPlanLoading] = useState(false);
@@ -213,36 +206,6 @@ export default function Home() {
   }, [language]);
 
   useEffect(() => {
-    async function loadCachedStock() {
-      try {
-        const data = await loadClientMarketOrders(settings);
-        if (data) {
-          await replaceMarketOrderStock(data.marketOrderStock ?? []);
-        }
-      }
-      catch {
-        // Keep cached stock available when market orders cannot be loaded.
-      }
-      const stockLoad = loadStockRecords();
-      stockLoadPromiseRef.current = stockLoad;
-      stockLoad.then(
-        () => setIsStockLoaded(true),
-        () => setIsStockLoaded(true),
-      );
-    }
-
-    loadCachedStock();
-    const handleRefresh = () => {
-      setIsStockLoaded(false);
-      const stockLoad = loadStockRecords();
-      stockLoadPromiseRef.current = stockLoad;
-      stockLoad.finally(() => setIsStockLoaded(true));
-    };
-    window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
-    return () => window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
-  }, [settings]);
-
-  useEffect(() => {
     if (isBuildListLoaded) void saveBuildList(items);
   }, [isBuildListLoaded, items]);
 
@@ -252,124 +215,7 @@ export default function Home() {
     setIsPlanLoading(true);
     setPlanStatus("Calculating...");
     try {
-      const stockLoad = stockLoadPromiseRef.current ?? loadStockRecords();
-      stockLoadPromiseRef.current = stockLoad;
-      const localRecords = await stockLoad;
-      const assets = {
-        items: [],
-        blueprints: [],
-        industry: [],
-        market: [],
-      } as {
-        items: Array<{
-          typeId: number;
-          locationId: number;
-          rootLocationId: number;
-          quantity: number;
-        }>;
-        blueprints: Array<{
-          itemId?: number;
-          typeId: number;
-          type: "bpc" | "bpo";
-          locationId: number;
-          rootLocationId: number;
-          quantity: number;
-          runs: number;
-          me?: number;
-          te?: number;
-        }>;
-        industry: Array<{
-          jobId: number;
-          blueprintId?: number;
-          typeId: number;
-          blueprintTypeId?: number;
-          locationId: number;
-          rootLocationId: number;
-          quantity: number;
-          runs: number;
-          activity: string;
-          blueprintRunsAtInstall?: number;
-          licensedRuns?: number;
-        }>;
-        market: Array<{
-          typeId: number;
-          locationId: number;
-          rootLocationId: number;
-          quantity: number;
-        }>;
-      };
-      const industryByJobId = new Map<number, (typeof assets.industry)[number]>();
-      for (const record of localRecords) {
-        for (const item of record.items) {
-          const recordLocationId = record.structureId ? Number(record.structureId) : undefined;
-          const locationId = item.locationId ?? recordLocationId;
-          const rootLocationId = item.rootLocationId ?? recordLocationId;
-          if (
-            locationId === undefined
-            || rootLocationId === undefined
-            || !Number.isInteger(locationId)
-            || !Number.isInteger(rootLocationId)
-          ) continue;
-          const location = { locationId, rootLocationId };
-          const jobActivity =
-            item.activityName
-            ?? item.blueprintPrints?.find(
-              (print) => print.activity === "Copying" || print.activity === "Invention",
-            )?.activity
-            ?? (item.inBuild && item.jobId !== undefined && item.typeId !== item.blueprintTypeId
-              ? "Manufacturing"
-              : undefined);
-          if (record.source === "marketOrder" || item.source === "marketOrder") {
-            assets.market.push({ typeId: item.typeId, ...location, quantity: item.quantity });
-            continue;
-          }
-          if (item.inBuild && item.jobId !== undefined && jobActivity !== undefined) {
-            const industryRow = {
-              jobId: item.jobId,
-              blueprintId: item.blueprintId,
-              typeId: item.typeId,
-              blueprintTypeId: item.blueprintTypeId,
-              ...location,
-              quantity: item.inBuildQuantity ?? item.quantity,
-              runs: item.jobRuns ?? item.quantity,
-              activity: jobActivity,
-              blueprintRunsAtInstall: item.blueprintRunsAtInstall,
-              licensedRuns: item.licensedRuns,
-            };
-            const existingIndustryRow = industryByJobId.get(item.jobId);
-            const isOutputRow = item.typeId !== item.blueprintTypeId;
-            const shouldReplace =
-              !existingIndustryRow
-              || (
-                isOutputRow
-                && existingIndustryRow.typeId === existingIndustryRow.blueprintTypeId
-              );
-            if (shouldReplace) industryByJobId.set(item.jobId, industryRow);
-          }
-          if (item.category === "bp" && item.type) {
-            for (const print of item.blueprintPrints ?? []) {
-              assets.blueprints.push({
-                itemId: print.itemId,
-                typeId: item.typeId,
-                type: print.type,
-                ...location,
-                quantity: 1,
-                runs: print.runs,
-                me: print.me,
-                te: print.te,
-              });
-            }
-            continue;
-          }
-          const directQuantity = item.inBuild
-            ? Math.max(0, item.quantity - (item.inBuildQuantity ?? 0))
-            : item.quantity;
-          if (directQuantity > 0) {
-            assets.items.push({ typeId: item.typeId, ...location, quantity: directQuantity });
-          }
-        }
-      }
-      assets.industry.push(...industryByJobId.values());
+      const stockData = await loadClientStock(language);
       const response = await fetch(
         "/api/plan",
         {
@@ -378,7 +224,7 @@ export default function Home() {
           body: JSON.stringify({
             language,
             toBuild: items.map(({ typeId, quantity, me, te }) => ({ typeId, quantity, me, te })),
-            assets,
+            stock: stockData.workingStock ?? [],
             locations,
             settings: {
               includeCorporationAssets: settings.includeCorporationAssets,
@@ -593,7 +439,7 @@ export default function Home() {
             <button
               className={styles.calculate}
               type="submit"
-              disabled={isPlanLoading || items.length === 0 || !isStockLoaded}
+              disabled={isPlanLoading || items.length === 0}
             >
               <span>{isPlanLoading ? "Calculating..." : "Calculate production plan"}</span>
               <b>→</b>

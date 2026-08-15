@@ -2,18 +2,18 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { GitMerge, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { languageStorageKey } from "../AppShell";
-import { replaceEsiStock, replaceMarketOrderStock } from "@/lib/planning/stockStore";
-import { defaultSettings, settingsStorageKey } from "@/lib/planning/preferences";
+import { replaceEsiStock } from "@/lib/planning/stockStore";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageServer";
 import {
+  groupClientStockByLocation,
   invalidateClientCharacterData,
   clearClientStockCache,
   loadClientCharacters,
   loadClientCorpStatus,
-  loadClientMarketOrders,
   loadClientStateStatus,
   loadClientStock,
   type ClientCharacter,
@@ -116,10 +116,12 @@ function missingScopes(statuses: CharacterStatus[]) {
       statuses
         .flatMap((character) => [
           character.assets?.error,
+          character.blueprints?.error,
           character.jobs?.error,
           character.orders?.error,
           ...(character.corporations ?? []).flatMap((corporation) => [
             corporation.assets?.error,
+            corporation.blueprints?.error,
             corporation.jobs?.error,
             corporation.orders?.error,
           ]),
@@ -147,7 +149,6 @@ async function refreshStockAfterCharacterRemoval() {
   if (response.status === 401) {
     clearClientStockCache(language);
     await replaceEsiStock([]);
-    await replaceMarketOrderStock([]);
     window.dispatchEvent(
       new CustomEvent("assembly-line-esi-refreshed", { detail: { stockLocations: [] } }),
     );
@@ -156,7 +157,7 @@ async function refreshStockAfterCharacterRemoval() {
   if (!response.ok) throw new Error("Could not refresh stock.");
 
   const stockData = await loadClientStock(language, true);
-  const stockLocations = stockData.locations ?? [];
+  const stockLocations = groupClientStockByLocation(stockData);
   await replaceEsiStock(
     stockLocations.map((location) => ({
       systemId: location.systemId ?? 0,
@@ -167,16 +168,6 @@ async function refreshStockAfterCharacterRemoval() {
       items: location.items,
     })),
   );
-  let settings = defaultSettings;
-  try {
-    const savedSettings = window.localStorage.getItem(settingsStorageKey);
-    settings = savedSettings
-      ? { ...defaultSettings, ...JSON.parse(savedSettings) }
-      : defaultSettings;
-  }
-  catch {}
-  const marketOrders = await loadClientMarketOrders(settings);
-  await replaceMarketOrderStock(marketOrders?.marketOrderStock ?? []);
   window.dispatchEvent(
     new CustomEvent("assembly-line-esi-refreshed", { detail: { stockLocations } }),
   );
@@ -340,10 +331,12 @@ export default function CharactersPage() {
   const hasAuthorizationErrors = statuses.some((status) =>
     [
       status.assets,
+      status.blueprints,
       status.jobs,
       status.orders,
       ...(status.corporations ?? []).flatMap((corporation) => [
         corporation.assets,
+        corporation.blueprints,
         corporation.jobs,
         corporation.orders,
       ]),
@@ -407,6 +400,7 @@ export default function CharactersPage() {
             <div className={styles.characterTableHeader}>
               <span>PILOT</span>
               <span>ASSETS</span>
+              <span>BLUEPRINTS</span>
               <span>JOBS</span>
               <span>ORDERS</span>
               <span />
@@ -415,10 +409,12 @@ export default function CharactersPage() {
               const status = statuses.find((entry) => entry.characterId === character.characterId);
               const hasAuthorizationError = [
                 status?.assets,
+                status?.blueprints,
                 status?.jobs,
                 status?.orders,
                 ...(status?.corporations ?? []).flatMap((corporation) => [
                   corporation.assets,
+                  corporation.blueprints,
                   corporation.jobs,
                   corporation.orders,
                 ]),
@@ -466,6 +462,24 @@ export default function CharactersPage() {
                       </span>
                       <span className={styles.availabilityNarrow}>
                         {availabilityLabel(status?.assets).replace(/^Available /, "")}
+                      </span>
+                    </small>
+                  </span>
+                  <span
+                    className={styles.statusCell}
+                    title={`Blueprints: ${availabilityLabel(status?.blueprints)}${status?.blueprints?.error ? `; ${status.blueprints.error}` : ""}${status?.blueprints?.lastModified ? `; modified ${formatDate(status.blueprints.lastModified)}` : ""}`}
+                  >
+                    <small className={styles.endpointName}>BLUEPRINTS</small>
+                    <span className={`${styles.statusDot} ${statusClass(status?.blueprints)}`} />
+                    <small className={styles.endpointState}>
+                      {statusLabel(status?.blueprints)}
+                    </small>
+                    <small className={styles.statusDate}>
+                      <span className={styles.availabilityWide}>
+                        {availabilityLabel(status?.blueprints)}
+                      </span>
+                      <span className={styles.availabilityNarrow}>
+                        {availabilityLabel(status?.blueprints).replace(/^Available /, "")}
                       </span>
                     </small>
                   </span>
@@ -563,10 +577,12 @@ export default function CharactersPage() {
               >
                 <div className={styles.panelHeader}>
                   <div className={styles.characterModalHeading}>
-                    <img
+                    <Image
                       className={styles.characterPortrait}
                       src={eveCharacterPortraitUrl(selectedCharacter.characterId)}
                       alt=""
+                      width={64}
+                      height={64}
                     />
                     <div>
                       <p className={styles.panelKicker}>CHARACTER DETAILS</p>
@@ -586,10 +602,12 @@ export default function CharactersPage() {
                 <div className={styles.characterModalIdentity}>
                   <strong className={styles.characterModalCorporation}>
                     {selectedCharacter.corporationId && (
-                      <img
+                      <Image
                         className={styles.characterCorporationLogo}
                         src={eveCorporationLogoUrl(selectedCharacter.corporationId)}
                         alt=""
+                        width={28}
+                        height={28}
                       />
                     )}
                     <span>
@@ -607,7 +625,7 @@ export default function CharactersPage() {
                   </small>
                 </div>
                 <div className={styles.characterModalStatuses}>
-                  {(["assets", "jobs", "orders"] as const).map((endpoint) => {
+                  {(["assets", "blueprints", "jobs", "orders"] as const).map((endpoint) => {
                     const endpointStatus = selectedStatus?.[endpoint];
                     return (
                       <div className={styles.characterModalStatus} key={endpoint}>
@@ -671,10 +689,12 @@ export default function CharactersPage() {
                 <div className={styles.mergePortraits}>
                   {mergeDetails.currentCharacters.map((character) => (
                     <div className={styles.mergeCharacter} key={character.characterId}>
-                      <img
+                      <Image
                         className={styles.mergePortrait}
                         src={eveCharacterPortraitUrl(character.characterId)}
                         alt=""
+                        width={52}
+                        height={52}
                       />
                       <span>{character.characterName}</span>
                     </div>
@@ -689,10 +709,12 @@ export default function CharactersPage() {
                 <div className={styles.mergePortraits}>
                   {mergeDetails.incomingCharacters.map((character) => (
                     <div className={styles.mergeCharacter} key={character.characterId}>
-                      <img
+                      <Image
                         className={styles.mergePortrait}
                         src={eveCharacterPortraitUrl(character.characterId)}
                         alt=""
+                        width={52}
+                        height={52}
                       />
                       <span>{character.characterName}</span>
                     </div>
@@ -771,10 +793,11 @@ export default function CharactersPage() {
                   <span className={styles.endpointList}>
                     <span className={styles.endpointHeaders}>
                       <small>ASSETS</small>
+                      <small>BLUEPRINTS</small>
                       <small>JOBS</small>
                       <small>ORDERS</small>
                     </span>
-                    {(["assets", "jobs", "orders"] as const).map((endpoint) => {
+                    {(["assets", "blueprints", "jobs", "orders"] as const).map((endpoint) => {
                       const endpointStatus = corporationStatus?.[endpoint];
                       return (
                         <span className={styles.endpointStatus} key={endpoint}>
@@ -823,10 +846,12 @@ export default function CharactersPage() {
                   <div className={styles.corporationModalHeading}>
                     <p className={styles.panelKicker}>CORPORATION DETAILS</p>
                     <div className={styles.corporationModalIdentityHeading}>
-                      <img
+                      <Image
                         className={styles.characterPortrait}
                         src={eveCorporationLogoUrl(corporation.corporationId)}
                         alt=""
+                        width={64}
+                        height={64}
                       />
                       <h2 id="corporation-dialog-title">
                         {corporation.corporationName ?? `Corporation ${corporation.corporationId}`}
@@ -855,7 +880,7 @@ export default function CharactersPage() {
                   </small>
                 </div>
                 <div className={styles.characterModalStatuses}>
-                  {(["assets", "jobs", "orders"] as const).map((endpoint) => {
+                  {(["assets", "blueprints", "jobs", "orders"] as const).map((endpoint) => {
                     const endpointStatus = corporationStatus?.[endpoint];
                     return (
                       <div className={styles.characterModalStatus} key={endpoint}>
@@ -877,10 +902,12 @@ export default function CharactersPage() {
                   <p className={styles.panelKicker}>CONNECTED PILOTS AND ROLES</p>
                   {corporation.pilots.map((pilot) => (
                     <div className={styles.corporationPilot} key={pilot.characterId}>
-                      <img
+                      <Image
                         className={styles.corporationPilotPortrait}
                         src={eveCharacterPortraitUrl(pilot.characterId)}
                         alt=""
+                        width={32}
+                        height={32}
                       />
                       <div>
                         <strong>{pilot.characterName}</strong>

@@ -157,10 +157,10 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     totalStock.set(typeId, (totalStock.get(typeId) ?? 0) + quantity);
   }
   const availableBlueprintCopies = request.stock.filter(
-    (item) => item.category === "bp" && item.type === "bpc" && !item.inBuild,
+    (item) => item.category === "bp" && item.type === "bpc",
   );
   const availableBlueprintOriginals = request.stock.filter(
-    (item) => item.category === "bp" && item.type === "bpo",
+    (item) => item.category === "bp" && (item.type === "bpo" || item.blueprintIsOriginal === true),
   );
   const availableReactionFormulas = request.stock.filter((item) => item.category === "reaction");
   const blueprintCopyStock = new Map<number, { copies: number; runs: number }>();

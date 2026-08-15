@@ -945,6 +945,113 @@
   gap: 18px;
 }
 
+.jobsSection {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+  border-top: 1px solid #2b5260;
+  padding-top: 15px;
+}
+
+.jobsCharacters {
+  display: grid;
+  gap: 10px;
+}
+
+.jobsCharacter,
+.jobRow {
+  border: 1px solid #244b57;
+  background: #0c222a;
+}
+
+.jobsCharacter {
+  padding: 13px;
+}
+
+.jobsCharacter > strong {
+  color: #e2f0f2;
+  font-size: 13px;
+}
+
+.jobsSlotGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.jobsSlotGrid span {
+  display: grid;
+  gap: 5px;
+  border-left: 2px solid #315863;
+  padding-left: 8px;
+}
+
+.jobsSlotGrid small,
+.jobRow small {
+  color: #78959e;
+  font: 9px "DM Mono";
+  text-transform: uppercase;
+}
+
+.jobsSlotGrid b {
+  color: var(--cyan);
+  font: 18px "DM Mono";
+}
+
+.jobsList {
+  border-top: 1px solid #1e3740;
+}
+
+.jobRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px minmax(150px, auto);
+  gap: 16px;
+  align-items: center;
+  border-width: 0 1px 1px;
+  padding: 13px;
+}
+
+.jobRow > div,
+.jobRow > span {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.jobTypeIdentity {
+  min-width: 0;
+}
+
+.jobRow > span {
+  justify-items: end;
+}
+
+.jobRow strong,
+.jobRow b {
+  overflow: hidden;
+  color: #d4e6e9;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobRow b {
+  color: var(--cyan);
+  font: 11px "DM Mono";
+}
+
+@media (max-width: 640px) {
+  .jobRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .jobRow > span:last-child {
+    grid-column: 1 / -1;
+    justify-items: start;
+  }
+}
+
 .shipSystem {
   border-top: 1px solid #2b5260;
   padding-top: 15px;
@@ -1622,7 +1729,7 @@
 
 .stockCardTotals {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px;
   padding: 15px 0;
 }
@@ -1657,6 +1764,15 @@
   color: #78959e;
   font: 9px "DM Mono";
   line-height: 1.3;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.stockMetric span svg {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
 }
 
 .stockMetric strong {
@@ -3060,7 +3176,7 @@
 .characterTableHeader,
 .characterRow {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)) 74px;
+  grid-template-columns: minmax(0, 1.4fr) repeat(4, minmax(0, 1fr)) 74px;
   gap: 12px;
   align-items: center;
 }
@@ -3080,7 +3196,7 @@
 }
 
 .characterRowWithReauthorize {
-  grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)) 110px;
+  grid-template-columns: minmax(0, 1.4fr) repeat(4, minmax(0, 1fr)) 110px;
 }
 
 .characterRow:focus-visible {
@@ -3446,12 +3562,12 @@
 @media (max-width: 900px) {
   .characterTableHeader,
   .characterRow {
-    grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)) 74px;
+    grid-template-columns: minmax(0, 1.4fr) repeat(4, minmax(0, 1fr)) 74px;
     gap: 12px;
   }
 
   .characterRowWithReauthorize {
-    grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr)) 110px;
+    grid-template-columns: minmax(0, 1.4fr) repeat(4, minmax(0, 1fr)) 110px;
   }
 }
 

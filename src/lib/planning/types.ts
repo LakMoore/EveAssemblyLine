@@ -46,6 +46,7 @@ export interface PlanIndustryInput extends PlanAssetLocation {
   blueprintTypeId?: number;
   blueprintRunsAtInstall?: number;
   licensedRuns?: number;
+  installedRuns?: number;
 }
 
 export interface PlanMarketInput extends PlanAssetLocation {
@@ -68,6 +69,7 @@ export interface PlanStockItem {
   ownerId?: number;
   category?: "blueprint" | "bp" | "bpo" | "bpc" | "reaction" | "item";
   inBuild?: boolean;
+  inProduction?: boolean;
   inBuildQuantity?: number;
   jobId?: number;
   blueprintTypeId?: number;
@@ -92,7 +94,7 @@ export interface BlueprintPrint {
 export interface PlanRequest {
   language?: SdeLanguage;
   toBuild: PlanBuildInput[];
-  assets: {
+  assets?: {
     items: PlanItemInput[];
     blueprints: PlanBlueprintInput[];
     industry: PlanIndustryInput[];

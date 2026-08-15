@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type {
   AssetRecord,
+  BlueprintInstanceRecord,
   CharacterTokenRecord,
   IndustryJobRecord,
   MarketOrderRecord,
@@ -47,6 +48,10 @@ type EsiAssetName = {
 
 export type EsiBlueprint = {
   item_id: number;
+  type_id: number;
+  location_id: number;
+  location_flag: string;
+  quantity: number;
   runs: number;
   material_efficiency: number;
   time_efficiency: number;
@@ -64,6 +69,7 @@ type EsiIndustryJob = {
   blueprint_type_id: number;
   blueprint_location_id: number;
   runs: number;
+  probability?: number;
   licensed_runs?: number;
   product_type_id?: number;
   status: string;
@@ -374,20 +380,11 @@ function mapAsset(
   asset: EsiAsset,
   ownerType: "character" | "corporation",
   ownerId: number,
-  blueprintsByItemId?: Map<number, EsiBlueprint>,
 ): AssetRecord {
-  const blueprint = blueprintsByItemId?.get(asset.item_id);
   return {
     itemId: asset.item_id,
     typeId: asset.type_id,
     quantity: asset.quantity,
-    ...(blueprint
-      ? {
-          runCount: blueprint.runs,
-          me: blueprint.material_efficiency,
-          te: blueprint.time_efficiency,
-        }
-      : {}),
     locationId: asset.location_id,
     locationType:
       asset.location_type === "station"
@@ -403,26 +400,72 @@ function mapAsset(
   };
 }
 
-async function fetchBlueprints(path: string, token: TokenSet) {
-  const result = await fetchPages<EsiBlueprint>(path, token);
+function mapBlueprintInstance(
+  blueprint: EsiBlueprint,
+  ownerType: BlueprintInstanceRecord["ownerType"],
+  ownerId: number,
+): BlueprintInstanceRecord {
   return {
-    data: result.data ?? [],
-    byItemId: new Map((result.data ?? []).map((blueprint) => [blueprint.item_id, blueprint])),
+    itemId: blueprint.item_id,
+    typeId: blueprint.type_id,
+    locationId: blueprint.location_id,
+    locationFlag: blueprint.location_flag,
+    quantity: blueprint.quantity,
+    runs: blueprint.runs,
+    me: blueprint.material_efficiency,
+    te: blueprint.time_efficiency,
+    ownerType,
+    ownerId,
   };
 }
 
-export function applyBlueprintMetadata(assets: AssetRecord[], blueprints: EsiBlueprint[]) {
-  const byItemId = new Map(blueprints.map((blueprint) => [blueprint.item_id, blueprint]));
-  return assets.map((asset) => {
-    const blueprint = byItemId.get(asset.itemId);
-    if (!blueprint) return asset;
-    return {
-      ...asset,
-      runCount: blueprint.runs,
-      me: blueprint.material_efficiency,
-      te: blueprint.time_efficiency,
-    };
-  });
+export async function fetchCharacterBlueprints(
+  record: CharacterTokenRecord,
+  etag?: string,
+  bypassCache = false,
+) {
+  const token = await getUsableToken(record, "personal");
+  const result = await fetchPages<EsiBlueprint>(
+    `/characters/${record.characterId}/blueprints/`,
+    token,
+    etag,
+    bypassCache,
+  );
+  return {
+    blueprints:
+      result.data?.map((blueprint) =>
+        mapBlueprintInstance(blueprint, "character", record.characterId),
+      ) ?? null,
+    headers: result.headers,
+    notModified: result.notModified,
+    fromCache: result.fromCache,
+  };
+}
+
+export async function fetchCorporationBlueprints(
+  record: CharacterTokenRecord,
+  etag?: string,
+  bypassCache = false,
+) {
+  if (!record.corporationId || !record.hasDirectorRole) {
+    throw new Error("Corporation authorization is incomplete");
+  }
+  const token = await getUsableToken(record, "corp");
+  const result = await fetchPages<EsiBlueprint>(
+    `/corporations/${record.corporationId}/blueprints/`,
+    token,
+    etag,
+    bypassCache,
+  );
+  return {
+    blueprints:
+      result.data?.map((blueprint) =>
+        mapBlueprintInstance(blueprint, "corporation", record.corporationId!),
+      ) ?? null,
+    headers: result.headers,
+    notModified: result.notModified,
+    fromCache: result.fromCache,
+  };
 }
 
 export async function fetchAssetNames(path: string, token: TokenSet, itemIds: number[]) {
@@ -454,21 +497,9 @@ export async function fetchCharacterAssets(
     etag,
     bypassCache,
   );
-  let blueprintsByItemId = new Map<number, EsiBlueprint>();
-  let blueprints: EsiBlueprint[] = [];
-  try {
-    const result = await fetchBlueprints(`/characters/${record.characterId}/blueprints/`, token);
-    blueprintsByItemId = result.byItemId;
-    blueprints = result.data;
-  }
-  catch {}
   return {
-    assets:
-      result.data?.map((asset) =>
-        mapAsset(asset, "character", record.characterId, blueprintsByItemId),
-      ) ?? null,
+    assets: result.data?.map((asset) => mapAsset(asset, "character", record.characterId)) ?? null,
     token,
-    blueprints,
     headers: result.headers,
     notModified: result.notModified,
     fromCache: result.fromCache,
@@ -490,23 +521,9 @@ export async function fetchCorporationAssets(
     etag,
     bypassCache,
   );
-  let blueprintsByItemId = new Map<number, EsiBlueprint>();
-  let blueprints: EsiBlueprint[] = [];
-  try {
-    const result = await fetchBlueprints(
-      `/corporations/${record.corporationId}/blueprints/`,
-      token,
-    );
-    blueprintsByItemId = result.byItemId;
-    blueprints = result.data;
-  }
-  catch {}
   return {
     assets:
-      result.data?.map((asset) =>
-        mapAsset(asset, "corporation", record.corporationId!, blueprintsByItemId),
-      ) ?? null,
-    blueprints,
+      result.data?.map((asset) => mapAsset(asset, "corporation", record.corporationId!)) ?? null,
     token,
     headers: result.headers,
     notModified: result.notModified,
@@ -519,6 +536,7 @@ function mapIndustryJob(
   ownerType: IndustryJobRecord["ownerType"],
   ownerId: number,
 ): IndustryJobRecord {
+  const installedRuns = job.successful_runs ?? Math.floor(job.runs * (job.probability ?? 1));
   return {
     jobId: job.job_id,
     installerId: job.installer_id,
@@ -530,6 +548,8 @@ function mapIndustryJob(
     blueprintTypeId: job.blueprint_type_id,
     blueprintLocationId: job.blueprint_location_id,
     runs: job.runs,
+    installedRuns,
+    ...(job.probability !== undefined ? { probability: job.probability } : {}),
     ...(job.licensed_runs !== undefined ? { licensedRuns: job.licensed_runs } : {}),
     ...(job.product_type_id !== undefined ? { productTypeId: job.product_type_id } : {}),
     status: job.status,

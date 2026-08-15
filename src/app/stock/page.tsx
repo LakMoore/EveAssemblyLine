@@ -14,24 +14,34 @@ import {
 import { loadStructures } from "@/lib/planning/structureStore";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
-import { loadClientStock } from "@/lib/client/requestCache";
+import { groupClientStockByLocation, loadClientStock } from "@/lib/client/requestCache";
 import { type KnownStructure } from "@/lib/planning/preferences";
 import TypeIdentity from "../components/TypeIdentity";
 import styles from "../page.module.css";
-import { Clipboard, Plus, Trash2 } from "lucide-react";
+import {
+  Beaker,
+  Clipboard,
+  Factory,
+  FileText,
+  Package,
+  Plus,
+  ShoppingCart,
+  Trash2,
+} from "lucide-react";
 
 type StructureOption = { id: string; name: string };
 type SystemOption = { id: number; name: string };
 type EsiStockLocation = {
-  structureId: number;
+  structureId?: number;
   name: string;
   systemId?: number;
   systemName?: string;
   locationType: "structure" | "station" | "anchored";
-  items: StockItem[];
+  items?: StockItem[];
 };
 type EsiStockResponse = {
   locations?: Array<EsiStockLocation & { locationId: number }>;
+  workingStock?: Array<StockItem & { sourceLocationId?: number }>;
   filteredLocationIds?: number[];
 };
 type PasteResult = {
@@ -44,7 +54,11 @@ type PasteResult = {
   marketCategory?: string;
   error?: string;
 };
-type StockFilter = { kind: "all" } | { kind: "category" | "market"; value: string };
+type StockFilter =
+  | { kind: "all" }
+  | { kind: "sales" }
+  | { kind: "jobs" }
+  | { kind: "category" | "market"; value: string };
 type StockSort = "alphabetical" | "totalVolume" | "totalCount";
 
 const stockSortOptions: Array<{ value: StockSort; label: string }> = [
@@ -118,7 +132,10 @@ export default function StockPage() {
   const [pasting, setPasting] = useState<StockRecord | null>(null);
   const [isHydratingVolumes, setIsHydratingVolumes] = useState(false);
   useEffect(() => {
-    async function loadPageData(refreshedLocations?: EsiStockResponse["locations"]) {
+    async function loadPageData(
+      refreshedLocations?: EsiStockResponse["locations"],
+      loadEsiStock = true,
+    ) {
       setIsHydratingVolumes(true);
       try {
         const [records, structures, esiResponse] = await Promise.all([
@@ -126,14 +143,23 @@ export default function StockPage() {
           loadStructures().catch(() => []),
           refreshedLocations
             ? Promise.resolve({ ok: true, json: async () => ({ locations: refreshedLocations }) })
-            : loadClientStock(language).then((data) => ({ ok: true, json: async () => data })),
+            : loadEsiStock
+              ? loadClientStock(language).then((data) => ({ ok: true, json: async () => data }))
+              : Promise.resolve({ ok: false, json: async () => ({}) }),
         ]);
         const esiData = (await esiResponse.json()) as EsiStockResponse;
         const esiLocations = esiResponse.ok
-          ? (esiData.locations ?? []).map((location) => ({
-              ...location,
-              structureId: location.locationId,
-            }))
+          ? (
+              refreshedLocations?.map((location) => ({
+                ...location,
+                structureId: location.structureId ?? location.locationId,
+                items: location.items ?? [],
+              }))
+              ?? groupClientStockByLocation(esiData).map((location) => ({
+                ...location,
+                structureId: location.locationId,
+              }))
+            )
           : [];
         setEsiLocationIds(new Set(esiLocations.map((location) => String(location.structureId))));
         setKnownStructures(structures);
@@ -147,6 +173,7 @@ export default function StockPage() {
             structureName: structure.name,
           };
         });
+        const marketOrders = esiData.workingStock ?? [];
         const esiRecords = esiLocations.map((location) => {
           const knownStructure = structures.find(
             (structure) => structure.esiStructureId === location.structureId,
@@ -157,7 +184,10 @@ export default function StockPage() {
             structureId: String(location.structureId),
             structureName: knownStructure?.name ?? location.name,
             source: "esi" as const,
-            items: location.items,
+            items: [
+              ...location.items,
+              ...marketOrders.filter((item) => item.sourceLocationId === location.locationId),
+            ],
           };
         });
         const esiKeys = new Set(esiRecords.map((record) => locationKey(record)));
@@ -258,7 +288,7 @@ export default function StockPage() {
         setIsHydratingVolumes(false);
       }
     }
-    void loadPageData();
+    void loadPageData(undefined, false);
     const handleRefresh = (event: Event) => {
       const detail = (
         event as CustomEvent<{
@@ -625,10 +655,10 @@ function AddLocationModal({
   );
 }
 
-const stockCategories: Array<{ id: NonNullable<StockItem["category"]>; label: string }> = [
-  { id: "bpc", label: "Blueprints" },
-  { id: "reaction", label: "Reaction formulas" },
-  { id: "item", label: "Items" },
+const stockCategories = [
+  { id: "bpc" as const, label: "Blueprints", icon: FileText },
+  { id: "reaction" as const, label: "Reaction formulas", icon: Beaker },
+  { id: "item" as const, label: "Items", icon: Package },
 ];
 
 function formatBlueprintDate(value: string) {
@@ -673,6 +703,12 @@ function StockLocationCard({
         ),
     ),
   ] as string[];
+  const sellOrderCount = location.items.filter((item) => item.source === "marketOrder").length;
+  const installedJobCount = new Set(
+    location.items
+      .map((item) => item.jobId)
+      .filter((jobId): jobId is number => jobId !== undefined),
+  ).size;
   return (
     <article className={styles.stockCard}>
       <div className={styles.stockCardHeading}>
@@ -720,7 +756,10 @@ function StockLocationCard({
               key={category.id}
               onClick={() => onView(location, { kind: "category", value: category.id })}
             >
-              <span>{category.label}</span>
+              <span>
+                <category.icon aria-hidden="true" />
+                {category.label}
+              </span>
               <strong>{items.length.toLocaleString()}</strong>
               <small>
                 {isVolumesLoading ? "Calculating..." : `${formatVolume(volume)} Volume`}
@@ -728,6 +767,30 @@ function StockLocationCard({
             </button>
           );
         })}
+        <button
+          type="button"
+          className={styles.stockMetric}
+          onClick={() => onView(location, { kind: "sales" })}
+        >
+          <span>
+            <ShoppingCart aria-hidden="true" />
+            Sales
+          </span>
+          <strong>{sellOrderCount.toLocaleString()}</strong>
+          <small>Sell orders</small>
+        </button>
+        <button
+          type="button"
+          className={styles.stockMetric}
+          onClick={() => onView(location, { kind: "jobs" })}
+        >
+          <span>
+            <Factory aria-hidden="true" />
+            Jobs
+          </span>
+          <strong>{installedJobCount.toLocaleString()}</strong>
+          <small>Installed jobs</small>
+        </button>
       </div>
       <div className={styles.stockMarketCategories}>
         {marketCategories.length === 0 ? (
@@ -781,6 +844,8 @@ function ViewItemsModal({
   }
   const filteredItems = location.items.filter((item) => {
     if (filter.kind === "all") return true;
+    if (filter.kind === "sales") return item.source === "marketOrder";
+    if (filter.kind === "jobs") return item.inProduction || item.jobId !== undefined;
     if (filter.kind === "market") return item.marketCategory === filter.value;
     return filter.value === "bpc"
       ? isBlueprintStockItem(item)
@@ -825,9 +890,13 @@ function ViewItemsModal({
   const title =
     filter.kind === "all"
       ? "All items"
-      : filter.kind === "market"
-        ? filter.value
-        : stockCategories.find((category) => category.id === filter.value)?.label;
+      : filter.kind === "sales"
+        ? "Sales"
+        : filter.kind === "jobs"
+          ? "Jobs"
+          : filter.kind === "market"
+            ? filter.value
+            : stockCategories.find((category) => category.id === filter.value)?.label;
   return (
     <div
       className={styles.modalBackdrop}
@@ -864,6 +933,20 @@ function ViewItemsModal({
             onClick={() => onFilterChange({ kind: "all" })}
           >
             All
+          </button>
+          <button
+            type="button"
+            className={filter.kind === "sales" ? styles.stockFilterActive : ""}
+            onClick={() => onFilterChange({ kind: "sales" })}
+          >
+            Sales
+          </button>
+          <button
+            type="button"
+            className={filter.kind === "jobs" ? styles.stockFilterActive : ""}
+            onClick={() => onFilterChange({ kind: "jobs" })}
+          >
+            Jobs
           </button>
           {stockCategories.map((category) => (
             <button
@@ -984,7 +1067,12 @@ function ViewItemsModal({
                   />
                   {item.inBuild && item.endDate && (
                     <small className={styles.stockCompletion}>
-                      <span>{item.activityName ?? "Industry job"} completes</span>
+                      <span>
+                        {item.inProduction
+                          ? "In production"
+                          : (item.activityName ?? "Industry job")}{" "}
+                        completes
+                      </span>
                       <span>
                         {new Date(item.endDate).toLocaleDateString(
                           "en-GB",
