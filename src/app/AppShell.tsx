@@ -223,7 +223,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
         });
     };
     loadStatuses();
-    const handleRefresh = () => loadStatuses(true);
+    const handleRefresh = () => {
+      if (activePage !== "imagechecker") loadStatuses(true);
+    };
     const statusTimer = window.setInterval(() => setStatusCheckAt(Date.now()), 5_000);
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
     return () => {
@@ -231,7 +233,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       window.clearInterval(statusTimer);
       window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
     };
-  }, [authenticated, characters.length]);
+  }, [activePage, authenticated, characters.length]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 900px)");
@@ -348,7 +350,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }, [activePage, authenticated, characters.length, isRefreshingData, language]);
 
   useEffect(() => {
-    if (!authenticated || characters.length === 0) return;
+    if (!authenticated || characters.length === 0 || activePage === "imagechecker") return;
     const page = activePage;
     const endpoints = refreshDependentEndpoints[page];
     if (endpoints.length === 0) return;
@@ -393,7 +395,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [authenticated, characters.length, language, refreshData]);
+  }, [activePage, authenticated, characters.length, language, refreshData]);
 
   const scheduleMobileMetaCollapse = useCallback(() => {
     if (mobileMetaCollapseTimer.current !== null) {

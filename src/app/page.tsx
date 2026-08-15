@@ -42,7 +42,8 @@ const tabs: PlannerTab[] = ["Plan", "Buy", "Copy", "Invent", "React", "Manufactu
 type TypeResult = { 
   name: string; 
   typeId: number; 
-  iconCategory?: ClientBuildItem["iconCategory"] 
+  category?: string;
+  marketCategory?: string;
 };
 type PasteResult = {
   name: string;
@@ -790,9 +791,9 @@ function TypeSearch({
                     name={item.name}
                     typeId={item.typeId}
                     variation={
-                      item.iconCategory === "bpo"
+                      item.category === "blueprint"
                         ? "bp"
-                        : item.iconCategory === "bpc" || item.iconCategory === "reactionformula"
+                        : item.category === "reactionformula"
                           ? "bpc"
                           : "icon"
                     }

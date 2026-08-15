@@ -414,7 +414,7 @@ function installedJobContributions(
       blueprintRunsAtInstall: installedRunCount,
       blueprintRunsUsed: installedBlueprintRunsUsed,
       blueprintRunsRemaining: installedBlueprintRemainingRuns,
-      activityName: activityName(job.activityId),
+      ...(!isCopying ? { activityName: activityName(job.activityId) } : {}),
       blueprintPrint: {
         itemId: job.blueprintId,
         runs: installedBlueprintRemainingRuns,
@@ -434,16 +434,39 @@ function installedJobContributions(
     && (!isProduction || productQuantityPerRun !== undefined)
   ) {
     const outputQuantity = !isProduction ? productionRuns : productionRuns * productQuantityPerRun!;
-    contributions.push({
-      itemId: job.jobId,
-      typeId: job.productTypeId,
-      quantity: outputQuantity,
-      isPackaged: false,
-      ownerType: job.ownerType,
-      inBuild: true,
-      job,
-      activityName: activityName(job.activityId),
-    });
+    if (isCopying && job.licensedRuns !== undefined) {
+      for (let index = 0; index < outputQuantity; index += 1) {
+        contributions.push({
+          itemId: job.jobId,
+          typeId: job.productTypeId,
+          quantity: 1,
+          isPackaged: false,
+          ownerType: job.ownerType,
+          blueprintPrint: {
+            itemId: -(job.jobId * 1_000_000 + index + 1),
+            runs: job.licensedRuns,
+            activity: activityName(job.activityId),
+            endDate: job.endDate,
+            type: "bpc",
+          },
+          inBuild: true,
+          job,
+          activityName: activityName(job.activityId),
+        });
+      }
+    }
+    else {
+      contributions.push({
+        itemId: job.jobId,
+        typeId: job.productTypeId,
+        quantity: outputQuantity,
+        isPackaged: false,
+        ownerType: job.ownerType,
+        inBuild: true,
+        job,
+        activityName: activityName(job.activityId),
+      });
+    }
   }
   return contributions;
 }

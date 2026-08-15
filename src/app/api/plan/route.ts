@@ -205,13 +205,11 @@ export async function POST(request: Request) {
               { ...job, typeId: product.typeId, quantity: product.quantity },
               {
                 category: "blueprint",
-                blueprintPrints: [
-                  {
-                    itemId: -job.jobId,
-                    runs: product.runs ?? 1,
-                    type: "bpc",
-                  },
-                ],
+                blueprintPrints: Array.from({ length: job.runs }, (_, index) => ({
+                  itemId: -(job.jobId * 1_000_000 + index + 1),
+                  runs: product.runs ?? 1,
+                  type: "bpc" as const,
+                })),
                 inBuild: true,
                 inBuildQuantity: product.quantity,
                 jobId: job.jobId,

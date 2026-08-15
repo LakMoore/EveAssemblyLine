@@ -126,7 +126,6 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     if (
       stockItem.inBuild
       && stockItem.category === "blueprint"
-      && stockItem.blueprintIsOriginal === undefined
       && stockItem.activityName === "Copying"
     ) {
       addSource("copying");
@@ -191,24 +190,6 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       {
         copies: existing.copies + bpStockItem.quantity,
         runs: existing.runs + printRuns,
-      },
-    );
-  }
-  for (const item of request.stock) {
-    if (
-      !item.inBuild
-      || item.category !== "blueprint"
-      || item.blueprintIsOriginal !== undefined
-      || item.activityName !== "Copying"
-    ) continue;
-    const copiedRuns = (item.jobRuns ?? 0) * (item.licensedRuns ?? 1);
-    if (copiedRuns <= 0) continue;
-    const existing = blueprintCopyStock.get(item.typeId) ?? { copies: 0, runs: 0 };
-    blueprintCopyStock.set(
-      item.typeId,
-      {
-        copies: existing.copies + (item.jobRuns ?? 0),
-        runs: existing.runs + copiedRuns,
       },
     );
   }

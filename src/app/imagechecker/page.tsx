@@ -234,7 +234,8 @@ function ImageProbe({
     <div
       className={`${styles.probe} ${styles[`probe${status[0].toUpperCase()}${status.slice(1)}`]}`}
     >
-      <Image
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
         src={eveTypeImageUrl(typeId, variation, 32)}
         alt=""
         width={32}
