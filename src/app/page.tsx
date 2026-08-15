@@ -2,7 +2,12 @@
 
 import { FormEvent, KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { PlanResult, PlanSourceCounts, PlanSourceIcon } from "@/lib/planning/types";
+import type {
+  PlanResult,
+  PlanSourceCounts,
+  PlanSourceIcon,
+  PlanStockItem,
+} from "@/lib/planning/types";
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
 import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
 import { loadClientStock } from "@/lib/client/requestCache";
@@ -177,6 +182,7 @@ export default function Home() {
   const [isPlanLoading, setIsPlanLoading] = useState(false);
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
   const [plan, setPlan] = useState<PlanResult | null>(null);
+  const [stock, setStock] = useState<PlanStockItem[]>([]);
   const [locations] = useState<PlannerLocations>(() => {
     if (typeof window === "undefined") return defaultLocations;
     try {
@@ -216,6 +222,8 @@ export default function Home() {
     setPlanStatus("Calculating...");
     try {
       const stockData = await loadClientStock(language);
+      const workingStock = stockData.workingStock ?? [];
+      setStock(workingStock);
       const response = await fetch(
         "/api/plan",
         {
@@ -224,7 +232,7 @@ export default function Home() {
           body: JSON.stringify({
             language,
             toBuild: items.map(({ typeId, quantity, me, te }) => ({ typeId, quantity, me, te })),
-            stock: stockData.workingStock ?? [],
+            stock: workingStock,
             locations,
             settings: {
               includeCorporationAssets: settings.includeCorporationAssets,
@@ -478,7 +486,12 @@ export default function Home() {
           ))}
         </div>
         {plan ? (
-          <PlanList activeTab={activeTab} plan={plan} resultsHeaderRef={resultsHeaderRef} />
+          <PlanList
+            activeTab={activeTab}
+            plan={plan}
+            stock={stock}
+            resultsHeaderRef={resultsHeaderRef}
+          />
         ) : (
           <div className={styles.emptyResult}>
             <div className={styles.resultGlyph}>↗</div>
@@ -794,10 +807,12 @@ function TypeSearch({
 function PlanList({
   activeTab,
   plan,
+  stock,
   resultsHeaderRef,
 }: {
   activeTab: PlannerTab;
   plan: PlanResult;
+  stock: PlanStockItem[];
   resultsHeaderRef: RefObject<HTMLElement | null>;
 }) {
   const router = useRouter();
@@ -967,6 +982,29 @@ function PlanList({
                 : "";
           const totalTime =
             "totalTime" in entry && typeof entry.totalTime === "number" ? entry.totalTime : null;
+          const reactionFormulaCount =
+            activeTab === "React"
+              ? stock
+                  .filter(
+                    (stockItem) =>
+                      stockItem.category === "reaction"
+                      && stockItem.typeId === typeId
+                      && !stockItem.inUse,
+                  )
+                  .reduce((total, stockItem) => total + stockItem.quantity, 0)
+              : 0;
+          const installCount =
+            activeTab === "React" && "runs" in entry && entry.runs >= 10 && reactionFormulaCount > 0
+              ? entry.runs / reactionFormulaCount < 10
+                ? Math.ceil(entry.runs / 10)
+                : reactionFormulaCount
+              : null;
+          const runsPerInstall =
+            installCount !== null && "runs" in entry ? Math.ceil(entry.runs / installCount) : null;
+          const installTime =
+            totalTime !== null && runsPerInstall !== null && "runs" in entry && entry.runs > 0
+              ? (totalTime / entry.runs) * runsPerInstall
+              : totalTime;
           const materialEntry =
             (activeTab === "Buy" && !isBpcPurchase && "quantity" in entry)
             || (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
@@ -988,7 +1026,13 @@ function PlanList({
                         : "quantity" in entry
                           ? `${entry.quantity.toLocaleString()} ${activeTab === "Copy" ? "runs" : "units"}`
                           : "runs" in entry
-                            ? `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
+                            ? entry.runs >= 10
+                              && installCount !== null
+                              && installCount > 1
+                              && runsPerInstall !== null
+                              && installTime !== null
+                              ? `${installCount.toLocaleString()} x ${runsPerInstall.toLocaleString()} runs @ ${formatDuration(installTime)} | ${entry.runs.toLocaleString()} runs`
+                              : `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
                             : "";
           const imageVariation =
             planBlueprintVariation

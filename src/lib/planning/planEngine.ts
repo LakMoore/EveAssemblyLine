@@ -118,7 +118,6 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     if (
       stockItem.inBuild
       && stockItem.category === "bp"
-      && stockItem.type === "bpc"
       && stockItem.blueprintRunsAtInstall !== undefined
       && stockItem.activityName === "Invention"
     ) {
@@ -127,7 +126,6 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     if (
       stockItem.inBuild
       && stockItem.category === "bp"
-      && stockItem.type === "bpc"
       && stockItem.activityName === "Copying"
     ) {
       addSource("copying");
@@ -161,18 +159,23 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     if (!initialBuildTypeIds.has(typeId)) continue;
     totalStock.set(typeId, (totalStock.get(typeId) ?? 0) + quantity);
   }
-  const availableBlueprintCopies = request.stock.filter(
-    (item) => item.category === "bp" && item.type === "bpc",
-  );
-  const availableBlueprintOriginals = request.stock.filter(
-    (item) => item.category === "bp" && (item.type === "bpo" || item.blueprintIsOriginal === true),
-  );
-  const availableReactionFormulas = request.stock.filter((item) => item.category === "reaction");
+  const allBlueprintStockItems = request.stock
+    .filter(
+      (item) => item.category === "bp",
+    );
   const blueprintCopyStock = new Map<number, { copies: number; runs: number }>();
   const seenBlueprintPrints = new Set<number>();
-  for (const item of availableBlueprintCopies) {
-    const existing = blueprintCopyStock.get(item.typeId) ?? { copies: 0, runs: 0 };
-    const prints = item.blueprintPrints ?? [];
+  const blueprintOriginalCounts = new Map<number, number>();
+  for (const bpStockItem of allBlueprintStockItems) {
+    const existing = blueprintCopyStock.get(bpStockItem.typeId) ?? { copies: 0, runs: 0 };
+    const prints = bpStockItem.blueprintPrints ?? [];
+    const bpoCount = prints.filter((print) => print.type === "bpo").length;
+    if (bpoCount > 0) {
+      blueprintOriginalCounts.set(
+        bpStockItem.typeId,
+        bpoCount,
+      );
+    }
     const uniquePrints = prints.filter((print) => {
       if (seenBlueprintPrints.has(print.itemId)) return false;
       seenBlueprintPrints.add(print.itemId);
@@ -183,9 +186,9 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       .filter((print) => print.type === "bpc")
       .reduce((total, print) => total + Math.max(0, print.runs), 0);
     blueprintCopyStock.set(
-      item.typeId,
+      bpStockItem.typeId,
       {
-        copies: existing.copies + item.quantity,
+        copies: existing.copies + bpStockItem.quantity,
         runs: existing.runs + printRuns,
       },
     );
@@ -194,7 +197,6 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     if (
       !item.inBuild
       || item.category !== "bp"
-      || item.type !== "bpc"
       || item.activityName !== "Copying"
     ) continue;
     const copiedRuns = (item.jobRuns ?? 0) * (item.licensedRuns ?? 1);
@@ -208,14 +210,8 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       },
     );
   }
-  const blueprintOriginalCounts = new Map<number, number>();
-  for (const item of availableBlueprintOriginals) {
-    blueprintOriginalCounts.set(
-      item.typeId,
-      (blueprintOriginalCounts.get(item.typeId) ?? 0) + item.quantity,
-    );
-  }
   const reactionFormulaCounts = new Map<number, number>();
+  const availableReactionFormulas = request.stock.filter((item) => item.category === "reaction");
   for (const item of availableReactionFormulas) {
     reactionFormulaCounts.set(
       item.typeId,

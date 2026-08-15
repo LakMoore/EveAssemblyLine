@@ -204,7 +204,6 @@ export async function POST(request: Request) {
               { ...job, typeId: product.typeId, quantity: product.quantity },
               {
                 category: "bp",
-                type: "bpc",
                 blueprintPrints: [
                   {
                     itemId: -job.jobId,
@@ -243,7 +242,6 @@ export async function POST(request: Request) {
           blueprint,
           {
             category: "bp",
-            type: blueprint.type,
             blueprintPrints: [
               {
                 itemId: blueprint.itemId ?? -(index + 1),
