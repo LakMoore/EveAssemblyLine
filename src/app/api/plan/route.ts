@@ -8,6 +8,7 @@ import {
 } from "@/cache/services/sdeCache";
 import type {
   BuildItem,
+  ClientBuildItem,
   PlanBlueprintInput,
   PlanIndustryInput,
   PlanItemInput,
@@ -203,7 +204,7 @@ export async function POST(request: Request) {
           ? stockItem(
               { ...job, typeId: product.typeId, quantity: product.quantity },
               {
-                category: "bp",
+                category: "blueprint",
                 blueprintPrints: [
                   {
                     itemId: -job.jobId,
@@ -241,7 +242,7 @@ export async function POST(request: Request) {
         stockItem(
           blueprint,
           {
-            category: "bp",
+            category: "blueprint",
             blueprintPrints: [
               {
                 itemId: blueprint.itemId ?? -(index + 1),

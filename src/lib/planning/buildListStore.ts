@@ -1,22 +1,23 @@
-import type { BuildItem } from "./types";
+import type { ClientBuildItem } from "./types";
 import { buildStoreName, getPlanningDatabase } from "./planningDatabase";
 
 const currentListKey = "current";
 
-function isBuildItem(value: unknown): value is BuildItem {
+function isBuildItem(value: unknown): value is ClientBuildItem {
   if (!value || typeof value !== "object") return false;
   const item = value as Record<string, unknown>;
   return (
     typeof item.name === "string"
+    && typeof item.categoryName === "string"
     && Number.isInteger(item.typeId)
     && Number.isInteger(item.quantity)
     && Number(item.quantity) > 0
   );
 }
 
-export async function loadBuildList() {
+export async function loadBuildList(): Promise<ClientBuildItem[]> {
   const database = await getPlanningDatabase();
-  return new Promise<BuildItem[]>((resolve, reject) => {
+    return new Promise<ClientBuildItem[]>((resolve, reject) => {
     const request = database
       .transaction(buildStoreName, "readonly")
       .objectStore(buildStoreName)
@@ -40,7 +41,7 @@ export async function loadBuildList() {
   });
 }
 
-export async function saveBuildList(items: BuildItem[]) {
+export async function saveBuildList(items: ClientBuildItem[]) {
   const database = await getPlanningDatabase();
   return new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(buildStoreName, "readwrite");

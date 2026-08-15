@@ -1,19 +1,22 @@
 import type { SdeLanguage } from "@/lib/reference/languages";
 
-export interface BuildItem {
+// shape of build items passed between client and server
+export interface PlanBuildItem {
   typeId: number;
-  name: string;
   quantity: number;
   me: number;
   te: number;
-  category?: "blueprint" | "bp" | "bpo" | "bpc" | "reaction" | "item";
 }
 
-export interface PlanBuildInput {
-  typeId: number;
-  quantity: number;
-  me: number;
-  te: number;
+// shape of the build item used on the server
+export interface BuildItem extends PlanBuildItem {
+  name: string;
+  iconCategory?: "bpo" | "bpc" | "reactionformula" | "item";
+}
+
+// Client-side BuildItem is a BuildItem with an extra localised CategoryName
+export interface ClientBuildItem extends BuildItem {
+  categoryName: string;
 }
 
 export interface PlanAssetLocation {
@@ -61,14 +64,14 @@ export interface PlanStockItem {
   locationId?: number;
   rootLocationId?: number;
   techLevel?: number;
-  type?: "bpo" | "bpc";
   blueprintPrints?: BlueprintPrint[];
   sourceLocationId?: number;
   sourceLocationName?: string;
   ownerType?: "character" | "corporation";
   ownerId?: number;
-  category?: "blueprint" | "bp" | "bpo" | "bpc" | "reaction" | "item";
+  category?: "blueprint" | "reactionformula" | "item";
   inBuild?: boolean;
+  inUse?: boolean;
   inProduction?: boolean;
   inBuildQuantity?: number;
   jobId?: number;
@@ -93,7 +96,7 @@ export interface BlueprintPrint {
 
 export interface PlanRequest {
   language?: SdeLanguage;
-  toBuild: PlanBuildInput[];
+  toBuild: PlanBuildItem[];
   assets?: {
     items: PlanItemInput[];
     blueprints: PlanBlueprintInput[];

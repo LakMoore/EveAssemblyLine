@@ -1,7 +1,7 @@
 import type { GroupsRecord, MarketGroupsRecord } from "@/lib/sde/generated";
 import type { SdeLanguage } from "./languages";
 
-export type ItemCategory = "blueprint" | "reaction" | "item";
+export type ItemCategory = "blueprint" | "reactionformula" | "item";
 
 type CategorizedType = {
   name: { en?: string };
@@ -54,7 +54,7 @@ export function categorizeType(
   }
 
   let category: ItemCategory = "item";
-  if (marketCategory === "Reaction Formulas") category = "reaction";
+  if (marketCategory === "Reaction Formulas") category = "reactionformula";
   else if (categoryId === blueprintCategoryId) category = "blueprint";
 
   return { category, marketCategory };

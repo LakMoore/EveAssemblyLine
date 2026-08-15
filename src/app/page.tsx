@@ -3,6 +3,7 @@
 import { FormEvent, KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
+  ClientBuildItem,
   PlanResult,
   PlanSourceCounts,
   PlanSourceIcon,
@@ -38,20 +39,16 @@ import {
 type PlannerTab = "Plan" | "Haul" | "Buy" | "Copy" | "Invent" | "React" | "Manufacture";
 // the hauling tab is purposefully not yet implemented
 const tabs: PlannerTab[] = ["Plan", "Buy", "Copy", "Invent", "React", "Manufacture"];
-type BuildItem = {
-  name: string;
-  typeId: number;
-  quantity: number;
-  me: number;
-  te: number;
-  category?: "blueprint" | "bp" | "bpo" | "bpc" | "reaction" | "item";
+type TypeResult = { 
+  name: string; 
+  typeId: number; 
+  iconCategory?: ClientBuildItem["iconCategory"] 
 };
-type TypeResult = { name: string; typeId: number; category?: BuildItem["category"] };
 type PasteResult = {
   name: string;
   quantity?: number;
   typeId?: number;
-  category?: BuildItem["category"];
+  iconCategory?: ClientBuildItem["iconCategory"];
   error?: string;
 };
 
@@ -150,7 +147,7 @@ function ScrollTopButton({
   );
 }
 
-async function localizeItems(buildItems: BuildItem[], targetLanguage: SdeLanguage) {
+async function localizeItems(buildItems: ClientBuildItem[], targetLanguage: SdeLanguage): Promise<ClientBuildItem[]> {
   try {
     const metadata = await fetchTypeMetadata(
       buildItems.map((item) => item.typeId),
@@ -160,7 +157,11 @@ async function localizeItems(buildItems: BuildItem[], targetLanguage: SdeLanguag
     return buildItems.map((item) => {
       const localizedItem = metadataByTypeId.get(item.typeId);
       return localizedItem
-        ? { ...item, name: localizedItem.name, category: localizedItem.category }
+        ? { 
+          ...item, 
+          name: localizedItem.name,
+          categoryName: localizedItem.marketCategory ?? "Unknown",
+        }
         : item;
     });
   }
@@ -170,7 +171,7 @@ async function localizeItems(buildItems: BuildItem[], targetLanguage: SdeLanguag
 }
 
 export default function Home() {
-  const [items, setItems] = useState<BuildItem[]>([]);
+  const [items, setItems] = useState<ClientBuildItem[]>([]);
   const requirementsHeaderRef = useRef<HTMLParagraphElement>(null);
   const buildListHeaderRef = useRef<HTMLDivElement>(null);
   const resultsHeaderRef = useRef<HTMLDivElement>(null);
@@ -266,9 +267,10 @@ export default function Home() {
   function importItems(
     importedItems: Array<{
       name: string;
+      categoryName: string;
       typeId: number;
       quantity: number;
-      category?: BuildItem["category"];
+      iconCategory?: ClientBuildItem["iconCategory"];
     }>,
   ) {
     setItems((current) => {
@@ -348,7 +350,7 @@ export default function Home() {
                           ? { ...entry, quantity: entry.quantity + 1 }
                           : entry,
                       )
-                    : [...current, { ...item, quantity: 1, me: 0, te: 0 }];
+                    : [...current, { ...item, categoryName: "Unknown", quantity: 1, me: 0, te: 0 }];
                 })
               }
             />
@@ -370,9 +372,9 @@ export default function Home() {
                     name={item.name}
                     typeId={item.typeId}
                     variation={
-                      item.category === "blueprint" || item.category === "bpo"
+                      item.iconCategory === "bpo"
                         ? "bp"
-                        : item.category === "bpc" || item.category === "reaction"
+                        : item.iconCategory === "bpc" || item.iconCategory === "reactionformula"
                           ? "bpc"
                           : "icon"
                     }
@@ -514,9 +516,10 @@ function PasteListModal({
   onImport: (
     items: Array<{
       name: string;
+      categoryName: string;
       typeId: number;
       quantity: number;
-      category?: BuildItem["category"];
+      iconCategory?: ClientBuildItem["iconCategory"];
     }>,
   ) => void;
 }) {
@@ -559,9 +562,10 @@ function PasteListModal({
         onImport(
           resolvedItems.map((item) => ({
             name: item.name,
+            categoryName: "Unknown",
             typeId: item.typeId!,
             quantity: item.quantity!,
-            category: item.category,
+            iconCategory: item.iconCategory,
           })),
         );
       }
@@ -632,9 +636,9 @@ function PasteListModal({
                     name={item.name}
                     typeId={item.typeId}
                     variation={
-                      item.category === "blueprint" || item.category === "bpo"
+                      item.iconCategory === "bpo"
                         ? "bp"
-                        : item.category === "bpc"
+                        : item.iconCategory === "bpc" || item.iconCategory === "reactionformula"
                           ? "bpc"
                           : "icon"
                     }
@@ -786,9 +790,9 @@ function TypeSearch({
                     name={item.name}
                     typeId={item.typeId}
                     variation={
-                      item.category === "blueprint"
+                      item.iconCategory === "bpo"
                         ? "bp"
-                        : item.category === "reaction"
+                        : item.iconCategory === "bpc" || item.iconCategory === "reactionformula"
                           ? "bpc"
                           : "icon"
                     }
@@ -987,7 +991,7 @@ function PlanList({
               ? stock
                   .filter(
                     (stockItem) =>
-                      stockItem.category === "reaction"
+                      stockItem.category === "reactionformula"
                       && stockItem.typeId === typeId
                       && !stockItem.inUse,
                   )

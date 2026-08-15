@@ -6,7 +6,7 @@ export type TypeMetadata = {
   techLevel?: number;
   assembledVolume?: number;
   packagedVolume?: number;
-  category?: "blueprint" | "bpo" | "bpc" | "reaction" | "item";
+  category?: "blueprint" | "reactionformula" | "item";
   marketCategory?: string;
 };
 

@@ -117,7 +117,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     }
     if (
       stockItem.inBuild
-      && stockItem.category === "bp"
+      && stockItem.category === "blueprint"
       && stockItem.blueprintRunsAtInstall !== undefined
       && stockItem.activityName === "Invention"
     ) {
@@ -125,7 +125,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     }
     if (
       stockItem.inBuild
-      && stockItem.category === "bp"
+      && stockItem.category === "blueprint"
       && stockItem.activityName === "Copying"
     ) {
       addSource("copying");
@@ -161,7 +161,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
   }
   const allBlueprintStockItems = request.stock
     .filter(
-      (item) => item.category === "bp",
+      (item) => item.category === "blueprint",
     );
   const blueprintCopyStock = new Map<number, { copies: number; runs: number }>();
   const seenBlueprintPrints = new Set<number>();
@@ -196,7 +196,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
   for (const item of request.stock) {
     if (
       !item.inBuild
-      || item.category !== "bp"
+      || item.category !== "blueprint"
       || item.activityName !== "Copying"
     ) continue;
     const copiedRuns = (item.jobRuns ?? 0) * (item.licensedRuns ?? 1);
@@ -211,7 +211,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     );
   }
   const reactionFormulaCounts = new Map<number, number>();
-  const availableReactionFormulas = request.stock.filter((item) => item.category === "reaction");
+  const availableReactionFormulas = request.stock.filter((item) => item.category === "reactionformula");
   for (const item of availableReactionFormulas) {
     reactionFormulaCounts.set(
       item.typeId,

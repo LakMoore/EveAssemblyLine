@@ -267,9 +267,9 @@ function addStockContribution(
   const type = types.get(contribution.typeId);
   if (!type?.published) return;
   const categorized = categorizeType(type, language, marketGroups, groups);
-  const category = categorized.category === "blueprint" ? "bp" : categorized.category;
+  const category = categorized.category;
   const blueprintType =
-    category === "bp"
+    category === "blueprint"
       ? (contribution.blueprintType ?? (contribution.runCount === -1 ? "bpo" : "bpc"))
       : undefined;
   const bucket =
@@ -320,7 +320,7 @@ function addStockContribution(
     contribution.blueprintPrint !== undefined
     && item.blueprintPrints?.some((print) => print.itemId === contribution.blueprintPrint?.itemId);
   if (!sameBlueprint) item.quantity += contribution.quantity;
-  if (category !== "bp") {
+  if (category !== "blueprint") {
     item.me ??= contribution.me;
     item.te ??= contribution.te;
   }
