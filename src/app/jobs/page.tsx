@@ -6,8 +6,9 @@ import { loadClientJobs, type ClientJobsResponse } from "@/lib/client/requestCac
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import TypeIdentity from "../components/TypeIdentity";
 import styles from "../page.module.css";
+import { Atom, Factory, FlaskConical } from "lucide-react";
 
-const slotOrder = ["Manufacturing", "Reactions", "Science"];
+const slotOrder = ["Manufacturing", "Science", "Reactions"];
 const scienceJobActivities = new Set([
   "Time research",
   "Material research",
@@ -76,6 +77,21 @@ export default function JobsPage() {
     }
     return [...types];
   }, [data]);
+  const availableSlotTotals = slotOrder.map((type) => {
+    const totals = (data?.characters ?? []).reduce(
+      (summary, character) => {
+        const totalSlots = character.availableSlots[type] ?? 0;
+        const inUseSlots = character.slots[type] ?? 0;
+        return {
+          totalSlots: summary.totalSlots + totalSlots,
+          inUseSlots: summary.inUseSlots + inUseSlots,
+          availableSlots: summary.availableSlots + Math.max(0, totalSlots - inUseSlots),
+        };
+      },
+      { totalSlots: 0, inUseSlots: 0, availableSlots: 0 },
+    );
+    return { type, ...totals };
+  });
 
   return (
     <>
@@ -85,8 +101,35 @@ export default function JobsPage() {
           <h1>Jobs</h1>
         </div>
         <div className={styles.shipsStats}>
-          <strong>{jobs.length}</strong>
-          <span>active jobs</span>
+          <div className={styles.jobsAvailableSlots}>
+            <div className={styles.jobsAvailableSlotValues}>
+              {availableSlotTotals.map(({ type, availableSlots, inUseSlots, totalSlots }) => (
+                <span
+                  key={type}
+                  className={`${styles.jobsAvailableSlot} ${styles.availableSourceIcon}`}
+                  title={`${type}: ${inUseSlots} / ${totalSlots} in use`}
+                  data-tooltip={`${type}: ${inUseSlots} / ${totalSlots} in use`}
+                  aria-label={`${type}: ${inUseSlots} / ${totalSlots} in use`}
+                  role="img"
+                  tabIndex={0}
+                >
+                  <strong>{availableSlots}</strong>
+                  {type === "Manufacturing" ? (
+                    <Factory aria-hidden="true" />
+                  ) : type === "Reactions" ? (
+                    <Atom aria-hidden="true" />
+                  ) : (
+                    <FlaskConical aria-hidden="true" />
+                  )}
+                </span>
+              ))}
+            </div>
+            <small>SLOTS AVAILABLE</small>
+          </div>
+          <div className={styles.jobsActiveMetric}>
+            <strong>{jobs.length}</strong>
+            <span>active jobs</span>
+          </div>
         </div>
       </div>
       {error && <p className={styles.shipsEmpty}>Could not load industry jobs.</p>}
@@ -115,7 +158,16 @@ export default function JobsPage() {
               <div className={styles.jobsSlotGrid}>
                 {slotTypes.map((type) => (
                   <span key={type}>
-                    <small>{type}</small>
+                    <small>
+                      {type === "Manufacturing" ? (
+                        <Factory aria-hidden="true" />
+                      ) : type === "Reactions" ? (
+                        <Atom aria-hidden="true" />
+                      ) : type === "Science" ? (
+                        <FlaskConical aria-hidden="true" />
+                      ) : null}
+                      {type}
+                    </small>
                     <b>
                       {character.slots[type] ?? 0} / {character.availableSlots[type] ?? 0}
                     </b>

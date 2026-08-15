@@ -19,9 +19,12 @@ import { type KnownStructure } from "@/lib/planning/preferences";
 import TypeIdentity from "../components/TypeIdentity";
 import styles from "../page.module.css";
 import {
+  Atom,
   Beaker,
   Clipboard,
   Factory,
+  FileBox,
+  Files,
   FileText,
   Package,
   Plus,
@@ -802,6 +805,12 @@ type StockTypeBucket = {
   stockQuantity: number;
   productionQuantity: number;
   marketQuantity: number;
+  bpoCount: number;
+  bpoInUseCount: number;
+  bpcProductionCount: number;
+  bpcProductionRuns: number;
+  bpcStockCount: number;
+  bpcStockRuns: number;
   category: StockItem["category"];
   marketCategory?: string;
 };
@@ -834,6 +843,19 @@ function ViewItemsModal({
     const stockQuantity = !isMarketOrder && !isProduction ? item.quantity : 0;
     const productionQuantity = isProduction ? (item.inBuildQuantity ?? item.quantity) : 0;
     const marketQuantity = isMarketOrder ? item.quantity : 0;
+    const isBlueprint = isBlueprintStockItem(item);
+    const isBpo = isBlueprint && item.type === "bpo";
+    const isBpc = isBlueprint && item.type !== "bpo";
+    const bpcRuns =
+      item.blueprintPrints?.reduce((total, print) => total + Math.max(0, print.runs), 0) ?? 0;
+    const blueprintSummary = {
+      bpoCount: isBpo ? item.quantity : 0,
+      bpoInUseCount: isBpo && item.inUse ? item.quantity : 0,
+      bpcProductionCount: isBpc && item.inBuild ? item.quantity : 0,
+      bpcProductionRuns: isBpc && item.inBuild ? (item.jobRuns ?? 0) * (item.licensedRuns ?? 0) : 0,
+      bpcStockCount: isBpc && !item.inBuild ? item.quantity : 0,
+      bpcStockRuns: isBpc && !item.inBuild ? bpcRuns : 0,
+    };
     if (!existing) {
       displayItems.set(
         item.typeId,
@@ -842,6 +864,7 @@ function ViewItemsModal({
           stockQuantity,
           productionQuantity,
           marketQuantity,
+          ...blueprintSummary,
           category: item.category,
           marketCategory: item.marketCategory,
         },
@@ -851,6 +874,12 @@ function ViewItemsModal({
     existing.stockQuantity += stockQuantity;
     existing.productionQuantity += productionQuantity;
     existing.marketQuantity += marketQuantity;
+    existing.bpoCount += blueprintSummary.bpoCount;
+    existing.bpoInUseCount += blueprintSummary.bpoInUseCount;
+    existing.bpcProductionCount += blueprintSummary.bpcProductionCount;
+    existing.bpcProductionRuns += blueprintSummary.bpcProductionRuns;
+    existing.bpcStockCount += blueprintSummary.bpcStockCount;
+    existing.bpcStockRuns += blueprintSummary.bpcStockRuns;
     if (isProduction && !existing.item.inBuild) existing.item = item;
   }
   const buckets = [...displayItems.values()];
@@ -935,10 +964,26 @@ function ViewItemsModal({
         ) : (
           <div className={styles.stockList}>
             {buckets.map(
-              ({ item, stockQuantity, productionQuantity, marketQuantity }, itemIndex) => {
+              (
+                {
+                  item,
+                  stockQuantity,
+                  productionQuantity,
+                  marketQuantity,
+                  bpoCount,
+                  bpoInUseCount,
+                  bpcProductionCount,
+                  bpcProductionRuns,
+                  bpcStockCount,
+                  bpcStockRuns,
+                },
+                itemIndex,
+              ) => {
                 const categoryLabel = item.marketCategory ?? item.category ?? "Item";
                 const showCategory =
                   filter.kind === "all" || (filter.kind === "category" && filter.value === "item");
+                const isBlueprint = isBlueprintStockItem(item);
+                const isReaction = item.category === "reaction";
                 return (
                   <div className={styles.stockRow} key={`${item.typeId}:${itemIndex}`}>
                     <div className={styles.stockIdentityStack}>
@@ -949,38 +994,70 @@ function ViewItemsModal({
                         className={styles.stockTypeIdentity}
                         variation={item.category === "reaction" ? "bpc" : "icon"}
                         blueprintType={
-                          isBlueprintStockItem(item)
-                            ? item.type === "bpo"
-                              ? "bpo"
-                              : "bpc"
-                            : undefined
+                          isBlueprintStockItem(item) ? (bpoCount > 0 ? "bpo" : "bpc") : undefined
                         }
                       />
                       {showCategory && (
                         <small className={styles.stockAggregateCategory}>{categoryLabel}</small>
                       )}
                     </div>
-                    <div className={styles.stockAggregateList}>
-                      <span className={styles.stockAggregateStock}>
-                        <Package aria-hidden="true" />
-                        <b>{stockQuantity.toLocaleString()}</b>
-                        <small>Stock</small>
-                      </span>
-                      {productionQuantity > 0 && (
+                    {isBlueprint ? (
+                      <div className={styles.stockAggregateList}>
+                        {bpoCount > 0 && (
+                          <span>
+                            <FileBox aria-hidden="true" />
+                            <b>{`${bpoInUseCount.toLocaleString()} / ${bpoCount.toLocaleString()}`}</b>
+                            <small>BPO in use</small>
+                          </span>
+                        )}
+                        {bpcProductionCount > 0 && (
+                          <span>
+                            <Files aria-hidden="true" />
+                            <b>
+                              {`${bpcProductionRuns.toLocaleString()} Runs on ${bpcProductionCount.toLocaleString()} BPC`}
+                            </b>
+                            <small>In production</small>
+                          </span>
+                        )}
                         <span>
-                          <Factory aria-hidden="true" />
-                          <b>{productionQuantity.toLocaleString()}</b>
-                          <small>In production</small>
+                          <Package aria-hidden="true" />
+                          <b>
+                            {`${bpcStockRuns.toLocaleString()} Runs on ${bpcStockCount.toLocaleString()} BPC`}
+                          </b>
+                          <small>In stock</small>
                         </span>
-                      )}
-                      {marketQuantity > 0 && (
-                        <span>
-                          <ShoppingCart aria-hidden="true" />
-                          <b>{marketQuantity.toLocaleString()}</b>
-                          <small>On market</small>
+                      </div>
+                    ) : (
+                      <div className={styles.stockAggregateList}>
+                        {productionQuantity > 0 && (
+                          <span>
+                            {isReaction ? (
+                              <Atom aria-hidden="true" />
+                            ) : (
+                              <Factory aria-hidden="true" />
+                            )}
+                            <b>{productionQuantity.toLocaleString()}</b>
+                            <small>{isReaction ? "In use" : "In production"}</small>
+                          </span>
+                        )}
+                        <span
+                          className={`${styles.stockAggregateStock} ${
+                            isReaction ? styles.stockAggregateReactionStock : ""
+                          }`}
+                        >
+                          <Package aria-hidden="true" />
+                          <b>{stockQuantity.toLocaleString()}</b>
+                          <small>Available</small>
                         </span>
-                      )}
-                    </div>
+                        {marketQuantity > 0 && (
+                          <span>
+                            <ShoppingCart aria-hidden="true" />
+                            <b>{marketQuantity.toLocaleString()}</b>
+                            <small>On market</small>
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               },

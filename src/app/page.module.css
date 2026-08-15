@@ -925,19 +925,109 @@
 }
 
 .shipsStats {
-  display: grid;
-  justify-items: end;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   align-content: center;
-  gap: 4px;
+  gap: 20px;
   color: #78959e;
   font: 10px "DM Mono";
   text-transform: uppercase;
 }
 
-.shipsStats strong {
+.jobsActiveMetric {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.shipsIndexedMetric {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.jobsActiveMetric strong {
   color: var(--cyan);
   font-size: 28px;
   line-height: 1;
+}
+
+.shipsIndexedMetric strong {
+  color: var(--cyan);
+  font-size: 28px;
+  line-height: 1;
+}
+
+.jobsAvailableSlots {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+
+.jobsAvailableSlotValues {
+  display: flex;
+  gap: 14px;
+}
+
+.jobsAvailableSlotValues span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 38px;
+  justify-content: flex-end;
+}
+
+.jobsAvailableSlot {
+  position: relative;
+  cursor: help;
+  outline: none;
+}
+
+.jobsAvailableSlot::after {
+  position: absolute;
+  z-index: 10;
+  right: 0;
+  bottom: calc(100% + 8px);
+  display: block;
+  padding: 6px 8px;
+  border: 1px solid #315662;
+  background: #102a32;
+  color: #d8e8ec;
+  content: attr(data-tooltip);
+  font: 10px "DM Mono";
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(3px);
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
+}
+
+.jobsAvailableSlot:hover::after,
+.jobsAvailableSlot:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.jobsAvailableSlotValues strong {
+  color: var(--cyan);
+  font-size: 28px;
+  line-height: 1;
+}
+
+.jobsAvailableSlotValues svg {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+}
+
+.jobsAvailableSlots small {
+  color: #78959e;
+  font: 8px "DM Mono";
+  text-transform: uppercase;
 }
 
 .shipSystems {
@@ -992,7 +1082,8 @@
 
 .jobsSlotGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+  grid-template-columns: repeat(3, max-content);
+  justify-content: space-between;
   gap: 8px;
   margin-top: 12px;
 }
@@ -1011,9 +1102,21 @@
   text-transform: uppercase;
 }
 
+.jobsSlotGrid small {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.jobsSlotGrid small svg {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+}
+
 .jobsSlotGrid b {
   color: var(--cyan);
-  font: 15px "DM Mono";
+  font: 13px "DM Mono";
 }
 
 .jobsList {
@@ -1232,7 +1335,8 @@
 
 @media (max-width: 640px) {
   .shipsStats {
-    justify-items: start;
+    justify-content: flex-start;
+    gap: 14px;
   }
 
   .shipSystemHeader {
@@ -1639,6 +1743,10 @@
 
 .stockAggregateStock svg {
   color: #b4df72;
+}
+
+.stockAggregateReactionStock svg {
+  color: #78c7d2;
 }
 
 .stockAggregateCategory {

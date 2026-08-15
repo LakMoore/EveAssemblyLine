@@ -146,8 +146,10 @@ export default function ShipsPage() {
           <h1>Ships</h1>
         </div>
         <div className={styles.shipsStats}>
-          <strong>{data?.ships?.length ?? 0}</strong>
-          <span>ships indexed</span>
+          <div className={styles.shipsIndexedMetric}>
+            <strong>{data?.ships?.length ?? 0}</strong>
+            <span>ships indexed</span>
+          </div>
         </div>
       </div>
       {error && <p className={styles.shipsEmpty}>Could not load ship assets.</p>}
