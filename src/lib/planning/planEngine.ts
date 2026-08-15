@@ -126,6 +126,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     if (
       stockItem.inBuild
       && stockItem.category === "blueprint"
+      && stockItem.blueprintIsOriginal === undefined
       && stockItem.activityName === "Copying"
     ) {
       addSource("copying");
@@ -197,6 +198,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     if (
       !item.inBuild
       || item.category !== "blueprint"
+      || item.blueprintIsOriginal !== undefined
       || item.activityName !== "Copying"
     ) continue;
     const copiedRuns = (item.jobRuns ?? 0) * (item.licensedRuns ?? 1);
