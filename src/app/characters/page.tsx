@@ -116,6 +116,7 @@ function missingScopes(statuses: CharacterStatus[]) {
       statuses
         .flatMap((character) => [
           character.assets?.error,
+          character.skills?.error,
           character.blueprints?.error,
           character.jobs?.error,
           character.orders?.error,
@@ -331,6 +332,7 @@ export default function CharactersPage() {
   const hasAuthorizationErrors = statuses.some((status) =>
     [
       status.assets,
+      status.skills,
       status.blueprints,
       status.jobs,
       status.orders,
@@ -400,6 +402,7 @@ export default function CharactersPage() {
             <div className={styles.characterTableHeader}>
               <span>PILOT</span>
               <span>ASSETS</span>
+              <span>SKILLS</span>
               <span>BLUEPRINTS</span>
               <span>JOBS</span>
               <span>ORDERS</span>
@@ -409,6 +412,7 @@ export default function CharactersPage() {
               const status = statuses.find((entry) => entry.characterId === character.characterId);
               const hasAuthorizationError = [
                 status?.assets,
+                status?.skills,
                 status?.blueprints,
                 status?.jobs,
                 status?.orders,
@@ -435,19 +439,28 @@ export default function CharactersPage() {
                   }}
                 >
                   <span className={styles.characterIdentity}>
-                    <strong>{character.characterName}</strong>
-                    <small>
-                      {character.corporationName
-                        ?? (character.corporationId
-                          ? `Corporation ${character.corporationId}`
-                          : "Corporation unavailable")}{" "}
-                      / {hasCorpAccess ? "Director access" : "Character access only"}
-                    </small>
-                    <small>
-                      Director: {roleLabel(character.hasDirectorRole)} · Accountant:{" "}
-                      {roleLabel(character.hasAccountantRole)} · Trader:{" "}
-                      {roleLabel(character.hasTraderRole)}
-                    </small>
+                    <Image
+                      className={styles.characterCardPortrait}
+                      src={eveCharacterPortraitUrl(character.characterId)}
+                      alt=""
+                      width={40}
+                      height={40}
+                    />
+                    <span className={styles.characterIdentityText}>
+                      <strong>{character.characterName}</strong>
+                      <small>
+                        {character.corporationName
+                          ?? (character.corporationId
+                            ? `Corporation ${character.corporationId}`
+                            : "Corporation unavailable")}{" "}
+                        / {hasCorpAccess ? "Director access" : "Character access only"}
+                      </small>
+                      <small>
+                        Director: {roleLabel(character.hasDirectorRole)} · Accountant:{" "}
+                        {roleLabel(character.hasAccountantRole)} · Trader:{" "}
+                        {roleLabel(character.hasTraderRole)}
+                      </small>
+                    </span>
                   </span>
                   <span
                     className={styles.statusCell}
@@ -462,6 +475,22 @@ export default function CharactersPage() {
                       </span>
                       <span className={styles.availabilityNarrow}>
                         {availabilityLabel(status?.assets).replace(/^Available /, "")}
+                      </span>
+                    </small>
+                  </span>
+                  <span
+                    className={styles.statusCell}
+                    title={`Skills: ${availabilityLabel(status?.skills)}${status?.skills?.error ? `; ${status.skills.error}` : ""}${status?.skills?.lastModified ? `; modified ${formatDate(status.skills.lastModified)}` : ""}`}
+                  >
+                    <small className={styles.endpointName}>SKILLS</small>
+                    <span className={`${styles.statusDot} ${statusClass(status?.skills)}`} />
+                    <small className={styles.endpointState}>{statusLabel(status?.skills)}</small>
+                    <small className={styles.statusDate}>
+                      <span className={styles.availabilityWide}>
+                        {availabilityLabel(status?.skills)}
+                      </span>
+                      <span className={styles.availabilityNarrow}>
+                        {availabilityLabel(status?.skills).replace(/^Available /, "")}
                       </span>
                     </small>
                   </span>
@@ -625,23 +654,27 @@ export default function CharactersPage() {
                   </small>
                 </div>
                 <div className={styles.characterModalStatuses}>
-                  {(["assets", "blueprints", "jobs", "orders"] as const).map((endpoint) => {
-                    const endpointStatus = selectedStatus?.[endpoint];
-                    return (
-                      <div className={styles.characterModalStatus} key={endpoint}>
-                        <small>{endpoint.toUpperCase()}</small>
-                        <span>
-                          <span className={`${styles.statusDot} ${statusClass(endpointStatus)}`} />
-                          {statusLabel(endpointStatus)}
-                        </span>
-                        <small>{availabilityLabel(endpointStatus)}</small>
-                        {endpointStatus?.lastModified && (
-                          <small>Modified {formatDate(endpointStatus.lastModified)}</small>
-                        )}
-                        {endpointStatus?.error && <small>{endpointStatus.error}</small>}
-                      </div>
-                    );
-                  })}
+                  {(["assets", "skills", "blueprints", "jobs", "orders"] as const).map(
+                    (endpoint) => {
+                      const endpointStatus = selectedStatus?.[endpoint];
+                      return (
+                        <div className={styles.characterModalStatus} key={endpoint}>
+                          <small>{endpoint.toUpperCase()}</small>
+                          <span>
+                            <span
+                              className={`${styles.statusDot} ${statusClass(endpointStatus)}`}
+                            />
+                            {statusLabel(endpointStatus)}
+                          </span>
+                          <small>{availabilityLabel(endpointStatus)}</small>
+                          {endpointStatus?.lastModified && (
+                            <small>Modified {formatDate(endpointStatus.lastModified)}</small>
+                          )}
+                          {endpointStatus?.error && <small>{endpointStatus.error}</small>}
+                        </div>
+                      );
+                    },
+                  )}
                 </div>
                 <div className={styles.characterModalRoles}>
                   <p className={styles.panelKicker}>CORPORATION ROLES</p>

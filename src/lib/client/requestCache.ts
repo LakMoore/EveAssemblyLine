@@ -1,5 +1,6 @@
 import type { PlanStockItem } from "@/lib/planning/types";
 import type { SdeLanguage } from "@/lib/reference/languages";
+import { saveEndpointResponse } from "./refreshCache";
 
 export type ClientSession = {
   authenticated?: boolean;
@@ -72,6 +73,7 @@ export type ClientJobsResponse = {
     characterId: number;
     characterName: string;
     slots: Record<string, number>;
+    availableSlots: Record<string, number>;
   }>;
   jobs?: Array<{
     jobId: number;
@@ -82,6 +84,8 @@ export type ClientJobsResponse = {
     status: string;
     runs: number;
     outputQuantity: number;
+    outputRunsPerCopy?: number;
+    usesBpo?: boolean;
     startDate: string;
     endDate: string;
     facilityId: number;
@@ -108,6 +112,7 @@ export type ClientCharacter = {
 export type ClientCharacterStatus = {
   characterId: number;
   assets?: ClientEndpointStatus;
+  skills?: ClientEndpointStatus;
   blueprints?: ClientEndpointStatus;
   jobs?: ClientEndpointStatus;
   orders?: ClientEndpointStatus;
@@ -147,6 +152,7 @@ let stateStatusResponse: { characters?: ClientCharacterStatus[] } | undefined;
 
 function loadJson<T>(
   url: string,
+  endpointKey: string,
   pending: Promise<T> | undefined,
   setPending: (value: Promise<T> | undefined) => void,
 ) {
@@ -155,6 +161,7 @@ function loadJson<T>(
     .then(async (response) => {
       const data = (await response.json()) as T;
       if (!response.ok) throw new Error(`Could not load ${url}.`);
+      await saveEndpointResponse(endpointKey, url, data);
       return data;
     })
     .catch((error) => {
@@ -193,6 +200,7 @@ export function loadClientStock(language: SdeLanguage, force = false) {
     .then(async (response) => {
       const data = (await response.json()) as ClientStockResponse;
       if (!response.ok) throw new Error("Could not load stock.");
+      await saveEndpointResponse("state/stock", `/api/state/stock?${query.toString()}`, data);
       stockResponses.set(key, data);
       return data;
     })
@@ -214,6 +222,7 @@ export function loadClientShips(force = false) {
       .then(async (response) => {
         const data = (await response.json()) as ClientShipsResponse;
         if (!response.ok) throw new Error("Could not load ships.");
+        await saveEndpointResponse("state/ships", "/api/state/ships", data);
         shipsResponse = data;
         return data;
       })
@@ -230,6 +239,7 @@ export function loadClientJobs(force = false) {
       .then(async (response) => {
         const data = (await response.json()) as ClientJobsResponse;
         if (!response.ok) throw new Error("Could not load industry jobs.");
+        await saveEndpointResponse("state/jobs", "/api/state/jobs", data);
         jobsResponse = data;
         return data;
       })
@@ -239,10 +249,15 @@ export function loadClientJobs(force = false) {
   return jobsRequest;
 }
 
-export function loadClientCharacters() {
+export function loadClientCharacters(force = false) {
+  if (force) {
+    charactersRequest = undefined;
+    charactersResponse = undefined;
+  }
   if (charactersResponse) return Promise.resolve(charactersResponse);
   charactersRequest = loadJson(
     "/api/characters",
+    "characters",
     charactersRequest,
     (value) => {
       charactersRequest = value;
@@ -254,10 +269,15 @@ export function loadClientCharacters() {
   return charactersRequest;
 }
 
-export function loadClientCorpStatus() {
+export function loadClientCorpStatus(force = false) {
+  if (force) {
+    corpStatusRequest = undefined;
+    corpStatusResponse = undefined;
+  }
   if (corpStatusResponse) return Promise.resolve(corpStatusResponse);
   corpStatusRequest = loadJson(
     "/api/auth/corp/status",
+    "auth/corp/status",
     corpStatusRequest,
     (value) => {
       corpStatusRequest = value;
@@ -274,6 +294,7 @@ export function loadClientStateStatus(force = false) {
   if (!force && stateStatusResponse) return Promise.resolve(stateStatusResponse);
   stateStatusRequest = loadJson(
     "/api/state/status",
+    "state/status",
     stateStatusRequest,
     (value) => {
       stateStatusRequest = value;

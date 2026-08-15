@@ -103,6 +103,11 @@ export interface IndustryJobRecord {
   successfulRuns?: number;
 }
 
+export interface CharacterSkillRecord {
+  skillId: number;
+  activeSkillLevel: number;
+}
+
 export interface BlueprintInstanceRecord {
   itemId: number;
   typeId: number;

@@ -2,6 +2,7 @@ import type {
   AssetLocation,
   AssetRecord,
   BlueprintInstanceRecord,
+  CharacterSkillRecord,
   CharacterTokenRecord,
   IndustryJobRecord,
   MarketOrderRecord,
@@ -26,6 +27,7 @@ import {
   fetchCharacterIndustryJobs,
   fetchCorporationIndustryJobs,
   fetchCharacterMarketOrders,
+  fetchCharacterSkills,
   fetchCorporationMarketOrders,
   fetchSolarSystemMetadata,
   fetchStationMetadata,
@@ -66,6 +68,7 @@ type OwnerCache = {
   assembledShipsByItemId: Map<number, AssetRecord>;
   assembledStructureRigs: AssetRecord[];
   jobs?: EndpointCache<IndustryJobRecord[]>;
+  skills?: EndpointCache<CharacterSkillRecord[]>;
   marketOrders?: EndpointCache<MarketOrderRecord[]>;
   unresolvedAssetCount: number;
 };
@@ -683,6 +686,7 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
     assets?: EndpointCache<AssetRecord[] | null>;
     blueprints?: EndpointCache<BlueprintInstanceRecord[] | null>;
     jobs?: EndpointCache<IndustryJobRecord[] | null>;
+    skills?: EndpointCache<CharacterSkillRecord[] | null>;
     marketOrders?: EndpointCache<MarketOrderRecord[] | null>;
     corporations?: Array<{
       corporationId: number;
@@ -695,6 +699,39 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
     if (!character) continue;
     const cache = getCache(characterCaches, characterId, sessionId);
     const characterSummary: (typeof summary)[number] = { characterId };
+    try {
+      if (
+        !cache.skills
+        || !cache.skills.nextRefreshAllowed
+        || Date.parse(cache.skills.nextRefreshAllowed) <= Date.now()
+      ) {
+        const skills = await fetchCharacterSkills(character);
+        cache.skills =
+          skills.fromCache && cache.skills
+            ? {
+                ...cache.skills,
+                status: endpointDataStatus(
+                  cache.skills.lastModified,
+                  cache.skills.nextRefreshAllowed,
+                ),
+              }
+            : setFresh(skills.skills ?? [], skills.headers, cache.skills, 5 * 60 * 1000);
+      }
+      else {
+        cache.skills.status = endpointDataStatus(
+          cache.skills.lastModified,
+          cache.skills.nextRefreshAllowed,
+        );
+      }
+      characterSummary.skills = cache.skills;
+    }
+    catch (error) {
+      cache.skills = {
+        ...(cache.skills ?? { lastBody: [] }),
+        ...endpointStatus(error),
+      };
+      characterSummary.skills = cache.skills;
+    }
     try {
       if (
         cache.allAssetsRaw?.nextRefreshAllowed
@@ -1557,6 +1594,10 @@ export async function getStateStatus(characterIds: number[], sessionId: string) 
         status: "cached" as const,
         hasBody: false,
       },
+      skills: toClientEndpointStatus(getCache(characterCaches, characterId, sessionId).skills) ?? {
+        status: "cached" as const,
+        hasBody: false,
+      },
       blueprints: toClientEndpointStatus(
         getCache(characterCaches, characterId, sessionId).blueprintInstances,
       ) ?? {
@@ -1602,4 +1643,36 @@ export async function getStateStatus(characterIds: number[], sessionId: string) 
       })),
     })),
   };
+}
+
+export async function getCharacterIndustrySlots(characterIds: number[], sessionId: string) {
+  const types = await getTypes();
+  const skillIds = new Map(
+    [
+      ["Mass Production", "manufacturing"],
+      ["Advanced Mass Production", "manufacturingAdvanced"],
+      ["Laboratory Operation", "science"],
+      ["Advanced Laboratory Operation", "scienceAdvanced"],
+      ["Mass Reactions", "reactions"],
+      ["Advanced Mass Reactions", "reactionsAdvanced"],
+    ].map(
+      ([name, key]) =>
+        [key, [...types.values()].find((type) => type.name.en === name)?._key] as const,
+    ),
+  );
+  return new Map(
+    characterIds.map((characterId) => {
+      const skills = getCache(characterCaches, characterId, sessionId).skills?.lastBody ?? [];
+      const levels = new Map(skills.map((skill) => [skill.skillId, skill.activeSkillLevel]));
+      const level = (key: string) => levels.get(skillIds.get(key) ?? -1) ?? 0;
+      return [
+        characterId,
+        {
+          Manufacturing: 1 + level("manufacturing") + level("manufacturingAdvanced"),
+          Reactions: 1 + level("reactions") + level("reactionsAdvanced"),
+          Science: 1 + level("science") + level("scienceAdvanced"),
+        },
+      ] as const;
+    }),
+  );
 }

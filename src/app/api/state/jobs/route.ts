@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
-import { getRootLocationsByItemId, getRunningIndustryJobs } from "@/lib/esi/cache";
+import {
+  getCharacterIndustrySlots,
+  getBlueprintInstances,
+  getResolvedAssetIndex,
+  getRootLocationsByItemId,
+  getRunningIndustryJobs,
+} from "@/lib/esi/cache";
 import { getCharacter, getCharacters } from "@/lib/auth/tokensStore";
 import {
   getBlueprintById,
@@ -76,6 +82,26 @@ function outputQuantity(
   return (product?.quantity ?? 0) * installedRuns;
 }
 
+function outputRunsPerCopy(job: Awaited<ReturnType<typeof getRunningIndustryJobs>>[number]) {
+  return job.activityId === 5 ? job.licensedRuns : undefined;
+}
+
+function jobUsesBpo(
+  job: Awaited<ReturnType<typeof getRunningIndustryJobs>>[number],
+  blueprintInstances: Awaited<ReturnType<typeof getBlueprintInstances>>,
+  assets: Awaited<ReturnType<typeof getResolvedAssetIndex>>,
+) {
+  if (job.activityId === 9) return false;
+  const instance = blueprintInstances.find(
+    (blueprint) =>
+      blueprint.itemId === job.blueprintId
+      && blueprint.ownerType === job.ownerType
+      && blueprint.ownerId === job.ownerId,
+  );
+  if (instance) return instance.quantity === -1;
+  return assets.get(job.blueprintId)?.runCount === -1;
+}
+
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
@@ -85,13 +111,16 @@ export async function GET(request: Request) {
     characterIds.includes(character.characterId),
   );
   const includeCorporationJobs = characters.some((character) => character.hasDirectorRole);
+  const availableSlots = await getCharacterIndustrySlots(characterIds, session.sessionId);
   const jobs = (
     await getRunningIndustryJobs(characterIds, includeCorporationJobs, session.sessionId)
   ).filter((job) => isActiveJob(job.status));
-  const [stations, systems, rootLocations] = await Promise.all([
+  const [stations, systems, rootLocations, blueprintInstances, assets] = await Promise.all([
     getStations(),
     getSystems(),
     getRootLocationsByItemId(characterIds, true, session.sessionId),
+    getBlueprintInstances(characterIds, true, session.sessionId),
+    getResolvedAssetIndex(characterIds, true, session.sessionId),
   ]);
   const types = await getTypesByIds(
     [
@@ -152,6 +181,11 @@ export async function GET(request: Request) {
       characterId: character.characterId,
       characterName: character.characterName,
       slots: slots.get(character.characterId) ?? {},
+      availableSlots: availableSlots.get(character.characterId) ?? {
+        Manufacturing: 1,
+        Reactions: 1,
+        Science: 1,
+      },
     })),
     jobs: jobs
       .sort((left, right) => Date.parse(left.endDate) - Date.parse(right.endDate))
@@ -164,6 +198,10 @@ export async function GET(request: Request) {
         status: job.status,
         runs: job.runs,
         outputQuantity: outputQuantity(job, blueprints.get(job.blueprintTypeId) ?? null),
+        ...(outputRunsPerCopy(job) !== undefined
+          ? { outputRunsPerCopy: outputRunsPerCopy(job) }
+          : {}),
+        ...(jobUsesBpo(job, blueprintInstances, assets) ? { usesBpo: true } : {}),
         startDate: job.startDate,
         endDate: job.endDate,
         facilityId: job.facilityId,

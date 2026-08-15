@@ -14,6 +14,7 @@ function toClientRefreshResult(result: Awaited<ReturnType<typeof refreshCharacte
     characters: result.characters.map((character) => ({
       characterId: character.characterId,
       ...(character.assets ? { assets: toClientEndpointStatus(character.assets) } : {}),
+      ...(character.skills ? { skills: toClientEndpointStatus(character.skills) } : {}),
       ...(character.jobs ? { jobs: toClientEndpointStatus(character.jobs) } : {}),
       ...(character.marketOrders
         ? { marketOrders: toClientEndpointStatus(character.marketOrders) }

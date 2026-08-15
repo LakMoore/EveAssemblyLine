@@ -954,7 +954,8 @@
 }
 
 .jobsCharacters {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -965,7 +966,23 @@
 }
 
 .jobsCharacter {
-  padding: 13px;
+  flex: 1 1 240px;
+  max-width: 360px;
+  padding: 10px;
+}
+
+.jobsCharacterIdentity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jobsCharacterIdentity img {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  object-fit: cover;
+  border: 1px solid #37606c;
 }
 
 .jobsCharacter > strong {
@@ -996,7 +1013,7 @@
 
 .jobsSlotGrid b {
   color: var(--cyan);
-  font: 18px "DM Mono";
+  font: 15px "DM Mono";
 }
 
 .jobsList {
@@ -1021,6 +1038,18 @@
 
 .jobTypeIdentity {
   min-width: 0;
+}
+
+.jobBpoFlag {
+  justify-self: start;
+  width: fit-content;
+  border: 1px solid #8cae49;
+  background: #24351b;
+  color: #d5ef8e;
+  padding: 3px 7px;
+  font: 10px "DM Mono";
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
 }
 
 .jobRow > span {
@@ -1560,6 +1589,65 @@
   min-width: 0;
 }
 
+.stockIdentityStack {
+  display: grid;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 3px;
+}
+
+.stockAggregateList {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 13px;
+}
+
+.stockAggregateList > span {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 14px;
+  grid-template-rows: auto auto;
+  column-gap: 5px;
+  align-items: center;
+  min-width: 72px;
+  color: #d4e6e9;
+}
+
+.stockAggregateList svg {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  width: 14px;
+  height: 14px;
+  color: #78c7d2;
+}
+
+.stockAggregateList b {
+  grid-column: 1;
+  grid-row: 2;
+  font: 12px "DM Mono";
+  text-align: right;
+}
+
+.stockAggregateList small {
+  grid-column: 1;
+  grid-row: 1;
+  color: #78959e;
+  font: 9px "DM Mono";
+  text-align: right;
+  white-space: nowrap;
+}
+
+.stockAggregateStock svg {
+  color: #b4df72;
+}
+
+.stockAggregateCategory {
+  flex: 0 0 auto;
+  color: #78959e;
+  font: 9px "DM Mono";
+  padding-left: 47px;
+}
+
 .stockSummaryLine {
   display: block;
   white-space: nowrap;
@@ -1717,6 +1805,18 @@
 }
 
 @media (max-width: 640px) {
+  .stockAggregateList {
+    gap: 8px;
+  }
+
+  .stockAggregateList > span {
+    min-width: 58px;
+  }
+
+  .stockAggregateCategory {
+    display: none;
+  }
+
   .stockCardActions :global(.actionButton) {
     width: 28px;
     padding: 0;
@@ -3175,8 +3275,8 @@
 
 .characterTableHeader,
 .characterRow {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) repeat(4, minmax(0, 1fr)) 74px;
+  display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   align-items: center;
 }
@@ -3191,7 +3291,7 @@
 
 .characterRow {
   border-top: 1px solid #1e3740;
-  padding: 16px 0;
+  padding: 10px 0;
   cursor: pointer;
 }
 
@@ -3212,7 +3312,25 @@
   display: block;
 }
 .characterIdentity {
+  display: flex;
+  flex: 1 1 220px;
+  align-items: center;
+  gap: 9px;
   min-width: 0;
+}
+
+.characterIdentityText {
+  display: block;
+  min-width: 0;
+}
+
+.characterCardPortrait {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  object-fit: cover;
+  border: 1px solid #37606c;
+  background: #102b34;
 }
 
 .characterIdentity strong,
@@ -3230,6 +3348,7 @@
 }
 
 .statusCell {
+  flex: 1 1 90px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -3283,6 +3402,7 @@
 }
 
 .characterActions {
+  flex: 0 1 110px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -3562,12 +3682,11 @@
 @media (max-width: 900px) {
   .characterTableHeader,
   .characterRow {
-    grid-template-columns: minmax(0, 1.4fr) repeat(4, minmax(0, 1fr)) 74px;
     gap: 12px;
   }
 
   .characterRowWithReauthorize {
-    grid-template-columns: minmax(0, 1.4fr) repeat(4, minmax(0, 1fr)) 110px;
+    gap: 12px;
   }
 }
 
@@ -3599,26 +3718,25 @@
   }
 
   .characterRow {
-    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
   }
 
   .characterRowWithReauthorize {
-    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
   }
 
   .characterIdentity {
-    grid-column: 1 / -1;
+    flex-basis: 100%;
     min-width: 0;
   }
 
   .characterRow > .statusCell {
-    grid-column: 1 / -1;
+    flex-basis: 100%;
     width: 100%;
   }
 
   .characterRow > .characterActions {
-    grid-column: 1 / -1;
+    flex-basis: 100%;
     justify-self: start;
     width: 100%;
     align-items: flex-start;

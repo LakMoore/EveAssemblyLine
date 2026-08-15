@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type {
   AssetRecord,
   BlueprintInstanceRecord,
+  CharacterSkillRecord,
   CharacterTokenRecord,
   IndustryJobRecord,
   MarketOrderRecord,
@@ -29,6 +30,11 @@ export type EsiAssetLocation = {
   name: string;
   location_id?: number;
   location_type?: string;
+};
+
+type EsiCharacterSkill = {
+  skill_id: number;
+  active_skill_level: number;
 };
 
 export type EsiAsset = {
@@ -582,6 +588,25 @@ export async function fetchCharacterIndustryJobs(
             .map((job) => mapIndustryJob(job, "character", record.characterId)),
     headers: result.headers,
     notModified: result.status === 304,
+    fromCache: result.fromCache,
+  };
+}
+
+export async function fetchCharacterSkills(record: CharacterTokenRecord) {
+  const token = await getUsableToken(record, "personal");
+  const result = await requestCachedEsi<{ skills?: EsiCharacterSkill[] }>(
+    `/characters/${record.characterId}/skills/`,
+    token,
+  );
+  return {
+    skills:
+      result.data?.skills?.map(
+        (skill): CharacterSkillRecord => ({
+          skillId: skill.skill_id,
+          activeSkillLevel: skill.active_skill_level,
+        }),
+      ) ?? null,
+    headers: result.headers,
     fromCache: result.fromCache,
   };
 }

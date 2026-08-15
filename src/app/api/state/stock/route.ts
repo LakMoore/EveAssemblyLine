@@ -13,7 +13,7 @@ import { getCharacter } from "@/lib/auth/tokensStore";
 import {
   getGroups,
   getMarketGroups,
-  getBuildBlueprintByProductTypeId,
+  getBlueprintById,
   getShipTypeIds,
   getStations,
   getStructureTypeIds,
@@ -338,7 +338,7 @@ function addStockContribution(
   if (contribution.inBuild) {
     item.inBuildQuantity = (item.inBuildQuantity ?? 0) + contribution.quantity;
     item.inBuild = true;
-    item.jobRuns = (item.jobRuns ?? 0) + (contribution.job?.runs ?? 0);
+    if (contribution.job) item.jobRuns = contribution.job.runs;
     item.inUse = contribution.inUse;
     item.jobId = contribution.job?.jobId;
     item.installerId = contribution.job?.installerId;
@@ -490,7 +490,7 @@ export async function GET(request: NextRequest) {
     rootLocationsByItemId,
   ] = await Promise.all([
     getResolvedAssets(characterIds, true, session.sessionId),
-    getRunningIndustryJobs(characterIds, true),
+    getRunningIndustryJobs(characterIds, true, session.sessionId),
     getBlueprintInstances(characterIds, true, session.sessionId),
     getShipTypeIds(),
     getStructureTypeIds(),
@@ -543,15 +543,16 @@ export async function GET(request: NextRequest) {
         jobs.flatMap((job) => (job.productTypeId !== undefined ? [job.productTypeId] : [])),
       ),
     ].map(async (productTypeId) => {
-      const buildBlueprint = await getBuildBlueprintByProductTypeId(productTypeId);
-      const product =
-        buildBlueprint?.activity === "manufacturing"
-          ? buildBlueprint.blueprint.activities.manufacturing?.products?.find(
-              (candidate) => candidate.typeID === productTypeId,
-            )
-          : buildBlueprint?.blueprint.activities.reaction?.products.find(
-              (candidate) => candidate.typeID === productTypeId,
-            );
+      const job = jobs.find((candidate) => candidate.productTypeId === productTypeId);
+      if (!job) return;
+      const blueprint = await getBlueprintById(job.blueprintTypeId);
+      const activity =
+        job.activityId === 9
+          ? blueprint?.activities.reaction
+          : job.activityId === 1
+            ? blueprint?.activities.manufacturing
+            : undefined;
+      const product = activity?.products?.find((candidate) => candidate.typeID === productTypeId);
       if (product?.quantity && product.quantity > 0) {
         productQuantities.set(productTypeId, product.quantity);
       }

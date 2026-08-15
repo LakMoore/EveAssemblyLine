@@ -19,6 +19,7 @@ import {
 } from "@/lib/planning/compressSettingsStore";
 import type { KnownStructure } from "@/lib/planning/preferences";
 import { loadClientStock } from "@/lib/client/requestCache";
+import { loadEndpointRecord, saveEndpointResponse } from "@/lib/client/refreshCache";
 import { structureRigsKey, structureRigsName } from "@/lib/planning/structureRigs";
 import { fetchStructureRigs } from "@/lib/planning/structureRigsStore";
 import styles from "./compress.module.css";
@@ -160,14 +161,16 @@ function CompressContent() {
     const optionsLoadKey = `${language}:${optionsRefreshVersion}`;
     if (optionsLoadKeyRef.current === optionsLoadKey) return;
     optionsLoadKeyRef.current = optionsLoadKey;
+    const isRefreshLoad = optionsRefreshVersion > 0;
     Promise
       .all([
         loadStructures(),
         loadCompressSettings(),
         loadClientStock(language),
         fetchStructureRigs(),
+        loadEndpointRecord<CompressOptions>("compress/options"),
       ])
-      .then(async ([loadedStructures, loadedSettings, stock, structureRigs]) => {
+      .then(async ([loadedStructures, loadedSettings, stock, structureRigs, cachedOptions]) => {
         const structures = loadedStructures.map((structure) => {
           const sharedRigKey = structureRigsKey(
             structure.systemId,
@@ -182,43 +185,54 @@ function CompressContent() {
             rigTypeIds: sharedEntry.rigTypeIds,
           };
         });
-        const loadedOptions = await fetch(
-          "/api/compress/options",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            cache: "no-store",
-            body: JSON.stringify({
-              language,
-              structures: structures
-                .filter(
-                  (structure) =>
-                    structure.typeId !== undefined
-                    && structure.rigTypeIds !== undefined
-                    && Number.isSafeInteger(structure.systemId)
-                    && structure.systemId > 0,
-                )
-                .map((structure) => ({
-                  id:
-                    structure.esiStructureId === undefined
-                      ? structure.id
-                      : `structure:${structure.esiStructureId}`,
-                  type: structure.typeId,
-                  systemId: structure.systemId,
-                  rigs: structure.rigTypeIds,
-                })),
-              assetLocations: (stock.locations ?? [])
-                .filter((location) => location.locationType !== "anchored")
-                .map(({ locationId, name, locationType, typeId, systemId }) => ({
-                  locationId,
-                  name,
-                  locationType,
-                  ...(typeId === undefined ? {} : { typeId }),
-                  ...(systemId === undefined ? {} : { systemId }),
-                })),
-            }),
-          },
-        ).then((response) => response.json() as Promise<CompressOptions>);
+        if (!isRefreshLoad && !cachedOptions) {
+          setStatus("Refresh data to load compression options.");
+          return;
+        }
+        let loadedOptions = cachedOptions?.data;
+        if (isRefreshLoad) {
+          const optionsResponse = await fetch(
+            "/api/compress/options",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              cache: "no-store",
+              body: JSON.stringify({
+                language,
+                structures: structures
+                  .filter(
+                    (structure) =>
+                      structure.typeId !== undefined
+                      && structure.rigTypeIds !== undefined
+                      && Number.isSafeInteger(structure.systemId)
+                      && structure.systemId > 0,
+                  )
+                  .map((structure) => ({
+                    id:
+                      structure.esiStructureId === undefined
+                        ? structure.id
+                        : `structure:${structure.esiStructureId}`,
+                    type: structure.typeId,
+                    systemId: structure.systemId,
+                    rigs: structure.rigTypeIds,
+                  })),
+                assetLocations: (stock.locations ?? [])
+                  .filter((location) => location.locationType !== "anchored")
+                  .map(({ locationId, name, locationType, typeId, systemId }) => ({
+                    locationId,
+                    name,
+                    locationType,
+                    ...(typeId === undefined ? {} : { typeId }),
+                    ...(systemId === undefined ? {} : { systemId }),
+                  })),
+              }),
+            },
+          );
+          loadedOptions = (await optionsResponse.json()) as CompressOptions;
+          if (!optionsResponse.ok) throw new Error("Could not load compression options.");
+          await saveEndpointResponse("compress/options", "/api/compress/options", loadedOptions);
+        }
+        if (!loadedOptions) throw new Error("Could not load compression options.");
         const structuresWithSecurity = structures.map((structure) => {
           const suppliedSecurityStatus = loadedOptions.locations.find(
             (location) => location.id === structure.id,
@@ -494,12 +508,6 @@ function CompressContent() {
                       disabled={location.canReprocess === false}
                     >
                       {location.name ?? `Location ${location.id}`}
-                      {location.canReprocess !== false
-                      && location.structureTypeId !== undefined
-                      && location.structureTypeId !== 0
-                      && reprocessingRigLevel(location.rigs ?? []) === 0
-                        ? " [No Rigs]"
-                        : ""}
                       {location.canReprocess === false ? " [No Reprocessing]" : ""} ·{" "}
                       {Math.round(location.baseYield ?? 50)}%
                     </option>

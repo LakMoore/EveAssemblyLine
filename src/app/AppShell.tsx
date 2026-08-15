@@ -17,12 +17,20 @@ import { loadStockSnapshotTime, replaceEsiStock, type StockItem } from "@/lib/pl
 import {
   groupClientStockByLocation,
   loadClientJobs,
+  loadClientCharacters,
+  loadClientCorpStatus,
   loadClientSession,
   loadClientShips,
   loadClientStateStatus,
   loadClientStock,
   type ClientCharacterStatus,
 } from "@/lib/client/requestCache";
+import {
+  endpointNeedsRefresh,
+  loadLastRefreshAt,
+  refreshDependentEndpoints,
+  saveLastRefreshAt,
+} from "@/lib/client/refreshCache";
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import {
   Activity,
@@ -70,15 +78,16 @@ type EsiStockResponse = {
     items: StockItem[];
   }>;
 };
-type StateEndpoint = keyof Pick<ClientCharacterStatus, "assets" | "jobs" | "orders">;
-const stateEndpoints: StateEndpoint[] = ["assets", "jobs", "orders"];
+type StateEndpoint = keyof Pick<ClientCharacterStatus, "assets" | "skills" | "jobs" | "orders">;
+const stateEndpoints: StateEndpoint[] = ["assets", "skills", "jobs", "orders"];
+const corporationStateEndpoints: Array<"assets" | "jobs" | "orders"> = ["assets", "jobs", "orders"];
 
 function hasExpiredEndpoint(statuses: ClientCharacterStatus[]) {
   return statuses.some((character) => {
     const endpoints = [
       ...stateEndpoints.map((endpoint) => character[endpoint]),
       ...(character.corporations ?? []).flatMap((corporation) =>
-        stateEndpoints.map((endpoint) => corporation[endpoint]),
+        corporationStateEndpoints.map((endpoint) => corporation[endpoint]),
       ),
     ];
     return endpoints.some((endpoint) => {
@@ -101,7 +110,7 @@ function hasEndpointErrors(statuses: ClientCharacterStatus[]) {
     [
       ...stateEndpoints.map((endpoint) => character[endpoint]),
       ...(character.corporations ?? []).flatMap((corporation) =>
-        stateEndpoints.map((endpoint) => corporation[endpoint]),
+        corporationStateEndpoints.map((endpoint) => corporation[endpoint]),
       ),
     ].some((endpoint) => endpoint?.status === "error"),
   );
@@ -280,20 +289,27 @@ export default function AppShell({ children }: { children: ReactNode }) {
         rateLimitedUntil?: string | null;
       };
       if (!response.ok || data.success !== true) return false;
+      const refreshedAt = data.refreshedAt ?? new Date().toISOString();
+      await saveLastRefreshAt(refreshedAt);
+      const requiredEndpoints = new Set<string>(refreshDependentEndpoints[activePage]);
       let shipsResponse;
-      try {
-        shipsResponse = await loadClientShips(true);
+      if (requiredEndpoints.has("state/ships")) {
+        try {
+          shipsResponse = await loadClientShips(true);
+        }
+        catch {}
       }
-      catch {}
       let jobsResponse;
-      try {
-        jobsResponse = await loadClientJobs(true);
+      if (requiredEndpoints.has("state/jobs")) {
+        try {
+          jobsResponse = await loadClientJobs(true);
+        }
+        catch {}
       }
-      catch {}
-      try {
-        const stockData = await loadClientStock(language, true);
-        stockLocations = groupClientStockByLocation(stockData);
-        {
+      if (requiredEndpoints.has("state/stock")) {
+        try {
+          const stockData = await loadClientStock(language, true);
+          stockLocations = groupClientStockByLocation(stockData);
           await replaceEsiStock(
             stockLocations.map((location) => ({
               systemId: location.systemId ?? 0,
@@ -305,14 +321,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
             })),
           );
         }
+        catch {}
       }
-      catch {}
       window.dispatchEvent(
         new CustomEvent(
           "assembly-line-esi-refreshed",
           {
             detail: {
-              refreshedAt: data.refreshedAt ?? null,
+              refreshedAt,
               rateLimitedUntil: data.rateLimitedUntil ?? null,
               stockLocations,
               ships: shipsResponse ?? null,
@@ -329,7 +345,38 @@ export default function AppShell({ children }: { children: ReactNode }) {
     finally {
       setIsRefreshingData(false);
     }
-  }, [authenticated, characters.length, isRefreshingData, language]);
+  }, [activePage, authenticated, characters.length, isRefreshingData, language]);
+
+  useEffect(() => {
+    if (!authenticated || characters.length === 0) return;
+    const page = activePage;
+    const endpoints = refreshDependentEndpoints[page];
+    if (endpoints.length === 0) return;
+    let cancelled = false;
+    void loadLastRefreshAt()
+      .then(async (refreshAt) => {
+        if (cancelled || !refreshAt) return;
+        const stale = await Promise.all(
+          endpoints.map(async (endpoint) => ({
+            endpoint,
+            stale: await endpointNeedsRefresh(endpoint, refreshAt),
+          })),
+        );
+        const staleEndpoints = new Set(
+          stale.filter((entry) => entry.stale).map((entry) => entry.endpoint),
+        );
+        if (staleEndpoints.has("state/stock")) await loadClientStock(language, true);
+        if (staleEndpoints.has("state/jobs")) await loadClientJobs(true);
+        if (staleEndpoints.has("state/ships")) await loadClientShips(true);
+        if (staleEndpoints.has("state/status")) await loadClientStateStatus(true);
+        if (staleEndpoints.has("characters")) await loadClientCharacters(true);
+        if (staleEndpoints.has("auth/corp/status")) await loadClientCorpStatus(true);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activePage, authenticated, characters.length, language]);
 
   useEffect(() => {
     if (!authenticated || characters.length === 0) return;

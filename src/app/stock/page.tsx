@@ -661,24 +661,6 @@ const stockCategories = [
   { id: "item" as const, label: "Items", icon: Package },
 ];
 
-function formatBlueprintDate(value: string) {
-  const date = new Date(value);
-  return `${date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" })} ${date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false })}`;
-}
-
-type BlueprintDetail = {
-  kind: "BPO" | "BPC";
-  source: "Asset" | "In use" | "In Progress";
-  runs?: number;
-  copies: number;
-  me?: number;
-  te?: number;
-  activity?: string;
-  endDate?: string;
-  quantity?: number;
-  estimated?: boolean;
-};
-
 function StockLocationCard({
   location,
   isEsiLocation,
@@ -815,6 +797,15 @@ function StockLocationCard({
   );
 }
 
+type StockTypeBucket = {
+  item: StockItem;
+  stockQuantity: number;
+  productionQuantity: number;
+  marketQuantity: number;
+  category: StockItem["category"];
+  marketCategory?: string;
+};
+
 function ViewItemsModal({
   location,
   filter,
@@ -826,22 +817,6 @@ function ViewItemsModal({
   onFilterChange: (filter: StockFilter) => void;
   onCancel: () => void;
 }) {
-  const [openBlueprintTypeId, setOpenBlueprintTypeId] = useState<number | null>(null);
-  const [openReactionTypeId, setOpenReactionTypeId] = useState<number | null>(null);
-  const blueprintCounts = new Map<number, { bpo: number; bpc: number; runs: number }>();
-  for (const item of location.items) {
-    if (!isBlueprintStockItem(item)) continue;
-    const counts = blueprintCounts.get(item.typeId) ?? { bpo: 0, bpc: 0, runs: 0 };
-    if (item.type === "bpo" || item.category === "bpo") counts.bpo += item.quantity;
-    else {
-      counts.bpc += item.quantity;
-      counts.runs
-        += (item.blueprintPrints ?? [])
-          .filter((print) => print.type === "bpc" && print.runs >= 0)
-          .reduce((total, print) => total + print.runs, 0);
-    }
-    blueprintCounts.set(item.typeId, counts);
-  }
   const filteredItems = location.items.filter((item) => {
     if (filter.kind === "all") return true;
     if (filter.kind === "sales") return item.source === "marketOrder";
@@ -851,42 +826,34 @@ function ViewItemsModal({
       ? isBlueprintStockItem(item)
       : (item.category ?? "item") === filter.value;
   });
-  const displayItems: Array<{
-    item: StockItem;
-    blueprints?: StockItem[];
-    reactionJobs?: StockItem[];
-  }> = [];
+  const displayItems = new Map<number, StockTypeBucket>();
   for (const item of filteredItems) {
-    if (item.category === "reaction") {
-      const existing = displayItems.find(
-        (entry) => entry.item.typeId === item.typeId && entry.item.category === "reaction",
-      );
-      if (!existing) {
-        displayItems.push({ item, reactionJobs: item.inUse ? [item] : [] });
-        continue;
-      }
-      existing.item = { ...existing.item, quantity: existing.item.quantity + item.quantity };
-      if (item.inUse) existing.reactionJobs?.push(item);
-      continue;
-    }
-    if (!isBlueprintStockItem(item)) {
-      displayItems.push({ item });
-      continue;
-    }
-    const existing = displayItems.find((entry) => entry.item.typeId === item.typeId);
+    const existing = displayItems.get(item.typeId);
+    const isMarketOrder = item.source === "marketOrder";
+    const isProduction = item.inBuild && !isBlueprintStockItem(item);
+    const stockQuantity = !isMarketOrder && !isProduction ? item.quantity : 0;
+    const productionQuantity = isProduction ? (item.inBuildQuantity ?? item.quantity) : 0;
+    const marketQuantity = isMarketOrder ? item.quantity : 0;
     if (!existing) {
-      displayItems.push({ item, blueprints: [item] });
+      displayItems.set(
+        item.typeId,
+        {
+          item,
+          stockQuantity,
+          productionQuantity,
+          marketQuantity,
+          category: item.category,
+          marketCategory: item.marketCategory,
+        },
+      );
       continue;
     }
-    existing.blueprints?.push(item);
-    existing.item = {
-      ...existing.item,
-      quantity: existing.item.quantity + item.quantity,
-      inBuild: existing.item.inBuild || item.inBuild,
-      inUse: existing.item.inUse || item.inUse,
-    };
-    if (!existing.item.inBuild && item.inBuild) existing.item = item;
+    existing.stockQuantity += stockQuantity;
+    existing.productionQuantity += productionQuantity;
+    existing.marketQuantity += marketQuantity;
+    if (isProduction && !existing.item.inBuild) existing.item = item;
   }
+  const buckets = [...displayItems.values()];
   const title =
     filter.kind === "all"
       ? "All items"
@@ -924,7 +891,7 @@ function ViewItemsModal({
           </button>
         </div>
         <p className={styles.panelDescription}>
-          {location.systemName} · {title} · {displayItems.length} item types
+          {location.systemName} · {title} · {buckets.length} item types
         </p>
         <div className={styles.stockViewFilters}>
           <button
@@ -963,244 +930,61 @@ function ViewItemsModal({
             </button>
           ))}
         </div>
-        {displayItems.length === 0 ? (
+        {buckets.length === 0 ? (
           <div className={styles.emptyBuildList}>No items recorded at this location.</div>
         ) : (
           <div className={styles.stockList}>
-            {displayItems.map(({ item, blueprints, reactionJobs }, itemIndex) => {
-              const counts = blueprintCounts.get(item.typeId);
-              const marketOrderQuantity = item.marketOrderQuantity ?? 0;
-              const isMarketOrder = item.source === "marketOrder";
-              const isBlueprint = Boolean(blueprints);
-              const hasBlueprintOriginal =
-                blueprints?.some(
-                  (blueprint) => blueprint.type === "bpo" || blueprint.category === "bpo",
-                ) ?? false;
-              const isReaction = Boolean(reactionJobs);
-              const reactionInUse =
-                reactionJobs?.reduce((total, job) => total + job.quantity, 0) ?? 0;
-              const details: BlueprintDetail[] | undefined = blueprints
-                ? (() => {
-                    const buckets = new Map<string, BlueprintDetail>();
-                    const addToBucket = (detail: BlueprintDetail) => {
-                      const key = `${detail.kind}:${detail.activity ?? "-"}:${detail.me ?? "-"}:${detail.te ?? "-"}`;
-                      const existing = buckets.get(key);
-                      if (!existing) {
-                        buckets.set(key, detail);
-                        return;
-                      }
-                      existing.copies += detail.copies;
-                      if (detail.runs !== undefined) {
-                        existing.runs = (existing.runs ?? 0) + detail.runs;
-                      }
-                    };
-
-                    for (const blueprint of blueprints) {
-                      const kind =
-                        blueprint.type === "bpo" || blueprint.category === "bpo" ? "BPO" : "BPC";
-                      const source = blueprint.inBuild
-                        ? blueprint.activityName === "Invention"
-                          && !blueprint.blueprintPrints?.length
-                          ? "In Progress"
-                          : "In use"
-                        : "Asset";
-                      if (blueprint.blueprintPrints?.length) {
-                        for (const print of blueprint.blueprintPrints) {
-                          addToBucket({
-                            kind,
-                            source,
-                            copies: 1,
-                            ...(kind === "BPC" && print.runs >= 0 ? { runs: print.runs } : {}),
-                            me: print.me,
-                            te: print.te,
-                            activity: print.activity,
-                            endDate: print.endDate,
-                          });
+            {buckets.map(
+              ({ item, stockQuantity, productionQuantity, marketQuantity }, itemIndex) => {
+                const categoryLabel = item.marketCategory ?? item.category ?? "Item";
+                const showCategory =
+                  filter.kind === "all" || (filter.kind === "category" && filter.value === "item");
+                return (
+                  <div className={styles.stockRow} key={`${item.typeId}:${itemIndex}`}>
+                    <div className={styles.stockIdentityStack}>
+                      <TypeIdentity
+                        name={item.name}
+                        typeId={item.typeId}
+                        imageSize={40}
+                        className={styles.stockTypeIdentity}
+                        variation={item.category === "reaction" ? "bpc" : "icon"}
+                        blueprintType={
+                          isBlueprintStockItem(item)
+                            ? item.type === "bpo"
+                              ? "bpo"
+                              : "bpc"
+                            : undefined
                         }
-                        continue;
-                      }
-                      addToBucket({
-                        kind,
-                        source,
-                        copies: blueprint.quantity,
-                        ...(kind === "BPC"
-                          ? {
-                              runs: (blueprint.blueprintPrints ?? []).reduce(
-                                (total, print) => total + Math.max(0, print.runs),
-                                0,
-                              ),
-                            }
-                          : {}),
-                        ...(source === "In Progress"
-                          ? { estimated: true }
-                          : { me: blueprint.me, te: blueprint.te }),
-                        activity: blueprint.activityName,
-                        endDate: blueprint.endDate,
-                      });
-                    }
-                    return [...buckets.values()];
-                  })()
-                : undefined;
-              const showTooltip = isBlueprint && openBlueprintTypeId === item.typeId;
-              const showReactionTooltip = isReaction && openReactionTypeId === item.typeId;
-              return (
-                <div
-                  className={styles.stockRow}
-                  key={`${item.typeId}:${item.category ?? "item"}:${isReaction ? "reaction" : item.isPackaged ? "packaged" : "assembled"}:${item.jobId ?? "asset"}:${itemIndex}`}
-                >
-                  <TypeIdentity
-                    name={item.name}
-                    typeId={item.typeId}
-                    imageSize={40}
-                    className={styles.stockTypeIdentity}
-                    variation={
-                      isBlueprint
-                        ? hasBlueprintOriginal
-                          ? "bp"
-                          : "bpc"
-                        : item.category === "reaction"
-                          ? "bpc"
-                          : item.source !== "marketOrder" && item.techLevel === 1
-                            ? "render"
-                            : "icon"
-                    }
-                  />
-                  {item.inBuild && item.endDate && (
-                    <small className={styles.stockCompletion}>
-                      <span>
-                        {item.inProduction
-                          ? "In production"
-                          : (item.activityName ?? "Industry job")}{" "}
-                        completes
-                      </span>
-                      <span>
-                        {new Date(item.endDate).toLocaleDateString(
-                          "en-GB",
-                          {
-                            day: "2-digit",
-                            month: "short",
-                          },
-                        )}{" "}
-                        {new Date(item.endDate).toLocaleTimeString(
-                          "en-GB",
-                          {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            hour12: false,
-                          },
-                        )}
-                      </span>
-                    </small>
-                  )}
-                  {isReaction ? (
-                    <div
-                      className={styles.stockBlueprintSummary}
-                      onMouseEnter={() => setOpenReactionTypeId(item.typeId)}
-                      onMouseLeave={() => setOpenReactionTypeId(null)}
-                    >
-                      <button
-                        type="button"
-                        className={styles.stockBlueprintSummaryButton}
-                        aria-label={`Show installed reaction formulas for ${item.name}`}
-                        aria-expanded={showReactionTooltip}
-                        onClick={() =>
-                          setOpenReactionTypeId(showReactionTooltip ? null : item.typeId)
-                        }
-                      >
-                        {reactionInUse > 0 && <b className={styles.stockBlueprintHelp}>?</b>}
-                        <span>
-                          {reactionInUse.toLocaleString()} / {item.quantity.toLocaleString()} in use
-                        </span>
-                      </button>
-                      {showReactionTooltip && reactionJobs && reactionJobs.length > 0 && (
-                        <div className={styles.stockBlueprintTooltip} role="tooltip">
-                          {reactionJobs.map((job, index) => (
-                            <div
-                              className={styles.stockBlueprintDetail}
-                              key={`${job.jobId ?? index}`}
-                            >
-                              <strong>In use · {job.blueprintRunsUsed ?? 0} runs</strong>
-                              <span>
-                                {job.endDate
-                                  ? formatBlueprintDate(job.endDate)
-                                  : "Completion date unavailable"}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
+                      />
+                      {showCategory && (
+                        <small className={styles.stockAggregateCategory}>{categoryLabel}</small>
                       )}
                     </div>
-                  ) : isBlueprint && counts ? (
-                    <div
-                      className={styles.stockBlueprintSummary}
-                      onMouseEnter={() => setOpenBlueprintTypeId(item.typeId)}
-                      onMouseLeave={() => setOpenBlueprintTypeId(null)}
-                    >
-                      <button
-                        type="button"
-                        className={styles.stockBlueprintSummaryButton}
-                        aria-label={`Show details for ${item.name}`}
-                        aria-expanded={showTooltip}
-                        onClick={() => setOpenBlueprintTypeId(showTooltip ? null : item.typeId)}
-                      >
+                    <div className={styles.stockAggregateList}>
+                      <span className={styles.stockAggregateStock}>
+                        <Package aria-hidden="true" />
+                        <b>{stockQuantity.toLocaleString()}</b>
+                        <small>Stock</small>
+                      </span>
+                      {productionQuantity > 0 && (
                         <span>
-                          {counts.bpo > 0 && (
-                            <span className={styles.stockSummaryLine}>
-                              {counts.bpo.toLocaleString()} BPO
-                            </span>
-                          )}
-                          {counts.bpc > 0 && (
-                            <span className={styles.stockSummaryLine}>
-                              {counts.runs > 0
-                                ? `${counts.runs.toLocaleString()} Runs on ${counts.bpc.toLocaleString()} BPC`
-                                : `${counts.bpc.toLocaleString()} BPC`}
-                            </span>
-                          )}
+                          <Factory aria-hidden="true" />
+                          <b>{productionQuantity.toLocaleString()}</b>
+                          <small>In production</small>
                         </span>
-                        <b className={styles.stockBlueprintHelp}>?</b>
-                      </button>
-                      {showTooltip && details && (
-                        <div className={styles.stockBlueprintTooltip} role="tooltip">
-                          {details.map((detail, index) => (
-                            <div
-                              className={styles.stockBlueprintDetail}
-                              key={`${item.typeId}-${index}`}
-                            >
-                              <strong>
-                                {detail.copies.toLocaleString()}{" "}
-                                {detail.kind === "BPO"
-                                  ? detail.copies === 1
-                                    ? "Original"
-                                    : "Originals"
-                                  : detail.copies === 1
-                                    ? "Copy"
-                                    : "Copies"}
-                              </strong>
-                              <span>
-                                {detail.me !== undefined ? `ME ${detail.me}` : ""}
-                                {detail.te !== undefined ? ` · TE ${detail.te}` : ""}
-                                {detail.runs !== undefined
-                                  ? ` · ${detail.estimated ? "~" : ""}${detail.runs.toLocaleString()} runs`
-                                  : ""}
-                                {detail.activity ? ` · ${detail.activity}` : ""}
-                                {detail.endDate ? ` · ${formatBlueprintDate(detail.endDate)}` : ""}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
+                      )}
+                      {marketQuantity > 0 && (
+                        <span>
+                          <ShoppingCart aria-hidden="true" />
+                          <b>{marketQuantity.toLocaleString()}</b>
+                          <small>On market</small>
+                        </span>
                       )}
                     </div>
-                  ) : (
-                    <strong>
-                      {isMarketOrder
-                        ? `${item.quantity.toLocaleString()} on market`
-                        : `${item.quantity.toLocaleString()} stock${marketOrderQuantity > 0 ? ` · ${marketOrderQuantity.toLocaleString()} on market` : ""}${item.inBuild ? " · In Build" : ""}${item.inUse ? " · In Use" : ""}`}
-                      {isMarketOrder && <span className={styles.sellOrderTag}>Sell Order</span>}
-                    </strong>
-                  )}
-                </div>
-              );
-            })}
+                  </div>
+                );
+              },
+            )}
           </div>
         )}
       </div>

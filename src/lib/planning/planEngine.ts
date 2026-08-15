@@ -124,7 +124,12 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     ) {
       addSource("invention");
     }
-    if (stockItem.inBuild && stockItem.category === "bp" && stockItem.activityName === "Copying") {
+    if (
+      stockItem.inBuild
+      && stockItem.category === "bp"
+      && stockItem.type === "bpc"
+      && stockItem.activityName === "Copying"
+    ) {
       addSource("copying");
     }
     if (sourceCounts.size > 0) sourceCountsByTypeId.set(stockItem.typeId, sourceCounts);
@@ -186,7 +191,12 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     );
   }
   for (const item of request.stock) {
-    if (!item.inBuild || item.category !== "bp" || item.activityName !== "Copying") continue;
+    if (
+      !item.inBuild
+      || item.category !== "bp"
+      || item.type !== "bpc"
+      || item.activityName !== "Copying"
+    ) continue;
     const copiedRuns = (item.jobRuns ?? 0) * (item.licensedRuns ?? 1);
     if (copiedRuns <= 0) continue;
     const existing = blueprintCopyStock.get(item.typeId) ?? { copies: 0, runs: 0 };

@@ -1,11 +1,23 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import { loadClientJobs, type ClientJobsResponse } from "@/lib/client/requestCache";
+import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import TypeIdentity from "../components/TypeIdentity";
 import styles from "../page.module.css";
 
 const slotOrder = ["Manufacturing", "Reactions", "Science"];
+const scienceJobActivities = new Set([
+  "Time research",
+  "Material research",
+  "Copying",
+  "Invention",
+]);
+
+function isScienceJob(activity: string) {
+  return scienceJobActivities.has(activity);
+}
 
 function formatDate(value: string) {
   const date = new Date(value);
@@ -91,12 +103,22 @@ export default function JobsPage() {
         <div className={styles.jobsCharacters}>
           {(data?.characters ?? []).map((character) => (
             <div className={styles.jobsCharacter} key={character.characterId}>
-              <strong>{character.characterName}</strong>
+              <div className={styles.jobsCharacterIdentity}>
+                <Image
+                  src={eveCharacterPortraitUrl(character.characterId, 64)}
+                  alt=""
+                  width={32}
+                  height={32}
+                />
+                <strong>{character.characterName}</strong>
+              </div>
               <div className={styles.jobsSlotGrid}>
                 {slotTypes.map((type) => (
                   <span key={type}>
                     <small>{type}</small>
-                    <b>{character.slots[type] ?? 0}</b>
+                    <b>
+                      {character.slots[type] ?? 0} / {character.availableSlots[type] ?? 0}
+                    </b>
                   </span>
                 ))}
               </div>
@@ -121,11 +143,13 @@ export default function JobsPage() {
                   typeId={job.productTypeId ?? job.blueprintTypeId}
                   imageSize={38}
                   className={styles.jobTypeIdentity}
+                  variation={isScienceJob(job.activity) ? (job.usesBpo ? "bp" : "bpc") : "icon"}
                 />
                 <small>
                   {job.activity} · {job.characterName}
                   {job.ownerType === "corporation" ? " · CORPORATION" : ""}
                 </small>
+                {job.usesBpo && <span className={styles.jobBpoFlag}>From BPO</span>}
                 <small>{job.outputLocationName}</small>
               </div>
               <span>
@@ -133,8 +157,15 @@ export default function JobsPage() {
                 <small>runs</small>
               </span>
               <span>
-                <b>{job.outputQuantity.toLocaleString()}</b>
-                <small>output</small>
+                <b>
+                  {job.outputQuantity.toLocaleString()}
+                  {job.activity === "Copying" ? " BPCs" : ""}
+                </b>
+                <small>
+                  {job.activity === "Copying" && job.outputRunsPerCopy !== undefined
+                    ? `${job.outputRunsPerCopy.toLocaleString()} runs each`
+                    : "output"}
+                </small>
               </span>
               <span>
                 <b>{formatRemaining(job.endDate)}</b>

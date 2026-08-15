@@ -1,6 +1,5 @@
 import {
   emptyStructureRigs,
-  mergeStructureRigs,
   normalizeStructureRigs,
   structureRigsKey,
   structureRigsName,
@@ -29,15 +28,15 @@ function cacheStructureRigs(payload: StructureRigsPayload) {
   catch {}
 }
 
-/** Reads the collection rig map and reconciles it with the local cache. */
+/** Reads the collection rig map, using localStorage only when the server is unavailable. */
 export async function fetchStructureRigs(): Promise<StructureRigsPayload> {
   const cached = loadCachedStructureRigs();
   try {
     const response = await fetch("/api/structures", { credentials: "same-origin" });
     if (!response.ok) return cached;
-    const merged = mergeStructureRigs(cached, normalizeStructureRigs(await response.json()));
-    cacheStructureRigs(merged);
-    return merged;
+    const serverPayload = normalizeStructureRigs(await response.json());
+    cacheStructureRigs(serverPayload);
+    return serverPayload;
   }
   catch {
     return cached;

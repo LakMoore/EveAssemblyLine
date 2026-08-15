@@ -12,6 +12,7 @@ type TypeIdentityProps = {
   typeId: number;
   imageSize?: number;
   variation?: "icon" | "render" | "bp" | "bpc";
+  blueprintType?: "bpo" | "bpc";
   className?: string;
 };
 
@@ -21,11 +22,13 @@ export default function TypeIdentity({
   typeId,
   imageSize = 32,
   variation = "icon",
+  blueprintType,
   className,
 }: TypeIdentityProps) {
   const { showToast } = useToast();
   const [useIconFallback, setUseIconFallback] = useState(false);
-  const activeVariation = useIconFallback ? "icon" : variation;
+  const blueprintVariation = blueprintType === "bpo" ? "bp" : "bpc";
+  const activeVariation = useIconFallback ? "icon" : blueprintType ? blueprintVariation : variation;
 
   async function copyValue(value: string, label: string) {
     try {
