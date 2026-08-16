@@ -2,11 +2,11 @@
 
 ## Project context
 
-AssemblyLine is a Next.js App Router application for planning large EVE Online manufacturing projects. The authoritative product and architecture plan is [FullPlan.md](../../FullPlan.md). The application supports EVE SSO, multiple attached characters, server-side ESI calls, static SDE data, Firestore persistence, inventory-aware planning, and six plan output lists.
+AssemblyLine is a Next.js App Router application for planning large EVE Online manufacturing projects. The authoritative product and architecture plan is [CurrentPlan.md](../CurrentPlan.md). The application supports EVE SSO, multiple attached characters, server-side ESI calls, static SDE data, Firestore persistence, inventory-aware planning, and six plan output lists.
 
 The repository root is the application root and contains `package.json`. Run project commands from this directory unless a task explicitly requires a different working directory.
 
-The repository is currently an early prototype, not a completed implementation of FullPlan.md:
+The repository is currently an early prototype, not a completed implementation of CurrentPlan.md:
 
 - `src/app/page.tsx` is a client-side prototype with hard-coded characters, locations, and sample build items.
 - `src/lib/planning/planEngine.ts` uses two hard-coded recipes and does not yet use SDE or cached assets.
@@ -18,10 +18,10 @@ Do not present prototype data as live EVE data. When replacing a mock path, keep
 
 ## Working rules
 
-- Create well commented code.
+- Create well commented and easily readable code.
 - Now the SDE is in place don't use hard-coded recipes or fallback values in production paths. Group IDs or Type IDs may be used when dealing with the large Dogma dataset in the SDE, but do not hard-code values or lists for build recipes, materials, or products.
 - Prioritise readability of the main function over local convenience. Nested helper functions are acceptable only when they are very small and obvious; otherwise, extract them so the caller reads linearly from top to bottom. Treat closures as a useful tool, not the default, and prefer explicit parameters if that makes the code easier to follow.
-- Read the nearby implementation and relevant section of `FullPlan.md` before editing. Keep changes focused on the owning module.
+- Read the nearby implementation and relevant section of `CurrentPlan.md` before editing. Keep changes focused on the owning module.
 - Preserve existing user changes and avoid unrelated refactors.
 - Keep methods short, with low complexity and a single responsibility.
 - Name methods and variables clearly, using descriptive names that convey their purpose and intent.
@@ -124,7 +124,7 @@ Keep each step independently testable. Avoid broad UI rewrites while server cont
 - Do not expose internal token records. Map them to public character/session DTOs.
 - Keep `/api/plan` fast and side-effect free. Refresh belongs in `/api/state/refresh`.
 - Include timestamps and cache status in plan/state metadata so stale data is visible to users.
-- Preserve the six-list response names in `FullPlan.md` unless a deliberate, documented contract change is required.
+- Preserve the six-list response names in `CurrentPlan.md` unless a deliberate, documented contract change is required.
 
 ## Validation commands
 
@@ -141,7 +141,7 @@ Run the narrowest relevant test or check first after an edit, then run the broad
 
 ## Local development notes
 
-- The root contains the Next.js App Router project (`package.json`, `src/`, `scripts/`, `sde/`, `data/`, and `node_modules/`). Repository-level planning documents such as `FullPlan.md` and `CachingPlan.md` are one directory above the application root.
+- The root contains the Next.js App Router project (`package.json`, `src/`, `scripts/`, `sde/`, `data/`, and `node_modules/`) and repository-level planning documents such as `CurrentPlan.md`.
 - `src/lib/storage.ts` uses Firebase Admin Firestore and stores one document per logical key in the `assemblyLineStorage` collection. Firebase App Hosting may use Application Default Credentials; local development can use `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, and `FIREBASE_PRIVATE_KEY`. Keep all service-account values server-only and never log tokens.
 - Firestore is the durable store, not the full SDE cache. Keep processed SDE data in build/runtime inputs and process memory. Upstash Redis is not the production SDE cache because its observed latency was too high for that workload.
 - For one-off TypeScript probes, use `tsx -e` from the application root. Because the project uses CommonJS output, put asynchronous code in an async IIFE rather than using top-level `await`:
