@@ -24,6 +24,9 @@ function toClientRefreshResult(result: Awaited<ReturnType<typeof refreshCharacte
             corporations: character.corporations.map((corporation) => ({
               corporationId: corporation.corporationId,
               ...(corporation.assets ? { assets: toClientEndpointStatus(corporation.assets) } : {}),
+              ...(corporation.structures
+                ? { structures: toClientEndpointStatus(corporation.structures) }
+                : {}),
             })),
           }
         : {}),

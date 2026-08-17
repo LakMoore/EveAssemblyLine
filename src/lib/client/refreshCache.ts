@@ -12,11 +12,11 @@ export type ClientEndpointRecord<T = unknown> = {
 
 export const refreshDependentEndpoints = {
   planner: ["state/stock"],
-  compress: ["state/stock", "compress/options"],
+  compress: ["state/stock", "state/status", "facilities", "compress/options"],
   stock: ["state/stock"],
   jobs: ["state/jobs"],
   ships: ["state/ships"],
-  locations: ["state/stock"],
+  locations: ["state/stock", "facilities"],
   characters: ["state/status", "characters", "auth/corp/status", "state/stock"],
   settings: [],
   imagechecker: [],

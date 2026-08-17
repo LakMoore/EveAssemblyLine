@@ -98,9 +98,15 @@ function securityMultiplier(
   structureTypeId: number,
   securityStatus: number | undefined,
   rig: number,
+  reprocessingRigTypeIdOverride?: number,
 ) {
-  if (structureTypeId === 0 || securityStatus === undefined || rig === 0) return 1;
-  const rigDogma = reprocessingRigTypeId(maps, structureTypeId, rig);
+  if (
+    structureTypeId === 0
+    || securityStatus === undefined
+    || (rig === 0 && reprocessingRigTypeIdOverride === undefined)
+  ) return 1;
+  const rigDogma =
+    reprocessingRigTypeIdOverride ?? reprocessingRigTypeId(maps, structureTypeId, rig);
   const record = rigDogma === undefined ? undefined : maps.typeDogma.get(rigDogma);
   const securityClass = securityStatus >= 0.5 ? "high" : securityStatus > 0 ? "low" : "null";
   return dogmaValue(record, securityModifierAttributes[securityClass]) ?? 1;
@@ -113,8 +119,19 @@ export function calculateReprocessingEfficiency(
   implantLevel: number,
   securityStatus?: number,
   reprocessingRig = 0,
+  reprocessingRigTypeIdOverride?: number,
 ): ReprocessingEfficiency {
-  const rigModifier = reprocessingRigModifier(maps, structureTypeId, reprocessingRig);
+  const rigRecord =
+    reprocessingRigTypeIdOverride === undefined
+      ? undefined
+      : maps.typeDogma.get(reprocessingRigTypeIdOverride);
+  const rigModifier =
+    reprocessingRigTypeIdOverride === undefined
+      ? reprocessingRigModifier(maps, structureTypeId, reprocessingRig)
+      : (
+          dogmaValue(rigRecord, refiningYieldMutatorAttribute)
+          ?? (dogmaValue(rigRecord, refiningYieldMultiplierAttribute) ?? 0.5) * 100 - 50
+        );
   const normalBase =
     maps.dogmaAttributes.get(attributeId(maps, "refiningYieldNormalOres") ?? -1)?.defaultValue ?? 0;
   const moonBase =
@@ -137,7 +154,13 @@ export function calculateReprocessingEfficiency(
       .map((record) => dogmaValue(record, implantMutatorId))
       .find((value) => value === implantLevel) ?? 0;
   const multiplier =
-    securityMultiplier(maps, structureTypeId, securityStatus, reprocessingRig)
+    securityMultiplier(
+      maps,
+      structureTypeId,
+      securityStatus,
+      reprocessingRig,
+      reprocessingRigTypeIdOverride,
+    )
     * structureMultiplier(maps, structureTypeId)
     * skillMultiplier(
       maps,

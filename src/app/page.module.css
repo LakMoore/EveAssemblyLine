@@ -3190,6 +3190,98 @@
   background: #09171d;
 }
 
+.constructionGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 58px 150px;
+  margin-top: 22px;
+  border-top: 1px solid #1e3740;
+}
+
+.constructionGridHeader,
+.constructionGridRow {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  column-gap: 12px;
+}
+
+.constructionGridHeader {
+  padding: 12px 0 8px;
+  color: #76949e;
+  font:
+    9px "DM Mono",
+    monospace;
+  letter-spacing: 1px;
+}
+
+.constructionGridRow {
+  min-height: 48px;
+  border-top: 1px solid #1e3740;
+  color: var(--ink);
+  font:
+    10px "DM Mono",
+    monospace;
+  letter-spacing: 0.6px;
+}
+
+.constructionGridRowDisabled {
+  color: #58717a;
+  background: #08141a;
+}
+
+.constructionGridRowDisabled .constructionTaxField {
+  opacity: 0.58;
+}
+
+.constructionGridRow .stockSwitch {
+  justify-self: start;
+}
+
+.constructionTaxField {
+  position: relative;
+  min-width: 0;
+}
+
+.constructionTaxInput {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 8px 28px 8px 10px;
+  border: 1px solid #2b4b57;
+  outline: 0;
+  color: var(--ink);
+  background: #09171d;
+  text-align: right;
+  font:
+    12px "DM Mono",
+    monospace;
+}
+
+.constructionTaxField > span {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  color: #76949e;
+  font:
+    11px "DM Mono",
+    monospace;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.constructionTaxInput:focus {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 1px #5ed8ef33;
+}
+
+.constructionTaxInput:disabled {
+  border-color: #203941;
+  color: #58717a;
+  background: #071117;
+  cursor: not-allowed;
+}
+
 .rule {
   border-top: 1px solid #1e3740;
   margin-top: 22px;
@@ -3241,6 +3333,135 @@
   margin-top: 24px;
   font-size: 12px;
   box-shadow: 0 0 18px #42c7b433;
+}
+
+.planOptions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.planOptions label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 9px 11px 10px;
+  border: 1px solid #294852;
+  background: #0a1a21;
+}
+
+.planOptions label > span {
+  color: var(--muted);
+  font:
+    9px "DM Mono",
+    monospace;
+  letter-spacing: 1px;
+}
+
+.planOptions select {
+  min-width: 0;
+  width: 100%;
+  height: 27px;
+  padding: 0 24px 0 0;
+  overflow: hidden;
+  border: 0;
+  outline: 0;
+  color: var(--ink);
+  background: transparent;
+  color-scheme: dark;
+  font:
+    11px "DM Mono",
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planOptions select:focus {
+  color: var(--cyan);
+}
+
+.checkboxOption {
+  display: grid !important;
+  align-self: end;
+  gap: 6px !important;
+  min-width: 0;
+  min-height: 68px;
+}
+
+.checkboxOption > span {
+  color: inherit;
+}
+
+.stockSwitch {
+  position: relative;
+  justify-self: start;
+  width: 36px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid #3d6670;
+  border-radius: 999px;
+  background: #08151b;
+  color: var(--ink);
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.stockSwitch:hover {
+  border-color: var(--cyan);
+}
+
+.stockSwitch:disabled {
+  border-color: #29434b;
+  background: #0b1a20;
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.stockSwitch:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.stockSwitch[aria-checked="true"] {
+  border-color: var(--action);
+  background: var(--action);
+  box-shadow: 0 0 12px #42c7b433;
+}
+
+.stockSwitchThumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #9fb9bf;
+  transition:
+    background 0.16s ease,
+    transform 0.16s ease;
+}
+
+.stockSwitch[aria-checked="true"] .stockSwitchThumb {
+  background: #f2ffff;
+  transform: translateX(16px);
+}
+
+@media (max-width: 640px) {
+  .planOptions {
+    grid-template-columns: 1fr;
+  }
+
+  .checkboxOption {
+    align-self: auto;
+    min-height: 48px;
+  }
 }
 
 .calculate b {
@@ -3331,6 +3552,22 @@
   border: 1px solid #2b5260;
   background: transparent;
   color: var(--cyan);
+}
+
+.compressionBadge {
+  color: var(--lime);
+  font:
+    9px "DM Mono",
+    monospace;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+}
+
+.buildItemIdentity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
 }
 
 @media (max-width: 640px) {

@@ -1,9 +1,12 @@
 import {
   getBlueprintsByInventionProductId,
   getBuildBlueprintByProductTypeId,
+  getCompressibleTypes,
+  getTypeMaterials,
 } from "@/cache/services/sdeCache";
 import { getTypes } from "@/lib/sde/loader";
 import { PlannerRequest, PlanResult, PlanSourceCounts, PlanSourceIcon } from "./types";
+import { reprocessCompressedStock, specialReprocessableTypeIds } from "./reprocessStock";
 
 type Material = PlanResult["lists"]["materialsToBuy"][number];
 type Efficiency = { me: number; te: number };
@@ -88,6 +91,61 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     return fallback;
   }
   const language = request.language ?? "en";
+  const [typeRecords, compressibleTypes, typeMaterials] = await Promise.all([
+    profiler.measure("typeNameBatch", () => getTypes()),
+    getCompressibleTypes(),
+    getTypeMaterials(),
+  ]);
+  const marketOrderStock = request.stock
+    .filter((item) => item.category === "item" && item.source === "marketOrder")
+    .reduce(
+      (map, item) => map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity),
+      new Map<number, number>(),
+    );
+  const standardStock = request.stock
+    .filter((item) => item.category !== "blueprint" && item.category !== "reactionformula")
+    .filter((item) => item.source !== "marketOrder")
+    .reduce(
+      (map, item) => map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity),
+      new Map<number, number>(),
+    );
+  const reprocessingStock = new Map(standardStock);
+  for (const [typeId, quantity] of marketOrderStock) {
+    reprocessingStock.set(typeId, (reprocessingStock.get(typeId) ?? 0) + quantity);
+  }
+  const compressedTypeIds = new Set([
+    ...compressibleTypes.values(),
+    ...specialReprocessableTypeIds,
+  ]);
+  const requiredCompressedQuantities = request.items.reduce(
+    (quantities, item) => {
+      if (compressedTypeIds.has(item.typeId)) {
+        quantities.set(item.typeId, (quantities.get(item.typeId) ?? 0) + item.quantity);
+      }
+      return quantities;
+    },
+    new Map<number, number>(),
+  );
+  const reprocessed = reprocessCompressedStock(
+    reprocessingStock,
+    requiredCompressedQuantities,
+    compressibleTypes,
+    typeMaterials,
+    typeRecords,
+  );
+  standardStock.clear();
+  for (const [typeId, quantity] of reprocessed.stock) standardStock.set(typeId, quantity);
+  for (const [typeId, quantity] of marketOrderStock) {
+    const consumed = reprocessed.consumedCompressed.get(typeId) ?? 0;
+    const remainingMarketQuantity = quantity - consumed;
+    const standardQuantity = standardStock.get(typeId) ?? 0;
+    const remainingStandardQuantity = standardQuantity - remainingMarketQuantity;
+    if (remainingStandardQuantity > 0) standardStock.set(typeId, remainingStandardQuantity);
+    else standardStock.delete(typeId);
+    if (remainingMarketQuantity > 0) marketOrderStock.set(typeId, remainingMarketQuantity);
+    else marketOrderStock.delete(typeId);
+  }
+
   const materials = new Map<number, Material>();
   const bpcs = new Map<number, PlanResult["lists"]["bpcsNeeded"][number]>();
   const reactionFormulas = new Map<number, PlanResult["lists"]["planItems"][number]>();
@@ -140,29 +198,13 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       counts: Object.fromEntries(counts) as PlanSourceCounts,
     };
   }
-  const standardStock = request.stock
-    .filter((item) => item.category === "item")
-    .filter((item) => item.source !== "marketOrder")
-    .reduce(
-      (map, item) => map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity),
-      new Map<number, number>(),
-    );
-  const marketOrderStock = request.stock
-    .filter((item) => item.category === "item" && item.source === "marketOrder")
-    .reduce(
-      (map, item) => map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity),
-      new Map<number, number>(),
-    );
   const totalStock = new Map(standardStock);
   const initialBuildTypeIds = new Set(request.items.map((item) => item.typeId));
   for (const [typeId, quantity] of marketOrderStock) {
     if (!initialBuildTypeIds.has(typeId)) continue;
     totalStock.set(typeId, (totalStock.get(typeId) ?? 0) + quantity);
   }
-  const allBlueprintStockItems = request.stock
-    .filter(
-      (item) => item.category === "blueprint",
-    );
+  const allBlueprintStockItems = request.stock.filter((item) => item.category === "blueprint");
   const blueprintCopyStock = new Map<number, { copies: number; runs: number }>();
   const seenBlueprintPrints = new Set<number>();
   const blueprintOriginalCounts = new Map<number, number>();
@@ -171,10 +213,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     const prints = bpStockItem.blueprintPrints ?? [];
     const bpoCount = prints.filter((print) => print.type === "bpo").length;
     if (bpoCount > 0) {
-      blueprintOriginalCounts.set(
-        bpStockItem.typeId,
-        bpoCount,
-      );
+      blueprintOriginalCounts.set(bpStockItem.typeId, bpoCount);
     }
     const uniquePrints = prints.filter((print) => {
       if (seenBlueprintPrints.has(print.itemId)) return false;
@@ -194,7 +233,9 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     );
   }
   const reactionFormulaCounts = new Map<number, number>();
-  const availableReactionFormulas = request.stock.filter((item) => item.category === "reactionformula");
+  const availableReactionFormulas = request.stock.filter(
+    (item) => item.category === "reactionformula",
+  );
   for (const item of availableReactionFormulas) {
     reactionFormulaCounts.set(
       item.typeId,
@@ -598,7 +639,6 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     material.remainingProductionQuantity = producedParts.get(material.typeId) ?? 0;
   }
 
-  const typeRecords = await profiler.measure("typeNameBatch", () => getTypes());
   const resolvedName = (typeId: number) => {
     const name = typeRecords.get(typeId)?.name;
     return name?.[language] ?? name?.en ?? fallbackByTypeId.get(typeId) ?? `Type ${typeId}`;

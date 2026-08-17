@@ -6,6 +6,8 @@ import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 const rigSizeAttribute = 1547;
 const materialBonusAttribute = 2594;
 const timeBonusAttribute = 2593;
+const refineryMaterialBonusAttribute = 2714;
+const refineryTimeBonusAttribute = 2713;
 const costBonusAttribute = 2595;
 const reprocessingYieldAttribute = 379;
 const refiningYieldMultiplierAttribute = 717;
@@ -36,6 +38,8 @@ export async function GET(request: Request) {
         rigSizeAttribute,
         materialBonusAttribute,
         timeBonusAttribute,
+        refineryMaterialBonusAttribute,
+        refineryTimeBonusAttribute,
         costBonusAttribute,
         reprocessingYieldAttribute,
         refiningYieldMultiplierAttribute,
@@ -58,12 +62,17 @@ export async function GET(request: Request) {
         );
         const size = sizeByValue[attributes.get(rigSizeAttribute) as keyof typeof sizeByValue];
         const type = typeById.get(dogma._key);
+        const isRefineryRig =
+          attributes.has(refineryMaterialBonusAttribute)
+          || attributes.has(refineryTimeBonusAttribute);
         if (
           !type?.published
           || type.groupID === outpostRigGroupId
           || ![
             materialBonusAttribute,
             timeBonusAttribute,
+            refineryMaterialBonusAttribute,
+            refineryTimeBonusAttribute,
             costBonusAttribute,
             reprocessingYieldAttribute,
             refiningYieldMultiplierAttribute,
@@ -75,14 +84,22 @@ export async function GET(request: Request) {
             name: type.name,
             size,
             bonuses: {
-              material: attributes.get(materialBonusAttribute) ?? 0,
-              time: attributes.get(timeBonusAttribute) ?? 0,
+              material:
+                attributes.get(materialBonusAttribute)
+                ?? attributes.get(refineryMaterialBonusAttribute)
+                ?? 0,
+              time:
+                attributes.get(timeBonusAttribute)
+                ?? attributes.get(refineryTimeBonusAttribute)
+                ?? 0,
               cost: attributes.get(costBonusAttribute) ?? 0,
             },
             reprocessingBonus:
               attributes.get(reprocessingYieldAttribute)
               ?? (attributes.get(refiningYieldMultiplierAttribute) ?? 0.5) * 100 - 50,
-            securityMultipliers: securityMultiplierAttributes.map((id) => attributes.get(id) ?? 1),
+            securityMultipliers: securityMultiplierAttributes.map(
+              (id, index) => attributes.get(id) ?? (isRefineryRig && index === 0 ? 0 : 1),
+            ),
           },
         ];
       });

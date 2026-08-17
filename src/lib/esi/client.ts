@@ -14,10 +14,27 @@ import { getCharacter, saveCharacterTokens } from "@/lib/auth/tokensStore";
 
 const esiBaseUrl = process.env.ESI_BASE_URL ?? "https://esi.evetech.net/latest";
 const refreshLocks = new Map<string, Promise<TokenSet>>();
-const tokenContexts = new WeakMap<
-  TokenSet,
-  { characterId: number; purpose: "personal" | "corp" }
->();
+type CorporationStructureCache = Map<
+  number,
+  { expiresAt: number; structures: EsiCorporationStructure[] }
+>;
+type CorporationStructureRuntime = {
+  requests: Map<number, Promise<EsiCorporationStructure[]>>;
+  cache: CorporationStructureCache;
+};
+const runtime = globalThis as typeof globalThis & {
+  __assemblyLineCorporationStructures?: CorporationStructureRuntime;
+};
+const corporationStructureRuntime =
+  runtime.__assemblyLineCorporationStructures
+  ?? (runtime.__assemblyLineCorporationStructures = {
+    requests: new Map(),
+    cache: new Map(),
+  });
+const corporationStructureRequests = corporationStructureRuntime.requests;
+const corporationStructureCache = corporationStructureRuntime.cache;
+const corporationStructureCacheTtlMs = 5 * 60 * 1000;
+const tokenContexts = new WeakMap<TokenSet, { characterId: number }>();
 const structureMetadataCache = new Map<
   string,
   { expiresAt: number; response: LocationMetadataResponse }
@@ -134,11 +151,11 @@ type LocationMetadataResponse = {
   fromCache: boolean;
 };
 
-async function getUsableToken(record: CharacterTokenRecord, purpose: "personal" | "corp") {
+async function getUsableToken(record: CharacterTokenRecord) {
   const tokenSet = record.personalAuth;
-  tokenContexts.set(tokenSet, { characterId: record.characterId, purpose });
+  tokenContexts.set(tokenSet, { characterId: record.characterId });
   if (Date.parse(tokenSet.accessTokenExpiresAt) > Date.now() + 5 * 60 * 1000) return tokenSet;
-  const lockKey = `${record.characterId}:${purpose}`;
+  const lockKey = `${record.characterId}`;
   const existing = refreshLocks.get(lockKey);
   if (existing) return existing;
   const refresh = Promise.resolve()
@@ -146,7 +163,7 @@ async function getUsableToken(record: CharacterTokenRecord, purpose: "personal" 
       const current = await getCharacter(record.characterId);
       const currentTokenSet = current?.personalAuth ?? tokenSet;
       if (Date.parse(currentTokenSet.accessTokenExpiresAt) > Date.now() + 5 * 60 * 1000) {
-        tokenContexts.set(currentTokenSet, { characterId: record.characterId, purpose });
+        tokenContexts.set(currentTokenSet, { characterId: record.characterId });
         return currentTokenSet;
       }
       const updated = await refreshTokenSet(currentTokenSet);
@@ -155,7 +172,7 @@ async function getUsableToken(record: CharacterTokenRecord, purpose: "personal" 
         currentTokenSet.accessToken,
         updated,
       );
-      tokenContexts.set(stored, { characterId: record.characterId, purpose });
+      tokenContexts.set(stored, { characterId: record.characterId });
       return stored;
     })
     .finally(() => refreshLocks.delete(lockKey));
@@ -163,12 +180,8 @@ async function getUsableToken(record: CharacterTokenRecord, purpose: "personal" 
   return refresh;
 }
 
-async function refreshTokenAfterAuthorizationFailure(
-  characterId: number,
-  tokenSet: TokenSet,
-  purpose: "personal" | "corp",
-) {
-  const lockKey = `${characterId}:${purpose}`;
+async function refreshTokenAfterAuthorizationFailure(characterId: number, tokenSet: TokenSet) {
+  const lockKey = `${characterId}`;
   const existing = refreshLocks.get(lockKey);
   if (existing) return existing;
   const refresh = Promise.resolve()
@@ -179,7 +192,7 @@ async function refreshTokenAfterAuthorizationFailure(
       if (currentTokenSet.accessToken !== tokenSet.accessToken) return currentTokenSet;
       const updated = await refreshTokenSet(currentTokenSet);
       const stored = await saveCharacterTokens(characterId, currentTokenSet.accessToken, updated);
-      tokenContexts.set(stored, { characterId, purpose });
+      tokenContexts.set(stored, { characterId });
       return stored;
     })
     .finally(() => refreshLocks.delete(lockKey));
@@ -259,7 +272,6 @@ export async function requestCachedEsi<T>(
           const refreshedTokenSet = await refreshTokenAfterAuthorizationFailure(
             context.characterId,
             tokenSet,
-            context.purpose,
           );
           return requestCachedEsi<T>(
             path,
@@ -430,7 +442,7 @@ export async function fetchCharacterBlueprints(
   etag?: string,
   bypassCache = false,
 ) {
-  const token = await getUsableToken(record, "personal");
+  const token = await getUsableToken(record);
   const result = await fetchPages<EsiBlueprint>(
     `/characters/${record.characterId}/blueprints/`,
     token,
@@ -456,7 +468,7 @@ export async function fetchCorporationBlueprints(
   if (!record.corporationId || !record.hasDirectorRole) {
     throw new Error("Corporation authorization is incomplete");
   }
-  const token = await getUsableToken(record, "corp");
+  const token = await getUsableToken(record);
   const result = await fetchPages<EsiBlueprint>(
     `/corporations/${record.corporationId}/blueprints/`,
     token,
@@ -496,7 +508,7 @@ export async function fetchCharacterAssets(
   etag?: string,
   bypassCache = false,
 ) {
-  const token = await getUsableToken(record, "personal");
+  const token = await getUsableToken(record);
   const result = await fetchPages<EsiAsset>(
     `/characters/${record.characterId}/assets/`,
     token,
@@ -520,7 +532,7 @@ export async function fetchCorporationAssets(
   if (!record.corporationId || !record.hasDirectorRole) {
     throw new Error("Corporation authorization is incomplete");
   }
-  const token = await getUsableToken(record, "corp");
+  const token = await getUsableToken(record);
   const result = await fetchPages<EsiAsset>(
     `/corporations/${record.corporationId}/assets/`,
     token,
@@ -572,7 +584,7 @@ export async function fetchCharacterIndustryJobs(
   etag?: string,
   bypassCache = false,
 ) {
-  const token = await getUsableToken(record, "personal");
+  const token = await getUsableToken(record);
   const result = await requestEsiConditional<EsiIndustryJob[]>(
     `/characters/${record.characterId}/industry/jobs/`,
     token,
@@ -593,7 +605,7 @@ export async function fetchCharacterIndustryJobs(
 }
 
 export async function fetchCharacterSkills(record: CharacterTokenRecord) {
-  const token = await getUsableToken(record, "personal");
+  const token = await getUsableToken(record);
   const result = await requestCachedEsi<{ skills?: EsiCharacterSkill[] }>(
     `/characters/${record.characterId}/skills/`,
     token,
@@ -619,7 +631,7 @@ export async function fetchCorporationIndustryJobs(
   if (!record.corporationId || !record.hasDirectorRole) {
     throw new Error("Corporation authorization is incomplete");
   }
-  const token = await getUsableToken(record, "corp");
+  const token = await getUsableToken(record);
   const result = await requestEsiConditional<EsiIndustryJob[]>(
     `/corporations/${record.corporationId}/industry/jobs/`,
     token,
@@ -663,7 +675,7 @@ export async function fetchCharacterMarketOrders(
   etag?: string,
   bypassCache = false,
 ) {
-  const token = await getUsableToken(record, "personal");
+  const token = await getUsableToken(record);
   const result = await fetchPages<EsiMarketOrder>(
     `/characters/${record.characterId}/orders`,
     token,
@@ -688,7 +700,7 @@ export async function fetchCorporationMarketOrders(
   if (!record.corporationId || !record.hasDirectorRole) {
     throw new Error("Corporation authorization is incomplete");
   }
-  const token = await getUsableToken(record, "corp");
+  const token = await getUsableToken(record);
   const result = await fetchPages<EsiMarketOrder>(
     `/corporations/${record.corporationId}/orders`,
     token,
@@ -710,12 +722,42 @@ export async function fetchCorporationStructures(record: CharacterTokenRecord) {
   if (!record.corporationId || (!record.hasStationManagerRole && !record.hasDirectorRole)) {
     throw new Error("Corporation structure authorization is incomplete");
   }
-  const token = await getUsableToken(record, "corp");
-  const result = await requestCachedEsi<EsiCorporationStructure[]>(
-    `/corporations/${record.corporationId}/structures/`,
-    token,
-  );
-  return result.data ?? [];
+  const corporationId = record.corporationId;
+  const cached = corporationStructureCache.get(corporationId);
+  if (cached && cached.expiresAt > Date.now()) return cached.structures;
+  corporationStructureCache.delete(corporationId);
+  const existingRequest = corporationStructureRequests.get(corporationId);
+  if (existingRequest) return existingRequest;
+  const request = Promise.resolve()
+    .then(async () => {
+      const path = `/corporations/${corporationId}/structures/`;
+      const cachedResponse = await getCachedEsiResponse<EsiCorporationStructure[]>(path);
+      if (cachedResponse) {
+        const structures = cachedResponse.data ?? [];
+        corporationStructureCache.set(
+          corporationId,
+          {
+            expiresAt: Date.now() + corporationStructureCacheTtlMs,
+            structures,
+          },
+        );
+        return structures;
+      }
+      const token = await getUsableToken(record);
+      const result = await requestCachedEsi<EsiCorporationStructure[]>(path, token);
+      const structures = result.data ?? [];
+      corporationStructureCache.set(
+        corporationId,
+        {
+          expiresAt: Date.now() + corporationStructureCacheTtlMs,
+          structures,
+        },
+      );
+      return structures;
+    })
+    .finally(() => corporationStructureRequests.delete(corporationId));
+  corporationStructureRequests.set(corporationId, request);
+  return request;
 }
 
 export async function fetchAssetLocations(
@@ -804,6 +846,15 @@ export function fetchStationMetadata(stationId: number, token?: TokenSet) {
 
 export function fetchSolarSystemMetadata(solarSystemId: number, token?: TokenSet) {
   return fetchPublicLocationMetadata(`/universe/systems/${solarSystemId}/`, token);
+}
+
+export function fetchIndustrySystems() {
+  return requestCachedEsi<
+    Array<{
+      solar_system_id: number;
+      cost_indices?: Array<{ activity: string; cost_index: number }>;
+    }>
+  >("/industry/systems/");
 }
 
 /**

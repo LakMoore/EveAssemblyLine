@@ -123,6 +123,7 @@ function missingScopes(statuses: CharacterStatus[]) {
           ...(character.corporations ?? []).flatMap((corporation) => [
             corporation.assets?.error,
             corporation.blueprints?.error,
+            corporation.structures?.error,
             corporation.jobs?.error,
             corporation.orders?.error,
           ]),
@@ -339,6 +340,7 @@ export default function CharactersPage() {
       ...(status.corporations ?? []).flatMap((corporation) => [
         corporation.assets,
         corporation.blueprints,
+        corporation.structures,
         corporation.jobs,
         corporation.orders,
       ]),
@@ -419,6 +421,7 @@ export default function CharactersPage() {
                 ...(status?.corporations ?? []).flatMap((corporation) => [
                   corporation.assets,
                   corporation.blueprints,
+                  corporation.structures,
                   corporation.jobs,
                   corporation.orders,
                 ]),
@@ -827,29 +830,34 @@ export default function CharactersPage() {
                     <span className={styles.endpointHeaders}>
                       <small>ASSETS</small>
                       <small>BLUEPRINTS</small>
+                      <small>STRUCTURES</small>
                       <small>JOBS</small>
                       <small>ORDERS</small>
                     </span>
-                    {(["assets", "blueprints", "jobs", "orders"] as const).map((endpoint) => {
-                      const endpointStatus = corporationStatus?.[endpoint];
-                      return (
-                        <span className={styles.endpointStatus} key={endpoint}>
-                          <small className={styles.endpointName}>{endpoint.toUpperCase()}</small>
-                          <span className={`${styles.statusDot} ${statusClass(endpointStatus)}`} />
-                          <small className={styles.endpointState}>
-                            {statusLabel(endpointStatus, corporation.eligible.length === 0)}
-                          </small>
-                          <small className={styles.endpointAvailability}>
-                            <span className={styles.availabilityWide}>
-                              {availabilityLabel(endpointStatus)}
-                            </span>
-                            <span className={styles.availabilityNarrow}>
-                              {availabilityLabel(endpointStatus).replace(/^Available /, "")}
-                            </span>
-                          </small>
-                        </span>
-                      );
-                    })}
+                    {(["assets", "blueprints", "structures", "jobs", "orders"] as const).map(
+                      (endpoint) => {
+                        const endpointStatus = corporationStatus?.[endpoint];
+                        return (
+                          <span className={styles.endpointStatus} key={endpoint}>
+                            <small className={styles.endpointName}>{endpoint.toUpperCase()}</small>
+                            <span
+                              className={`${styles.statusDot} ${statusClass(endpointStatus)}`}
+                            />
+                            <small className={styles.endpointState}>
+                              {statusLabel(endpointStatus, corporation.eligible.length === 0)}
+                            </small>
+                            <small className={styles.endpointAvailability}>
+                              <span className={styles.availabilityWide}>
+                                {availabilityLabel(endpointStatus)}
+                              </span>
+                              <span className={styles.availabilityNarrow}>
+                                {availabilityLabel(endpointStatus).replace(/^Available /, "")}
+                              </span>
+                            </small>
+                          </span>
+                        );
+                      },
+                    )}
                   </span>
                 </div>
               );
@@ -913,23 +921,27 @@ export default function CharactersPage() {
                   </small>
                 </div>
                 <div className={styles.characterModalStatuses}>
-                  {(["assets", "blueprints", "jobs", "orders"] as const).map((endpoint) => {
-                    const endpointStatus = corporationStatus?.[endpoint];
-                    return (
-                      <div className={styles.characterModalStatus} key={endpoint}>
-                        <small>{endpoint.toUpperCase()}</small>
-                        <span>
-                          <span className={`${styles.statusDot} ${statusClass(endpointStatus)}`} />
-                          {statusLabel(endpointStatus, corporation.eligible.length === 0)}
-                        </span>
-                        <small>{availabilityLabel(endpointStatus)}</small>
-                        {endpointStatus?.lastModified && (
-                          <small>Modified {formatDate(endpointStatus.lastModified)}</small>
-                        )}
-                        {endpointStatus?.error && <small>{endpointStatus.error}</small>}
-                      </div>
-                    );
-                  })}
+                  {(["assets", "blueprints", "structures", "jobs", "orders"] as const).map(
+                    (endpoint) => {
+                      const endpointStatus = corporationStatus?.[endpoint];
+                      return (
+                        <div className={styles.characterModalStatus} key={endpoint}>
+                          <small>{endpoint.toUpperCase()}</small>
+                          <span>
+                            <span
+                              className={`${styles.statusDot} ${statusClass(endpointStatus)}`}
+                            />
+                            {statusLabel(endpointStatus, corporation.eligible.length === 0)}
+                          </span>
+                          <small>{availabilityLabel(endpointStatus)}</small>
+                          {endpointStatus?.lastModified && (
+                            <small>Modified {formatDate(endpointStatus.lastModified)}</small>
+                          )}
+                          {endpointStatus?.error && <small>{endpointStatus.error}</small>}
+                        </div>
+                      );
+                    },
+                  )}
                 </div>
                 <div className={styles.characterModalRoles}>
                   <p className={styles.panelKicker}>CONNECTED PILOTS AND ROLES</p>

@@ -17,7 +17,7 @@ function isBuildItem(value: unknown): value is ClientBuildItem {
 
 export async function loadBuildList(): Promise<ClientBuildItem[]> {
   const database = await getPlanningDatabase();
-    return new Promise<ClientBuildItem[]>((resolve, reject) => {
+  return new Promise<ClientBuildItem[]>((resolve, reject) => {
     const request = database
       .transaction(buildStoreName, "readonly")
       .objectStore(buildStoreName)
@@ -31,6 +31,7 @@ export async function loadBuildList(): Promise<ClientBuildItem[]> {
                 ...item,
                 me: typeof item.me === "number" ? item.me : 0,
                 te: typeof item.te === "number" ? item.te : 0,
+                fromCompression: item.fromCompression === true,
               }))
           : [],
       );

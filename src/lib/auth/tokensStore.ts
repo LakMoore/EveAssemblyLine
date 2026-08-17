@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { initStorage } from "../storage";
 import {
-  mergeStructureRigs,
-  normalizeStructureRigs,
-  type StructureRigsPayload,
-} from "../planning/structureRigs";
+  mergeFacilitySettings,
+  normalizeFacilitySettings,
+  type FacilitySettingsPayload,
+} from "../planning/facilities";
 import {
   CharacterCollectionRecord,
   CharacterTokenRecord,
@@ -255,9 +255,9 @@ export async function mergeCollections(targetId: string, sourceId: string) {
     if (!target || !source) throw new Error("Collection not found");
     target.characterIds = [...new Set([...target.characterIds, ...source.characterIds])];
     target.lastSeenAt = new Date().toISOString();
-    target.structureRigs = mergeStructureRigs(
-      normalizeStructureRigs(target.structureRigs),
-      normalizeStructureRigs(source.structureRigs),
+    target.facilities = mergeFacilitySettings(
+      normalizeFacilitySettings(target.facilities),
+      normalizeFacilitySettings(source.facilities),
     );
     for (const character of characters) {
       if (character.collectionId === sourceId) character.collectionId = targetId;
@@ -287,17 +287,17 @@ export async function getCharacter(characterId: number) {
   return (await getCharacters()).find((record) => record.characterId === characterId) ?? null;
 }
 
-export async function getCollectionStructureRigs(
+export async function getCollectionFacilities(
   collectionId: string,
-): Promise<StructureRigsPayload> {
-  return normalizeStructureRigs((await getCollection(collectionId))?.structureRigs);
+): Promise<FacilitySettingsPayload> {
+  return normalizeFacilitySettings((await getCollection(collectionId))?.facilities);
 }
 
-/** Merges the supplied rig map into the collection, keeping whichever side reports the newer edit. */
-export async function saveCollectionStructureRigs(
+/** Merges facility settings into the collection, keeping the newer edit. */
+export async function saveCollectionFacilities(
   collectionId: string,
-  payload: StructureRigsPayload,
-): Promise<StructureRigsPayload> {
+  payload: FacilitySettingsPayload,
+): Promise<FacilitySettingsPayload> {
   const derived = await getCollection(collectionId);
   const storage = await initStorage();
   return storage.runTransaction(async (transaction) => {
@@ -310,11 +310,11 @@ export async function saveCollectionStructureRigs(
       collection = { ...derived };
       collections.push(collection);
     }
-    const merged = mergeStructureRigs(
-      normalizeStructureRigs(collection.structureRigs),
-      normalizeStructureRigs(payload),
+    const merged = mergeFacilitySettings(
+      normalizeFacilitySettings(collection.facilities),
+      normalizeFacilitySettings(payload),
     );
-    collection.structureRigs = merged;
+    collection.facilities = merged;
     transaction.setItem("collections", collections);
     return merged;
   });

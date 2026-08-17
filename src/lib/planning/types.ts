@@ -6,6 +6,7 @@ export interface PlanBuildItem {
   quantity: number;
   me: number;
   te: number;
+  fromCompression: boolean;
 }
 
 // shape of the build item used on the server

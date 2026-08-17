@@ -17,6 +17,13 @@ import type {
   PlanStockItem,
 } from "@/lib/planning/types";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+const noStoreResponseInit: ResponseInit = {
+  headers: { "Cache-Control": "no-store" },
+};
+
 function validLocation(value: { locationId: number; rootLocationId: number }) {
   return Number.isInteger(value.locationId) && Number.isInteger(value.rootLocationId);
 }
@@ -75,6 +82,7 @@ async function calculateWorkingStockPlan(input: PlanRequest, stock: PlanStockIte
   ]);
   const buildItems: BuildItem[] = input.toBuild.map((item) => ({
     ...item,
+    fromCompression: item.fromCompression === true,
     name:
       types.get(item.typeId)?.name[input.language ?? "en"]
       ?? types.get(item.typeId)?.name.en
@@ -98,7 +106,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Add at least one build item." }, { status: 400 });
     }
     if (Array.isArray(input.stock)) {
-      return NextResponse.json(await calculateWorkingStockPlan(input, input.stock));
+      return NextResponse.json(
+        await calculateWorkingStockPlan(input, input.stock),
+        noStoreResponseInit,
+      );
     }
     const assets = input.assets;
     if (
@@ -143,6 +154,7 @@ export async function POST(request: Request) {
     const types = await getTypesByIds([...new Set(typeIds)]);
     const buildItems: BuildItem[] = input.toBuild.map((item) => ({
       ...item,
+      fromCompression: item.fromCompression === true,
       name:
         types.get(item.typeId)?.name[input.language ?? "en"]
         ?? types.get(item.typeId)?.name.en
@@ -205,11 +217,14 @@ export async function POST(request: Request) {
               { ...job, typeId: product.typeId, quantity: product.quantity },
               {
                 category: "blueprint",
-                blueprintPrints: Array.from({ length: job.runs }, (_, index) => ({
-                  itemId: -(job.jobId * 1_000_000 + index + 1),
-                  runs: product.runs ?? 1,
-                  type: "bpc" as const,
-                })),
+                blueprintPrints: Array.from(
+                  { length: job.runs },
+                  (_, index) => ({
+                    itemId: -(job.jobId * 1_000_000 + index + 1),
+                    runs: product.runs ?? 1,
+                    type: "bpc" as const,
+                  }),
+                ),
                 inBuild: true,
                 inBuildQuantity: product.quantity,
                 jobId: job.jobId,
@@ -264,7 +279,7 @@ export async function POST(request: Request) {
       settings: input.settings,
     });
     result.metadata.unresolvedAssetCount = 0;
-    return NextResponse.json(result);
+    return NextResponse.json(result, noStoreResponseInit);
   }
   catch {
     return NextResponse.json({ error: "The plan request was not valid JSON." }, { status: 400 });

@@ -1,0 +1,146 @@
+import {
+  emptyFacilitySettings,
+  facilitySettingsKey,
+  facilitySettingsName,
+  normalizeFacilitySettings,
+  supportsReactionSettings,
+  type FacilityResponse,
+  type FacilitySettingsPayload,
+} from "./facilities";
+import type { KnownStructure } from "./preferences";
+
+const localStorageKey = "assembly-line-facilities";
+
+export function loadCachedFacilities(): FacilitySettingsPayload {
+  if (typeof window === "undefined") return emptyFacilitySettings;
+  try {
+    const stored = window.localStorage.getItem(localStorageKey);
+    return stored ? normalizeFacilitySettings(JSON.parse(stored)) : emptyFacilitySettings;
+  }
+  catch {
+    return emptyFacilitySettings;
+  }
+}
+
+function cacheFacilities(payload: FacilitySettingsPayload) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(localStorageKey, JSON.stringify(payload));
+  }
+  catch {}
+}
+
+export async function fetchFacilities(): Promise<FacilitySettingsPayload> {
+  const cached = loadCachedFacilities();
+  try {
+    const response = await fetch("/api/facilities", { credentials: "same-origin" });
+    if (!response.ok) return cached;
+    const serverResponse = (await response.json()) as FacilityResponse | FacilitySettingsPayload;
+    const serverPayload = normalizeFacilitySettings(
+      "settings" in serverResponse ? serverResponse.settings : serverResponse,
+    );
+    cacheFacilities(serverPayload);
+    return serverPayload;
+  }
+  catch {
+    return cached;
+  }
+}
+
+export async function fetchFacilityResponse(): Promise<FacilityResponse | null> {
+  try {
+    const response = await fetch("/api/facilities", { credentials: "same-origin" });
+    if (!response.ok) return null;
+    return (await response.json()) as FacilityResponse;
+  }
+  catch {
+    return null;
+  }
+}
+
+export function facilitySettingsFromStructures(
+  structures: KnownStructure[],
+): FacilitySettingsPayload {
+  const payload: FacilitySettingsPayload = {
+    lastModified: new Date().toISOString(),
+    facilities: {},
+  };
+  for (const structure of structures) {
+    const rigTypeIds = structure.rigTypeIds ?? [];
+    if (!structure.systemId || rigTypeIds.length === 0) continue;
+    const name = facilitySettingsName(structure.systemName, structure.name);
+    const reactionsAllowed = supportsReactionSettings(structure.typeId, structure.securityStatus);
+    payload.facilities[facilitySettingsKey(structure.systemId, name)] = {
+      locationId: structure.esiStructureId,
+      systemId: structure.systemId,
+      name,
+      typeId: structure.typeId,
+      rigTypeIds,
+      allowStandardBuilds: structure.allowStandardBuilds !== false,
+      allowReactionBuilds: reactionsAllowed && structure.allowReactionBuilds !== false,
+      allowBiochemicalReactions:
+        reactionsAllowed
+        && (structure.allowBiochemicalReactions ?? structure.allowReactionBuilds !== false),
+      allowCompositeReactions:
+        reactionsAllowed
+        && (structure.allowCompositeReactions ?? structure.allowReactionBuilds !== false),
+      allowHybridReactions:
+        reactionsAllowed
+        && (structure.allowHybridReactions ?? structure.allowReactionBuilds !== false),
+      allowInvention: structure.allowInvention !== false,
+      allowResearch: structure.allowResearch !== false,
+      ...(structure.allowCapitalBuilds === undefined
+        ? {}
+        : { allowCapitalBuilds: structure.allowCapitalBuilds }),
+      ...(structure.standardTaxRate === undefined
+        ? {}
+        : { standardTaxRate: structure.standardTaxRate }),
+      ...(structure.capitalTaxRate === undefined
+        ? {}
+        : { capitalTaxRate: structure.capitalTaxRate }),
+      reactionTaxRate: reactionsAllowed ? (structure.reactionTaxRate ?? 0) : 0,
+      biochemicalTaxRate: reactionsAllowed
+        ? (structure.biochemicalTaxRate ?? structure.reactionTaxRate ?? 0)
+        : 0,
+      compositeTaxRate: reactionsAllowed
+        ? (structure.compositeTaxRate ?? structure.reactionTaxRate ?? 0)
+        : 0,
+      hybridTaxRate: reactionsAllowed
+        ? (structure.hybridTaxRate ?? structure.reactionTaxRate ?? 0)
+        : 0,
+      inventionTaxRate: structure.inventionTaxRate ?? 0,
+      researchTaxRate: structure.researchTaxRate ?? 0,
+      ...(structure.settingsLastModified === undefined
+        ? {}
+        : { settingsLastModified: structure.settingsLastModified }),
+    };
+  }
+  return payload;
+}
+
+export async function publishFacilities(
+  payload: FacilitySettingsPayload,
+): Promise<FacilitySettingsPayload> {
+  cacheFacilities(payload);
+  try {
+    const response = await fetch(
+      "/api/facilities",
+      {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+    if (!response.ok) return payload;
+    const responseBody = (await response.json()) as FacilityResponse | FacilitySettingsPayload;
+    const merged = normalizeFacilitySettings(
+      "settings" in responseBody ? responseBody.settings : responseBody,
+    );
+    cacheFacilities(merged);
+    return merged;
+  }
+  catch {
+    return payload;
+  }
+}

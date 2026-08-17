@@ -35,10 +35,22 @@ test("compresses exact Tritanium into one compressed Veldspar", () => {
     candidates,
     names,
   );
-  assert.deepEqual(result.toBuy, [{ typeId: 62516, name: "Compressed Veldspar", quantity: 100 }]);
+  assert.deepEqual(
+    result.toBuy,
+    [{ typeId: 62516, name: "Compressed Veldspar", quantity: 100, ignored: false }],
+  );
   assert.deepEqual(
     result.plan,
-    [{ typeId: 34, name: "Tritanium", quantity: 400, fromReprocessing: 400, surplus: 0 }],
+    [
+      {
+        typeId: 34,
+        name: "Tritanium",
+        quantity: 400,
+        ignored: false,
+        fromReprocessing: 400,
+        surplus: 0,
+      },
+    ],
   );
   assert.deepEqual(result.surplus, []);
 });
@@ -52,7 +64,10 @@ test("selects exact mixed-ore quantities for Tritanium and Pyerite", () => {
     candidates,
     names,
   );
-  assert.deepEqual(result.toBuy, [{ typeId: 62520, name: "Compressed Scordite", quantity: 100 }]);
+  assert.deepEqual(
+    result.toBuy,
+    [{ typeId: 62520, name: "Compressed Scordite", quantity: 100, ignored: false }],
+  );
   assert.deepEqual(result.surplus, []);
 });
 
@@ -70,7 +85,7 @@ test("excludes batch-compressed ore", () => {
     ],
     names,
   );
-  assert.deepEqual(result.toBuy, [{ typeId: 34, name: "Tritanium", quantity: 420 }]);
+  assert.deepEqual(result.toBuy, [{ typeId: 34, name: "Tritanium", quantity: 420, ignored: true }]);
 });
 
 test("keeps minerals without a matching recipe in the buy list", () => {
@@ -79,7 +94,7 @@ test("keeps minerals without a matching recipe in the buy list", () => {
     candidates.slice(0, 1),
     names,
   );
-  assert.deepEqual(result.toBuy, [{ typeId: 35, name: "Pyerite", quantity: 1 }]);
+  assert.deepEqual(result.toBuy, [{ typeId: 35, name: "Pyerite", quantity: 1, ignored: true }]);
 });
 
 test("keeps fractional gas output instead of discarding compressed gas", () => {
@@ -98,11 +113,20 @@ test("keeps fractional gas output instead of discarding compressed gas", () => {
   );
   assert.deepEqual(
     result.toBuy,
-    [{ typeId: 62377, name: "Compressed Amber Mykoserocin", quantity: 2 }],
+    [{ typeId: 62377, name: "Compressed Amber Mykoserocin", quantity: 2, ignored: false }],
   );
   assert.deepEqual(
     result.plan,
-    [{ typeId: 28694, name: "Amber Mykoserocin", quantity: 1, fromReprocessing: 1, surplus: 0 }],
+    [
+      {
+        typeId: 28694,
+        name: "Amber Mykoserocin",
+        quantity: 1,
+        ignored: false,
+        fromReprocessing: 1,
+        surplus: 0,
+      },
+    ],
   );
 });
 
@@ -121,7 +145,7 @@ test("does not exceed a candidate's market volume limit", () => {
     ],
     names,
   );
-  assert.deepEqual(result.toBuy, [{ typeId: 34, name: "Tritanium", quantity: 800 }]);
+  assert.deepEqual(result.toBuy, [{ typeId: 34, name: "Tritanium", quantity: 800, ignored: true }]);
 });
 
 test("excludes candidates with zero market volume", () => {
@@ -139,5 +163,5 @@ test("excludes candidates with zero market volume", () => {
     ],
     names,
   );
-  assert.deepEqual(result.toBuy, [{ typeId: 34, name: "Tritanium", quantity: 400 }]);
+  assert.deepEqual(result.toBuy, [{ typeId: 34, name: "Tritanium", quantity: 400, ignored: true }]);
 });

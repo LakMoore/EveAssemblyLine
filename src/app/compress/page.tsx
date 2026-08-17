@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, KeyboardEvent, Suspense, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAppLanguage } from "../AppShell";
 import TypeIdentity from "../components/TypeIdentity";
@@ -10,7 +10,6 @@ import type { SdeLanguage } from "@/lib/reference/languages";
 import { Clipboard, Copy, Minimize2, Upload, X } from "lucide-react";
 import Image from "next/image";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
-import { loadStructures } from "@/lib/planning/structureStore";
 import {
   loadCompressSettings,
   saveCompressSettings,
@@ -18,10 +17,10 @@ import {
   type CompressSettings,
 } from "@/lib/planning/compressSettingsStore";
 import type { KnownStructure } from "@/lib/planning/preferences";
-import { loadClientStock } from "@/lib/client/requestCache";
+import { loadClientStateStatus } from "@/lib/client/requestCache";
+import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
 import { loadEndpointRecord, saveEndpointResponse } from "@/lib/client/refreshCache";
-import { structureRigsKey, structureRigsName } from "@/lib/planning/structureRigs";
-import { fetchStructureRigs } from "@/lib/planning/structureRigsStore";
+import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
 import styles from "./compress.module.css";
 import { marketHubs } from "@/lib/reference/marketHubs";
 
@@ -32,6 +31,7 @@ type ResultItem = {
   name: string;
   typeId?: number;
   quantity: number;
+  ignored: boolean;
   packagedVolume?: number;
   fromReprocessing?: number;
   surplus?: number;
@@ -70,7 +70,7 @@ type CharacterOption = {
   id: string;
   characterId: number;
   name: string;
-  skills: Record<string, number>;
+  skills?: Record<string, number>;
   implants: number[];
 };
 type ImplantOption = { id: string; name: string; level: number; typeId?: number };
@@ -164,27 +164,13 @@ function CompressContent() {
     const isRefreshLoad = optionsRefreshVersion > 0;
     Promise
       .all([
-        loadStructures(),
         loadCompressSettings(),
-        loadClientStock(language),
-        fetchStructureRigs(),
+        fetchFacilityResponse(),
+        loadClientStateStatus(),
         loadEndpointRecord<CompressOptions>("compress/options"),
       ])
-      .then(async ([loadedStructures, loadedSettings, stock, structureRigs, cachedOptions]) => {
-        const structures = loadedStructures.map((structure) => {
-          const sharedRigKey = structureRigsKey(
-            structure.systemId,
-            structureRigsName(structure.systemName, structure.name),
-          );
-          const sharedEntry = Object.hasOwn(structureRigs.structures, sharedRigKey)
-            ? structureRigs.structures[sharedRigKey]
-            : undefined;
-          if (!sharedEntry) return structure;
-          return {
-            ...structure,
-            rigTypeIds: sharedEntry.rigTypeIds,
-          };
-        });
+      .then(async ([loadedSettings, facilityResponse, stateStatus, cachedOptions]) => {
+        const loadedFacilities = facilityResponse?.facilities ?? [];
         if (!isRefreshLoad && !cachedOptions) {
           setStatus("Refresh data to load compression options.");
           return;
@@ -199,32 +185,6 @@ function CompressContent() {
               cache: "no-store",
               body: JSON.stringify({
                 language,
-                structures: structures
-                  .filter(
-                    (structure) =>
-                      structure.typeId !== undefined
-                      && structure.rigTypeIds !== undefined
-                      && Number.isSafeInteger(structure.systemId)
-                      && structure.systemId > 0,
-                  )
-                  .map((structure) => ({
-                    id:
-                      structure.esiStructureId === undefined
-                        ? structure.id
-                        : `structure:${structure.esiStructureId}`,
-                    type: structure.typeId,
-                    systemId: structure.systemId,
-                    rigs: structure.rigTypeIds,
-                  })),
-                assetLocations: (stock.locations ?? [])
-                  .filter((location) => location.locationType !== "anchored")
-                  .map(({ locationId, name, locationType, typeId, systemId }) => ({
-                    locationId,
-                    name,
-                    locationType,
-                    ...(typeId === undefined ? {} : { typeId }),
-                    ...(systemId === undefined ? {} : { systemId }),
-                  })),
               }),
             },
           );
@@ -233,36 +193,16 @@ function CompressContent() {
           await saveEndpointResponse("compress/options", "/api/compress/options", loadedOptions);
         }
         if (!loadedOptions) throw new Error("Could not load compression options.");
-        const structuresWithSecurity = structures.map((structure) => {
-          const suppliedSecurityStatus = loadedOptions.locations.find(
-            (location) => location.id === structure.id,
-          )?.securityStatus;
-          if (suppliedSecurityStatus !== undefined) {
-            return { ...structure, securityStatus: suppliedSecurityStatus };
-          }
-          return structure;
-        });
         const rawLocations: CompressOption[] = [
-          ...loadedOptions.locations.map((location) => {
-            const known = structuresWithSecurity.find(
-              (structure) =>
-                location.id === `structure:${structure.esiStructureId}`
-                || location.id === structure.id
-                || (
-                  location.name !== undefined
-                  && normalizeLocationName(location.name).toLocaleLowerCase()
-                    === structureDisplayName(structure).toLocaleLowerCase()
-                ),
-            );
-            return {
-              ...location,
-              ...(known
-                ? { name: structureDisplayName(known), rigs: known.rigs }
-                : location.name
-                  ? { name: normalizeLocationName(location.name) }
-                  : {}),
-            };
-          }),
+          ...loadedFacilities.map((facility) => ({
+            id: String(facility.id),
+            name: facility.name,
+            structureTypeId: facility.typeId,
+            securityStatus: facility.securityStatus,
+            rigs: facility.rigTypeIds.map((typeId) => String(typeId)),
+            baseYield: (facility.activities.reprocessing.baseYield ?? 0) * 100,
+            canReprocess: facility.activities.reprocessing.available,
+          })),
         ].filter(
           (location, index, all) =>
             all.findIndex((candidate) => locationKey(candidate) === locationKey(location))
@@ -288,7 +228,16 @@ function CompressContent() {
             ? loadedSettings.marketId
             : "jita",
         };
-        setOptions({ ...loadedOptions, locations: loadedLocations });
+        const characters = loadedOptions.characters.map((character) => ({
+          ...character,
+          skills: Object.fromEntries(
+            (
+              stateStatus.characters?.find((status) => status.characterId === character.characterId)
+                ?.skills?.body ?? []
+            ).map((skill) => [String(skill.skillId), skill.activeSkillLevel]),
+          ),
+        }));
+        setOptions({ ...loadedOptions, characters, locations: loadedLocations });
         setSettings(normalizedSettings);
         setItems(normalizedSettings.items);
         void saveCompressSettings(normalizedSettings);
@@ -757,7 +706,9 @@ function TypeSearch({
 }
 
 function Results({ result }: { result: CompressResult }) {
+  const router = useRouter();
   const { showToast } = useToast();
+  const [isAddingToPlan, setIsAddingToPlan] = useState(false);
   const tabs = [
     { key: "efficiency", label: "Efficiency", note: "Reprocessing efficiencies used by the solve" },
     { key: "plan", label: "Plan", note: "Required materials and recovered quantities" },
@@ -788,6 +739,39 @@ function Results({ result }: { result: CompressResult }) {
     }
     catch {
       showToast("Could not copy To Buy multibuy list");
+    }
+  }
+  async function addToPlan() {
+    if (isAddingToPlan) return;
+    setIsAddingToPlan(true);
+    try {
+      const additions = items.filter(
+        (item): item is ResultItem & { typeId: number } =>
+          item.typeId !== undefined && !item.ignored,
+      );
+      const existing = await loadBuildList();
+      const next = [...existing];
+      for (const item of additions) {
+        const match = next.find((entry) => entry.typeId === item.typeId && entry.fromCompression);
+        if (match) match.quantity += item.quantity;
+        else {
+          next.push({
+            name: item.name,
+            categoryName: "Unknown",
+            typeId: item.typeId,
+            quantity: item.quantity,
+            me: 0,
+            te: 0,
+            fromCompression: true,
+          });
+        }
+      }
+      await saveBuildList(next);
+      router.push("/");
+    }
+    catch {
+      setIsAddingToPlan(false);
+      showToast("Could not add compression items to the build plan");
     }
   }
   return (
@@ -829,6 +813,17 @@ function Results({ result }: { result: CompressResult }) {
                 Copy multibuy
               </button>
             )}
+            {active.key === "toBuy" && items.some((item) => !item.ignored) && (
+              <button
+                type="button"
+                className={`actionButton ${styles.secondaryButton}`}
+                onClick={() => void addToPlan()}
+                disabled={isAddingToPlan}
+              >
+                <Upload aria-hidden="true" />
+                Add to Plan
+              </button>
+            )}
             <strong>{itemCount}</strong>
           </div>
         </div>
@@ -860,6 +855,7 @@ function Results({ result }: { result: CompressResult }) {
                     ) : (
                       item.name
                     )}
+                    {item.ignored && <small className={styles.ignoredBadge}>ignored</small>}
                   </span>
                   <strong data-label="Required">{item.quantity.toLocaleString()}</strong>
                   {active.key === "plan" && (

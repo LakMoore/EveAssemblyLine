@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
 import { getCharacters } from "@/lib/auth/tokensStore";
+import { getCachedCorporationStructures } from "@/lib/esi/cache";
 import {
   getDogmaAttributes,
   getGroups,
@@ -9,12 +10,7 @@ import {
   getTypeDogma,
   getTypes,
 } from "@/cache/services/sdeCache";
-import {
-  fetchCorporationStructures,
-  fetchStationMetadata,
-  getUsableToken,
-  requestCachedEsi,
-} from "@/lib/esi/client";
+import { fetchStationMetadata, getUsableToken, requestCachedEsi } from "@/lib/esi/client";
 import { calculateReprocessingEfficiency } from "@/lib/planning/reprocessingEfficiency";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 
@@ -32,6 +28,8 @@ type OptionsRequest = {
   assetLocations?: AssetLocation[];
   stationIds?: number[];
 };
+
+let relevantSkillIdsPromise: Promise<number[]> | undefined;
 
 function getEsiStructureId(locationId: string) {
   if (!locationId.startsWith("structure:")) return undefined;
@@ -160,26 +158,10 @@ async function getOptions(
     ? (await getCharacters()).filter((record) => characterIds.includes(record.characterId))
     : [];
   markPhase("session");
-  const structureAuthorizationScope = "esi-corporations.read_structures.v1";
-  const authorizedStructureRecords = records
-    .filter(
-      (record) =>
-        record.corporationId !== undefined
-        && (record.hasStationManagerRole || record.hasDirectorRole)
-        && record.personalAuth.scopes.includes(structureAuthorizationScope),
-    )
-    .filter(
-      (record, index, authorizedRecords) =>
-        authorizedRecords.findIndex((candidate) => candidate.corporationId === record.corporationId)
-        === index,
-    );
-  const corporationStructures = (
-    await Promise.all(
-      authorizedStructureRecords.map((record) =>
-        fetchCorporationStructures(record).catch(() => []),
-      ),
-    )
-  ).flat();
+  const corporationStructures = await getCachedCorporationStructures(
+    characterIds,
+    session?.sessionId,
+  );
   const structuresById = new Map(
     corporationStructures.map((structure) => [structure.structure_id, structure]),
   );
@@ -198,12 +180,7 @@ async function getOptions(
   markPhase("structures");
   const characters = await Promise.all(
     records.map(async (record) => {
-      const token = await getUsableToken(record, "personal").catch(() => null);
-      const skills = token
-        ? await requestCachedEsi<{
-            skills?: Array<{ skill_id: number; active_skill_level: number }>;
-          }>(`/characters/${record.characterId}/skills/`, token).catch(() => ({ data: null }))
-        : { data: null };
+      const token = await getUsableToken(record).catch(() => null);
       const clones = token
         ? await requestCachedEsi<{
             active_clone_id?: number;
@@ -214,9 +191,6 @@ async function getOptions(
         id: `character:${record.characterId}`,
         characterId: record.characterId,
         name: record.characterName,
-        skills: Object.fromEntries(
-          (skills.data?.skills ?? []).map((skill) => [skill.skill_id, skill.active_skill_level]),
-        ),
         implants: [
           ...new Set(
             (clones.data?.clones ?? []).find(
@@ -247,43 +221,65 @@ async function getOptions(
       name: types.get(typeId)?.name[language] ?? types.get(typeId)?.name.en ?? `Implant ${typeId}`,
       level: 0,
     }));
-  const skillAttributeId = [...dogmaAttributes.values()].find(
-    (attribute) => attribute.name === "reprocessingSkillType",
-  )?._key;
-  const processingSkillIds = [
-    "Reprocessing",
-    "Reprocessing Efficiency",
-    "Gas Decompression Efficiency",
-    "Scrapmetal Processing",
-  ]
-    .map((name) => [...types.values()].find((type) => type.name.en === name)?._key)
-    .filter((id): id is number => id !== undefined);
-  const scrapMetalSkillId = [...types.values()].find(
-    (type) => type.name.en === "Scrapmetal Processing",
-  )?._key;
-  const relevantSkillIds = [
-    ...new Set([
-      ...[...typeDogma.values()].flatMap((record) =>
-        record.dogmaAttributes
-          .filter((attribute) => attribute.attributeID === skillAttributeId)
-          .map((attribute) => attribute.value),
-      ),
-      ...processingSkillIds,
-      ...(scrapMetalSkillId === undefined ? [] : [scrapMetalSkillId]),
-    ]),
-  ];
+  if (!relevantSkillIdsPromise) {
+    relevantSkillIdsPromise = Promise.resolve().then(() => {
+      const skillAttributeId = [...dogmaAttributes.values()].find(
+        (attribute) => attribute.name === "reprocessingSkillType",
+      )?._key;
+      const processingSkillIds = [
+        "Reprocessing",
+        "Reprocessing Efficiency",
+        "Gas Decompression Efficiency",
+        "Scrapmetal Processing",
+      ]
+        .map((name) => [...types.values()].find((type) => type.name.en === name)?._key)
+        .filter((id): id is number => id !== undefined);
+      const scrapMetalSkillId = [...types.values()].find(
+        (type) => type.name.en === "Scrapmetal Processing",
+      )?._key;
+      return [
+        ...new Set([
+          ...[...typeDogma.values()].flatMap((record) =>
+            record.dogmaAttributes
+              .filter((attribute) => attribute.attributeID === skillAttributeId)
+              .map((attribute) => attribute.value),
+          ),
+          ...processingSkillIds,
+          ...(scrapMetalSkillId === undefined ? [] : [scrapMetalSkillId]),
+        ]),
+      ];
+    });
+  }
+  const relevantSkillIds = await relevantSkillIdsPromise;
   const locationRecords = [...npcLocations, ...resolvedStructures];
   const baseYieldMaps = { types, groups: await getGroups(), typeDogma, dogmaAttributes };
   const locations = locationRecords.map((location) => {
     const { structureTypeId, ...locationData } = location;
+    const locationId = Number(location.id.split(":")[1]);
     return {
       ...locationData,
       structureTypeId,
+      ...(Number.isSafeInteger(locationId) ? { locationId } : {}),
       baseYield:
         "canReprocess" in location && location.canReprocess === false
           ? 0
           : structureTypeId === 0
             ? 50
+            : calculateReprocessingEfficiency(
+                baseYieldMaps,
+                structureTypeId,
+                {},
+                0,
+                location.securityStatus,
+                "reprocessingRig" in location && typeof location.reprocessingRig === "number"
+                  ? location.reprocessingRig
+                  : 0,
+              ).normalOre,
+      baseReactionMe:
+        "canReprocess" in location && location.canReprocess === false
+          ? 0
+          : structureTypeId === 0
+            ? 0
             : calculateReprocessingEfficiency(
                 baseYieldMaps,
                 structureTypeId,
@@ -310,13 +306,11 @@ async function getOptions(
       assetLocations: assetLocations.length,
       structures: structureLocations.length,
       corporationStructures: corporationStructures.length,
-      authorizedStructureCharacters: authorizedStructureRecords.length,
       characters: records.length,
       suppliedStructures: suppliedStructures.length,
     },
   );
   const response = NextResponse.json({
-    locations,
     characters,
     relevantSkillIds,
     implants: [{ id: "none", name: "No implant", level: 0 }, ...implantNames, ...cloneImplants],

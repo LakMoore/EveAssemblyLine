@@ -112,7 +112,9 @@ export type ClientCharacter = {
 export type ClientCharacterStatus = {
   characterId: number;
   assets?: ClientEndpointStatus;
-  skills?: ClientEndpointStatus;
+  skills?: ClientEndpointStatus & {
+    body?: Array<{ skillId: number; activeSkillLevel: number }> | null;
+  };
   blueprints?: ClientEndpointStatus;
   jobs?: ClientEndpointStatus;
   orders?: ClientEndpointStatus;
@@ -120,6 +122,7 @@ export type ClientCharacterStatus = {
     corporationId: number;
     assets?: ClientEndpointStatus;
     blueprints?: ClientEndpointStatus;
+    structures?: ClientEndpointStatus;
     jobs?: ClientEndpointStatus;
     orders?: ClientEndpointStatus;
   }>;

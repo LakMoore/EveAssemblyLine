@@ -15,6 +15,7 @@ export type CompressionResultItem = {
   typeId?: number;
   name: string;
   quantity: number;
+  ignored: boolean;
   packagedVolume?: number;
   fromReprocessing?: number;
   surplus?: number;
@@ -115,6 +116,7 @@ export function compressMaterials(
       typeId,
       name: requestNames.get(typeId) ?? names.get(typeId) ?? `Type ${typeId}`,
       quantity,
+      ignored: recoveredQuantity === 0,
       fromReprocessing: recoveredQuantity,
       surplus: Math.max(0, recoveredQuantity - quantity),
     };
@@ -126,6 +128,7 @@ export function compressMaterials(
       typeId,
       name: names.get(typeId) ?? candidate?.name ?? `Type ${typeId}`,
       quantity: quantity * (candidate?.unitsToReprocess ?? 1),
+      ignored: false,
     };
   });
   for (const [typeId, quantity] of remaining) {
@@ -134,6 +137,7 @@ export function compressMaterials(
         typeId,
         name: requestNames.get(typeId) ?? names.get(typeId) ?? `Type ${typeId}`,
         quantity,
+        ignored: true,
       });
     }
   }
@@ -144,6 +148,7 @@ export function compressMaterials(
       typeId,
       name: requestNames.get(typeId) ?? names.get(typeId) ?? `Type ${typeId}`,
       quantity: quantity - (required.get(typeId) ?? 0),
+      ignored: false,
     }));
   return { plan, toBuy, surplus };
 }

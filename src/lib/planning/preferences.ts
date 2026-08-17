@@ -18,6 +18,23 @@ export type KnownStructure = {
   rigs: string[];
   rigTypeIds?: number[];
   esiStructureId?: number;
+  allowStandardBuilds?: boolean;
+  allowCapitalBuilds?: boolean;
+  allowReactionBuilds?: boolean;
+  allowBiochemicalReactions?: boolean;
+  allowCompositeReactions?: boolean;
+  allowHybridReactions?: boolean;
+  allowInvention?: boolean;
+  allowResearch?: boolean;
+  standardTaxRate?: number;
+  capitalTaxRate?: number;
+  reactionTaxRate?: number;
+  biochemicalTaxRate?: number;
+  compositeTaxRate?: number;
+  hybridTaxRate?: number;
+  inventionTaxRate?: number;
+  researchTaxRate?: number;
+  settingsLastModified?: string;
 };
 
 export type PlannerSettings = {

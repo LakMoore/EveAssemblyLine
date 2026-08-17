@@ -8,6 +8,7 @@ import type {
   MarketOrderRecord,
   TokenSet,
 } from "@/lib/auth/model";
+import type { EsiCorporationStructure } from "./client";
 import type { PlanStockItem } from "@/lib/planning/types";
 import {
   getGroups,
@@ -29,6 +30,7 @@ import {
   fetchCharacterMarketOrders,
   fetchCharacterSkills,
   fetchCorporationMarketOrders,
+  fetchCorporationStructures,
   fetchSolarSystemMetadata,
   fetchStationMetadata,
   fetchStructureMetadataPerCharacter,
@@ -70,6 +72,7 @@ type OwnerCache = {
   jobs?: EndpointCache<IndustryJobRecord[]>;
   skills?: EndpointCache<CharacterSkillRecord[]>;
   marketOrders?: EndpointCache<MarketOrderRecord[]>;
+  structures?: EndpointCache<EsiCorporationStructure[]>;
   unresolvedAssetCount: number;
 };
 
@@ -692,6 +695,7 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
       corporationId: number;
       assets?: EndpointCache<AssetRecord[] | null>;
       blueprints?: EndpointCache<BlueprintInstanceRecord[] | null>;
+      structures?: EndpointCache<EsiCorporationStructure[] | null>;
     }>;
   }[] = [];
   for (const characterId of characterIds) {
@@ -947,9 +951,41 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
         corporationId: number;
         assets?: EndpointCache<AssetRecord[] | null>;
         blueprints?: EndpointCache<BlueprintInstanceRecord[] | null>;
+        structures?: EndpointCache<EsiCorporationStructure[] | null>;
         jobs?: EndpointCache<IndustryJobRecord[] | null>;
         marketOrders?: EndpointCache<MarketOrderRecord[] | null>;
       } = { corporationId: character.corporationId };
+      try {
+        if (
+          !corpCache.structures
+          || !corpCache.structures.nextRefreshAllowed
+          || Date.parse(corpCache.structures.nextRefreshAllowed) <= Date.now()
+        ) {
+          const structures = await fetchCorporationStructures(character);
+          corpCache.structures = setFresh(
+            structures,
+            undefined,
+            corpCache.structures,
+            5 * 60 * 1000,
+            false,
+            true,
+          );
+        }
+        else {
+          corpCache.structures.status = endpointDataStatus(
+            corpCache.structures.lastModified,
+            corpCache.structures.nextRefreshAllowed,
+          );
+        }
+        corpSummary.structures = corpCache.structures;
+      }
+      catch (error) {
+        corpCache.structures = {
+          ...(corpCache.structures ?? { lastBody: [] }),
+          ...endpointStatus(error),
+        };
+        corpSummary.structures = { ...corpCache.structures };
+      }
       try {
         if (
           corpCache.allAssetsRaw?.nextRefreshAllowed
@@ -1356,6 +1392,27 @@ export async function getRootLocationsByItemId(
   );
 }
 
+export async function getCachedCorporationStructures(
+  characterIds: number[],
+  sessionId = "default",
+) {
+  const characters = await getCharacters();
+  const corporationIds = new Set(
+    characters
+      .filter(
+        (character) =>
+          characterIds.includes(character.characterId)
+          && character.hasDirectorRole
+          && character.corporationId,
+      )
+      .map((character) => character.corporationId!),
+  );
+  return [...corporationIds].flatMap(
+    (corporationId) =>
+      getCache(corporationCaches, corporationId, sessionId).structures?.lastBody ?? [],
+  );
+}
+
 export async function getAssembledStructureRigAssets(
   characterIds: number[],
   includeCorporationAssets: boolean,
@@ -1594,9 +1651,14 @@ export async function getStateStatus(characterIds: number[], sessionId: string) 
         status: "cached" as const,
         hasBody: false,
       },
-      skills: toClientEndpointStatus(getCache(characterCaches, characterId, sessionId).skills) ?? {
-        status: "cached" as const,
-        hasBody: false,
+      skills: {
+        ...(
+          toClientEndpointStatus(getCache(characterCaches, characterId, sessionId).skills) ?? {
+            status: "cached" as const,
+            hasBody: false,
+          }
+        ),
+        body: getCache(characterCaches, characterId, sessionId).skills?.lastBody ?? null,
       },
       blueprints: toClientEndpointStatus(
         getCache(characterCaches, characterId, sessionId).blueprintInstances,
@@ -1636,6 +1698,12 @@ export async function getStateStatus(characterIds: number[], sessionId: string) 
         },
         orders: toClientEndpointStatus(
           getCache(corporationCaches, corporationId, sessionId).marketOrders,
+        ) ?? {
+          status: "cached" as const,
+          hasBody: false,
+        },
+        structures: toClientEndpointStatus(
+          getCache(corporationCaches, corporationId, sessionId).structures,
         ) ?? {
           status: "cached" as const,
           hasBody: false,

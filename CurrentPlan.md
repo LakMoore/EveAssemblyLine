@@ -9,8 +9,9 @@ Build a single-container web application as a 3rd party support tool for complet
   - EVE character token records.
   - Accounts, character collections, and sessions.
   - Pending SSO state and other small application records.
-- Uses a cache abstraction for SDE and ESI data. SDE entries are namespaced by SDE build; the default provider is in-memory.  An Upstash Redis provider was developed for shared deployements but was found not to be performant.
+- Uses a cache abstraction for SDE and ESI data. SDE entries are namespaced by SDE build; the default provider is in-memory. An Upstash Redis provider was developed for shared deployements but was found not to be performant.
 - Provides a **React/Next.js production-control UI** where users:
+
   - Attach multiple characters (including corp director characters).
   - Define a “build list” of items (typeId + quantity).
   - Choose locations (systems/stations/structures) for manufacturing, reactions, market.
@@ -20,20 +21,20 @@ Build a single-container web application as a 3rd party support tool for complet
 
 - Primary tool is a Planning Engine, which computes a plan that outputs results in lists, including:
 
-    1. Raw materials to buy
-    2. BPCs needed
-    3. Invention jobs to install
-    4. Reaction jobs to install
-    5. Manufacturing jobs to install
-    6. Hauling tasks needed
+  1. Raw materials to buy
+  2. BPCs needed
+  3. Invention jobs to install
+  4. Reaction jobs to install
+  5. Manufacturing jobs to install
+  6. Hauling tasks needed
 
 Performance constraint: `/plan` must respond in **< 3 seconds** for typical use.
 
-  - Additional tools to support the primary tool and industry actions in general:
-    - Additional material Compression calculator with associated settings.
-    - Invention success cost calculator and associated settings
-    - Asset list appraisal tool
-    - Ability to add ship fittings atomically to the build list and have their contents unpacked by the app ahead of being sent to the planning engine. (Ship fitting may need a results list of its own).
+- Additional tools to support the primary tool and industry actions in general:
+  - Additional material Compression calculator with associated settings.
+  - Invention success cost calculator and associated settings
+  - Asset list appraisal tool
+  - Ability to add ship fittings atomically to the build list and have their contents unpacked by the app ahead of being sent to the planning engine. (Ship fitting may need a results list of its own).
 
 ## Current implementation decisions
 
@@ -52,12 +53,12 @@ The original goals that remain deliberately future-facing include the hauling ou
 
 ## Future Direction
 
-- **Stock selection:** Full stock lists will always be fetched from server and cached locally, but in a future version the user will be able to select subsets of held stocks for submission to the planning engine.  Those subsets should be easily configured but may be per-character, corp (or non-corp) only, location restrictions, per-container inclusion and/or exclusion. Refresh will always provide all available stock to the client but the client will provide tools to filter what stock is sent to planning.
-- **Corporation "Type":** The nature of the game causes some corporations to be created specifically to house industry activities. In these "solo" corps, one player will retain Director roles on most or all of their characters and they have full access and ownership of all assets.  However, traditional corp structure is that our user will control a collection of characters that do not have Director roles but do have sufficient roles to view, access and control assets in a sub-set of corporation locations.  This project aims to (eventually) solve the problem of planning industry jobs within a Typical Corp setup where access is restricted by role.
-- **Hauling workflow:** In a future version, hauling will be derived automatically from resolved stock origins and target facilities, at the time of writing stock is sent to the planning engine without location data.  This contract shape will need to change and the engine will need to be location aware, preferring to draw stock that is already at the activity site and building a hauling plan noting the asset type, quantity, source and destination root locations when the stocks levels globally are sufficient but the stock levels at the activity site are not.
+- **Stock selection:** Full stock lists will always be fetched from server and cached locally, but in a future version the user will be able to select subsets of held stocks for submission to the planning engine. Those subsets should be easily configured but may be per-character, corp (or non-corp) only, location restrictions, per-container inclusion and/or exclusion. Refresh will always provide all available stock to the client but the client will provide tools to filter what stock is sent to planning.
+- **Corporation "Type":** The nature of the game causes some corporations to be created specifically to house industry activities. In these "solo" corps, one player will retain Director roles on most or all of their characters and they have full access and ownership of all assets. However, traditional corp structure is that our user will control a collection of characters that do not have Director roles but do have sufficient roles to view, access and control assets in a sub-set of corporation locations. This project aims to (eventually) solve the problem of planning industry jobs within a Typical Corp setup where access is restricted by role.
+- **Hauling workflow:** In a future version, hauling will be derived automatically from resolved stock origins and target facilities, at the time of writing stock is sent to the planning engine without location data. This contract shape will need to change and the engine will need to be location aware, preferring to draw stock that is already at the activity site and building a hauling plan noting the asset type, quantity, source and destination root locations when the stocks levels globally are sufficient but the stock levels at the activity site are not.
 - **Reference APIs:** Are unified blueprint, location, and settings-preset endpoints desired, or should the existing specialized systems/structures/rigs/settings workflows remain the permanent interface?
-- **Offline recovery:** Offline recovery of the plan results is not a priority goal, but a potential convenience feature.  The most recent plan response could be cached and reloaded.  However, the plan input is quickly/easily invalidated. So we would need to track that and display warnings when the currently visible plan is outdated.  While executing the plan remains fast, this is a low priority need.
-- **Completion Tracking:** The plan creates lists of things to buy and jobs to install, we should devise a simple system for the user to track what tasks have been completed and what remain.  The completion tracker data can be persisted while the stock inputs to the planner remain identical.  If the assets or jobs endpoint refreshes while the user is installing jobs that will create a new plan that *should* include the user's recent actions therefore taking into account some or all of actions taking.  Alternatively, we could track the plan's creation time and the industry job's installation time to determine how to adjust the user's manually entered completed count to keep the user on track.
+- **Offline recovery:** Offline recovery of the plan results is not a priority goal, but a potential convenience feature. The most recent plan response could be cached and reloaded. However, the plan input is quickly/easily invalidated. So we would need to track that and display warnings when the currently visible plan is outdated. While executing the plan remains fast, this is a low priority need.
+- **Completion Tracking:** The plan creates lists of things to buy and jobs to install, we should devise a simple system for the user to track what tasks have been completed and what remain. The completion tracker data can be persisted while the stock inputs to the planner remain identical. If the assets or jobs endpoint refreshes while the user is installing jobs that will create a new plan that _should_ include the user's recent actions therefore taking into account some or all of actions taking. Alternatively, we could track the plan's creation time and the industry job's installation time to determine how to adjust the user's manually entered completed count to keep the user on track.
 
 ---
 
@@ -228,22 +229,10 @@ async function jsonlToJson(inputPath: string, outputPath: string) {
 
 async function main() {
   await jsonlToJson("sde/raw/types.jsonl", "sde/processed/types.json");
-  await jsonlToJson(
-    "sde/raw/blueprints.jsonl",
-    "sde/processed/blueprints.json",
-  );
-  await jsonlToJson(
-    "sde/raw/typeMaterials.jsonl",
-    "sde/processed/typeMaterials.json",
-  );
-  await jsonlToJson(
-    "sde/raw/solarSystems.jsonl",
-    "sde/processed/solarSystems.json",
-  );
-  await jsonlToJson(
-    "sde/raw/npcStations.jsonl",
-    "sde/processed/npcStations.json",
-  );
+  await jsonlToJson("sde/raw/blueprints.jsonl", "sde/processed/blueprints.json");
+  await jsonlToJson("sde/raw/typeMaterials.jsonl", "sde/processed/typeMaterials.json");
+  await jsonlToJson("sde/raw/solarSystems.jsonl", "sde/processed/solarSystems.json");
+  await jsonlToJson("sde/raw/npcStations.jsonl", "sde/processed/npcStations.json");
 }
 
 main().catch((err) => {
@@ -910,14 +899,16 @@ Never create a hauling task with a guessed origin. If assets are unresolved, ret
 - If authenticated:
   - Consider whether local data is stale and call /refresh endpoint as necessary
 
-
 ### On Refresh
+
 - Look up the endpoints required by the currently active route and call them to refresh local caches with the latest data
 
 ### On Auth
+
 - After successfully adding or removing a character from the collection the client app should re-call '/refresh' and update local caches
 
 ### On Navigation
+
 - Check the timestamp of the endpoints required by the current route.
 - Refresh local data required for current route only if /refresh has returned more recently.
 
@@ -1011,7 +1002,7 @@ You mentioned offline would be a benefit but not mandatory. Given our design:
       - Last `/plan` result.
       - Current build list and locations/settings.
 
-Requires simple caching on the frontend and the ability to manually build stock lists, if the user requires stock to be considered.  Any automatic stock calcluatons remains server-dependent due to ESI and SDE.
+Requires simple caching on the frontend and the ability to manually build stock lists, if the user requires stock to be considered. Any automatic stock calcluatons remains server-dependent due to ESI and SDE.
 
 ---
 

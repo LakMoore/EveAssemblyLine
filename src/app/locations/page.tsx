@@ -19,20 +19,21 @@ import {
 } from "@/lib/reference/structureTypes";
 import { loadStructures, saveStructures } from "@/lib/planning/structureStore";
 import {
-  emptyStructureRigs,
-  structureRigsKey,
-  structureRigsName,
-  type StructureRigsEntry,
-  type StructureRigsPayload,
-} from "@/lib/planning/structureRigs";
+  emptyFacilitySettings,
+  facilitySettingsKey,
+  facilitySettingsName,
+  supportsReactionSettings,
+  type FacilitySettingsEntry,
+  type FacilitySettingsPayload,
+} from "@/lib/planning/facilities";
 import {
-  fetchStructureRigs,
-  publishStructureRigs,
-  structureRigsFromStructures,
-} from "@/lib/planning/structureRigsStore";
+  fetchFacilityResponse,
+  publishFacilities,
+  facilitySettingsFromStructures,
+} from "@/lib/planning/facilitiesStore";
 import styles from "../page.module.css";
 
-type SystemMatch = { systemId: number; name: string };
+type SystemMatch = { systemId: number; name: string; securityStatus?: number };
 type EsiStructure = {
   structureId: number;
   name: string;
@@ -154,7 +155,7 @@ export default function LocationsPage() {
   });
   const [rigTypeIdsByName, setRigTypeIdsByName] = useState<Record<string, number>>({});
   const [rigNamesByTypeId, setRigNamesByTypeId] = useState<Record<number, string>>({});
-  const [structureRigs, setStructureRigs] = useState<StructureRigsPayload>(emptyStructureRigs);
+  const [facilities, setFacilities] = useState<FacilitySettingsPayload>(emptyFacilitySettings);
   const [esiStructures, setEsiStructures] = useState<EsiStructure[]>([]);
   const [esiConnected, setEsiConnected] = useState(false);
   const [esiRateLimitedUntil, setEsiRateLimitedUntil] = useState<string | null>(null);
@@ -215,7 +216,7 @@ export default function LocationsPage() {
 
     async function loadEsiStructures() {
       try {
-        const data = (await loadClientStock(language)) as {
+        const data = await (loadClientStock(language) as Promise<{
           locations?: Array<{
             locationId: number;
             name: string;
@@ -231,7 +232,13 @@ export default function LocationsPage() {
             corporationAssetCount: number;
             resolved: boolean;
           }>;
-        };
+        }>);
+        const facilityResponse = await fetchFacilityResponse();
+        if (!facilityResponse) throw new Error("Facilities unavailable");
+        setFacilities(facilityResponse.settings);
+        const facilitiesByLocationId = new Map(
+          facilityResponse.facilities.map((facility) => [facility.id, facility]),
+        );
         const locations = (data.locations ?? [])
           .filter(
             (
@@ -240,8 +247,13 @@ export default function LocationsPage() {
               locationType: "structure" | "station";
             } => location.locationType !== "anchored",
           )
-          .map(
-            (location): EsiStructure => ({
+          .map((location): EsiStructure => {
+            const facility = facilitiesByLocationId.get(location.locationId);
+            const manufacturing = facility?.activities.manufacturing;
+            const research = facility?.activities.meResearch;
+            const reactions = facility?.activities.reactions;
+            const invention = facility?.activities.invention;
+            return {
               structureId: location.locationId,
               name: location.name,
               locationType: location.locationType,
@@ -263,13 +275,29 @@ export default function LocationsPage() {
               totalCount: location.totalCount,
               totalVolume: location.totalVolume,
               bonuses: {
-                manufacturing: { me: 0, te: 0, cost: 0 },
-                research: { me: 0, te: 0, cost: 0 },
-                reactions: { me: 0, te: 0, cost: 0 },
-                invention: { me: 0, te: 0, cost: 0 },
+                manufacturing: {
+                  me: manufacturing?.materialConsumption ?? 0,
+                  te: manufacturing?.jobDuration ?? 0,
+                  cost: manufacturing?.jobCost ?? 0,
+                },
+                research: {
+                  me: research?.materialConsumption ?? 0,
+                  te: research?.jobDuration ?? 0,
+                  cost: research?.jobCost ?? 0,
+                },
+                reactions: {
+                  me: reactions?.materialConsumption ?? 0,
+                  te: reactions?.jobDuration ?? 0,
+                  cost: reactions?.jobCost ?? 0,
+                },
+                invention: {
+                  me: invention?.materialConsumption ?? 0,
+                  te: invention?.jobDuration ?? 0,
+                  cost: invention?.jobCost ?? 0,
+                },
               },
-            }),
-          );
+            };
+          });
         if (!cancelled) setEsiStructures(locations);
       }
       catch {
@@ -307,26 +335,14 @@ export default function LocationsPage() {
       .catch(() => setRigOptionsBySize({ Small: [], Medium: [], Large: [], "Extra Large": [] }));
   }, [language]);
 
-  useEffect(() => {
-    let cancelled = false;
-    fetchStructureRigs()
-      .then((payload) => {
-        if (!cancelled) setStructureRigs(payload);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   function sharedRigEntry(
     systemId: number | undefined,
     systemName: string | undefined,
     name: string,
   ) {
     if (!systemId) return undefined;
-    const entry: StructureRigsEntry | undefined =
-      structureRigs.structures[structureRigsKey(systemId, structureRigsName(systemName, name))];
+    const entry: FacilitySettingsEntry | undefined =
+      facilities.facilities[facilitySettingsKey(systemId, facilitySettingsName(systemName, name))];
     return entry;
   }
 
@@ -427,6 +443,23 @@ export default function LocationsPage() {
         localOverride?.rigs
         ?? sharedRigNames(esiStructure.systemId, esiStructure.systemName, esiStructure.name)
         ?? (esiStructure.rigs.length > 0 ? esiStructure.rigs : ["No Rig", "No Rig", "No Rig"]),
+      allowStandardBuilds: localOverride?.allowStandardBuilds,
+      allowCapitalBuilds: localOverride?.allowCapitalBuilds,
+      allowReactionBuilds: localOverride?.allowReactionBuilds,
+      allowBiochemicalReactions: localOverride?.allowBiochemicalReactions,
+      allowCompositeReactions: localOverride?.allowCompositeReactions,
+      allowHybridReactions: localOverride?.allowHybridReactions,
+      allowInvention: localOverride?.allowInvention,
+      allowResearch: localOverride?.allowResearch,
+      standardTaxRate: localOverride?.standardTaxRate,
+      capitalTaxRate: localOverride?.capitalTaxRate,
+      reactionTaxRate: localOverride?.reactionTaxRate,
+      biochemicalTaxRate: localOverride?.biochemicalTaxRate,
+      compositeTaxRate: localOverride?.compositeTaxRate,
+      hybridTaxRate: localOverride?.hybridTaxRate,
+      inventionTaxRate: localOverride?.inventionTaxRate,
+      researchTaxRate: localOverride?.researchTaxRate,
+      settingsLastModified: localOverride?.settingsLastModified,
     });
     setIsDialogOpen(true);
   }
@@ -634,12 +667,7 @@ export default function LocationsPage() {
               structures,
             }));
             void saveStructures(structures);
-            // Only publish when the rig loadout actually changed to avoid pointless writes.
-            if (!sameRigTypeIds(previous?.rigTypeIds, structure.rigTypeIds)) {
-              void publishStructureRigs(structureRigsFromStructures(structures)).then(
-                setStructureRigs,
-              );
-            }
+            void publishFacilities(facilitySettingsFromStructures(structures)).then(setFacilities);
             setIsDialogOpen(false);
             setEditingStructure(null);
           }}
@@ -669,7 +697,11 @@ function StructureDialog({
   const [systemName, setSystemName] = useState(structure?.systemName ?? "");
   const [system, setSystem] = useState<SystemMatch | null>(
     structure && structure.systemId > 0
-      ? { systemId: structure.systemId, name: structure.systemName }
+      ? {
+          systemId: structure.systemId,
+          name: structure.systemName,
+          securityStatus: structure.securityStatus,
+        }
       : null,
   );
   const [suggestions, setSuggestions] = useState<SystemMatch[]>([]);
@@ -677,7 +709,69 @@ function StructureDialog({
   const [type, setType] = useState(structure?.type ?? structureTypes[0].name);
   const [name, setName] = useState(structure?.name ?? "");
   const [rigs, setRigs] = useState(structure?.rigs ?? ["No Rig", "No Rig", "No Rig"]);
+  const [allowStandardBuilds, setAllowStandardBuilds] = useState(
+    structure?.allowStandardBuilds ?? true,
+  );
+  const [allowCapitalBuilds, setAllowCapitalBuilds] = useState(
+    structure?.allowCapitalBuilds ?? false,
+  );
+  const [allowReactionBuilds, setAllowReactionBuilds] = useState(
+    structure?.allowReactionBuilds ?? true,
+  );
+  const [allowBiochemicalReactions, setAllowBiochemicalReactions] = useState(
+    structure?.allowBiochemicalReactions ?? structure?.allowReactionBuilds ?? true,
+  );
+  const [allowCompositeReactions, setAllowCompositeReactions] = useState(
+    structure?.allowCompositeReactions ?? structure?.allowReactionBuilds ?? true,
+  );
+  const [allowHybridReactions, setAllowHybridReactions] = useState(
+    structure?.allowHybridReactions ?? structure?.allowReactionBuilds ?? true,
+  );
+  const [allowInvention, setAllowInvention] = useState(structure?.allowInvention ?? true);
+  const [allowResearch, setAllowResearch] = useState(structure?.allowResearch ?? true);
+  const [standardTaxRate, setStandardTaxRate] = useState(
+    structure?.standardTaxRate?.toFixed(1) ?? "0.0",
+  );
+  const [capitalTaxRate, setCapitalTaxRate] = useState(
+    structure?.capitalTaxRate?.toFixed(1) ?? "0.0",
+  );
+  const [reactionTaxRate, setReactionTaxRate] = useState(
+    structure?.reactionTaxRate?.toFixed(1) ?? "0.0",
+  );
+  const [biochemicalTaxRate, setBiochemicalTaxRate] = useState(
+    structure?.biochemicalTaxRate?.toFixed(1) ?? structure?.reactionTaxRate?.toFixed(1) ?? "0.0",
+  );
+  const [compositeTaxRate, setCompositeTaxRate] = useState(
+    structure?.compositeTaxRate?.toFixed(1) ?? structure?.reactionTaxRate?.toFixed(1) ?? "0.0",
+  );
+  const [hybridTaxRate, setHybridTaxRate] = useState(
+    structure?.hybridTaxRate?.toFixed(1) ?? structure?.reactionTaxRate?.toFixed(1) ?? "0.0",
+  );
+  const [inventionTaxRate, setInventionTaxRate] = useState(
+    structure?.inventionTaxRate?.toFixed(1) ?? "0.0",
+  );
+  const [researchTaxRate, setResearchTaxRate] = useState(
+    structure?.researchTaxRate?.toFixed(1) ?? "0.0",
+  );
   const selectedType = structureTypes.find((structureType) => structureType.name === type);
+  const reactionsAllowed = supportsReactionSettings(
+    selectedType?.typeId,
+    system?.securityStatus ?? structure?.securityStatus,
+  );
+
+  useEffect(() => {
+    if (!system || system.securityStatus !== undefined) return;
+    let cancelled = false;
+    void fetch(`/api/reference/systems?systemId=${system.systemId}&language=${language}`)
+      .then((response) => response.json() as Promise<{ item?: SystemMatch | null }>)
+      .then((data) => {
+        if (!cancelled && data.item) setSystem(data.item);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [language, system]);
 
   useEffect(() => {
     if (systemName.trim().length < 2 || !isOpen) return;
@@ -704,10 +798,28 @@ function StructureDialog({
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!system || !name.trim() || !selectedType) return;
+    const reactionSettings = reactionsAllowed
+      ? {
+          allowBiochemicalReactions,
+          allowCompositeReactions,
+          allowHybridReactions,
+          biochemicalTaxRate: Number(biochemicalTaxRate) || 0,
+          compositeTaxRate: Number(compositeTaxRate) || 0,
+          hybridTaxRate: Number(hybridTaxRate) || 0,
+        }
+      : {
+          allowBiochemicalReactions: false,
+          allowCompositeReactions: false,
+          allowHybridReactions: false,
+          biochemicalTaxRate: 0,
+          compositeTaxRate: 0,
+          hybridTaxRate: 0,
+        };
     onSave({
       id: structure?.id ?? `local:${crypto.randomUUID()}`,
       systemId: system.systemId,
       systemName: system.name,
+      securityStatus: system.securityStatus,
       type,
       typeId: selectedType.typeId,
       size: selectedType.size,
@@ -715,6 +827,18 @@ function StructureDialog({
       name: name.trim(),
       rigs,
       rigTypeIds: rigs.map((rig) => rigTypeIdsByName[rig] ?? 0),
+      allowStandardBuilds,
+      allowCapitalBuilds,
+      allowReactionBuilds,
+      allowInvention,
+      allowResearch,
+      ...reactionSettings,
+      standardTaxRate: Number(standardTaxRate) || 0,
+      capitalTaxRate: Number(capitalTaxRate) || 0,
+      reactionTaxRate: Number(reactionTaxRate) || 0,
+      inventionTaxRate: Number(inventionTaxRate) || 0,
+      researchTaxRate: Number(researchTaxRate) || 0,
+      settingsLastModified: new Date().toISOString(),
       ...(structure?.esiStructureId ? { esiStructureId: structure.esiStructureId } : {}),
     });
   }
@@ -844,6 +968,216 @@ function StructureDialog({
             }
           />
         ))}
+        <div className={styles.constructionGrid}>
+          <div className={styles.constructionGridHeader} aria-hidden="true">
+            <span />
+            <span>ENABLED</span>
+            <span>TAX RATE</span>
+          </div>
+          <div className={styles.constructionGridRow}>
+            <span>STANDARD MANUFACTURING</span>
+            <button
+              type="button"
+              className={styles.stockSwitch}
+              role="switch"
+              aria-checked={allowStandardBuilds}
+              aria-label="Enable standard manufacturing"
+              onClick={() => setAllowStandardBuilds((current) => !current)}
+            >
+              <span className={styles.stockSwitchThumb} />
+            </button>
+            <div className={styles.constructionTaxField}>
+              <input
+                className={styles.constructionTaxInput}
+                aria-label="Standard manufacturing tax rate"
+                type="number"
+                min="0"
+                step="0.1"
+                value={standardTaxRate}
+                onChange={(event) => setStandardTaxRate(event.target.value)}
+                onBlur={() => setStandardTaxRate((current) => (Number(current) || 0).toFixed(1))}
+              />
+              <span>%</span>
+            </div>
+          </div>
+          <div className={styles.constructionGridRow}>
+            <span>CAPITAL MANUFACTURING</span>
+            <button
+              type="button"
+              className={styles.stockSwitch}
+              role="switch"
+              aria-checked={allowCapitalBuilds}
+              aria-label="Enable capital manufacturing"
+              onClick={() => setAllowCapitalBuilds((current) => !current)}
+            >
+              <span className={styles.stockSwitchThumb} />
+            </button>
+            <div className={styles.constructionTaxField}>
+              <input
+                className={styles.constructionTaxInput}
+                aria-label="Capital manufacturing tax rate"
+                type="number"
+                min="0"
+                step="0.1"
+                value={capitalTaxRate}
+                onChange={(event) => setCapitalTaxRate(event.target.value)}
+                onBlur={() => setCapitalTaxRate((current) => (Number(current) || 0).toFixed(1))}
+              />
+              <span>%</span>
+            </div>
+          </div>
+          <div
+            className={`${styles.constructionGridRow} ${
+              !reactionsAllowed ? styles.constructionGridRowDisabled : ""
+            }`}
+          >
+            <span>BIOCHEMICAL REACTIONS</span>
+            <button
+              type="button"
+              className={styles.stockSwitch}
+              role="switch"
+              aria-checked={reactionsAllowed && allowBiochemicalReactions}
+              aria-label="Enable biochemical reactions"
+              aria-disabled={!reactionsAllowed}
+              disabled={!reactionsAllowed}
+              onClick={() => setAllowBiochemicalReactions((current) => !current)}
+            >
+              <span className={styles.stockSwitchThumb} />
+            </button>
+            <div className={styles.constructionTaxField}>
+              <input
+                className={styles.constructionTaxInput}
+                aria-label="Biochemical reaction tax rate"
+                type="number"
+                min="0"
+                step="0.1"
+                value={reactionsAllowed ? biochemicalTaxRate : "0.0"}
+                disabled={!reactionsAllowed}
+                onChange={(event) => setBiochemicalTaxRate(event.target.value)}
+                onBlur={() => setBiochemicalTaxRate((current) => (Number(current) || 0).toFixed(1))}
+              />
+              <span>%</span>
+            </div>
+          </div>
+          <div
+            className={`${styles.constructionGridRow} ${
+              !reactionsAllowed ? styles.constructionGridRowDisabled : ""
+            }`}
+          >
+            <span>COMPOSITE REACTIONS</span>
+            <button
+              type="button"
+              className={styles.stockSwitch}
+              role="switch"
+              aria-checked={reactionsAllowed && allowCompositeReactions}
+              aria-label="Enable composite reactions"
+              aria-disabled={!reactionsAllowed}
+              disabled={!reactionsAllowed}
+              onClick={() => setAllowCompositeReactions((current) => !current)}
+            >
+              <span className={styles.stockSwitchThumb} />
+            </button>
+            <div className={styles.constructionTaxField}>
+              <input
+                className={styles.constructionTaxInput}
+                aria-label="Composite reaction tax rate"
+                type="number"
+                min="0"
+                step="0.1"
+                value={reactionsAllowed ? compositeTaxRate : "0.0"}
+                disabled={!reactionsAllowed}
+                onChange={(event) => setCompositeTaxRate(event.target.value)}
+                onBlur={() => setCompositeTaxRate((current) => (Number(current) || 0).toFixed(1))}
+              />
+              <span>%</span>
+            </div>
+          </div>
+          <div
+            className={`${styles.constructionGridRow} ${
+              !reactionsAllowed ? styles.constructionGridRowDisabled : ""
+            }`}
+          >
+            <span>HYBRID REACTIONS</span>
+            <button
+              type="button"
+              className={styles.stockSwitch}
+              role="switch"
+              aria-checked={reactionsAllowed && allowHybridReactions}
+              aria-label="Enable hybrid reactions"
+              aria-disabled={!reactionsAllowed}
+              disabled={!reactionsAllowed}
+              onClick={() => setAllowHybridReactions((current) => !current)}
+            >
+              <span className={styles.stockSwitchThumb} />
+            </button>
+            <div className={styles.constructionTaxField}>
+              <input
+                className={styles.constructionTaxInput}
+                aria-label="Hybrid reaction tax rate"
+                type="number"
+                min="0"
+                step="0.1"
+                value={reactionsAllowed ? hybridTaxRate : "0.0"}
+                disabled={!reactionsAllowed}
+                onChange={(event) => setHybridTaxRate(event.target.value)}
+                onBlur={() => setHybridTaxRate((current) => (Number(current) || 0).toFixed(1))}
+              />
+              <span>%</span>
+            </div>
+          </div>
+          <div className={styles.constructionGridRow}>
+            <span>INVENTION</span>
+            <button
+              type="button"
+              className={styles.stockSwitch}
+              role="switch"
+              aria-checked={allowInvention}
+              aria-label="Enable invention"
+              onClick={() => setAllowInvention((current) => !current)}
+            >
+              <span className={styles.stockSwitchThumb} />
+            </button>
+            <div className={styles.constructionTaxField}>
+              <input
+                className={styles.constructionTaxInput}
+                aria-label="Invention tax rate"
+                type="number"
+                min="0"
+                step="0.1"
+                value={inventionTaxRate}
+                onChange={(event) => setInventionTaxRate(event.target.value)}
+                onBlur={() => setInventionTaxRate((current) => (Number(current) || 0).toFixed(1))}
+              />
+              <span>%</span>
+            </div>
+          </div>
+          <div className={styles.constructionGridRow}>
+            <span>RESEARCH</span>
+            <button
+              type="button"
+              className={styles.stockSwitch}
+              role="switch"
+              aria-checked={allowResearch}
+              aria-label="Enable research"
+              onClick={() => setAllowResearch((current) => !current)}
+            >
+              <span className={styles.stockSwitchThumb} />
+            </button>
+            <div className={styles.constructionTaxField}>
+              <input
+                className={styles.constructionTaxInput}
+                aria-label="Research tax rate"
+                type="number"
+                min="0"
+                step="0.1"
+                value={researchTaxRate}
+                onChange={(event) => setResearchTaxRate(event.target.value)}
+                onBlur={() => setResearchTaxRate((current) => (Number(current) || 0).toFixed(1))}
+              />
+              <span>%</span>
+            </div>
+          </div>
+        </div>
         <div className={styles.modalActions}>
           <button type="button" className={styles.refresh} onClick={onCancel}>
             Cancel

@@ -12,6 +12,7 @@ import type {
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
 import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
 import { loadClientStock } from "@/lib/client/requestCache";
+import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
 import {
   defaultLocations,
   defaultSettings,
@@ -34,14 +35,15 @@ import {
   Minimize2,
   Microscope,
   TestTubes,
+  X,
 } from "lucide-react";
 
 type PlannerTab = "Plan" | "Haul" | "Buy" | "Copy" | "Invent" | "React" | "Manufacture";
 // the hauling tab is purposefully not yet implemented
 const tabs: PlannerTab[] = ["Plan", "Buy", "Copy", "Invent", "React", "Manufacture"];
-type TypeResult = { 
-  name: string; 
-  typeId: number; 
+type TypeResult = {
+  name: string;
+  typeId: number;
   category?: string;
   marketCategory?: string;
 };
@@ -51,6 +53,14 @@ type PasteResult = {
   typeId?: number;
   iconCategory?: ClientBuildItem["iconCategory"];
   error?: string;
+};
+type PlanLocationOption = {
+  id: string;
+  locationId: number;
+  name?: string;
+  baseYield?: number;
+  baseManufacturingMe?: number;
+  baseReactionMe?: number;
 };
 
 function AvailableSourceIcons({ counts }: { counts?: PlanSourceCounts }) {
@@ -148,7 +158,10 @@ function ScrollTopButton({
   );
 }
 
-async function localizeItems(buildItems: ClientBuildItem[], targetLanguage: SdeLanguage): Promise<ClientBuildItem[]> {
+async function localizeItems(
+  buildItems: ClientBuildItem[],
+  targetLanguage: SdeLanguage,
+): Promise<ClientBuildItem[]> {
   try {
     const metadata = await fetchTypeMetadata(
       buildItems.map((item) => item.typeId),
@@ -158,11 +171,11 @@ async function localizeItems(buildItems: ClientBuildItem[], targetLanguage: SdeL
     return buildItems.map((item) => {
       const localizedItem = metadataByTypeId.get(item.typeId);
       return localizedItem
-        ? { 
-          ...item, 
-          name: localizedItem.name,
-          categoryName: localizedItem.marketCategory ?? "Unknown",
-        }
+        ? {
+            ...item,
+            name: localizedItem.name,
+            categoryName: localizedItem.marketCategory ?? "Unknown",
+          }
         : item;
     });
   }
@@ -185,7 +198,9 @@ export default function Home() {
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
   const [plan, setPlan] = useState<PlanResult | null>(null);
   const [stock, setStock] = useState<PlanStockItem[]>([]);
-  const [locations] = useState<PlannerLocations>(() => {
+  const [locationOptions, setLocationOptions] = useState<PlanLocationOption[]>([]);
+  const [includeStock, setIncludeStock] = useState(true);
+  const [locations, setLocations] = useState<PlannerLocations>(() => {
     if (typeof window === "undefined") return defaultLocations;
     try {
       const stored = window.localStorage.getItem(locationsStorageKey);
@@ -206,12 +221,42 @@ export default function Home() {
     }
   });
 
+  function updateLocations(next: Partial<Pick<PlannerLocations, "manufacturing" | "reactions">>) {
+    setLocations((current) => {
+      const updated = { ...current, ...next };
+      window.localStorage.setItem(locationsStorageKey, JSON.stringify(updated));
+      return updated;
+    });
+  }
+
   useEffect(() => {
     loadBuildList()
       .then((savedItems) => localizeItems(savedItems, language).then(setItems))
       .catch(() => setItems([]))
       .finally(() => setIsBuildListLoaded(true));
   }, [language]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchFacilityResponse()
+      .then((data) => {
+        const options = (data?.facilities ?? []).map((facility) => ({
+          id: String(facility.id),
+          locationId: facility.id,
+          name: facility.name,
+          baseYield: (facility.activities.reprocessing.baseYield ?? 0) * 100,
+          baseManufacturingMe: facility.activities.manufacturing.materialConsumption ?? 0,
+          baseReactionMe: facility.activities.reactions.materialConsumption ?? 0,
+        }));
+        if (!cancelled) setLocationOptions(options);
+      })
+      .catch(() => {
+        if (!cancelled) setLocationOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [language, locations.structures]);
 
   useEffect(() => {
     if (isBuildListLoaded) void saveBuildList(items);
@@ -224,7 +269,7 @@ export default function Home() {
     setPlanStatus("Calculating...");
     try {
       const stockData = await loadClientStock(language);
-      const workingStock = stockData.workingStock ?? [];
+      const workingStock = includeStock ? (stockData.workingStock ?? []) : [];
       setStock(workingStock);
       const response = await fetch(
         "/api/plan",
@@ -233,7 +278,13 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             language,
-            toBuild: items.map(({ typeId, quantity, me, te }) => ({ typeId, quantity, me, te })),
+            toBuild: items.map(({ typeId, quantity, me, te, fromCompression }) => ({
+              typeId,
+              quantity,
+              me,
+              te,
+              fromCompression,
+            })),
             stock: workingStock,
             locations,
             settings: {
@@ -277,9 +328,11 @@ export default function Home() {
     setItems((current) => {
       const next = [...current];
       for (const imported of importedItems) {
-        const existing = next.find((item) => item.typeId === imported.typeId);
+        const existing = next.find(
+          (item) => item.typeId === imported.typeId && !item.fromCompression,
+        );
         if (existing) existing.quantity += imported.quantity;
-        else next.push({ ...imported, me: 0, te: 0 });
+        else next.push({ ...imported, me: 0, te: 0, fromCompression: false });
       }
       return next;
     });
@@ -296,6 +349,12 @@ export default function Home() {
     catch {
       showToast("Could not copy build list multibuy");
     }
+  }
+
+  function removeCompressionItems() {
+    if (!items.some((item) => item.fromCompression)) return;
+    if (!window.confirm("Remove all items added from Compression?")) return;
+    setItems((current) => current.filter((item) => !item.fromCompression));
   }
 
   return (
@@ -337,6 +396,16 @@ export default function Home() {
                   <CopyIcon aria-hidden="true" />
                   <span>Copy list</span>
                 </button>
+                {items.some((item) => item.fromCompression) && (
+                  <button
+                    type="button"
+                    className={`actionButton ${styles.importButton}`}
+                    onClick={removeCompressionItems}
+                  >
+                    <X aria-hidden="true" />
+                    <span>Remove Compression</span>
+                  </button>
+                )}
               </div>
             </div>
             <p className={styles.panelDescription}>What are you making?</p>
@@ -344,14 +413,21 @@ export default function Home() {
               language={language}
               onSelect={(item) =>
                 setItems((current) => {
-                  const existing = current.find((entry) => entry.typeId === item.typeId);
-                  return existing
-                    ? current.map((entry) =>
-                        entry.typeId === item.typeId
-                          ? { ...entry, quantity: entry.quantity + 1 }
-                          : entry,
-                      )
-                    : [...current, { ...item, categoryName: "Unknown", quantity: 1, me: 0, te: 0 }];
+                  const existingIndex = current.findIndex(
+                    (entry) => entry.typeId === item.typeId && !entry.fromCompression,
+                  );
+                  const nextItem =
+                    existingIndex >= 0
+                      ? { ...current[existingIndex], quantity: current[existingIndex].quantity + 1 }
+                      : {
+                          ...item,
+                          categoryName: "Unknown",
+                          quantity: 1,
+                          me: 0,
+                          te: 0,
+                          fromCompression: false,
+                        };
+                  return [nextItem, ...current.filter((_, index) => index !== existingIndex)];
                 })
               }
             />
@@ -368,18 +444,23 @@ export default function Home() {
               </div>
             ) : (
               items.map((item, index) => (
-                <div className={styles.itemRow} key={item.typeId}>
-                  <TypeIdentity
-                    name={item.name}
-                    typeId={item.typeId}
-                    variation={
-                      item.iconCategory === "bpo"
-                        ? "bp"
-                        : item.iconCategory === "bpc" || item.iconCategory === "reactionformula"
-                          ? "bpc"
-                          : "icon"
-                    }
-                  />
+                <div className={styles.itemRow} key={`${item.typeId}-${item.fromCompression}`}>
+                  <div className={styles.buildItemIdentity}>
+                    <TypeIdentity
+                      name={item.name}
+                      typeId={item.typeId}
+                      variation={
+                        item.iconCategory === "bpo"
+                          ? "bp"
+                          : item.iconCategory === "bpc" || item.iconCategory === "reactionformula"
+                            ? "bpc"
+                            : "icon"
+                      }
+                    />
+                    {item.fromCompression && (
+                      <small className={styles.compressionBadge}>Compression</small>
+                    )}
+                  </div>
                   <input
                     aria-label={`${item.name} quantity`}
                     type="number"
@@ -447,6 +528,68 @@ export default function Home() {
                 </div>
               ))
             )}
+            <div className={styles.planOptions}>
+              <label>
+                <span>BUILD LOCATION</span>
+                <select
+                  value={locations.manufacturing}
+                  onChange={(event) =>
+                    updateLocations({ manufacturing: Number(event.target.value) })
+                  }
+                  disabled={locationOptions.length === 0}
+                >
+                  {locationOptions
+                    .slice()
+                    .sort(
+                      (left, right) =>
+                        (left.baseManufacturingMe ?? 0) - (right.baseManufacturingMe ?? 0)
+                        || (left.name ?? "").localeCompare(right.name ?? ""),
+                    )
+                    .map((location) => (
+                      <option value={location.locationId} key={`manufacturing-${location.id}`}>
+                        {location.name ?? `Location ${location.locationId}`} (
+                        {(location.baseManufacturingMe ?? 0).toFixed(1)}% ME)
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label>
+                <span>REACTION LOCATION</span>
+                <select
+                  value={locations.reactions}
+                  onChange={(event) => updateLocations({ reactions: Number(event.target.value) })}
+                  disabled={locationOptions.length === 0}
+                >
+                  {locationOptions
+                    .slice()
+                    .sort(
+                      (left, right) =>
+                        (left.baseReactionMe ?? left.baseYield ?? 0)
+                          - (right.baseReactionMe ?? right.baseYield ?? 0)
+                        || (left.name ?? "").localeCompare(right.name ?? ""),
+                    )
+                    .map((location) => (
+                      <option value={location.locationId} key={`reaction-${location.id}`}>
+                        {location.name ?? `Location ${location.locationId}`} (
+                        {(location.baseReactionMe ?? location.baseYield ?? 0).toFixed(1)}% ME)
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label className={styles.checkboxOption}>
+                <span>INCLUDE STOCK</span>
+                <button
+                  type="button"
+                  className={styles.stockSwitch}
+                  role="switch"
+                  aria-checked={includeStock}
+                  aria-label="Include stock"
+                  onClick={() => setIncludeStock((current) => !current)}
+                >
+                  <span className={styles.stockSwitchThumb} />
+                </button>
+              </label>
+            </div>
             <button
               className={styles.calculate}
               type="submit"

@@ -17,6 +17,7 @@ import {
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { getMarketSellOrders, getSevenDayAverageVolume } from "@/lib/esi/marketHistory";
 import { marketHubs } from "@/lib/reference/marketHubs";
+import { specialReprocessableTypeIds } from "@/lib/planning/reprocessStock";
 import type { GroupsRecord, TypesRecord, TypeDogmaRecord } from "@/lib/sde/generated";
 
 // Zod schema for validating the compression request body
@@ -175,7 +176,10 @@ export async function POST(request: Request) {
         group.typeIds.map((typeId) => ({ typeId, name: names.get(typeId) ?? `Type ${typeId}` })),
       ]),
     );
-    const candidateTypeIds = new Set([...compressibleTypes.values(), 15331, 30497]);
+    const candidateTypeIds = new Set([
+      ...compressibleTypes.values(),
+      ...specialReprocessableTypeIds,
+    ]);
     const baseCandidates = [...candidateTypeIds].flatMap((compressedTypeId) => {
       const materialRecord = typeMaterials.get(compressedTypeId);
       const type = types.get(compressedTypeId);
