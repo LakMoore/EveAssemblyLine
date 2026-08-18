@@ -56,7 +56,7 @@ async function resolveOutputLocationName(
     const character = await getCharacter(characterId);
     if (!character) continue;
     try {
-      const token = await getUsableToken(character, "personal");
+      const token = await getUsableToken(character);
       const result = await fetchStructureMetadataPerCharacter(locationId, token);
       if (result.data?.name) return result.data.name;
     }

@@ -13,16 +13,21 @@ export type FacilitySettingsEntry = {
   allowHybridReactions?: boolean;
   allowInvention?: boolean;
   allowResearch?: boolean;
-  standardTaxRate?: number;
-  capitalTaxRate?: number;
-  reactionTaxRate?: number;
-  biochemicalTaxRate?: number;
-  compositeTaxRate?: number;
-  hybridTaxRate?: number;
-  inventionTaxRate?: number;
-  researchTaxRate?: number;
+  jobTypes?: FacilityJobTypes;
   settingsLastModified?: string;
 };
+
+export type FacilityJobType =
+  | "standard"
+  | "capital"
+  | "reactions"
+  | "biochemical"
+  | "composite"
+  | "hybrid"
+  | "invention"
+  | "research";
+
+export type FacilityJobTypes = Partial<Record<FacilityJobType, number>>;
 
 export type FacilitySettingsPayload = {
   lastModified: string;
@@ -37,7 +42,7 @@ export type Facility = {
   systemId: number;
   securityStatus?: number;
   systemCostIndices: Record<string, number>;
-  activities: Record<string, FacilityActivity>;
+  activities: Record<string, FacilityActivityGroup>;
   buildTypeGroups: Record<string, unknown>;
   services: Array<{ name: string; state: string }>;
   rigTypeIds: number[];
@@ -46,21 +51,22 @@ export type Facility = {
 
 export type FacilityActivity = {
   available: boolean;
+  taxRate?: number;
   baseYield?: number;
-  standard?: number | null;
-  capital?: number | null;
-  reactions?: number | null;
-  biochemical?: number | null;
-  composite?: number | null;
-  hybrid?: number | null;
-  invention?: number | null;
-  research?: number | null;
   jobDuration?: number;
   materialConsumption?: number;
   jobCost?: number;
   rawJobDurationMultiplier?: number;
   rawMaterialConsumptionMultiplier?: number;
   rawJobCostMultiplier?: number;
+};
+
+export type FacilityActivityGroup = FacilityActivity & {
+  standard?: FacilityActivity;
+  capital?: FacilityActivity;
+  biochemical?: FacilityActivity;
+  composite?: FacilityActivity;
+  hybrid?: FacilityActivity;
 };
 
 export type FacilityResponse = {
@@ -105,6 +111,19 @@ function normalizeEntry(value: unknown): FacilitySettingsEntry | null {
     (rigTypeId): rigTypeId is number => Number.isInteger(rigTypeId) && rigTypeId >= 0,
   );
   if (rigTypeIds.length === 0) return null;
+  const savedJobTypes = entry.jobTypes && typeof entry.jobTypes === "object" ? entry.jobTypes : {};
+  const jobTypes: FacilityJobTypes = {
+    ...Object.fromEntries(
+      Object
+        .entries(savedJobTypes)
+        .filter(
+          (pair): pair is [FacilityJobType, number] =>
+            facilityJobTypes.includes(pair[0] as FacilityJobType)
+            && typeof pair[1] === "number"
+            && Number.isFinite(pair[1]),
+        ),
+    ),
+  };
   return {
     ...(Number.isSafeInteger(entry.locationId) ? { locationId: entry.locationId } : {}),
     systemId: entry.systemId as number,
@@ -120,34 +139,26 @@ function normalizeEntry(value: unknown): FacilitySettingsEntry | null {
     allowHybridReactions: entry.allowHybridReactions ?? entry.allowReactionBuilds !== false,
     allowInvention: entry.allowInvention !== false,
     allowResearch: entry.allowResearch !== false,
+    ...(Object.keys(jobTypes).length > 0 ? { jobTypes } : {}),
     ...(typeof entry.allowCapitalBuilds === "boolean"
       ? { allowCapitalBuilds: entry.allowCapitalBuilds }
-      : {}),
-    ...(typeof entry.standardTaxRate === "number"
-      ? { standardTaxRate: entry.standardTaxRate }
-      : {}),
-    ...(typeof entry.capitalTaxRate === "number" ? { capitalTaxRate: entry.capitalTaxRate } : {}),
-    ...(typeof entry.reactionTaxRate === "number"
-      ? { reactionTaxRate: entry.reactionTaxRate }
-      : {}),
-    ...(typeof entry.biochemicalTaxRate === "number"
-      ? { biochemicalTaxRate: entry.biochemicalTaxRate }
-      : {}),
-    ...(typeof entry.compositeTaxRate === "number"
-      ? { compositeTaxRate: entry.compositeTaxRate }
-      : {}),
-    ...(typeof entry.hybridTaxRate === "number" ? { hybridTaxRate: entry.hybridTaxRate } : {}),
-    ...(typeof entry.inventionTaxRate === "number"
-      ? { inventionTaxRate: entry.inventionTaxRate }
-      : {}),
-    ...(typeof entry.researchTaxRate === "number"
-      ? { researchTaxRate: entry.researchTaxRate }
       : {}),
     ...(typeof entry.settingsLastModified === "string"
       ? { settingsLastModified: entry.settingsLastModified }
       : {}),
   };
 }
+
+const facilityJobTypes: FacilityJobType[] = [
+  "standard",
+  "capital",
+  "reactions",
+  "biochemical",
+  "composite",
+  "hybrid",
+  "invention",
+  "research",
+];
 
 export function normalizeFacilitySettings(value: unknown): FacilitySettingsPayload {
   if (!value || typeof value !== "object") return emptyFacilitySettings;

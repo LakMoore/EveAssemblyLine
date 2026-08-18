@@ -1,4 +1,4 @@
-import type { BlueprintPrint, BuildItem } from "./types";
+import type { StockItem } from "./types";
 import { getPlanningDatabase, stockMetadataStoreName, stockStoreName } from "./planningDatabase";
 
 const stockSnapshotKey = "last-refresh";
@@ -8,42 +8,6 @@ export type StockLocation = {
   systemName: string;
   structureId: string | null;
   structureName: string;
-};
-
-export type StockItem = Pick<BuildItem, "typeId" | "name" | "quantity"> & {
-  locationId?: number;
-  rootLocationId?: number;
-  source?: "marketOrder";
-  marketOrderQuantity?: number;
-  isPackaged?: boolean;
-  type?: "bpo" | "bpc";
-  me?: number;
-  te?: number;
-  blueprintPrints?: BlueprintPrint[];
-  assembledVolume?: number;
-  packagedVolume?: number;
-  techLevel?: number;
-  category?: "blueprint" | "bp" | "bpo" | "bpc" | "reaction" | "item";
-  marketCategory?: string;
-  inBuild?: boolean;
-  inProduction?: boolean;
-  inBuildQuantity?: number;
-  inUse?: boolean;
-  jobId?: number;
-  installerId?: number;
-  facilityId?: number;
-  outputLocationId?: number;
-  blueprintId?: number;
-  blueprintTypeId?: number;
-  blueprintIsOriginal?: boolean;
-  blueprintRunsAtInstall?: number;
-  licensedRuns?: number;
-  installedRuns?: number;
-  blueprintRunsUsed?: number;
-  blueprintRunsRemaining?: number;
-  activityName?: string;
-  jobRuns?: number;
-  endDate?: string;
 };
 
 export type StockRecord = StockLocation & {

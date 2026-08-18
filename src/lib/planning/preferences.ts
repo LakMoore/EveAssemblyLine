@@ -26,14 +26,7 @@ export type KnownStructure = {
   allowHybridReactions?: boolean;
   allowInvention?: boolean;
   allowResearch?: boolean;
-  standardTaxRate?: number;
-  capitalTaxRate?: number;
-  reactionTaxRate?: number;
-  biochemicalTaxRate?: number;
-  compositeTaxRate?: number;
-  hybridTaxRate?: number;
-  inventionTaxRate?: number;
-  researchTaxRate?: number;
+  jobTypes?: import("./facilities").FacilityJobTypes;
   settingsLastModified?: string;
 };
 

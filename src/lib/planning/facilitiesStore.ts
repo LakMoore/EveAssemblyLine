@@ -8,6 +8,7 @@ import {
   type FacilitySettingsPayload,
 } from "./facilities";
 import type { KnownStructure } from "./preferences";
+import { loadEndpointRecord, saveEndpointResponse } from "@/lib/client/refreshCache";
 
 const localStorageKey = "assembly-line-facilities";
 
@@ -47,11 +48,17 @@ export async function fetchFacilities(): Promise<FacilitySettingsPayload> {
   }
 }
 
-export async function fetchFacilityResponse(): Promise<FacilityResponse | null> {
+export async function fetchFacilityResponse(force = false): Promise<FacilityResponse | null> {
+  if (!force) {
+    const cached = await loadEndpointRecord<FacilityResponse>("facilities");
+    if (cached) return cached.data;
+  }
   try {
     const response = await fetch("/api/facilities", { credentials: "same-origin" });
     if (!response.ok) return null;
-    return (await response.json()) as FacilityResponse;
+    const data = (await response.json()) as FacilityResponse;
+    await saveEndpointResponse("facilities", "/api/facilities", data);
+    return data;
   }
   catch {
     return null;
@@ -89,27 +96,10 @@ export function facilitySettingsFromStructures(
         && (structure.allowHybridReactions ?? structure.allowReactionBuilds !== false),
       allowInvention: structure.allowInvention !== false,
       allowResearch: structure.allowResearch !== false,
+      ...(structure.jobTypes ? { jobTypes: structure.jobTypes } : {}),
       ...(structure.allowCapitalBuilds === undefined
         ? {}
         : { allowCapitalBuilds: structure.allowCapitalBuilds }),
-      ...(structure.standardTaxRate === undefined
-        ? {}
-        : { standardTaxRate: structure.standardTaxRate }),
-      ...(structure.capitalTaxRate === undefined
-        ? {}
-        : { capitalTaxRate: structure.capitalTaxRate }),
-      reactionTaxRate: reactionsAllowed ? (structure.reactionTaxRate ?? 0) : 0,
-      biochemicalTaxRate: reactionsAllowed
-        ? (structure.biochemicalTaxRate ?? structure.reactionTaxRate ?? 0)
-        : 0,
-      compositeTaxRate: reactionsAllowed
-        ? (structure.compositeTaxRate ?? structure.reactionTaxRate ?? 0)
-        : 0,
-      hybridTaxRate: reactionsAllowed
-        ? (structure.hybridTaxRate ?? structure.reactionTaxRate ?? 0)
-        : 0,
-      inventionTaxRate: structure.inventionTaxRate ?? 0,
-      researchTaxRate: structure.researchTaxRate ?? 0,
       ...(structure.settingsLastModified === undefined
         ? {}
         : { settingsLastModified: structure.settingsLastModified }),
@@ -126,7 +116,7 @@ export async function publishFacilities(
     const response = await fetch(
       "/api/facilities",
       {
-        method: "PUT",
+        method: "POST",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
@@ -138,6 +128,7 @@ export async function publishFacilities(
       "settings" in responseBody ? responseBody.settings : responseBody,
     );
     cacheFacilities(merged);
+    await saveEndpointResponse("facilities", "/api/facilities", responseBody);
     return merged;
   }
   catch {

@@ -662,7 +662,7 @@ async function rebuildResolvedAssets(
     return;
   }
   try {
-    const token = await getUsableToken(record, purpose);
+    const token = await getUsableToken(record);
     const ownerPath =
       purpose === "corp"
         ? `/corporations/${record.corporationId}`
@@ -749,7 +749,7 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
           ),
         };
         if (Array.isArray(cache.allAssetsRaw.lastBody)) {
-          const token = await getUsableToken(character, "personal");
+          const token = await getUsableToken(character);
           await cacheResolvedAssets(
             cache,
             cache.allAssetsRaw.lastBody as AssetRecord[],
@@ -999,7 +999,7 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
             ),
           };
           if (Array.isArray(corpCache.allAssetsRaw.lastBody)) {
-            const token = await getUsableToken(character, "corp");
+            const token = await getUsableToken(character);
             await cacheResolvedAssets(
               corpCache,
               corpCache.allAssetsRaw.lastBody as AssetRecord[],

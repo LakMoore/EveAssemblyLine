@@ -58,41 +58,59 @@ export interface PlanMarketInput extends PlanAssetLocation {
   quantity: number;
 }
 
-export interface PlanStockItem {
+export type StockOwnerType = "character" | "corporation";
+export type BlueprintType = "bpo" | "bpc";
+
+export interface StockItemBase {
   typeId: number;
-  name: string;
   quantity: number; // this is the number of items in the stack (not the number of runs)
   locationId?: number;
   rootLocationId?: number;
-  techLevel?: number;
+  isPackaged?: boolean;
+  ownerType?: StockOwnerType;
+  ownerId?: number;
+  inBuild?: boolean;
+  inUse?: boolean;
+  jobId?: number;
+  blueprintRunsAtInstall?: number;
+  licensedRuns?: number;
+  blueprintType?: BlueprintType;
+  activityName?: string;
+  jobRuns?: number;
+  me?: number;
+  te?: number;
+}
+
+export interface PlanStockItem extends StockItemBase {
+  name: string;
   blueprintPrints?: BlueprintPrint[];
   sourceLocationId?: number;
   sourceLocationName?: string;
-  ownerType?: "character" | "corporation";
-  ownerId?: number;
   category?: "blueprint" | "reactionformula" | "item";
-  inBuild?: boolean;
-  inUse?: boolean;
-  inProduction?: boolean;
   inBuildQuantity?: number;
-  jobId?: number;
-  blueprintTypeId?: number;
-  blueprintIsOriginal?: boolean;
-  blueprintRunsAtInstall?: number;
-  licensedRuns?: number;
-  activityName?: string;
-  jobRuns?: number;
   source?: "marketOrder";
+}
+
+export interface StockItem extends PlanStockItem {
+  assembledVolume?: number;
+  packagedVolume?: number;
+  techLevel?: number;
+  marketCategory?: string;
+}
+
+export interface StockContribution extends StockItemBase {
+  itemId: number;
+  ownerType: StockOwnerType;
+  blueprintPrint?: BlueprintPrint;
 }
 
 export interface BlueprintPrint {
   itemId: number;
   runs: number;
-  type: "bpo" | "bpc";
+  type: BlueprintType;
   me?: number;
   te?: number;
   activity?: string;
-  endDate?: string;
 }
 
 export interface PlanRequest {

@@ -21,6 +21,7 @@ import {
   supportsReactionSettings,
   type FacilitySettingsEntry,
   type FacilityActivity,
+  type FacilityActivityGroup,
   type FacilitySettingsPayload,
 } from "@/lib/planning/facilities";
 import { calculateReprocessingEfficiency } from "@/lib/planning/reprocessingEfficiency";
@@ -39,16 +40,21 @@ function serviceIsOnline(services: FacilityCandidate["services"], name: string) 
   );
 }
 
-function emptyActivities(): Record<string, FacilityActivity> {
+function emptyActivities(): Record<string, FacilityActivityGroup> {
   return {
     reprocessing: {
       available: false,
     },
     manufacturing: {
       available: false,
+      standard: { available: false },
+      capital: { available: false },
     },
     reactions: {
       available: false,
+      biochemical: { available: false },
+      composite: { available: false },
+      hybrid: { available: false },
     },
     meResearch: {
       available: false,
@@ -183,20 +189,7 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
         ...(saved?.allowCapitalBuilds === undefined
           ? {}
           : { allowCapitalBuilds: saved.allowCapitalBuilds }),
-        ...(saved?.standardTaxRate === undefined ? {} : { standardTaxRate: saved.standardTaxRate }),
-        ...(saved?.capitalTaxRate === undefined ? {} : { capitalTaxRate: saved.capitalTaxRate }),
-        ...(saved?.reactionTaxRate === undefined ? {} : { reactionTaxRate: saved.reactionTaxRate }),
-        ...(saved?.biochemicalTaxRate === undefined
-          ? {}
-          : { biochemicalTaxRate: saved.biochemicalTaxRate }),
-        ...(saved?.compositeTaxRate === undefined
-          ? {}
-          : { compositeTaxRate: saved.compositeTaxRate }),
-        ...(saved?.hybridTaxRate === undefined ? {} : { hybridTaxRate: saved.hybridTaxRate }),
-        ...(saved?.inventionTaxRate === undefined
-          ? {}
-          : { inventionTaxRate: saved.inventionTaxRate }),
-        ...(saved?.researchTaxRate === undefined ? {} : { researchTaxRate: saved.researchTaxRate }),
+        ...(saved?.jobTypes ? { jobTypes: saved.jobTypes } : {}),
         ...(saved?.settingsLastModified === undefined
           ? {}
           : { settingsLastModified: saved.settingsLastModified }),
@@ -247,20 +240,7 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
         ...(saved?.allowCapitalBuilds === undefined
           ? {}
           : { allowCapitalBuilds: saved.allowCapitalBuilds }),
-        ...(saved?.standardTaxRate === undefined ? {} : { standardTaxRate: saved.standardTaxRate }),
-        ...(saved?.capitalTaxRate === undefined ? {} : { capitalTaxRate: saved.capitalTaxRate }),
-        ...(saved?.reactionTaxRate === undefined ? {} : { reactionTaxRate: saved.reactionTaxRate }),
-        ...(saved?.biochemicalTaxRate === undefined
-          ? {}
-          : { biochemicalTaxRate: saved.biochemicalTaxRate }),
-        ...(saved?.compositeTaxRate === undefined
-          ? {}
-          : { compositeTaxRate: saved.compositeTaxRate }),
-        ...(saved?.hybridTaxRate === undefined ? {} : { hybridTaxRate: saved.hybridTaxRate }),
-        ...(saved?.inventionTaxRate === undefined
-          ? {}
-          : { inventionTaxRate: saved.inventionTaxRate }),
-        ...(saved?.researchTaxRate === undefined ? {} : { researchTaxRate: saved.researchTaxRate }),
+        ...(saved?.jobTypes ? { jobTypes: saved.jobTypes } : {}),
         ...(saved?.settingsLastModified === undefined
           ? {}
           : { settingsLastModified: saved.settingsLastModified }),
@@ -307,6 +287,7 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
       facility.securityStatus,
     );
     const activities = emptyActivities();
+    const jobTypes = facility.jobTypes ?? {};
     activities.reprocessing.available =
       facility.locationType === "structure"
         ? true
@@ -362,25 +343,29 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
     activities.reactions.rawMaterialConsumptionMultiplier =
       bonusResult.reactions.material.rawMultiplier;
     activities.reactions.rawJobCostMultiplier = bonusResult.reactions.cost.rawMultiplier;
-    activities.manufacturing.standard = facility.standardTaxRate ?? null;
-    activities.manufacturing.capital = facility.allowCapitalBuilds
-      ? (facility.capitalTaxRate ?? null)
-      : null;
-    activities.reactions.reactions = reactionSettingsAllowed
-      ? (facility.reactionTaxRate ?? null)
-      : 0;
-    activities.reactions.biochemical = reactionSettingsAllowed
-      ? (facility.biochemicalTaxRate ?? facility.reactionTaxRate ?? null)
-      : 0;
-    activities.reactions.composite = reactionSettingsAllowed
-      ? (facility.compositeTaxRate ?? facility.reactionTaxRate ?? null)
-      : 0;
-    activities.reactions.hybrid = reactionSettingsAllowed
-      ? (facility.hybridTaxRate ?? facility.reactionTaxRate ?? null)
-      : 0;
-    activities.invention.invention = facility.inventionTaxRate ?? null;
-    activities.meResearch.research = facility.researchTaxRate ?? null;
-    activities.teResearch.research = facility.researchTaxRate ?? null;
+    activities.manufacturing.standard = {
+      available: activities.manufacturing.available,
+      ...(jobTypes.standard === undefined ? {} : { taxRate: jobTypes.standard }),
+    };
+    activities.manufacturing.capital = {
+      available: activities.manufacturing.available && facility.allowCapitalBuilds === true,
+      ...(jobTypes.capital === undefined ? {} : { taxRate: jobTypes.capital }),
+    };
+    activities.reactions.biochemical = {
+      available: activities.reactions.available && facility.allowBiochemicalReactions !== false,
+      ...(jobTypes.biochemical === undefined ? {} : { taxRate: jobTypes.biochemical }),
+    };
+    activities.reactions.composite = {
+      available: activities.reactions.available && facility.allowCompositeReactions !== false,
+      ...(jobTypes.composite === undefined ? {} : { taxRate: jobTypes.composite }),
+    };
+    activities.reactions.hybrid = {
+      available: activities.reactions.available && facility.allowHybridReactions !== false,
+      ...(jobTypes.hybrid === undefined ? {} : { taxRate: jobTypes.hybrid }),
+    };
+    activities.invention.taxRate = jobTypes.invention;
+    activities.meResearch.taxRate = jobTypes.research;
+    activities.teResearch.taxRate = jobTypes.research;
     return {
       id: facility.locationId,
       name:
@@ -435,7 +420,7 @@ export async function GET(request: Request) {
   }
 }
 
-export async function PUT(request: Request) {
+async function saveFacilities(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session?.collectionId) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
@@ -453,4 +438,12 @@ export async function PUT(request: Request) {
       { status: 400 },
     );
   }
+}
+
+export async function POST(request: Request) {
+  return saveFacilities(request);
+}
+
+export async function PUT(request: Request) {
+  return saveFacilities(request);
 }

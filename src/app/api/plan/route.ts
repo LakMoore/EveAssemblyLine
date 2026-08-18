@@ -230,7 +230,6 @@ export async function POST(request: Request) {
                 jobId: job.jobId,
                 jobRuns: job.runs,
                 activityName: job.activity,
-                blueprintTypeId: job.blueprintTypeId,
                 blueprintRunsAtInstall: job.blueprintRunsAtInstall,
                 licensedRuns: job.licensedRuns,
               },

@@ -451,14 +451,7 @@ export default function LocationsPage() {
       allowHybridReactions: localOverride?.allowHybridReactions,
       allowInvention: localOverride?.allowInvention,
       allowResearch: localOverride?.allowResearch,
-      standardTaxRate: localOverride?.standardTaxRate,
-      capitalTaxRate: localOverride?.capitalTaxRate,
-      reactionTaxRate: localOverride?.reactionTaxRate,
-      biochemicalTaxRate: localOverride?.biochemicalTaxRate,
-      compositeTaxRate: localOverride?.compositeTaxRate,
-      hybridTaxRate: localOverride?.hybridTaxRate,
-      inventionTaxRate: localOverride?.inventionTaxRate,
-      researchTaxRate: localOverride?.researchTaxRate,
+      jobTypes: localOverride?.jobTypes,
       settingsLastModified: localOverride?.settingsLastModified,
     });
     setIsDialogOpen(true);
@@ -729,30 +722,20 @@ function StructureDialog({
   );
   const [allowInvention, setAllowInvention] = useState(structure?.allowInvention ?? true);
   const [allowResearch, setAllowResearch] = useState(structure?.allowResearch ?? true);
-  const [standardTaxRate, setStandardTaxRate] = useState(
-    structure?.standardTaxRate?.toFixed(1) ?? "0.0",
-  );
-  const [capitalTaxRate, setCapitalTaxRate] = useState(
-    structure?.capitalTaxRate?.toFixed(1) ?? "0.0",
-  );
-  const [reactionTaxRate, setReactionTaxRate] = useState(
-    structure?.reactionTaxRate?.toFixed(1) ?? "0.0",
-  );
-  const [biochemicalTaxRate, setBiochemicalTaxRate] = useState(
-    structure?.biochemicalTaxRate?.toFixed(1) ?? structure?.reactionTaxRate?.toFixed(1) ?? "0.0",
-  );
-  const [compositeTaxRate, setCompositeTaxRate] = useState(
-    structure?.compositeTaxRate?.toFixed(1) ?? structure?.reactionTaxRate?.toFixed(1) ?? "0.0",
-  );
-  const [hybridTaxRate, setHybridTaxRate] = useState(
-    structure?.hybridTaxRate?.toFixed(1) ?? structure?.reactionTaxRate?.toFixed(1) ?? "0.0",
-  );
-  const [inventionTaxRate, setInventionTaxRate] = useState(
-    structure?.inventionTaxRate?.toFixed(1) ?? "0.0",
-  );
-  const [researchTaxRate, setResearchTaxRate] = useState(
-    structure?.researchTaxRate?.toFixed(1) ?? "0.0",
-  );
+  const [jobTypes, setJobTypes] = useState(() => ({
+    standard: structure?.jobTypes?.standard ?? 0,
+    capital: structure?.jobTypes?.capital ?? 0,
+    reactions: structure?.jobTypes?.reactions ?? 0,
+    biochemical: structure?.jobTypes?.biochemical ?? 0,
+    composite: structure?.jobTypes?.composite ?? 0,
+    hybrid: structure?.jobTypes?.hybrid ?? 0,
+    invention: structure?.jobTypes?.invention ?? 0,
+    research: structure?.jobTypes?.research ?? 0,
+  }));
+  const taxRate = (jobType: keyof typeof jobTypes) => jobTypes[jobType].toFixed(1);
+  const setTaxRate = (jobType: keyof typeof jobTypes, value: string) => {
+    setJobTypes((current) => ({ ...current, [jobType]: Number(value) || 0 }));
+  };
   const selectedType = structureTypes.find((structureType) => structureType.name === type);
   const reactionsAllowed = supportsReactionSettings(
     selectedType?.typeId,
@@ -798,22 +781,27 @@ function StructureDialog({
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!system || !name.trim() || !selectedType) return;
+    const savedJobTypes = {
+      ...jobTypes,
+      standard: jobTypes.standard,
+      capital: jobTypes.capital,
+      reactions: jobTypes.reactions,
+      biochemical: reactionsAllowed ? jobTypes.biochemical : 0,
+      composite: reactionsAllowed ? jobTypes.composite : 0,
+      hybrid: reactionsAllowed ? jobTypes.hybrid : 0,
+      invention: jobTypes.invention,
+      research: jobTypes.research,
+    };
     const reactionSettings = reactionsAllowed
       ? {
           allowBiochemicalReactions,
           allowCompositeReactions,
           allowHybridReactions,
-          biochemicalTaxRate: Number(biochemicalTaxRate) || 0,
-          compositeTaxRate: Number(compositeTaxRate) || 0,
-          hybridTaxRate: Number(hybridTaxRate) || 0,
         }
       : {
           allowBiochemicalReactions: false,
           allowCompositeReactions: false,
           allowHybridReactions: false,
-          biochemicalTaxRate: 0,
-          compositeTaxRate: 0,
-          hybridTaxRate: 0,
         };
     onSave({
       id: structure?.id ?? `local:${crypto.randomUUID()}`,
@@ -833,11 +821,7 @@ function StructureDialog({
       allowInvention,
       allowResearch,
       ...reactionSettings,
-      standardTaxRate: Number(standardTaxRate) || 0,
-      capitalTaxRate: Number(capitalTaxRate) || 0,
-      reactionTaxRate: Number(reactionTaxRate) || 0,
-      inventionTaxRate: Number(inventionTaxRate) || 0,
-      researchTaxRate: Number(researchTaxRate) || 0,
+      jobTypes: savedJobTypes,
       settingsLastModified: new Date().toISOString(),
       ...(structure?.esiStructureId ? { esiStructureId: structure.esiStructureId } : {}),
     });
@@ -993,9 +977,8 @@ function StructureDialog({
                 type="number"
                 min="0"
                 step="0.1"
-                value={standardTaxRate}
-                onChange={(event) => setStandardTaxRate(event.target.value)}
-                onBlur={() => setStandardTaxRate((current) => (Number(current) || 0).toFixed(1))}
+                value={taxRate("standard")}
+                onChange={(event) => setTaxRate("standard", event.target.value)}
               />
               <span>%</span>
             </div>
@@ -1019,9 +1002,8 @@ function StructureDialog({
                 type="number"
                 min="0"
                 step="0.1"
-                value={capitalTaxRate}
-                onChange={(event) => setCapitalTaxRate(event.target.value)}
-                onBlur={() => setCapitalTaxRate((current) => (Number(current) || 0).toFixed(1))}
+                value={taxRate("capital")}
+                onChange={(event) => setTaxRate("capital", event.target.value)}
               />
               <span>%</span>
             </div>
@@ -1051,10 +1033,9 @@ function StructureDialog({
                 type="number"
                 min="0"
                 step="0.1"
-                value={reactionsAllowed ? biochemicalTaxRate : "0.0"}
+                value={reactionsAllowed ? taxRate("biochemical") : "0.0"}
                 disabled={!reactionsAllowed}
-                onChange={(event) => setBiochemicalTaxRate(event.target.value)}
-                onBlur={() => setBiochemicalTaxRate((current) => (Number(current) || 0).toFixed(1))}
+                onChange={(event) => setTaxRate("biochemical", event.target.value)}
               />
               <span>%</span>
             </div>
@@ -1084,10 +1065,9 @@ function StructureDialog({
                 type="number"
                 min="0"
                 step="0.1"
-                value={reactionsAllowed ? compositeTaxRate : "0.0"}
+                value={reactionsAllowed ? taxRate("composite") : "0.0"}
                 disabled={!reactionsAllowed}
-                onChange={(event) => setCompositeTaxRate(event.target.value)}
-                onBlur={() => setCompositeTaxRate((current) => (Number(current) || 0).toFixed(1))}
+                onChange={(event) => setTaxRate("composite", event.target.value)}
               />
               <span>%</span>
             </div>
@@ -1117,10 +1097,9 @@ function StructureDialog({
                 type="number"
                 min="0"
                 step="0.1"
-                value={reactionsAllowed ? hybridTaxRate : "0.0"}
+                value={reactionsAllowed ? taxRate("hybrid") : "0.0"}
                 disabled={!reactionsAllowed}
-                onChange={(event) => setHybridTaxRate(event.target.value)}
-                onBlur={() => setHybridTaxRate((current) => (Number(current) || 0).toFixed(1))}
+                onChange={(event) => setTaxRate("hybrid", event.target.value)}
               />
               <span>%</span>
             </div>
@@ -1144,9 +1123,8 @@ function StructureDialog({
                 type="number"
                 min="0"
                 step="0.1"
-                value={inventionTaxRate}
-                onChange={(event) => setInventionTaxRate(event.target.value)}
-                onBlur={() => setInventionTaxRate((current) => (Number(current) || 0).toFixed(1))}
+                value={taxRate("invention")}
+                onChange={(event) => setTaxRate("invention", event.target.value)}
               />
               <span>%</span>
             </div>
@@ -1170,9 +1148,8 @@ function StructureDialog({
                 type="number"
                 min="0"
                 step="0.1"
-                value={researchTaxRate}
-                onChange={(event) => setResearchTaxRate(event.target.value)}
-                onBlur={() => setResearchTaxRate((current) => (Number(current) || 0).toFixed(1))}
+                value={taxRate("research")}
+                onChange={(event) => setTaxRate("research", event.target.value)}
               />
               <span>%</span>
             </div>

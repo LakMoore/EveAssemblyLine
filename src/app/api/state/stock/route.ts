@@ -28,7 +28,12 @@ import type {
   BlueprintInstanceRecord,
   IndustryJobRecord,
 } from "@/lib/auth/model";
-import type { PlanStockItem } from "@/lib/planning/types";
+import type {
+  BlueprintType,
+  PlanStockItem,
+  StockContribution,
+  StockItem,
+} from "@/lib/planning/types";
 
 type RootLocation = {
   locationId: number;
@@ -37,49 +42,6 @@ type RootLocation = {
   name?: string;
   systemId?: number;
   regionId?: number;
-};
-
-type StockItem = {
-  typeId: number;
-  name: string;
-  quantity: number;
-  locationId: number;
-  rootLocationId: number;
-  isPackaged: boolean;
-  category: string;
-  type?: "bpo" | "bpc";
-  me?: number;
-  te?: number;
-  blueprintPrints?: Array<{
-    itemId: number;
-    runs: number;
-    me?: number;
-    te?: number;
-    activity?: string;
-    type: "bpo" | "bpc";
-  }>;
-  assembledVolume: number;
-  packagedVolume?: number;
-  techLevel?: number;
-  marketCategory?: string;
-  inBuild?: boolean;
-  inBuildQuantity?: number;
-  inUse?: boolean;
-  jobId?: number;
-  installerId?: number;
-  facilityId?: number;
-  outputLocationId?: number;
-  blueprintId?: number;
-  blueprintTypeId?: number;
-  blueprintIsOriginal?: boolean;
-  blueprintRunsAtInstall?: number;
-  licensedRuns?: number;
-  installedRuns?: number;
-  blueprintRunsUsed?: number;
-  blueprintRunsRemaining?: number;
-  activityName?: string;
-  jobRuns?: number;
-  endDate?: string;
 };
 
 type StockBucket = {
@@ -98,38 +60,6 @@ type StockBucket = {
   totalCount: number;
   totalVolume: number;
   items: Map<string, StockItem>;
-};
-
-type StockContribution = {
-  itemId: number;
-  typeId: number;
-  quantity: number;
-  locationId?: number;
-  rootLocationId?: number;
-  isPackaged: boolean;
-  ownerType: "character" | "corporation";
-  runCount?: number;
-  me?: number;
-  te?: number;
-  blueprintType?: "bpo" | "bpc";
-  blueprintPrint?: {
-    itemId: number;
-    runs: number;
-    me?: number;
-    te?: number;
-    activity?: string;
-    endDate?: string;
-    type: "bpo" | "bpc";
-  };
-  inBuild?: boolean;
-  inUse?: boolean;
-  job?: IndustryJobRecord;
-  blueprintIsOriginal?: boolean;
-  blueprintRunsAtInstall?: number;
-  blueprintRunsUsed?: number;
-  blueprintRunsRemaining?: number;
-  activityName?: string;
-  jobRuns?: number;
 };
 
 function isDirectLocation(asset: AssetRecord): asset is AssetRecord & {
@@ -208,7 +138,7 @@ async function resolveLocation(
         if (!character) return [];
         const usable = [];
         try {
-          usable.push(await getUsableToken(character, "personal"));
+          usable.push(await getUsableToken(character));
         }
         catch {}
         return usable;
@@ -268,10 +198,8 @@ function addStockContribution(
   if (!type?.published) return;
   const categorized = categorizeType(type, language, marketGroups, groups);
   const category = categorized.category;
-  const blueprintType =
-    category === "blueprint"
-      ? (contribution.blueprintType ?? (contribution.runCount === -1 ? "bpo" : "bpc"))
-      : undefined;
+  const blueprintType: BlueprintType | undefined =
+    category === "blueprint" ? (contribution.blueprintType ?? "bpc") : undefined;
   const bucket =
     buckets.get(location.locationId)
     ?? ({
@@ -300,7 +228,7 @@ function addStockContribution(
   bucket.assetCount += 1;
   if (contribution.ownerType === "corporation") bucket.corporationAssetCount += 1;
   else bucket.personalAssetCount += 1;
-  const jobKey = contribution.inBuild && contribution.job ? `:job:${contribution.job.jobId}` : "";
+  const jobKey = contribution.inBuild && contribution.jobId ? `:job:${contribution.jobId}` : "";
   const itemKey = `${contribution.typeId}:${category}:${blueprintType ?? "item"}:${contribution.locationId ?? location.locationId}:${contribution.rootLocationId ?? location.locationId}${jobKey}`;
   const item: StockItem = bucket.items.get(itemKey) ?? {
     typeId: contribution.typeId,
@@ -314,7 +242,7 @@ function addStockContribution(
     techLevel: type.techLevel,
     ...categorized,
     category,
-    ...(blueprintType ? { type: blueprintType } : {}),
+    ...(blueprintType ? { blueprintType } : {}),
   };
   const sameBlueprint =
     contribution.blueprintPrint !== undefined
@@ -338,22 +266,11 @@ function addStockContribution(
   if (contribution.inBuild) {
     item.inBuildQuantity = (item.inBuildQuantity ?? 0) + contribution.quantity;
     item.inBuild = true;
-    if (contribution.job) item.jobRuns = contribution.job.runs;
+    item.jobRuns = contribution.jobRuns;
     item.inUse = contribution.inUse;
-    item.jobId = contribution.job?.jobId;
-    item.installerId = contribution.job?.installerId;
-    item.facilityId = contribution.job?.facilityId;
-    item.outputLocationId = contribution.job?.outputLocationId;
-    item.blueprintId = contribution.job?.blueprintId;
-    item.blueprintTypeId = contribution.job?.blueprintTypeId;
-    item.blueprintIsOriginal = contribution.blueprintIsOriginal;
-    item.blueprintRunsAtInstall = contribution.blueprintRunsAtInstall;
-    item.licensedRuns = contribution.job?.licensedRuns;
-    item.installedRuns = contribution.job?.installedRuns;
-    item.blueprintRunsUsed = contribution.blueprintRunsUsed;
-    item.blueprintRunsRemaining = contribution.blueprintRunsRemaining;
+    item.jobId = contribution.jobId;
+    item.licensedRuns = contribution.licensedRuns;
     item.activityName = contribution.activityName;
-    item.endDate = contribution.job?.endDate;
   }
   bucket.items.set(itemKey, item);
   bucket.totalCount += contribution.quantity;
@@ -406,14 +323,12 @@ function installedJobContributions(
       isPackaged: true,
       ownerType: job.ownerType,
       blueprintType: installedBlueprintIsOriginal ? "bpo" : "bpc",
-      runCount: installedBlueprintRemainingRuns,
       inBuild: true,
       inUse: true,
-      job,
-      blueprintIsOriginal: installedBlueprintIsOriginal,
+      jobId: job.jobId,
+      jobRuns: job.runs,
+      licensedRuns: job.licensedRuns,
       blueprintRunsAtInstall: installedRunCount,
-      blueprintRunsUsed: installedBlueprintRunsUsed,
-      blueprintRunsRemaining: installedBlueprintRemainingRuns,
       ...(!isCopying ? { activityName: activityName(job.activityId) } : {}),
       blueprintPrint: {
         itemId: job.blueprintId,
@@ -421,7 +336,6 @@ function installedJobContributions(
         me: blueprintInstance?.me ?? blueprint?.me,
         te: blueprintInstance?.te ?? blueprint?.te,
         activity: activityName(job.activityId),
-        endDate: job.endDate,
         type: installedBlueprintIsOriginal ? "bpo" : "bpc",
       },
     });
@@ -446,11 +360,12 @@ function installedJobContributions(
             itemId: -(job.jobId * 1_000_000 + index + 1),
             runs: job.licensedRuns,
             activity: activityName(job.activityId),
-            endDate: job.endDate,
             type: "bpc",
           },
           inBuild: true,
-          job,
+          jobId: job.jobId,
+          jobRuns: job.runs,
+          licensedRuns: job.licensedRuns,
           activityName: activityName(job.activityId),
         });
       }
@@ -463,7 +378,9 @@ function installedJobContributions(
         isPackaged: false,
         ownerType: job.ownerType,
         inBuild: true,
-        job,
+        jobId: job.jobId,
+        jobRuns: job.runs,
+        licensedRuns: job.licensedRuns,
         activityName: activityName(job.activityId),
       });
     }
@@ -615,7 +532,6 @@ export async function GET(request: NextRequest) {
         isPackaged: !asset.isSingleton,
         ownerType: asset.ownerType,
         blueprintType,
-        runCount: blueprintInstance?.runs,
         me: blueprintInstance?.me,
         te: blueprintInstance?.te,
         ...(blueprintInstance
@@ -705,7 +621,7 @@ export async function GET(request: NextRequest) {
         })),
       ),
       ...(marketStock ?? []),
-    ] satisfies PlanStockItem[],
+    ] as PlanStockItem[],
   };
   const totalMs = Math.round(performance.now() - startedAt);
   const timingHeader = [

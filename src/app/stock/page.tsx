@@ -8,7 +8,6 @@ import {
   loadStockRecords,
   locationKey,
   saveStock,
-  type StockItem,
   type StockRecord,
 } from "@/lib/planning/stockStore";
 import { loadStructures } from "@/lib/planning/structureStore";
@@ -31,6 +30,7 @@ import {
   ShoppingCart,
   Trash2,
 } from "lucide-react";
+import type { StockItem } from "@/lib/planning/types";
 
 type StructureOption = { id: string; name: string };
 type SystemOption = { id: number; name: string };
@@ -44,7 +44,7 @@ type EsiStockLocation = {
 };
 type EsiStockResponse = {
   locations?: Array<EsiStockLocation & { locationId: number }>;
-  workingStock?: Array<StockItem & { sourceLocationId?: number }>;
+  workingStock?: StockItem[];
   filteredLocationIds?: number[];
 };
 type PasteResult = {
@@ -93,12 +93,7 @@ function stockItemVolume(item: StockItem) {
 }
 
 function isBlueprintStockItem(item: StockItem) {
-  return (
-    item.category === "blueprint"
-    || item.category === "bp"
-    || item.category === "bpo"
-    || item.category === "bpc"
-  );
+  return item.category === "blueprint";
 }
 
 function stockTotalCount(location: StockRecord) {
@@ -225,11 +220,6 @@ export default function StockPage() {
         const combinedRecords = esiResponse.ok
           ? [...esiRecords, ...correctedRecords.filter((record) => !isEsiRecord(record))]
           : correctedRecords;
-        setLocations(
-          [...combinedRecords].sort((left, right) =>
-            left.systemName.localeCompare(right.systemName),
-          ),
-        );
         const hydratedRecords = await hydrateVolumes(combinedRecords, language);
         const marketOrderQuantities = new Map<number, number>();
         for (const record of hydratedRecords) {
@@ -829,7 +819,7 @@ function ViewItemsModal({
   const filteredItems = location.items.filter((item) => {
     if (filter.kind === "all") return true;
     if (filter.kind === "sales") return item.source === "marketOrder";
-    if (filter.kind === "jobs") return item.inProduction || item.jobId !== undefined;
+    if (filter.kind === "jobs") return item.inBuild || item.jobId !== undefined;
     if (filter.kind === "market") return item.marketCategory === filter.value;
     return filter.value === "bpc"
       ? isBlueprintStockItem(item)
@@ -844,8 +834,8 @@ function ViewItemsModal({
     const productionQuantity = isProduction ? (item.inBuildQuantity ?? item.quantity) : 0;
     const marketQuantity = isMarketOrder ? item.quantity : 0;
     const isBlueprint = isBlueprintStockItem(item);
-    const isBpo = isBlueprint && item.type === "bpo";
-    const isBpc = isBlueprint && item.type !== "bpo";
+    const isBpo = isBlueprint && item.blueprintType === "bpo";
+    const isBpc = isBlueprint && item.blueprintType !== "bpo";
     const bpcRuns =
       item.blueprintPrints?.reduce((total, print) => total + Math.max(0, print.runs), 0) ?? 0;
     const blueprintSummary = {
@@ -983,7 +973,7 @@ function ViewItemsModal({
                 const showCategory =
                   filter.kind === "all" || (filter.kind === "category" && filter.value === "item");
                 const isBlueprint = isBlueprintStockItem(item);
-                const isReaction = item.category === "reaction";
+                const isReaction = item.category === "reactionformula";
                 return (
                   <div className={styles.stockRow} key={`${item.typeId}:${itemIndex}`}>
                     <div className={styles.stockIdentityStack}>
@@ -992,7 +982,7 @@ function ViewItemsModal({
                         typeId={item.typeId}
                         imageSize={40}
                         className={styles.stockTypeIdentity}
-                        variation={item.category === "reaction" ? "bpc" : "icon"}
+                        variation={item.category === "reactionformula" ? "bpc" : "icon"}
                         blueprintType={
                           isBlueprintStockItem(item) ? (bpoCount > 0 ? "bpo" : "bpc") : undefined
                         }
@@ -1250,7 +1240,7 @@ function mergeItems(existing: StockItem[], imported: StockItem[]) {
     );
     if (current) {
       current.quantity += item.quantity;
-      current.type ??= item.type;
+      current.blueprintType ??= item.blueprintType;
       current.me ??= item.me;
       current.te ??= item.te;
       if (item.blueprintPrints) {

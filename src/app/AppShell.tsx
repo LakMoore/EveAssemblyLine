@@ -13,7 +13,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { isSdeLanguage, sdeLanguages, type SdeLanguage } from "@/lib/reference/languages";
-import { loadStockSnapshotTime, replaceEsiStock, type StockItem } from "@/lib/planning/stockStore";
+import { loadStockSnapshotTime, replaceEsiStock } from "@/lib/planning/stockStore";
 import {
   groupClientStockByLocation,
   loadClientJobs,
@@ -31,6 +31,7 @@ import {
   refreshDependentEndpoints,
   saveLastRefreshAt,
 } from "@/lib/client/refreshCache";
+import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import {
   Activity,
@@ -48,6 +49,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import styles from "./page.module.css";
+import { PlanStockItem } from "@/lib/planning/types";
 
 const languageStorageKey = "assembly-line-language";
 const sidebarStorageKey = "assembly-line-sidebar-collapsed";
@@ -75,7 +77,7 @@ type EsiStockResponse = {
     name: string;
     systemId?: number;
     systemName?: string;
-    items: StockItem[];
+    items: PlanStockItem[];
   }>;
 };
 type StateEndpoint = keyof Pick<ClientCharacterStatus, "assets" | "skills" | "jobs" | "orders">;
@@ -325,6 +327,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
         }
         catch {}
       }
+      if (requiredEndpoints.has("facilities")) {
+        try {
+          await fetchFacilityResponse(true);
+        }
+        catch {}
+      }
       window.dispatchEvent(
         new CustomEvent(
           "assembly-line-esi-refreshed",
@@ -373,6 +381,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         if (staleEndpoints.has("state/status")) await loadClientStateStatus(true);
         if (staleEndpoints.has("characters")) await loadClientCharacters(true);
         if (staleEndpoints.has("auth/corp/status")) await loadClientCorpStatus(true);
+        if (staleEndpoints.has("facilities")) await fetchFacilityResponse(true);
       })
       .catch(() => undefined);
     return () => {
