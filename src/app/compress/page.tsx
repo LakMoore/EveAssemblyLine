@@ -7,7 +7,7 @@ import { useAppLanguage } from "../AppShell";
 import TypeIdentity from "../components/TypeIdentity";
 import { useToast } from "../components/ToastProvider";
 import type { SdeLanguage } from "@/lib/reference/languages";
-import { Clipboard, Copy, Minimize2, Upload, X } from "lucide-react";
+import { Clipboard, Copy, Info, Minimize2, Upload, X } from "lucide-react";
 import Image from "next/image";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import {
@@ -17,7 +17,7 @@ import {
   type CompressSettings,
 } from "@/lib/planning/compressSettingsStore";
 import type { KnownStructure } from "@/lib/planning/preferences";
-import { loadClientStateStatus } from "@/lib/client/requestCache";
+import { loadClientSession, loadClientStateStatus } from "@/lib/client/requestCache";
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
 import { loadEndpointRecord, saveEndpointResponse } from "@/lib/client/refreshCache";
 import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
@@ -166,17 +166,14 @@ function CompressContent() {
       .all([
         loadCompressSettings(),
         fetchFacilityResponse(),
-        loadClientStateStatus(),
+        loadClientSession(),
         loadEndpointRecord<CompressOptions>("compress/options"),
       ])
-      .then(async ([loadedSettings, facilityResponse, stateStatus, cachedOptions]) => {
+      .then(async ([loadedSettings, facilityResponse, session, cachedOptions]) => {
+        const stateStatus = session.authenticated ? await loadClientStateStatus() : null;
         const loadedFacilities = facilityResponse?.facilities ?? [];
-        if (!isRefreshLoad && !cachedOptions) {
-          setStatus("Refresh data to load compression options.");
-          return;
-        }
         let loadedOptions = cachedOptions?.data;
-        if (isRefreshLoad) {
+        if (isRefreshLoad || !loadedOptions) {
           const optionsResponse = await fetch(
             "/api/compress/options",
             {
@@ -192,7 +189,6 @@ function CompressContent() {
           if (!optionsResponse.ok) throw new Error("Could not load compression options.");
           await saveEndpointResponse("compress/options", "/api/compress/options", loadedOptions);
         }
-        if (!loadedOptions) throw new Error("Could not load compression options.");
         const rawLocations: CompressOption[] = [
           ...loadedFacilities.map((facility) => ({
             id: String(facility.id),
@@ -232,8 +228,9 @@ function CompressContent() {
           ...character,
           skills: Object.fromEntries(
             (
-              stateStatus.characters?.find((status) => status.characterId === character.characterId)
-                ?.skills?.body ?? []
+              stateStatus?.characters?.find(
+                (status) => status.characterId === character.characterId,
+              )?.skills?.body ?? []
             ).map((skill) => [String(skill.skillId), skill.activeSkillLevel]),
           ),
         }));
@@ -464,14 +461,16 @@ function CompressContent() {
                 </select>
               </label>
             ) : (
-              <div className={styles.locationHelp}>
-                <span>LOCATION</span>
-                <p>
-                  No reprocessing locations found.{" "}
-                  <Link href="/locations">Add a reprocessing location</Link> or{" "}
-                  <Link href="/api/auth/eve/start">authenticate a character</Link> to find the best
-                  location automatically.
-                </p>
+              <div className={styles.locationAlert} role="alert">
+                <Info className={styles.locationAlertIcon} aria-hidden="true" />
+                <div className={styles.locationAlertContent}>
+                  <strong>No reprocessing locations found.</strong>
+                  <span>
+                    Add a reprocessing location on the <Link href="/locations">Locations</Link> page
+                    or <Link href="/api/auth/eve/start">authenticate a character</Link> to find the
+                    best location automatically.
+                  </span>
+                </div>
               </div>
             )}
             <label>

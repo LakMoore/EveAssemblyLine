@@ -266,7 +266,7 @@
 }
 .compressOptions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin: 18px 0 4px;
 }
@@ -290,26 +290,40 @@
     12px Manrope,
     sans-serif;
 }
-.locationHelp {
-  display: grid;
-  gap: 6px;
-  color: #6f9299;
+.locationAlert {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 68px;
+  padding: 11px 13px;
+  border: 1px solid #35606a;
+  background: #0a1a21;
+  color: #d8e8ec;
   font:
-    9px "DM Mono",
-    monospace;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-}
-.locationHelp p {
-  margin: 0;
-  color: #8da8ad;
-  font:
-    12px/1.5 Manrope,
+    11px/1.5 Manrope,
     sans-serif;
-  letter-spacing: 0;
-  text-transform: none;
+  grid-column: span 2;
+  grid-row: span 2;
 }
-.locationHelp a {
+.locationAlertIcon {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  color: #62dce8;
+}
+.locationAlertContent {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.locationAlertContent strong {
+  font-weight: 700;
+}
+.locationAlertContent span {
+  color: #8da8ad;
+}
+.locationAlert a {
   color: #d9f16e;
 }
 .resultList {
@@ -631,5 +645,10 @@
 @media (max-width: 680px) {
   .compressOptions {
     grid-template-columns: 1fr;
+  }
+
+  .locationAlert {
+    grid-column: 1;
+    grid-row: auto;
   }
 }

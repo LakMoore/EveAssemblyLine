@@ -36,6 +36,8 @@ export const corporationScopes = authorizationScopes;
 
 type PendingAuth = {
   sessionId?: string;
+  reauthorizeCharacterId?: number;
+  returnPath?: string;
   characterId?: number;
   scopes: string[];
   redirectUri: string;
@@ -117,7 +119,11 @@ async function tokenRequest(body: URLSearchParams, useClientSecret = true) {
   const response = await fetch(`${ssoBaseUrl}/v2/oauth/token`, { method: "POST", headers, body });
   if (!response.ok) {
     const details = await response.text();
-    throw new Error(`EVE SSO token exchange failed (${response.status}): ${details.slice(0, 300)}`);
+    const error = new Error(
+      `EVE SSO token exchange failed (${response.status}): ${details.slice(0, 300)}`,
+    );
+    (error as Error & { status?: number }).status = response.status;
+    throw error;
   }
   return response.json() as Promise<TokenResponse>;
 }

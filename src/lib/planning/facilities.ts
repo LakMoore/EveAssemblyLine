@@ -5,21 +5,19 @@ export type FacilitySettingsEntry = {
   typeId?: number;
   rigTypeIds: number[];
   services?: Array<{ name: string; state: string }>;
-  allowStandardBuilds?: boolean;
-  allowCapitalBuilds?: boolean;
-  allowReactionBuilds?: boolean;
-  allowBiochemicalReactions?: boolean;
-  allowCompositeReactions?: boolean;
-  allowHybridReactions?: boolean;
-  allowInvention?: boolean;
-  allowResearch?: boolean;
-  jobTypes?: FacilityJobTypes;
+  activities: ActivitiesRequest;
   settingsLastModified?: string;
+};
+
+export type FacilitySettingsPayload = {
+  lastModified: string;
+  facilities: Record<string, FacilitySettingsEntry>;
 };
 
 export type FacilityJobType =
   | "standard"
   | "capital"
+  | "reprocessing"
   | "reactions"
   | "biochemical"
   | "composite"
@@ -29,29 +27,44 @@ export type FacilityJobType =
 
 export type FacilityJobTypes = Partial<Record<FacilityJobType, number>>;
 
-export type FacilitySettingsPayload = {
-  lastModified: string;
-  facilities: Record<string, FacilitySettingsEntry>;
-};
-
 export type Facility = {
-  id: number;
+  id: number | string;
   name: string;
   locationType: "station" | "structure";
   typeId: number;
   systemId: number;
   securityStatus?: number;
   systemCostIndices: Record<string, number>;
-  activities: Record<string, FacilityActivityGroup>;
+  activities: ActivitiesResponse;
   buildTypeGroups: Record<string, unknown>;
   services: Array<{ name: string; state: string }>;
   rigTypeIds: number[];
   settingsLastModified: string;
 };
 
-export type FacilityActivity = {
+export interface ActivityRequest {
   available: boolean;
   taxRate?: number;
+}
+
+export interface ActivitiesRequest {
+  reprocessing: ActivityRequest;
+  manufacturing: ActivityRequest & {
+    standard: ActivityRequest;
+    capital: ActivityRequest;
+  };
+  reactions: ActivityRequest & {
+    biochemical: ActivityRequest;
+    composite: ActivityRequest;
+    hybrid: ActivityRequest;
+  };
+  meResearch: ActivityRequest;
+  teResearch: ActivityRequest;
+  invention: ActivityRequest;
+  copying: ActivityRequest;
+}
+
+export interface ActivityResponse extends ActivityRequest {
   baseYield?: number;
   jobDuration?: number;
   materialConsumption?: number;
@@ -59,19 +72,57 @@ export type FacilityActivity = {
   rawJobDurationMultiplier?: number;
   rawMaterialConsumptionMultiplier?: number;
   rawJobCostMultiplier?: number;
+}
+
+export type FacilityActivity = ActivityResponse;
+
+export type FacilityActivityGroup = ActivityResponse & {
+  standard?: ActivityResponse;
+  capital?: ActivityResponse;
+  biochemical?: ActivityResponse;
+  composite?: ActivityResponse;
+  hybrid?: ActivityResponse;
 };
 
-export type FacilityActivityGroup = FacilityActivity & {
-  standard?: FacilityActivity;
-  capital?: FacilityActivity;
-  biochemical?: FacilityActivity;
-  composite?: FacilityActivity;
-  hybrid?: FacilityActivity;
-};
+export interface ActivitiesResponse extends ActivitiesRequest {
+  reprocessing: ActivityResponse;
+  manufacturing: ActivityResponse & {
+    standard: ActivityResponse;
+    capital: ActivityResponse;
+  };
+  reactions: ActivityResponse & {
+    biochemical: ActivityResponse;
+    composite: ActivityResponse;
+    hybrid: ActivityResponse;
+  };
+  meResearch: ActivityResponse;
+  teResearch: ActivityResponse;
+  invention: ActivityResponse;
+  copying: ActivityResponse;
+}
 
 export type FacilityResponse = {
   facilities: Facility[];
   settings: FacilitySettingsPayload;
+};
+
+export const emptyActivitiesRequest: ActivitiesRequest = {
+  reprocessing: { available: true, taxRate: 0 },
+  manufacturing: {
+    available: true,
+    standard: { available: true, taxRate: 0 },
+    capital: { available: false, taxRate: 0 },
+  },
+  reactions: {
+    available: true,
+    biochemical: { available: true, taxRate: 0 },
+    composite: { available: true, taxRate: 0 },
+    hybrid: { available: true, taxRate: 0 },
+  },
+  meResearch: { available: true, taxRate: 0 },
+  teResearch: { available: true, taxRate: 0 },
+  invention: { available: true, taxRate: 0 },
+  copying: { available: true, taxRate: 0 },
 };
 
 export const emptyFacilitySettings: FacilitySettingsPayload = { lastModified: "", facilities: {} };
@@ -101,6 +152,65 @@ export function facilitySettingsName(systemName: string | undefined, name: strin
     : name.trim();
 }
 
+function normalizeActivity(value: unknown): ActivityRequest | null {
+  if (!value || typeof value !== "object") return null;
+  const activity = value as Partial<ActivityRequest>;
+  if (typeof activity.available !== "boolean") return null;
+  if (
+    activity.taxRate !== undefined
+    && (typeof activity.taxRate !== "number" || !Number.isFinite(activity.taxRate))
+  ) return null;
+  return {
+    available: activity.available,
+    ...(activity.taxRate === undefined ? {} : { taxRate: activity.taxRate }),
+  };
+}
+
+function normalizeActivities(value: unknown): ActivitiesRequest | null {
+  if (!value || typeof value !== "object") return null;
+  const activities = value as Partial<ActivitiesRequest>;
+  const manufacturing = activities.manufacturing;
+  const reactions = activities.reactions;
+  if (
+    !manufacturing
+    || !reactions
+    || typeof manufacturing !== "object"
+    || typeof reactions !== "object"
+  ) {
+    return null;
+  }
+  const normalizedManufacturing = {
+    available: normalizeActivity(manufacturing)?.available,
+    standard: normalizeActivity(manufacturing.standard),
+    capital: normalizeActivity(manufacturing.capital),
+  };
+  const normalizedReactions = {
+    available: normalizeActivity(reactions)?.available,
+    biochemical: normalizeActivity(reactions.biochemical),
+    composite: normalizeActivity(reactions.composite),
+    hybrid: normalizeActivity(reactions.hybrid),
+  };
+  if (
+    normalizedManufacturing.available === undefined
+    || !normalizedManufacturing.standard
+    || !normalizedManufacturing.capital
+    || normalizedReactions.available === undefined
+    || !normalizedReactions.biochemical
+    || !normalizedReactions.composite
+    || !normalizedReactions.hybrid
+  ) return null;
+  const normalized = {
+    reprocessing: normalizeActivity(activities.reprocessing),
+    manufacturing: normalizedManufacturing,
+    reactions: normalizedReactions,
+    meResearch: normalizeActivity(activities.meResearch),
+    teResearch: normalizeActivity(activities.teResearch),
+    invention: normalizeActivity(activities.invention),
+    copying: normalizeActivity(activities.copying),
+  };
+  return Object.values(normalized).every(Boolean) ? (normalized as ActivitiesRequest) : null;
+}
+
 function normalizeEntry(value: unknown): FacilitySettingsEntry | null {
   if (!value || typeof value !== "object") return null;
   const entry = value as Partial<FacilitySettingsEntry>;
@@ -111,19 +221,8 @@ function normalizeEntry(value: unknown): FacilitySettingsEntry | null {
     (rigTypeId): rigTypeId is number => Number.isInteger(rigTypeId) && rigTypeId >= 0,
   );
   if (rigTypeIds.length === 0) return null;
-  const savedJobTypes = entry.jobTypes && typeof entry.jobTypes === "object" ? entry.jobTypes : {};
-  const jobTypes: FacilityJobTypes = {
-    ...Object.fromEntries(
-      Object
-        .entries(savedJobTypes)
-        .filter(
-          (pair): pair is [FacilityJobType, number] =>
-            facilityJobTypes.includes(pair[0] as FacilityJobType)
-            && typeof pair[1] === "number"
-            && Number.isFinite(pair[1]),
-        ),
-    ),
-  };
+  const activities = normalizeActivities(entry.activities);
+  if (!activities) return null;
   return {
     ...(Number.isSafeInteger(entry.locationId) ? { locationId: entry.locationId } : {}),
     systemId: entry.systemId as number,
@@ -131,18 +230,7 @@ function normalizeEntry(value: unknown): FacilitySettingsEntry | null {
     ...(Number.isSafeInteger(entry.typeId) ? { typeId: entry.typeId } : {}),
     rigTypeIds,
     ...(Array.isArray(entry.services) ? { services: entry.services } : {}),
-    allowStandardBuilds: entry.allowStandardBuilds !== false,
-    allowReactionBuilds: entry.allowReactionBuilds !== false,
-    allowBiochemicalReactions:
-      entry.allowBiochemicalReactions ?? entry.allowReactionBuilds !== false,
-    allowCompositeReactions: entry.allowCompositeReactions ?? entry.allowReactionBuilds !== false,
-    allowHybridReactions: entry.allowHybridReactions ?? entry.allowReactionBuilds !== false,
-    allowInvention: entry.allowInvention !== false,
-    allowResearch: entry.allowResearch !== false,
-    ...(Object.keys(jobTypes).length > 0 ? { jobTypes } : {}),
-    ...(typeof entry.allowCapitalBuilds === "boolean"
-      ? { allowCapitalBuilds: entry.allowCapitalBuilds }
-      : {}),
+    activities,
     ...(typeof entry.settingsLastModified === "string"
       ? { settingsLastModified: entry.settingsLastModified }
       : {}),
@@ -152,6 +240,7 @@ function normalizeEntry(value: unknown): FacilitySettingsEntry | null {
 const facilityJobTypes: FacilityJobType[] = [
   "standard",
   "capital",
+  "reprocessing",
   "reactions",
   "biochemical",
   "composite",

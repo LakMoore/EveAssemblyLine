@@ -17,18 +17,19 @@ import {
 import { getCachedCorporationStructures, getRootLocationsByItemId } from "@/lib/esi/cache";
 import { fetchIndustrySystems, fetchStationMetadata } from "@/lib/esi/client";
 import {
+  emptyActivitiesRequest,
   normalizeFacilitySettings,
   supportsReactionSettings,
+  type ActivitiesResponse,
   type FacilitySettingsEntry,
-  type FacilityActivity,
-  type FacilityActivityGroup,
   type FacilitySettingsPayload,
 } from "@/lib/planning/facilities";
 import { calculateReprocessingEfficiency } from "@/lib/planning/reprocessingEfficiency";
 import { calculateFacilityBonuses } from "@/lib/planning/facilityBonuses";
 
 type FacilityCandidate = Omit<FacilitySettingsEntry, "locationId"> & {
-  locationId: number;
+  id: number | string;
+  locationId?: number;
   locationType: "station" | "structure";
   securityStatus?: number;
   services?: Array<{ name: string; state: string }>;
@@ -40,7 +41,7 @@ function serviceIsOnline(services: FacilityCandidate["services"], name: string) 
   );
 }
 
-function emptyActivities(): Record<string, FacilityActivityGroup> {
+function emptyActivities(): ActivitiesResponse {
   return {
     reprocessing: {
       available: false,
@@ -160,7 +161,7 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
       .filter((facility) => facility.locationId !== undefined)
       .map((facility) => [facility.locationId!, facility]),
   );
-  const candidates = new Map<number, FacilityCandidate>();
+  const candidates = new Map<number | string, FacilityCandidate>();
   for (const root of roots.values()) {
     if (root.kind !== "station" && root.kind !== "structure") continue;
     const saved = savedByLocationId.get(root.locationId);
@@ -171,25 +172,14 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
     candidates.set(
       root.locationId,
       {
+        id: root.locationId,
         locationId: root.locationId,
         systemId,
         name: root.name ?? `Location ${root.locationId}`,
         typeId: root.typeId,
         rigTypeIds: saved?.rigTypeIds ?? [],
         ...(saved?.services ? { services: saved.services } : {}),
-        allowStandardBuilds: saved?.allowStandardBuilds !== false,
-        allowReactionBuilds: saved?.allowReactionBuilds !== false,
-        allowBiochemicalReactions:
-          saved?.allowBiochemicalReactions ?? saved?.allowReactionBuilds !== false,
-        allowCompositeReactions:
-          saved?.allowCompositeReactions ?? saved?.allowReactionBuilds !== false,
-        allowHybridReactions: saved?.allowHybridReactions ?? saved?.allowReactionBuilds !== false,
-        allowInvention: saved?.allowInvention !== false,
-        allowResearch: saved?.allowResearch !== false,
-        ...(saved?.allowCapitalBuilds === undefined
-          ? {}
-          : { allowCapitalBuilds: saved.allowCapitalBuilds }),
-        ...(saved?.jobTypes ? { jobTypes: saved.jobTypes } : {}),
+        activities: saved?.activities ?? emptyActivitiesRequest,
         ...(saved?.settingsLastModified === undefined
           ? {}
           : { settingsLastModified: saved.settingsLastModified }),
@@ -198,13 +188,14 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
       },
     );
   }
-  for (const facility of Object.values(settings.facilities)) {
-    if (facility.locationId === undefined || candidates.has(facility.locationId)) continue;
+  for (const [settingsKey, facility] of Object.entries(settings.facilities)) {
+    const candidateId = facility.locationId ?? settingsKey;
+    if (candidates.has(candidateId)) continue;
     candidates.set(
-      facility.locationId,
+      candidateId,
       {
         ...facility,
-        locationId: facility.locationId,
+        id: candidateId,
         locationType: "structure",
         securityStatus: systems.get(facility.systemId)?.securityStatus,
       },
@@ -222,25 +213,14 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
     candidates.set(
       structure.structure_id,
       {
+        id: structure.structure_id,
         locationId: structure.structure_id,
         systemId: structure.system_id,
         name: structure.name ?? `Structure ${structure.structure_id}`,
         typeId: structure.type_id,
         rigTypeIds: saved?.rigTypeIds ?? [],
         services: structure.services ?? saved?.services,
-        allowStandardBuilds: saved?.allowStandardBuilds !== false,
-        allowReactionBuilds: saved?.allowReactionBuilds !== false,
-        allowBiochemicalReactions:
-          saved?.allowBiochemicalReactions ?? saved?.allowReactionBuilds !== false,
-        allowCompositeReactions:
-          saved?.allowCompositeReactions ?? saved?.allowReactionBuilds !== false,
-        allowHybridReactions: saved?.allowHybridReactions ?? saved?.allowReactionBuilds !== false,
-        allowInvention: saved?.allowInvention !== false,
-        allowResearch: saved?.allowResearch !== false,
-        ...(saved?.allowCapitalBuilds === undefined
-          ? {}
-          : { allowCapitalBuilds: saved.allowCapitalBuilds }),
-        ...(saved?.jobTypes ? { jobTypes: saved.jobTypes } : {}),
+        activities: saved?.activities ?? emptyActivitiesRequest,
         ...(saved?.settingsLastModified === undefined
           ? {}
           : { settingsLastModified: saved.settingsLastModified }),
@@ -252,7 +232,10 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
   markPhase("corporationStructures");
   const stationMetadata = await Promise.all(
     [...candidates.values()]
-      .filter((facility) => facility.locationType === "station")
+      .filter(
+        (facility): facility is FacilityCandidate & { locationId: number } =>
+          facility.locationType === "station" && facility.locationId !== undefined,
+      )
       .map(
         async (facility) =>
           [
@@ -270,7 +253,10 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
     ]),
   );
   const facilities = [...candidates.values()].map((facility) => {
-    const stationServices = metadataById.get(facility.locationId)?.data?.services;
+    const stationServices =
+      facility.locationId === undefined
+        ? undefined
+        : metadataById.get(facility.locationId)?.data?.services;
     const services =
       facility.services
       ?? stationServices?.flatMap((service) =>
@@ -287,27 +273,28 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
       facility.securityStatus,
     );
     const activities = emptyActivities();
-    const jobTypes = facility.jobTypes ?? {};
+    const requestActivities = facility.activities;
     activities.reprocessing.available =
       facility.locationType === "structure"
-        ? true
-        : (services?.some((service) => service.name.toLowerCase().includes("reprocess")) ?? false);
+        ? requestActivities.reprocessing.available
+        : (services?.some((service) => service.name.toLowerCase().includes("reprocess")) ?? false)
+          && requestActivities.reprocessing.available;
     activities.manufacturing.available =
       facility.locationType === "structure"
         ? (serviceIsOnline(services, "manufact") || services === undefined)
-          && facility.allowStandardBuilds !== false
-        : serviceIsOnline(services, "factory") && facility.allowStandardBuilds !== false;
+          && requestActivities.manufacturing.available
+        : serviceIsOnline(services, "factory") && requestActivities.manufacturing.available;
     activities.reactions.available =
       facility.locationType === "structure"
       && reactionSettingsAllowed
-      && facility.allowReactionBuilds !== false;
+      && requestActivities.reactions.available;
     activities.meResearch.available =
       (facility.locationType === "structure" ? true : serviceIsOnline(services, "laboratory"))
-      && facility.allowResearch !== false;
+      && requestActivities.meResearch.available;
     activities.teResearch.available = activities.meResearch.available;
     activities.invention.available =
       (facility.locationType === "structure" ? true : serviceIsOnline(services, "laboratory"))
-      && facility.allowInvention !== false;
+      && requestActivities.invention.available;
     activities.copying.available = activities.meResearch.available;
     for (const activity of Object.values(activities)) {
       activity.materialConsumption = bonusResult.manufacturing.material.percentage;
@@ -328,6 +315,7 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
             reprocessingRigTypeId(typeDogma, facility.rigTypeIds),
           ).normalOre / 100;
     activities.reprocessing.baseYield = reprocessingYield;
+    activities.reprocessing.taxRate = requestActivities.reprocessing.taxRate;
     activities.manufacturing.jobDuration = bonusResult.manufacturing.time.percentage;
     activities.manufacturing.materialConsumption = bonusResult.manufacturing.material.percentage;
     activities.manufacturing.jobCost = bonusResult.manufacturing.cost.percentage;
@@ -345,29 +333,31 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
     activities.reactions.rawJobCostMultiplier = bonusResult.reactions.cost.rawMultiplier;
     activities.manufacturing.standard = {
       available: activities.manufacturing.available,
-      ...(jobTypes.standard === undefined ? {} : { taxRate: jobTypes.standard }),
+      taxRate: requestActivities.manufacturing.standard.taxRate,
     };
     activities.manufacturing.capital = {
-      available: activities.manufacturing.available && facility.allowCapitalBuilds === true,
-      ...(jobTypes.capital === undefined ? {} : { taxRate: jobTypes.capital }),
+      available:
+        activities.manufacturing.available && requestActivities.manufacturing.capital.available,
+      taxRate: requestActivities.manufacturing.capital.taxRate,
     };
     activities.reactions.biochemical = {
-      available: activities.reactions.available && facility.allowBiochemicalReactions !== false,
-      ...(jobTypes.biochemical === undefined ? {} : { taxRate: jobTypes.biochemical }),
+      available:
+        activities.reactions.available && requestActivities.reactions.biochemical.available,
+      taxRate: requestActivities.reactions.biochemical.taxRate,
     };
     activities.reactions.composite = {
-      available: activities.reactions.available && facility.allowCompositeReactions !== false,
-      ...(jobTypes.composite === undefined ? {} : { taxRate: jobTypes.composite }),
+      available: activities.reactions.available && requestActivities.reactions.composite.available,
+      taxRate: requestActivities.reactions.composite.taxRate,
     };
     activities.reactions.hybrid = {
-      available: activities.reactions.available && facility.allowHybridReactions !== false,
-      ...(jobTypes.hybrid === undefined ? {} : { taxRate: jobTypes.hybrid }),
+      available: activities.reactions.available && requestActivities.reactions.hybrid.available,
+      taxRate: requestActivities.reactions.hybrid.taxRate,
     };
-    activities.invention.taxRate = jobTypes.invention;
-    activities.meResearch.taxRate = jobTypes.research;
-    activities.teResearch.taxRate = jobTypes.research;
+    activities.invention.taxRate = requestActivities.invention.taxRate;
+    activities.meResearch.taxRate = requestActivities.meResearch.taxRate;
+    activities.teResearch.taxRate = requestActivities.teResearch.taxRate;
     return {
-      id: facility.locationId,
+      id: facility.id,
       name:
         facility.name
         || types.get(facility.typeId ?? 0)?.name.en

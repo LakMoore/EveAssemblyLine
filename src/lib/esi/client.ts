@@ -213,9 +213,12 @@ export async function requestCachedEsi<T>(
   if (!options.bypassCache) {
     const cached = await getCachedEsiResponse<T>(cachePath);
     if (cached) {
+      const cachedHeaders = new Headers(cached.headers);
+      // ETags are process-local validators and must stay paired with the in-memory body.
+      cachedHeaders.delete("etag");
       return {
         data: cached.data,
-        headers: new Headers(cached.headers),
+        headers: cachedHeaders,
         status: cached.status,
         fromCache: true,
       };
@@ -324,11 +327,14 @@ export async function requestCachedEsi<T>(
     );
   }
   if (!options.skipCacheWrite) {
+    const sharedHeaders = Object.fromEntries(
+      [...response.headers.entries()].filter(([name]) => name.toLowerCase() !== "etag"),
+    );
     await setCachedEsiResponse(
       cachePath,
       {
         data,
-        headers: Object.fromEntries(response.headers.entries()),
+        headers: sharedHeaders,
         status: response.status,
       },
       response.headers.get("expires"),

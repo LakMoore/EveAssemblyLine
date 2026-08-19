@@ -28,6 +28,12 @@ function getPublicOrigin(request: Request, callbackUrl: string) {
   return `${forwardedProtocol}://${forwardedHost}`;
 }
 
+function getReturnUrl(request: Request, pendingReturnPath: string | undefined) {
+  const returnUrl = new URL(pendingReturnPath ?? "/", getPublicOrigin(request, ""));
+  returnUrl.searchParams.set("refresh", "1");
+  return returnUrl.toString();
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
@@ -51,6 +57,14 @@ export async function GET(request: Request) {
   try {
     const tokenSet = await exchangeCodeForTokens(code, pending.codeVerifier, pending.redirectUri);
     const identity = await validateToken(tokenSet.accessToken);
+    if (pending.reauthorizeCharacterId && identity.characterId !== pending.reauthorizeCharacterId) {
+      return NextResponse.json(
+        {
+          error: "The authenticated EVE character does not match the character being reauthorized.",
+        },
+        { status: 400 },
+      );
+    }
     tokenSet.scopes = identity.scopes.length > 0 ? identity.scopes : pending.scopes;
     const existingCharacter = await getCharacter(identity.characterId);
     const existingSession = pending.sessionId ? await getSession(pending.sessionId) : null;
@@ -76,7 +90,8 @@ export async function GET(request: Request) {
         },
       );
       const response = NextResponse.redirect(
-        `${getPublicOrigin(request, pending.redirectUri)}/characters?merge=1`,
+        `${getPublicOrigin(request, pending.redirectUri)}${pending.returnPath ?? "/characters"}`
+          + `${pending.returnPath?.includes("?") ? "&" : "?"}merge=1`,
       );
       response.cookies.set(
         "assembly_line_merge",
@@ -116,9 +131,7 @@ export async function GET(request: Request) {
     });
     if (!session.collectionId) session.collectionId = resolvedCollectionId;
     await saveSession(session);
-    const response = NextResponse.redirect(
-      `${getPublicOrigin(request, pending.redirectUri)}/?refresh=1`,
-    );
+    const response = NextResponse.redirect(getReturnUrl(request, pending.returnPath));
     setSessionCookie(response, session.sessionId);
     response.cookies.set("assembly_line_sso_state", "", { httpOnly: true, path: "/", maxAge: 0 });
     return response;

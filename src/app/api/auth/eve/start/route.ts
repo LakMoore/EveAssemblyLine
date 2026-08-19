@@ -18,7 +18,21 @@ function getPublicOrigin(request: Request) {
   return `${forwardedProtocol}://${forwardedHost}`;
 }
 
+function getReturnPath(request: Request) {
+  const referer = request.headers.get("referer");
+  if (!referer) return "/";
+  try {
+    const refererUrl = new URL(referer);
+    if (refererUrl.origin !== getPublicOrigin(request)) return "/";
+    return `${refererUrl.pathname}${refererUrl.search}`;
+  }
+  catch {
+    return "/";
+  }
+}
+
 export async function GET(request: Request) {
+  const requestedCharacterId = Number(new URL(request.url).searchParams.get("characterId"));
   const state = randomUUID();
   const codeVerifier = createCodeVerifier();
   const redirectUri =
@@ -31,6 +45,10 @@ export async function GET(request: Request) {
       redirectUri,
       codeVerifier,
       sessionId,
+      returnPath: getReturnPath(request),
+      ...(Number.isInteger(requestedCharacterId) && requestedCharacterId > 0
+        ? { reauthorizeCharacterId: requestedCharacterId }
+        : {}),
       expiresAt: new Date(Date.now() + pendingAuthTtlMs).toISOString(),
     },
   );

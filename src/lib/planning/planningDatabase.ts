@@ -5,6 +5,7 @@ export const buildStoreName = "build-lists";
 export const stockStoreName = "stock";
 export const structureStoreName = "structures";
 export const compressSettingsStoreName = "compress-settings";
+export const plannerPreferencesStoreName = "planner-preferences";
 export const stockMetadataStoreName = "stock-metadata";
 export const endpointCacheStoreName = "endpoint-cache";
 
@@ -20,6 +21,7 @@ function openDatabase() {
         stockStoreName,
         structureStoreName,
         compressSettingsStoreName,
+        plannerPreferencesStoreName,
         stockMetadataStoreName,
         endpointCacheStoreName,
       ]) {

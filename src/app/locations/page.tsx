@@ -445,6 +445,7 @@ export default function LocationsPage() {
         ?? (esiStructure.rigs.length > 0 ? esiStructure.rigs : ["No Rig", "No Rig", "No Rig"]),
       allowStandardBuilds: localOverride?.allowStandardBuilds,
       allowCapitalBuilds: localOverride?.allowCapitalBuilds,
+      allowReprocessing: localOverride?.allowReprocessing,
       allowReactionBuilds: localOverride?.allowReactionBuilds,
       allowBiochemicalReactions: localOverride?.allowBiochemicalReactions,
       allowCompositeReactions: localOverride?.allowCompositeReactions,
@@ -468,7 +469,7 @@ export default function LocationsPage() {
 
   return (
     <>
-      <div className={styles.pageIntro}>
+      <div className={`${styles.pageIntro} ${styles.locationsPageIntro}`}>
         <div>
           <p className={styles.eyebrow}>CONFIGURATION / OPERATIONS</p>
           <h1>Locations</h1>
@@ -476,6 +477,75 @@ export default function LocationsPage() {
             Choose operational sites and maintain the structures you use.
           </p>
         </div>
+      </div>
+      <div className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <div>
+            <p className={styles.panelKicker}>01 / STRUCTURES</p>
+            <h2>Known structures</h2>
+          </div>
+          <button
+            type="button"
+            className={`actionButton ${styles.importButton}`}
+            onClick={openAddDialog}
+            disabled={structureTypes.length === 0}
+          >
+            <Plus aria-hidden="true" />
+            <span>Add structure</span>
+          </button>
+        </div>
+        {unmatchedKnownStructures.length === 0 ? (
+          <div className={styles.emptyBuildList}>
+            All known structures with assets are listed above. Add a structure to make it available
+            in Stock.
+          </div>
+        ) : (
+          <div className={styles.knownStructureList}>
+            {unmatchedKnownStructures.map((structure) => (
+              <div className={styles.knownStructure} key={structure.id}>
+                <span>
+                  <strong>
+                    {structure.systemName} - {structure.name}
+                  </strong>
+                  <span className={styles.knownStructureMeta}>
+                    <small>
+                      <span>{structure.type}</span>
+                      <span>{structure.size}</span>
+                      {structure.rigs.length > 0 && (
+                        <span>
+                          {structure.rigs.filter((rig) => rig !== "No Rig").length} rig
+                          {structure.rigs.filter((rig) => rig !== "No Rig").length === 1 ? "" : "s"}
+                        </span>
+                      )}
+                    </small>
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className={`actionButton ${styles.importButton}`}
+                  aria-label={`Edit ${structure.name}`}
+                  title={`Edit ${structure.name}`}
+                  onClick={() => {
+                    setEditingStructure(structure);
+                    setIsDialogOpen(true);
+                  }}
+                >
+                  <Pencil aria-hidden="true" />
+                  <span className={styles.structureActionLabel}>Edit</span>
+                </button>
+                <button
+                  type="button"
+                  className={`actionButton ${styles.remove}`}
+                  aria-label={`Remove ${structure.name}`}
+                  onClick={() => removeStructure(structure.id)}
+                >
+                  <Trash2 aria-hidden="true" />
+                  <span className={styles.structureActionLabel}>Delete</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <div className={styles.panel}>
         <div className={styles.panelHeader}>
@@ -570,75 +640,6 @@ export default function LocationsPage() {
           </div>
         )}
       </div>
-      <div className={styles.panel}>
-        <div className={styles.panelHeader}>
-          <div>
-            <p className={styles.panelKicker}>01 / STRUCTURES</p>
-            <h2>Known structures</h2>
-          </div>
-          <button
-            type="button"
-            className={`actionButton ${styles.importButton}`}
-            onClick={openAddDialog}
-            disabled={structureTypes.length === 0}
-          >
-            <Plus aria-hidden="true" />
-            <span>Add structure</span>
-          </button>
-        </div>
-        {unmatchedKnownStructures.length === 0 ? (
-          <div className={styles.emptyBuildList}>
-            All known structures with assets are listed above. Add a structure to make it available
-            in Stock.
-          </div>
-        ) : (
-          <div className={styles.knownStructureList}>
-            {unmatchedKnownStructures.map((structure) => (
-              <div className={styles.knownStructure} key={structure.id}>
-                <span>
-                  <strong>
-                    {structure.systemName} - {structure.name}
-                  </strong>
-                  <span className={styles.knownStructureMeta}>
-                    <small>
-                      <span>{structure.type}</span>
-                      <span>{structure.size}</span>
-                      {structure.rigs.length > 0 && (
-                        <span>
-                          {structure.rigs.filter((rig) => rig !== "No Rig").length} rig
-                          {structure.rigs.filter((rig) => rig !== "No Rig").length === 1 ? "" : "s"}
-                        </span>
-                      )}
-                    </small>
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  className={`actionButton ${styles.importButton}`}
-                  aria-label={`Edit ${structure.name}`}
-                  title={`Edit ${structure.name}`}
-                  onClick={() => {
-                    setEditingStructure(structure);
-                    setIsDialogOpen(true);
-                  }}
-                >
-                  <Pencil aria-hidden="true" />
-                  <span className={styles.structureActionLabel}>Edit</span>
-                </button>
-                <button
-                  type="button"
-                  className={`actionButton ${styles.remove}`}
-                  aria-label={`Remove ${structure.name}`}
-                  onClick={() => removeStructure(structure.id)}
-                >
-                  <Trash2 aria-hidden="true" />
-                  <span className={styles.structureActionLabel}>Delete</span>
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
       {isDialogOpen && (
         <StructureDialog
           language={language}
@@ -708,6 +709,7 @@ function StructureDialog({
   const [allowCapitalBuilds, setAllowCapitalBuilds] = useState(
     structure?.allowCapitalBuilds ?? false,
   );
+  const [allowReprocessing, setAllowReprocessing] = useState(structure?.allowReprocessing ?? true);
   const [allowReactionBuilds, setAllowReactionBuilds] = useState(
     structure?.allowReactionBuilds ?? true,
   );
@@ -723,18 +725,23 @@ function StructureDialog({
   const [allowInvention, setAllowInvention] = useState(structure?.allowInvention ?? true);
   const [allowResearch, setAllowResearch] = useState(structure?.allowResearch ?? true);
   const [jobTypes, setJobTypes] = useState(() => ({
-    standard: structure?.jobTypes?.standard ?? 0,
-    capital: structure?.jobTypes?.capital ?? 0,
-    reactions: structure?.jobTypes?.reactions ?? 0,
-    biochemical: structure?.jobTypes?.biochemical ?? 0,
-    composite: structure?.jobTypes?.composite ?? 0,
-    hybrid: structure?.jobTypes?.hybrid ?? 0,
-    invention: structure?.jobTypes?.invention ?? 0,
-    research: structure?.jobTypes?.research ?? 0,
+    standard: String(structure?.jobTypes?.standard ?? 0),
+    capital: String(structure?.jobTypes?.capital ?? 0),
+    reprocessing: String(structure?.jobTypes?.reprocessing ?? 0),
+    reactions: String(structure?.jobTypes?.reactions ?? 0),
+    biochemical: String(structure?.jobTypes?.biochemical ?? 0),
+    composite: String(structure?.jobTypes?.composite ?? 0),
+    hybrid: String(structure?.jobTypes?.hybrid ?? 0),
+    invention: String(structure?.jobTypes?.invention ?? 0),
+    research: String(structure?.jobTypes?.research ?? 0),
   }));
-  const taxRate = (jobType: keyof typeof jobTypes) => jobTypes[jobType].toFixed(1);
+  const taxRate = (jobType: keyof typeof jobTypes) => jobTypes[jobType];
+  const numericTaxRate = (jobType: keyof typeof jobTypes) => {
+    const value = Number(jobTypes[jobType]);
+    return Number.isFinite(value) && value >= 0 ? value : 0;
+  };
   const setTaxRate = (jobType: keyof typeof jobTypes, value: string) => {
-    setJobTypes((current) => ({ ...current, [jobType]: Number(value) || 0 }));
+    setJobTypes((current) => ({ ...current, [jobType]: value }));
   };
   const selectedType = structureTypes.find((structureType) => structureType.name === type);
   const reactionsAllowed = supportsReactionSettings(
@@ -782,15 +789,15 @@ function StructureDialog({
     event.preventDefault();
     if (!system || !name.trim() || !selectedType) return;
     const savedJobTypes = {
-      ...jobTypes,
-      standard: jobTypes.standard,
-      capital: jobTypes.capital,
-      reactions: jobTypes.reactions,
-      biochemical: reactionsAllowed ? jobTypes.biochemical : 0,
-      composite: reactionsAllowed ? jobTypes.composite : 0,
-      hybrid: reactionsAllowed ? jobTypes.hybrid : 0,
-      invention: jobTypes.invention,
-      research: jobTypes.research,
+      standard: numericTaxRate("standard"),
+      capital: numericTaxRate("capital"),
+      reprocessing: numericTaxRate("reprocessing"),
+      reactions: numericTaxRate("reactions"),
+      biochemical: reactionsAllowed ? numericTaxRate("biochemical") : 0,
+      composite: reactionsAllowed ? numericTaxRate("composite") : 0,
+      hybrid: reactionsAllowed ? numericTaxRate("hybrid") : 0,
+      invention: numericTaxRate("invention"),
+      research: numericTaxRate("research"),
     };
     const reactionSettings = reactionsAllowed
       ? {
@@ -817,6 +824,7 @@ function StructureDialog({
       rigTypeIds: rigs.map((rig) => rigTypeIdsByName[rig] ?? 0),
       allowStandardBuilds,
       allowCapitalBuilds,
+      allowReprocessing,
       allowReactionBuilds,
       allowInvention,
       allowResearch,
@@ -957,6 +965,31 @@ function StructureDialog({
             <span />
             <span>ENABLED</span>
             <span>TAX RATE</span>
+          </div>
+          <div className={styles.constructionGridRow}>
+            <span>REPROCESSING</span>
+            <button
+              type="button"
+              className={styles.stockSwitch}
+              role="switch"
+              aria-checked={allowReprocessing}
+              aria-label="Enable reprocessing"
+              onClick={() => setAllowReprocessing((current) => !current)}
+            >
+              <span className={styles.stockSwitchThumb} />
+            </button>
+            <div className={styles.constructionTaxField}>
+              <input
+                className={styles.constructionTaxInput}
+                aria-label="Reprocessing tax rate"
+                type="number"
+                min="0"
+                step="0.1"
+                value={taxRate("reprocessing")}
+                onChange={(event) => setTaxRate("reprocessing", event.target.value)}
+              />
+              <span>%</span>
+            </div>
           </div>
           <div className={styles.constructionGridRow}>
             <span>STANDARD MANUFACTURING</span>

@@ -1,4 +1,5 @@
 import {
+  emptyActivitiesRequest,
   emptyFacilitySettings,
   facilitySettingsKey,
   facilitySettingsName,
@@ -9,6 +10,7 @@ import {
 } from "./facilities";
 import type { KnownStructure } from "./preferences";
 import { loadEndpointRecord, saveEndpointResponse } from "@/lib/client/refreshCache";
+import { loadClientSession } from "@/lib/client/requestCache";
 
 const localStorageKey = "assembly-line-facilities";
 
@@ -34,6 +36,7 @@ function cacheFacilities(payload: FacilitySettingsPayload) {
 export async function fetchFacilities(): Promise<FacilitySettingsPayload> {
   const cached = loadCachedFacilities();
   try {
+    if (!(await loadClientSession()).authenticated) return cached;
     const response = await fetch("/api/facilities", { credentials: "same-origin" });
     if (!response.ok) return cached;
     const serverResponse = (await response.json()) as FacilityResponse | FacilitySettingsPayload;
@@ -54,6 +57,7 @@ export async function fetchFacilityResponse(force = false): Promise<FacilityResp
     if (cached) return cached.data;
   }
   try {
+    if (!(await loadClientSession()).authenticated) return null;
     const response = await fetch("/api/facilities", { credentials: "same-origin" });
     if (!response.ok) return null;
     const data = (await response.json()) as FacilityResponse;
@@ -77,29 +81,65 @@ export function facilitySettingsFromStructures(
     if (!structure.systemId || rigTypeIds.length === 0) continue;
     const name = facilitySettingsName(structure.systemName, structure.name);
     const reactionsAllowed = supportsReactionSettings(structure.typeId, structure.securityStatus);
+    const jobTypes = structure.jobTypes ?? {};
     payload.facilities[facilitySettingsKey(structure.systemId, name)] = {
       locationId: structure.esiStructureId,
       systemId: structure.systemId,
       name,
       typeId: structure.typeId,
       rigTypeIds,
-      allowStandardBuilds: structure.allowStandardBuilds !== false,
-      allowReactionBuilds: reactionsAllowed && structure.allowReactionBuilds !== false,
-      allowBiochemicalReactions:
-        reactionsAllowed
-        && (structure.allowBiochemicalReactions ?? structure.allowReactionBuilds !== false),
-      allowCompositeReactions:
-        reactionsAllowed
-        && (structure.allowCompositeReactions ?? structure.allowReactionBuilds !== false),
-      allowHybridReactions:
-        reactionsAllowed
-        && (structure.allowHybridReactions ?? structure.allowReactionBuilds !== false),
-      allowInvention: structure.allowInvention !== false,
-      allowResearch: structure.allowResearch !== false,
-      ...(structure.jobTypes ? { jobTypes: structure.jobTypes } : {}),
-      ...(structure.allowCapitalBuilds === undefined
-        ? {}
-        : { allowCapitalBuilds: structure.allowCapitalBuilds }),
+      activities: {
+        ...emptyActivitiesRequest,
+        reprocessing: {
+          available: structure.allowReprocessing !== false,
+          taxRate: jobTypes.reprocessing ?? 0,
+        },
+        manufacturing: {
+          available: structure.allowStandardBuilds !== false,
+          standard: {
+            available: structure.allowStandardBuilds !== false,
+            taxRate: jobTypes.standard ?? 0,
+          },
+          capital: {
+            available: structure.allowCapitalBuilds === true,
+            taxRate: jobTypes.capital ?? 0,
+          },
+        },
+        reactions: {
+          available: reactionsAllowed && structure.allowReactionBuilds !== false,
+          biochemical: {
+            available:
+              reactionsAllowed
+              && (structure.allowBiochemicalReactions ?? structure.allowReactionBuilds !== false),
+            taxRate: jobTypes.biochemical ?? 0,
+          },
+          composite: {
+            available:
+              reactionsAllowed
+              && (structure.allowCompositeReactions ?? structure.allowReactionBuilds !== false),
+            taxRate: jobTypes.composite ?? 0,
+          },
+          hybrid: {
+            available:
+              reactionsAllowed
+              && (structure.allowHybridReactions ?? structure.allowReactionBuilds !== false),
+            taxRate: jobTypes.hybrid ?? 0,
+          },
+        },
+        meResearch: {
+          available: structure.allowResearch !== false,
+          taxRate: jobTypes.research ?? 0,
+        },
+        teResearch: {
+          available: structure.allowResearch !== false,
+          taxRate: jobTypes.research ?? 0,
+        },
+        invention: {
+          available: structure.allowInvention !== false,
+          taxRate: jobTypes.invention ?? 0,
+        },
+        copying: { available: structure.allowResearch !== false, taxRate: jobTypes.research ?? 0 },
+      },
       ...(structure.settingsLastModified === undefined
         ? {}
         : { settingsLastModified: structure.settingsLastModified }),
@@ -113,6 +153,7 @@ export async function publishFacilities(
 ): Promise<FacilitySettingsPayload> {
   cacheFacilities(payload);
   try {
+    if (!(await loadClientSession()).authenticated) return payload;
     const response = await fetch(
       "/api/facilities",
       {

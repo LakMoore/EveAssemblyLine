@@ -9,6 +9,7 @@ import { useToast } from "./ToastProvider";
 type TypeIdentityProps = {
   name: string;
   typeName?: string;
+  subline?: string;
   typeId: number;
   imageSize?: number;
   variation?: "icon" | "render" | "bp" | "bpc";
@@ -19,6 +20,7 @@ type TypeIdentityProps = {
 export default function TypeIdentity({
   name,
   typeName,
+  subline,
   typeId,
   imageSize = 32,
   variation = "icon",
@@ -68,6 +70,7 @@ export default function TypeIdentity({
         >
           {typeName ? `${typeName} · ` : ""}Type ID {typeId}
         </button>
+        {subline && <small className={styles.subline}>{subline}</small>}
       </span>
     </div>
   );

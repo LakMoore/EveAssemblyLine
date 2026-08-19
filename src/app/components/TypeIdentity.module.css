@@ -43,6 +43,12 @@
   font: 9px "DM Mono";
 }
 
+.subline {
+  margin-top: 3px;
+  color: #78959e;
+  font: 9px "DM Mono";
+}
+
 .name:hover,
 .name:focus-visible,
 .typeId:hover,

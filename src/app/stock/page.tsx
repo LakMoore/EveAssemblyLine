@@ -19,12 +19,11 @@ import TypeIdentity from "../components/TypeIdentity";
 import styles from "../page.module.css";
 import {
   Atom,
-  Beaker,
+  ChartLine,
   Clipboard,
   Factory,
   FileBox,
   Files,
-  FileText,
   Package,
   Plus,
   ShoppingCart,
@@ -649,8 +648,8 @@ function AddLocationModal({
 }
 
 const stockCategories = [
-  { id: "bpc" as const, label: "Blueprints", icon: FileText },
-  { id: "reaction" as const, label: "Reaction formulas", icon: Beaker },
+  { id: "bpc" as const, label: "Blueprints", icon: FileBox },
+  { id: "reaction" as const, label: "Reaction formulas", icon: Atom },
   { id: "item" as const, label: "Items", icon: Package },
 ];
 
@@ -684,6 +683,39 @@ function StockLocationCard({
       .map((item) => item.jobId)
       .filter((jobId): jobId is number => jobId !== undefined),
   ).size;
+  const stockMetrics = [
+    ...stockCategories.map((category) => {
+      const items = location.items.filter((item) =>
+        category.id === "bpc"
+          ? isBlueprintStockItem(item)
+          : (item.category ?? "item") === category.id,
+      );
+      return {
+        ...category,
+        count: items.length,
+        detail: isVolumesLoading
+          ? "Calculating..."
+          : formatVolume(items.reduce((total, item) => total + stockItemVolume(item), 0)),
+        filter: { kind: "category" as const, value: category.id },
+      };
+    }),
+    {
+      id: "sales",
+      label: "Sales",
+      icon: ChartLine,
+      count: sellOrderCount,
+      detail: "Sell orders",
+      filter: { kind: "sales" as const },
+    },
+    {
+      id: "jobs",
+      label: "Jobs",
+      icon: Factory,
+      count: installedJobCount,
+      detail: "Installed jobs",
+      filter: { kind: "jobs" as const },
+    },
+  ].filter((metric) => metric.count > 0);
   return (
     <article className={styles.stockCard}>
       <div className={styles.stockCardHeading}>
@@ -717,55 +749,25 @@ function StockLocationCard({
         )}
       </div>
       <div className={styles.stockCardTotals}>
-        {stockCategories.map((category) => {
-          const items = location.items.filter((item) =>
-            category.id === "bpc"
-              ? isBlueprintStockItem(item)
-              : (item.category ?? "item") === category.id,
-          );
-          const volume = items.reduce((total, item) => total + stockItemVolume(item), 0);
-          return (
+        {stockMetrics.length === 0 ? (
+          <p className={styles.stockMetricsEmpty}>No stock metrics available</p>
+        ) : (
+          stockMetrics.map((metric) => (
             <button
               type="button"
               className={styles.stockMetric}
-              key={category.id}
-              onClick={() => onView(location, { kind: "category", value: category.id })}
+              key={metric.id}
+              onClick={() => onView(location, metric.filter)}
             >
               <span>
-                <category.icon aria-hidden="true" />
-                {category.label}
+                <metric.icon aria-hidden="true" />
+                {metric.label}
               </span>
-              <strong>{items.length.toLocaleString()}</strong>
-              <small>
-                {isVolumesLoading ? "Calculating..." : `${formatVolume(volume)} Volume`}
-              </small>
+              <strong>{metric.count.toLocaleString()}</strong>
+              <small>{metric.detail}</small>
             </button>
-          );
-        })}
-        <button
-          type="button"
-          className={styles.stockMetric}
-          onClick={() => onView(location, { kind: "sales" })}
-        >
-          <span>
-            <ShoppingCart aria-hidden="true" />
-            Sales
-          </span>
-          <strong>{sellOrderCount.toLocaleString()}</strong>
-          <small>Sell orders</small>
-        </button>
-        <button
-          type="button"
-          className={styles.stockMetric}
-          onClick={() => onView(location, { kind: "jobs" })}
-        >
-          <span>
-            <Factory aria-hidden="true" />
-            Jobs
-          </span>
-          <strong>{installedJobCount.toLocaleString()}</strong>
-          <small>Installed jobs</small>
-        </button>
+          ))
+        )}
       </div>
       <div className={styles.stockMarketCategories}>
         {marketCategories.length === 0 ? (
@@ -979,6 +981,7 @@ function ViewItemsModal({
                     <div className={styles.stockIdentityStack}>
                       <TypeIdentity
                         name={item.name}
+                        subline={showCategory ? categoryLabel : undefined}
                         typeId={item.typeId}
                         imageSize={40}
                         className={styles.stockTypeIdentity}
@@ -987,9 +990,6 @@ function ViewItemsModal({
                           isBlueprintStockItem(item) ? (bpoCount > 0 ? "bpo" : "bpc") : undefined
                         }
                       />
-                      {showCategory && (
-                        <small className={styles.stockAggregateCategory}>{categoryLabel}</small>
-                      )}
                     </div>
                     {isBlueprint ? (
                       <div className={styles.stockAggregateList}>

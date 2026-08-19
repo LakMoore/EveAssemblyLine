@@ -38,6 +38,7 @@ type EndpointStatus = {
   nextRefreshAllowed?: string;
   rateLimitedUntil?: string;
   error?: string;
+  reauthorizeRequired?: boolean;
 };
 
 type CharacterStatus = ClientCharacterStatus;
@@ -66,7 +67,9 @@ function renderedStatus(status: EndpointStatus | undefined): EndpointStatus | un
 function statusLabel(status: EndpointStatus | undefined, noAccess = false) {
   if (noAccess) return "No Access";
   const currentStatus = renderedStatus(status);
-  if (currentStatus?.status === "error") return "Reauthorize required";
+  if (currentStatus?.status === "error") {
+    return currentStatus.reauthorizeRequired ? "Reauthorize required" : "Refresh failed";
+  }
   if (!currentStatus || !currentStatus.hasBody) return "Unknown";
   if (
     currentStatus.status !== "rate_limited"
@@ -82,13 +85,22 @@ function statusLabel(status: EndpointStatus | undefined, noAccess = false) {
 
 function statusClass(status: EndpointStatus | undefined) {
   const currentStatus = renderedStatus(status);
-  if (!currentStatus || !currentStatus.hasBody) return styles.statusError;
+  if (!currentStatus || !currentStatus.hasBody) return styles.statusCached;
   if (currentStatus.status === "fresh") return styles.statusFresh;
   if (currentStatus.status === "stale") return styles.statusError;
   if (currentStatus.status === "rate_limited" || currentStatus.status === "error") {
     return styles.statusError;
   }
   return styles.statusCached;
+}
+
+function statusIndicator(status: EndpointStatus | undefined, isRefreshing: boolean) {
+  return (
+    <span
+      className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(status)}`}
+      aria-label={isRefreshing ? "Refreshing" : undefined}
+    />
+  );
 }
 
 function availabilityLabel(status?: EndpointStatus) {
@@ -136,6 +148,10 @@ function missingScopes(statuses: CharacterStatus[]) {
   ];
 }
 
+function personalEndpointStatuses(status: CharacterStatus) {
+  return [status.assets, status.skills, status.blueprints, status.jobs, status.orders];
+}
+
 async function refreshStockAfterCharacterRemoval() {
   const savedLanguage = window.localStorage.getItem(languageStorageKey);
   const language: SdeLanguage = isSdeLanguage(savedLanguage) ? savedLanguage : "en";
@@ -180,6 +196,7 @@ export default function CharactersPage() {
   const [statuses, setStatuses] = useState<CharacterStatus[]>([]);
   const [, setFreshnessTick] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [removingId, setRemovingId] = useState<number | null>(null);
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
   const [selectedCorporationId, setSelectedCorporationId] = useState<number | null>(null);
@@ -210,11 +227,17 @@ export default function CharactersPage() {
       .catch(() => setError("Could not reach the character service."))
       .finally(() => setIsLoading(false));
     const freshnessTimer = window.setInterval(() => setFreshnessTick((tick) => tick + 1), 5_000);
-    const handleRefresh = () => void loadStatuses(true);
-    window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
+    const handleRefreshStarted = () => setIsRefreshing(true);
+    const handleRefreshFinished = () => {
+      setIsRefreshing(false);
+      void loadStatuses(true);
+    };
+    window.addEventListener("assembly-line-esi-refresh-started", handleRefreshStarted);
+    window.addEventListener("assembly-line-esi-refresh-finished", handleRefreshFinished);
     return () => {
       window.clearInterval(freshnessTimer);
-      window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
+      window.removeEventListener("assembly-line-esi-refresh-started", handleRefreshStarted);
+      window.removeEventListener("assembly-line-esi-refresh-finished", handleRefreshFinished);
     };
   }, []);
 
@@ -331,21 +354,18 @@ export default function CharactersPage() {
   });
   const scopes = missingScopes(statuses);
   const hasAuthorizationErrors = statuses.some((status) =>
-    [
-      status.assets,
-      status.skills,
-      status.blueprints,
-      status.jobs,
-      status.orders,
-      ...(status.corporations ?? []).flatMap((corporation) => [
-        corporation.assets,
-        corporation.blueprints,
-        corporation.structures,
-        corporation.jobs,
-        corporation.orders,
-      ]),
-    ].some((endpoint) => endpoint?.status === "error"),
+    personalEndpointStatuses(status).some((endpoint) => endpoint?.reauthorizeRequired),
   );
+  const characterNamesById = new Map(
+    characters.map((character) => [character.characterId, character.characterName]),
+  );
+  const charactersNeedingReauthorization = statuses
+    .filter((status) =>
+      personalEndpointStatuses(status).some((endpoint) => endpoint?.reauthorizeRequired),
+    )
+    .map(
+      (status) => characterNamesById.get(status.characterId) ?? `Character ${status.characterId}`,
+    );
 
   return (
     <>
@@ -369,9 +389,8 @@ export default function CharactersPage() {
       )}
       {hasAuthorizationErrors && (
         <p role="alert" className={styles.importError}>
-          EVE authorization has expired for one or more connected characters. Reauthorize the
-          affected character to restore assets, jobs, and orders.{" "}
-          <Link href="/api/auth/eve/start">Reauthorize character</Link>
+          EVE authorization failed for {charactersNeedingReauthorization.join(", ")}. Reauthorize
+          each affected character to restore personal assets, jobs, and orders.
         </p>
       )}
       {scopes.length > 0 && (
@@ -412,20 +431,9 @@ export default function CharactersPage() {
             </div>
             {characters.map((character) => {
               const status = statuses.find((entry) => entry.characterId === character.characterId);
-              const hasAuthorizationError = [
-                status?.assets,
-                status?.skills,
-                status?.blueprints,
-                status?.jobs,
-                status?.orders,
-                ...(status?.corporations ?? []).flatMap((corporation) => [
-                  corporation.assets,
-                  corporation.blueprints,
-                  corporation.structures,
-                  corporation.jobs,
-                  corporation.orders,
-                ]),
-              ].some((endpoint) => endpoint?.status === "error");
+              const hasAuthorizationError = status
+                ? personalEndpointStatuses(status).some((endpoint) => endpoint?.reauthorizeRequired)
+                : false;
               const hasCorpAccess = character.hasDirectorRole;
               return (
                 <div
@@ -470,7 +478,7 @@ export default function CharactersPage() {
                     title={`Assets: ${availabilityLabel(status?.assets)}${status?.assets?.error ? `; ${status.assets.error}` : ""}${status?.assets?.lastModified ? `; modified ${formatDate(status.assets.lastModified)}` : ""}`}
                   >
                     <small className={styles.endpointName}>ASSETS</small>
-                    <span className={`${styles.statusDot} ${statusClass(status?.assets)}`} />
+                    {statusIndicator(status?.assets, isRefreshing)}
                     <small className={styles.endpointState}>{statusLabel(status?.assets)}</small>
                     <small className={styles.statusDate}>
                       <span className={styles.availabilityWide}>
@@ -486,7 +494,7 @@ export default function CharactersPage() {
                     title={`Skills: ${availabilityLabel(status?.skills)}${status?.skills?.error ? `; ${status.skills.error}` : ""}${status?.skills?.lastModified ? `; modified ${formatDate(status.skills.lastModified)}` : ""}`}
                   >
                     <small className={styles.endpointName}>SKILLS</small>
-                    <span className={`${styles.statusDot} ${statusClass(status?.skills)}`} />
+                    {statusIndicator(status?.skills, isRefreshing)}
                     <small className={styles.endpointState}>{statusLabel(status?.skills)}</small>
                     <small className={styles.statusDate}>
                       <span className={styles.availabilityWide}>
@@ -502,7 +510,7 @@ export default function CharactersPage() {
                     title={`Blueprints: ${availabilityLabel(status?.blueprints)}${status?.blueprints?.error ? `; ${status.blueprints.error}` : ""}${status?.blueprints?.lastModified ? `; modified ${formatDate(status.blueprints.lastModified)}` : ""}`}
                   >
                     <small className={styles.endpointName}>BLUEPRINTS</small>
-                    <span className={`${styles.statusDot} ${statusClass(status?.blueprints)}`} />
+                    {statusIndicator(status?.blueprints, isRefreshing)}
                     <small className={styles.endpointState}>
                       {statusLabel(status?.blueprints)}
                     </small>
@@ -520,7 +528,7 @@ export default function CharactersPage() {
                     title={`Jobs: ${availabilityLabel(status?.jobs)}${status?.jobs?.error ? `; ${status.jobs.error}` : ""}${status?.jobs?.lastModified ? `; modified ${formatDate(status.jobs.lastModified)}` : ""}`}
                   >
                     <small className={styles.endpointName}>JOBS</small>
-                    <span className={`${styles.statusDot} ${statusClass(status?.jobs)}`} />
+                    {statusIndicator(status?.jobs, isRefreshing)}
                     <small className={styles.endpointState}>{statusLabel(status?.jobs)}</small>
                     <small className={styles.statusDate}>
                       <span className={styles.availabilityWide}>
@@ -536,7 +544,7 @@ export default function CharactersPage() {
                     title={`Orders: ${availabilityLabel(status?.orders)}${status?.orders?.error ? `; ${status.orders.error}` : ""}${status?.orders?.lastModified ? `; modified ${formatDate(status.orders.lastModified)}` : ""}`}
                   >
                     <small className={styles.endpointName}>ORDERS</small>
-                    <span className={`${styles.statusDot} ${statusClass(status?.orders)}`} />
+                    {statusIndicator(status?.orders, isRefreshing)}
                     <small className={styles.endpointState}>{statusLabel(status?.orders)}</small>
                     <small className={styles.statusDate}>
                       <span className={styles.availabilityWide}>
@@ -554,7 +562,9 @@ export default function CharactersPage() {
                         className={`actionButton ${styles.characterReauthorize}`}
                         onClick={(event) => {
                           event.stopPropagation();
-                          window.location.assign("/api/auth/eve/start");
+                          window.location.assign(
+                            `/api/auth/eve/start?characterId=${character.characterId}`,
+                          );
                         }}
                         aria-label={`Re-authorise ${character.characterName}`}
                         title="Re-authorise character"
@@ -665,7 +675,7 @@ export default function CharactersPage() {
                           <small>{endpoint.toUpperCase()}</small>
                           <span>
                             <span
-                              className={`${styles.statusDot} ${statusClass(endpointStatus)}`}
+                              className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
                             />
                             {statusLabel(endpointStatus)}
                           </span>
@@ -841,7 +851,7 @@ export default function CharactersPage() {
                           <span className={styles.endpointStatus} key={endpoint}>
                             <small className={styles.endpointName}>{endpoint.toUpperCase()}</small>
                             <span
-                              className={`${styles.statusDot} ${statusClass(endpointStatus)}`}
+                              className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
                             />
                             <small className={styles.endpointState}>
                               {statusLabel(endpointStatus, corporation.eligible.length === 0)}
@@ -910,7 +920,13 @@ export default function CharactersPage() {
                   </button>
                 </div>
                 <div className={styles.characterModalIdentity}>
-                  <strong>
+                  <strong
+                    className={
+                      corporation.eligible.length === 0
+                        ? styles.characterModalAccessRequired
+                        : undefined
+                    }
+                  >
                     {corporation.eligible.length > 0
                       ? "Director access available"
                       : "Director access required"}
@@ -929,7 +945,7 @@ export default function CharactersPage() {
                           <small>{endpoint.toUpperCase()}</small>
                           <span>
                             <span
-                              className={`${styles.statusDot} ${statusClass(endpointStatus)}`}
+                              className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
                             />
                             {statusLabel(endpointStatus, corporation.eligible.length === 0)}
                           </span>

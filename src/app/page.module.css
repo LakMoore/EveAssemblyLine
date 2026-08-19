@@ -891,7 +891,6 @@
   padding: 18px 0;
   color: #6f8c95;
   font-size: 12px;
-  border-bottom: 1px solid #1b3b44;
 }
 
 .importButton {
@@ -1937,14 +1936,22 @@
 
 .stockCardTotals {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(5, max-content);
+  gap: 12px;
+  overflow-x: auto;
   padding: 15px 0;
+}
+
+.stockMetricsEmpty {
+  grid-column: 1 / -1;
+  padding: 8px 5px;
+  color: #78959e;
+  font: 9px "DM Mono";
 }
 
 .stockMetric {
   display: grid;
-  grid-template-rows: 25px 25px 30px;
+  grid-template-rows: 25px 25px 20px;
   align-content: start;
   min-width: 0;
   padding: 8px 5px;
@@ -1974,7 +1981,11 @@
   line-height: 1.3;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
+  flex-direction: row-reverse;
   gap: 5px;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .stockMetric span svg {
@@ -1987,12 +1998,15 @@
   margin-top: 5px;
   color: #e0eef0;
   font: 16px "DM Mono";
+  text-align: right;
 }
 
 .stockMetric small {
   margin-top: 4px;
   color: #8eb1b9;
   font: 9px "DM Mono";
+  text-align: right;
+  white-space: nowrap;
 }
 
 .stockMarketCategories {
@@ -2912,6 +2926,10 @@
   margin-top: 0;
 }
 
+.locationsPageIntro {
+  margin-bottom: 18px;
+}
+
 .eyebrow {
   color: var(--cyan);
   font: 10px "DM Mono";
@@ -3383,9 +3401,52 @@
   color: var(--cyan);
 }
 
+.locationAlert {
+  display: flex;
+  align-items: center;
+  grid-column: span 2;
+  align-self: stretch;
+  gap: 10px;
+  min-width: 0;
+  min-height: 68px;
+  padding: 11px 13px;
+  border: 1px solid #35606a;
+  background: #0a1a21;
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.locationAlertIcon {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  color: var(--cyan);
+}
+
+.locationAlertContent {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.locationAlertContent strong {
+  font-weight: 700;
+}
+
+.locationAlertContent span {
+  color: var(--muted);
+}
+
+.locationAlert a {
+  color: var(--cyan);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .checkboxOption {
   display: grid !important;
-  align-self: end;
+  align-self: stretch;
   gap: 6px !important;
   min-width: 0;
   min-height: 68px;
@@ -3461,6 +3522,10 @@
   .checkboxOption {
     align-self: auto;
     min-height: 48px;
+  }
+
+  .locationAlert {
+    grid-column: 1;
   }
 }
 
@@ -3707,11 +3772,37 @@
   flex: 0 0 auto;
 }
 
+.statusCell .statusRefreshing {
+  position: relative;
+}
+
 .statusDot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
+}
+
+.statusRefreshing {
+  position: relative;
+  overflow: hidden;
+  background: transparent;
+}
+
+.statusRefreshing::before {
+  position: absolute;
+  inset: 1px;
+  border: 2px solid #5ed8ef55;
+  border-top-color: var(--cyan);
+  border-radius: 50%;
+  animation: statusRefreshSpin 0.8s linear infinite;
+  content: "";
+}
+
+@keyframes statusRefreshSpin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .statusFresh {
@@ -3812,7 +3903,7 @@
   margin-top: 18px;
 }
 
-.characterModalIdentity > strong {
+.characterModalAccessRequired {
   color: #ed6a5a;
 }
 

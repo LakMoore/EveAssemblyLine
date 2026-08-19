@@ -31,6 +31,42 @@ type OptionsRequest = {
 
 let relevantSkillIdsPromise: Promise<number[]> | undefined;
 
+function getReprocessingImplants(
+  types: Awaited<ReturnType<typeof getTypes>>,
+  groups: Awaited<ReturnType<typeof getGroups>>,
+  typeDogma: Awaited<ReturnType<typeof getTypeDogma>>,
+  dogmaAttributes: Awaited<ReturnType<typeof getDogmaAttributes>>,
+  language: SdeLanguage,
+) {
+  const reprocessingGroupId = [...groups.values()].find(
+    (group) => group.name.en === "Cyber Resource Processing",
+  )?._key;
+  const refiningYieldMutatorId = [...dogmaAttributes.values()].find(
+    (attribute) => attribute.name === "refiningYieldMutator",
+  )?._key;
+  if (reprocessingGroupId === undefined || refiningYieldMutatorId === undefined) return [];
+  return [...types.values()]
+    .filter((type) => type.published && type.groupID === reprocessingGroupId)
+    .flatMap((type) => {
+      const level = typeDogma
+        .get(type._key)
+        ?.dogmaAttributes.find(
+          (attribute) => attribute.attributeID === refiningYieldMutatorId,
+        )?.value;
+      return typeof level === "number"
+        ? [
+            {
+              id: `implant:${type._key}`,
+              typeId: type._key,
+              name: type.name[language] ?? type.name.en,
+              level,
+            },
+          ]
+        : [];
+    })
+    .sort((left, right) => left.level - right.level || left.name.localeCompare(right.name));
+}
+
 function getEsiStructureId(locationId: string) {
   if (!locationId.startsWith("structure:")) return undefined;
   const structureId = Number(locationId.slice("structure:".length));
@@ -64,12 +100,13 @@ async function getOptions(
     phaseDurations[name] = Math.round(now - lastPhaseAt);
     lastPhaseAt = now;
   };
-  const [types, systems, typeDogma, dogmaAttributes, stations] = await Promise.all([
+  const [types, systems, typeDogma, dogmaAttributes, stations, groups] = await Promise.all([
     getTypes(),
     getSystems(),
     getTypeDogma(),
     getDogmaAttributes(),
     getStations(),
+    getGroups(),
   ]);
   markPhase("sde");
   const stationAssetLocations = assetLocations.filter(
@@ -202,19 +239,10 @@ async function getOptions(
     }),
   );
   markPhase("characters");
-  const implantLevels: Record<string, number> = { "RX-801": 1, "RX-802": 2, "RX-804": 4 };
-  const implantNames = ["RX-801", "RX-802", "RX-804"].map((name) => {
-    const type = [...types.values()].find((entry) => entry.name.en.endsWith(name));
-    return {
-      id: type ? `implant:${type._key}` : `implant:${name}`,
-      typeId: type?._key,
-      name: type?.name[language] ?? type?.name.en ?? name,
-      level: implantLevels[name],
-    };
-  });
+  const sdeImplants = getReprocessingImplants(types, groups, typeDogma, dogmaAttributes, language);
   const cloneImplantIds = [...new Set(characters.flatMap((character) => character.implants))];
   const cloneImplants = cloneImplantIds
-    .filter((typeId) => !implantNames.some((implant) => implant.typeId === typeId))
+    .filter((typeId) => !sdeImplants.some((implant) => implant.typeId === typeId))
     .map((typeId) => ({
       id: `implant:${typeId}`,
       typeId,
@@ -313,7 +341,7 @@ async function getOptions(
   const response = NextResponse.json({
     characters,
     relevantSkillIds,
-    implants: [{ id: "none", name: "No implant", level: 0 }, ...implantNames, ...cloneImplants],
+    implants: [{ id: "none", name: "No implant", level: 0 }, ...sdeImplants, ...cloneImplants],
   });
   response.headers.set("Server-Timing", timingHeader);
   return response;

@@ -137,6 +137,7 @@ export type ClientEndpointStatus = {
   nextRefreshAllowed?: string;
   rateLimitedUntil?: string;
   error?: string;
+  reauthorizeRequired?: boolean;
 };
 
 let sessionRequest: Promise<ClientSession> | undefined;

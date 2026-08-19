@@ -2,6 +2,7 @@
 
 import { FormEvent, KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type {
   ClientBuildItem,
   PlanResult,
@@ -11,12 +12,12 @@ import type {
 } from "@/lib/planning/types";
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
 import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
-import { loadClientStock } from "@/lib/client/requestCache";
+import { loadPlannerLocations, savePlannerLocations } from "@/lib/planning/plannerPreferencesStore";
+import { loadClientSession, loadClientStock } from "@/lib/client/requestCache";
 import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
 import {
   defaultLocations,
   defaultSettings,
-  locationsStorageKey,
   settingsStorageKey,
   type PlannerLocations,
   type PlannerSettings,
@@ -32,6 +33,7 @@ import {
   Clipboard,
   Copy as CopyIcon,
   Factory,
+  Info,
   Minimize2,
   Microscope,
   TestTubes,
@@ -57,11 +59,21 @@ type PasteResult = {
 type PlanLocationOption = {
   id: string;
   locationId: number;
-  name?: string;
-  baseYield?: number;
-  baseManufacturingMe?: number;
-  baseReactionMe?: number;
+  name: string;
+  baseYield: number;
+  baseManufacturingMe: number;
+  baseReactionMe: number;
 };
+
+function selectSavedLocation(
+  options: PlanLocationOption[],
+  savedLocationId: number | undefined,
+  defaultLocationId: number,
+) {
+  return options.some((location) => location.locationId === savedLocationId)
+    ? savedLocationId!
+    : (options[0]?.locationId ?? defaultLocationId);
+}
 
 function AvailableSourceIcons({ counts }: { counts?: PlanSourceCounts }) {
   const icons = (Object.keys(counts ?? {}) as PlanSourceIcon[]).filter(
@@ -200,16 +212,7 @@ export default function Home() {
   const [stock, setStock] = useState<PlanStockItem[]>([]);
   const [locationOptions, setLocationOptions] = useState<PlanLocationOption[]>([]);
   const [includeStock, setIncludeStock] = useState(true);
-  const [locations, setLocations] = useState<PlannerLocations>(() => {
-    if (typeof window === "undefined") return defaultLocations;
-    try {
-      const stored = window.localStorage.getItem(locationsStorageKey);
-      return stored ? { ...defaultLocations, ...JSON.parse(stored) } : defaultLocations;
-    }
-    catch {
-      return defaultLocations;
-    }
-  });
+  const [locations, setLocations] = useState<PlannerLocations>(defaultLocations);
   const [settings] = useState<PlannerSettings>(() => {
     if (typeof window === "undefined") return defaultSettings;
     try {
@@ -224,7 +227,7 @@ export default function Home() {
   function updateLocations(next: Partial<Pick<PlannerLocations, "manufacturing" | "reactions">>) {
     setLocations((current) => {
       const updated = { ...current, ...next };
-      window.localStorage.setItem(locationsStorageKey, JSON.stringify(updated));
+      void savePlannerLocations(updated);
       return updated;
     });
   }
@@ -238,17 +241,54 @@ export default function Home() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchFacilityResponse()
-      .then((data) => {
-        const options = (data?.facilities ?? []).map((facility) => ({
-          id: String(facility.id),
-          locationId: facility.id,
-          name: facility.name,
-          baseYield: (facility.activities.reprocessing.baseYield ?? 0) * 100,
-          baseManufacturingMe: facility.activities.manufacturing.materialConsumption ?? 0,
-          baseReactionMe: facility.activities.reactions.materialConsumption ?? 0,
-        }));
-        if (!cancelled) setLocationOptions(options);
+    Promise
+      .all([fetchFacilityResponse(), loadPlannerLocations()])
+      .then(([data, storedLocations]) => {
+        const options = (data?.facilities ?? [])
+          .filter(
+            (facility): facility is typeof facility & { id: number } =>
+              typeof facility.id === "number",
+          )
+          .map((facility) => ({
+            id: String(facility.id),
+            locationId: facility.id,
+            name: facility.name,
+            baseYield: (facility.activities.reprocessing.baseYield ?? 0) * 100,
+            baseManufacturingMe: facility.activities.manufacturing.materialConsumption ?? 0,
+            baseReactionMe: facility.activities.reactions.materialConsumption ?? 0,
+          }));
+        const manufacturingOptions = options
+          .slice()
+          .sort(
+            (left, right) =>
+              right.baseManufacturingMe - left.baseManufacturingMe
+              || left.name.localeCompare(right.name),
+          );
+        const reactionOptions = options
+          .slice()
+          .sort(
+            (left, right) =>
+              right.baseReactionMe - left.baseReactionMe || left.name.localeCompare(right.name),
+          );
+        const nextLocations = {
+          ...defaultLocations,
+          ...storedLocations,
+          manufacturing: selectSavedLocation(
+            manufacturingOptions,
+            storedLocations?.manufacturing,
+            defaultLocations.manufacturing,
+          ),
+          reactions: selectSavedLocation(
+            reactionOptions,
+            storedLocations?.reactions,
+            defaultLocations.reactions,
+          ),
+        };
+        if (!cancelled) {
+          setLocationOptions(options);
+          setLocations(nextLocations);
+          void savePlannerLocations(nextLocations);
+        }
       })
       .catch(() => {
         if (!cancelled) setLocationOptions([]);
@@ -268,8 +308,11 @@ export default function Home() {
     setIsPlanLoading(true);
     setPlanStatus("Calculating...");
     try {
-      const stockData = await loadClientStock(language);
-      const workingStock = includeStock ? (stockData.workingStock ?? []) : [];
+      let workingStock: PlanStockItem[] = [];
+      if (includeStock && (await loadClientSession()).authenticated) {
+        const stockData = await loadClientStock(language);
+        workingStock = stockData.workingStock ?? [];
+      }
       setStock(workingStock);
       const response = await fetch(
         "/api/plan",
@@ -529,53 +572,66 @@ export default function Home() {
               ))
             )}
             <div className={styles.planOptions}>
-              <label>
-                <span>BUILD LOCATION</span>
-                <select
-                  value={locations.manufacturing}
-                  onChange={(event) =>
-                    updateLocations({ manufacturing: Number(event.target.value) })
-                  }
-                  disabled={locationOptions.length === 0}
-                >
-                  {locationOptions
-                    .slice()
-                    .sort(
-                      (left, right) =>
-                        (left.baseManufacturingMe ?? 0) - (right.baseManufacturingMe ?? 0)
-                        || (left.name ?? "").localeCompare(right.name ?? ""),
-                    )
-                    .map((location) => (
-                      <option value={location.locationId} key={`manufacturing-${location.id}`}>
-                        {location.name ?? `Location ${location.locationId}`} (
-                        {(location.baseManufacturingMe ?? 0).toFixed(1)}% ME)
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <label>
-                <span>REACTION LOCATION</span>
-                <select
-                  value={locations.reactions}
-                  onChange={(event) => updateLocations({ reactions: Number(event.target.value) })}
-                  disabled={locationOptions.length === 0}
-                >
-                  {locationOptions
-                    .slice()
-                    .sort(
-                      (left, right) =>
-                        (left.baseReactionMe ?? left.baseYield ?? 0)
-                          - (right.baseReactionMe ?? right.baseYield ?? 0)
-                        || (left.name ?? "").localeCompare(right.name ?? ""),
-                    )
-                    .map((location) => (
-                      <option value={location.locationId} key={`reaction-${location.id}`}>
-                        {location.name ?? `Location ${location.locationId}`} (
-                        {(location.baseReactionMe ?? location.baseYield ?? 0).toFixed(1)}% ME)
-                      </option>
-                    ))}
-                </select>
-              </label>
+              {locationOptions.length > 0 ? (
+                <>
+                  <label>
+                    <span>BUILD LOCATION</span>
+                    <select
+                      value={locations.manufacturing}
+                      onChange={(event) =>
+                        updateLocations({ manufacturing: Number(event.target.value) })
+                      }
+                    >
+                      {locationOptions
+                        .slice()
+                        .sort(
+                          (left, right) =>
+                            right.baseManufacturingMe - left.baseManufacturingMe
+                            || left.name.localeCompare(right.name),
+                        )
+                        .map((location) => (
+                          <option value={location.locationId} key={`manufacturing-${location.id}`}>
+                            {location.name} ({location.baseManufacturingMe.toFixed(1)}% ME)
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>REACTION LOCATION</span>
+                    <select
+                      value={locations.reactions}
+                      onChange={(event) =>
+                        updateLocations({ reactions: Number(event.target.value) })
+                      }
+                    >
+                      {locationOptions
+                        .slice()
+                        .sort(
+                          (left, right) =>
+                            right.baseReactionMe - left.baseReactionMe
+                            || left.name.localeCompare(right.name),
+                        )
+                        .map((location) => (
+                          <option value={location.locationId} key={`reaction-${location.id}`}>
+                            {location.name} ({location.baseReactionMe.toFixed(1)}% ME)
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                </>
+              ) : (
+                <div className={styles.locationAlert} role="alert">
+                  <Info className={styles.locationAlertIcon} aria-hidden="true" />
+                  <div className={styles.locationAlertContent}>
+                    <strong>No build or reaction locations available.</strong>
+                    <span>
+                      Optionally add structures on the <Link href="/locations">Locations</Link> page
+                      or <Link href="/api/auth/eve/start">add character(s) via ESI</Link> to improve
+                      plan results.
+                    </span>
+                  </div>
+                </div>
+              )}
               <label className={styles.checkboxOption}>
                 <span>INCLUDE STOCK</span>
                 <button

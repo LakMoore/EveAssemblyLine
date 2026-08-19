@@ -277,7 +277,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const refreshData = useCallback(async () => {
     if (isRefreshingData || !authenticated || characters.length === 0) return false;
     setIsRefreshingData(true);
+    window.dispatchEvent(new CustomEvent("assembly-line-esi-refresh-started"));
     let stockLocations: EsiStockResponse["locations"] | undefined;
+    let refreshSucceeded = false;
     try {
       const response = await fetch(
         "/api/state/refresh",
@@ -293,6 +295,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         rateLimitedUntil?: string | null;
       };
       if (!response.ok || data.success !== true) return false;
+      refreshSucceeded = true;
       const refreshedAt = data.refreshedAt ?? new Date().toISOString();
       await saveLastRefreshAt(refreshedAt);
       const requiredEndpoints = new Set<string>(refreshDependentEndpoints[activePage]);
@@ -354,6 +357,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
     }
     finally {
       setIsRefreshingData(false);
+      window.dispatchEvent(
+        new CustomEvent(
+          "assembly-line-esi-refresh-finished",
+          {
+            detail: { success: refreshSucceeded },
+          },
+        ),
+      );
     }
   }, [activePage, authenticated, characters.length, isRefreshingData, language]);
 

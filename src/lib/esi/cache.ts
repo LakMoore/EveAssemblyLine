@@ -49,12 +49,13 @@ export type EndpointCache<T> = {
   nextRefreshAllowed?: string;
   rateLimitedUntil?: string;
   error?: string;
+  reauthorizeRequired?: boolean;
   status: EndpointStatus;
 };
 
 export function toClientEndpointStatus<T>(cache: EndpointCache<T> | undefined) {
   if (!cache) return undefined;
-  const { lastBody, ...status } = cache;
+  const { lastBody, etag, ...status } = cache;
   return {
     ...status,
     hasBody: lastBody !== null && lastBody !== undefined,
@@ -139,7 +140,7 @@ async function refreshBlueprintInstances(
 }
 
 function getCache(map: Map<string, OwnerCache>, id: number, sessionId: string): OwnerCache {
-  const key = `${sessionId}:${id}`;
+  const key = String(id);
   const existing = map.get(key);
   if (existing) return existing;
   const created: OwnerCache = {
@@ -155,8 +156,9 @@ function getCache(map: Map<string, OwnerCache>, id: number, sessionId: string): 
 
 function endpointStatus<T>(
   error: unknown,
-): Pick<EndpointCache<T>, "status" | "rateLimitedUntil" | "error"> {
+): Pick<EndpointCache<T>, "status" | "rateLimitedUntil" | "error" | "reauthorizeRequired"> {
   const status = (error as { status?: number }).status;
+  const isInvalidGrant = error instanceof Error && /invalid_grant/i.test(error.message);
   if (status !== 429) {
     const errorMessage =
       status === 401
@@ -171,6 +173,7 @@ function endpointStatus<T>(
     return {
       status: "error",
       error: errorMessage,
+      reauthorizeRequired: status === 401 || status === 403 || isInvalidGrant,
     };
   }
   const retryAfterValue = (error as { retryAfter?: string }).retryAfter;
