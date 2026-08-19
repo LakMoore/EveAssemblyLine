@@ -179,7 +179,9 @@ function CompressContent() {
         loadEndpointRecord<CompressOptions>("compress/options"),
       ])
       .then(async ([loadedSettings, facilityResponse, session, cachedOptions]) => {
-        const stateStatus = session.authenticated ? await loadClientStateStatus() : null;
+        const stateStatus = session.authenticated
+          ? await loadClientStateStatus(isRefreshLoad)
+          : null;
         const loadedFacilities = facilityResponse?.facilities ?? [];
         let loadedOptions = cachedOptions?.data;
         if (isRefreshLoad || !loadedOptions) {

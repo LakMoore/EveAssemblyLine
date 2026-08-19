@@ -50,7 +50,6 @@ const compressionRequestSchema = z.object({
       z.string().regex(/^\d+$/, "Skill IDs must be numeric strings"),
       z.number().int().min(0).max(5),
     )
-    .refine((obj) => Object.keys(obj).length > 0, "skillLevels must be a non-empty map")
     .describe("Map of skill IDs to levels (0-5)"),
   implantLevel: z
     .union([z.literal(0), z.literal(1), z.literal(2), z.literal(4)])
