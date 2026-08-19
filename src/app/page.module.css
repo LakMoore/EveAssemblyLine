@@ -3895,6 +3895,10 @@
   font-size: 11px;
 }
 
+.tabs button:focus {
+  outline: none;
+}
+
 .tabs button span {
   font: 9px "DM Mono";
   margin-right: 8px;

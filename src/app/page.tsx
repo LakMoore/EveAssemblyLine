@@ -281,11 +281,7 @@ function Planner() {
   });
 
   function updateLocations(next: Partial<Pick<PlannerLocations, "manufacturing" | "reactions">>) {
-    setLocations((current) => {
-      const updated = { ...current, ...next };
-      void savePlannerLocations(updated);
-      return updated;
-    });
+    setLocations((current) => ({ ...current, ...next }));
   }
 
   useEffect(() => {
@@ -317,14 +313,14 @@ function Planner() {
           .slice()
           .sort(
             (left, right) =>
-              right.baseManufacturingMe - left.baseManufacturingMe
+              left.baseManufacturingMe - right.baseManufacturingMe
               || left.name.localeCompare(right.name),
           );
         const reactionOptions = options
           .slice()
           .sort(
             (left, right) =>
-              right.baseReactionMe - left.baseReactionMe || left.name.localeCompare(right.name),
+              left.baseReactionMe - right.baseReactionMe || left.name.localeCompare(right.name),
           );
         const nextLocations = {
           ...defaultLocations,
@@ -405,6 +401,7 @@ function Planner() {
         return;
       }
       setPlan(data as PlanResult);
+      await savePlannerLocations(locations);
       setPlanStatus("Plan updated just now");
     }
     catch {
@@ -642,7 +639,7 @@ function Planner() {
                         .slice()
                         .sort(
                           (left, right) =>
-                            right.baseManufacturingMe - left.baseManufacturingMe
+                            left.baseManufacturingMe - right.baseManufacturingMe
                             || left.name.localeCompare(right.name),
                         )
                         .map((location) => (
@@ -664,7 +661,7 @@ function Planner() {
                         .slice()
                         .sort(
                           (left, right) =>
-                            right.baseReactionMe - left.baseReactionMe
+                            left.baseReactionMe - right.baseReactionMe
                             || left.name.localeCompare(right.name),
                         )
                         .map((location) => (
