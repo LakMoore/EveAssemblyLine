@@ -95,10 +95,13 @@ export default function JobsPage() {
 
   return (
     <>
-      <div className={styles.pageHeader}>
+      <div className={styles.pageIntro}>
         <div>
-          <p className={styles.pageKicker}>INDUSTRY CONTROL</p>
+          <p className={styles.eyebrow}>INDUSTRY CONTROL</p>
           <h1>Jobs</h1>
+          <p className={styles.subtitle}>
+            Monitor active manufacturing, science, and reaction jobs across connected pilots.
+          </p>
         </div>
         <div className={styles.shipsStats}>
           <div className={styles.jobsAvailableSlots}>

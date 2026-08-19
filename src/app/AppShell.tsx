@@ -36,14 +36,15 @@ import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import {
   Activity,
   ArrowUp,
+  BadgeDollarSign,
   Boxes,
+  ClipboardList,
   Factory,
   Image as ImageIcon,
   MapPinned,
   Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
-  Rocket,
   Settings2,
   UserRoundPlus,
   UsersRound,
@@ -55,7 +56,9 @@ const languageStorageKey = "assembly-line-language";
 const sidebarStorageKey = "assembly-line-sidebar-collapsed";
 type ActivePage =
   | "planner"
+  | "welcome"
   | "compress"
+  | "appraise"
   | "stock"
   | "jobs"
   | "ships"
@@ -118,6 +121,17 @@ function hasEndpointErrors(statuses: ClientCharacterStatus[]) {
   );
 }
 
+function characterNeedsReauthorization(status: ClientCharacterStatus | undefined) {
+  return [
+    ...(status ? [status.assets, status.skills, status.jobs, status.orders] : []),
+    ...(status?.corporations ?? []).flatMap((corporation) => [
+      corporation.assets,
+      corporation.jobs,
+      corporation.orders,
+    ]),
+  ].some((endpoint) => endpoint?.reauthorizeRequired === true);
+}
+
 export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [localLanguage, setLocalLanguage] = useState<SdeLanguage>(() => {
@@ -142,23 +156,29 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const pilotListSentinelRef = useRef<HTMLSpanElement | null>(null);
   const language = localLanguage;
   const activePage: ActivePage =
-    pathname === "/compress"
-      ? "compress"
-      : pathname === "/stock"
-        ? "stock"
-        : pathname === "/jobs"
-          ? "jobs"
-          : pathname === "/ships"
-            ? "ships"
-            : pathname === "/locations"
-              ? "locations"
-              : pathname === "/settings"
-                ? "settings"
-                : pathname === "/imagechecker"
-                  ? "imagechecker"
-                  : pathname === "/characters"
-                    ? "characters"
-                    : "planner";
+    pathname === "/"
+      ? "welcome"
+      : pathname === "/planner"
+        ? "planner"
+        : pathname === "/compress"
+          ? "compress"
+          : pathname === "/appraise"
+            ? "appraise"
+            : pathname === "/stock"
+              ? "stock"
+              : pathname === "/jobs"
+                ? "jobs"
+                : pathname === "/ships"
+                  ? "ships"
+                  : pathname === "/locations"
+                    ? "locations"
+                    : pathname === "/settings"
+                      ? "settings"
+                      : pathname === "/imagechecker"
+                        ? "imagechecker"
+                        : pathname === "/characters"
+                          ? "characters"
+                          : "planner";
   const hasExpiredState =
     authenticated
     && characters.length > 0
@@ -603,14 +623,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 <ArrowUp size={16} strokeWidth={1.8} aria-hidden="true" />
               </button>
             )}
-            <div className={styles.sectionLabel}>WORKSPACE</div>
+            <div className={`${styles.sectionLabel} ${styles.firstSectionLabel}`}>TOOLS</div>
             <Link
               className={`${styles.navItem} ${activePage === "planner" ? styles.navActive : ""}`}
-              href="/"
+              href="/planner"
               onClick={closeSidebarOnNavigation}
             >
               <span>
-                <Factory size={17} strokeWidth={1.8} aria-hidden="true" />
+                <ClipboardList size={17} strokeWidth={1.8} aria-hidden="true" />
               </span>
               <span className={styles.navText}>Production planner</span>
             </Link>
@@ -625,6 +645,17 @@ export default function AppShell({ children }: { children: ReactNode }) {
               <span className={styles.navText}>Compress</span>
             </Link>
             <Link
+              className={`${styles.navItem} ${activePage === "appraise" ? styles.navActive : ""}`}
+              href="/appraise"
+              onClick={closeSidebarOnNavigation}
+            >
+              <span>
+                <BadgeDollarSign size={17} strokeWidth={1.8} aria-hidden="true" />
+              </span>
+              <span className={styles.navText}>Appraise</span>
+            </Link>
+            <div className={styles.sectionLabel}>INFORMATION</div>
+            <Link
               className={`${styles.navItem} ${activePage === "stock" ? styles.navActive : ""}`}
               href="/stock"
               onClick={closeSidebarOnNavigation}
@@ -634,27 +665,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
               </span>
               <span className={styles.navText}>Stock</span>
             </Link>
-            <Link
-              className={`${styles.navItem} ${activePage === "jobs" ? styles.navActive : ""}`}
-              href="/jobs"
-              onClick={closeSidebarOnNavigation}
-            >
-              <span>
-                <Activity size={17} strokeWidth={1.8} aria-hidden="true" />
-              </span>
-              <span className={styles.navText}>Jobs</span>
-            </Link>
-            <Link
-              className={`${styles.navItem} ${activePage === "ships" ? styles.navActive : ""}`}
-              href="/ships"
-              onClick={closeSidebarOnNavigation}
-            >
-              <span>
-                <Rocket size={17} strokeWidth={1.8} aria-hidden="true" />
-              </span>
-              <span className={styles.navText}>Ships</span>
-            </Link>
-            <div className={styles.sectionLabel}>CONFIGURATION</div>
             <Link
               className={`${styles.navItem} ${activePage === "locations" ? styles.navActive : ""}`}
               href="/locations"
@@ -666,6 +676,17 @@ export default function AppShell({ children }: { children: ReactNode }) {
               <span className={styles.navText}>Locations</span>
             </Link>
             <Link
+              className={`${styles.navItem} ${activePage === "jobs" ? styles.navActive : ""}`}
+              href="/jobs"
+              onClick={closeSidebarOnNavigation}
+            >
+              <span>
+                <Factory size={17} strokeWidth={1.8} aria-hidden="true" />
+              </span>
+              <span className={styles.navText}>Jobs</span>
+            </Link>
+            <div className={styles.sectionLabel}>CONFIGURATION</div>
+            <Link
               className={`${styles.navItem} ${activePage === "settings" ? styles.navActive : ""}`}
               href="/settings"
               onClick={closeSidebarOnNavigation}
@@ -674,16 +695,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 <Settings2 size={17} strokeWidth={1.8} aria-hidden="true" />
               </span>
               <span className={styles.navText}>Settings</span>
-            </Link>
-            <Link
-              className={`${styles.navItem} ${activePage === "imagechecker" ? styles.navActive : ""}`}
-              href="/imagechecker"
-              onClick={closeSidebarOnNavigation}
-            >
-              <span>
-                <ImageIcon size={17} strokeWidth={1.8} aria-hidden="true" />
-              </span>
-              <span className={styles.navText}>Image checker</span>
             </Link>
             <Link
               className={`${styles.navItem} ${activePage === "characters" ? styles.navActive : ""}`}
@@ -696,34 +707,51 @@ export default function AppShell({ children }: { children: ReactNode }) {
               <span className={styles.navText}>Characters</span>
               <b>{characters.length}</b>
             </Link>
-            <button type="button" className={styles.navItem}>
+            <div className={styles.sectionLabel}>UTILITY</div>
+            <Link
+              className={`${styles.navItem} ${activePage === "imagechecker" ? styles.navActive : ""}`}
+              href="/imagechecker"
+              onClick={closeSidebarOnNavigation}
+            >
               <span>
-                <Activity size={17} strokeWidth={1.8} aria-hidden="true" />
+                <ImageIcon size={17} strokeWidth={1.8} aria-hidden="true" />
               </span>
-              <span className={styles.navText}>Data status</span>
-            </button>
+              <span className={styles.navText}>Image checker</span>
+            </Link>
             <div className={styles.sidebarBottom}>
               <div className={styles.sectionLabel}>CONNECTED PILOTS</div>
               <div className={styles.pilotList}>
-                {characters.map((character, index) => (
-                  <div className={styles.pilot} key={character.characterId}>
-                    <span className={`${styles.pilotDot} ${index > 0 ? styles.pilotAlt : ""}`}>
-                      <Image
-                        src={eveCharacterPortraitUrl(character.characterId, 64)}
-                        alt=""
-                        width={32}
-                        height={32}
-                      />
-                    </span>
-                    <span className={styles.navText}>
-                      <strong>{character.characterName}</strong>
-                      <small>
-                        {character.hasDirectorRole ? "Director access" : "Character access"}
-                      </small>
-                    </span>
-                    <i />
-                  </div>
-                ))}
+                {characters.map((character) => {
+                  const isNotAuthenticated = characterNeedsReauthorization(
+                    stateStatuses.find((status) => status.characterId === character.characterId),
+                  );
+                  return (
+                    <div className={styles.pilot} key={character.characterId}>
+                      <span
+                        className={`${styles.pilotDot} ${isNotAuthenticated ? styles.pilotNotOk : styles.pilotOk}`}
+                      >
+                        <Image
+                          src={eveCharacterPortraitUrl(character.characterId, 64)}
+                          alt=""
+                          width={36}
+                          height={36}
+                        />
+                        <i
+                          aria-label={isNotAuthenticated ? "Authorization required" : "Authorized"}
+                        />
+                      </span>
+                      <span className={styles.navText}>
+                        <strong>{character.characterName}</strong>
+                        <small>
+                          {character.hasDirectorRole ? "Director access" : "Character access"}
+                        </small>
+                      </span>
+                    </div>
+                  );
+                })}
+                {characters.length === 0 && (
+                  <div className={styles.pilotEmpty}>No connected pilots</div>
+                )}
                 <span
                   className={styles.sidebarSentinel}
                   ref={pilotListSentinelRef}

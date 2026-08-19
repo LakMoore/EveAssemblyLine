@@ -11,7 +11,9 @@ export type ClientEndpointRecord<T = unknown> = {
 };
 
 export const refreshDependentEndpoints = {
+  welcome: [],
   planner: ["state/stock"],
+  appraise: [],
   compress: ["state/stock", "state/status", "facilities", "compress/options"],
   stock: ["state/stock"],
   jobs: ["state/jobs"],

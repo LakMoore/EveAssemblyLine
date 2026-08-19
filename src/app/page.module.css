@@ -205,7 +205,7 @@
 }
 
 .layoutCollapsed .navItem b,
-.layoutCollapsed .pilot i {
+.layoutCollapsed .pilot > i {
   display: none;
 }
 
@@ -307,7 +307,7 @@
   }
 
   .layout.layoutCollapsed .navItem b,
-  .layout.layoutCollapsed .pilot i {
+  .layout.layoutCollapsed .pilot > i {
     display: none;
   }
 
@@ -609,6 +609,45 @@
 
   .content h1 {
     font-size: 30px;
+  }
+
+  .workspaceGrid {
+    min-width: 0;
+  }
+
+  .workspaceGrid > .panel {
+    min-width: 0;
+    padding: 18px 14px;
+  }
+
+  .workspaceGrid .panelHeader {
+    gap: 12px;
+  }
+
+  .workspaceGrid .panelHeaderActions {
+    min-width: 0;
+  }
+
+  .workspaceGrid .panelHeaderActions .actionButton {
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .workspaceGrid .panelHeaderActions .actionButton span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .shell .itemRow,
+  .shell .tableHead {
+    grid-template-columns: minmax(0, 1fr) 60px 40px 40px 20px;
+    column-gap: 5px;
+  }
+
+  .shell .buildItemIdentity {
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .tableHead {
@@ -940,6 +979,14 @@
   gap: 4px;
 }
 
+.jobsActiveMetric span,
+.jobsAvailableSlots small {
+  color: #78959e;
+  font: 8px "DM Mono";
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .shipsIndexedMetric {
   display: grid;
   justify-items: end;
@@ -1021,12 +1068,6 @@
   width: 22px;
   height: 22px;
   flex: 0 0 22px;
-}
-
-.jobsAvailableSlots small {
-  color: #78959e;
-  font: 8px "DM Mono";
-  text-transform: uppercase;
 }
 
 .shipSystems {
@@ -1183,6 +1224,61 @@
   }
 }
 
+@media (max-width: 410px) {
+  .shipsStats {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px 12px;
+  }
+
+  .jobsAvailableSlotValues {
+    gap: 6px;
+  }
+
+  .jobsAvailableSlotValues span {
+    min-width: 0;
+  }
+
+  .jobsCharacter {
+    min-width: 0;
+  }
+
+  .jobsCharacters {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .jobsSlotGrid {
+    min-width: 0;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  .jobsSlotGrid span {
+    min-width: 0;
+    padding-left: 5px;
+  }
+
+  .jobsSlotGrid small {
+    min-width: 0;
+    gap: 2px;
+    overflow: hidden;
+    font-size: 7px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .jobsSlotGrid small svg {
+    width: 10px;
+    height: 10px;
+    flex-basis: 10px;
+  }
+
+  .jobsSlotGrid b {
+    font-size: 11px;
+  }
+}
+
 .shipSystem {
   border-top: 1px solid #2b5260;
   padding-top: 15px;
@@ -1334,7 +1430,6 @@
 
 @media (max-width: 640px) {
   .shipsStats {
-    justify-content: flex-start;
     gap: 14px;
   }
 
@@ -2590,14 +2685,24 @@
 }
 
 .sectionLabel {
-  padding: 0 14px 12px;
+  margin-top: 10px;
+  padding: 14px 14px 10px;
+  border-top: 1px solid #1b3740;
+}
+
+.firstSectionLabel {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 
 .navItem {
   width: 100%;
   border: 0;
   background: transparent;
-  padding: 13px 14px;
+  min-height: 48px;
+  padding: 10px 14px;
+  line-height: 1.35;
   text-align: left;
   color: #8aa4ad;
   font-size: 13px;
@@ -2656,10 +2761,11 @@
 }
 
 .pilotDot {
+  position: relative;
   display: grid;
   place-items: center;
-  width: 25px;
-  height: 25px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   background: var(--lime);
   color: #243b32;
@@ -2673,9 +2779,24 @@
   object-fit: cover;
 }
 
-.pilotAlt {
-  background: #6caec0;
-  color: #103542;
+.pilotDot i {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #0a1a21;
+  border-radius: 50%;
+}
+
+.pilotOk i {
+  background: var(--cyan);
+  box-shadow: 0 0 7px #5ed8ef;
+}
+
+.pilotNotOk i {
+  background: #ed6a5a;
+  box-shadow: 0 0 7px #ed6a5a;
 }
 
 .pilot strong,
@@ -2689,11 +2810,10 @@
   margin-top: 3px;
 }
 
-.pilot i {
-  margin-left: auto;
-  border-radius: 50%;
-  background: var(--cyan);
-  box-shadow: 0 0 7px #5ed8ef;
+.pilotEmpty {
+  padding: 6px 14px 12px;
+  color: #708b94;
+  font: 10px "DM Mono";
 }
 
 .addButton {
@@ -2908,7 +3028,7 @@
   max-width: 1380px;
   width: 100%;
   min-width: 0;
-  margin: auto;
+  margin: 0 auto;
 }
 
 .pageIntro,
@@ -2921,13 +3041,211 @@
   align-items: center;
 }
 
+.pageIntro {
+  align-items: flex-start;
+  gap: 28px;
+}
+
 .pageIntro > .addButton {
   width: auto;
   margin-top: 0;
 }
 
-.locationsPageIntro {
-  margin-bottom: 18px;
+.welcomePage,
+.appraisePage {
+  display: grid;
+  gap: 30px;
+}
+
+.welcomePage .pageIntro,
+.appraisePage .pageIntro {
+  display: block;
+  max-width: 760px;
+}
+
+.welcomePage .pageIntro p,
+.appraisePage .pageIntro p,
+.welcomeNote {
+  max-width: 680px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+  margin-top: 12px;
+}
+
+.welcomeGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.welcomePanel,
+.appraiseTool,
+.appraiseResults {
+  border: 1px solid var(--line);
+  background: #0b2028;
+  padding: 24px;
+}
+
+.welcomePanel h2 {
+  margin-bottom: 9px;
+  font-size: 19px;
+}
+
+.welcomePanel p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.welcomeNote {
+  margin-top: 0;
+}
+
+.appraiseTool {
+  display: grid;
+  gap: 14px;
+  max-width: 860px;
+}
+
+.appraiseTool > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 54px;
+  border: 0;
+  background: #197b78;
+  color: #e8ffff;
+  padding: 14px 16px;
+  margin-top: 10px;
+  font-size: 12px;
+  box-shadow: 0 0 18px #42c7b433;
+}
+
+.appraiseTool > button > svg {
+  flex: 0 0 16px;
+}
+
+.appraiseTool > button > b {
+  color: var(--action-accent);
+  font-size: 19px;
+  font-weight: 400;
+}
+
+.calculateLead,
+.appraiseActionLead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  text-align: left;
+}
+
+.calculateLead > span,
+.appraiseActionLead > span {
+  min-width: 0;
+}
+
+.appraiseInputHeader,
+.appraiseSummary,
+.appraiseRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.appraiseInputHeader {
+  justify-content: space-between;
+  color: var(--ink);
+  font: 11px "DM Mono";
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.appraiseInputHeader select {
+  border: 1px solid var(--line);
+  background: #07171d;
+  color: var(--ink);
+  padding: 8px 10px;
+  font: 11px "DM Mono";
+}
+
+.appraiseTextarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: #07171d;
+  color: var(--ink);
+  padding: 14px;
+  resize: vertical;
+  font: 12px/1.6 "DM Mono";
+}
+
+.appraiseTextarea:focus {
+  outline: 1px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.appraiseSummary {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 18px;
+}
+
+.appraiseSummary div span,
+.appraiseSummary small,
+.appraiseRow small {
+  display: block;
+  color: var(--muted);
+  font: 10px "DM Mono";
+  letter-spacing: 0.5px;
+}
+
+.appraiseSummary div strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--cyan);
+  font: 17px "DM Mono";
+}
+
+.appraiseRow {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 150px 150px;
+  border-bottom: 1px solid #17343d;
+  padding: 14px 0;
+  color: var(--ink);
+}
+
+.appraiseRow > svg {
+  color: var(--cyan);
+}
+
+.appraiseRow span strong,
+.appraiseRow > strong {
+  display: block;
+  font-size: 12px;
+}
+
+.appraiseRow > span:nth-child(3),
+.appraiseRow > strong {
+  text-align: right;
+}
+
+.formError {
+  color: #ed8e87;
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .welcomeGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .welcomePanel {
+    padding: 18px;
+  }
 }
 
 .eyebrow {
@@ -2938,15 +3256,20 @@
 }
 
 .content h1 {
+  color: var(--ink);
   font-size: 37px;
-  letter-spacing: -1.5px;
   line-height: 1.1;
+  letter-spacing: -1.5px;
 }
 
 .subtitle {
   color: var(--muted);
   font-size: 13px;
   margin-top: 9px;
+}
+
+.pageIntro + .panel {
+  margin-top: 28px;
 }
 
 .refresh {
@@ -3343,6 +3666,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   width: 100%;
   border: 0;
   background: #197b78;
@@ -3351,6 +3675,10 @@
   margin-top: 24px;
   font-size: 12px;
   box-shadow: 0 0 18px #42c7b433;
+}
+
+.calculate > svg {
+  flex: 0 0 16px;
 }
 
 .planOptions {

@@ -2,6 +2,7 @@
 
 import { FormEvent, KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import type {
   ClientBuildItem,
@@ -31,6 +32,7 @@ import styles from "./page.module.css";
 import {
   ChartLine,
   Clipboard,
+  ClipboardList,
   Copy as CopyIcon,
   Factory,
   Info,
@@ -196,7 +198,61 @@ async function localizeItems(
   }
 }
 
-export default function Home() {
+function WelcomePage() {
+  return (
+    <div className={styles.welcomePage}>
+      <div className={styles.pageIntro}>
+        <span className={styles.eyebrow}>EVE INDUSTRY CONTROL</span>
+        <h1>Welcome to AssemblyLine</h1>
+        <p>Plan production, inspect your stock, and keep every industrial decision in one place.</p>
+        <Link className={styles.addButton} href="/planner">
+          Open production planner
+        </Link>
+      </div>
+      <div className={styles.welcomeGrid}>
+        <section className={styles.welcomePanel}>
+          <span className={styles.eyebrow}>TOOLS</span>
+          <h2>Build and evaluate</h2>
+          <p>
+            Use the planner for manufacturing plans, Compress for reprocessing decisions, and
+            Appraise to turn a pasted item list into priced ISK and volume totals.
+          </p>
+        </section>
+        <section className={styles.welcomePanel}>
+          <span className={styles.eyebrow}>INFORMATION</span>
+          <h2>See the operation</h2>
+          <p>
+            Stock, Locations, and Jobs show what you have, where it lives, and what is already
+            moving through your facilities.
+          </p>
+        </section>
+        <section className={styles.welcomePanel}>
+          <span className={styles.eyebrow}>CONFIGURATION</span>
+          <h2>Shape your workspace</h2>
+          <p>
+            Connect Characters when you need live ESI-backed assets and jobs, then configure the
+            locations and settings used by your plans.
+          </p>
+        </section>
+        <section className={styles.welcomePanel}>
+          <span className={styles.eyebrow}>UTILITY</span>
+          <h2>Keep assets visible</h2>
+          <p>
+            Image checker is a small diagnostic tool for verifying the artwork and identifiers used
+            throughout the application.
+          </p>
+        </section>
+      </div>
+      <p className={styles.welcomeNote}>
+        Character authentication is optional. Without it, you can still work with local planner
+        data; connecting a character enables authenticated ESI state and corporation access
+        according to that character&apos;s roles.
+      </p>
+    </div>
+  );
+}
+
+function Planner() {
   const [items, setItems] = useState<ClientBuildItem[]>([]);
   const requirementsHeaderRef = useRef<HTMLParagraphElement>(null);
   const buildListHeaderRef = useRef<HTMLDivElement>(null);
@@ -651,8 +707,11 @@ export default function Home() {
               type="submit"
               disabled={isPlanLoading || items.length === 0}
             >
-              <span>{isPlanLoading ? "Calculating..." : "Calculate production plan"}</span>
-              <b>→</b>
+              <span className={styles.calculateLead}>
+                <ClipboardList size={16} aria-hidden="true" />
+                <span>{isPlanLoading ? "Calculating..." : "Calculate production plan"}</span>
+              </span>
+              <b aria-hidden="true">→</b>
             </button>
           </div>
         </div>
@@ -704,6 +763,11 @@ export default function Home() {
       </div>
     </>
   );
+}
+
+export default function Home() {
+  const pathname = usePathname();
+  return pathname === "/" ? <WelcomePage /> : <Planner />;
 }
 
 function PasteListModal({

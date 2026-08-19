@@ -2,12 +2,13 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  gap: 28px;
   margin-bottom: 34px;
 }
 .eyebrow,
 .kicker {
   margin: 0 0 9px;
-  color: #79aeb8;
+  color: var(--cyan);
   font:
     10px "DM Mono",
     monospace;
@@ -15,18 +16,17 @@
 }
 .intro h1 {
   margin: 0;
-  color: #eef7f5;
-  font:
-    500 clamp(34px, 5vw, 62px) / 0.95 "Space Grotesk",
-    sans-serif;
-  letter-spacing: 0;
+  color: var(--ink);
+  font-size: 37px;
+  line-height: 1.1;
+  letter-spacing: -1.5px;
 }
 .subtitle {
-  max-width: 620px;
-  margin: 15px 0 0;
-  color: #8da8ad;
+  max-width: 680px;
+  margin: 9px 0 0;
+  color: var(--muted);
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.7;
 }
 .introMark {
   display: grid;
@@ -77,16 +77,52 @@
 .secondaryButton {
   composes: actionButton from global;
 }
+.modalActions .secondaryButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 54px;
+  padding: 14px 16px;
+  border: 1px solid #37636d;
+  background: transparent;
+  color: #a9d5d5;
+  font-size: 12px;
+}
 .primaryButton {
   composes: actionButton from global;
   display: inline-flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  border-color: #d9f16e;
-  background: #d9f16e;
-  color: #12242a;
-  font-weight: 600;
+  min-height: 54px;
+  padding: 14px 16px;
+  border: 0;
+  background: #197b78;
+  color: #e8ffff;
+  font-size: 12px;
+  box-shadow: 0 0 18px #42c7b433;
+  width: 100%;
 }
+
+.primaryButtonLead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  text-align: left;
+}
+
+.primaryButtonLead > span {
+  min-width: 0;
+}
+
+.primaryButton > b {
+  color: var(--action-accent);
+  font-size: 19px;
+  font-weight: 400;
+}
+
 .primaryButton:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -189,12 +225,9 @@
 }
 .actionBar {
   margin-top: 20px;
-}
-.status {
-  color: #77969d;
-  font:
-    10px "DM Mono",
-    monospace;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
 }
 .results {
   margin-top: 28px;
@@ -509,8 +542,10 @@
   inset: 0;
   display: grid;
   place-items: center;
+  overflow-y: auto;
   padding: 20px;
   background: #020a0dcc;
+  overscroll-behavior: contain;
 }
 .dialog {
   width: min(560px, 100%);
@@ -532,17 +567,51 @@
     12px/1.6 "DM Mono",
     monospace;
 }
+.dialog > .description {
+  margin-bottom: 8px;
+}
 .modeToggle {
-  display: flex;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
   margin-top: 15px;
 }
-.modeToggle button {
-  color: #77969d;
+.choiceCard {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid #315863;
+  background: #0a1a21;
+  color: #a9d5d5;
+  padding: 12px;
+  cursor: pointer;
 }
-.modeToggle .modeActive {
+.choiceCard input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin: 1px 0 0;
+  accent-color: #d9f16e;
+}
+.choiceCardContent {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.choiceCardContent strong {
+  color: #d8e8ec;
+  font-size: 12px;
+  font-weight: 600;
+}
+.choiceCardContent small {
+  color: #77969d;
+  font-size: 10px;
+  line-height: 1.45;
+}
+.choiceCard.modeActive {
   border-color: #d9f16e;
-  color: #d9f16e;
+  background: #122d31;
 }
 .modalActions {
   display: flex;
@@ -570,15 +639,6 @@
   }
   .efficiencyRow strong:first-child {
     text-align: left;
-  }
-  .efficiencyRow > span:nth-child(2)::before {
-    content: "Ores ";
-    display: block;
-    margin-bottom: 5px;
-    color: #708c95;
-    font:
-      9px "DM Mono",
-      monospace;
   }
   .efficiencyRow > strong:last-child::before {
     content: "Efficiency ";
@@ -628,6 +688,20 @@
   .itemRow {
     grid-template-columns: minmax(0, 1fr) 96px 22px;
     gap: 8px;
+  }
+  .itemRow {
+    grid-template-rows: auto auto;
+    padding: 9px 0;
+  }
+  .itemRow > :first-child {
+    grid-column: 1 / -1;
+  }
+  .itemRow > input {
+    grid-column: 2;
+  }
+  .itemRow > .removeButton {
+    grid-column: 3;
+    justify-self: end;
   }
   .panelHeader {
     align-items: flex-start;

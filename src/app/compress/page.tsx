@@ -7,7 +7,7 @@ import { useAppLanguage } from "../AppShell";
 import TypeIdentity from "../components/TypeIdentity";
 import { useToast } from "../components/ToastProvider";
 import type { SdeLanguage } from "@/lib/reference/languages";
-import { Clipboard, Copy, Info, Minimize2, Upload, X } from "lucide-react";
+import { Clipboard, Copy, FileUp, Info, Minimize2, Upload, X } from "lucide-react";
 import Image from "next/image";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import {
@@ -138,7 +138,7 @@ function CompressContent() {
   const [result, setResult] = useState<CompressResult | null>(null);
   const [isPasteOpen, setIsPasteOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [status, setStatus] = useState("Ready to compress");
+  const [error, setError] = useState("");
   const [options, setOptions] = useState<CompressOptions>({
     locations: [],
     characters: [],
@@ -156,6 +156,15 @@ function CompressContent() {
   const [optionsRefreshVersion, setOptionsRefreshVersion] = useState(0);
   const importedRef = useRef("");
   const optionsLoadKeyRef = useRef("");
+
+  useEffect(() => {
+    if (!isPasteOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isPasteOpen]);
 
   useEffect(() => {
     const optionsLoadKey = `${language}:${optionsRefreshVersion}`;
@@ -241,7 +250,7 @@ function CompressContent() {
       })
       .catch(() => {
         optionsLoadKeyRef.current = "";
-        setStatus("Could not load compression options.");
+        setError("Could not load compression options.");
       });
   }, [language, optionsRefreshVersion]);
 
@@ -335,10 +344,10 @@ function CompressContent() {
           })),
         );
         setResult(null);
-        setStatus("Buy list loaded");
+        setError("");
       })
       .catch((error) =>
-        setStatus(error instanceof Error ? error.message : "Could not load the Buy list."),
+        setError(error instanceof Error ? error.message : "Could not load the Buy list."),
       );
   }, [importedMultibuy, language]);
 
@@ -352,13 +361,14 @@ function CompressContent() {
         : [...current, { ...item, quantity: 1 }];
     });
     setResult(null);
+    setError("");
   }
 
   async function compress(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (items.length === 0 || isLoading) return;
     setIsLoading(true);
-    setStatus("Reprocessing requirements...");
+    setError("");
     try {
       const selectedLocation = locationOptions.find(
         (location) => location.id === settings.locationId,
@@ -392,12 +402,9 @@ function CompressContent() {
       }
       if (!data) throw new Error("The compression service returned an invalid response.");
       setResult(data);
-      setStatus("Compression complete");
     }
     catch (error) {
-      setStatus(
-        error instanceof Error ? error.message : "Could not reach the compression service.",
-      );
+      setError(error instanceof Error ? error.message : "Could not reach the compression service.");
     }
     finally {
       setIsLoading(false);
@@ -581,15 +588,22 @@ function CompressContent() {
               </div>
             ))
           )}
+          {error && (
+            <p className={styles.error} role="alert" aria-live="polite">
+              {error}
+            </p>
+          )}
           <div className={styles.actionBar}>
-            <span className={styles.status}>{status}</span>
             <button
               className={styles.primaryButton}
               type="submit"
               disabled={items.length === 0 || isLoading}
             >
-              <Minimize2 size={16} />
-              {isLoading ? "Compressing..." : "Compress"}
+              <span className={styles.primaryButtonLead}>
+                <Minimize2 size={16} aria-hidden="true" />
+                <span>{isLoading ? "Compressing..." : "Compress"}</span>
+              </span>
+              <b aria-hidden="true">→</b>
             </button>
           </div>
         </section>
@@ -1037,7 +1051,9 @@ function PasteDialog({
             ×
           </button>
         </div>
-        <p className={styles.description}>One item per line, with the quantity at the end.</p>
+        <p className={styles.description}>
+          Compatible with Eve Multibuy. One item per line, with the quantity at the end.
+        </p>
         <textarea
           value={text}
           onChange={(event) => {
@@ -1046,24 +1062,37 @@ function PasteDialog({
           }}
           placeholder="Tritanium 120000\nPyerite 60000"
           aria-label="Multibuy list"
+          spellCheck={false}
           autoFocus
         />
         {error && <p className={styles.error}>{error}</p>}
-        <div className={styles.modeToggle} role="group" aria-label="Paste behavior">
-          <button
-            type="button"
-            className={mode === "add" ? styles.modeActive : ""}
-            onClick={() => setMode("add")}
-          >
-            Add to list
-          </button>
-          <button
-            type="button"
-            className={mode === "replace" ? styles.modeActive : ""}
-            onClick={() => setMode("replace")}
-          >
-            Replace list
-          </button>
+        <div className={styles.modeToggle} role="radiogroup" aria-label="Paste behavior">
+          <label className={`${styles.choiceCard} ${mode === "add" ? styles.modeActive : ""}`}>
+            <input
+              type="radio"
+              name="paste-behavior"
+              value="add"
+              checked={mode === "add"}
+              onChange={() => setMode("add")}
+            />
+            <span className={styles.choiceCardContent}>
+              <strong>Add to list</strong>
+              <small>Keep the imported items with the current list.</small>
+            </span>
+          </label>
+          <label className={`${styles.choiceCard} ${mode === "replace" ? styles.modeActive : ""}`}>
+            <input
+              type="radio"
+              name="paste-behavior"
+              value="replace"
+              checked={mode === "replace"}
+              onChange={() => setMode("replace")}
+            />
+            <span className={styles.choiceCardContent}>
+              <strong>Replace list</strong>
+              <small>Clear the current list before importing.</small>
+            </span>
+          </label>
         </div>
         <div className={styles.modalActions}>
           <button
@@ -1079,8 +1108,11 @@ function PasteDialog({
             className={`actionButton ${styles.primaryButton}`}
             disabled={!text.trim()}
           >
-            <Upload aria-hidden="true" />
-            Import list
+            <span className={styles.primaryButtonLead}>
+              <FileUp aria-hidden="true" />
+              <span>Import list</span>
+            </span>
+            <b aria-hidden="true">→</b>
           </button>
         </div>
       </form>

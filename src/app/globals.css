@@ -30,6 +30,21 @@ body {
   background-size: 32px 32px;
 }
 
+::selection {
+  background: var(--lime);
+  color: var(--paper);
+}
+
+::-moz-selection {
+  background: var(--lime);
+  color: var(--paper);
+}
+
+:focus {
+  outline: 1px solid var(--action-accent);
+  outline-offset: 0;
+}
+
 button,
 input,
 select {

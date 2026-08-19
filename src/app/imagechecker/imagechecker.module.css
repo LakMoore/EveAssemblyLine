@@ -1,6 +1,6 @@
 .pageIntro {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 28px;
   margin-bottom: 28px;
@@ -24,15 +24,17 @@
 .pageIntro h1 {
   margin-top: 7px;
   color: var(--ink);
-  font-size: clamp(30px, 4vw, 48px);
-  letter-spacing: -0.04em;
+  font-size: 37px;
+  line-height: 1.1;
+  letter-spacing: -1.5px;
 }
 
 .subtitle {
-  max-width: 570px;
+  max-width: 680px;
   margin-top: 9px;
   color: var(--muted);
   font-size: 13px;
+  line-height: 1.7;
 }
 
 .paging {
