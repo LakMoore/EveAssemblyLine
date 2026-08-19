@@ -782,7 +782,7 @@ function Results({ result }: { result: CompressResult }) {
         }
       }
       await saveBuildList(next);
-      router.push("/");
+      router.push("/planner");
     }
     catch {
       setIsAddingToPlan(false);
@@ -858,7 +858,7 @@ function Results({ result }: { result: CompressResult }) {
               {items.map((item) => (
                 <div
                   className={`${styles.resultRow} ${active.key === "plan" ? styles.planResultRow : ""}`}
-                  key={`${active.key}-${item.typeId ?? item.name}`}
+                  key={`${active.key}-${item.typeId ?? item.name}-${item.ignored ? "ignored" : "included"}`}
                 >
                   <span>
                     {item.typeId ? (
