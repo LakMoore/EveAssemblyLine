@@ -277,6 +277,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
   const manufacturingJobs = new Map<number, PlanResult["lists"]["manufacturingJobs"][number]>();
   const reactionJobs = new Map<number, PlanResult["lists"]["reactionJobs"][number]>();
   const inventionJobs = new Map<number, PlanResult["lists"]["inventionJobs"][number]>();
+  const requiredSkillLevels = new Map<number, number>();
   const inventedBpcTypeIds = new Set<number>();
   const producedParts = new Map<number, number>();
   const sourceCountsByTypeId = new Map<number, Map<PlanSourceIcon, number>>();
@@ -380,6 +381,15 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     me: clampEfficiency(request.settings.defaultMe, 10),
     te: clampEfficiency(request.settings.defaultTe, 20),
   };
+
+  function addRequiredSkills(skills: Array<{ typeID: number; level: number }> | undefined) {
+    for (const skill of skills ?? []) {
+      requiredSkillLevels.set(
+        skill.typeID,
+        Math.max(requiredSkillLevels.get(skill.typeID) ?? 0, skill.level),
+      );
+    }
+  }
 
   function updateMaterial(typeId: number, fallbackName: string, update: Partial<Material>) {
     const existing = materials.get(typeId);
@@ -597,6 +607,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
         usedRunsByBlueprint.set(blueprint._key, alreadyUsedRuns + runsFromStock);
 
         if (activity === "manufacturing") {
+          addRequiredSkills(blueprint.activities.manufacturing?.skills);
           const existing = manufacturingJobs.get(blueprint._key);
           manufacturingJobs.set(
             blueprint._key,
@@ -631,6 +642,9 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
             },
           );
           const bpoCount = blueprintOriginalCounts.get(blueprint._key) ?? 0;
+          if (bpoCount > 0 && remainingRuns > 0) {
+            addRequiredSkills(blueprint.activities.copying?.skills);
+          }
           const bpcBuyQuantity =
             bpoCount > 0
               ? Math.ceil(Math.max(0, remainingRuns) / blueprint.maxProductionLimit)
@@ -652,6 +666,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
           return;
         }
 
+        addRequiredSkills(blueprint.activities.reaction?.skills);
         const existing = reactionJobs.get(blueprint._key);
         reactionJobs.set(
           blueprint._key,
@@ -752,6 +767,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
         const remainingBpcRuns = Math.max(0, bpc.neededQuantity - bpc.stockRuns);
         if (remainingBpcRuns <= 0) continue;
 
+        addRequiredSkills(invention.skills);
         inventedBpcTypeIds.add(bpc.typeId);
 
         const successfulBpcRuns = inventingBlueprint.maxProductionLimit;
@@ -819,6 +835,13 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     const name = typeRecords.get(typeId)?.name;
     return name?.[language] ?? name?.en ?? fallbackByTypeId.get(typeId) ?? `Type ${typeId}`;
   };
+  const skillsRequired: PlanResult["lists"]["skillsRequired"] = [...requiredSkillLevels]
+    .map(([skillId, requiredLevel]) => ({
+      skillId,
+      name: resolvedName(skillId),
+      requiredLevel,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
   for (const material of materials.values()) material.name = resolvedName(material.typeId);
   for (const bpc of bpcs.values()) bpc.name = resolvedName(bpc.typeId);
   for (const job of manufacturingJobs.values()) job.name = resolvedName(job.typeId);
@@ -865,6 +888,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       inventionJobs: [...inventionJobs.values()],
       reactionJobs: [...reactionJobs.values()],
       manufacturingJobs: [...manufacturingJobs.values()],
+      skillsRequired,
       haulingTasks,
     },
   };

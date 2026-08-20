@@ -14,7 +14,12 @@ import type {
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
 import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
 import { loadPlannerLocations, savePlannerLocations } from "@/lib/planning/plannerPreferencesStore";
-import { loadClientSession, loadClientStock } from "@/lib/client/requestCache";
+import {
+  loadClientSession,
+  loadClientStateStatus,
+  loadClientStock,
+  type ClientCharacterStatus,
+} from "@/lib/client/requestCache";
 import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
 import {
   defaultLocations,
@@ -33,6 +38,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui/tooltip
 import styles from "./page.module.css";
 import {
   ChartLine,
+  Check,
   Clipboard,
   ClipboardList,
   Copy as CopyIcon,
@@ -46,8 +52,17 @@ import {
   X,
 } from "lucide-react";
 
-type PlannerTab = "Plan" | "Haul" | "Buy" | "Copy" | "Invent" | "React" | "Manufacture";
-const tabs: PlannerTab[] = ["Plan", "Haul", "Buy", "Copy", "Invent", "React", "Manufacture"];
+type PlannerTab = "Plan" | "Haul" | "Buy" | "Copy" | "Invent" | "React" | "Manufacture" | "Skills";
+const tabs: PlannerTab[] = [
+  "Plan",
+  "Haul",
+  "Buy",
+  "Copy",
+  "Invent",
+  "React",
+  "Manufacture",
+  "Skills",
+];
 type TypeResult = {
   name: string;
   typeId: number;
@@ -273,6 +288,8 @@ function Planner() {
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
   const [isExcludedLocationsModalOpen, setIsExcludedLocationsModalOpen] = useState(false);
   const [plan, setPlan] = useState<PlanResult | null>(null);
+  const [characterStatuses, setCharacterStatuses] = useState<ClientCharacterStatus[]>([]);
+  const [characterNamesById, setCharacterNamesById] = useState<Map<number, string>>(new Map());
   const [stock, setStock] = useState<PlanStockItem[]>([]);
   const [excludedLocationIds, setExcludedLocationIds] = useState<number[]>([]);
   const [locationOptions, setLocationOptions] = useState<PlanLocationOption[]>([]);
@@ -421,6 +438,23 @@ function Planner() {
         return;
       }
       setPlan(data as PlanResult);
+      try {
+        const session = await loadClientSession();
+        const status = session.authenticated ? await loadClientStateStatus() : { characters: [] };
+        setCharacterNamesById(
+          new Map(
+            (session.characters ?? []).map((character) => [
+              character.characterId,
+              character.characterName,
+            ]),
+          ),
+        );
+        setCharacterStatuses(status.characters ?? []);
+      }
+      catch {
+        setCharacterNamesById(new Map());
+        setCharacterStatuses([]);
+      }
       await savePlannerLocations(locations);
       setPlanStatus("Plan updated just now");
     }
@@ -826,9 +860,16 @@ function Planner() {
             <p className={styles.panelKicker}>03 / OUTPUT</p>
             <h2>Plan breakdown</h2>
           </div>
-          <span className={styles.planStatus}>
-            <i /> {planStatus}
-          </span>
+          <div className={styles.resultsHeaderMeta}>
+            {plan && (
+              <span className={styles.requiredSkillCount}>
+                {plan.lists.skillsRequired.length.toLocaleString()} skills required
+              </span>
+            )}
+            <span className={styles.planStatus}>
+              <i /> {planStatus}
+            </span>
+          </div>
         </div>
         <div className={styles.tabs}>
           {tabs.map((tab, index) => (
@@ -847,6 +888,8 @@ function Planner() {
           <PlanList
             activeTab={activeTab}
             plan={plan}
+            characterStatuses={characterStatuses}
+            characterNamesById={characterNamesById}
             stock={stock}
             locationNamesById={
               new Map([
@@ -1259,6 +1302,8 @@ function TypeSearch({
 function PlanList({
   activeTab,
   plan,
+  characterStatuses,
+  characterNamesById,
   stock,
   locationNamesById,
   onPlanChange,
@@ -1267,6 +1312,8 @@ function PlanList({
 }: {
   activeTab: PlannerTab;
   plan: PlanResult;
+  characterStatuses: ClientCharacterStatus[];
+  characterNamesById: Map<number, string>;
   stock: PlanStockItem[];
   locationNamesById: Map<number, string>;
   onPlanChange: (plan: PlanResult) => void;
@@ -1276,6 +1323,25 @@ function PlanList({
   const router = useRouter();
   const [copyStatus, setCopyStatus] = useState("");
   const planListHeaderRef = useRef<HTMLDivElement>(null);
+  const skillRequirements = plan.lists.skillsRequired;
+  const skillsByCharacter = characterStatuses.map((character) => {
+    const skillsAvailable =
+      character.skills?.hasBody === true && Array.isArray(character.skills.body);
+    const trainedSkills = new Map(
+      (character.skills?.body ?? []).map((skill) => [skill.skillId, skill.activeSkillLevel]),
+    );
+    return {
+      characterId: character.characterId,
+      name: characterNamesById.get(character.characterId) ?? `Character ${character.characterId}`,
+      skillsAvailable,
+      skills: (skillsAvailable ? skillRequirements : [])
+        .map((required) => ({
+          ...required,
+          currentLevel: trainedSkills.get(required.skillId) ?? 0,
+        }))
+        .filter((skill) => skill.currentLevel < skill.requiredLevel),
+    };
+  });
   const list =
     activeTab === "Plan"
       ? plan.lists.planItems
@@ -1463,6 +1529,72 @@ function PlanList({
     catch {
       setCopyStatus("Copy failed");
     }
+  }
+
+  if (activeTab === "Skills") {
+    return (
+      <div className={styles.skillsResult}>
+        <div className={styles.skillsSummary}>
+          <strong>{skillRequirements.length.toLocaleString()} required skills</strong>
+          <span>Only insufficient skills are shown for each character.</span>
+        </div>
+        {skillsByCharacter.length === 0 ? (
+          <div className={styles.emptyResult}>
+            <div className={styles.resultGlyph}>?</div>
+            <strong>Character skills are unavailable</strong>
+            <p>Connect a character and refresh status to compare trained skills.</p>
+          </div>
+        ) : skillsByCharacter.every((character) => character.skills.length === 0) ? (
+          <div className={styles.emptyResult}>
+            <div className={styles.resultGlyph}>✓</div>
+            <strong>All characters meet the requirements</strong>
+            <p>No insufficient skills were found in the cached character status.</p>
+          </div>
+        ) : (
+          <div className={styles.skillsCharacters}>
+            {skillsByCharacter.map((character) => (
+              <section className={styles.skillsCharacter} key={character.characterId}>
+                <header className={styles.skillsCharacterHeader}>
+                  <strong>{character.name}</strong>
+                  {character.skillsAvailable ? (
+                    character.skills.length === 0 ? (
+                      <span className={styles.skillsComplete}>
+                        All required skills trained
+                        <Check aria-hidden="true" />
+                      </span>
+                    ) : (
+                      <span className={styles.skillsInsufficient}>
+                        {character.skills.length} MISSING SKILL
+                        {character.skills.length === 1 ? "" : "S"}
+                        <X aria-hidden="true" />
+                      </span>
+                    )
+                  ) : (
+                    <span className={styles.skillsUnavailable}>Status unavailable</span>
+                  )}
+                </header>
+                {!character.skillsAvailable ? (
+                  <p className={styles.skillsUnavailable}>
+                    Refresh character status to compare skills.
+                  </p>
+                ) : character.skills.length > 0 ? (
+                  <div className={styles.skillsRows}>
+                    {character.skills.map((skill) => (
+                      <div className={styles.skillRow} key={skill.skillId}>
+                        <span>{skill.name}</span>
+                        <strong>
+                          {skill.currentLevel} / {skill.requiredLevel}
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+            ))}
+          </div>
+        )}
+      </div>
+    );
   }
 
   if (list.length === 0) {

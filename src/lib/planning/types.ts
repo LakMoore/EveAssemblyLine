@@ -151,6 +151,11 @@ export type PlannerRequest = Omit<PlanRequest, "toBuild" | "assets"> & {
 
 export type PlanSourceIcon = "market" | "industry" | "invention" | "copying";
 export type PlanSourceCounts = Partial<Record<PlanSourceIcon, number>>;
+export type PlanSkillRequirement = {
+  skillId: number;
+  name: string;
+  requiredLevel: number;
+};
 
 export interface PlanResult {
   metadata: {
@@ -237,6 +242,7 @@ export interface PlanResult {
       totalTime: number;
       locationId?: number;
     }>;
+    skillsRequired: PlanSkillRequirement[];
     haulingTasks: Array<{
       itemTypeId: number;
       name: string;

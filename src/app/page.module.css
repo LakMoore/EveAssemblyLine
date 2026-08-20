@@ -4088,6 +4088,18 @@
   gap: 7px;
 }
 
+.resultsHeaderMeta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.requiredSkillCount {
+  color: var(--lime);
+  font: 10px "DM Mono";
+  text-transform: uppercase;
+}
+
 .tabs {
   display: flex;
   gap: 25px;
@@ -4125,6 +4137,114 @@
   text-align: center;
   padding: 34px 10px 42px;
   color: #78949d;
+}
+
+.skillsResult {
+  padding-bottom: 14px;
+}
+
+.skillsSummary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 0 14px;
+  border-bottom: 1px solid var(--line);
+  color: #78949d;
+  font-size: 11px;
+}
+
+.skillsSummary strong {
+  color: var(--cyan);
+  font: 12px "DM Mono";
+  text-transform: uppercase;
+}
+
+.skillsCharacters {
+  display: grid;
+  gap: 18px;
+  padding-top: 18px;
+}
+
+.skillsCharacter {
+  border-top: 1px solid #2b5260;
+}
+
+.skillsCharacterHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+}
+
+.skillsCharacterHeader strong {
+  color: #d6e8eb;
+  font-size: 13px;
+}
+
+.skillsCharacterHeader span {
+  font: 10px "DM Mono";
+  text-transform: uppercase;
+}
+
+.skillsCharacterHeader span svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+}
+
+.skillsComplete,
+.skillsInsufficient,
+.skillsUnavailable {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.skillsCharacterHeader .skillsComplete {
+  padding: 0;
+  color: #8ed19a;
+}
+
+.skillsInsufficient {
+  color: #ffae7a;
+}
+
+.skillsRows {
+  display: grid;
+  gap: 1px;
+  background: #234650;
+}
+
+.skillRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 11px 13px;
+  background: #0c222a;
+  color: #b7d0d5;
+  font-size: 12px;
+}
+
+.skillRow strong {
+  color: #ffae7a;
+  font: 12px "DM Mono";
+}
+
+.skillsComplete {
+  margin: 0;
+  padding: 11px 0;
+  color: #8ed19a;
+  font: 11px "DM Mono";
+}
+
+.skillsUnavailable {
+  margin: 0;
+  padding: 11px 0;
+  color: #ffcf8a;
+  font: 11px "DM Mono";
 }
 
 .resultGlyph {
