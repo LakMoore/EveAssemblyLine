@@ -70,6 +70,18 @@
   min-width: 0;
 }
 
+.shell .itemRow > .quantityField input {
+  grid-column: 2;
+}
+
+.shell .itemRow > .meField input {
+  grid-column: 3;
+}
+
+.shell .itemRow > .teField input {
+  grid-column: 4;
+}
+
 .shell .itemRow .remove {
   width: 28px;
   padding: 0;
@@ -78,12 +90,12 @@
 
 @media (max-width: 640px) {
   .shell .tableHead {
-    grid-template-columns: minmax(0, 1fr) 68px 48px 48px 24px;
+    grid-template-columns: 0 minmax(96px, 1fr) 52px 52px 20px;
     column-gap: 7px;
   }
 
   .shell .itemRow {
-    grid-template-columns: minmax(0, 1fr) 68px 48px 48px 24px;
+    grid-template-columns: 0 minmax(96px, 1fr) 52px 52px 20px;
     column-gap: 7px;
   }
 
@@ -638,10 +650,62 @@
     text-overflow: ellipsis;
   }
 
-  .shell .itemRow,
   .shell .tableHead {
-    grid-template-columns: minmax(0, 1fr) 60px 40px 40px 20px;
+    grid-template-columns: 0 minmax(96px, 1fr) 52px 52px 20px;
     column-gap: 5px;
+  }
+
+  .shell .itemRow {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 52px 52px 20px;
+    column-gap: 5px;
+  }
+
+  .shell .itemRow > .quantityField {
+    grid-column: 1 / -1;
+  }
+
+  .shell .itemRow > .buildItemIdentity {
+    justify-self: start;
+  }
+
+  .shell .itemRow > .itemField,
+  .shell .itemRow > .remove {
+    justify-self: end;
+  }
+
+  .shell .itemRow > .itemField {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .shell .itemRow > .itemField > span {
+    display: block;
+    color: #76949e;
+    font: 9px "DM Mono";
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .shell .itemRow > .quantityField {
+    width: 100%;
+  }
+
+  .shell .itemRow > .quantityField input {
+    width: 100%;
+  }
+
+  .shell .itemRow > .meField {
+    grid-column: 3;
+  }
+
+  .shell .itemRow > .teField {
+    grid-column: 4;
+  }
+
+  .shell .itemRow > .remove {
+    grid-column: 5;
   }
 
   .shell .buildItemIdentity {
@@ -3542,6 +3606,10 @@
   background: transparent;
 }
 
+.search input::placeholder {
+  font-size: 12px;
+}
+
 .search kbd {
   color: #64828d;
   font: 10px "DM Mono";
@@ -3604,6 +3672,14 @@
   text-align: right;
   outline: 0;
   font: 11px "DM Mono";
+}
+
+.itemField {
+  display: contents;
+}
+
+.itemField > span {
+  display: none;
 }
 
 .remove {

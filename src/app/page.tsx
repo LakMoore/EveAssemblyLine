@@ -650,62 +650,71 @@ function Planner() {
                       </Tooltip>
                     )}
                   </div>
-                  <input
-                    aria-label={`${item.name} quantity`}
-                    type="number"
-                    min="1"
-                    step="1"
-                    value={item.quantity}
-                    onChange={(event) =>
-                      setItems(
-                        items.map((entry, itemIndex) =>
-                          itemIndex === index
-                            ? { ...entry, quantity: Math.max(1, Number(event.target.value) || 1) }
-                            : entry,
-                        ),
-                      )
-                    }
-                  />
-                  <input
-                    aria-label={`${item.name} material efficiency`}
-                    type="number"
-                    min="0"
-                    max="10"
-                    step="1"
-                    value={item.me}
-                    onChange={(event) =>
-                      setItems(
-                        items.map((entry, itemIndex) =>
-                          itemIndex === index
-                            ? {
-                                ...entry,
-                                me: Math.min(10, Math.max(0, Number(event.target.value) || 0)),
-                              }
-                            : entry,
-                        ),
-                      )
-                    }
-                  />
-                  <input
-                    aria-label={`${item.name} time efficiency`}
-                    type="number"
-                    min="0"
-                    max="20"
-                    step="1"
-                    value={item.te}
-                    onChange={(event) =>
-                      setItems(
-                        items.map((entry, itemIndex) =>
-                          itemIndex === index
-                            ? {
-                                ...entry,
-                                te: Math.min(20, Math.max(0, Number(event.target.value) || 0)),
-                              }
-                            : entry,
-                        ),
-                      )
-                    }
-                  />
+                  <label className={`${styles.itemField} ${styles.quantityField}`}>
+                    <span>Quantity</span>
+                    <input
+                      aria-label={`${item.name} quantity`}
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={item.quantity}
+                      onChange={(event) =>
+                        setItems(
+                          items.map((entry, itemIndex) =>
+                            itemIndex === index
+                              ? { ...entry, quantity: Math.max(1, Number(event.target.value) || 1) }
+                              : entry,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <label className={`${styles.itemField} ${styles.meField}`}>
+                    <span>ME</span>
+                    <input
+                      aria-label={`${item.name} material efficiency`}
+                      type="number"
+                      min="0"
+                      max="10"
+                      step="1"
+                      value={item.me}
+                      onChange={(event) =>
+                        setItems(
+                          items.map((entry, itemIndex) =>
+                            itemIndex === index
+                              ? {
+                                  ...entry,
+                                  me: Math.min(10, Math.max(0, Number(event.target.value) || 0)),
+                                }
+                              : entry,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <label className={`${styles.itemField} ${styles.teField}`}>
+                    <span>TE</span>
+                    <input
+                      aria-label={`${item.name} time efficiency`}
+                      type="number"
+                      min="0"
+                      max="20"
+                      step="1"
+                      value={item.te}
+                      onChange={(event) =>
+                        setItems(
+                          items.map((entry, itemIndex) =>
+                            itemIndex === index
+                              ? {
+                                  ...entry,
+                                  te: Math.min(20, Math.max(0, Number(event.target.value) || 0)),
+                                }
+                              : entry,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
                   <button
                     type="button"
                     className={styles.remove}

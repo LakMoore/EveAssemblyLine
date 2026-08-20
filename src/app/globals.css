@@ -47,8 +47,17 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
+}
+
+@media (max-width: 640px) {
+  :root input,
+  :root select,
+  :root textarea {
+    font-size: max(16px, 1em) !important;
+  }
 }
 
 button {
