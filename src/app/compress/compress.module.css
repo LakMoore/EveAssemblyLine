@@ -40,7 +40,7 @@
 .inputPanel,
 .results {
   border-top: 1px solid #315863;
-  background: linear-gradient(135deg, #0d252d, #0a1d24);
+  background: var(--surface);
   padding: 25px 28px;
 }
 .panelHeader,
@@ -127,53 +127,6 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
-.searchWrap {
-  position: relative;
-  margin: 22px 0 10px;
-}
-.search {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border: 1px solid #315863;
-  background: #081a20;
-  padding: 0 13px;
-  color: #9bc8cb;
-}
-.search input {
-  width: 100%;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: #e4f4f0;
-  padding: 14px 0;
-  font:
-    12px "DM Mono",
-    monospace;
-}
-.searchResults {
-  position: absolute;
-  z-index: 5;
-  inset: 100% 0 auto;
-  border: 1px solid #37606c;
-  background: #0d252d;
-  box-shadow: 0 14px 28px #0008;
-  padding: 4px;
-}
-.searchResult {
-  display: block;
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: #d8e8ec;
-  padding: 10px 12px;
-  text-align: left;
-  cursor: pointer;
-}
-.searchResult:hover {
-  background: #16404b;
-}
-.noResults,
 .empty {
   padding: 18px 0;
   color: #6f8c95;
@@ -220,8 +173,28 @@
   border: 0;
   background: transparent;
   color: #78959e;
-  font-size: 20px;
   cursor: pointer;
+}
+.removeButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 32px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: #c17878;
+}
+.removeButton:hover {
+  border-color: transparent;
+  background: #6d292933;
+  color: #f09a91;
+}
+.removeButton:focus-visible {
+  border-color: #f09a91;
+  background: transparent;
+  color: #f09a91;
 }
 .actionBar {
   margin-top: 20px;
@@ -308,6 +281,9 @@
   gap: 10px;
   margin: 18px 0 4px;
 }
+.compressOptions > * {
+  min-width: 0;
+}
 .compressOptions label {
   display: grid;
   gap: 6px;
@@ -318,29 +294,66 @@
   letter-spacing: 0.6px;
   text-transform: uppercase;
 }
-.compressOptions select {
+.formSelect {
+  width: 100% !important;
+  max-width: 100%;
   min-width: 0;
+  height: 37px;
+  overflow: hidden;
   border: 1px solid #315863;
+  border-radius: 2px;
   background: #081a20;
   color: #d4e8e4;
-  padding: 10px;
+  padding: 10px 8px 10px 10px;
   font:
-    12px Manrope,
-    sans-serif;
+    12px "DM Mono",
+    monospace;
+}
+.formSelect :global([data-slot="select-value"]) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.selectContent {
+  border: 1px solid #315863;
+  border-radius: 2px;
+  background: #0d252d;
+  color: #d4e8e4;
+}
+.selectItem {
+  min-width: 0;
+  border-radius: 0;
+  color: #d4e8e4;
+  font:
+    11px "DM Mono",
+    monospace;
+}
+.selectItem > :first-child {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.selectItemLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.selectItemMeta {
+  flex: 0 0 auto;
+  color: #8da8ad;
+}
+.selectItem:focus {
+  background: #16404b;
+  color: #e8ffff;
 }
 .locationAlert {
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
-  min-height: 68px;
-  padding: 11px 13px;
-  border: 1px solid #35606a;
-  background: #0a1a21;
-  color: #d8e8ec;
-  font:
-    11px/1.5 Manrope,
-    sans-serif;
+  width: 100%;
   grid-column: span 1;
   grid-row: span 2;
 }
@@ -358,7 +371,7 @@
 .locationAlertContent strong {
   font-weight: 700;
 }
-.locationAlertContent span {
+.locationAlertContent {
   color: #8da8ad;
 }
 .locationAlert a {
@@ -501,18 +514,23 @@
     monospace;
 }
 
+.resultIdentity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
 .ignoredBadge {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 2px 5px;
-  border: 1px solid #527078;
+  flex: 0 0 auto;
+  border-radius: 0;
+  border-color: #527078;
   color: #94aeb3;
   font:
     9px "DM Mono",
     monospace;
   letter-spacing: 0.6px;
   text-transform: uppercase;
-  vertical-align: middle;
 }
 .resultRow.planResultRow strong {
   text-align: right;
@@ -676,8 +694,19 @@
     text-align: left;
     text-transform: uppercase;
   }
+  .resultIdentity {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .ignoredBadge {
+    align-self: center;
+  }
 }
 @media (max-width: 560px) {
+  .compressOptions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .intro {
     gap: 16px;
   }
@@ -691,8 +720,11 @@
   }
   .listHeader,
   .itemRow {
-    grid-template-columns: minmax(0, 1fr) 96px 22px;
+    grid-template-columns: minmax(0, 1fr) 28px;
     gap: 8px;
+  }
+  .listHeader {
+    display: none;
   }
   .itemRow {
     grid-template-rows: auto auto;
@@ -702,10 +734,10 @@
     grid-column: 1 / -1;
   }
   .itemRow > input {
-    grid-column: 2;
+    grid-column: 1;
   }
   .itemRow > .removeButton {
-    grid-column: 3;
+    grid-column: 2;
     justify-self: end;
   }
   .panelHeader {

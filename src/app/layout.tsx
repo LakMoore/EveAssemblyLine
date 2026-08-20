@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import AppShell from "./AppShell";
 import { ToastProvider } from "./components/ToastProvider";
-import { TooltipProvider } from "./components/ui/tooltip";
 import "./globals.css";
 
 export const metadata: Metadata = {

@@ -1,13 +1,14 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, Suspense, useEffect, useRef, useState } from "react";
+import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAppLanguage } from "../AppShell";
 import TypeIdentity from "../components/TypeIdentity";
+import TypeSearch from "@/components/TypeSearch";
 import { useToast } from "../components/ToastProvider";
 import type { SdeLanguage } from "@/lib/reference/languages";
-import { Clipboard, Copy, FileUp, Info, Minimize2, Upload, X } from "lucide-react";
+import { Clipboard, Copy, FileUp, Info, Minimize2, Trash2, Upload, X } from "lucide-react";
 import Image from "next/image";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import {
@@ -21,6 +22,19 @@ import { loadClientSession, loadClientStateStatus } from "@/lib/client/requestCa
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
 import { loadEndpointRecord, saveEndpointResponse } from "@/lib/client/refreshCache";
 import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/app/components/ui/badge";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import styles from "./compress.module.css";
 import { marketHubs } from "@/lib/reference/marketHubs";
 
@@ -287,11 +301,16 @@ function CompressContent() {
   }
 
   const locationOptions = options.locations;
+  const selectedLocation = locationOptions.find((location) => location.id === settings.locationId);
   const selectedCharacter = options.characters.find(
     (character) => character.id === settings.characterId,
   );
-  const selectedImplant =
-    options.implants.find((implant) => implant.id === settings.implantId) ?? options.implants[0];
+  const selectedImplant = options.implants.find((implant) => implant.id === settings.implantId)
+    ?? options.implants.find((implant) => implant.id === "none") ?? {
+      id: "none",
+      name: "No implant",
+      level: 0,
+    };
   const implantOptions = selectedCharacter
     ? options.implants.filter(
         (implant) =>
@@ -299,6 +318,13 @@ function CompressContent() {
           || (implant.typeId !== undefined && selectedCharacter.implants.includes(implant.typeId)),
       )
     : options.implants;
+  const selectedMarket = marketHubs.find((market) => market.id === settings.marketId);
+  const orderTypeLabel =
+    settings.orderType === "buy-1-day"
+      ? "Buy (1 Day)"
+      : settings.orderType === "buy-5-day"
+        ? "Buy (5 Day)"
+        : "Sell";
   const skillLevels =
     settings.characterId === "all-zero"
       ? Object.fromEntries(options.relevantSkillIds.map((id) => [String(id), 0]))
@@ -436,115 +462,185 @@ function CompressContent() {
               <p className={styles.kicker}>01 / REQUIREMENTS</p>
               <h2>Raw materials</h2>
             </div>
-            <button
+            <Button
               type="button"
-              className={`actionButton ${styles.secondaryButton}`}
+              className={styles.secondaryButton}
+              variant="outline"
               onClick={() => setIsPasteOpen(true)}
             >
               <Clipboard aria-hidden="true" />
               <span>Paste multibuy</span>
-            </button>
+            </Button>
           </div>
           <p className={styles.description}>
             Add the minerals you need, then find the compressed ores that can produce them.
           </p>
-          <TypeSearch language={language} onSelect={addItem} />
-          <div className={styles.compressOptions}>
+          <TypeSearch
+            language={language}
+            placeholder="Search material by name or type ID"
+            ariaLabel="Search minerals"
+            onSelect={(item) =>
+              addItem({
+                ...item,
+                category: item.category === "reactionformula" ? "reaction" : item.category,
+              })
+            }
+          />
+          <FieldGroup className={styles.compressOptions}>
             {locationOptions.length > 0 ? (
-              <label>
-                <span>LOCATION</span>
-                <select
+              <Field>
+                <FieldLabel htmlFor="compress-location">LOCATION</FieldLabel>
+                <Select
                   value={settings.locationId}
-                  onChange={(event) => updateSettings({ locationId: event.target.value })}
+                  onValueChange={(value) => value && updateSettings({ locationId: value })}
                 >
-                  {locationOptions.map((location) => (
-                    <option
-                      value={location.id}
-                      key={location.id}
-                      disabled={location.canReprocess === false}
-                    >
-                      {location.name ?? `Location ${location.id}`}
-                      {location.canReprocess === false ? " [No Reprocessing]" : ""} ·{" "}
-                      {Math.round(location.baseYield ?? 50)}%
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  <SelectTrigger id="compress-location" className={styles.formSelect}>
+                    <SelectValue>
+                      {selectedLocation?.name ?? `Location ${settings.locationId}`}
+                      {selectedLocation?.canReprocess === false ? " [No Reprocessing]" : ""} ·{" "}
+                      {Math.round(selectedLocation?.baseYield ?? 50)}%
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent className={styles.selectContent}>
+                    {locationOptions.map((location) => (
+                      <SelectItem
+                        value={location.id}
+                        key={location.id}
+                        className={styles.selectItem}
+                        disabled={location.canReprocess === false}
+                      >
+                        <span className={styles.selectItemLabel}>
+                          {location.name ?? `Location ${location.id}`}
+                          {location.canReprocess === false ? " [No Reprocessing]" : ""}
+                        </span>
+                        <span className={styles.selectItemMeta}>
+                          {Math.round(location.baseYield ?? 50)}%
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
             ) : (
-              <div className={styles.locationAlert} role="alert">
+              <Alert className={styles.locationAlert}>
                 <Info className={styles.locationAlertIcon} aria-hidden="true" />
-                <div className={styles.locationAlertContent}>
-                  <strong>No reprocessing locations found.</strong>
-                  <span>
-                    Add a reprocessing location on the <Link href="/locations">Locations</Link> page
-                    or <Link href="/api/auth/eve/start">authenticate a character</Link> to find the
-                    best location automatically.
-                  </span>
-                </div>
-              </div>
+                <AlertTitle>No reprocessing locations found.</AlertTitle>
+                <AlertDescription className={styles.locationAlertContent}>
+                  Add a reprocessing location on the <Link href="/locations">Locations</Link> page
+                  or <Link href="/api/auth/eve/start">authenticate a character</Link> to find the
+                  best location automatically.
+                </AlertDescription>
+              </Alert>
             )}
-            <label>
-              <span>CHARACTER / SKILLS</span>
-              <select
+            <Field>
+              <FieldLabel htmlFor="compress-character">CHARACTER / SKILLS</FieldLabel>
+              <Select
                 value={settings.characterId}
-                onChange={(event) =>
-                  updateSettings({ characterId: event.target.value, implantId: "none" })
+                onValueChange={(value) =>
+                  value && updateSettings({ characterId: value, implantId: "none" })
                 }
               >
-                <option value="all-zero">All zero</option>
-                <option value="all-iv">All IV</option>
-                <option value="all-v">All V</option>
-                {options.characters.map((character) => (
-                  <option value={character.id} key={character.id}>
-                    {character.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>IMPLANT</span>
-              <select
+                <SelectTrigger id="compress-character" className={styles.formSelect}>
+                  <SelectValue>
+                    {settings.characterId === "all-zero"
+                      ? "All zero"
+                      : settings.characterId === "all-iv"
+                        ? "All IV"
+                        : settings.characterId === "all-v"
+                          ? "All V"
+                          : (selectedCharacter?.name ?? settings.characterId)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent className={styles.selectContent}>
+                  <SelectItem className={styles.selectItem} value="all-zero">
+                    All zero
+                  </SelectItem>
+                  <SelectItem className={styles.selectItem} value="all-iv">
+                    All IV
+                  </SelectItem>
+                  <SelectItem className={styles.selectItem} value="all-v">
+                    All V
+                  </SelectItem>
+                  {options.characters.map((character) => (
+                    <SelectItem
+                      value={character.id}
+                      key={character.id}
+                      className={styles.selectItem}
+                    >
+                      {character.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="compress-implant">IMPLANT</FieldLabel>
+              <Select
                 value={
                   implantOptions.some((implant) => implant.id === settings.implantId)
                     ? settings.implantId
                     : "none"
                 }
-                onChange={(event) => updateSettings({ implantId: event.target.value })}
+                onValueChange={(value) => value && updateSettings({ implantId: value })}
               >
-                {implantOptions.map((implant) => (
-                  <option value={implant.id} key={implant.id}>
-                    {implant.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>MARKET</span>
-              <select
+                <SelectTrigger id="compress-implant" className={styles.formSelect}>
+                  <SelectValue>{selectedImplant.name}</SelectValue>
+                </SelectTrigger>
+                <SelectContent className={styles.selectContent}>
+                  {implantOptions.map((implant) => (
+                    <SelectItem value={implant.id} key={implant.id} className={styles.selectItem}>
+                      <span className={styles.selectItemLabel}>{implant.name}</span>
+                      {implant.level > 0 && (
+                        <span className={styles.selectItemMeta}>{implant.level}%</span>
+                      )}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="compress-market">MARKET</FieldLabel>
+              <Select
                 value={settings.marketId}
-                onChange={(event) => updateSettings({ marketId: event.target.value })}
+                onValueChange={(value) => value && updateSettings({ marketId: value })}
               >
-                {marketHubs.map((market) => (
-                  <option value={market.id} key={market.id}>
-                    {market.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>ORDER TYPE</span>
-              <select
+                <SelectTrigger id="compress-market" className={styles.formSelect}>
+                  <SelectValue>{selectedMarket?.name ?? settings.marketId}</SelectValue>
+                </SelectTrigger>
+                <SelectContent className={styles.selectContent}>
+                  {marketHubs.map((market) => (
+                    <SelectItem value={market.id} key={market.id} className={styles.selectItem}>
+                      {market.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="compress-order-type">ORDER TYPE</FieldLabel>
+              <Select
                 value={settings.orderType}
-                onChange={(event) =>
-                  updateSettings({ orderType: event.target.value as CompressSettings["orderType"] })
+                onValueChange={(value) =>
+                  value && updateSettings({ orderType: value as CompressSettings["orderType"] })
                 }
               >
-                <option value="buy-1-day">Buy (1 Day)</option>
-                <option value="buy-5-day">Buy (5 Day)</option>
-                <option value="sell">Sell</option>
-              </select>
-            </label>
-          </div>
+                <SelectTrigger id="compress-order-type" className={styles.formSelect}>
+                  <SelectValue>{orderTypeLabel}</SelectValue>
+                </SelectTrigger>
+                <SelectContent className={styles.selectContent}>
+                  <SelectItem className={styles.selectItem} value="buy-1-day">
+                    Buy (1 Day)
+                  </SelectItem>
+                  <SelectItem className={styles.selectItem} value="buy-5-day">
+                    Buy (5 Day)
+                  </SelectItem>
+                  <SelectItem className={styles.selectItem} value="sell">
+                    Sell
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          </FieldGroup>
           <div className={styles.listHeader}>
             <span>ITEM</span>
             <span>QUANTITY</span>
@@ -562,7 +658,7 @@ function CompressContent() {
                   typeId={item.typeId}
                   variation={variation(item.category, item.imageVariation, item.name)}
                 />
-                <input
+                <Input
                   aria-label={`${item.name} quantity`}
                   type="number"
                   min="1"
@@ -578,16 +674,18 @@ function CompressContent() {
                     )
                   }
                 />
-                <button
+                <Button
                   type="button"
                   className={styles.removeButton}
+                  variant="destructive"
+                  size="icon-sm"
                   aria-label={`Remove ${item.name}`}
                   onClick={() =>
                     updateItems((current) => current.filter((_, itemIndex) => itemIndex !== index))
                   }
                 >
-                  ×
-                </button>
+                  <Trash2 aria-hidden="true" size={15} strokeWidth={1.8} />
+                </Button>
               </div>
             ))
           )}
@@ -629,98 +727,6 @@ function CompressContent() {
   );
 }
 
-function TypeSearch({
-  language,
-  onSelect,
-}: {
-  language: SdeLanguage;
-  onSelect: (item: TypeResult) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<TypeResult[]>([]);
-  const [isOpen, setIsOpen] = useState(false);
-  const requestId = useRef(0);
-  useEffect(() => {
-    if (query.trim().length < 2) return;
-    const id = ++requestId.current;
-    const timer = window.setTimeout(
-      () =>
-        fetch(`/api/reference/types?query=${encodeURIComponent(query.trim())}&language=${language}`)
-          .then((response) => response.json() as Promise<{ items?: TypeResult[] }>)
-          .then((data) => {
-            if (id === requestId.current) {
-              setResults(data.items ?? []);
-              setIsOpen(true);
-            }
-          })
-          .catch(() => setResults([])),
-      180,
-    );
-    return () => window.clearTimeout(timer);
-  }, [language, query]);
-  function choose(item: TypeResult) {
-    onSelect(item);
-    setQuery("");
-    setResults([]);
-    setIsOpen(false);
-  }
-  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key === "Escape") setIsOpen(false);
-    if (event.key === "Enter" && results[0]) {
-      event.preventDefault();
-      choose(results[0]);
-    }
-  }
-  return (
-    <div className={styles.searchWrap}>
-      <div className={styles.search}>
-        <span aria-hidden="true">⌕</span>
-        <input
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setIsOpen(true);
-          }}
-          onFocus={() => results.length > 0 && setIsOpen(true)}
-          onKeyDown={onKeyDown}
-          placeholder="Search minerals by name or type ID"
-          aria-label="Search minerals"
-        />
-      </div>
-      {isOpen && query.trim().length >= 2 && (
-        <div className={styles.searchResults} role="listbox">
-          {results.length ? (
-            results.map((item) => (
-              <div
-                role="option"
-                aria-selected="false"
-                tabIndex={0}
-                className={styles.searchResult}
-                key={item.typeId}
-                onMouseDown={() => choose(item)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    choose(item);
-                  }
-                }}
-              >
-                <TypeIdentity
-                  name={item.name}
-                  typeId={item.typeId}
-                  variation={variation(item.category)}
-                />
-              </div>
-            ))
-          ) : (
-            <div className={styles.noResults}>No matching published items.</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function Results({ result }: { result: CompressResult }) {
   const router = useRouter();
   const { showToast } = useToast();
@@ -748,9 +754,6 @@ function Results({ result }: { result: CompressResult }) {
   );
   async function copyToBuyList() {
     try {
-      await navigator.clipboard.writeText(
-        items.map((item) => `${item.name}\t${item.quantity}`).join("\n"),
-      );
       showToast("To Buy multibuy list copied");
     }
     catch {
@@ -864,7 +867,7 @@ function Results({ result }: { result: CompressResult }) {
                   className={`${styles.resultRow} ${active.key === "plan" ? styles.planResultRow : ""}`}
                   key={`${active.key}-${item.typeId ?? item.name}-${item.ignored ? "ignored" : "included"}`}
                 >
-                  <span>
+                  <span className={styles.resultIdentity}>
                     {item.typeId ? (
                       <TypeIdentity
                         name={item.name}
@@ -874,7 +877,11 @@ function Results({ result }: { result: CompressResult }) {
                     ) : (
                       item.name
                     )}
-                    {item.ignored && <small className={styles.ignoredBadge}>ignored</small>}
+                    {item.ignored && (
+                      <Badge variant="outline" className={styles.ignoredBadge}>
+                        ignored
+                      </Badge>
+                    )}
                   </span>
                   <strong data-label="Required">{item.quantity.toLocaleString()}</strong>
                   {active.key === "plan" && (
@@ -1060,7 +1067,7 @@ function PasteDialog({
         <p className={styles.description}>
           Compatible with Eve Multibuy. One item per line, with the quantity at the end.
         </p>
-        <textarea
+        <Textarea
           value={text}
           onChange={(event) => {
             setText(event.target.value);

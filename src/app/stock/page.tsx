@@ -372,7 +372,7 @@ export default function StockPage() {
           Add location
         </button>
       </div>
-      <div className={styles.panel}>
+      <section className={styles.panel}>
         <div className={styles.panelHeader}>
           <div>
             <p className={styles.panelKicker}>01 / LOCATIONS</p>
@@ -417,7 +417,7 @@ export default function StockPage() {
             })}
           </div>
         )}
-      </div>
+      </section>
       {isAddOpen && (
         <AddLocationModal
           language={language}

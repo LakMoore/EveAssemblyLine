@@ -134,7 +134,7 @@
 .panel {
   overflow: hidden;
   border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--white) 88%, transparent);
+  background: var(--surface);
 }
 
 .panelHeader {

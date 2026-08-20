@@ -478,7 +478,7 @@ export default function LocationsPage() {
           </p>
         </div>
       </div>
-      <div className={styles.panel}>
+      <section className={styles.panel}>
         <div className={styles.panelHeader}>
           <div>
             <p className={styles.panelKicker}>01 / STRUCTURES</p>
@@ -546,8 +546,8 @@ export default function LocationsPage() {
             ))}
           </div>
         )}
-      </div>
-      <div className={styles.panel}>
+      </section>
+      <section className={styles.panel}>
         <div className={styles.panelHeader}>
           <div>
             <p className={styles.panelKicker}>02 / ESI INVENTORY</p>
@@ -639,7 +639,7 @@ export default function LocationsPage() {
             ))}
           </div>
         )}
-      </div>
+      </section>
       {isDialogOpen && (
         <StructureDialog
           language={language}

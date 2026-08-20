@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, type RefObject, useEffect, useRef, useState } from "react";
+import { FormEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
@@ -32,9 +32,20 @@ import type { SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import { useAppLanguage } from "./AppShell";
 import TypeIdentity from "./components/TypeIdentity";
+import TypeSearch from "@/components/TypeSearch";
 import { useToast } from "./components/ToastProvider";
 import { Badge } from "./components/ui/badge";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui/tooltip";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import styles from "./page.module.css";
 import {
   ChartLine,
@@ -163,15 +174,12 @@ function ScrollTopButton({
   headerRef: RefObject<HTMLElement | null>;
 }) {
   const [isFloating, setIsFloating] = useState(false);
-
   useEffect(() => {
     function updateFloatingState() {
-      // Must match the breakpoint where the table headers become sticky.
       const isSticky = window.matchMedia("(min-width: 641px)").matches;
       const headerTop = headerRef.current?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY;
       setIsFloating(isSticky && headerTop <= 0);
     }
-
     updateFloatingState();
     window.addEventListener("scroll", updateFloatingState, { passive: true });
     window.addEventListener("resize", updateFloatingState);
@@ -180,7 +188,6 @@ function ScrollTopButton({
       window.removeEventListener("resize", updateFloatingState);
     };
   }, [headerRef]);
-
   return (
     <button
       type="button"
@@ -544,7 +551,7 @@ function Planner() {
       </div>
       <form onSubmit={calculatePlan}>
         <div className={styles.workspaceGrid}>
-          <div className={styles.panel}>
+          <section className={styles.panel}>
             <div className={styles.panelHeader}>
               <div>
                 <p className={styles.panelKicker} ref={requirementsHeaderRef}>
@@ -585,6 +592,8 @@ function Planner() {
             <p className={styles.panelDescription}>What are you making?</p>
             <TypeSearch
               language={language}
+              placeholder="Search items by name or type ID"
+              ariaLabel="Search items by name or type ID"
               onSelect={(item) =>
                 setItems((current) => {
                   const existingIndex = current.findIndex(
@@ -652,7 +661,7 @@ function Planner() {
                   </div>
                   <label className={`${styles.itemField} ${styles.quantityField}`}>
                     <span>Quantity</span>
-                    <input
+                    <Input
                       aria-label={`${item.name} quantity`}
                       type="number"
                       min="1"
@@ -671,7 +680,7 @@ function Planner() {
                   </label>
                   <label className={`${styles.itemField} ${styles.meField}`}>
                     <span>ME</span>
-                    <input
+                    <Input
                       aria-label={`${item.name} material efficiency`}
                       type="number"
                       min="0"
@@ -694,7 +703,7 @@ function Planner() {
                   </label>
                   <label className={`${styles.itemField} ${styles.teField}`}>
                     <span>TE</span>
-                    <input
+                    <Input
                       aria-label={`${item.name} time efficiency`}
                       type="number"
                       min="0"
@@ -731,96 +740,114 @@ function Planner() {
                 <>
                   <label>
                     <span>BUILD LOCATION</span>
-                    <select
-                      value={locations.manufacturing}
-                      onChange={(event) =>
-                        updateLocations({ manufacturing: Number(event.target.value) })
-                      }
+                    <Select
+                      value={String(locations.manufacturing)}
+                      onValueChange={(value) => {
+                        if (value) updateLocations({ manufacturing: Number(value) });
+                      }}
                     >
-                      {locationOptions
-                        .slice()
-                        .sort(
-                          (left, right) =>
-                            left.baseManufacturingMe - right.baseManufacturingMe
-                            || left.name.localeCompare(right.name),
-                        )
-                        .map((location) => (
-                          <option value={location.locationId} key={`manufacturing-${location.id}`}>
-                            {location.name} ({location.baseManufacturingMe.toFixed(1)}% ME)
-                          </option>
-                        ))}
-                    </select>
+                      <SelectTrigger
+                        id="planner-build-location"
+                        size="sm"
+                        className={styles.locationSelect}
+                      >
+                        <SelectValue className={styles.locationSelectValue}>
+                          <span className={styles.locationSelectName}>
+                            {locationOptions.find(
+                              (location) => location.locationId === locations.manufacturing,
+                            )?.name ?? String(locations.manufacturing)}
+                          </span>
+                          <span className={styles.locationSelectBonus}>
+                            {locationOptions
+                              .find((location) => location.locationId === locations.manufacturing)
+                              ?.baseManufacturingMe.toFixed(1)}
+                            %
+                          </span>
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent className={styles.locationSelectContent}>
+                        {locationOptions
+                          .slice()
+                          .sort(
+                            (left, right) =>
+                              left.baseManufacturingMe - right.baseManufacturingMe
+                              || left.name.localeCompare(right.name),
+                          )
+                          .map((location) => (
+                            <SelectItem
+                              value={String(location.locationId)}
+                              key={`manufacturing-${location.id}`}
+                              className={styles.locationSelectItem}
+                            >
+                              <span className={styles.locationSelectName}>{location.name}</span>
+                              <span className={styles.locationSelectBonus}>
+                                {location.baseManufacturingMe.toFixed(1)}%
+                              </span>
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
                   </label>
                   <label>
                     <span>REACTION LOCATION</span>
-                    <select
-                      value={locations.reactions}
-                      onChange={(event) =>
-                        updateLocations({ reactions: Number(event.target.value) })
-                      }
+                    <Select
+                      value={String(locations.reactions)}
+                      onValueChange={(value) => {
+                        if (value) updateLocations({ reactions: Number(value) });
+                      }}
                     >
-                      {locationOptions
-                        .slice()
-                        .sort(
-                          (left, right) =>
-                            left.baseReactionMe - right.baseReactionMe
-                            || left.name.localeCompare(right.name),
-                        )
-                        .map((location) => (
-                          <option value={location.locationId} key={`reaction-${location.id}`}>
-                            {location.name} ({location.baseReactionMe.toFixed(1)}% ME)
-                          </option>
-                        ))}
-                    </select>
+                      <SelectTrigger
+                        id="planner-reaction-location"
+                        size="sm"
+                        className={styles.locationSelect}
+                      >
+                        <SelectValue className={styles.locationSelectValue}>
+                          <span className={styles.locationSelectName}>
+                            {locationOptions.find(
+                              (location) => location.locationId === locations.reactions,
+                            )?.name ?? String(locations.reactions)}
+                          </span>
+                          <span className={styles.locationSelectBonus}>
+                            {locationOptions
+                              .find((location) => location.locationId === locations.reactions)
+                              ?.baseReactionMe.toFixed(1)}
+                            %
+                          </span>
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent className={styles.locationSelectContent}>
+                        {locationOptions
+                          .slice()
+                          .sort(
+                            (left, right) =>
+                              left.baseReactionMe - right.baseReactionMe
+                              || left.name.localeCompare(right.name),
+                          )
+                          .map((location) => (
+                            <SelectItem
+                              value={String(location.locationId)}
+                              key={`reaction-${location.id}`}
+                              className={styles.locationSelectItem}
+                            >
+                              <span className={styles.locationSelectName}>{location.name}</span>
+                              <span className={styles.locationSelectBonus}>
+                                {location.baseReactionMe.toFixed(1)}%
+                              </span>
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
                   </label>
                 </>
               ) : (
-                <div className={styles.locationAlert} role="alert">
+                <Alert className={styles.locationAlert}>
                   <Info className={styles.locationAlertIcon} aria-hidden="true" />
-                  <div className={styles.locationAlertContent}>
-                    <strong>No build or reaction locations available.</strong>
-                    <span>
-                      Optionally add structures on the <Link href="/locations">Locations</Link> page
-                      or <Link href="/api/auth/eve/start">add character(s) via ESI</Link> to improve
-                      plan results.
-                    </span>
+                  <div className={styles.locationAlertBody}>
+                    Add a reprocessing location on the Locations page or authenticate a character to
+                    find the best location automatically.
                   </div>
-                </div>
+                </Alert>
               )}
-              <label className={styles.checkboxOption}>
-                <span>INCLUDE STOCK</span>
-                <button
-                  type="button"
-                  className={styles.stockSwitch}
-                  role="switch"
-                  aria-checked={includeStock}
-                  aria-label="Include stock"
-                  onClick={() => setIncludeStock((current) => !current)}
-                >
-                  <span className={styles.stockSwitchThumb} />
-                </button>
-              </label>
-              <div className={styles.excludedLocationsControl}>
-                <span>EXCLUDED LOCATIONS</span>
-                <div className={styles.excludedLocationsActions}>
-                  <button
-                    type="button"
-                    className={styles.excludedLocationsCount}
-                    disabled={excludedLocationIds.length === 0}
-                    onClick={() => setIsExcludedLocationsModalOpen(true)}
-                  >
-                    {excludedLocationIds.length}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.clearExcludedButton}
-                    disabled={excludedLocationIds.length === 0 || isPlanLoading}
-                    onClick={() => void clearExcludedLocations()}
-                  >
-                    Clear all
-                  </button>
-                </div>
-              </div>
             </div>
             <button
               className={styles.calculate}
@@ -833,7 +860,7 @@ function Planner() {
               </span>
               <b aria-hidden="true">→</b>
             </button>
-          </div>
+          </section>
         </div>
       </form>
       {isPasteModalOpen && (
@@ -863,7 +890,7 @@ function Planner() {
           onCancel={() => setIsExcludedLocationsModalOpen(false)}
         />
       )}
-      <div className={styles.results}>
+      <section className={styles.results}>
         <div className={styles.resultsHeader} ref={resultsHeaderRef}>
           <div>
             <p className={styles.panelKicker}>03 / OUTPUT</p>
@@ -921,10 +948,224 @@ function Planner() {
             <p>Calculate a plan to see the work required for this project.</p>
           </div>
         )}
-      </div>
+      </section>
     </>
   );
 }
+
+/*
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent className={styles.locationSelectContent}>
+                        {locationOptions
+                          .slice()
+                          .sort(
+                            (left, right) =>
+                              left.baseManufacturingMe - right.baseManufacturingMe
+                              || left.name.localeCompare(right.name),
+                          )
+                          .map((location) => (
+                            <SelectItem
+                              value={String(location.locationId)}
+                              key={`manufacturing-${location.id}`}
+                            >
+                              {location.name} ({location.baseManufacturingMe.toFixed(1)}% ME)
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </label>
+                  <label>
+                    <span>REACTION LOCATION</span>
+                    <Select
+                      value={String(locations.reactions)}
+                      onValueChange={(value) => {
+                        if (value) updateLocations({ reactions: Number(value) });
+                      }}
+                    >
+                      <SelectTrigger
+                        id="planner-reaction-location"
+                        size="sm"
+                        className={styles.locationSelect}
+                      >
+                        <SelectValue>
+                          {locationOptions.find(
+                            (location) => location.locationId === locations.reactions,
+                          )?.name ?? String(locations.reactions)}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent className={styles.locationSelectContent}>
+                        {locationOptions
+                          .slice()
+                          .sort(
+                            (left, right) =>
+                              left.baseReactionMe - right.baseReactionMe
+                              || left.name.localeCompare(right.name),
+                          )
+                          .map((location) => (
+                            <SelectItem
+                              value={String(location.locationId)}
+                              key={`reaction-${location.id}`}
+                            >
+                              {location.name} ({location.baseReactionMe.toFixed(1)}% ME)
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </label>
+                </>
+              ) : (
+                <Alert className={styles.locationAlert}>
+                  <Info className={styles.locationAlertIcon} aria-hidden="true" />
+                  <div className={styles.locationAlertBody}>
+                    <AlertTitle>No build or reaction locations available.</AlertTitle>
+                    <AlertDescription className={styles.locationAlertContent}>
+                      Optionally add structures on the <Link href="/locations">Locations</Link> page
+                      or <Link href="/api/auth/eve/start">add character(s) via ESI</Link> to improve
+                      plan results.
+                    </AlertDescription>
+                  </div>
+                </Alert>
+              )}
+              <label className={styles.checkboxOption}>
+                <span>INCLUDE STOCK</span>
+                <button
+                  type="button"
+                  className={styles.stockSwitch}
+                  role="switch"
+                  aria-checked={includeStock}
+                  aria-label="Include stock"
+                  onClick={() => setIncludeStock((current) => !current)}
+                >
+                  <span className={styles.stockSwitchThumb} />
+                </button>
+              </label>
+              <div className={styles.excludedLocationsControl}>
+                <span>EXCLUDED LOCATIONS</span>
+                <div className={styles.excludedLocationsActions}>
+                  <button
+                    type="button"
+                    className={styles.excludedLocationsCount}
+                    disabled={excludedLocationIds.length === 0}
+                    onClick={() => setIsExcludedLocationsModalOpen(true)}
+                  >
+                    {excludedLocationIds.length}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.clearExcludedButton}
+                    disabled={excludedLocationIds.length === 0 || isPlanLoading}
+                    onClick={() => void clearExcludedLocations()}
+                  >
+                    Clear all
+                  </button>
+                </div>
+              </div>
+            </div>
+            <button
+              className={styles.calculate}
+              type="submit"
+              disabled={isPlanLoading || items.length === 0}
+            >
+              <span className={styles.calculateLead}>
+                <ClipboardList size={16} aria-hidden="true" />
+                <span>{isPlanLoading ? "Calculating..." : "Calculate production plan"}</span>
+              </span>
+              <b aria-hidden="true">→</b>
+            </button>
+          </section>
+        </div>
+      </form>
+      {isPasteModalOpen && (
+        <PasteListModal
+          language={language}
+          onCancel={() => setIsPasteModalOpen(false)}
+          onImport={importItems}
+        />
+      )}
+      {isExcludedLocationsModalOpen && (
+        <ExcludedLocationsModal
+          locationIds={excludedLocationIds}
+          locationNamesById={
+            new Map([
+              ...locationOptions.map((option) => [option.locationId, option.name] as const),
+              ...stock.flatMap((item) => {
+                const locationId = getStockLocationId(item);
+                return locationId !== undefined && item.sourceLocationName
+                  ? [[locationId, item.sourceLocationName] as const]
+                  : [];
+              }),
+            ])
+          }
+          isLoading={isPlanLoading}
+          onRemove={(locationId) => void removeExcludedLocation(locationId)}
+          onClearAll={() => void clearExcludedLocations()}
+          onCancel={() => setIsExcludedLocationsModalOpen(false)}
+        />
+      )}
+      <section className={styles.results}>
+        <div className={styles.resultsHeader} ref={resultsHeaderRef}>
+          <div>
+            <p className={styles.panelKicker}>03 / OUTPUT</p>
+            <h2>Plan breakdown</h2>
+          </div>
+          <div className={styles.resultsHeaderMeta}>
+            {plan && (
+              <span className={styles.requiredSkillCount}>
+                {plan.lists.skillsRequired.length.toLocaleString()} skills required
+              </span>
+            )}
+            <span className={styles.planStatus}>
+              <i /> {planStatus}
+            </span>
+          </div>
+        </div>
+        <div className={styles.tabs}>
+          {tabs.map((tab, index) => (
+            <button
+              type="button"
+              key={tab}
+              className={activeTab === tab ? styles.tabActive : ""}
+              onClick={() => setActiveTab(tab)}
+            >
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              {tab}
+            </button>
+          ))}
+        </div>
+        {plan ? (
+          <PlanList
+            activeTab={activeTab}
+            plan={plan}
+            characterStatuses={characterStatuses}
+            characterNamesById={characterNamesById}
+            stock={stock}
+            locationNamesById={
+              new Map([
+                ...locationOptions.map((option) => [option.locationId, option.name] as const),
+                ...stock.flatMap((item) =>
+                  item.rootLocationId !== undefined && item.sourceLocationName
+                    ? [[item.rootLocationId, item.sourceLocationName] as const]
+                    : [],
+                ),
+              ])
+            }
+            onPlanChange={setPlan}
+            onExcludeHaulBucket={(fromLocationId) => void excludeHaulBucket(fromLocationId)}
+            resultsHeaderRef={resultsHeaderRef}
+          />
+        ) : (
+          <div className={styles.emptyResult}>
+            <div className={styles.resultGlyph}>↗</div>
+            <strong>Your {activeTab.toLowerCase()} list will appear here</strong>
+            <p>Calculate a plan to see the work required for this project.</p>
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+*/
 
 export default function Home() {
   const pathname = usePathname();
@@ -1111,7 +1352,7 @@ function PasteListModal({
         <p className={styles.panelDescription}>
           One item per line. Put the quantity at the end of each line.
         </p>
-        <textarea
+        <Textarea
           className={styles.importTextarea}
           value={text}
           onChange={(event) => {
@@ -1166,144 +1407,6 @@ function PasteListModal({
           </button>
         </div>
       </form>
-    </div>
-  );
-}
-
-function TypeSearch({
-  language,
-  onSelect,
-}: {
-  language: SdeLanguage;
-  onSelect: (item: TypeResult) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<TypeResult[]>([]);
-  const [highlightedIndex, setHighlightedIndex] = useState(0);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
-  const requestId = useRef(0);
-
-  useEffect(() => {
-    const trimmedQuery = query.trim();
-    if (trimmedQuery.length < 2) return;
-    const currentRequestId = ++requestId.current;
-    const controller = new AbortController();
-    const timeout = window.setTimeout(
-      async () => {
-        setIsLoading(true);
-        try {
-          const response = await fetch(
-            `/api/reference/types?query=${encodeURIComponent(trimmedQuery)}&language=${language}`,
-            { signal: controller.signal },
-          );
-          const data = (await response.json()) as { items?: TypeResult[] };
-          if (currentRequestId === requestId.current) {
-            setResults(data.items ?? []);
-            setHighlightedIndex(0);
-            setIsOpen(true);
-          }
-        }
-        catch (error) {
-          if (error instanceof DOMException && error.name === "AbortError") return;
-          setResults([]);
-        }
-        finally {
-          if (currentRequestId === requestId.current) setIsLoading(false);
-        }
-      },
-      180,
-    );
-    return () => {
-      window.clearTimeout(timeout);
-      controller.abort();
-    };
-  }, [language, query]);
-
-  function selectItem(item: TypeResult) {
-    onSelect(item);
-    setQuery("");
-    setResults([]);
-    setIsOpen(false);
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setHighlightedIndex((index) => Math.min(index + 1, results.length - 1));
-    }
-    else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setHighlightedIndex((index) => Math.max(index - 1, 0));
-    }
-    else if (event.key === "Enter" && isOpen && results[highlightedIndex]) {
-      event.preventDefault();
-      selectItem(results[highlightedIndex]);
-    }
-    else if (event.key === "Escape") {
-      setIsOpen(false);
-    }
-  }
-
-  return (
-    <div className={styles.searchWrap}>
-      <div className={styles.search}>
-        ⌕{" "}
-        <input
-          data-type-search
-          value={query}
-          onChange={(event) => {
-            const value = event.target.value;
-            setQuery(value);
-            setIsOpen(true);
-            if (value.trim().length < 2) {
-              setResults([]);
-              setIsLoading(false);
-            }
-          }}
-          onFocus={() => results.length > 0 && setIsOpen(true)}
-          onKeyDown={handleKeyDown}
-          placeholder="Search items by name or type ID"
-          aria-label="Search items by name or type ID"
-          aria-autocomplete="list"
-        />
-        <kbd>⌘ K</kbd>
-        {isLoading && <span className={styles.searchSpinner} />}
-      </div>
-      {isOpen && query.trim().length >= 2 && (
-        <div className={styles.searchResults} role="listbox">
-          {results.length > 0
-            ? results.map((item, index) => (
-                <div
-                  role="option"
-                  aria-selected={index === highlightedIndex}
-                  className={
-                    index === highlightedIndex ? styles.searchResultActive : styles.searchResult
-                  }
-                  key={item.typeId}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    selectItem(item);
-                  }}
-                >
-                  <TypeIdentity
-                    name={item.name}
-                    typeId={item.typeId}
-                    variation={
-                      item.category === "blueprint"
-                        ? "bp"
-                        : item.category === "reactionformula"
-                          ? "bpc"
-                          : "icon"
-                    }
-                  />
-                </div>
-              ))
-            : !isLoading && (
-                <div className={styles.noSearchResults}>No matching published items.</div>
-              )}
-        </div>
-      )}
     </div>
   );
 }

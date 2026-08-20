@@ -58,6 +58,7 @@ export default function TypeIdentity({
           type="button"
           className={styles.name}
           title="Copy item name"
+          tabIndex={-1}
           onClick={() => void copyValue(name, "Item name")}
         >
           {name}
@@ -66,6 +67,7 @@ export default function TypeIdentity({
           type="button"
           className={styles.typeId}
           title="Copy type ID"
+          tabIndex={-1}
           onClick={() => void copyValue(String(typeId), "Type ID")}
         >
           {typeName ? `${typeName} · ` : ""}Type ID {typeId}
