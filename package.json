@@ -19,6 +19,7 @@
     "cache:cleanup-old-sde": "tsx scripts/cleanup-old-sde-cache.ts"
   },
   "dependencies": {
+    "@base-ui/react": "^1.7.0",
     "@upstash/redis": "^1.38.1",
     "firebase-admin": "^14.2.0",
     "jsonrepair": "^3.15.0",

@@ -7,6 +7,7 @@ export interface PlanBuildItem {
   me: number;
   te: number;
   fromCompression: boolean;
+  reprocessingEfficiency?: number;
 }
 
 // shape of the build item used on the server
@@ -123,7 +124,14 @@ export interface PlanRequest {
     market: PlanMarketInput[];
   };
   stock?: PlanStockItem[];
-  locations?: { manufacturing: number; reactions: number; market: number };
+  locations?: {
+    manufacturing: number;
+    reactions: number;
+    market: number;
+    reprocessing?: number;
+    copying?: number;
+    invention?: number;
+  };
   settings: {
     includeCorporationAssets: boolean;
     personalSellOrdersAsStock: boolean;
@@ -236,8 +244,6 @@ export interface PlanResult {
       volume: number;
       fromLocationId: number;
       toLocationId: number;
-      fromLocationName?: string;
-      toLocationName?: string;
       ownerType?: "character" | "corporation";
       ownerId?: number;
     }>;

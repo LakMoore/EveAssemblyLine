@@ -32,6 +32,7 @@ type ResultItem = {
   typeId?: number;
   quantity: number;
   ignored: boolean;
+  reprocessingEfficiency?: number;
   packagedVolume?: number;
   fromReprocessing?: number;
   surplus?: number;
@@ -778,6 +779,9 @@ function Results({ result }: { result: CompressResult }) {
             me: 0,
             te: 0,
             fromCompression: true,
+            ...(item.reprocessingEfficiency === undefined
+              ? {}
+              : { reprocessingEfficiency: item.reprocessingEfficiency }),
           });
         }
       }

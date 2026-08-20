@@ -2403,6 +2403,124 @@
   padding-bottom: 14px;
 }
 
+.haulGroups {
+  display: grid;
+  gap: 18px;
+  padding-bottom: 14px;
+}
+
+.haulGroup {
+  border-top: 1px solid #2b5260;
+}
+
+.haulGroupHeader {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 11px 0;
+  color: #708c95;
+  font: 10px "DM Mono";
+  text-transform: uppercase;
+}
+
+.haulHeaderActions {
+  display: flex;
+  grid-column: 5;
+  justify-self: end;
+  gap: 6px;
+}
+
+.haulHeaderActions svg {
+  width: 14px;
+  height: 14px;
+}
+
+.haulGroupHeader strong {
+  overflow: hidden;
+  color: var(--cyan);
+  font:
+    12px Manrope,
+    sans-serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+}
+
+.haulGroupRows {
+  border-top: 1px solid #1e3740;
+}
+
+.haulRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 13px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid #1e3740;
+}
+
+.haulRowAmount {
+  display: grid;
+  justify-items: end;
+  color: #d4e6e9;
+  font: 12px "DM Mono";
+  white-space: nowrap;
+}
+
+.haulRowAmount small {
+  margin-top: 4px;
+  color: #708c95;
+  font: 10px "DM Mono";
+}
+
+@media (max-width: 640px) {
+  .haulGroupHeader {
+    grid-template-columns: auto minmax(0, 1fr);
+    row-gap: 5px;
+  }
+
+  .haulGroupHeader strong {
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .haulGroupHeader span:nth-of-type(2) {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .haulGroupHeader strong:nth-of-type(2) {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .haulHeaderActions {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    justify-self: end;
+    flex-direction: column;
+    align-items: flex-end;
+  }
+
+  .haulRow {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 8px;
+  }
+
+  .haulRow .planTypeIdentity {
+    grid-column: 1;
+    width: 100%;
+  }
+
+  .haulRowAmount {
+    grid-column: 1;
+    justify-self: end;
+    text-align: right;
+  }
+}
+
 .planTableHeader,
 .planTableRow {
   display: grid;
@@ -3780,6 +3898,96 @@
   min-height: 68px;
 }
 
+.excludedLocationsControl {
+  display: grid;
+  align-content: space-between;
+  gap: 6px;
+  min-width: 132px;
+  min-height: 68px;
+  padding: 9px 11px 10px;
+  border: 1px solid #294852;
+  background: #0a1a21;
+}
+
+.excludedLocationsControl > span {
+  color: var(--muted);
+  font:
+    9px "DM Mono",
+    monospace;
+  letter-spacing: 1px;
+}
+
+.excludedLocationsActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.excludedLocationsCount,
+.clearExcludedButton {
+  border: 1px solid #2b5260;
+  background: transparent;
+  color: var(--cyan);
+  cursor: pointer;
+  font:
+    11px "DM Mono",
+    monospace;
+}
+
+.excludedLocationsCount {
+  min-width: 28px;
+  height: 24px;
+  padding: 0 7px;
+}
+
+.clearExcludedButton {
+  padding: 4px 7px;
+}
+
+.excludedLocationsCount:hover:not(:disabled),
+.clearExcludedButton:hover:not(:disabled) {
+  border-color: var(--cyan);
+  background: #12313b;
+}
+
+.excludedLocationsCount:disabled,
+.clearExcludedButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.excludedLocationsCount:focus-visible,
+.clearExcludedButton:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.excludedLocationList {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.excludedLocationRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  font:
+    11px "DM Mono",
+    monospace;
+}
+
+.excludedLocationRow span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .checkboxOption > span {
   color: inherit;
 }
@@ -3849,6 +4057,10 @@
 
   .checkboxOption {
     align-self: auto;
+    min-height: 48px;
+  }
+
+  .excludedLocationsControl {
     min-height: 48px;
   }
 
@@ -3951,13 +4163,18 @@
   color: var(--cyan);
 }
 
-.compressionBadge {
-  color: var(--lime);
+.compressionTooltip {
+  z-index: 50;
+  max-width: 240px;
+  padding: 7px 9px;
+  border: 1px solid #376270;
+  background: #0d1d25;
+  color: var(--ink);
   font:
-    9px "DM Mono",
+    11px "DM Mono",
     monospace;
-  letter-spacing: 0.7px;
-  text-transform: uppercase;
+  line-height: 1.35;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
 .buildItemIdentity {

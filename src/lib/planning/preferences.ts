@@ -2,6 +2,9 @@ export type PlannerLocations = {
   manufacturing: number;
   reactions: number;
   market: number;
+  reprocessing?: number;
+  copying?: number;
+  invention?: number;
   structures: KnownStructure[];
 };
 
@@ -45,6 +48,9 @@ export const defaultLocations: PlannerLocations = {
   manufacturing: 60003760,
   reactions: 30000142,
   market: 60008494,
+  reprocessing: 60003760,
+  copying: 60003760,
+  invention: 60003760,
   structures: [],
 };
 

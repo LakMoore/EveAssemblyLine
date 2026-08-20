@@ -16,6 +16,7 @@ export type CompressionResultItem = {
   name: string;
   quantity: number;
   ignored: boolean;
+  reprocessingEfficiency?: number;
   packagedVolume?: number;
   fromReprocessing?: number;
   surplus?: number;
@@ -129,6 +130,9 @@ export function compressMaterials(
       name: names.get(typeId) ?? candidate?.name ?? `Type ${typeId}`,
       quantity: quantity * (candidate?.unitsToReprocess ?? 1),
       ignored: false,
+      ...(candidate && candidate.efficiency !== 100
+        ? { reprocessingEfficiency: candidate.efficiency }
+        : {}),
     };
   });
   for (const [typeId, quantity] of remaining) {

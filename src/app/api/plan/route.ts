@@ -83,6 +83,9 @@ async function calculateWorkingStockPlan(input: PlanRequest, stock: PlanStockIte
   const buildItems: BuildItem[] = input.toBuild.map((item) => ({
     ...item,
     fromCompression: item.fromCompression === true,
+    ...(item.reprocessingEfficiency === undefined
+      ? {}
+      : { reprocessingEfficiency: item.reprocessingEfficiency }),
     name:
       types.get(item.typeId)?.name[input.language ?? "en"]
       ?? types.get(item.typeId)?.name.en

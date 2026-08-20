@@ -21,6 +21,7 @@ export function reprocessCompressedStock(
   typeMaterials: ReadonlyMap<number, TypeMaterialsRecord>,
   types: ReadonlyMap<number, ReprocessTypeRecord>,
   additionalCompressedTypeIds: readonly number[] = specialReprocessableTypeIds,
+  efficiencyByTypeId: ReadonlyMap<number, number> = new Map(),
 ): ReprocessStockResult {
   const nextStock = new Map(stock);
   const consumedCompressed = new Map<number, number>();
@@ -42,10 +43,12 @@ export function reprocessCompressedStock(
     else nextStock.delete(compressedTypeId);
     consumedCompressed.set(compressedTypeId, processable);
     const runs = processable / portionSize;
+    const efficiency = efficiencyByTypeId.get(compressedTypeId) ?? 50;
     for (const material of materialRecord.materials ?? []) {
       producedMaterials.set(
         material.materialTypeID,
-        (producedMaterials.get(material.materialTypeID) ?? 0) + material.quantity * runs,
+        (producedMaterials.get(material.materialTypeID) ?? 0)
+          + Math.floor((material.quantity * runs * efficiency) / 100),
       );
     }
   }

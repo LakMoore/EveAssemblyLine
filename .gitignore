@@ -44,3 +44,5 @@ yarn-error.log*
 next-env.d.ts
 src/lib/sde/generated
 .key-file
+.agents
+skills-lock.json

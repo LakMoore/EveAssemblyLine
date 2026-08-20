@@ -10,6 +10,26 @@ import { reprocessCompressedStock, specialReprocessableTypeIds } from "./reproce
 
 type Material = PlanResult["lists"]["materialsToBuy"][number];
 type Efficiency = { me: number; te: number };
+type StockLot = {
+  typeId: number;
+  quantity: number;
+  rootLocationId: number;
+  ownerType?: "character" | "corporation";
+  ownerId?: number;
+  volumePerUnit: number;
+};
+
+function getStockRootLocationId(item: PlannerRequest["stock"][number]) {
+  return item.rootLocationId ?? item.sourceLocationId ?? item.locationId;
+}
+
+function getPreferredActivityLocationIds(locations: PlannerRequest["locations"]) {
+  return new Set(
+    [locations?.manufacturing, locations?.reactions, locations?.reprocessing].filter(
+      (locationId): locationId is number => locationId !== undefined,
+    ),
+  );
+}
 
 type ProfileEntry = { count: number; totalMs: number; maxMs: number };
 
@@ -109,7 +129,35 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       (map, item) => map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity),
       new Map<number, number>(),
     );
+  const stockLots: StockLot[] = request.stock
+    .filter((item) => item.category !== "blueprint" && item.category !== "reactionformula")
+    .filter((item) => item.source !== "marketOrder")
+    .filter((item): item is typeof item & { rootLocationId: number } =>
+      Number.isInteger(getStockRootLocationId(item)),
+    )
+    .map((item) => ({
+      typeId: item.typeId,
+      quantity: item.quantity,
+      rootLocationId: getStockRootLocationId(item)!,
+      ownerType: item.ownerType,
+      ownerId: item.ownerId,
+      volumePerUnit: item.isPackaged
+        ? (
+            typeRecords.get(item.typeId)?.packagedVolume
+            ?? typeRecords.get(item.typeId)?.volume
+            ?? 0
+          )
+        : (typeRecords.get(item.typeId)?.volume ?? 0),
+    }));
   const reprocessingStock = new Map(standardStock);
+  const compressionEfficiencyByTypeId = new Map<number, number>();
+  for (const item of request.items) {
+    if (!item.fromCompression) continue;
+    reprocessingStock.set(item.typeId, (reprocessingStock.get(item.typeId) ?? 0) + item.quantity);
+    if (item.reprocessingEfficiency !== undefined) {
+      compressionEfficiencyByTypeId.set(item.typeId, item.reprocessingEfficiency);
+    }
+  }
   for (const [typeId, quantity] of marketOrderStock) {
     reprocessingStock.set(typeId, (reprocessingStock.get(typeId) ?? 0) + quantity);
   }
@@ -117,22 +165,99 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     ...compressibleTypes.values(),
     ...specialReprocessableTypeIds,
   ]);
-  const requiredCompressedQuantities = request.items.reduce(
-    (quantities, item) => {
-      if (compressedTypeIds.has(item.typeId)) {
-        quantities.set(item.typeId, (quantities.get(item.typeId) ?? 0) + item.quantity);
-      }
-      return quantities;
-    },
-    new Map<number, number>(),
-  );
   const reprocessed = reprocessCompressedStock(
     reprocessingStock,
-    requiredCompressedQuantities,
+    request.items.reduce(
+      (quantities, item) => {
+        if (!item.fromCompression && compressedTypeIds.has(item.typeId)) {
+          const availableDirectStock =
+            (standardStock.get(item.typeId) ?? 0) + (marketOrderStock.get(item.typeId) ?? 0);
+          const reserved = Math.min(
+            availableDirectStock,
+            (quantities.get(item.typeId) ?? 0) + item.quantity,
+          );
+          quantities.set(item.typeId, reserved);
+        }
+        return quantities;
+      },
+      new Map<number, number>(),
+    ),
     compressibleTypes,
     typeMaterials,
     typeRecords,
+    specialReprocessableTypeIds,
+    compressionEfficiencyByTypeId,
   );
+  const haulingByKey = new Map<string, PlanResult["lists"]["haulingTasks"][number]>();
+  const reprocessingLocationId =
+    request.locations?.reprocessing ?? request.locations?.manufacturing;
+  const preferredActivityLocationIds = getPreferredActivityLocationIds(request.locations);
+  function addHauling(
+    lot: StockLot,
+    quantity: number,
+    destinationRootLocationId: number | undefined,
+  ) {
+    if (
+      quantity <= 0
+      || destinationRootLocationId === undefined
+      || !preferredActivityLocationIds.has(destinationRootLocationId)
+      || lot.rootLocationId === destinationRootLocationId
+    ) return;
+    const key = `${lot.typeId}:${lot.rootLocationId}:${destinationRootLocationId}`;
+    const existing = haulingByKey.get(key);
+    const task = existing ?? {
+      itemTypeId: lot.typeId,
+      name: `Type ${lot.typeId}`,
+      quantity: 0,
+      volume: 0,
+      fromLocationId: lot.rootLocationId,
+      toLocationId: destinationRootLocationId,
+      ownerType: lot.ownerType,
+      ownerId: lot.ownerId,
+    };
+    task.quantity += quantity;
+    task.volume += quantity * lot.volumePerUnit;
+    haulingByKey.set(key, task);
+  }
+  function consumeTrackedStock(
+    typeId: number,
+    quantity: number,
+    destinationRootLocationId: number | undefined,
+  ) {
+    let remaining = quantity;
+    const candidateLots = stockLots
+      .filter((lot) => lot.typeId === typeId && lot.quantity > 0)
+      .sort(
+        (left, right) =>
+          Number(left.rootLocationId !== destinationRootLocationId)
+          - Number(right.rootLocationId !== destinationRootLocationId),
+      );
+    for (const lot of candidateLots) {
+      if (remaining <= 0) break;
+      const consumed = Math.min(lot.quantity, remaining);
+      addHauling(lot, consumed, destinationRootLocationId);
+      lot.quantity -= consumed;
+      remaining -= consumed;
+    }
+  }
+  function addReprocessedStock(typeId: number, quantity: number) {
+    if (quantity <= 0 || reprocessingLocationId === undefined) return;
+    const type = typeRecords.get(typeId);
+    stockLots.push({
+      typeId,
+      quantity,
+      rootLocationId: reprocessingLocationId,
+      volumePerUnit: type?.volume ?? 0,
+    });
+  }
+  if (reprocessingLocationId !== undefined) {
+    for (const [typeId, quantity] of reprocessed.consumedCompressed) {
+      consumeTrackedStock(typeId, quantity, reprocessingLocationId);
+    }
+    for (const [typeId, quantity] of reprocessed.producedMaterials) {
+      addReprocessedStock(typeId, quantity);
+    }
+  }
   standardStock.clear();
   for (const [typeId, quantity] of reprocessed.stock) standardStock.set(typeId, quantity);
   for (const [typeId, quantity] of marketOrderStock) {
@@ -286,14 +411,17 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     fallbackName: string,
     demandAlreadyRecorded = false,
     imageVariation: "icon" | "bp" | "bpc" = "icon",
+    consumeAvailableStock = true,
+    activityRootLocationId?: number,
   ) {
     return profiler.measure(
       "addMaterial",
       async () => {
         const stockAvailable = standardStock.get(typeId) ?? 0;
-        const stockConsumed = Math.min(stockAvailable, quantity);
+        const stockConsumed = consumeAvailableStock ? Math.min(stockAvailable, quantity) : 0;
         if (stockConsumed > 0) {
           consumedStock.set(typeId, (consumedStock.get(typeId) ?? 0) + stockConsumed);
+          consumeTrackedStock(typeId, stockConsumed, activityRootLocationId);
         }
         const remainingStock = stockAvailable - stockConsumed;
         if (remainingStock > 0) standardStock.set(typeId, remainingStock);
@@ -317,6 +445,11 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     );
   }
 
+  for (const item of request.items) {
+    if (!item.fromCompression) continue;
+    await addMaterial(item.typeId, item.quantity, item.name, false, "icon", false);
+  }
+
   async function expand(
     typeId: number,
     quantity: number,
@@ -324,6 +457,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     stack: Set<number>,
     efficiency: Efficiency,
     allowMarketOrderStock = false,
+    activityRootLocationId?: number,
   ) {
     let phase = "stock";
     let activity = "unknown";
@@ -348,6 +482,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
         );
         if (stockConsumed > 0) {
           consumedStock.set(typeId, (consumedStock.get(typeId) ?? 0) + stockConsumed);
+          consumeTrackedStock(typeId, standardConsumed, activityRootLocationId);
         }
         if (stockConsumed > 0) {
           if (standardConsumed > 0) {
@@ -385,7 +520,15 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
         if (quantity <= 0) return;
 
         if (stack.has(typeId) || buildBlacklist.has(typeId) || buyBlacklist.has(typeId)) {
-          await addMaterial(typeId, quantity, fallbackName);
+          await addMaterial(
+            typeId,
+            quantity,
+            fallbackName,
+            false,
+            "icon",
+            true,
+            activityRootLocationId,
+          );
           return;
         }
 
@@ -403,7 +546,15 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
         const blueprint = candidate?.blueprint;
 
         if (!blueprint) {
-          await addMaterial(typeId, quantity, fallbackName, true);
+          await addMaterial(
+            typeId,
+            quantity,
+            fallbackName,
+            true,
+            "icon",
+            true,
+            activityRootLocationId,
+          );
           return;
         }
 
@@ -473,6 +624,8 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
                   typeName(material.typeID, `Type ${material.typeID}`),
                   nextStack,
                   defaultEfficiency,
+                  false,
+                  request.locations?.manufacturing,
                 );
               }
             },
@@ -528,7 +681,18 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
           },
         );
         if (runsNeeded > 0 && formulaCount === 0) {
-          await addMaterial(blueprint._key, 1, `${fallbackName} Formula`, false, "bpc");
+          await addMaterial(
+            blueprint._key,
+            1,
+            `${fallbackName} Formula`,
+            false,
+            "bpc",
+            true,
+            request.locations?.reactions,
+          );
+        }
+        else if (runsNeeded > 0) {
+          consumeTrackedStock(blueprint._key, 1, request.locations?.reactions);
         }
         phase = "reaction materials";
         await profiler.measure(
@@ -541,6 +705,8 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
                 typeName(material.typeID, `Type ${material.typeID}`),
                 nextStack,
                 defaultEfficiency,
+                false,
+                request.locations?.reactions,
               );
             }
           },
@@ -551,6 +717,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
   }
 
   for (const item of request.items) {
+    if (item.fromCompression) continue;
     await expand(
       item.typeId,
       item.quantity,
@@ -561,6 +728,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
         te: clampEfficiency(item.te, 20),
       },
       true,
+      request.locations?.manufacturing,
     );
   }
 
@@ -596,7 +764,11 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
             typeId: inventingBlueprint._key,
             name: typeName(inventingBlueprint._key, "Blueprint Copy"),
             runs: (existing?.runs ?? 0) + inventionAttempts,
-            ...(request.locations ? { locationId: request.locations.manufacturing } : {}),
+            ...(request.locations
+              ? {
+                  locationId: request.locations.manufacturing,
+                }
+              : {}),
           },
         );
         const sourceBpc = bpcs.get(inventingBlueprint._key);
@@ -629,6 +801,10 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
             material.typeID,
             material.quantity * inventionAttempts,
             typeName(material.typeID, `Type ${material.typeID}`),
+            false,
+            "icon",
+            true,
+            request.locations?.manufacturing,
           );
         }
       }
@@ -664,42 +840,17 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     ...[...bpcs.values()].map((bpc) => ({ kind: "bpc" as const, ...bpc })),
     ...reactionFormulas.values(),
   ];
-  const haulingTasks: PlanResult["lists"]["haulingTasks"] = [];
-  const remainingConsumption = new Map(consumedStock);
-  const planningStock = request.stock;
-  for (const stock of planningStock) {
-    if (!stock.sourceLocationId) continue;
-    const quantity = Math.min(stock.quantity, remainingConsumption.get(stock.typeId) ?? 0);
-    if (
-      quantity <= 0
-      || !request.locations
-      || stock.sourceLocationId === request.locations.manufacturing
-    ) continue;
-    remainingConsumption.set(
-      stock.typeId,
-      (remainingConsumption.get(stock.typeId) ?? 0) - quantity,
-    );
-    haulingTasks.push({
-      itemTypeId: stock.typeId,
-      name: resolvedName(stock.typeId),
-      quantity,
-      volume: 0,
-      fromLocationId: stock.sourceLocationId,
-      toLocationId: request.locations.manufacturing,
-      fromLocationName: stock.sourceLocationName,
-      ownerType: stock.ownerType,
-      ownerId: stock.ownerId,
-    });
-  }
+  const haulingTasks = [...haulingByKey.values()];
+  for (const task of haulingTasks) task.name = resolvedName(task.itemTypeId);
   const result = {
     metadata: {
       generatedAt: new Date().toISOString(),
       assetsLastUpdated: null,
       jobsLastUpdated: null,
-      unresolvedAssetCount: planningStock.length,
+      unresolvedAssetCount: request.stock.length,
       corporationAssetSources: [
         ...new Set(
-          planningStock
+          request.stock
             .filter((stock) => stock.ownerType === "corporation")
             .map((stock) => stock.ownerId)
             .filter((id): id is number => id !== undefined),

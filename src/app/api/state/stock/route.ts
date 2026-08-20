@@ -236,6 +236,7 @@ function addStockContribution(
     quantity: 0,
     locationId: contribution.locationId ?? location.locationId,
     rootLocationId: contribution.rootLocationId ?? location.locationId,
+    sourceLocationName: location.name,
     isPackaged: contribution.isPackaged,
     assembledVolume: type.volume ?? 0,
     packagedVolume: type.packagedVolume,

@@ -15,6 +15,8 @@ test("reprocesses complete compressed portions into SDE material yields", () => 
     compressibleTypes,
     materials,
     types,
+    undefined,
+    new Map([[62516, 100]]),
   );
 
   assert.deepEqual(result.consumedCompressed, new Map([[62516, 200]]));
@@ -26,6 +28,18 @@ test("reprocesses complete compressed portions into SDE material yields", () => 
       [34, 800],
     ]),
   );
+});
+
+test("defaults missing reprocessing efficiency to the base 50% yield", () => {
+  const result = reprocessCompressedStock(
+    new Map([[62516, 100]]),
+    new Map(),
+    compressibleTypes,
+    materials,
+    types,
+  );
+
+  assert.deepEqual(result.producedMaterials, new Map([[34, 200]]));
 });
 
 test("does not consume partial portions or unrelated compressed stock", () => {
@@ -58,6 +72,8 @@ test("reserves compressed stock needed as a direct build requirement", () => {
     compressibleTypes,
     materials,
     types,
+    undefined,
+    new Map([[62516, 100]]),
   );
 
   assert.deepEqual(result.consumedCompressed, new Map([[62516, 100]]));
@@ -91,6 +107,10 @@ test("reprocesses scrap metal and reinforced scrap metal with separate yields", 
     scrapMaterials,
     scrapTypes,
     specialReprocessableTypeIds,
+    new Map([
+      [15331, 100],
+      [30497, 100],
+    ]),
   );
 
   assert.deepEqual(

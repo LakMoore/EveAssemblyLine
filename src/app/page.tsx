@@ -28,6 +28,8 @@ import { fetchTypeMetadata } from "@/lib/reference/types";
 import { useAppLanguage } from "./AppShell";
 import TypeIdentity from "./components/TypeIdentity";
 import { useToast } from "./components/ToastProvider";
+import { Badge } from "./components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./components/ui/tooltip";
 import styles from "./page.module.css";
 import {
   ChartLine,
@@ -38,13 +40,14 @@ import {
   Info,
   Minimize2,
   Microscope,
+  Repeat,
+  SquareX,
   TestTubes,
   X,
 } from "lucide-react";
 
 type PlannerTab = "Plan" | "Haul" | "Buy" | "Copy" | "Invent" | "React" | "Manufacture";
-// the hauling tab is purposefully not yet implemented
-const tabs: PlannerTab[] = ["Plan", "Buy", "Copy", "Invent", "React", "Manufacture"];
+const tabs: PlannerTab[] = ["Plan", "Haul", "Buy", "Copy", "Invent", "React", "Manufacture"];
 type TypeResult = {
   name: string;
   typeId: number;
@@ -66,6 +69,10 @@ type PlanLocationOption = {
   baseManufacturingMe: number;
   baseReactionMe: number;
 };
+
+function getStockLocationId(item: PlanStockItem) {
+  return item.rootLocationId ?? item.sourceLocationId ?? item.locationId;
+}
 
 function selectSavedLocation(
   options: PlanLocationOption[],
@@ -203,7 +210,7 @@ function WelcomePage() {
     <div className={styles.welcomePage}>
       <div className={styles.pageIntro}>
         <span className={styles.eyebrow}>EVE INDUSTRY CONTROL</span>
-        <h1>Welcome to AssemblyLine</h1>
+        <h1>Welcome to Eve AssemblyLine</h1>
         <p>Plan production, inspect your stock, and keep every industrial decision in one place.</p>
         <Link className={styles.addButton} href="/planner">
           Open production planner
@@ -264,8 +271,10 @@ function Planner() {
   const [planStatus, setPlanStatus] = useState("Ready to calculate");
   const [isPlanLoading, setIsPlanLoading] = useState(false);
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
+  const [isExcludedLocationsModalOpen, setIsExcludedLocationsModalOpen] = useState(false);
   const [plan, setPlan] = useState<PlanResult | null>(null);
   const [stock, setStock] = useState<PlanStockItem[]>([]);
+  const [excludedLocationIds, setExcludedLocationIds] = useState<number[]>([]);
   const [locationOptions, setLocationOptions] = useState<PlanLocationOption[]>([]);
   const [includeStock, setIncludeStock] = useState(true);
   const [locations, setLocations] = useState<PlannerLocations>(defaultLocations);
@@ -354,8 +363,7 @@ function Planner() {
     if (isBuildListLoaded) void saveBuildList(items);
   }, [isBuildListLoaded, items]);
 
-  async function calculatePlan(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function submitPlan(exclusions: Set<number>) {
     if (items.length === 0 || isPlanLoading) return;
     setIsPlanLoading(true);
     setPlanStatus("Calculating...");
@@ -365,7 +373,16 @@ function Planner() {
         const stockData = await loadClientStock(language);
         workingStock = stockData.workingStock ?? [];
       }
-      setStock(workingStock);
+      const compressSettings = await loadCompressSettings();
+      const compressLocationId = Number(compressSettings.locationId);
+      const planningLocations = Number.isInteger(compressLocationId)
+        ? { ...locations, reprocessing: compressLocationId }
+        : locations;
+      const requestStock = workingStock.filter((item) => {
+        const locationId = getStockLocationId(item);
+        return locationId === undefined || !exclusions.has(locationId);
+      });
+      setStock(requestStock);
       const response = await fetch(
         "/api/plan",
         {
@@ -373,15 +390,18 @@ function Planner() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             language,
-            toBuild: items.map(({ typeId, quantity, me, te, fromCompression }) => ({
-              typeId,
-              quantity,
-              me,
-              te,
-              fromCompression,
-            })),
-            stock: workingStock,
-            locations,
+            toBuild: items.map(
+              ({ typeId, quantity, me, te, fromCompression, reprocessingEfficiency }) => ({
+                typeId,
+                quantity,
+                me,
+                te,
+                fromCompression,
+                reprocessingEfficiency,
+              }),
+            ),
+            stock: requestStock.map(({ sourceLocationName: _sourceLocationName, ...item }) => item),
+            locations: planningLocations,
             settings: {
               includeCorporationAssets: settings.includeCorporationAssets,
               personalSellOrdersAsStock: settings.personalSellOrdersAsStock,
@@ -410,6 +430,30 @@ function Planner() {
     finally {
       setIsPlanLoading(false);
     }
+  }
+
+  async function calculatePlan(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await submitPlan(new Set(excludedLocationIds));
+  }
+
+  async function excludeHaulBucket(fromLocationId: number) {
+    const nextExcludedLocationIds = new Set(excludedLocationIds);
+    nextExcludedLocationIds.add(fromLocationId);
+    setExcludedLocationIds([...nextExcludedLocationIds]);
+    await submitPlan(nextExcludedLocationIds);
+  }
+
+  async function removeExcludedLocation(locationId: number) {
+    const nextExcludedLocationIds = excludedLocationIds.filter((id) => id !== locationId);
+    setExcludedLocationIds(nextExcludedLocationIds);
+    await submitPlan(new Set(nextExcludedLocationIds));
+  }
+
+  async function clearExcludedLocations() {
+    setExcludedLocationIds([]);
+    setIsExcludedLocationsModalOpen(false);
+    await submitPlan(new Set());
   }
 
   function importItems(
@@ -554,7 +598,22 @@ function Planner() {
                       }
                     />
                     {item.fromCompression && (
-                      <small className={styles.compressionBadge}>Compression</small>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Badge
+                              variant="default"
+                              aria-label={`Will be reprocessed at ${(item.reprocessingEfficiency ?? 50).toFixed(1)}%`}
+                            >
+                              <Minimize2 aria-hidden="true" />
+                              <span>{Math.round(item.reprocessingEfficiency ?? 50)}%</span>
+                            </Badge>
+                          }
+                        />
+                        <TooltipContent className={styles.compressionTooltip}>
+                          Will be reprocessed at {(item.reprocessingEfficiency ?? 50).toFixed(1)}%
+                        </TooltipContent>
+                      </Tooltip>
                     )}
                   </div>
                   <input
@@ -698,6 +757,27 @@ function Planner() {
                   <span className={styles.stockSwitchThumb} />
                 </button>
               </label>
+              <div className={styles.excludedLocationsControl}>
+                <span>EXCLUDED LOCATIONS</span>
+                <div className={styles.excludedLocationsActions}>
+                  <button
+                    type="button"
+                    className={styles.excludedLocationsCount}
+                    disabled={excludedLocationIds.length === 0}
+                    onClick={() => setIsExcludedLocationsModalOpen(true)}
+                  >
+                    {excludedLocationIds.length}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.clearExcludedButton}
+                    disabled={excludedLocationIds.length === 0 || isPlanLoading}
+                    onClick={() => void clearExcludedLocations()}
+                  >
+                    Clear all
+                  </button>
+                </div>
+              </div>
             </div>
             <button
               className={styles.calculate}
@@ -718,6 +798,26 @@ function Planner() {
           language={language}
           onCancel={() => setIsPasteModalOpen(false)}
           onImport={importItems}
+        />
+      )}
+      {isExcludedLocationsModalOpen && (
+        <ExcludedLocationsModal
+          locationIds={excludedLocationIds}
+          locationNamesById={
+            new Map([
+              ...locationOptions.map((option) => [option.locationId, option.name] as const),
+              ...stock.flatMap((item) => {
+                const locationId = getStockLocationId(item);
+                return locationId !== undefined && item.sourceLocationName
+                  ? [[locationId, item.sourceLocationName] as const]
+                  : [];
+              }),
+            ])
+          }
+          isLoading={isPlanLoading}
+          onRemove={(locationId) => void removeExcludedLocation(locationId)}
+          onClearAll={() => void clearExcludedLocations()}
+          onCancel={() => setIsExcludedLocationsModalOpen(false)}
         />
       )}
       <div className={styles.results}>
@@ -748,6 +848,18 @@ function Planner() {
             activeTab={activeTab}
             plan={plan}
             stock={stock}
+            locationNamesById={
+              new Map([
+                ...locationOptions.map((option) => [option.locationId, option.name] as const),
+                ...stock.flatMap((item) =>
+                  item.rootLocationId !== undefined && item.sourceLocationName
+                    ? [[item.rootLocationId, item.sourceLocationName] as const]
+                    : [],
+                ),
+              ])
+            }
+            onPlanChange={setPlan}
+            onExcludeHaulBucket={(fromLocationId) => void excludeHaulBucket(fromLocationId)}
             resultsHeaderRef={resultsHeaderRef}
           />
         ) : (
@@ -765,6 +877,81 @@ function Planner() {
 export default function Home() {
   const pathname = usePathname();
   return pathname === "/" ? <WelcomePage /> : <Planner />;
+}
+
+function ExcludedLocationsModal({
+  locationIds,
+  locationNamesById,
+  isLoading,
+  onRemove,
+  onClearAll,
+  onCancel,
+}: {
+  locationIds: number[];
+  locationNamesById: Map<number, string>;
+  isLoading: boolean;
+  onRemove: (locationId: number) => void;
+  onClearAll: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      className={styles.modalBackdrop}
+      role="presentation"
+      onMouseDown={(event) => event.target === event.currentTarget && onCancel()}
+    >
+      <div
+        className={styles.importModal}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="excluded-locations-title"
+      >
+        <div className={styles.panelHeader}>
+          <div>
+            <p className={styles.panelKicker}>STOCK FILTER</p>
+            <h2 id="excluded-locations-title">Excluded locations</h2>
+          </div>
+          <button
+            type="button"
+            className={styles.iconButton}
+            aria-label="Close excluded locations dialog"
+            onClick={onCancel}
+          >
+            ×
+          </button>
+        </div>
+        <div className={styles.excludedLocationList}>
+          {locationIds.map((locationId) => (
+            <div className={styles.excludedLocationRow} key={locationId}>
+              <span>{locationNamesById.get(locationId) ?? locationId}</span>
+              <button
+                type="button"
+                className={styles.clearExcludedButton}
+                disabled={isLoading}
+                onClick={() => onRemove(locationId)}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className={styles.modalActions}>
+          <button type="button" className={styles.refresh} onClick={onCancel}>
+            Close
+          </button>
+          <button
+            type="button"
+            className={styles.calculate}
+            disabled={isLoading}
+            onClick={onClearAll}
+          >
+            <span>Clear all</span>
+            <b>→</b>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function PasteListModal({
@@ -1073,11 +1260,17 @@ function PlanList({
   activeTab,
   plan,
   stock,
+  locationNamesById,
+  onPlanChange,
+  onExcludeHaulBucket,
   resultsHeaderRef,
 }: {
   activeTab: PlannerTab;
   plan: PlanResult;
   stock: PlanStockItem[];
+  locationNamesById: Map<number, string>;
+  onPlanChange: (plan: PlanResult) => void;
+  onExcludeHaulBucket: (fromLocationId: number) => void;
   resultsHeaderRef: RefObject<HTMLElement | null>;
 }) {
   const router = useRouter();
@@ -1100,6 +1293,26 @@ function PlanList({
               : activeTab === "Manufacture"
                 ? plan.lists.manufacturingJobs
                 : plan.lists.haulingTasks;
+  const haulBuckets = new Map<
+    string,
+    {
+      fromLocationId: number;
+      toLocationId: number;
+      tasks: PlanResult["lists"]["haulingTasks"];
+    }
+  >();
+  if (activeTab === "Haul") {
+    for (const task of plan.lists.haulingTasks) {
+      const key = `${task.fromLocationId}:${task.toLocationId}`;
+      const bucket = haulBuckets.get(key) ?? {
+        fromLocationId: task.fromLocationId,
+        toLocationId: task.toLocationId,
+        tasks: [],
+      };
+      bucket.tasks.push(task);
+      haulBuckets.set(key, bucket);
+    }
+  }
   const planColumns = ["Required", "Available", "Buy/Build", "Surplus"] as const;
 
   function getPlanCells(
@@ -1129,6 +1342,70 @@ function PlanList({
       "Buy/Build": Math.max(0, entry.runsNeeded - entry.availableQuantity).toLocaleString(),
       Surplus: "0",
     };
+  }
+
+  function rebuyHaulBucket(fromLocationId: number, toLocationId: number) {
+    const bucketTasks = plan.lists.haulingTasks.filter(
+      (task) => task.fromLocationId === fromLocationId && task.toLocationId === toLocationId,
+    );
+    if (bucketTasks.length === 0) return;
+    const rebuyQuantities = new Map<number, number>();
+    for (const task of bucketTasks) {
+      rebuyQuantities.set(
+        task.itemTypeId,
+        (rebuyQuantities.get(task.itemTypeId) ?? 0) + task.quantity,
+      );
+    }
+    const materialsToBuy = plan.lists.materialsToBuy.map((material) => {
+      const quantity = rebuyQuantities.get(material.typeId);
+      if (quantity === undefined) return material;
+      return {
+        ...material,
+        quantity: material.quantity + quantity,
+        buyQuantity: material.buyQuantity + quantity,
+      };
+    });
+    for (const [typeId, quantity] of rebuyQuantities) {
+      if (materialsToBuy.some((material) => material.typeId === typeId)) continue;
+      const task = bucketTasks.find((entry) => entry.itemTypeId === typeId);
+      if (!task) continue;
+      materialsToBuy.push({
+        typeId,
+        name: task.name,
+        quantity,
+        requiredQuantity: 0,
+        stockQuantity: 0,
+        availableStockQuantity: 0,
+        productionQuantity: 0,
+        buildQuantity: 0,
+        buyQuantity: quantity,
+        remainingStockQuantity: 0,
+        remainingProductionQuantity: 0,
+        imageVariation: "icon",
+      });
+    }
+    const planItems = plan.lists.planItems.map((entry) => {
+      if (entry.kind !== "material") return entry;
+      const quantity = rebuyQuantities.get(entry.typeId);
+      return quantity === undefined
+        ? entry
+        : {
+            ...entry,
+            quantity: entry.quantity + quantity,
+            buyQuantity: entry.buyQuantity + quantity,
+          };
+    });
+    onPlanChange({
+      ...plan,
+      lists: {
+        ...plan.lists,
+        planItems,
+        materialsToBuy,
+        haulingTasks: plan.lists.haulingTasks.filter(
+          (task) => task.fromLocationId !== fromLocationId || task.toLocationId !== toLocationId,
+        ),
+      },
+    });
   }
 
   function getListAmount(entry: (typeof list)[number]) {
@@ -1199,22 +1476,24 @@ function PlanList({
   }
   return (
     <>
-      <div className={styles.planActions}>
-        {activeTab === "Buy" && (
-          <button
-            type="button"
-            className={`actionButton ${styles.copyButton}`}
-            onClick={() => void sendToCompress()}
-          >
-            <Minimize2 aria-hidden="true" />
-            <span>Send to Compress</span>
+      {activeTab !== "Haul" && (
+        <div className={styles.planActions}>
+          {activeTab === "Buy" && (
+            <button
+              type="button"
+              className={`actionButton ${styles.copyButton}`}
+              onClick={() => void sendToCompress()}
+            >
+              <Minimize2 aria-hidden="true" />
+              <span>Send to Compress</span>
+            </button>
+          )}
+          <button type="button" className={`actionButton ${styles.copyButton}`} onClick={copyList}>
+            <CopyIcon aria-hidden="true" />
+            {copyStatus || (activeTab === "Plan" ? "Copy table" : "Copy list")}
           </button>
-        )}
-        <button type="button" className={`actionButton ${styles.copyButton}`} onClick={copyList}>
-          <CopyIcon aria-hidden="true" />
-          {copyStatus || (activeTab === "Plan" ? "Copy table" : "Copy list")}
-        </button>
-      </div>
+        </div>
+      )}
       {activeTab === "Plan" && (
         <div className={styles.planTableHeader} ref={planListHeaderRef}>
           <ScrollTopButton targetRef={resultsHeaderRef} headerRef={planListHeaderRef} />
@@ -1223,154 +1502,213 @@ function PlanList({
           ))}
         </div>
       )}
-      <div className={activeTab === "Plan" ? styles.planTable : styles.planList}>
-        {list.map((entry, index) => {
-          const typeId = "itemTypeId" in entry ? entry.itemTypeId : entry.typeId;
-          const name = entry.name;
-          const isPlanBpc = "kind" in entry && entry.kind === "bpc";
-          const isBpcPurchase = activeTab === "Buy" && "bpoCount" in entry;
-          const isCopyOfBpo = activeTab === "Copy" && "bpoCount" in entry && entry.bpoCount > 0;
-          const isBlueprintName = / blueprint$/i.test(name);
-          const isReactionFormulaName = / formula$/i.test(name);
-          const isPlanReaction = "kind" in entry && entry.kind === "reaction";
-          const planBlueprintVariation =
-            activeTab === "Plan" && (isPlanBpc || isBlueprintName)
-              ? isPlanBpc && entry.bpoCount > 0
-                ? "bp"
-                : "bpc"
-              : null;
-          const detail =
-            "fromLocationId" in entry && activeTab !== "Buy"
-              ? `From ${entry.fromLocationId} to ${entry.toLocationId}`
-              : "locationId" in entry && activeTab !== "Buy"
-                ? `Location ${entry.locationId}`
-                : "";
-          const totalTime =
-            "totalTime" in entry && typeof entry.totalTime === "number" ? entry.totalTime : null;
-          const reactionFormulaCount =
-            activeTab === "React"
-              ? stock
-                  .filter(
-                    (stockItem) =>
-                      stockItem.category === "reactionformula"
-                      && stockItem.typeId === typeId
-                      && !stockItem.inUse,
-                  )
-                  .reduce((total, stockItem) => total + stockItem.quantity, 0)
-              : 0;
-          const installCount =
-            activeTab === "React" && "runs" in entry && entry.runs >= 10 && reactionFormulaCount > 0
-              ? entry.runs / reactionFormulaCount < 10
-                ? Math.ceil(entry.runs / 10)
-                : reactionFormulaCount
-              : null;
-          const runsPerInstall =
-            installCount !== null && "runs" in entry ? Math.ceil(entry.runs / installCount) : null;
-          const installTime =
-            totalTime !== null && runsPerInstall !== null && "runs" in entry && entry.runs > 0
-              ? (totalTime / entry.runs) * runsPerInstall
-              : totalTime;
-          const materialEntry =
-            (activeTab === "Buy" && !isBpcPurchase && "quantity" in entry)
-            || (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
-              ? (entry as PlanResult["lists"]["materialsToBuy"][number])
-              : null;
-          const amount =
-            "volume" in entry
-              ? `${entry.quantity.toLocaleString()} units | ${Math.ceil(entry.volume).toLocaleString()} m3`
-              : isBpcPurchase
-                ? `${entry.buyQuantity.toLocaleString()} runs`
-                : isPlanBpc
-                  ? `${entry.neededQuantity.toLocaleString()} needed`
-                  : isPlanReaction
-                    ? `${entry.runsNeeded.toLocaleString()} runs`
-                    : materialEntry
-                      ? `${(materialEntry.buildQuantity || materialEntry.buyQuantity).toLocaleString()} units`
-                      : activeTab === "Copy" && "neededQuantity" in entry
-                        ? `${Math.max(0, entry.neededQuantity - entry.stockRuns).toLocaleString()} runs`
-                        : "quantity" in entry
-                          ? `${entry.quantity.toLocaleString()} ${activeTab === "Copy" ? "runs" : "units"}`
-                          : "runs" in entry
-                            ? entry.runs >= 10
-                              && installCount !== null
-                              && installCount > 1
-                              && runsPerInstall !== null
-                              && installTime !== null
-                              ? `${installCount.toLocaleString()} x ${runsPerInstall.toLocaleString()} runs @ ${formatDuration(installTime)} | ${entry.runs.toLocaleString()} runs`
-                              : `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
-                            : "";
-          const imageVariation =
-            planBlueprintVariation
-            ?? ("imageVariation" in entry && entry.imageVariation
-              ? entry.imageVariation === "icon" && isBlueprintName
-                ? "bp"
-                : entry.imageVariation === "icon" && isReactionFormulaName
-                  ? "bpc"
-                  : entry.imageVariation
-              : isCopyOfBpo || (isPlanBpc && entry.bpoCount > 0)
-                ? "bp"
-                : isBlueprintName
-                  ? "bp"
-                  : isReactionFormulaName
-                    ? "bpc"
-                    : activeTab === "Manufacture"
-                        || activeTab === "React"
-                        || isPlanBpc
-                        || isBpcPurchase
-                        || isPlanReaction
-                        || activeTab === "Copy"
-                        || activeTab === "Invent"
-                      ? "bpc"
-                      : "icon");
-          const planCells =
-            activeTab === "Plan"
-              ? getPlanCells(entry as PlanResult["lists"]["planItems"][number])
-              : null;
-          return (
-            <div
-              className={activeTab === "Plan" ? styles.planTableRow : styles.planRow}
-              key={`${activeTab}-${index}`}
+      {activeTab === "Haul" ? (
+        <div className={styles.haulGroups}>
+          {[...haulBuckets.values()].map((bucket) => (
+            <section
+              className={styles.haulGroup}
+              key={`${bucket.fromLocationId}:${bucket.toLocationId}`}
             >
-              <div className={styles.planTypeCell}>
-                <TypeIdentity
-                  name={name}
-                  typeId={typeId}
-                  imageSize={40}
-                  variation={imageVariation}
-                  className={styles.planTypeIdentity}
-                />
-              </div>
-              {activeTab === "Plan" ? (
-                planColumns.map((column) =>
-                  planCells?.[column] ? (
-                    <span className={styles.planTableCell} data-label={column} key={column}>
-                      <span className={styles.planTableValue}>
-                        {column === "Available" && (
-                          <AvailableSourceIcons
-                            counts={
-                              "availableSourceCounts" in entry
-                                ? entry.availableSourceCounts
-                                : undefined
-                            }
-                          />
-                        )}
-                        {planCells[column]}
-                      </span>
+              <header className={styles.haulGroupHeader}>
+                <span>From</span>
+                <strong>
+                  {locationNamesById.get(bucket.fromLocationId) ?? bucket.fromLocationId}
+                </strong>
+                <span>To</span>
+                <strong>{locationNamesById.get(bucket.toLocationId) ?? bucket.toLocationId}</strong>
+                <div className={styles.haulHeaderActions}>
+                  <button
+                    type="button"
+                    className={`actionButton ${styles.copyButton} ${styles.rebuyButton}`}
+                    onClick={() => rebuyHaulBucket(bucket.fromLocationId, bucket.toLocationId)}
+                  >
+                    <Repeat aria-hidden="true" />
+                    <span>Rebuy</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`actionButton ${styles.copyButton} ${styles.excludeButton}`}
+                    onClick={() => onExcludeHaulBucket(bucket.fromLocationId)}
+                  >
+                    <SquareX aria-hidden="true" />
+                    <span>Exclude and Recalculate</span>
+                  </button>
+                </div>
+              </header>
+              <div className={styles.haulGroupRows}>
+                {bucket.tasks.map((task) => (
+                  <div className={styles.haulRow} key={task.itemTypeId}>
+                    <TypeIdentity
+                      name={task.name}
+                      typeId={task.itemTypeId}
+                      imageSize={40}
+                      className={styles.planTypeIdentity}
+                    />
+                    <span className={styles.haulRowAmount}>
+                      {task.quantity.toLocaleString()} units
+                      <small>{Math.ceil(task.volume).toLocaleString()} m3</small>
                     </span>
-                  ) : (
-                    <span className={styles.planTableCellEmpty} key={column} />
-                  ),
-                )
-              ) : (
-                <span className={styles.planRowAmount}>
-                  <strong>{amount}</strong>
-                  {detail && <small>{detail}</small>}
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      ) : (
+        <div className={activeTab === "Plan" ? styles.planTable : styles.planList}>
+          {list.map((entry, index) => {
+            const typeId = "itemTypeId" in entry ? entry.itemTypeId : entry.typeId;
+            const name = entry.name;
+            const isPlanBpc = "kind" in entry && entry.kind === "bpc";
+            const isBpcPurchase = activeTab === "Buy" && "bpoCount" in entry;
+            const isCopyOfBpo = activeTab === "Copy" && "bpoCount" in entry && entry.bpoCount > 0;
+            const isBlueprintName = / blueprint$/i.test(name);
+            const isReactionFormulaName = / formula$/i.test(name);
+            const isPlanReaction = "kind" in entry && entry.kind === "reaction";
+            const planBlueprintVariation =
+              activeTab === "Plan" && (isPlanBpc || isBlueprintName)
+                ? isPlanBpc && entry.bpoCount > 0
+                  ? "bp"
+                  : "bpc"
+                : null;
+            const detail =
+              "fromLocationId" in entry && activeTab !== "Buy"
+                ? `From ${locationNamesById.get(entry.fromLocationId) ?? entry.fromLocationId} to ${locationNamesById.get(entry.toLocationId) ?? entry.toLocationId}`
+                : "locationId" in entry && activeTab !== "Buy"
+                  ? `Location ${entry.locationId}`
+                  : "";
+            const totalTime =
+              "totalTime" in entry && typeof entry.totalTime === "number" ? entry.totalTime : null;
+            const reactionFormulaCount =
+              activeTab === "React"
+                ? stock
+                    .filter(
+                      (stockItem) =>
+                        stockItem.category === "reactionformula"
+                        && stockItem.typeId === typeId
+                        && !stockItem.inUse,
+                    )
+                    .reduce((total, stockItem) => total + stockItem.quantity, 0)
+                : 0;
+            const installCount =
+              activeTab === "React"
+              && "runs" in entry
+              && entry.runs >= 10
+              && reactionFormulaCount > 0
+                ? entry.runs / reactionFormulaCount < 10
+                  ? Math.ceil(entry.runs / 10)
+                  : reactionFormulaCount
+                : null;
+            const runsPerInstall =
+              installCount !== null && "runs" in entry
+                ? Math.ceil(entry.runs / installCount)
+                : null;
+            const installTime =
+              totalTime !== null && runsPerInstall !== null && "runs" in entry && entry.runs > 0
+                ? (totalTime / entry.runs) * runsPerInstall
+                : totalTime;
+            const materialEntry =
+              (activeTab === "Buy" && !isBpcPurchase && "quantity" in entry)
+              || (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
+                ? (entry as PlanResult["lists"]["materialsToBuy"][number])
+                : null;
+            const amount =
+              "volume" in entry
+                ? `${entry.quantity.toLocaleString()} units | ${Math.ceil(entry.volume).toLocaleString()} m3`
+                : isBpcPurchase
+                  ? `${entry.buyQuantity.toLocaleString()} runs`
+                  : isPlanBpc
+                    ? `${entry.neededQuantity.toLocaleString()} needed`
+                    : isPlanReaction
+                      ? `${entry.runsNeeded.toLocaleString()} runs`
+                      : materialEntry
+                        ? `${(materialEntry.buildQuantity || materialEntry.buyQuantity).toLocaleString()} units`
+                        : activeTab === "Copy" && "neededQuantity" in entry
+                          ? `${Math.max(0, entry.neededQuantity - entry.stockRuns).toLocaleString()} runs`
+                          : "quantity" in entry
+                            ? `${entry.quantity.toLocaleString()} ${activeTab === "Copy" ? "runs" : "units"}`
+                            : "runs" in entry
+                              ? entry.runs >= 10
+                                && installCount !== null
+                                && installCount > 1
+                                && runsPerInstall !== null
+                                && installTime !== null
+                                ? `${installCount.toLocaleString()} x ${runsPerInstall.toLocaleString()} runs @ ${formatDuration(installTime)} | ${entry.runs.toLocaleString()} runs`
+                                : `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
+                              : "";
+            const imageVariation =
+              planBlueprintVariation
+              ?? ("imageVariation" in entry && entry.imageVariation
+                ? entry.imageVariation === "icon" && isBlueprintName
+                  ? "bp"
+                  : entry.imageVariation === "icon" && isReactionFormulaName
+                    ? "bpc"
+                    : entry.imageVariation
+                : isCopyOfBpo || (isPlanBpc && entry.bpoCount > 0)
+                  ? "bp"
+                  : isBlueprintName
+                    ? "bp"
+                    : isReactionFormulaName
+                      ? "bpc"
+                      : activeTab === "Manufacture"
+                          || activeTab === "React"
+                          || isPlanBpc
+                          || isBpcPurchase
+                          || isPlanReaction
+                          || activeTab === "Copy"
+                          || activeTab === "Invent"
+                        ? "bpc"
+                        : "icon");
+            const planCells =
+              activeTab === "Plan"
+                ? getPlanCells(entry as PlanResult["lists"]["planItems"][number])
+                : null;
+            return (
+              <div
+                className={activeTab === "Plan" ? styles.planTableRow : styles.planRow}
+                key={`${activeTab}-${index}`}
+              >
+                <div className={styles.planTypeCell}>
+                  <TypeIdentity
+                    name={name}
+                    typeId={typeId}
+                    imageSize={40}
+                    variation={imageVariation}
+                    className={styles.planTypeIdentity}
+                  />
+                </div>
+                {activeTab === "Plan" ? (
+                  planColumns.map((column) =>
+                    planCells?.[column] ? (
+                      <span className={styles.planTableCell} data-label={column} key={column}>
+                        <span className={styles.planTableValue}>
+                          {column === "Available" && (
+                            <AvailableSourceIcons
+                              counts={
+                                "availableSourceCounts" in entry
+                                  ? entry.availableSourceCounts
+                                  : undefined
+                              }
+                            />
+                          )}
+                          {planCells[column]}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className={styles.planTableCellEmpty} key={column} />
+                    ),
+                  )
+                ) : (
+                  <span className={styles.planRowAmount}>
+                    <strong>{amount}</strong>
+                    {detail && <small>{detail}</small>}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </>
   );
 }

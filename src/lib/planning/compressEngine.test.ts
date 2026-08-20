@@ -113,7 +113,15 @@ test("keeps fractional gas output instead of discarding compressed gas", () => {
   );
   assert.deepEqual(
     result.toBuy,
-    [{ typeId: 62377, name: "Compressed Amber Mykoserocin", quantity: 2, ignored: false }],
+    [
+      {
+        typeId: 62377,
+        name: "Compressed Amber Mykoserocin",
+        quantity: 2,
+        ignored: false,
+        reprocessingEfficiency: 95,
+      },
+    ],
   );
   assert.deepEqual(
     result.plan,
