@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useAppLanguage } from "../AppShell";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowRight, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   Combobox,
   ComboboxContent,
@@ -12,11 +12,18 @@ import {
   ComboboxList,
   useComboboxAnchor,
 } from "@/components/ui/combobox";
-import { Field, FieldLabel } from "@/components/ui/field";
-import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
   defaultLocations,
@@ -579,8 +586,8 @@ export default function LocationsPage() {
             <h2>Locations with assets</h2>
           </div>
           <div className={styles.locationControls}>
-            <label>
-              <span>SORT</span>
+            <div className="flex min-w-0 items-center gap-2">
+              <Label htmlFor="locations-sort">Sort</Label>
               <Select
                 aria-label="Sort locations"
                 value={locationSort}
@@ -589,7 +596,7 @@ export default function LocationsPage() {
                 }}
                 items={locationSortOptions}
               >
-                <SelectTrigger size="sm">
+                <SelectTrigger id="locations-sort" size="sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -602,7 +609,7 @@ export default function LocationsPage() {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-            </label>
+            </div>
             <span className={styles.panelDescription}>{displayedEsiStructures.length} found</span>
           </div>
         </div>
@@ -884,98 +891,107 @@ function StructureDialog({
             <DialogTitle>{structure ? "Edit structure" : "Add structure"}</DialogTitle>
           </div>
         </div>
-        <div className="no-scrollbar max-h-[70vh] overflow-y-auto overscroll-contain">
-          <Field className={styles.dialogField}>
-            <FieldLabel>SYSTEM</FieldLabel>
-            <div ref={systemAnchor}>
-              <Combobox
-                open={isOpen && systemName.trim().length >= 2}
-                inputValue={systemName}
-                onOpenChange={setIsOpen}
-                onInputValueChange={(value) => {
-                  setSystem(null);
-                  setSystemName(value);
-                  setIsOpen(true);
-                }}
-                onValueChange={(value) => {
-                  const match = suggestions.find((item) => String(item.systemId) === String(value));
-                  if (match) {
-                    setSystem(match);
-                    setSystemName(match.name);
-                    setIsOpen(false);
-                  }
-                }}
-              >
-                <ComboboxInput
-                  showTrigger={false}
-                  onFocus={() => suggestions.length > 0 && setIsOpen(true)}
-                  placeholder="Type a system name"
-                  aria-label="Search systems"
-                />
-                <ComboboxContent anchor={systemAnchor}>
-                  <ComboboxList>
-                    {suggestions.length > 0 ? (
-                      suggestions.map((match) => (
-                        <ComboboxItem key={match.systemId} value={String(match.systemId)}>
-                          <span>{match.name}</span>
-                          <small>System ID {match.systemId}</small>
-                        </ComboboxItem>
-                      ))
-                    ) : (
-                      <ComboboxEmpty>No matching systems.</ComboboxEmpty>
-                    )}
-                  </ComboboxList>
-                </ComboboxContent>
-              </Combobox>
-            </div>
-          </Field>
-          <StructureSelect
-            label="STRUCTURE TYPE"
-            value={type}
-            options={structureTypes.map((option) => ({
-              value: option.name,
-              label: `${option.name} (${option.size})`,
-            }))}
-            onChange={(value) => {
-              const nextType = structureTypes.find((structureType) => structureType.name === value);
-              if (!nextType) return;
-              setType(nextType.name);
-              setRigs((current) =>
-                current.map((rig) =>
-                  rigOptionsBySize[nextType.size].includes(rig) ? rig : "No Rig",
-                ),
-              );
-            }}
-          />
-          <Field className={styles.dialogField}>
-            <FieldLabel htmlFor="structure-name">NAME</FieldLabel>
-            <div>
-              <Input
-                id="structure-name"
-                required
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="e.g. Assembly Bay Alpha"
-                aria-label="Structure name"
-              />
-            </div>
-          </Field>
-          {rigs.map((rig, index) => (
+        <DialogBody className="no-scrollbar overscroll-contain">
+          <FieldGroup>
+            <Field>
+              <FieldLabel>SYSTEM</FieldLabel>
+              <div ref={systemAnchor}>
+                <Combobox
+                  open={isOpen && systemName.trim().length >= 2}
+                  inputValue={systemName}
+                  onOpenChange={setIsOpen}
+                  onInputValueChange={(value, eventDetails) => {
+                    if (eventDetails.reason !== "input-change") return;
+                    setSystem(null);
+                    setSystemName(value);
+                    setIsOpen(true);
+                  }}
+                  onValueChange={(value) => {
+                    const match = suggestions.find(
+                      (item) => String(item.systemId) === String(value),
+                    );
+                    if (match) {
+                      setSystem(match);
+                      setSystemName(match.name);
+                      setIsOpen(false);
+                    }
+                  }}
+                >
+                  <ComboboxInput
+                    showTrigger={false}
+                    onFocus={() => suggestions.length > 0 && setIsOpen(true)}
+                    placeholder="Type a system name"
+                    aria-label="Search systems"
+                  />
+                  <ComboboxContent anchor={systemAnchor}>
+                    <ComboboxList>
+                      {suggestions.length > 0 ? (
+                        suggestions.map((match) => (
+                          <ComboboxItem key={match.systemId} value={String(match.systemId)}>
+                            <span>{match.name}</span>
+                            <small>System ID {match.systemId}</small>
+                          </ComboboxItem>
+                        ))
+                      ) : (
+                        <ComboboxEmpty>No matching systems.</ComboboxEmpty>
+                      )}
+                    </ComboboxList>
+                  </ComboboxContent>
+                </Combobox>
+              </div>
+            </Field>
             <StructureSelect
-              key={index}
-              label={`RIG ${index + 1}`}
-              value={rig}
-              options={rigOptionsBySize[selectedType.size].map((option) => ({
-                value: option,
-                label: option,
+              label="STRUCTURE TYPE"
+              value={type}
+              options={structureTypes.map((option) => ({
+                value: option.name,
+                label: `${option.name} (${option.size})`,
               }))}
-              onChange={(value) =>
+              onChange={(value) => {
+                const nextType = structureTypes.find(
+                  (structureType) => structureType.name === value,
+                );
+                if (!nextType) return;
+                setType(nextType.name);
                 setRigs((current) =>
-                  current.map((currentRig, rigIndex) => (rigIndex === index ? value : currentRig)),
-                )
-              }
+                  current.map((rig) =>
+                    rigOptionsBySize[nextType.size].includes(rig) ? rig : "No Rig",
+                  ),
+                );
+              }}
             />
-          ))}
+            <Field>
+              <FieldLabel htmlFor="structure-name">NAME</FieldLabel>
+              <div>
+                <Input
+                  id="structure-name"
+                  required
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="e.g. Assembly Bay Alpha"
+                  aria-label="Structure name"
+                />
+              </div>
+            </Field>
+            {rigs.map((rig, index) => (
+              <StructureSelect
+                key={index}
+                label={`RIG ${index + 1}`}
+                value={rig}
+                options={rigOptionsBySize[selectedType.size].map((option) => ({
+                  value: option,
+                  label: option,
+                }))}
+                onChange={(value) =>
+                  setRigs((current) =>
+                    current.map((currentRig, rigIndex) =>
+                      rigIndex === index ? value : currentRig,
+                    ),
+                  )
+                }
+              />
+            ))}
+          </FieldGroup>
           <div className={styles.constructionGrid}>
             <div className={styles.constructionGridHeader} aria-hidden="true">
               <span />
@@ -1105,14 +1121,14 @@ function StructureDialog({
               />
             </div>
           </div>
-        </div>
+        </DialogBody>
         <DialogFooter>
-          <Button type="button" className={styles.refresh} onClick={onCancel}>
+          <Button type="button" variant="outline" onClick={onCancel}>
             Cancel
           </Button>
-          <Button type="submit" className={styles.calculate} disabled={!system || !name.trim()}>
-            <span>{structure ? "Save structure" : "Add structure"}</span>
-            <b>→</b>
+          <Button type="submit" disabled={!system || !name.trim()}>
+            {structure ? "Save structure" : "Add structure"}
+            <ArrowRight data-icon="inline-end" />
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1132,7 +1148,7 @@ function StructureSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <Field className={styles.dialogField}>
+    <Field>
       <FieldLabel>{label}</FieldLabel>
       <Select value={value} onValueChange={(nextValue) => nextValue && onChange(nextValue)}>
         <SelectTrigger>

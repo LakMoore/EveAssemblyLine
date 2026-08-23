@@ -65,125 +65,6 @@
   font-size: 11px;
   line-height: 1.5;
 }
-.secondaryButton,
-.primaryButton,
-.closeButton,
-.modeToggle button {
-  border: 1px solid #37636d;
-  background: transparent;
-  color: #a9d5d5;
-  cursor: pointer;
-}
-.secondaryButton {
-  composes: actionButton from global;
-}
-.secondaryButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-height: 54px;
-  padding: 14px 16px;
-  border: 1px solid #37636d;
-  background: transparent;
-  color: #a9d5d5;
-  font-size: 12px;
-}
-.primaryButton {
-  composes: actionButton from global;
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 54px;
-  padding: 14px 16px;
-  border: 0;
-  background: #197b78;
-  color: #e8ffff;
-  font-size: 12px;
-  box-shadow: 0 0 18px #42c7b433;
-  width: 100%;
-}
-
-.primaryButtonLead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  text-align: left;
-}
-
-.primaryButtonLead > span {
-  min-width: 0;
-}
-
-.primaryButton > b {
-  color: var(--action-accent);
-  font-size: 19px;
-  font-weight: 400;
-}
-
-.primaryButton:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.searchWrap {
-  position: relative;
-  margin: 22px 0 10px;
-}
-.search {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border: 1px solid #315863;
-  background: #081a20;
-  padding: 0 13px;
-  color: #9bc8cb;
-}
-.search input {
-  width: 100%;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: #e4f4f0;
-  padding: 14px 0;
-  font:
-    12px "DM Mono",
-    monospace;
-}
-
-.search input::placeholder {
-  font-size: 12px;
-}
-
-.searchResults {
-  position: absolute;
-  z-index: 5;
-  inset: 100% 0 auto;
-  border: 1px solid #37606c;
-  background: #0d252d;
-  box-shadow: 0 14px 28px #0008;
-  padding: 4px;
-}
-.searchResult {
-  display: block;
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: #d8e8ec;
-  padding: 10px 12px;
-  text-align: left;
-  cursor: pointer;
-}
-.searchResult:hover {
-  background: #16404b;
-}
-.noResults,
-.empty {
-  padding: 18px 0;
-  color: #6f8c95;
-  font-size: 12px;
-}
 .listHeader,
 .itemRow {
   display: grid;
@@ -208,26 +89,7 @@
   min-height: 60px;
   border-bottom: 1px solid #1b3b44;
 }
-.itemRow input {
-  width: 100%;
-  box-sizing: border-box;
-  border: 1px solid #315863;
-  background: #081a20;
-  color: #ebf5f2;
-  padding: 9px;
-  font:
-    12px "DM Mono",
-    monospace;
-  text-align: right;
-}
 .removeButton,
-.closeButton {
-  border: 0;
-  background: transparent;
-  color: #78959e;
-  font-size: 20px;
-  cursor: pointer;
-}
 .actionBar {
   margin-top: 20px;
   display: grid;
@@ -242,39 +104,6 @@
   font:
     9px "DM Mono",
     monospace;
-}
-.tabs {
-  display: flex;
-  gap: 25px;
-  border-bottom: 1px solid #315863;
-  margin: 27px -28px 0;
-  padding: 0 28px;
-  overflow: auto;
-}
-.tabs button {
-  white-space: nowrap;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: none;
-  padding: 0 0 14px;
-  color: #78939c;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.tabs button:focus {
-  outline: none;
-}
-
-.tabs button span {
-  margin-right: 8px;
-  font:
-    9px "DM Mono",
-    monospace;
-}
-.tabs .tabActive {
-  color: #5ed8ef;
-  border-color: #5ed8ef;
 }
 .resultPanel {
   margin-top: 24px;
@@ -312,52 +141,6 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin: 18px 0 4px;
-}
-.compressOptions label {
-  display: grid;
-  gap: 6px;
-  color: #6f9299;
-  font:
-    9px "DM Mono",
-    monospace;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-}
-.locationAlert {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  min-height: 68px;
-  padding: 11px 13px;
-  border: 1px solid #35606a;
-  background: #0a1a21;
-  color: #d8e8ec;
-  font:
-    11px/1.5 Manrope,
-    sans-serif;
-  grid-column: span 1;
-  grid-row: span 2;
-}
-.locationAlertIcon {
-  flex: 0 0 auto;
-  width: 17px;
-  height: 17px;
-  color: #62dce8;
-}
-.locationAlertContent {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-.locationAlertContent strong {
-  font-weight: 700;
-}
-.locationAlertContent span {
-  color: #8da8ad;
-}
-.locationAlert a {
-  color: #d9f16e;
 }
 .resultList {
   padding: 0 16px;
@@ -536,79 +319,6 @@
   color: #6f8c95;
   font-size: 11px;
 }
-.backdrop {
-  position: fixed;
-  z-index: 20;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  overflow-y: auto;
-  padding: 20px;
-  background: #020a0dcc;
-  overscroll-behavior: contain;
-}
-.dialog {
-  width: min(560px, 100%);
-  border: 1px solid #37606c;
-  background: #0d252d;
-  box-shadow: 0 22px 60px #000b;
-}
-.dialog textarea {
-  width: 100%;
-  min-height: 180px;
-  box-sizing: border-box;
-  resize: vertical;
-  border: 1px solid #315863;
-  background: #081a20;
-  color: #e4f4f0;
-  padding: 13px;
-  font:
-    12px/1.6 "DM Mono",
-    monospace;
-}
-.dialog .description {
-  margin-bottom: 8px;
-}
-.modeToggle {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 15px;
-}
-.choiceCard {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  min-width: 0;
-  border: 1px solid #315863;
-  background: #0a1a21;
-  color: #a9d5d5;
-  padding: 12px;
-  cursor: pointer;
-}
-.choiceCardContent {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-.choiceCardContent strong {
-  color: #d8e8ec;
-  font-size: 12px;
-  font-weight: 600;
-}
-.choiceCardContent small {
-  color: #77969d;
-  font-size: 10px;
-  line-height: 1.45;
-}
-.choiceCard.modeActive {
-  border-color: #d9f16e;
-  background: #122d31;
-}
-.error {
-  color: #f39b84;
-  font-size: 11px;
-}
 @media (max-width: 680px) {
   .efficiencySummary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -697,18 +407,9 @@
     align-items: flex-start;
     flex-direction: column;
   }
-  .primaryButton {
-    width: 100%;
-    justify-content: center;
-  }
 }
 @media (max-width: 680px) {
   .compressOptions {
     grid-template-columns: 1fr;
-  }
-
-  .locationAlert {
-    grid-column: 1;
-    grid-row: auto;
   }
 }

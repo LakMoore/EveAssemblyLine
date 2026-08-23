@@ -12,7 +12,6 @@ import {
   ComboboxList,
   useComboboxAnchor,
 } from "./ui/combobox";
-import styles from "./TypeSearch.module.css";
 
 type TypeSearchResult = {
   name: string;
@@ -89,7 +88,7 @@ export default function TypeSearch({
   }
 
   return (
-    <div ref={anchor} className={styles.search}>
+    <div ref={anchor} className="w-full">
       <Combobox
         items={results}
         open={isOpen && query.trim().length >= 2}
@@ -97,27 +96,33 @@ export default function TypeSearch({
         filter={null}
         inputValue={query}
         onOpenChange={setIsOpen}
-        onInputValueChange={(value) => {
+        onInputValueChange={(value, eventDetails) => {
+          if (eventDetails.reason !== "input-change") {
+            setQuery("");
+            setResults([]);
+            setIsOpen(false);
+            return;
+          }
           setQuery(value);
-          setIsOpen(true);
+          setIsOpen(value.trim().length >= 2);
         }}
         onValueChange={(value) => {
           if (value) choose(value);
         }}
       >
         <ComboboxInput
-          className={styles.searchInput}
+          className="w-full"
           showTrigger={false}
           onFocus={() => results.length > 0 && setIsOpen(true)}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
           aria-label={ariaLabel}
         />
-        <ComboboxContent anchor={anchor} className={styles.searchResults}>
-          <ComboboxEmpty className={styles.noResults}>No matching published items.</ComboboxEmpty>
+        <ComboboxContent anchor={anchor}>
+          <ComboboxEmpty>No matching published items.</ComboboxEmpty>
           <ComboboxList>
             {results.map((item) => (
-              <ComboboxItem key={item.typeId} value={item} className={styles.searchResult}>
+              <ComboboxItem key={item.typeId} value={item}>
                 <TypeIdentity
                   name={item.name}
                   typeId={item.typeId}

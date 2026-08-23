@@ -8,7 +8,19 @@ import TypeIdentity from "../components/TypeIdentity";
 import TypeSearch from "@/components/TypeSearch";
 import { toast } from "@/components/ui/toast";
 import type { SdeLanguage } from "@/lib/reference/languages";
-import { Clipboard, Copy, FileUp, Info, Minimize2, Upload, X } from "lucide-react";
+import {
+  Clipboard,
+  ClipboardList,
+  Copy,
+  FileUp,
+  Gauge,
+  Info,
+  Minimize2,
+  PackageOpen,
+  ShoppingCart,
+  Upload,
+  X,
+} from "lucide-react";
 import Image from "next/image";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import {
@@ -22,11 +34,19 @@ import { loadClientSession, loadClientStateStatus } from "@/lib/client/requestCa
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
 import { loadEndpointRecord, saveEndpointResponse } from "@/lib/client/refreshCache";
 import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
-import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -453,14 +473,10 @@ function CompressContent() {
               <p className={styles.kicker}>01 / REQUIREMENTS</p>
               <h2>Raw materials</h2>
             </div>
-            <button
-              type="button"
-              className={`actionButton ${styles.secondaryButton}`}
-              onClick={() => setIsPasteOpen(true)}
-            >
+            <Button type="button" variant="outline" onClick={() => setIsPasteOpen(true)}>
               <Clipboard aria-hidden="true" />
               <span>Paste multibuy</span>
-            </button>
+            </Button>
           </div>
           <p className={styles.description}>
             Add the minerals you need, then find the compressed ores that can produce them.
@@ -478,8 +494,8 @@ function CompressContent() {
           />
           <div className={styles.compressOptions}>
             {locationOptions.length > 0 ? (
-              <label>
-                <span>LOCATION</span>
+              <Label className="flex-col items-start gap-1.5">
+                <span className="text-muted-foreground text-xs">LOCATION</span>
                 <Select
                   value={settings.locationId}
                   onValueChange={(value) => value && updateSettings({ locationId: value })}
@@ -508,22 +524,20 @@ function CompressContent() {
                     </SelectGroup>
                   </SelectContent>
                 </Select>
-              </label>
+              </Label>
             ) : (
-              <Alert className={styles.locationAlert}>
-                <Info className={styles.locationAlertIcon} aria-hidden="true" />
-                <div className={styles.locationAlertContent}>
-                  <AlertTitle>No reprocessing locations found.</AlertTitle>
-                  <AlertDescription>
-                    Add a reprocessing location on the <Link href="/locations">Locations</Link> page
-                    or <Link href="/api/auth/eve/start">authenticate a character</Link> to find the
-                    best location automatically.
-                  </AlertDescription>
-                </div>
+              <Alert>
+                <Info aria-hidden="true" />
+                <AlertTitle>No reprocessing locations found.</AlertTitle>
+                <AlertDescription>
+                  Add a reprocessing location on the <Link href="/locations">Locations</Link> page
+                  or <Link href="/api/auth/eve/start">authenticate a character</Link> to find the
+                  best location automatically.
+                </AlertDescription>
               </Alert>
             )}
-            <label>
-              <span>CHARACTER / SKILLS</span>
+            <Label className="flex-col items-start gap-1.5">
+              <span className="text-muted-foreground text-xs">CHARACTER / SKILLS</span>
               <Select
                 value={settings.characterId}
                 onValueChange={(value) =>
@@ -555,9 +569,9 @@ function CompressContent() {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-            </label>
-            <label>
-              <span>IMPLANT</span>
+            </Label>
+            <Label className="flex-col items-start gap-1.5">
+              <span className="text-muted-foreground text-xs">IMPLANT</span>
               <Select
                 value={
                   implantOptions.some((implant) => implant.id === settings.implantId)
@@ -583,9 +597,9 @@ function CompressContent() {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-            </label>
-            <label>
-              <span>MARKET</span>
+            </Label>
+            <Label className="flex-col items-start gap-1.5">
+              <span className="text-muted-foreground text-xs">MARKET</span>
               <Select
                 value={settings.marketId}
                 onValueChange={(value) => value && updateSettings({ marketId: value })}
@@ -607,9 +621,9 @@ function CompressContent() {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-            </label>
-            <label>
-              <span>ORDER TYPE</span>
+            </Label>
+            <Label className="flex-col items-start gap-1.5">
+              <span className="text-muted-foreground text-xs">ORDER TYPE</span>
               <Select
                 value={settings.orderType}
                 onValueChange={(value) =>
@@ -632,7 +646,7 @@ function CompressContent() {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-            </label>
+            </Label>
           </div>
           <div className={styles.listHeader}>
             <span>ITEM</span>
@@ -640,7 +654,7 @@ function CompressContent() {
             <span />
           </div>
           {items.length === 0 ? (
-            <Empty className={styles.empty}>
+            <Empty>
               <EmptyDescription>
                 Search for a mineral above to build your requirement.
               </EmptyDescription>
@@ -654,6 +668,7 @@ function CompressContent() {
                   variation={variation(item.category, item.imageVariation, item.name)}
                 />
                 <Input
+                  className="text-right"
                   aria-label={`${item.name} quantity`}
                   type="number"
                   min="1"
@@ -683,18 +698,18 @@ function CompressContent() {
             ))
           )}
           {error && (
-            <Alert variant="destructive" className={styles.error}>
+            <Alert variant="destructive">
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
           <div className={styles.actionBar}>
             <Button
-              className={styles.primaryButton}
+              className="w-full justify-between"
               type="submit"
               disabled={items.length === 0 || isLoading}
             >
-              <span className={styles.primaryButtonLead}>
-                <Minimize2 size={16} aria-hidden="true" />
+              <span className="flex min-w-0 items-center gap-1.5 text-left">
+                <Minimize2 aria-hidden="true" />
                 <span>{isLoading ? "Compressing..." : "Compress"}</span>
               </span>
               <b aria-hidden="true">→</b>
@@ -724,10 +739,30 @@ function Results({ result }: { result: CompressResult }) {
   const router = useRouter();
   const [isAddingToPlan, setIsAddingToPlan] = useState(false);
   const tabs = [
-    { key: "efficiency", label: "Efficiency", note: "Reprocessing efficiencies used by the solve" },
-    { key: "plan", label: "Plan", note: "Required materials and recovered quantities" },
-    { key: "toBuy", label: "To buy", note: "Compressed ores and unrecoverable minerals" },
-    { key: "surplus", label: "Surplus", note: "Recovered materials beyond the requirement" },
+    {
+      key: "efficiency",
+      label: "Efficiency",
+      note: "Reprocessing efficiencies used by the solve",
+      icon: Gauge,
+    },
+    {
+      key: "plan",
+      label: "Plan",
+      note: "Required materials and recovered quantities",
+      icon: ClipboardList,
+    },
+    {
+      key: "toBuy",
+      label: "To buy",
+      note: "Compressed ores and unrecoverable minerals",
+      icon: ShoppingCart,
+    },
+    {
+      key: "surplus",
+      label: "Surplus",
+      note: "Recovered materials beyond the requirement",
+      icon: PackageOpen,
+    },
   ] as const;
   const [activeTab, setActiveTab] = useState<(typeof tabs)[number]["key"]>("efficiency");
   const active = tabs.find((tab) => tab.key === activeTab) ?? tabs[0];
@@ -807,14 +842,10 @@ function Results({ result }: { result: CompressResult }) {
         value={activeTab}
         onValueChange={(value) => setActiveTab(value as (typeof tabs)[number]["key"])}
       >
-        <TabsList className={styles.tabs}>
-          {tabs.map((tab, index) => (
-            <TabsTrigger
-              key={tab.key}
-              value={tab.key}
-              className={activeTab === tab.key ? styles.tabActive : ""}
-            >
-              <span>{String(index + 1).padStart(2, "0")}</span>
+        <TabsList variant="line">
+          {tabs.map((tab) => (
+            <TabsTrigger key={tab.key} value={tab.key}>
+              <tab.icon data-icon="inline-start" aria-hidden="true" />
               {tab.label}
             </TabsTrigger>
           ))}
@@ -828,25 +859,21 @@ function Results({ result }: { result: CompressResult }) {
               </div>
               <div className={styles.resultPanelActions}>
                 {active.key === "toBuy" && items.length > 0 && (
-                  <button
-                    type="button"
-                    className={`actionButton ${styles.secondaryButton}`}
-                    onClick={() => void copyToBuyList()}
-                  >
+                  <Button type="button" variant="outline" onClick={() => void copyToBuyList()}>
                     <Copy aria-hidden="true" />
                     Copy multibuy
-                  </button>
+                  </Button>
                 )}
                 {active.key === "toBuy" && items.some((item) => !item.ignored) && (
-                  <button
+                  <Button
                     type="button"
-                    className={`actionButton ${styles.secondaryButton}`}
+                    variant="outline"
                     onClick={() => void addToPlan()}
                     disabled={isAddingToPlan}
                   >
                     <Upload aria-hidden="true" />
                     Add to Plan
-                  </button>
+                  </Button>
                 )}
                 <strong>{itemCount}</strong>
               </div>
@@ -912,7 +939,7 @@ function Results({ result }: { result: CompressResult }) {
                 </div>
               </>
             ) : (
-              <Empty className={styles.emptyResult}>
+              <Empty>
                 <EmptyDescription>No entries returned.</EmptyDescription>
               </Empty>
             )}
@@ -926,7 +953,7 @@ function Results({ result }: { result: CompressResult }) {
 function EfficiencyTable({ efficiency }: { efficiency?: EfficiencyResult }) {
   if (!efficiency) {
     return (
-      <Empty className={styles.emptyResult}>
+      <Empty>
         <EmptyDescription>No efficiency data returned.</EmptyDescription>
       </Empty>
     );
@@ -1051,17 +1078,17 @@ function PasteDialog({
   }
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className={styles.dialog} render={<form onSubmit={resolve} />}>
+      <DialogContent render={<form onSubmit={resolve} />}>
         <div className={styles.panelHeader}>
           <div>
             <p className={styles.kicker}>BATCH IMPORT</p>
             <DialogTitle>Paste multibuy list</DialogTitle>
           </div>
         </div>
-        <div className="no-scrollbar max-h-[70vh] overflow-y-auto overscroll-contain">
-          <p className={styles.description}>
+        <DialogBody className="no-scrollbar overscroll-contain">
+          <DialogDescription>
             Compatible with Eve Multibuy. One item per line, with the quantity at the end.
-          </p>
+          </DialogDescription>
           <Textarea
             value={text}
             onChange={(event) => {
@@ -1074,49 +1101,43 @@ function PasteDialog({
             autoFocus
           />
           {error && (
-            <Alert variant="destructive" className={styles.error}>
+            <Alert variant="destructive">
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
           <RadioGroup
-            className={styles.modeToggle}
+            className="mt-4 sm:grid-cols-2"
             value={mode}
             onValueChange={(value) => setMode(value as "add" | "replace")}
             aria-label="Paste behavior"
           >
-            <label className={`${styles.choiceCard} ${mode === "add" ? styles.modeActive : ""}`}>
+            <label className="flex items-start gap-2">
               <RadioGroupItem value="add" />
-              <span className={styles.choiceCardContent}>
-                <strong>Add to list</strong>
-                <small>Keep the imported items with the current list.</small>
+              <span className="grid min-w-0 gap-1">
+                <span className="text-sm font-medium">Add to list</span>
+                <span className="text-muted-foreground text-xs">
+                  Keep the imported items with the current list.
+                </span>
               </span>
             </label>
-            <label
-              className={`${styles.choiceCard} ${mode === "replace" ? styles.modeActive : ""}`}
-            >
+            <label className="flex items-start gap-2">
               <RadioGroupItem value="replace" />
-              <span className={styles.choiceCardContent}>
-                <strong>Replace list</strong>
-                <small>Clear the current list before importing.</small>
+              <span className="grid min-w-0 gap-1">
+                <span className="text-sm font-medium">Replace list</span>
+                <span className="text-muted-foreground text-xs">
+                  Clear the current list before importing.
+                </span>
               </span>
             </label>
           </RadioGroup>
-        </div>
+        </DialogBody>
         <DialogFooter>
-          <Button
-            type="button"
-            className={`actionButton ${styles.secondaryButton}`}
-            onClick={onCancel}
-          >
+          <Button type="button" variant="outline" onClick={onCancel}>
             <X aria-hidden="true" />
             Cancel
           </Button>
-          <Button
-            type="submit"
-            className={`actionButton ${styles.primaryButton}`}
-            disabled={!text.trim()}
-          >
-            <span className={styles.primaryButtonLead}>
+          <Button type="submit" disabled={!text.trim()}>
+            <span className="flex min-w-0 items-center gap-1.5 text-left">
               <FileUp aria-hidden="true" />
               <span>Import list</span>
             </span>

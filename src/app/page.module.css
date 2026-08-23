@@ -885,10 +885,6 @@
   grid-template-columns: 28px minmax(0, 1fr) 72px 44px 44px 16px;
 }
 
-.searchWrap {
-  position: relative;
-}
-
 .searchSpinner {
   width: 12px;
   height: 12px;
@@ -896,52 +892,6 @@
   border-top-color: var(--cyan);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
-}
-
-.searchResults {
-  position: absolute;
-  z-index: 5;
-  top: calc(100% + 5px);
-  left: 0;
-  right: 0;
-  background: #0d252d;
-  border: 1px solid #37606c;
-  box-shadow: 0 14px 28px #0008;
-  padding: 4px;
-}
-
-.searchResult,
-.searchResultActive {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 10px 12px;
-  border: 0;
-  text-align: left;
-  background: transparent;
-  color: #d8e8ec;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.searchResult small,
-.searchResultActive small {
-  color: #76959e;
-  font: 10px "DM Mono";
-}
-
-.searchResultActive,
-.searchResult:hover {
-  background: #16404b;
-  color: #fff;
-}
-
-.noSearchResults {
-  padding: 13px 12px;
-  color: #78959e;
-  font-size: 11px;
 }
 
 .emptyBuildList {
@@ -1452,13 +1402,6 @@
   }
 }
 
-.importModal {
-  width: min(620px, 100%);
-  background: var(--white);
-  border: 1px solid #37606c;
-  box-shadow: 0 18px 50px #000b;
-}
-
 .mergeModal {
   width: min(700px, 100%);
 }
@@ -1635,50 +1578,6 @@
 
 .importResultInvalid small {
   color: #f29a82;
-}
-
-.combobox {
-  position: relative;
-}
-
-.combobox input {
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.comboboxOptions {
-  position: absolute;
-  z-index: 5;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  overflow: hidden;
-  border: 1px solid #31515b;
-  background: #10262d;
-  box-shadow: 0 12px 28px #06151bcc;
-}
-
-.comboboxOptions button {
-  display: block;
-  width: 100%;
-  padding: 11px 13px;
-  border: 0;
-  border-bottom: 1px solid #1e3740;
-  background: transparent;
-  color: #c8dadd;
-  cursor: pointer;
-  font: 11px "DM Mono";
-  text-align: left;
-}
-
-.comboboxOptions button:last-child {
-  border-bottom: 0;
-}
-
-.comboboxOptions button:hover,
-.comboboxOptions button[aria-selected="true"] {
-  background: #193943;
-  color: #fff;
 }
 
 .stockLocation {
@@ -2260,14 +2159,6 @@
   display: flex;
   align-items: flex-end;
   gap: 12px;
-}
-
-.locationControls label {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: #78959e;
-  font: 9px "DM Mono";
 }
 
 .locationBonusLine {
@@ -3140,11 +3031,6 @@
     align-items: center;
   }
 
-  .locationControls label {
-    min-width: 0;
-    flex: 1 1 auto;
-  }
-
   .locationControls > .panelDescription {
     flex: 0 0 100%;
     margin: 0;
@@ -3711,14 +3597,6 @@
   color: var(--cyan);
   font-size: 11px;
   padding: 15px 6px 0;
-}
-
-.field {
-  display: block;
-  color: #76949e;
-  font: 10px "DM Mono";
-  letter-spacing: 1px;
-  margin-top: 21px;
 }
 
 .constructionGrid {
