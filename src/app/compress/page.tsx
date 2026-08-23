@@ -18,6 +18,7 @@ import {
   Minimize2,
   PackageOpen,
   ShoppingCart,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -324,11 +325,11 @@ function CompressContent() {
   }
 
   const locationOptions = options.locations;
+  const selectedLocation = locationOptions.find((location) => location.id === settings.locationId);
   const selectedCharacter = options.characters.find(
     (character) => character.id === settings.characterId,
   );
-  const selectedImplant =
-    options.implants.find((implant) => implant.id === settings.implantId) ?? options.implants[0];
+  const selectedImplant = options.implants.find((implant) => implant.id === settings.implantId);
   const implantOptions = selectedCharacter
     ? options.implants.filter(
         (implant) =>
@@ -424,7 +425,7 @@ function CompressContent() {
             structureTypeId: selectedLocation?.structureTypeId ?? 0,
             reprocessingRig: reprocessingRigLevel(selectedLocation?.rigs ?? []),
             skillLevels,
-            implantLevel: selectedImplant.level,
+            implantLevel: selectedImplant?.level ?? 0,
             securityStatus: selectedLocation?.securityStatus,
             marketId:
               marketHubs.find((market) => market.id === settings.marketId)?.regionId
@@ -505,15 +506,23 @@ function CompressContent() {
                     disabled: location.canReprocess === false,
                   }))}
                 >
-                  <SelectTrigger aria-label="Reprocessing location">
-                    <SelectValue />
+                  <SelectTrigger className="w-full" aria-label="Reprocessing location">
+                    <SelectValue className={styles.selectValue}>
+                      <span className={styles.selectName}>
+                        {selectedLocation?.name ?? `Location ${settings.locationId}`}
+                      </span>
+                      <span className={styles.selectBonus}>
+                        {Math.round(selectedLocation?.baseYield ?? 50)}%
+                      </span>
+                    </SelectValue>
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className={styles.locationSelectContent}>
                     <SelectGroup>
                       {locationOptions.map((location) => (
                         <SelectItem
                           value={location.id}
                           key={location.id}
+                          className={styles.locationSelectItem}
                           disabled={location.canReprocess === false}
                         >
                           {location.name ?? `Location ${location.id}`}
@@ -553,7 +562,7 @@ function CompressContent() {
                   })),
                 ]}
               >
-                <SelectTrigger aria-label="Character skills">
+                <SelectTrigger className="w-full" aria-label="Character skills">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -584,8 +593,13 @@ function CompressContent() {
                   label: implant.name,
                 }))}
               >
-                <SelectTrigger aria-label="Reprocessing implant">
-                  <SelectValue />
+                <SelectTrigger className="w-full" aria-label="Reprocessing implant">
+                  <SelectValue className={styles.selectValue}>
+                    <span className={styles.selectName}>
+                      {selectedImplant?.name ?? "No implant"}
+                    </span>
+                    <span className={styles.selectBonus}>+{selectedImplant?.level ?? 0}%</span>
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
@@ -608,7 +622,7 @@ function CompressContent() {
                   label: market.name,
                 }))}
               >
-                <SelectTrigger aria-label="Market hub">
+                <SelectTrigger className="w-full" aria-label="Market hub">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -635,7 +649,7 @@ function CompressContent() {
                   { value: "sell", label: "Sell" },
                 ]}
               >
-                <SelectTrigger aria-label="Order type">
+                <SelectTrigger className="w-full" aria-label="Order type">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -684,16 +698,17 @@ function CompressContent() {
                     )
                   }
                 />
-                <button
+                <Button
                   type="button"
-                  className={styles.removeButton}
+                  variant="destructive"
+                  size="icon-sm"
                   aria-label={`Remove ${item.name}`}
                   onClick={() =>
                     updateItems((current) => current.filter((_, itemIndex) => itemIndex !== index))
                   }
                 >
-                  ×
-                </button>
+                  <Trash2 aria-hidden="true" />
+                </Button>
               </div>
             ))
           )}

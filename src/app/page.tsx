@@ -77,6 +77,7 @@ import {
   Repeat,
   ShoppingCart,
   SquareX,
+  Trash2,
   Truck,
   X,
   type LucideIcon,
@@ -819,14 +820,15 @@ function Planner() {
                       }
                     />
                   </label>
-                  <button
+                  <Button
                     type="button"
-                    className={styles.remove}
+                    variant="destructive"
+                    size="icon-sm"
                     aria-label={`Remove ${item.name}`}
                     onClick={() => setItems(items.filter((_, itemIndex) => itemIndex !== index))}
                   >
-                    ×
-                  </button>
+                    <Trash2 aria-hidden="true" />
+                  </Button>
                 </div>
               ))
             )}
@@ -1168,7 +1170,6 @@ function ExcludedLocationsModal({
             Close
           </Button>
           <Button type="button" className="min-w-32" disabled={isLoading} onClick={onClearAll}>
-            <span>Clear all</span>
             <b>→</b>
           </Button>
         </DialogFooter>

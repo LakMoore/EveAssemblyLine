@@ -89,7 +89,6 @@
   min-height: 60px;
   border-bottom: 1px solid #1b3b44;
 }
-.removeButton,
 .actionBar {
   margin-top: 20px;
   display: grid;
@@ -138,9 +137,37 @@
 }
 .compressOptions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(220px, 1.4fr) repeat(2, minmax(120px, 1fr));
   gap: 10px;
   margin: 18px 0 4px;
+}
+.selectValue {
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.selectName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.selectBonus {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.locationSelectItem {
+  align-items: flex-start;
+}
+.locationSelectContent [data-slot="select-item-text"] {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  line-height: 1.35;
 }
 .resultList {
   padding: 0 16px;
@@ -395,7 +422,7 @@
   .itemRow > input {
     grid-column: 2;
   }
-  .itemRow > .removeButton {
+  .itemRow > [data-slot="button"] {
     grid-column: 3;
     justify-self: end;
   }
@@ -410,6 +437,10 @@
 }
 @media (max-width: 680px) {
   .compressOptions {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .compressOptions > label,
+  .compressOptions [data-slot="select-trigger"] {
+    min-width: 0;
   }
 }
