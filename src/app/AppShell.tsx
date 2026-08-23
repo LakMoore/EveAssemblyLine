@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
+import { Empty, EmptyDescription } from "@/components/ui/empty";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { isSdeLanguage, sdeLanguages, type SdeLanguage } from "@/lib/reference/languages";
@@ -34,7 +35,6 @@ import {
 import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import {
-  Activity,
   ArrowUp,
   BadgeDollarSign,
   Boxes,
@@ -45,10 +45,19 @@ import {
   Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
+  Rocket,
   Settings2,
   UserRoundPlus,
   UsersRound,
 } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import styles from "./page.module.css";
 import { PlanStockItem } from "@/lib/planning/types";
 
@@ -150,6 +159,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [hasLoadedStateStatuses, setHasLoadedStateStatuses] = useState(false);
   const [showSidebarScrollTop, setShowSidebarScrollTop] = useState(false);
   const [statusCheckAt, setStatusCheckAt] = useState(() => Date.now());
+  const isRefreshingDataRef = useRef(false);
   const refreshAfterCharacterAdd = useRef(false);
   const mobileMetaCollapseTimer = useRef<number | null>(null);
   const mobileMetaCollapseAnimationTimer = useRef<number | null>(null);
@@ -295,7 +305,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }
 
   const refreshData = useCallback(async () => {
-    if (isRefreshingData || !authenticated || characters.length === 0) return false;
+    if (isRefreshingDataRef.current || !authenticated || characters.length === 0) return false;
+    isRefreshingDataRef.current = true;
     setIsRefreshingData(true);
     window.dispatchEvent(new CustomEvent("assembly-line-esi-refresh-started"));
     let stockLocations: EsiStockResponse["locations"] | undefined;
@@ -376,6 +387,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       return false;
     }
     finally {
+      isRefreshingDataRef.current = false;
       setIsRefreshingData(false);
       window.dispatchEvent(
         new CustomEvent(
@@ -386,7 +398,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         ),
       );
     }
-  }, [activePage, authenticated, characters.length, isRefreshingData, language]);
+  }, [activePage, authenticated, characters.length, language]);
 
   useEffect(() => {
     if (!authenticated || characters.length === 0 || activePage === "imagechecker") return;
@@ -504,88 +516,111 @@ export default function AppShell({ children }: { children: ReactNode }) {
               Eve <span className={styles.brandAccent}>AssemblyLine</span>
             </span>
           </Link>
-          <div
-            className={`${styles.topMeta} ${isMobileMetaExpanded || isMobileMetaCollapsing ? styles.topMetaExpanded : ""} ${isMobileMetaCollapsing ? styles.topMetaCollapsing : ""}`}
-          >
-            <label className={styles.languageControl}>
-              <span>LANGUAGE</span>
-              <select
-                className={styles.languageSelectFull}
-                aria-label="Language"
-                value={language}
-                onChange={(event) => changeLanguage(event.target.value)}
-              >
-                {sdeLanguages.map(({ code, label }) => (
-                  <option key={code} value={code}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-              <select
-                className={styles.languageSelectCompact}
-                aria-label="Language"
-                value={language}
-                onChange={(event) => changeLanguage(event.target.value)}
-              >
-                {sdeLanguages.map(({ code }) => (
-                  <option key={code} value={code}>
-                    {code.toUpperCase()}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {authenticated ? (
-              <span className={styles.esiStatus} aria-label="ESI connected" title="ESI connected">
-                <span className={`${styles.onlineDot} ${styles.onlineDotCompact}`} />
-                <span className={styles.esiStatusLabel}>ESI CONNECTED</span>
-              </span>
-            ) : (
-              <button
-                type="button"
-                className={styles.esiStatus}
-                onClick={() => void handleMobileMetaAction()}
-                aria-label="ESI not connected"
-                title="ESI not connected"
-              >
-                <span className={`${styles.onlineDot} ${styles.offlineDot}`} />
-                <span className={styles.esiStatusLabel}>NOT CONNECTED</span>
-              </button>
-            )}
-            {authenticated && (
-              <button
-                type="button"
-                className={`${styles.refresh} ${!hasExpiredState ? styles.refreshCurrent : ""}`}
-                onClick={() => void handleMobileMetaAction()}
-                disabled={isRefreshingData}
-                aria-label={hasExpiredState ? "Refresh data" : "Up to date"}
-                title={
-                  hasStateErrors
-                    ? "Refresh data; one or more endpoints failed"
-                    : hasExpiredState
-                      ? "Refresh data"
-                      : "Up to date"
-                }
-              >
-                {hasStateErrors ? (
-                  <span className={styles.refreshIconError} aria-hidden="true">
-                    !
-                  </span>
-                ) : hasExpiredState ? (
-                  <span className={styles.refreshIconWarning} aria-hidden="true">
-                    ↻
-                  </span>
-                ) : (
-                  <span className={styles.refreshStatusDot} aria-hidden="true" />
-                )}
-                <span>
-                  {isRefreshingData
-                    ? "Refreshing..."
-                    : hasExpiredState
-                      ? "Refresh Data"
-                      : "Up To Date"}
+          <div className={styles.topbarActions}>
+            <div
+              className={`${styles.topMeta} ${isMobileMetaExpanded || isMobileMetaCollapsing ? styles.topMetaExpanded : ""} ${isMobileMetaCollapsing ? styles.topMetaCollapsing : ""}`}
+            >
+              <label className={styles.languageControl}>
+                <span>LANGUAGE</span>
+                <Select
+                  aria-label="Language"
+                  value={language}
+                  onValueChange={(value) => {
+                    if (value && isSdeLanguage(value)) changeLanguage(value);
+                  }}
+                  items={sdeLanguages.map(({ code, label }) => ({ value: code, label }))}
+                >
+                  <SelectTrigger className={styles.languageSelectFull} size="sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent alignItemWithTrigger={false}>
+                    <SelectGroup>
+                      {sdeLanguages.map(({ code, label }) => (
+                        <SelectItem key={code} value={code}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <Select
+                  aria-label="Language"
+                  value={language}
+                  onValueChange={(value) => {
+                    if (value && isSdeLanguage(value)) changeLanguage(value);
+                  }}
+                  items={sdeLanguages.map(({ code }) => ({
+                    value: code,
+                    label: code.toUpperCase(),
+                  }))}
+                >
+                  <SelectTrigger className={styles.languageSelectCompact} size="sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {sdeLanguages.map(({ code }) => (
+                        <SelectItem key={code} value={code}>
+                          {code.toUpperCase()}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </label>
+              {authenticated ? (
+                <span className={styles.esiStatus} aria-label="ESI connected" title="ESI connected">
+                  <span className={`${styles.onlineDot} ${styles.onlineDotCompact}`} />
+                  <span className={styles.esiStatusLabel}>ESI CONNECTED</span>
                 </span>
-              </button>
-            )}
+              ) : (
+                <button
+                  type="button"
+                  className={styles.esiStatus}
+                  onClick={() => void handleMobileMetaAction()}
+                  aria-label="ESI not connected"
+                  title="ESI not connected"
+                >
+                  <span className={`${styles.onlineDot} ${styles.offlineDot}`} />
+                  <span className={styles.esiStatusLabel}>NOT CONNECTED</span>
+                </button>
+              )}
+              {authenticated && (
+                <button
+                  type="button"
+                  className={`${styles.refresh} ${!hasExpiredState ? styles.refreshCurrent : ""}`}
+                  onClick={() => void handleMobileMetaAction()}
+                  disabled={isRefreshingData}
+                  aria-label={hasExpiredState ? "Refresh data" : "Up to date"}
+                  title={
+                    hasStateErrors
+                      ? "Refresh data; one or more endpoints failed"
+                      : hasExpiredState
+                        ? "Refresh data"
+                        : "Up to date"
+                  }
+                >
+                  {hasStateErrors ? (
+                    <span className={styles.refreshIconError} aria-hidden="true">
+                      !
+                    </span>
+                  ) : hasExpiredState ? (
+                    <span className={styles.refreshIconWarning} aria-hidden="true">
+                      ↻
+                    </span>
+                  ) : (
+                    <span className={styles.refreshStatusDot} aria-hidden="true" />
+                  )}
+                  <span>
+                    {isRefreshingData
+                      ? "Refreshing..."
+                      : hasExpiredState
+                        ? "Refresh Data"
+                        : "Up To Date"}
+                  </span>
+                </button>
+              )}
+            </div>
           </div>
         </header>
         <div
@@ -685,6 +720,16 @@ export default function AppShell({ children }: { children: ReactNode }) {
               </span>
               <span className={styles.navText}>Jobs</span>
             </Link>
+            <Link
+              className={`${styles.navItem} ${activePage === "ships" ? styles.navActive : ""}`}
+              href="/ships"
+              onClick={closeSidebarOnNavigation}
+            >
+              <span>
+                <Rocket size={17} strokeWidth={1.8} aria-hidden="true" />
+              </span>
+              <span className={styles.navText}>Ships</span>
+            </Link>
             <div className={styles.sectionLabel}>CONFIGURATION</div>
             <Link
               className={`${styles.navItem} ${activePage === "settings" ? styles.navActive : ""}`}
@@ -750,7 +795,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   );
                 })}
                 {characters.length === 0 && (
-                  <div className={styles.pilotEmpty}>No connected pilots</div>
+                  <Empty className={styles.pilotEmpty}>
+                    <EmptyDescription>No connected pilots</EmptyDescription>
+                  </Empty>
                 )}
                 <span
                   className={styles.sidebarSentinel}

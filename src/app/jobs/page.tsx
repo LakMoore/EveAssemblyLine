@@ -7,6 +7,9 @@ import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import TypeIdentity from "../components/TypeIdentity";
 import styles from "../page.module.css";
 import { Atom, Factory, FlaskConical } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Empty, EmptyDescription } from "@/components/ui/empty";
 
 const slotOrder = ["Manufacturing", "Science", "Reactions"];
 const scienceJobActivities = new Set([
@@ -135,9 +138,15 @@ export default function JobsPage() {
           </div>
         </div>
       </div>
-      {error && <p className={styles.shipsEmpty}>Could not load industry jobs.</p>}
+      {error && (
+        <Alert variant="destructive" className={styles.shipsEmpty}>
+          <AlertDescription>Could not load industry jobs.</AlertDescription>
+        </Alert>
+      )}
       {!error && data && jobs.length === 0 && (
-        <p className={styles.shipsEmpty}>No active industry jobs in the current ESI cache.</p>
+        <Empty className={styles.shipsEmpty}>
+          <EmptyDescription>No active industry jobs in the current ESI cache.</EmptyDescription>
+        </Empty>
       )}
       <section className={styles.jobsSection}>
         <div className={styles.shipSystemHeader}>
@@ -204,7 +213,7 @@ export default function JobsPage() {
                   {job.activity} · {job.characterName}
                   {job.ownerType === "corporation" ? " · CORPORATION" : ""}
                 </small>
-                {job.usesBpo && <span className={styles.jobBpoFlag}>From BPO</span>}
+                {job.usesBpo && <Badge className={styles.jobBpoFlag}>From BPO</Badge>}
                 <small>{job.outputLocationName}</small>
               </div>
               <span>

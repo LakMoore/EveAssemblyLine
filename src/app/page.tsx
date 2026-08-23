@@ -1,6 +1,14 @@
 "use client";
 
-import { FormEvent, type RefObject, useEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  FormEvent,
+  KeyboardEvent,
+  type RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
@@ -33,21 +41,30 @@ import { fetchTypeMetadata } from "@/lib/reference/types";
 import { useAppLanguage } from "./AppShell";
 import TypeIdentity from "./components/TypeIdentity";
 import TypeSearch from "@/components/TypeSearch";
-import { useToast } from "./components/ToastProvider";
-import { Badge } from "./components/ui/badge";
+import { toast } from "@/components/ui/toast";
+import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import styles from "./page.module.css";
 import {
+  Atom,
+  Brain,
   ChartLine,
   Check,
   Clipboard,
@@ -58,28 +75,24 @@ import {
   Minimize2,
   Microscope,
   Repeat,
+  ShoppingCart,
   SquareX,
-  TestTubes,
+  Truck,
   X,
+  type LucideIcon,
 } from "lucide-react";
 
 type PlannerTab = "Plan" | "Haul" | "Buy" | "Copy" | "Invent" | "React" | "Manufacture" | "Skills";
-const tabs: PlannerTab[] = [
-  "Plan",
-  "Haul",
-  "Buy",
-  "Copy",
-  "Invent",
-  "React",
-  "Manufacture",
-  "Skills",
+const tabs: { value: PlannerTab; icon: LucideIcon }[] = [
+  { value: "Plan", icon: ClipboardList },
+  { value: "Haul", icon: Truck },
+  { value: "Buy", icon: ShoppingCart },
+  { value: "Copy", icon: CopyIcon },
+  { value: "Invent", icon: Microscope },
+  { value: "React", icon: Atom },
+  { value: "Manufacture", icon: Factory },
+  { value: "Skills", icon: Brain },
 ];
-type TypeResult = {
-  name: string;
-  typeId: number;
-  category?: string;
-  marketCategory?: string;
-};
 type PasteResult = {
   name: string;
   quantity?: number;
@@ -125,7 +138,7 @@ function AvailableSourceIcons({ counts }: { counts?: PlanSourceCounts }) {
               ? Factory
               : icon === "invention"
                 ? Microscope
-                : TestTubes;
+                : Brain;
         const quantity = counts?.[icon] ?? 0;
         const label =
           icon === "market"
@@ -174,12 +187,15 @@ function ScrollTopButton({
   headerRef: RefObject<HTMLElement | null>;
 }) {
   const [isFloating, setIsFloating] = useState(false);
+
   useEffect(() => {
     function updateFloatingState() {
+      // Must match the breakpoint where the table headers become sticky.
       const isSticky = window.matchMedia("(min-width: 641px)").matches;
       const headerTop = headerRef.current?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY;
       setIsFloating(isSticky && headerTop <= 0);
     }
+
     updateFloatingState();
     window.addEventListener("scroll", updateFloatingState, { passive: true });
     window.addEventListener("resize", updateFloatingState);
@@ -188,6 +204,7 @@ function ScrollTopButton({
       window.removeEventListener("resize", updateFloatingState);
     };
   }, [headerRef]);
+
   return (
     <button
       type="button"
@@ -272,6 +289,74 @@ function WelcomePage() {
           </p>
         </section>
       </div>
+      <section className={styles.aboutPanel}>
+        <div className={styles.sectionHeading}>
+          <span className={styles.eyebrow}>WHY ASSEMBLYLINE</span>
+          <h2>Planning for the work between the clicks</h2>
+        </div>
+        <div className={styles.aboutCopy}>
+          <p>
+            Eve AssemblyLine is an opinionated industry planning tool for EVE Online, with a set of
+            practical utilities around it. It exists to support large build jobs across New Eden:
+            the kind of work where materials are distributed across locations, jobs are staged over
+            time, and the final result depends on keeping many small decisions aligned.
+          </p>
+          <p>
+            That is also why this tool does not include ISK/hour or profitability calculations.
+            Those numbers look precise, but they are usually red herrings. ISK/hour only works if
+            you keep every build slot running at 100% of the time. Profit only works if you can buy
+            every part, build every stage, and assemble the final pieces instantaneously. Neither
+            reflects how a serious operation actually moves through New Eden.
+          </p>
+          <p>
+            AssemblyLine focuses on the useful questions instead: what is needed, what is already
+            available, where it is, which jobs must happen first, and what still has to move.
+          </p>
+        </div>
+      </section>
+      <div className={styles.roadmapGrid}>
+        <section className={styles.roadmapPanel}>
+          <div className={styles.sectionHeading}>
+            <span className={styles.eyebrow}>OPEN WORK</span>
+            <h2>Bugs remaining to be fixed</h2>
+          </div>
+          <ul className={styles.roadmapList}>
+            <li>Correct the manufacturing and reaction ME calculation per structure.</li>
+            <li>Remove unnecessary compressed items from the hauling section of the build plan.</li>
+          </ul>
+        </section>
+        <section className={styles.roadmapPanel}>
+          <div className={styles.sectionHeading}>
+            <span className={styles.eyebrow}>NEXT ON THE BOARD</span>
+            <h2>Future features</h2>
+          </div>
+          <ul className={styles.roadmapList}>
+            <li>Ship fittings added to build plans and compared wholesale against stock.</li>
+            <li>More precise asset exclusion per location.</li>
+            <li>Multiple build lists, one for each stock location.</li>
+            <li>
+              Share structure information and settings with anyone on that structure&apos;s ACL.
+            </li>
+            <li>Corporation assets with strict access based on in-game roles.</li>
+            <li>Four faction themes.</li>
+            <li>Singularity SDE version.</li>
+          </ul>
+        </section>
+        <section className={styles.roadmapPanel}>
+          <div className={styles.sectionHeading}>
+            <span className={styles.eyebrow}>NORTH STAR</span>
+            <h2>Goals</h2>
+          </div>
+          <ul className={styles.roadmapList}>
+            <li>Replace all UI components with shadcn components.</li>
+            <li>
+              Make the character-agnostic <code>/plan</code> tool create build plans in under three
+              seconds, without authenticated calls to ESI.
+            </li>
+            <li>Keep the SDE current through automatic updates.</li>
+          </ul>
+        </section>
+      </div>
       <p className={styles.welcomeNote}>
         Character authentication is optional. Without it, you can still work with local planner
         data; connecting a character enables authenticated ESI state and corporation access
@@ -287,9 +372,10 @@ function Planner() {
   const buildListHeaderRef = useRef<HTMLDivElement>(null);
   const resultsHeaderRef = useRef<HTMLDivElement>(null);
   const { language } = useAppLanguage();
-  const { showToast } = useToast();
   const [isBuildListLoaded, setIsBuildListLoaded] = useState(false);
   const [activeTab, setActiveTab] = useState<PlannerTab>("Plan");
+  const activeTabDefinition = tabs.find((tab) => tab.value === activeTab) ?? tabs[0];
+  const ActiveTabIcon = activeTabDefinition.icon;
   const [planStatus, setPlanStatus] = useState("Ready to calculate");
   const [isPlanLoading, setIsPlanLoading] = useState(false);
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
@@ -525,10 +611,10 @@ function Planner() {
       await navigator.clipboard.writeText(
         items.map((item) => `${item.name}\t${item.quantity}`).join("\n"),
       );
-      showToast("Build list multibuy copied");
+      toast.add({ description: "Build list multibuy copied" });
     }
     catch {
-      showToast("Could not copy build list multibuy");
+      toast.add({ description: "Could not copy build list multibuy", type: "error" });
     }
   }
 
@@ -537,6 +623,13 @@ function Planner() {
     if (!window.confirm("Remove all items added from Compression?")) return;
     setItems((current) => current.filter((item) => !item.fromCompression));
   }
+
+  const selectedManufacturingLocation = locationOptions.find(
+    (location) => location.locationId === locations.manufacturing,
+  );
+  const selectedReactionLocation = locationOptions.find(
+    (location) => location.locationId === locations.reactions,
+  );
 
   return (
     <>
@@ -551,7 +644,7 @@ function Planner() {
       </div>
       <form onSubmit={calculatePlan}>
         <div className={styles.workspaceGrid}>
-          <section className={styles.panel}>
+          <div className={styles.panel}>
             <div className={styles.panelHeader}>
               <div>
                 <p className={styles.panelKicker} ref={requirementsHeaderRef}>
@@ -622,9 +715,11 @@ function Planner() {
               <span />
             </div>
             {items.length === 0 ? (
-              <div className={styles.emptyBuildList}>
-                Search for an item above to start your build list.
-              </div>
+              <Empty className={styles.emptyBuildList}>
+                <EmptyDescription>
+                  Search for an item above to start your build list.
+                </EmptyDescription>
+              </Empty>
             ) : (
               items.map((item, index) => (
                 <div className={styles.itemRow} key={`${item.typeId}-${item.fromCompression}`}>
@@ -742,49 +837,51 @@ function Planner() {
                     <span>BUILD LOCATION</span>
                     <Select
                       value={String(locations.manufacturing)}
-                      onValueChange={(value) => {
-                        if (value) updateLocations({ manufacturing: Number(value) });
-                      }}
+                      onValueChange={(value) =>
+                        value && updateLocations({ manufacturing: Number(value) })
+                      }
+                      items={locationOptions.map((location) => ({
+                        value: String(location.locationId),
+                        label: `${location.name} (${location.baseManufacturingMe.toFixed(1)}%)`,
+                      }))}
                     >
                       <SelectTrigger
-                        id="planner-build-location"
-                        size="sm"
-                        className={styles.locationSelect}
+                        className={styles.locationSelectTrigger}
+                        aria-label="Build location"
                       >
                         <SelectValue className={styles.locationSelectValue}>
                           <span className={styles.locationSelectName}>
-                            {locationOptions.find(
-                              (location) => location.locationId === locations.manufacturing,
-                            )?.name ?? String(locations.manufacturing)}
+                            {selectedManufacturingLocation?.name ?? "Select build location"}
                           </span>
-                          <span className={styles.locationSelectBonus}>
-                            {locationOptions
-                              .find((location) => location.locationId === locations.manufacturing)
-                              ?.baseManufacturingMe.toFixed(1)}
-                            %
+                          <span className={styles.locationSelectYield}>
+                            {selectedManufacturingLocation
+                              ? `${selectedManufacturingLocation.baseManufacturingMe.toFixed(1)}%`
+                              : "0.0%"}
                           </span>
                         </SelectValue>
                       </SelectTrigger>
-                      <SelectContent className={styles.locationSelectContent}>
-                        {locationOptions
-                          .slice()
-                          .sort(
-                            (left, right) =>
-                              left.baseManufacturingMe - right.baseManufacturingMe
-                              || left.name.localeCompare(right.name),
-                          )
-                          .map((location) => (
-                            <SelectItem
-                              value={String(location.locationId)}
-                              key={`manufacturing-${location.id}`}
-                              className={styles.locationSelectItem}
-                            >
-                              <span className={styles.locationSelectName}>{location.name}</span>
-                              <span className={styles.locationSelectBonus}>
-                                {location.baseManufacturingMe.toFixed(1)}%
-                              </span>
-                            </SelectItem>
-                          ))}
+                      <SelectContent>
+                        <SelectGroup>
+                          {locationOptions
+                            .slice()
+                            .sort(
+                              (left, right) =>
+                                left.baseManufacturingMe - right.baseManufacturingMe
+                                || left.name.localeCompare(right.name),
+                            )
+                            .map((location) => (
+                              <SelectItem
+                                value={String(location.locationId)}
+                                key={`manufacturing-${location.id}`}
+                                className={styles.locationSelectItem}
+                              >
+                                <span className={styles.locationOptionName}>{location.name}</span>
+                                <span className={styles.locationOptionYield}>
+                                  {location.baseManufacturingMe.toFixed(1)}%
+                                </span>
+                              </SelectItem>
+                            ))}
+                        </SelectGroup>
                       </SelectContent>
                     </Select>
                   </label>
@@ -792,49 +889,51 @@ function Planner() {
                     <span>REACTION LOCATION</span>
                     <Select
                       value={String(locations.reactions)}
-                      onValueChange={(value) => {
-                        if (value) updateLocations({ reactions: Number(value) });
-                      }}
+                      onValueChange={(value) =>
+                        value && updateLocations({ reactions: Number(value) })
+                      }
+                      items={locationOptions.map((location) => ({
+                        value: String(location.locationId),
+                        label: `${location.name} (${location.baseReactionMe.toFixed(1)}%)`,
+                      }))}
                     >
                       <SelectTrigger
-                        id="planner-reaction-location"
-                        size="sm"
-                        className={styles.locationSelect}
+                        className={styles.locationSelectTrigger}
+                        aria-label="Reaction location"
                       >
                         <SelectValue className={styles.locationSelectValue}>
                           <span className={styles.locationSelectName}>
-                            {locationOptions.find(
-                              (location) => location.locationId === locations.reactions,
-                            )?.name ?? String(locations.reactions)}
+                            {selectedReactionLocation?.name ?? "Select reaction location"}
                           </span>
-                          <span className={styles.locationSelectBonus}>
-                            {locationOptions
-                              .find((location) => location.locationId === locations.reactions)
-                              ?.baseReactionMe.toFixed(1)}
-                            %
+                          <span className={styles.locationSelectYield}>
+                            {selectedReactionLocation
+                              ? `${selectedReactionLocation.baseReactionMe.toFixed(1)}%`
+                              : "0.0%"}
                           </span>
                         </SelectValue>
                       </SelectTrigger>
-                      <SelectContent className={styles.locationSelectContent}>
-                        {locationOptions
-                          .slice()
-                          .sort(
-                            (left, right) =>
-                              left.baseReactionMe - right.baseReactionMe
-                              || left.name.localeCompare(right.name),
-                          )
-                          .map((location) => (
-                            <SelectItem
-                              value={String(location.locationId)}
-                              key={`reaction-${location.id}`}
-                              className={styles.locationSelectItem}
-                            >
-                              <span className={styles.locationSelectName}>{location.name}</span>
-                              <span className={styles.locationSelectBonus}>
-                                {location.baseReactionMe.toFixed(1)}%
-                              </span>
-                            </SelectItem>
-                          ))}
+                      <SelectContent>
+                        <SelectGroup>
+                          {locationOptions
+                            .slice()
+                            .sort(
+                              (left, right) =>
+                                left.baseReactionMe - right.baseReactionMe
+                                || left.name.localeCompare(right.name),
+                            )
+                            .map((location) => (
+                              <SelectItem
+                                value={String(location.locationId)}
+                                key={`reaction-${location.id}`}
+                                className={styles.locationSelectItem}
+                              >
+                                <span className={styles.locationOptionName}>{location.name}</span>
+                                <span className={styles.locationOptionYield}>
+                                  {location.baseReactionMe.toFixed(1)}%
+                                </span>
+                              </SelectItem>
+                            ))}
+                        </SelectGroup>
                       </SelectContent>
                     </Select>
                   </label>
@@ -842,184 +941,9 @@ function Planner() {
               ) : (
                 <Alert className={styles.locationAlert}>
                   <Info className={styles.locationAlertIcon} aria-hidden="true" />
-                  <div className={styles.locationAlertBody}>
-                    Add a reprocessing location on the Locations page or authenticate a character to
-                    find the best location automatically.
-                  </div>
-                </Alert>
-              )}
-            </div>
-            <button
-              className={styles.calculate}
-              type="submit"
-              disabled={isPlanLoading || items.length === 0}
-            >
-              <span className={styles.calculateLead}>
-                <ClipboardList size={16} aria-hidden="true" />
-                <span>{isPlanLoading ? "Calculating..." : "Calculate production plan"}</span>
-              </span>
-              <b aria-hidden="true">→</b>
-            </button>
-          </section>
-        </div>
-      </form>
-      {isPasteModalOpen && (
-        <PasteListModal
-          language={language}
-          onCancel={() => setIsPasteModalOpen(false)}
-          onImport={importItems}
-        />
-      )}
-      {isExcludedLocationsModalOpen && (
-        <ExcludedLocationsModal
-          locationIds={excludedLocationIds}
-          locationNamesById={
-            new Map([
-              ...locationOptions.map((option) => [option.locationId, option.name] as const),
-              ...stock.flatMap((item) => {
-                const locationId = getStockLocationId(item);
-                return locationId !== undefined && item.sourceLocationName
-                  ? [[locationId, item.sourceLocationName] as const]
-                  : [];
-              }),
-            ])
-          }
-          isLoading={isPlanLoading}
-          onRemove={(locationId) => void removeExcludedLocation(locationId)}
-          onClearAll={() => void clearExcludedLocations()}
-          onCancel={() => setIsExcludedLocationsModalOpen(false)}
-        />
-      )}
-      <section className={styles.results}>
-        <div className={styles.resultsHeader} ref={resultsHeaderRef}>
-          <div>
-            <p className={styles.panelKicker}>03 / OUTPUT</p>
-            <h2>Plan breakdown</h2>
-          </div>
-          <div className={styles.resultsHeaderMeta}>
-            {plan && (
-              <span className={styles.requiredSkillCount}>
-                {plan.lists.skillsRequired.length.toLocaleString()} skills required
-              </span>
-            )}
-            <span className={styles.planStatus}>
-              <i /> {planStatus}
-            </span>
-          </div>
-        </div>
-        <div className={styles.tabs}>
-          {tabs.map((tab, index) => (
-            <button
-              type="button"
-              key={tab}
-              className={activeTab === tab ? styles.tabActive : ""}
-              onClick={() => setActiveTab(tab)}
-            >
-              <span>{String(index + 1).padStart(2, "0")}</span>
-              {tab}
-            </button>
-          ))}
-        </div>
-        {plan ? (
-          <PlanList
-            activeTab={activeTab}
-            plan={plan}
-            characterStatuses={characterStatuses}
-            characterNamesById={characterNamesById}
-            stock={stock}
-            locationNamesById={
-              new Map([
-                ...locationOptions.map((option) => [option.locationId, option.name] as const),
-                ...stock.flatMap((item) =>
-                  item.rootLocationId !== undefined && item.sourceLocationName
-                    ? [[item.rootLocationId, item.sourceLocationName] as const]
-                    : [],
-                ),
-              ])
-            }
-            onPlanChange={setPlan}
-            onExcludeHaulBucket={(fromLocationId) => void excludeHaulBucket(fromLocationId)}
-            resultsHeaderRef={resultsHeaderRef}
-          />
-        ) : (
-          <div className={styles.emptyResult}>
-            <div className={styles.resultGlyph}>↗</div>
-            <strong>Your {activeTab.toLowerCase()} list will appear here</strong>
-            <p>Calculate a plan to see the work required for this project.</p>
-          </div>
-        )}
-      </section>
-    </>
-  );
-}
-
-/*
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent className={styles.locationSelectContent}>
-                        {locationOptions
-                          .slice()
-                          .sort(
-                            (left, right) =>
-                              left.baseManufacturingMe - right.baseManufacturingMe
-                              || left.name.localeCompare(right.name),
-                          )
-                          .map((location) => (
-                            <SelectItem
-                              value={String(location.locationId)}
-                              key={`manufacturing-${location.id}`}
-                            >
-                              {location.name} ({location.baseManufacturingMe.toFixed(1)}% ME)
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  </label>
-                  <label>
-                    <span>REACTION LOCATION</span>
-                    <Select
-                      value={String(locations.reactions)}
-                      onValueChange={(value) => {
-                        if (value) updateLocations({ reactions: Number(value) });
-                      }}
-                    >
-                      <SelectTrigger
-                        id="planner-reaction-location"
-                        size="sm"
-                        className={styles.locationSelect}
-                      >
-                        <SelectValue>
-                          {locationOptions.find(
-                            (location) => location.locationId === locations.reactions,
-                          )?.name ?? String(locations.reactions)}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent className={styles.locationSelectContent}>
-                        {locationOptions
-                          .slice()
-                          .sort(
-                            (left, right) =>
-                              left.baseReactionMe - right.baseReactionMe
-                              || left.name.localeCompare(right.name),
-                          )
-                          .map((location) => (
-                            <SelectItem
-                              value={String(location.locationId)}
-                              key={`reaction-${location.id}`}
-                            >
-                              {location.name} ({location.baseReactionMe.toFixed(1)}% ME)
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  </label>
-                </>
-              ) : (
-                <Alert className={styles.locationAlert}>
-                  <Info className={styles.locationAlertIcon} aria-hidden="true" />
-                  <div className={styles.locationAlertBody}>
+                  <div className={styles.locationAlertContent}>
                     <AlertTitle>No build or reaction locations available.</AlertTitle>
-                    <AlertDescription className={styles.locationAlertContent}>
+                    <AlertDescription>
                       Optionally add structures on the <Link href="/locations">Locations</Link> page
                       or <Link href="/api/auth/eve/start">add character(s) via ESI</Link> to improve
                       plan results.
@@ -1029,16 +953,11 @@ function Planner() {
               )}
               <label className={styles.checkboxOption}>
                 <span>INCLUDE STOCK</span>
-                <button
-                  type="button"
-                  className={styles.stockSwitch}
-                  role="switch"
-                  aria-checked={includeStock}
+                <Switch
                   aria-label="Include stock"
-                  onClick={() => setIncludeStock((current) => !current)}
-                >
-                  <span className={styles.stockSwitchThumb} />
-                </button>
+                  checked={includeStock}
+                  onCheckedChange={setIncludeStock}
+                />
               </label>
               <div className={styles.excludedLocationsControl}>
                 <span>EXCLUDED LOCATIONS</span>
@@ -1068,12 +987,16 @@ function Planner() {
               disabled={isPlanLoading || items.length === 0}
             >
               <span className={styles.calculateLead}>
-                <ClipboardList size={16} aria-hidden="true" />
+                {isPlanLoading ? (
+                  <Spinner aria-hidden="true" />
+                ) : (
+                  <ClipboardList size={16} aria-hidden="true" />
+                )}
                 <span>{isPlanLoading ? "Calculating..." : "Calculate production plan"}</span>
               </span>
               <b aria-hidden="true">→</b>
             </button>
-          </section>
+          </div>
         </div>
       </form>
       {isPasteModalOpen && (
@@ -1103,7 +1026,7 @@ function Planner() {
           onCancel={() => setIsExcludedLocationsModalOpen(false)}
         />
       )}
-      <section className={styles.results}>
+      <div className={styles.results}>
         <div className={styles.resultsHeader} ref={resultsHeaderRef}>
           <div>
             <p className={styles.panelKicker}>03 / OUTPUT</p>
@@ -1120,52 +1043,79 @@ function Planner() {
             </span>
           </div>
         </div>
-        <div className={styles.tabs}>
-          {tabs.map((tab, index) => (
-            <button
-              type="button"
-              key={tab}
-              className={activeTab === tab ? styles.tabActive : ""}
-              onClick={() => setActiveTab(tab)}
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as PlannerTab)}>
+          <TabsList
+            variant="line"
+            className={`${styles.desktopTabList} w-full max-w-full justify-start overflow-x-auto overflow-y-hidden`}
+          >
+            {tabs.map(({ value, icon: Icon }) => (
+              <TabsTrigger key={value} value={value}>
+                <Icon data-icon="inline-start" />
+                {value}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          <div className={styles.mobileTabSelect}>
+            <span className={styles.mobileTabLabel}>OUTPUT VIEW</span>
+            <Select
+              value={activeTab}
+              onValueChange={(value) => value && setActiveTab(value as PlannerTab)}
             >
-              <span>{String(index + 1).padStart(2, "0")}</span>
-              {tab}
-            </button>
-          ))}
-        </div>
-        {plan ? (
-          <PlanList
-            activeTab={activeTab}
-            plan={plan}
-            characterStatuses={characterStatuses}
-            characterNamesById={characterNamesById}
-            stock={stock}
-            locationNamesById={
-              new Map([
-                ...locationOptions.map((option) => [option.locationId, option.name] as const),
-                ...stock.flatMap((item) =>
-                  item.rootLocationId !== undefined && item.sourceLocationName
-                    ? [[item.rootLocationId, item.sourceLocationName] as const]
-                    : [],
-                ),
-              ])
-            }
-            onPlanChange={setPlan}
-            onExcludeHaulBucket={(fromLocationId) => void excludeHaulBucket(fromLocationId)}
-            resultsHeaderRef={resultsHeaderRef}
-          />
-        ) : (
-          <div className={styles.emptyResult}>
-            <div className={styles.resultGlyph}>↗</div>
-            <strong>Your {activeTab.toLowerCase()} list will appear here</strong>
-            <p>Calculate a plan to see the work required for this project.</p>
+              <SelectTrigger className="w-full" aria-label="Plan output view">
+                <SelectValue>
+                  <ActiveTabIcon data-icon="inline-start" />
+                  {activeTab}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {tabs.map(({ value, icon: Icon }) => (
+                    <SelectItem key={value} value={value}>
+                      <Icon data-icon="inline-start" />
+                      {value}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
           </div>
-        )}
-      </section>
+          <TabsContent value={activeTab}>
+            {plan ? (
+              <PlanList
+                activeTab={activeTab}
+                plan={plan}
+                characterStatuses={characterStatuses}
+                characterNamesById={characterNamesById}
+                stock={stock}
+                locationNamesById={
+                  new Map([
+                    ...locationOptions.map((option) => [option.locationId, option.name] as const),
+                    ...stock.flatMap((item) =>
+                      item.rootLocationId !== undefined && item.sourceLocationName
+                        ? [[item.rootLocationId, item.sourceLocationName] as const]
+                        : [],
+                    ),
+                  ])
+                }
+                onPlanChange={setPlan}
+                onExcludeHaulBucket={(fromLocationId) => void excludeHaulBucket(fromLocationId)}
+                resultsHeaderRef={resultsHeaderRef}
+              />
+            ) : (
+              <Empty className={styles.emptyResult}>
+                <div className={styles.resultGlyph}>↗</div>
+                <strong>Your {activeTab.toLowerCase()} list will appear here</strong>
+                <EmptyDescription>
+                  Calculate a plan to see the work required for this project.
+                </EmptyDescription>
+              </Empty>
+            )}
+          </TabsContent>
+        </Tabs>
+      </div>
     </>
   );
 }
-*/
 
 export default function Home() {
   const pathname = usePathname();
@@ -1188,62 +1138,42 @@ function ExcludedLocationsModal({
   onCancel: () => void;
 }) {
   return (
-    <div
-      className={styles.modalBackdrop}
-      role="presentation"
-      onMouseDown={(event) => event.target === event.currentTarget && onCancel()}
-    >
-      <div
-        className={styles.importModal}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="excluded-locations-title"
-      >
+    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className={styles.importModal}>
         <div className={styles.panelHeader}>
           <div>
             <p className={styles.panelKicker}>STOCK FILTER</p>
-            <h2 id="excluded-locations-title">Excluded locations</h2>
+            <DialogTitle>Excluded locations</DialogTitle>
           </div>
-          <button
-            type="button"
-            className={styles.iconButton}
-            aria-label="Close excluded locations dialog"
-            onClick={onCancel}
-          >
-            ×
-          </button>
         </div>
-        <div className={styles.excludedLocationList}>
-          {locationIds.map((locationId) => (
-            <div className={styles.excludedLocationRow} key={locationId}>
-              <span>{locationNamesById.get(locationId) ?? locationId}</span>
-              <button
-                type="button"
-                className={styles.clearExcludedButton}
-                disabled={isLoading}
-                onClick={() => onRemove(locationId)}
-              >
-                Remove
-              </button>
-            </div>
-          ))}
+        <div className="no-scrollbar max-h-[70vh] overflow-y-auto overscroll-contain">
+          <div className={styles.excludedLocationList}>
+            {locationIds.map((locationId) => (
+              <div className={styles.excludedLocationRow} key={locationId}>
+                <span>{locationNamesById.get(locationId) ?? locationId}</span>
+                <button
+                  type="button"
+                  className={styles.clearExcludedButton}
+                  disabled={isLoading}
+                  onClick={() => onRemove(locationId)}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
-        <div className={styles.modalActions}>
-          <button type="button" className={styles.refresh} onClick={onCancel}>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onCancel}>
             Close
-          </button>
-          <button
-            type="button"
-            className={styles.calculate}
-            disabled={isLoading}
-            onClick={onClearAll}
-          >
+          </Button>
+          <Button type="button" className="min-w-32" disabled={isLoading} onClick={onClearAll}>
             <span>Clear all</span>
             <b>→</b>
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1323,91 +1253,79 @@ function PasteListModal({
   }
 
   return (
-    <div
-      className={styles.modalBackdrop}
-      role="presentation"
-      onMouseDown={(event) => event.target === event.currentTarget && onCancel()}
-    >
-      <form
-        className={styles.importModal}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="paste-list-title"
-        onSubmit={resolveItems}
-      >
+    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className={styles.importModal} render={<form onSubmit={resolveItems} />}>
         <div className={styles.panelHeader}>
           <div>
             <p className={styles.panelKicker}>BATCH IMPORT</p>
-            <h2 id="paste-list-title">Paste build list</h2>
+            <DialogTitle>Paste build list</DialogTitle>
           </div>
-          <button
-            type="button"
-            className={styles.iconButton}
-            aria-label="Close paste list dialog"
-            onClick={onCancel}
-          >
-            ×
-          </button>
         </div>
-        <p className={styles.panelDescription}>
-          One item per line. Put the quantity at the end of each line.
-        </p>
-        <Textarea
-          className={styles.importTextarea}
-          value={text}
-          onChange={(event) => {
-            setText(event.target.value);
-            setResults([]);
-            setError("");
-          }}
-          placeholder={"Raven 2\nVargur 1"}
-          aria-label="Build items and quantities"
-          autoFocus
-        />
-        {error && <p className={styles.importError}>{error}</p>}
-        {results.length > 0 && (
-          <div className={styles.importResults}>
-            {results.map((item, index) => (
-              <div
-                className={item.error ? styles.importResultInvalid : styles.importResult}
-                key={`${item.name}-${index}`}
-              >
-                {item.typeId ? (
-                  <TypeIdentity
-                    name={item.name}
-                    typeId={item.typeId}
-                    variation={
-                      item.iconCategory === "bpo"
-                        ? "bp"
-                        : item.iconCategory === "bpc" || item.iconCategory === "reactionformula"
-                          ? "bpc"
-                          : "icon"
-                    }
-                  />
-                ) : (
-                  <span>{item.name}</span>
-                )}
-                {item.quantity ? <small>Quantity {item.quantity}</small> : null}
-                {item.error ? <small>{item.error}</small> : null}
-              </div>
-            ))}
-          </div>
-        )}
-        <div className={styles.modalActions}>
-          <button type="button" className={styles.refresh} onClick={onCancel}>
+        <div className="no-scrollbar max-h-[70vh] overflow-y-auto overscroll-contain">
+          <p className={styles.panelDescription}>
+            One item per line. Put the quantity at the end of each line.
+          </p>
+          <Textarea
+            className={styles.importTextarea}
+            value={text}
+            onChange={(event) => {
+              setText(event.target.value);
+              setResults([]);
+              setError("");
+            }}
+            placeholder={"Raven 2\nVargur 1"}
+            aria-label="Build items and quantities"
+            autoFocus
+          />
+          {error && (
+            <Alert variant="destructive" className={styles.importError}>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          {results.length > 0 && (
+            <div className={styles.importResults}>
+              {results.map((item, index) => (
+                <div
+                  className={item.error ? styles.importResultInvalid : styles.importResult}
+                  key={`${item.name}-${index}`}
+                >
+                  {item.typeId ? (
+                    <TypeIdentity
+                      name={item.name}
+                      typeId={item.typeId}
+                      variation={
+                        item.iconCategory === "bpo"
+                          ? "bp"
+                          : item.iconCategory === "bpc" || item.iconCategory === "reactionformula"
+                            ? "bpc"
+                            : "icon"
+                      }
+                    />
+                  ) : (
+                    <span>{item.name}</span>
+                  )}
+                  {item.quantity ? <small>Quantity {item.quantity}</small> : null}
+                  {item.error ? <small>{item.error}</small> : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onCancel}>
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="submit"
-            className={styles.calculate}
+            className="min-w-32"
             disabled={isResolving || text.trim().length === 0}
           >
             <span>{isResolving ? "Checking list..." : "OK"}</span>
             <b>→</b>
-          </button>
-        </div>
-      </form>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1651,17 +1569,21 @@ function PlanList({
           <span>Only insufficient skills are shown for each character.</span>
         </div>
         {skillsByCharacter.length === 0 ? (
-          <div className={styles.emptyResult}>
+          <Empty className={styles.emptyResult}>
             <div className={styles.resultGlyph}>?</div>
             <strong>Character skills are unavailable</strong>
-            <p>Connect a character and refresh status to compare trained skills.</p>
-          </div>
+            <EmptyDescription>
+              Connect a character and refresh status to compare trained skills.
+            </EmptyDescription>
+          </Empty>
         ) : skillsByCharacter.every((character) => character.skills.length === 0) ? (
-          <div className={styles.emptyResult}>
+          <Empty className={styles.emptyResult}>
             <div className={styles.resultGlyph}>✓</div>
             <strong>All characters meet the requirements</strong>
-            <p>No insufficient skills were found in the cached character status.</p>
-          </div>
+            <EmptyDescription>
+              No insufficient skills were found in the cached character status.
+            </EmptyDescription>
+          </Empty>
         ) : (
           <div className={styles.skillsCharacters}>
             {skillsByCharacter.map((character) => (
@@ -1711,11 +1633,11 @@ function PlanList({
 
   if (list.length === 0) {
     return (
-      <div className={styles.emptyResult}>
+      <Empty className={styles.emptyResult}>
         <div className={styles.resultGlyph}>✓</div>
         <strong>Nothing to {activeTab}</strong>
-        <p>The current project has no work in this category.</p>
-      </div>
+        <EmptyDescription>The current project has no work in this category.</EmptyDescription>
+      </Empty>
     );
   }
   return (
@@ -1851,6 +1773,18 @@ function PlanList({
               totalTime !== null && runsPerInstall !== null && "runs" in entry && entry.runs > 0
                 ? (totalTime / entry.runs) * runsPerInstall
                 : totalTime;
+            const reactRunCalcs =
+              activeTab === "React" && "runs" in entry
+                ? installCount !== null && runsPerInstall !== null
+                  ? `${installCount.toLocaleString()} x ${runsPerInstall.toLocaleString()} runs${installTime !== null ? ` @ ${formatDuration(installTime)}` : ""}`
+                  : totalTime !== null
+                    ? formatDuration(totalTime)
+                    : null
+                : null;
+            const reactRunCount =
+              activeTab === "React" && "runs" in entry
+                ? `${entry.runs.toLocaleString()} runs`
+                : null;
             const materialEntry =
               (activeTab === "Buy" && !isBpcPurchase && "quantity" in entry)
               || (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
@@ -1908,47 +1842,56 @@ function PlanList({
                 ? getPlanCells(entry as PlanResult["lists"]["planItems"][number])
                 : null;
             return (
-              <div
-                className={activeTab === "Plan" ? styles.planTableRow : styles.planRow}
-                key={`${activeTab}-${index}`}
-              >
-                <div className={styles.planTypeCell}>
-                  <TypeIdentity
-                    name={name}
-                    typeId={typeId}
-                    imageSize={40}
-                    variation={imageVariation}
-                    className={styles.planTypeIdentity}
-                  />
-                </div>
-                {activeTab === "Plan" ? (
-                  planColumns.map((column) =>
-                    planCells?.[column] ? (
-                      <span className={styles.planTableCell} data-label={column} key={column}>
-                        <span className={styles.planTableValue}>
-                          {column === "Available" && (
-                            <AvailableSourceIcons
-                              counts={
-                                "availableSourceCounts" in entry
-                                  ? entry.availableSourceCounts
-                                  : undefined
-                              }
-                            />
-                          )}
-                          {planCells[column]}
+              <Fragment key={`${activeTab}-${index}`}>
+                <div className={activeTab === "Plan" ? styles.planTableRow : styles.planRow}>
+                  <div className={styles.planTypeCell}>
+                    <TypeIdentity
+                      name={name}
+                      typeId={typeId}
+                      imageSize={40}
+                      variation={imageVariation}
+                      className={styles.planTypeIdentity}
+                    />
+                  </div>
+                  {activeTab === "Plan" ? (
+                    planColumns.map((column) =>
+                      planCells?.[column] ? (
+                        <span className={styles.planTableCell} data-label={column} key={column}>
+                          <span className={styles.planTableValue}>
+                            {column === "Available" && (
+                              <AvailableSourceIcons
+                                counts={
+                                  "availableSourceCounts" in entry
+                                    ? entry.availableSourceCounts
+                                    : undefined
+                                }
+                              />
+                            )}
+                            {planCells[column]}
+                          </span>
                         </span>
-                      </span>
-                    ) : (
-                      <span className={styles.planTableCellEmpty} key={column} />
-                    ),
-                  )
-                ) : (
-                  <span className={styles.planRowAmount}>
-                    <strong>{amount}</strong>
-                    {detail && <small>{detail}</small>}
-                  </span>
+                      ) : (
+                        <span className={styles.planTableCellEmpty} key={column} />
+                      ),
+                    )
+                  ) : (
+                    <span className={styles.planRowAmount}>
+                      {activeTab === "React" ? (
+                        <>
+                          <strong className={styles.planRowRunCalcs}>{reactRunCalcs}</strong>
+                          <strong className={styles.planRowRunCount}>{reactRunCount}</strong>
+                        </>
+                      ) : (
+                        <strong>{amount}</strong>
+                      )}
+                      {detail && <small>{detail}</small>}
+                    </span>
+                  )}
+                </div>
+                {activeTab !== "Plan" && index < list.length - 1 && (
+                  <hr className={styles.planRowSeparator} />
                 )}
-              </div>
+              </Fragment>
             );
           })}
         </div>

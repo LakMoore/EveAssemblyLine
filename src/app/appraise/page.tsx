@@ -3,6 +3,19 @@
 import { useState } from "react";
 import { BadgeDollarSign } from "lucide-react";
 import { useAppLanguage } from "../AppShell";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Textarea } from "@/components/ui/textarea";
+import { Spinner } from "@/components/ui/spinner";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import styles from "../page.module.css";
 
 type AppraiseItem = {
@@ -102,20 +115,41 @@ export default function AppraisePage() {
       </div>
       <section className={styles.appraiseTool}>
         <div className={styles.appraiseInputHeader}>
-          <label htmlFor="appraise-list">Item list</label>
-          <select
+          <Field>
+            <FieldLabel htmlFor="appraise-list">Item list</FieldLabel>
+          </Field>
+          <Select
             value={market}
-            onChange={(event) => setMarket(event.target.value)}
-            aria-label="Market hub"
+            onValueChange={(value) => value && setMarket(value)}
+            items={[
+              { value: "Jita", label: "Jita" },
+              { value: "Amarr", label: "Amarr" },
+              { value: "Hek", label: "Hek" },
+              { value: "Dodixie", label: "Dodixie" },
+              { value: "Rens", label: "Rens" },
+            ]}
           >
-            <option value="Jita">Jita</option>
-            <option value="Amarr">Amarr</option>
-            <option value="Hek">Hek</option>
-            <option value="Dodixie">Dodixie</option>
-            <option value="Rens">Rens</option>
-          </select>
+            <SelectTrigger aria-label="Market hub">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {[
+                  ["Jita", "Jita"],
+                  ["Amarr", "Amarr"],
+                  ["Hek", "Hek"],
+                  ["Dodixie", "Dodixie"],
+                  ["Rens", "Rens"],
+                ].map(([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </div>
-        <textarea
+        <Textarea
           id="appraise-list"
           className={styles.appraiseTextarea}
           value={pastedItems}
@@ -123,19 +157,27 @@ export default function AppraisePage() {
           placeholder="100 Tritanium\n25,000 Mexallon"
           rows={10}
         />
-        <button
+        <Button
           type="button"
           className={styles.actionButton}
           onClick={appraiseItems}
           disabled={isLoading}
         >
           <span className={styles.appraiseActionLead}>
-            <BadgeDollarSign size={16} aria-hidden="true" />
+            {isLoading ? (
+              <Spinner aria-hidden="true" />
+            ) : (
+              <BadgeDollarSign size={16} aria-hidden="true" />
+            )}
             <span>{isLoading ? "Checking market..." : "Appraise list"}</span>
           </span>
           <b aria-hidden="true">→</b>
-        </button>
-        {error && <p className={styles.formError}>{error}</p>}
+        </Button>
+        {error && (
+          <Alert variant="destructive" className={styles.formError}>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
       </section>
       {items.length > 0 && (
         <section className={styles.appraiseResults}>

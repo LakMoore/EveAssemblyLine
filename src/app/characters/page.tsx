@@ -8,6 +8,9 @@ import { languageStorageKey } from "../AppShell";
 import { replaceEsiStock } from "@/lib/planning/stockStore";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageServer";
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Empty, EmptyDescription } from "@/components/ui/empty";
 import {
   groupClientStockByLocation,
   invalidateClientCharacterData,
@@ -383,21 +386,25 @@ export default function CharactersPage() {
         </Link>
       </div>
       {error && (
-        <p role="alert" className={styles.importError}>
-          {error}
-        </p>
+        <Alert variant="destructive" className={styles.importError}>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
       {hasAuthorizationErrors && (
-        <p role="alert" className={styles.importError}>
-          EVE authorization failed for {charactersNeedingReauthorization.join(", ")}. Reauthorize
-          each affected character to restore personal assets, jobs, and orders.
-        </p>
+        <Alert variant="destructive" className={styles.importError}>
+          <AlertDescription>
+            EVE authorization failed for {charactersNeedingReauthorization.join(", ")}. Reauthorize
+            each affected character to restore personal assets, jobs, and orders.
+          </AlertDescription>
+        </Alert>
       )}
       {scopes.length > 0 && (
-        <p role="alert" className={styles.importError}>
-          EVE authorization is missing {scopes.join(", ")}. Reconnect the affected character to
-          grant this scope.
-        </p>
+        <Alert variant="destructive" className={styles.importError}>
+          <AlertDescription>
+            EVE authorization is missing {scopes.join(", ")}. Reconnect the affected character to
+            grant this scope.
+          </AlertDescription>
+        </Alert>
       )}
       <section className={styles.panel}>
         <div className={styles.panelHeader}>
@@ -410,14 +417,16 @@ export default function CharactersPage() {
           </span>
         </div>
         {!isLoading && characters.length === 0 ? (
-          <div className={styles.emptyBuildList}>
+          <Empty className={styles.emptyBuildList}>
             <strong>No characters connected</strong>
-            <p>Connect an EVE character to make assets, jobs, and corporation access available.</p>
+            <EmptyDescription>
+              Connect an EVE character to make assets, jobs, and corporation access available.
+            </EmptyDescription>
             <Link className={`actionButton ${styles.addButton}`} href="/api/auth/eve/start">
               <Plus aria-hidden="true" />
               <span>Connect with EVE SSO</span>
             </Link>
-          </div>
+          </Empty>
         ) : (
           <>
             <div className={styles.characterTableHeader}>
@@ -439,129 +448,125 @@ export default function CharactersPage() {
                 <div
                   className={`${styles.characterRow} ${hasAuthorizationError ? styles.characterRowWithReauthorize : ""}`}
                   key={character.characterId}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setSelectedCharacter(character)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setSelectedCharacter(character);
-                    }
-                  }}
                 >
-                  <span className={styles.characterIdentity}>
-                    <Image
-                      className={styles.characterCardPortrait}
-                      src={eveCharacterPortraitUrl(character.characterId)}
-                      alt=""
-                      width={40}
-                      height={40}
-                    />
-                    <span className={styles.characterIdentityText}>
-                      <strong>{character.characterName}</strong>
-                      <small>
-                        {character.corporationName
-                          ?? (character.corporationId
-                            ? `Corporation ${character.corporationId}`
-                            : "Corporation unavailable")}{" "}
-                        / {hasCorpAccess ? "Director access" : "Character access only"}
-                      </small>
-                      <small>
-                        Director: {roleLabel(character.hasDirectorRole)} · Accountant:{" "}
-                        {roleLabel(character.hasAccountantRole)} · Trader:{" "}
-                        {roleLabel(character.hasTraderRole)}
+                  <button
+                    type="button"
+                    className={styles.characterRowButton}
+                    onClick={() => setSelectedCharacter(character)}
+                  >
+                    <span className={styles.characterIdentity}>
+                      <Image
+                        className={styles.characterCardPortrait}
+                        src={eveCharacterPortraitUrl(character.characterId)}
+                        alt=""
+                        width={40}
+                        height={40}
+                      />
+                      <span className={styles.characterIdentityText}>
+                        <strong>{character.characterName}</strong>
+                        <small>
+                          {character.corporationName
+                            ?? (character.corporationId
+                              ? `Corporation ${character.corporationId}`
+                              : "Corporation unavailable")}{" "}
+                          / {hasCorpAccess ? "Director access" : "Character access only"}
+                        </small>
+                        <small>
+                          Director: {roleLabel(character.hasDirectorRole)} · Accountant:{" "}
+                          {roleLabel(character.hasAccountantRole)} · Trader:{" "}
+                          {roleLabel(character.hasTraderRole)}
+                        </small>
+                      </span>
+                    </span>
+                    <span
+                      className={styles.statusCell}
+                      title={`Assets: ${availabilityLabel(status?.assets)}${status?.assets?.error ? `; ${status.assets.error}` : ""}${status?.assets?.lastModified ? `; modified ${formatDate(status.assets.lastModified)}` : ""}`}
+                    >
+                      <small className={styles.endpointName}>ASSETS</small>
+                      {statusIndicator(status?.assets, isRefreshing)}
+                      <small className={styles.endpointState}>{statusLabel(status?.assets)}</small>
+                      <small className={styles.statusDate}>
+                        <span className={styles.availabilityWide}>
+                          {availabilityLabel(status?.assets)}
+                        </span>
+                        <span className={styles.availabilityNarrow}>
+                          {availabilityLabel(status?.assets).replace(/^Available /, "")}
+                        </span>
                       </small>
                     </span>
-                  </span>
-                  <span
-                    className={styles.statusCell}
-                    title={`Assets: ${availabilityLabel(status?.assets)}${status?.assets?.error ? `; ${status.assets.error}` : ""}${status?.assets?.lastModified ? `; modified ${formatDate(status.assets.lastModified)}` : ""}`}
-                  >
-                    <small className={styles.endpointName}>ASSETS</small>
-                    {statusIndicator(status?.assets, isRefreshing)}
-                    <small className={styles.endpointState}>{statusLabel(status?.assets)}</small>
-                    <small className={styles.statusDate}>
-                      <span className={styles.availabilityWide}>
-                        {availabilityLabel(status?.assets)}
-                      </span>
-                      <span className={styles.availabilityNarrow}>
-                        {availabilityLabel(status?.assets).replace(/^Available /, "")}
-                      </span>
-                    </small>
-                  </span>
-                  <span
-                    className={styles.statusCell}
-                    title={`Skills: ${availabilityLabel(status?.skills)}${status?.skills?.error ? `; ${status.skills.error}` : ""}${status?.skills?.lastModified ? `; modified ${formatDate(status.skills.lastModified)}` : ""}`}
-                  >
-                    <small className={styles.endpointName}>SKILLS</small>
-                    {statusIndicator(status?.skills, isRefreshing)}
-                    <small className={styles.endpointState}>{statusLabel(status?.skills)}</small>
-                    <small className={styles.statusDate}>
-                      <span className={styles.availabilityWide}>
-                        {availabilityLabel(status?.skills)}
-                      </span>
-                      <span className={styles.availabilityNarrow}>
-                        {availabilityLabel(status?.skills).replace(/^Available /, "")}
-                      </span>
-                    </small>
-                  </span>
-                  <span
-                    className={styles.statusCell}
-                    title={`Blueprints: ${availabilityLabel(status?.blueprints)}${status?.blueprints?.error ? `; ${status.blueprints.error}` : ""}${status?.blueprints?.lastModified ? `; modified ${formatDate(status.blueprints.lastModified)}` : ""}`}
-                  >
-                    <small className={styles.endpointName}>BLUEPRINTS</small>
-                    {statusIndicator(status?.blueprints, isRefreshing)}
-                    <small className={styles.endpointState}>
-                      {statusLabel(status?.blueprints)}
-                    </small>
-                    <small className={styles.statusDate}>
-                      <span className={styles.availabilityWide}>
-                        {availabilityLabel(status?.blueprints)}
-                      </span>
-                      <span className={styles.availabilityNarrow}>
-                        {availabilityLabel(status?.blueprints).replace(/^Available /, "")}
-                      </span>
-                    </small>
-                  </span>
-                  <span
-                    className={styles.statusCell}
-                    title={`Jobs: ${availabilityLabel(status?.jobs)}${status?.jobs?.error ? `; ${status.jobs.error}` : ""}${status?.jobs?.lastModified ? `; modified ${formatDate(status.jobs.lastModified)}` : ""}`}
-                  >
-                    <small className={styles.endpointName}>JOBS</small>
-                    {statusIndicator(status?.jobs, isRefreshing)}
-                    <small className={styles.endpointState}>{statusLabel(status?.jobs)}</small>
-                    <small className={styles.statusDate}>
-                      <span className={styles.availabilityWide}>
-                        {availabilityLabel(status?.jobs)}
-                      </span>
-                      <span className={styles.availabilityNarrow}>
-                        {availabilityLabel(status?.jobs).replace(/^Available /, "")}
-                      </span>
-                    </small>
-                  </span>
-                  <span
-                    className={styles.statusCell}
-                    title={`Orders: ${availabilityLabel(status?.orders)}${status?.orders?.error ? `; ${status.orders.error}` : ""}${status?.orders?.lastModified ? `; modified ${formatDate(status.orders.lastModified)}` : ""}`}
-                  >
-                    <small className={styles.endpointName}>ORDERS</small>
-                    {statusIndicator(status?.orders, isRefreshing)}
-                    <small className={styles.endpointState}>{statusLabel(status?.orders)}</small>
-                    <small className={styles.statusDate}>
-                      <span className={styles.availabilityWide}>
-                        {availabilityLabel(status?.orders)}
-                      </span>
-                      <span className={styles.availabilityNarrow}>
-                        {availabilityLabel(status?.orders).replace(/^Available /, "")}
-                      </span>
-                    </small>
-                  </span>
+                    <span
+                      className={styles.statusCell}
+                      title={`Skills: ${availabilityLabel(status?.skills)}${status?.skills?.error ? `; ${status.skills.error}` : ""}${status?.skills?.lastModified ? `; modified ${formatDate(status.skills.lastModified)}` : ""}`}
+                    >
+                      <small className={styles.endpointName}>SKILLS</small>
+                      {statusIndicator(status?.skills, isRefreshing)}
+                      <small className={styles.endpointState}>{statusLabel(status?.skills)}</small>
+                      <small className={styles.statusDate}>
+                        <span className={styles.availabilityWide}>
+                          {availabilityLabel(status?.skills)}
+                        </span>
+                        <span className={styles.availabilityNarrow}>
+                          {availabilityLabel(status?.skills).replace(/^Available /, "")}
+                        </span>
+                      </small>
+                    </span>
+                    <span
+                      className={styles.statusCell}
+                      title={`Blueprints: ${availabilityLabel(status?.blueprints)}${status?.blueprints?.error ? `; ${status.blueprints.error}` : ""}${status?.blueprints?.lastModified ? `; modified ${formatDate(status.blueprints.lastModified)}` : ""}`}
+                    >
+                      <small className={styles.endpointName}>BLUEPRINTS</small>
+                      {statusIndicator(status?.blueprints, isRefreshing)}
+                      <small className={styles.endpointState}>
+                        {statusLabel(status?.blueprints)}
+                      </small>
+                      <small className={styles.statusDate}>
+                        <span className={styles.availabilityWide}>
+                          {availabilityLabel(status?.blueprints)}
+                        </span>
+                        <span className={styles.availabilityNarrow}>
+                          {availabilityLabel(status?.blueprints).replace(/^Available /, "")}
+                        </span>
+                      </small>
+                    </span>
+                    <span
+                      className={styles.statusCell}
+                      title={`Jobs: ${availabilityLabel(status?.jobs)}${status?.jobs?.error ? `; ${status.jobs.error}` : ""}${status?.jobs?.lastModified ? `; modified ${formatDate(status.jobs.lastModified)}` : ""}`}
+                    >
+                      <small className={styles.endpointName}>JOBS</small>
+                      {statusIndicator(status?.jobs, isRefreshing)}
+                      <small className={styles.endpointState}>{statusLabel(status?.jobs)}</small>
+                      <small className={styles.statusDate}>
+                        <span className={styles.availabilityWide}>
+                          {availabilityLabel(status?.jobs)}
+                        </span>
+                        <span className={styles.availabilityNarrow}>
+                          {availabilityLabel(status?.jobs).replace(/^Available /, "")}
+                        </span>
+                      </small>
+                    </span>
+                    <span
+                      className={styles.statusCell}
+                      title={`Orders: ${availabilityLabel(status?.orders)}${status?.orders?.error ? `; ${status.orders.error}` : ""}${status?.orders?.lastModified ? `; modified ${formatDate(status.orders.lastModified)}` : ""}`}
+                    >
+                      <small className={styles.endpointName}>ORDERS</small>
+                      {statusIndicator(status?.orders, isRefreshing)}
+                      <small className={styles.endpointState}>{statusLabel(status?.orders)}</small>
+                      <small className={styles.statusDate}>
+                        <span className={styles.availabilityWide}>
+                          {availabilityLabel(status?.orders)}
+                        </span>
+                        <span className={styles.availabilityNarrow}>
+                          {availabilityLabel(status?.orders).replace(/^Available /, "")}
+                        </span>
+                      </small>
+                    </span>
+                  </button>
                   <span className={styles.characterActions}>
                     {hasAuthorizationError && (
                       <button
                         type="button"
                         className={`actionButton ${styles.characterReauthorize}`}
-                        onClick={(event) => {
-                          event.stopPropagation();
+                        onClick={() => {
                           window.location.assign(
                             `/api/auth/eve/start?characterId=${character.characterId}`,
                           );
@@ -576,8 +581,7 @@ export default function CharactersPage() {
                     <button
                       type="button"
                       className={`actionButton ${styles.characterRemove}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
+                      onClick={() => {
                         void removeCharacter(character);
                       }}
                       disabled={removingId === character.characterId}
@@ -609,14 +613,8 @@ export default function CharactersPage() {
           );
           const hasCorpAccess = selectedCharacter.hasDirectorRole;
           return (
-            <div className={styles.modalBackdrop} onClick={() => setSelectedCharacter(null)}>
-              <div
-                className={styles.importModal}
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="character-dialog-title"
-                onClick={(event) => event.stopPropagation()}
-              >
+            <Dialog open onOpenChange={(open) => !open && setSelectedCharacter(null)}>
+              <DialogContent className={styles.importModal}>
                 <div className={styles.panelHeader}>
                   <div className={styles.characterModalHeading}>
                     <Image
@@ -628,151 +626,131 @@ export default function CharactersPage() {
                     />
                     <div>
                       <p className={styles.panelKicker}>CHARACTER DETAILS</p>
-                      <h2 id="character-dialog-title">{selectedCharacter.characterName}</h2>
+                      <DialogTitle>{selectedCharacter.characterName}</DialogTitle>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    className={`actionButton ${styles.importButton}`}
-                    onClick={() => setSelectedCharacter(null)}
-                    aria-label="Close character details"
-                  >
-                    <X aria-hidden="true" />
-                    <span>Close</span>
-                  </button>
                 </div>
-                <div className={styles.characterModalIdentity}>
-                  <strong className={styles.characterModalCorporation}>
-                    {selectedCharacter.corporationId && (
-                      <Image
-                        className={styles.characterCorporationLogo}
-                        src={eveCorporationLogoUrl(selectedCharacter.corporationId)}
-                        alt=""
-                        width={28}
-                        height={28}
-                      />
+                <div className="no-scrollbar max-h-[70vh] overflow-y-auto overscroll-contain">
+                  <div className={styles.characterModalIdentity}>
+                    <strong className={styles.characterModalCorporation}>
+                      {selectedCharacter.corporationId && (
+                        <Image
+                          className={styles.characterCorporationLogo}
+                          src={eveCorporationLogoUrl(selectedCharacter.corporationId)}
+                          alt=""
+                          width={28}
+                          height={28}
+                        />
+                      )}
+                      <span>
+                        {selectedCharacter.corporationName
+                          ?? (selectedCharacter.corporationId
+                            ? `Corporation ${selectedCharacter.corporationId}`
+                            : "Corporation unavailable")}
+                      </span>
+                    </strong>
+                    <small>{hasCorpAccess ? "Director access" : "Character access only"}</small>
+                    <small>
+                      Director: {roleLabel(selectedCharacter.hasDirectorRole)} · Accountant:{" "}
+                      {roleLabel(selectedCharacter.hasAccountantRole)} · Trader:{" "}
+                      {roleLabel(selectedCharacter.hasTraderRole)}
+                    </small>
+                  </div>
+                  <div className={styles.characterModalStatuses}>
+                    {(["assets", "skills", "blueprints", "jobs", "orders"] as const).map(
+                      (endpoint) => {
+                        const endpointStatus = selectedStatus?.[endpoint];
+                        return (
+                          <div className={styles.characterModalStatus} key={endpoint}>
+                            <small>{endpoint.toUpperCase()}</small>
+                            <span>
+                              <span
+                                className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
+                              />
+                              {statusLabel(endpointStatus)}
+                            </span>
+                            <small>{availabilityLabel(endpointStatus)}</small>
+                            {endpointStatus?.lastModified && (
+                              <small>Modified {formatDate(endpointStatus.lastModified)}</small>
+                            )}
+                            {endpointStatus?.error && <small>{endpointStatus.error}</small>}
+                          </div>
+                        );
+                      },
                     )}
-                    <span>
-                      {selectedCharacter.corporationName
-                        ?? (selectedCharacter.corporationId
-                          ? `Corporation ${selectedCharacter.corporationId}`
-                          : "Corporation unavailable")}
-                    </span>
-                  </strong>
-                  <small>{hasCorpAccess ? "Director access" : "Character access only"}</small>
-                  <small>
-                    Director: {roleLabel(selectedCharacter.hasDirectorRole)} · Accountant:{" "}
-                    {roleLabel(selectedCharacter.hasAccountantRole)} · Trader:{" "}
-                    {roleLabel(selectedCharacter.hasTraderRole)}
-                  </small>
-                </div>
-                <div className={styles.characterModalStatuses}>
-                  {(["assets", "skills", "blueprints", "jobs", "orders"] as const).map(
-                    (endpoint) => {
-                      const endpointStatus = selectedStatus?.[endpoint];
-                      return (
-                        <div className={styles.characterModalStatus} key={endpoint}>
-                          <small>{endpoint.toUpperCase()}</small>
-                          <span>
-                            <span
-                              className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
-                            />
-                            {statusLabel(endpointStatus)}
-                          </span>
-                          <small>{availabilityLabel(endpointStatus)}</small>
-                          {endpointStatus?.lastModified && (
-                            <small>Modified {formatDate(endpointStatus.lastModified)}</small>
-                          )}
-                          {endpointStatus?.error && <small>{endpointStatus.error}</small>}
-                        </div>
-                      );
-                    },
-                  )}
-                </div>
-                <div className={styles.characterModalRoles}>
-                  <p className={styles.panelKicker}>CORPORATION ROLES</p>
-                  <div>
-                    {selectedCharacter.corporationRoles.length > 0
-                      ? selectedCharacter.corporationRoles.join(", ")
-                      : "No corporation roles reported"}
+                  </div>
+                  <div className={styles.characterModalRoles}>
+                    <p className={styles.panelKicker}>CORPORATION ROLES</p>
+                    <div>
+                      {selectedCharacter.corporationRoles.length > 0
+                        ? selectedCharacter.corporationRoles.join(", ")
+                        : "No corporation roles reported"}
+                    </div>
                   </div>
                 </div>
-              </div>
-            </div>
+              </DialogContent>
+            </Dialog>
           );
         })()}
       {mergeDetails && (
-        <div className={styles.modalBackdrop} onClick={() => window.location.assign("/characters")}>
-          <div
-            className={`${styles.importModal} ${styles.mergeModal}`}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="merge-dialog-title"
-            onClick={(event) => event.stopPropagation()}
-          >
+        <Dialog open onOpenChange={(open) => !open && window.location.assign("/characters")}>
+          <DialogContent className={`${styles.importModal} ${styles.mergeModal}`}>
             <div className={styles.panelHeader}>
               <div>
                 <p className={styles.panelKicker}>ACCOUNT COLLECTION MERGE</p>
-                <h2 id="merge-dialog-title">Merge character collections?</h2>
+                <DialogTitle>Merge character collections?</DialogTitle>
               </div>
-              <button
-                type="button"
-                className={`actionButton ${styles.mergeCloseButton}`}
-                onClick={() => window.location.assign("/characters")}
-                aria-label="Cancel collection merge"
-                title="Cancel collection merge"
-              >
-                <X aria-hidden="true" />
-              </button>
             </div>
-            <p className={styles.mergeLead}>
-              The authenticated character belongs to another collection. Merge them to make both
-              collections available in every linked session.
-            </p>
-            <div className={styles.mergeCollections}>
-              <div className={styles.mergeCollection}>
-                <p className={styles.panelKicker}>THIS SESSION</p>
-                <div className={styles.mergePortraits}>
-                  {mergeDetails.currentCharacters.map((character) => (
-                    <div className={styles.mergeCharacter} key={character.characterId}>
-                      <Image
-                        className={styles.mergePortrait}
-                        src={eveCharacterPortraitUrl(character.characterId)}
-                        alt=""
-                        width={52}
-                        height={52}
-                      />
-                      <span>{character.characterName}</span>
-                    </div>
-                  ))}
+            <div className="no-scrollbar max-h-[70vh] overflow-y-auto overscroll-contain">
+              <p className={styles.mergeLead}>
+                The authenticated character belongs to another collection. Merge them to make both
+                collections available in every linked session.
+              </p>
+              <div className={styles.mergeCollections}>
+                <div className={styles.mergeCollection}>
+                  <p className={styles.panelKicker}>THIS SESSION</p>
+                  <div className={styles.mergePortraits}>
+                    {mergeDetails.currentCharacters.map((character) => (
+                      <div className={styles.mergeCharacter} key={character.characterId}>
+                        <Image
+                          className={styles.mergePortrait}
+                          src={eveCharacterPortraitUrl(character.characterId)}
+                          alt=""
+                          width={52}
+                          height={52}
+                        />
+                        <span>{character.characterName}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className={styles.mergeDivider} aria-hidden="true">
+                  +
+                </div>
+                <div className={styles.mergeCollection}>
+                  <p className={styles.panelKicker}>OTHER COLLECTION</p>
+                  <div className={styles.mergePortraits}>
+                    {mergeDetails.incomingCharacters.map((character) => (
+                      <div className={styles.mergeCharacter} key={character.characterId}>
+                        <Image
+                          className={styles.mergePortrait}
+                          src={eveCharacterPortraitUrl(character.characterId)}
+                          alt=""
+                          width={52}
+                          height={52}
+                        />
+                        <span>{character.characterName}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
-              <div className={styles.mergeDivider} aria-hidden="true">
-                +
-              </div>
-              <div className={styles.mergeCollection}>
-                <p className={styles.panelKicker}>OTHER COLLECTION</p>
-                <div className={styles.mergePortraits}>
-                  {mergeDetails.incomingCharacters.map((character) => (
-                    <div className={styles.mergeCharacter} key={character.characterId}>
-                      <Image
-                        className={styles.mergePortrait}
-                        src={eveCharacterPortraitUrl(character.characterId)}
-                        alt=""
-                        width={52}
-                        height={52}
-                      />
-                      <span>{character.characterName}</span>
-                    </div>
-                  ))}
-                </div>
+              <div className={styles.mergeNote}>
+                <strong>{mergeDetails.incomingCharacter.characterName}</strong> will be added to
+                this session.
               </div>
             </div>
-            <div className={styles.mergeNote}>
-              <strong>{mergeDetails.incomingCharacter.characterName}</strong> will be added to this
-              session.
-            </div>
-            <div className={styles.actionRow}>
+            <DialogFooter>
               <button
                 type="button"
                 className={`actionButton ${styles.mergeCancelButton}`}
@@ -791,9 +769,9 @@ export default function CharactersPage() {
                 <GitMerge aria-hidden="true" />
                 <span>{isMerging ? "Merging..." : "Merge collections"}</span>
               </button>
-            </div>
-          </div>
-        </div>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
       <section className={styles.panel}>
         <div className={styles.panelHeader}>
@@ -807,7 +785,9 @@ export default function CharactersPage() {
           role and the required corporation scopes.
         </p>
         {corporations.length === 0 ? (
-          <p className={styles.emptyBuildList}>No corporation information is available yet.</p>
+          <Empty className={styles.emptyBuildList}>
+            <EmptyDescription>No corporation information is available yet.</EmptyDescription>
+          </Empty>
         ) : (
           <div className={styles.eligibilityList}>
             {corporations.map((corporation) => {
@@ -815,18 +795,11 @@ export default function CharactersPage() {
                 .flatMap((status) => status.corporations ?? [])
                 .find((status) => status.corporationId === corporation.corporationId);
               return (
-                <div
+                <button
+                  type="button"
                   className={styles.eligibilityRow}
                   key={corporation.corporationId}
-                  role="button"
-                  tabIndex={0}
                   onClick={() => setSelectedCorporationId(corporation.corporationId)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setSelectedCorporationId(corporation.corporationId);
-                    }
-                  }}
                 >
                   <span>
                     <strong>
@@ -869,7 +842,7 @@ export default function CharactersPage() {
                       },
                     )}
                   </span>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -885,14 +858,8 @@ export default function CharactersPage() {
             .flatMap((status) => status.corporations ?? [])
             .find((status) => status.corporationId === selectedCorporationId);
           return (
-            <div className={styles.modalBackdrop} onClick={() => setSelectedCorporationId(null)}>
-              <div
-                className={styles.importModal}
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="corporation-dialog-title"
-                onClick={(event) => event.stopPropagation()}
-              >
+            <Dialog open onOpenChange={(open) => !open && setSelectedCorporationId(null)}>
+              <DialogContent className={styles.importModal}>
                 <div className={styles.panelHeader}>
                   <div className={styles.corporationModalHeading}>
                     <p className={styles.panelKicker}>CORPORATION DETAILS</p>
@@ -904,84 +871,77 @@ export default function CharactersPage() {
                         width={64}
                         height={64}
                       />
-                      <h2 id="corporation-dialog-title">
+                      <DialogTitle>
                         {corporation.corporationName ?? `Corporation ${corporation.corporationId}`}
-                      </h2>
+                      </DialogTitle>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    className={`actionButton ${styles.importButton}`}
-                    onClick={() => setSelectedCorporationId(null)}
-                    aria-label="Close corporation details"
-                  >
-                    <X aria-hidden="true" />
-                    <span>Close</span>
-                  </button>
                 </div>
-                <div className={styles.characterModalIdentity}>
-                  <strong
-                    className={
-                      corporation.eligible.length === 0
-                        ? styles.characterModalAccessRequired
-                        : undefined
-                    }
-                  >
-                    {corporation.eligible.length > 0
-                      ? "Director access available"
-                      : "Director access required"}
-                  </strong>
-                  <small>
-                    {corporation.pilots.length} connected pilot
-                    {corporation.pilots.length === 1 ? "" : "s"}
-                  </small>
-                </div>
-                <div className={styles.characterModalStatuses}>
-                  {(["assets", "blueprints", "structures", "jobs", "orders"] as const).map(
-                    (endpoint) => {
-                      const endpointStatus = corporationStatus?.[endpoint];
-                      return (
-                        <div className={styles.characterModalStatus} key={endpoint}>
-                          <small>{endpoint.toUpperCase()}</small>
-                          <span>
-                            <span
-                              className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
-                            />
-                            {statusLabel(endpointStatus, corporation.eligible.length === 0)}
-                          </span>
-                          <small>{availabilityLabel(endpointStatus)}</small>
-                          {endpointStatus?.lastModified && (
-                            <small>Modified {formatDate(endpointStatus.lastModified)}</small>
-                          )}
-                          {endpointStatus?.error && <small>{endpointStatus.error}</small>}
+                <div className="no-scrollbar max-h-[70vh] overflow-y-auto overscroll-contain">
+                  <div className={styles.characterModalIdentity}>
+                    <strong
+                      className={
+                        corporation.eligible.length === 0
+                          ? styles.characterModalAccessRequired
+                          : undefined
+                      }
+                    >
+                      {corporation.eligible.length > 0
+                        ? "Director access available"
+                        : "Director access required"}
+                    </strong>
+                    <small>
+                      {corporation.pilots.length} connected pilot
+                      {corporation.pilots.length === 1 ? "" : "s"}
+                    </small>
+                  </div>
+                  <div className={styles.characterModalStatuses}>
+                    {(["assets", "blueprints", "structures", "jobs", "orders"] as const).map(
+                      (endpoint) => {
+                        const endpointStatus = corporationStatus?.[endpoint];
+                        return (
+                          <div className={styles.characterModalStatus} key={endpoint}>
+                            <small>{endpoint.toUpperCase()}</small>
+                            <span>
+                              <span
+                                className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
+                              />
+                              {statusLabel(endpointStatus, corporation.eligible.length === 0)}
+                            </span>
+                            <small>{availabilityLabel(endpointStatus)}</small>
+                            {endpointStatus?.lastModified && (
+                              <small>Modified {formatDate(endpointStatus.lastModified)}</small>
+                            )}
+                            {endpointStatus?.error && <small>{endpointStatus.error}</small>}
+                          </div>
+                        );
+                      },
+                    )}
+                  </div>
+                  <div className={styles.characterModalRoles}>
+                    <p className={styles.panelKicker}>CONNECTED PILOTS AND ROLES</p>
+                    {corporation.pilots.map((pilot) => (
+                      <div className={styles.corporationPilot} key={pilot.characterId}>
+                        <Image
+                          className={styles.corporationPilotPortrait}
+                          src={eveCharacterPortraitUrl(pilot.characterId)}
+                          alt=""
+                          width={32}
+                          height={32}
+                        />
+                        <div>
+                          <strong>{pilot.characterName}</strong>
+                          <br />
+                          {pilot.corporationRoles.length > 0
+                            ? pilot.corporationRoles.join(", ")
+                            : "No corporation roles reported"}
                         </div>
-                      );
-                    },
-                  )}
-                </div>
-                <div className={styles.characterModalRoles}>
-                  <p className={styles.panelKicker}>CONNECTED PILOTS AND ROLES</p>
-                  {corporation.pilots.map((pilot) => (
-                    <div className={styles.corporationPilot} key={pilot.characterId}>
-                      <Image
-                        className={styles.corporationPilotPortrait}
-                        src={eveCharacterPortraitUrl(pilot.characterId)}
-                        alt=""
-                        width={32}
-                        height={32}
-                      />
-                      <div>
-                        <strong>{pilot.characterName}</strong>
-                        <br />
-                        {pilot.corporationRoles.length > 0
-                          ? pilot.corporationRoles.join(", ")
-                          : "No corporation roles reported"}
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            </div>
+              </DialogContent>
+            </Dialog>
           );
         })()}
     </>

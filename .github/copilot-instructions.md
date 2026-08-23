@@ -38,6 +38,17 @@ Do not present prototype data as live EVE data. When replacing a mock path, keep
 - For compact icon-and-label actions, use the global `actionButton` class and compose it with a visual variant such as `styles.importButton`, `styles.remove`, or `styles.characterRemove`. Keep the shared class responsible for height, alignment, spacing, padding, icon sizing, and typography; keep variants responsible for color, border, and state styling. At narrow breakpoints, override the shared class for icon-only controls rather than creating separate button dimensions.
 - For formatting workflow, run `npm run lint`, then `npm run format`, and only then do additional validation or issue triage. Prettier is the final style pass, not a substitute for linting.
 
+### Component reuse and UI consistency
+
+- Before creating or copying a UI component, inspect `src/components/ui`, nearby page components, and the relevant shadcn configuration for an existing solution. Reuse the existing component when it covers the behavior, and extend it only when the missing behavior is broadly useful.
+- If a shadcn component exists for the required control or feedback state, import and use that shadcn component rather than implementing a native or app-local replacement. Follow the installed `base-nova`/Base UI implementation and existing local APIs; do not introduce a second primitive library or a competing wrapper for the same behavior.
+- Components added or substantially changed earlier in the current task or thread are especially strong reuse candidates. In this codebase, check for and prefer the shared `Alert`, `Badge`, `Dialog`, `Empty`, `Field`, `Input`, `Select`, `Skeleton`, `Spinner`, `Switch`, `Tabs`, and `Textarea` components before adding page-local versions.
+- Treat an official shadcn component and a project-local wrapper as different things. A wrapper that resembles shadcn or uses Base UI primitives is not permission to claim or recreate a shadcn component; reuse it as an existing project component, but do not create another competing implementation.
+- If the official shadcn registry or package runner is unavailable, do not hand-author a replacement "shadcn-style" component and do not silently substitute a different primitive library. Leave the current control in place when it remains usable, report the registry/install blocker, and defer the migration until the official component can be installed or explicitly approved as a new project-local component.
+- Share visual treatment across pages through shared components and shared styles. Keep page-specific classes for layout or domain-specific variants, but do not duplicate markup and styling for common alerts, empty states, loading states, forms, dialogs, tabs, badges, or actions.
+- When migrating an existing page, preserve its domain-specific copy, data flow, and behavior while replacing only the visual/control layer needed for consistency. Do not make a new component solely to avoid adapting an existing shared component.
+- If no suitable component exists, first confirm that the behavior is genuinely new and decide whether it belongs in `src/components/ui` or is limited to one page. Document the reason in the change when the new component intentionally does not use an available shadcn primitive.
+
 ## Formatting and readability rules
 
 - Add comments to explain non-obvious algorithms, data-flow boundaries, and important invariants and methods.

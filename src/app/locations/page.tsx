@@ -4,6 +4,21 @@ import { FormEvent, useEffect, useState } from "react";
 import { useAppLanguage } from "../AppShell";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  useComboboxAnchor,
+} from "@/components/ui/combobox";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Empty, EmptyDescription } from "@/components/ui/empty";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import {
   defaultLocations,
   locationsStorageKey,
   type KnownStructure,
@@ -31,6 +46,14 @@ import {
   publishFacilities,
   facilitySettingsFromStructures,
 } from "@/lib/planning/facilitiesStore";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import styles from "../page.module.css";
 
 type SystemMatch = { systemId: number; name: string; securityStatus?: number };
@@ -484,7 +507,7 @@ export default function LocationsPage() {
             <p className={styles.panelKicker}>01 / STRUCTURES</p>
             <h2>Known structures</h2>
           </div>
-          <button
+          <Button
             type="button"
             className={`actionButton ${styles.importButton}`}
             onClick={openAddDialog}
@@ -492,13 +515,15 @@ export default function LocationsPage() {
           >
             <Plus aria-hidden="true" />
             <span>Add structure</span>
-          </button>
+          </Button>
         </div>
         {unmatchedKnownStructures.length === 0 ? (
-          <div className={styles.emptyBuildList}>
-            All known structures with assets are listed above. Add a structure to make it available
-            in Stock.
-          </div>
+          <Empty className={styles.emptyBuildList}>
+            <EmptyDescription>
+              All known structures with assets are listed above. Add a structure to make it
+              available in Stock.
+            </EmptyDescription>
+          </Empty>
         ) : (
           <div className={styles.knownStructureList}>
             {unmatchedKnownStructures.map((structure) => (
@@ -556,27 +581,39 @@ export default function LocationsPage() {
           <div className={styles.locationControls}>
             <label>
               <span>SORT</span>
-              <select
+              <Select
                 aria-label="Sort locations"
                 value={locationSort}
-                onChange={(event) => setLocationSort(event.target.value as LocationSort)}
+                onValueChange={(value) => {
+                  if (value !== null) setLocationSort(value as LocationSort);
+                }}
+                items={locationSortOptions}
               >
-                {locationSortOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {locationSortOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </label>
             <span className={styles.panelDescription}>{displayedEsiStructures.length} found</span>
           </div>
         </div>
         {displayedEsiStructures.length === 0 ? (
-          <div className={styles.emptyBuildList}>
-            {esiRateLimitedUntil
-              ? `ESI rate limit active until ${new Date(esiRateLimitedUntil).toLocaleTimeString()}.`
-              : "No structure assets found in the current ESI cache. Refresh ESI data to update this list."}
-          </div>
+          <Empty className={styles.emptyBuildList}>
+            <EmptyDescription>
+              {esiRateLimitedUntil
+                ? `ESI rate limit active until ${new Date(esiRateLimitedUntil).toLocaleTimeString()}.`
+                : "No structure assets found in the current ESI cache. Refresh ESI data to update this list."}
+            </EmptyDescription>
+          </Empty>
         ) : (
           <div className={styles.knownStructureList}>
             {sortedEsiStructures.map((structure) => (
@@ -700,6 +737,7 @@ function StructureDialog({
   );
   const [suggestions, setSuggestions] = useState<SystemMatch[]>([]);
   const [isOpen, setIsOpen] = useState(false);
+  const systemAnchor = useComboboxAnchor();
   const [type, setType] = useState(structure?.type ?? structureTypes[0].name);
   const [name, setName] = useState(structure?.name ?? "");
   const [rigs, setRigs] = useState(structure?.rigs ?? ["No Rig", "No Rig", "No Rig"]);
@@ -838,367 +876,247 @@ function StructureDialog({
   if (!selectedType) return null;
 
   return (
-    <div
-      className={styles.modalBackdrop}
-      role="presentation"
-      onMouseDown={(event) => event.target === event.currentTarget && onCancel()}
-    >
-      <form
-        className={styles.importModal}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="structure-dialog-title"
-        onSubmit={submit}
-      >
+    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className={styles.importModal} render={<form onSubmit={submit} />}>
         <div className={styles.panelHeader}>
           <div>
             <p className={styles.panelKicker}>STRUCTURE DIRECTORY</p>
-            <h2 id="structure-dialog-title">{structure ? "Edit structure" : "Add structure"}</h2>
+            <DialogTitle>{structure ? "Edit structure" : "Add structure"}</DialogTitle>
           </div>
-          <button
-            type="button"
-            className={styles.iconButton}
-            aria-label="Close add structure dialog"
-            onClick={onCancel}
-          >
-            ×
-          </button>
         </div>
-        <label className={styles.field}>
-          SYSTEM
-          <div className={styles.searchWrap}>
-            <div className={styles.search}>
-              ⌕{" "}
-              <input
-                role="combobox"
-                aria-controls="structure-system-options"
-                aria-expanded={isOpen}
-                value={systemName}
-                onFocus={() => setIsOpen(true)}
-                onChange={(event) => {
+        <div className="no-scrollbar max-h-[70vh] overflow-y-auto overscroll-contain">
+          <Field className={styles.dialogField}>
+            <FieldLabel>SYSTEM</FieldLabel>
+            <div ref={systemAnchor}>
+              <Combobox
+                open={isOpen && systemName.trim().length >= 2}
+                inputValue={systemName}
+                onOpenChange={setIsOpen}
+                onInputValueChange={(value) => {
                   setSystem(null);
-                  setSystemName(event.target.value);
+                  setSystemName(value);
                   setIsOpen(true);
                 }}
-                placeholder="Type a system name"
-                aria-label="Search systems"
-                aria-autocomplete="list"
-              />
+                onValueChange={(value) => {
+                  const match = suggestions.find((item) => String(item.systemId) === String(value));
+                  if (match) {
+                    setSystem(match);
+                    setSystemName(match.name);
+                    setIsOpen(false);
+                  }
+                }}
+              >
+                <ComboboxInput
+                  showTrigger={false}
+                  onFocus={() => suggestions.length > 0 && setIsOpen(true)}
+                  placeholder="Type a system name"
+                  aria-label="Search systems"
+                />
+                <ComboboxContent anchor={systemAnchor}>
+                  <ComboboxList>
+                    {suggestions.length > 0 ? (
+                      suggestions.map((match) => (
+                        <ComboboxItem key={match.systemId} value={String(match.systemId)}>
+                          <span>{match.name}</span>
+                          <small>System ID {match.systemId}</small>
+                        </ComboboxItem>
+                      ))
+                    ) : (
+                      <ComboboxEmpty>No matching systems.</ComboboxEmpty>
+                    )}
+                  </ComboboxList>
+                </ComboboxContent>
+              </Combobox>
             </div>
-            {isOpen && suggestions.length > 0 && (
-              <div className={styles.searchResults} id="structure-system-options" role="listbox">
-                {suggestions.map((match) => (
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={match.systemId === system?.systemId}
-                    className={
-                      match.systemId === system?.systemId
-                        ? styles.searchResultActive
-                        : styles.searchResult
-                    }
-                    key={match.systemId}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => {
-                      setSystem(match);
-                      setSystemName(match.name);
-                      setIsOpen(false);
-                    }}
-                  >
-                    <span>{match.name}</span>
-                    <small>System ID {match.systemId}</small>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </label>
-        <StructureSelect
-          label="STRUCTURE TYPE"
-          value={type}
-          options={structureTypes.map((option) => ({
-            value: option.name,
-            label: `${option.name} (${option.size})`,
-          }))}
-          onChange={(value) => {
-            const nextType = structureTypes.find((structureType) => structureType.name === value);
-            if (!nextType) return;
-            setType(nextType.name);
-            setRigs((current) =>
-              current.map((rig) =>
-                rigOptionsBySize[nextType.size].includes(rig) ? rig : "No Rig",
-              ),
-            );
-          }}
-        />
-        <label className={styles.field}>
-          NAME
-          <div className={styles.search}>
-            ⌕{" "}
-            <input
-              required
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="e.g. Assembly Bay Alpha"
-              aria-label="Structure name"
-            />
-          </div>
-        </label>
-        {rigs.map((rig, index) => (
+          </Field>
           <StructureSelect
-            key={index}
-            label={`RIG ${index + 1}`}
-            value={rig}
-            options={rigOptionsBySize[selectedType.size].map((option) => ({
-              value: option,
-              label: option,
+            label="STRUCTURE TYPE"
+            value={type}
+            options={structureTypes.map((option) => ({
+              value: option.name,
+              label: `${option.name} (${option.size})`,
             }))}
-            onChange={(value) =>
+            onChange={(value) => {
+              const nextType = structureTypes.find((structureType) => structureType.name === value);
+              if (!nextType) return;
+              setType(nextType.name);
               setRigs((current) =>
-                current.map((currentRig, rigIndex) => (rigIndex === index ? value : currentRig)),
-              )
-            }
+                current.map((rig) =>
+                  rigOptionsBySize[nextType.size].includes(rig) ? rig : "No Rig",
+                ),
+              );
+            }}
           />
-        ))}
-        <div className={styles.constructionGrid}>
-          <div className={styles.constructionGridHeader} aria-hidden="true">
-            <span />
-            <span>ENABLED</span>
-            <span>TAX RATE</span>
-          </div>
-          <div className={styles.constructionGridRow}>
-            <span>REPROCESSING</span>
-            <button
-              type="button"
-              className={styles.stockSwitch}
-              role="switch"
-              aria-checked={allowReprocessing}
-              aria-label="Enable reprocessing"
-              onClick={() => setAllowReprocessing((current) => !current)}
-            >
-              <span className={styles.stockSwitchThumb} />
-            </button>
-            <div className={styles.constructionTaxField}>
-              <input
-                className={styles.constructionTaxInput}
-                aria-label="Reprocessing tax rate"
-                type="number"
-                min="0"
-                step="0.1"
+          <Field className={styles.dialogField}>
+            <FieldLabel htmlFor="structure-name">NAME</FieldLabel>
+            <div>
+              <Input
+                id="structure-name"
+                required
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="e.g. Assembly Bay Alpha"
+                aria-label="Structure name"
+              />
+            </div>
+          </Field>
+          {rigs.map((rig, index) => (
+            <StructureSelect
+              key={index}
+              label={`RIG ${index + 1}`}
+              value={rig}
+              options={rigOptionsBySize[selectedType.size].map((option) => ({
+                value: option,
+                label: option,
+              }))}
+              onChange={(value) =>
+                setRigs((current) =>
+                  current.map((currentRig, rigIndex) => (rigIndex === index ? value : currentRig)),
+                )
+              }
+            />
+          ))}
+          <div className={styles.constructionGrid}>
+            <div className={styles.constructionGridHeader} aria-hidden="true">
+              <span />
+              <span>ENABLED</span>
+              <span>TAX RATE</span>
+            </div>
+            <div className={styles.constructionGridRow}>
+              <span>REPROCESSING</span>
+              <ActivitySwitch
+                label="reprocessing"
+                checked={allowReprocessing}
+                onCheckedChange={setAllowReprocessing}
+              />
+              <TaxRateInput
+                label="Reprocessing"
                 value={taxRate("reprocessing")}
-                onChange={(event) => setTaxRate("reprocessing", event.target.value)}
+                onChange={(value) => setTaxRate("reprocessing", value)}
               />
-              <span>%</span>
             </div>
-          </div>
-          <div className={styles.constructionGridRow}>
-            <span>STANDARD MANUFACTURING</span>
-            <button
-              type="button"
-              className={styles.stockSwitch}
-              role="switch"
-              aria-checked={allowStandardBuilds}
-              aria-label="Enable standard manufacturing"
-              onClick={() => setAllowStandardBuilds((current) => !current)}
-            >
-              <span className={styles.stockSwitchThumb} />
-            </button>
-            <div className={styles.constructionTaxField}>
-              <input
-                className={styles.constructionTaxInput}
-                aria-label="Standard manufacturing tax rate"
-                type="number"
-                min="0"
-                step="0.1"
+            <div className={styles.constructionGridRow}>
+              <span>STANDARD MANUFACTURING</span>
+              <ActivitySwitch
+                label="standard manufacturing"
+                checked={allowStandardBuilds}
+                onCheckedChange={setAllowStandardBuilds}
+              />
+              <TaxRateInput
+                label="Standard manufacturing"
                 value={taxRate("standard")}
-                onChange={(event) => setTaxRate("standard", event.target.value)}
+                onChange={(value) => setTaxRate("standard", value)}
               />
-              <span>%</span>
             </div>
-          </div>
-          <div className={styles.constructionGridRow}>
-            <span>CAPITAL MANUFACTURING</span>
-            <button
-              type="button"
-              className={styles.stockSwitch}
-              role="switch"
-              aria-checked={allowCapitalBuilds}
-              aria-label="Enable capital manufacturing"
-              onClick={() => setAllowCapitalBuilds((current) => !current)}
-            >
-              <span className={styles.stockSwitchThumb} />
-            </button>
-            <div className={styles.constructionTaxField}>
-              <input
-                className={styles.constructionTaxInput}
-                aria-label="Capital manufacturing tax rate"
-                type="number"
-                min="0"
-                step="0.1"
+            <div className={styles.constructionGridRow}>
+              <span>CAPITAL MANUFACTURING</span>
+              <ActivitySwitch
+                label="capital manufacturing"
+                checked={allowCapitalBuilds}
+                onCheckedChange={setAllowCapitalBuilds}
+              />
+              <TaxRateInput
+                label="Capital manufacturing"
                 value={taxRate("capital")}
-                onChange={(event) => setTaxRate("capital", event.target.value)}
+                onChange={(value) => setTaxRate("capital", value)}
               />
-              <span>%</span>
             </div>
-          </div>
-          <div
-            className={`${styles.constructionGridRow} ${
-              !reactionsAllowed ? styles.constructionGridRowDisabled : ""
-            }`}
-          >
-            <span>BIOCHEMICAL REACTIONS</span>
-            <button
-              type="button"
-              className={styles.stockSwitch}
-              role="switch"
-              aria-checked={reactionsAllowed && allowBiochemicalReactions}
-              aria-label="Enable biochemical reactions"
-              aria-disabled={!reactionsAllowed}
-              disabled={!reactionsAllowed}
-              onClick={() => setAllowBiochemicalReactions((current) => !current)}
+            <div
+              className={`${styles.constructionGridRow} ${
+                !reactionsAllowed ? styles.constructionGridRowDisabled : ""
+              }`}
             >
-              <span className={styles.stockSwitchThumb} />
-            </button>
-            <div className={styles.constructionTaxField}>
-              <input
-                className={styles.constructionTaxInput}
-                aria-label="Biochemical reaction tax rate"
-                type="number"
-                min="0"
-                step="0.1"
+              <span>BIOCHEMICAL REACTIONS</span>
+              <ActivitySwitch
+                label="biochemical reactions"
+                checked={reactionsAllowed && allowBiochemicalReactions}
+                disabled={!reactionsAllowed}
+                onCheckedChange={setAllowBiochemicalReactions}
+              />
+              <TaxRateInput
+                label="Biochemical reaction"
                 value={reactionsAllowed ? taxRate("biochemical") : "0.0"}
                 disabled={!reactionsAllowed}
-                onChange={(event) => setTaxRate("biochemical", event.target.value)}
+                onChange={(value) => setTaxRate("biochemical", value)}
               />
-              <span>%</span>
             </div>
-          </div>
-          <div
-            className={`${styles.constructionGridRow} ${
-              !reactionsAllowed ? styles.constructionGridRowDisabled : ""
-            }`}
-          >
-            <span>COMPOSITE REACTIONS</span>
-            <button
-              type="button"
-              className={styles.stockSwitch}
-              role="switch"
-              aria-checked={reactionsAllowed && allowCompositeReactions}
-              aria-label="Enable composite reactions"
-              aria-disabled={!reactionsAllowed}
-              disabled={!reactionsAllowed}
-              onClick={() => setAllowCompositeReactions((current) => !current)}
+            <div
+              className={`${styles.constructionGridRow} ${
+                !reactionsAllowed ? styles.constructionGridRowDisabled : ""
+              }`}
             >
-              <span className={styles.stockSwitchThumb} />
-            </button>
-            <div className={styles.constructionTaxField}>
-              <input
-                className={styles.constructionTaxInput}
-                aria-label="Composite reaction tax rate"
-                type="number"
-                min="0"
-                step="0.1"
+              <span>COMPOSITE REACTIONS</span>
+              <ActivitySwitch
+                label="composite reactions"
+                checked={reactionsAllowed && allowCompositeReactions}
+                disabled={!reactionsAllowed}
+                onCheckedChange={setAllowCompositeReactions}
+              />
+              <TaxRateInput
+                label="Composite reaction"
                 value={reactionsAllowed ? taxRate("composite") : "0.0"}
                 disabled={!reactionsAllowed}
-                onChange={(event) => setTaxRate("composite", event.target.value)}
+                onChange={(value) => setTaxRate("composite", value)}
               />
-              <span>%</span>
             </div>
-          </div>
-          <div
-            className={`${styles.constructionGridRow} ${
-              !reactionsAllowed ? styles.constructionGridRowDisabled : ""
-            }`}
-          >
-            <span>HYBRID REACTIONS</span>
-            <button
-              type="button"
-              className={styles.stockSwitch}
-              role="switch"
-              aria-checked={reactionsAllowed && allowHybridReactions}
-              aria-label="Enable hybrid reactions"
-              aria-disabled={!reactionsAllowed}
-              disabled={!reactionsAllowed}
-              onClick={() => setAllowHybridReactions((current) => !current)}
+            <div
+              className={`${styles.constructionGridRow} ${
+                !reactionsAllowed ? styles.constructionGridRowDisabled : ""
+              }`}
             >
-              <span className={styles.stockSwitchThumb} />
-            </button>
-            <div className={styles.constructionTaxField}>
-              <input
-                className={styles.constructionTaxInput}
-                aria-label="Hybrid reaction tax rate"
-                type="number"
-                min="0"
-                step="0.1"
+              <span>HYBRID REACTIONS</span>
+              <ActivitySwitch
+                label="hybrid reactions"
+                checked={reactionsAllowed && allowHybridReactions}
+                disabled={!reactionsAllowed}
+                onCheckedChange={setAllowHybridReactions}
+              />
+              <TaxRateInput
+                label="Hybrid reaction"
                 value={reactionsAllowed ? taxRate("hybrid") : "0.0"}
                 disabled={!reactionsAllowed}
-                onChange={(event) => setTaxRate("hybrid", event.target.value)}
+                onChange={(value) => setTaxRate("hybrid", value)}
               />
-              <span>%</span>
             </div>
-          </div>
-          <div className={styles.constructionGridRow}>
-            <span>INVENTION</span>
-            <button
-              type="button"
-              className={styles.stockSwitch}
-              role="switch"
-              aria-checked={allowInvention}
-              aria-label="Enable invention"
-              onClick={() => setAllowInvention((current) => !current)}
-            >
-              <span className={styles.stockSwitchThumb} />
-            </button>
-            <div className={styles.constructionTaxField}>
-              <input
-                className={styles.constructionTaxInput}
-                aria-label="Invention tax rate"
-                type="number"
-                min="0"
-                step="0.1"
+            <div className={styles.constructionGridRow}>
+              <span>INVENTION</span>
+              <ActivitySwitch
+                label="invention"
+                checked={allowInvention}
+                onCheckedChange={setAllowInvention}
+              />
+              <TaxRateInput
+                label="Invention"
                 value={taxRate("invention")}
-                onChange={(event) => setTaxRate("invention", event.target.value)}
+                onChange={(value) => setTaxRate("invention", value)}
               />
-              <span>%</span>
             </div>
-          </div>
-          <div className={styles.constructionGridRow}>
-            <span>RESEARCH</span>
-            <button
-              type="button"
-              className={styles.stockSwitch}
-              role="switch"
-              aria-checked={allowResearch}
-              aria-label="Enable research"
-              onClick={() => setAllowResearch((current) => !current)}
-            >
-              <span className={styles.stockSwitchThumb} />
-            </button>
-            <div className={styles.constructionTaxField}>
-              <input
-                className={styles.constructionTaxInput}
-                aria-label="Research tax rate"
-                type="number"
-                min="0"
-                step="0.1"
-                value={taxRate("research")}
-                onChange={(event) => setTaxRate("research", event.target.value)}
+            <div className={styles.constructionGridRow}>
+              <span>RESEARCH</span>
+              <ActivitySwitch
+                label="research"
+                checked={allowResearch}
+                onCheckedChange={setAllowResearch}
               />
-              <span>%</span>
+              <TaxRateInput
+                label="Research"
+                value={taxRate("research")}
+                onChange={(value) => setTaxRate("research", value)}
+              />
             </div>
           </div>
         </div>
-        <div className={styles.modalActions}>
-          <button type="button" className={styles.refresh} onClick={onCancel}>
+        <DialogFooter>
+          <Button type="button" className={styles.refresh} onClick={onCancel}>
             Cancel
-          </button>
-          <button type="submit" className={styles.calculate} disabled={!system || !name.trim()}>
+          </Button>
+          <Button type="submit" className={styles.calculate} disabled={!system || !name.trim()}>
             <span>{structure ? "Save structure" : "Add structure"}</span>
             <b>→</b>
-          </button>
-        </div>
-      </form>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1214,19 +1132,71 @@ function StructureSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className={styles.field}>
-      {label}
-      <select
-        className={styles.structureSelect}
+    <Field className={styles.dialogField}>
+      <FieldLabel>{label}</FieldLabel>
+      <Select value={value} onValueChange={(nextValue) => nextValue && onChange(nextValue)}>
+        <SelectTrigger>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            {options.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+function ActivitySwitch({
+  label,
+  checked,
+  disabled = false,
+  onCheckedChange,
+}: {
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <Switch
+      size="default"
+      checked={checked}
+      disabled={disabled}
+      aria-label={`Enable ${label.toLocaleLowerCase()}`}
+      onCheckedChange={onCheckedChange}
+    />
+  );
+}
+
+function TaxRateInput({
+  label,
+  value,
+  disabled = false,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className={styles.constructionTaxField}>
+      <Input
+        aria-label={`${label} tax rate`}
+        type="number"
+        min="0"
+        step="0.1"
         value={value}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
+      />
+      <span>%</span>
+    </div>
   );
 }

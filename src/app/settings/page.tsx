@@ -1,6 +1,10 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   defaultSettings,
   settingsStorageKey,
@@ -49,84 +53,102 @@ export default function SettingsPage() {
             <h2>Planning settings</h2>
           </div>
         </div>
-        <div className={styles.rule}>
-          <span>
-            <strong>Include corporation assets</strong>
-            <small>Use eligible corporation hangars in the plan</small>
-          </span>
-          <input
-            type="checkbox"
+        <Field className={styles.rule} orientation="horizontal">
+          <FieldContent>
+            <FieldLabel id="include-corporation-assets-label">
+              Include corporation assets
+            </FieldLabel>
+            <FieldDescription>Use eligible corporation hangars in the plan</FieldDescription>
+          </FieldContent>
+          <Switch
+            id="include-corporation-assets"
+            aria-labelledby="include-corporation-assets-label"
             checked={settings.includeCorporationAssets}
-            onChange={(event) =>
-              setSettings({ ...settings, includeCorporationAssets: event.target.checked })
+            onCheckedChange={(checked) =>
+              setSettings({ ...settings, includeCorporationAssets: checked })
             }
           />
-        </div>
-        <div className={styles.rule}>
-          <span>
-            <strong>Personal Sell Orders count as Stock</strong>
-            <small>Count open personal sell orders as available items</small>
-          </span>
-          <input
-            type="checkbox"
+        </Field>
+        <Field className={styles.rule} orientation="horizontal">
+          <FieldContent>
+            <FieldLabel id="personal-sell-orders-as-stock-label">
+              Personal Sell Orders count as Stock
+            </FieldLabel>
+            <FieldDescription>Count open personal sell orders as available items</FieldDescription>
+          </FieldContent>
+          <Switch
+            id="personal-sell-orders-as-stock"
+            aria-labelledby="personal-sell-orders-as-stock-label"
             checked={settings.personalSellOrdersAsStock}
-            onChange={(event) =>
-              setSettings({ ...settings, personalSellOrdersAsStock: event.target.checked })
+            onCheckedChange={(checked) =>
+              setSettings({ ...settings, personalSellOrdersAsStock: checked })
             }
           />
-        </div>
-        <div className={styles.rule}>
-          <span>
-            <strong>All Corporation Sell Orders count as Stock</strong>
-            <small>Count all open sell orders from eligible corporations</small>
-          </span>
-          <input
-            type="checkbox"
+        </Field>
+        <Field className={styles.rule} orientation="horizontal">
+          <FieldContent>
+            <FieldLabel id="all-corporation-sell-orders-as-stock-label">
+              All Corporation Sell Orders count as Stock
+            </FieldLabel>
+            <FieldDescription>
+              Count all open sell orders from eligible corporations
+            </FieldDescription>
+          </FieldContent>
+          <Switch
+            id="all-corporation-sell-orders-as-stock"
+            aria-labelledby="all-corporation-sell-orders-as-stock-label"
             checked={settings.allCorporationSellOrdersAsStock}
-            onChange={(event) =>
+            onCheckedChange={(checked) =>
               setSettings({
                 ...settings,
-                allCorporationSellOrdersAsStock: event.target.checked,
-                myCorporationSellOrdersAsStock: event.target.checked
+                allCorporationSellOrdersAsStock: checked,
+                myCorporationSellOrdersAsStock: checked
                   ? true
                   : settings.myCorporationSellOrdersAsStock,
               })
             }
           />
-        </div>
-        <div className={styles.rule}>
-          <span>
-            <strong>My Corporation Sell Orders count as Stock</strong>
-            <small>Count open corporation orders issued by selected characters</small>
-          </span>
-          <input
-            type="checkbox"
+        </Field>
+        <Field className={styles.rule} orientation="horizontal">
+          <FieldContent>
+            <FieldLabel id="my-corporation-sell-orders-as-stock-label">
+              My Corporation Sell Orders count as Stock
+            </FieldLabel>
+            <FieldDescription>
+              Count open corporation orders issued by selected characters
+            </FieldDescription>
+          </FieldContent>
+          <Switch
+            id="my-corporation-sell-orders-as-stock"
+            aria-labelledby="my-corporation-sell-orders-as-stock-label"
             checked={settings.myCorporationSellOrdersAsStock}
-            onChange={(event) =>
-              setSettings({ ...settings, myCorporationSellOrdersAsStock: event.target.checked })
+            onCheckedChange={(checked) =>
+              setSettings({ ...settings, myCorporationSellOrdersAsStock: checked })
             }
           />
-        </div>
-        <div className={styles.rule}>
-          <span>
-            <strong>Respect active jobs</strong>
-            <small>Account for jobs already in flight</small>
-          </span>
-          <input
-            type="checkbox"
+        </Field>
+        <Field className={styles.rule} orientation="horizontal">
+          <FieldContent>
+            <FieldLabel id="respect-active-jobs-label">Respect active jobs</FieldLabel>
+            <FieldDescription>Account for jobs already in flight</FieldDescription>
+          </FieldContent>
+          <Switch
+            id="respect-active-jobs"
+            aria-labelledby="respect-active-jobs-label"
             checked={settings.respectActiveJobs}
-            onChange={(event) =>
-              setSettings({ ...settings, respectActiveJobs: event.target.checked })
-            }
+            onCheckedChange={(checked) => setSettings({ ...settings, respectActiveJobs: checked })}
           />
-        </div>
-        <div className={styles.rule}>
-          <span>
-            <strong>Default intermediate ME</strong>
-            <small>Material efficiency for blueprints not in the build list</small>
-          </span>
-          <input
-            aria-label="Default intermediate material efficiency"
+        </Field>
+        <Field className={styles.rule} orientation="horizontal">
+          <FieldContent>
+            <FieldLabel htmlFor="default-intermediate-me">Default intermediate ME</FieldLabel>
+            <FieldDescription>
+              Material efficiency for blueprints not in the build list
+            </FieldDescription>
+          </FieldContent>
+          <Input
+            id="default-intermediate-me"
+            className={styles.ruleNumber}
             type="number"
             min="0"
             max="10"
@@ -136,14 +158,17 @@ export default function SettingsPage() {
               setSettings({ ...settings, defaultMe: boundedNumber(event.target.value, 10) })
             }
           />
-        </div>
-        <div className={styles.rule}>
-          <span>
-            <strong>Default intermediate TE</strong>
-            <small>Time efficiency for blueprints not in the build list</small>
-          </span>
-          <input
-            aria-label="Default intermediate time efficiency"
+        </Field>
+        <Field className={styles.rule} orientation="horizontal">
+          <FieldContent>
+            <FieldLabel htmlFor="default-intermediate-te">Default intermediate TE</FieldLabel>
+            <FieldDescription>
+              Time efficiency for blueprints not in the build list
+            </FieldDescription>
+          </FieldContent>
+          <Input
+            id="default-intermediate-te"
+            className={styles.ruleNumber}
             type="number"
             min="0"
             max="20"
@@ -153,11 +178,11 @@ export default function SettingsPage() {
               setSettings({ ...settings, defaultTe: boundedNumber(event.target.value, 20) })
             }
           />
-        </div>
-        <button className={styles.calculate} type="submit">
+        </Field>
+        <Button className={styles.calculate} type="submit">
           <span>{saved ? "Settings saved" : "Save settings"}</span>
           <b>→</b>
-        </button>
+        </Button>
       </form>
     </>
   );

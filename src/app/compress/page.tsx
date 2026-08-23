@@ -1,14 +1,14 @@
 "use client";
 
-import { FormEvent, Suspense, useEffect, useRef, useState } from "react";
+import { FormEvent, KeyboardEvent, Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAppLanguage } from "../AppShell";
 import TypeIdentity from "../components/TypeIdentity";
 import TypeSearch from "@/components/TypeSearch";
-import { useToast } from "../components/ToastProvider";
+import { toast } from "@/components/ui/toast";
 import type { SdeLanguage } from "@/lib/reference/languages";
-import { Clipboard, Copy, FileUp, Info, Minimize2, Trash2, Upload, X } from "lucide-react";
+import { Clipboard, Copy, FileUp, Info, Minimize2, Upload, X } from "lucide-react";
 import Image from "next/image";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import {
@@ -22,19 +22,22 @@ import { loadClientSession, loadClientStateStatus } from "@/lib/client/requestCa
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
 import { loadEndpointRecord, saveEndpointResponse } from "@/lib/client/refreshCache";
 import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/app/components/ui/badge";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Empty, EmptyDescription } from "@/components/ui/empty";
+import { Input } from "@/components/ui/input";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import styles from "./compress.module.css";
 import { marketHubs } from "@/lib/reference/marketHubs";
 
@@ -301,16 +304,11 @@ function CompressContent() {
   }
 
   const locationOptions = options.locations;
-  const selectedLocation = locationOptions.find((location) => location.id === settings.locationId);
   const selectedCharacter = options.characters.find(
     (character) => character.id === settings.characterId,
   );
-  const selectedImplant = options.implants.find((implant) => implant.id === settings.implantId)
-    ?? options.implants.find((implant) => implant.id === "none") ?? {
-      id: "none",
-      name: "No implant",
-      level: 0,
-    };
+  const selectedImplant =
+    options.implants.find((implant) => implant.id === settings.implantId) ?? options.implants[0];
   const implantOptions = selectedCharacter
     ? options.implants.filter(
         (implant) =>
@@ -318,13 +316,6 @@ function CompressContent() {
           || (implant.typeId !== undefined && selectedCharacter.implants.includes(implant.typeId)),
       )
     : options.implants;
-  const selectedMarket = marketHubs.find((market) => market.id === settings.marketId);
-  const orderTypeLabel =
-    settings.orderType === "buy-1-day"
-      ? "Buy (1 Day)"
-      : settings.orderType === "buy-5-day"
-        ? "Buy (5 Day)"
-        : "Sell";
   const skillLevels =
     settings.characterId === "all-zero"
       ? Object.fromEntries(options.relevantSkillIds.map((id) => [String(id), 0]))
@@ -462,15 +453,14 @@ function CompressContent() {
               <p className={styles.kicker}>01 / REQUIREMENTS</p>
               <h2>Raw materials</h2>
             </div>
-            <Button
+            <button
               type="button"
-              className={styles.secondaryButton}
-              variant="outline"
+              className={`actionButton ${styles.secondaryButton}`}
               onClick={() => setIsPasteOpen(true)}
             >
               <Clipboard aria-hidden="true" />
               <span>Paste multibuy</span>
-            </Button>
+            </button>
           </div>
           <p className={styles.description}>
             Add the minerals you need, then find the compressed ores that can produce them.
@@ -482,99 +472,92 @@ function CompressContent() {
             onSelect={(item) =>
               addItem({
                 ...item,
-                category: item.category === "reactionformula" ? "reaction" : item.category,
+                category: item.category === "reactionformula" ? "item" : item.category,
               })
             }
           />
-          <FieldGroup className={styles.compressOptions}>
+          <div className={styles.compressOptions}>
             {locationOptions.length > 0 ? (
-              <Field>
-                <FieldLabel htmlFor="compress-location">LOCATION</FieldLabel>
+              <label>
+                <span>LOCATION</span>
                 <Select
                   value={settings.locationId}
                   onValueChange={(value) => value && updateSettings({ locationId: value })}
+                  items={locationOptions.map((location) => ({
+                    value: location.id,
+                    label: `${location.name ?? `Location ${location.id}`}${location.canReprocess === false ? " [No Reprocessing]" : ""} · ${Math.round(location.baseYield ?? 50)}%`,
+                    disabled: location.canReprocess === false,
+                  }))}
                 >
-                  <SelectTrigger id="compress-location" className={styles.formSelect}>
-                    <SelectValue>
-                      {selectedLocation?.name ?? `Location ${settings.locationId}`}
-                      {selectedLocation?.canReprocess === false ? " [No Reprocessing]" : ""} ·{" "}
-                      {Math.round(selectedLocation?.baseYield ?? 50)}%
-                    </SelectValue>
+                  <SelectTrigger aria-label="Reprocessing location">
+                    <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className={styles.selectContent}>
-                    {locationOptions.map((location) => (
-                      <SelectItem
-                        value={location.id}
-                        key={location.id}
-                        className={styles.selectItem}
-                        disabled={location.canReprocess === false}
-                      >
-                        <span className={styles.selectItemLabel}>
+                  <SelectContent>
+                    <SelectGroup>
+                      {locationOptions.map((location) => (
+                        <SelectItem
+                          value={location.id}
+                          key={location.id}
+                          disabled={location.canReprocess === false}
+                        >
                           {location.name ?? `Location ${location.id}`}
-                          {location.canReprocess === false ? " [No Reprocessing]" : ""}
-                        </span>
-                        <span className={styles.selectItemMeta}>
+                          {location.canReprocess === false ? " [No Reprocessing]" : ""} ·{" "}
                           {Math.round(location.baseYield ?? 50)}%
-                        </span>
-                      </SelectItem>
-                    ))}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
                   </SelectContent>
                 </Select>
-              </Field>
+              </label>
             ) : (
               <Alert className={styles.locationAlert}>
                 <Info className={styles.locationAlertIcon} aria-hidden="true" />
-                <AlertTitle>No reprocessing locations found.</AlertTitle>
-                <AlertDescription className={styles.locationAlertContent}>
-                  Add a reprocessing location on the <Link href="/locations">Locations</Link> page
-                  or <Link href="/api/auth/eve/start">authenticate a character</Link> to find the
-                  best location automatically.
-                </AlertDescription>
+                <div className={styles.locationAlertContent}>
+                  <AlertTitle>No reprocessing locations found.</AlertTitle>
+                  <AlertDescription>
+                    Add a reprocessing location on the <Link href="/locations">Locations</Link> page
+                    or <Link href="/api/auth/eve/start">authenticate a character</Link> to find the
+                    best location automatically.
+                  </AlertDescription>
+                </div>
               </Alert>
             )}
-            <Field>
-              <FieldLabel htmlFor="compress-character">CHARACTER / SKILLS</FieldLabel>
+            <label>
+              <span>CHARACTER / SKILLS</span>
               <Select
                 value={settings.characterId}
                 onValueChange={(value) =>
                   value && updateSettings({ characterId: value, implantId: "none" })
                 }
+                items={[
+                  { value: "all-zero", label: "All zero" },
+                  { value: "all-iv", label: "All IV" },
+                  { value: "all-v", label: "All V" },
+                  ...options.characters.map((character) => ({
+                    value: character.id,
+                    label: character.name,
+                  })),
+                ]}
               >
-                <SelectTrigger id="compress-character" className={styles.formSelect}>
-                  <SelectValue>
-                    {settings.characterId === "all-zero"
-                      ? "All zero"
-                      : settings.characterId === "all-iv"
-                        ? "All IV"
-                        : settings.characterId === "all-v"
-                          ? "All V"
-                          : (selectedCharacter?.name ?? settings.characterId)}
-                  </SelectValue>
+                <SelectTrigger aria-label="Character skills">
+                  <SelectValue />
                 </SelectTrigger>
-                <SelectContent className={styles.selectContent}>
-                  <SelectItem className={styles.selectItem} value="all-zero">
-                    All zero
-                  </SelectItem>
-                  <SelectItem className={styles.selectItem} value="all-iv">
-                    All IV
-                  </SelectItem>
-                  <SelectItem className={styles.selectItem} value="all-v">
-                    All V
-                  </SelectItem>
-                  {options.characters.map((character) => (
-                    <SelectItem
-                      value={character.id}
-                      key={character.id}
-                      className={styles.selectItem}
-                    >
-                      {character.name}
-                    </SelectItem>
-                  ))}
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="all-zero">All zero</SelectItem>
+                    <SelectItem value="all-iv">All IV</SelectItem>
+                    <SelectItem value="all-v">All V</SelectItem>
+                    {options.characters.map((character) => (
+                      <SelectItem value={character.id} key={character.id}>
+                        {character.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="compress-implant">IMPLANT</FieldLabel>
+            </label>
+            <label>
+              <span>IMPLANT</span>
               <Select
                 value={
                   implantOptions.some((implant) => implant.id === settings.implantId)
@@ -582,74 +565,86 @@ function CompressContent() {
                     : "none"
                 }
                 onValueChange={(value) => value && updateSettings({ implantId: value })}
+                items={implantOptions.map((implant) => ({
+                  value: implant.id,
+                  label: implant.name,
+                }))}
               >
-                <SelectTrigger id="compress-implant" className={styles.formSelect}>
-                  <SelectValue>{selectedImplant.name}</SelectValue>
+                <SelectTrigger aria-label="Reprocessing implant">
+                  <SelectValue />
                 </SelectTrigger>
-                <SelectContent className={styles.selectContent}>
-                  {implantOptions.map((implant) => (
-                    <SelectItem value={implant.id} key={implant.id} className={styles.selectItem}>
-                      <span className={styles.selectItemLabel}>{implant.name}</span>
-                      {implant.level > 0 && (
-                        <span className={styles.selectItemMeta}>{implant.level}%</span>
-                      )}
-                    </SelectItem>
-                  ))}
+                <SelectContent>
+                  <SelectGroup>
+                    {implantOptions.map((implant) => (
+                      <SelectItem value={implant.id} key={implant.id}>
+                        {implant.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="compress-market">MARKET</FieldLabel>
+            </label>
+            <label>
+              <span>MARKET</span>
               <Select
                 value={settings.marketId}
                 onValueChange={(value) => value && updateSettings({ marketId: value })}
+                items={marketHubs.map((market) => ({
+                  value: market.id,
+                  label: market.name,
+                }))}
               >
-                <SelectTrigger id="compress-market" className={styles.formSelect}>
-                  <SelectValue>{selectedMarket?.name ?? settings.marketId}</SelectValue>
+                <SelectTrigger aria-label="Market hub">
+                  <SelectValue />
                 </SelectTrigger>
-                <SelectContent className={styles.selectContent}>
-                  {marketHubs.map((market) => (
-                    <SelectItem value={market.id} key={market.id} className={styles.selectItem}>
-                      {market.name}
-                    </SelectItem>
-                  ))}
+                <SelectContent>
+                  <SelectGroup>
+                    {marketHubs.map((market) => (
+                      <SelectItem value={market.id} key={market.id}>
+                        {market.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="compress-order-type">ORDER TYPE</FieldLabel>
+            </label>
+            <label>
+              <span>ORDER TYPE</span>
               <Select
                 value={settings.orderType}
                 onValueChange={(value) =>
                   value && updateSettings({ orderType: value as CompressSettings["orderType"] })
                 }
+                items={[
+                  { value: "buy-1-day", label: "Buy (1 Day)" },
+                  { value: "buy-5-day", label: "Buy (5 Day)" },
+                  { value: "sell", label: "Sell" },
+                ]}
               >
-                <SelectTrigger id="compress-order-type" className={styles.formSelect}>
-                  <SelectValue>{orderTypeLabel}</SelectValue>
+                <SelectTrigger aria-label="Order type">
+                  <SelectValue />
                 </SelectTrigger>
-                <SelectContent className={styles.selectContent}>
-                  <SelectItem className={styles.selectItem} value="buy-1-day">
-                    Buy (1 Day)
-                  </SelectItem>
-                  <SelectItem className={styles.selectItem} value="buy-5-day">
-                    Buy (5 Day)
-                  </SelectItem>
-                  <SelectItem className={styles.selectItem} value="sell">
-                    Sell
-                  </SelectItem>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="buy-1-day">Buy (1 Day)</SelectItem>
+                    <SelectItem value="buy-5-day">Buy (5 Day)</SelectItem>
+                    <SelectItem value="sell">Sell</SelectItem>
+                  </SelectGroup>
                 </SelectContent>
               </Select>
-            </Field>
-          </FieldGroup>
+            </label>
+          </div>
           <div className={styles.listHeader}>
             <span>ITEM</span>
             <span>QUANTITY</span>
             <span />
           </div>
           {items.length === 0 ? (
-            <div className={styles.empty}>
-              Search for a mineral above to build your requirement.
-            </div>
+            <Empty className={styles.empty}>
+              <EmptyDescription>
+                Search for a mineral above to build your requirement.
+              </EmptyDescription>
+            </Empty>
           ) : (
             items.map((item, index) => (
               <div className={styles.itemRow} key={item.typeId}>
@@ -674,28 +669,26 @@ function CompressContent() {
                     )
                   }
                 />
-                <Button
+                <button
                   type="button"
                   className={styles.removeButton}
-                  variant="destructive"
-                  size="icon-sm"
                   aria-label={`Remove ${item.name}`}
                   onClick={() =>
                     updateItems((current) => current.filter((_, itemIndex) => itemIndex !== index))
                   }
                 >
-                  <Trash2 aria-hidden="true" size={15} strokeWidth={1.8} />
-                </Button>
+                  ×
+                </button>
               </div>
             ))
           )}
           {error && (
-            <p className={styles.error} role="alert" aria-live="polite">
-              {error}
-            </p>
+            <Alert variant="destructive" className={styles.error}>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           )}
           <div className={styles.actionBar}>
-            <button
+            <Button
               className={styles.primaryButton}
               type="submit"
               disabled={items.length === 0 || isLoading}
@@ -705,7 +698,7 @@ function CompressContent() {
                 <span>{isLoading ? "Compressing..." : "Compress"}</span>
               </span>
               <b aria-hidden="true">→</b>
-            </button>
+            </Button>
           </div>
         </section>
       </form>
@@ -729,7 +722,6 @@ function CompressContent() {
 
 function Results({ result }: { result: CompressResult }) {
   const router = useRouter();
-  const { showToast } = useToast();
   const [isAddingToPlan, setIsAddingToPlan] = useState(false);
   const tabs = [
     { key: "efficiency", label: "Efficiency", note: "Reprocessing efficiencies used by the solve" },
@@ -754,10 +746,13 @@ function Results({ result }: { result: CompressResult }) {
   );
   async function copyToBuyList() {
     try {
-      showToast("To Buy multibuy list copied");
+      await navigator.clipboard.writeText(
+        items.map((item) => `${item.name}\t${item.quantity}`).join("\n"),
+      );
+      toast.add({ description: "To Buy multibuy list copied" });
     }
     catch {
-      showToast("Could not copy To Buy multibuy list");
+      toast.add({ description: "Could not copy To Buy multibuy list", type: "error" });
     }
   }
   async function addToPlan() {
@@ -793,7 +788,10 @@ function Results({ result }: { result: CompressResult }) {
     }
     catch {
       setIsAddingToPlan(false);
-      showToast("Could not add compression items to the build plan");
+      toast.add({
+        description: "Could not add compression items to the build plan",
+        type: "error",
+      });
     }
   }
   return (
@@ -805,120 +803,134 @@ function Results({ result }: { result: CompressResult }) {
         </div>
         <span className={styles.resultStamp}>SDE + ESI REPROCESSING</span>
       </div>
-      <div className={styles.tabs}>
-        {tabs.map((tab, index) => (
-          <button
-            type="button"
-            key={tab.key}
-            className={activeTab === tab.key ? styles.tabActive : ""}
-            onClick={() => setActiveTab(tab.key)}
-          >
-            <span>{String(index + 1).padStart(2, "0")}</span>
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      <div className={styles.resultPanel}>
-        <div className={styles.resultPanelHeader}>
-          <div>
-            <h3>{active.label}</h3>
-            <p>{active.note}</p>
-          </div>
-          <div className={styles.resultPanelActions}>
-            {active.key === "toBuy" && items.length > 0 && (
-              <button
-                type="button"
-                className={`actionButton ${styles.secondaryButton}`}
-                onClick={() => void copyToBuyList()}
-              >
-                <Copy aria-hidden="true" />
-                Copy multibuy
-              </button>
-            )}
-            {active.key === "toBuy" && items.some((item) => !item.ignored) && (
-              <button
-                type="button"
-                className={`actionButton ${styles.secondaryButton}`}
-                onClick={() => void addToPlan()}
-                disabled={isAddingToPlan}
-              >
-                <Upload aria-hidden="true" />
-                Add to Plan
-              </button>
-            )}
-            <strong>{itemCount}</strong>
-          </div>
-        </div>
-        {active.key === "efficiency" ? (
-          <EfficiencyTable efficiency={result.efficiencies} />
-        ) : items.length ? (
-          <>
-            {active.key === "plan" && (
-              <div className={styles.planTableHeader}>
-                <span>Material</span>
-                <span>Required</span>
-                <span>Reprocessed</span>
-                <span>Surplus</span>
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => setActiveTab(value as (typeof tabs)[number]["key"])}
+      >
+        <TabsList className={styles.tabs}>
+          {tabs.map((tab, index) => (
+            <TabsTrigger
+              key={tab.key}
+              value={tab.key}
+              className={activeTab === tab.key ? styles.tabActive : ""}
+            >
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              {tab.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <TabsContent value={activeTab}>
+          <div className={styles.resultPanel}>
+            <div className={styles.resultPanelHeader}>
+              <div>
+                <h3>{active.label}</h3>
+                <p>{active.note}</p>
               </div>
-            )}
-            <div className={styles.resultList}>
-              {items.map((item) => (
-                <div
-                  className={`${styles.resultRow} ${active.key === "plan" ? styles.planResultRow : ""}`}
-                  key={`${active.key}-${item.typeId ?? item.name}-${item.ignored ? "ignored" : "included"}`}
-                >
-                  <span className={styles.resultIdentity}>
-                    {item.typeId ? (
-                      <TypeIdentity
-                        name={item.name}
-                        typeId={item.typeId}
-                        variation={resultVariation(item.name)}
-                      />
-                    ) : (
-                      item.name
-                    )}
-                    {item.ignored && (
-                      <Badge variant="outline" className={styles.ignoredBadge}>
-                        ignored
-                      </Badge>
-                    )}
-                  </span>
-                  <strong data-label="Required">{item.quantity.toLocaleString()}</strong>
-                  {active.key === "plan" && (
-                    <>
-                      <strong data-label="Reprocessed">
-                        {item.fromReprocessing?.toLocaleString() ?? "0"}
-                      </strong>
-                      <strong data-label="Surplus">{item.surplus?.toLocaleString() ?? "0"}</strong>
-                    </>
-                  )}
-                </div>
-              ))}
-              {active.key === "plan" ? (
-                <div className={`${styles.resultRow} ${styles.planResultRow} ${styles.totalRow}`}>
-                  <strong>Total volume (m3)</strong>
-                  <strong data-label="Required">{totalQuantity.toLocaleString()}</strong>
-                  <strong data-label="Reprocessed">{totalReprocessed.toLocaleString()}</strong>
-                  <strong data-label="Surplus">{totalSurplus.toLocaleString()}</strong>
-                </div>
-              ) : active.key === "toBuy" ? (
-                <div className={styles.totalRow}>
-                  <strong>Total volume (m3)</strong>
-                  <strong>{totalQuantity.toLocaleString()}</strong>
-                </div>
-              ) : null}
+              <div className={styles.resultPanelActions}>
+                {active.key === "toBuy" && items.length > 0 && (
+                  <button
+                    type="button"
+                    className={`actionButton ${styles.secondaryButton}`}
+                    onClick={() => void copyToBuyList()}
+                  >
+                    <Copy aria-hidden="true" />
+                    Copy multibuy
+                  </button>
+                )}
+                {active.key === "toBuy" && items.some((item) => !item.ignored) && (
+                  <button
+                    type="button"
+                    className={`actionButton ${styles.secondaryButton}`}
+                    onClick={() => void addToPlan()}
+                    disabled={isAddingToPlan}
+                  >
+                    <Upload aria-hidden="true" />
+                    Add to Plan
+                  </button>
+                )}
+                <strong>{itemCount}</strong>
+              </div>
             </div>
-          </>
-        ) : (
-          <div className={styles.emptyResult}>No entries returned.</div>
-        )}
-      </div>
+            {active.key === "efficiency" ? (
+              <EfficiencyTable efficiency={result.efficiencies} />
+            ) : items.length ? (
+              <>
+                {active.key === "plan" && (
+                  <div className={styles.planTableHeader}>
+                    <span>Material</span>
+                    <span>Required</span>
+                    <span>Reprocessed</span>
+                    <span>Surplus</span>
+                  </div>
+                )}
+                <div className={styles.resultList}>
+                  {items.map((item) => (
+                    <div
+                      className={`${styles.resultRow} ${active.key === "plan" ? styles.planResultRow : ""}`}
+                      key={`${active.key}-${item.typeId ?? item.name}-${item.ignored ? "ignored" : "included"}`}
+                    >
+                      <span>
+                        {item.typeId ? (
+                          <TypeIdentity
+                            name={item.name}
+                            typeId={item.typeId}
+                            variation={resultVariation(item.name)}
+                          />
+                        ) : (
+                          item.name
+                        )}
+                        {item.ignored && <small className={styles.ignoredBadge}>ignored</small>}
+                      </span>
+                      <strong data-label="Required">{item.quantity.toLocaleString()}</strong>
+                      {active.key === "plan" && (
+                        <>
+                          <strong data-label="Reprocessed">
+                            {item.fromReprocessing?.toLocaleString() ?? "0"}
+                          </strong>
+                          <strong data-label="Surplus">
+                            {item.surplus?.toLocaleString() ?? "0"}
+                          </strong>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                  {active.key === "plan" ? (
+                    <div
+                      className={`${styles.resultRow} ${styles.planResultRow} ${styles.totalRow}`}
+                    >
+                      <strong>Total volume (m3)</strong>
+                      <strong data-label="Required">{totalQuantity.toLocaleString()}</strong>
+                      <strong data-label="Reprocessed">{totalReprocessed.toLocaleString()}</strong>
+                      <strong data-label="Surplus">{totalSurplus.toLocaleString()}</strong>
+                    </div>
+                  ) : active.key === "toBuy" ? (
+                    <div className={styles.totalRow}>
+                      <strong>Total volume (m3)</strong>
+                      <strong>{totalQuantity.toLocaleString()}</strong>
+                    </div>
+                  ) : null}
+                </div>
+              </>
+            ) : (
+              <Empty className={styles.emptyResult}>
+                <EmptyDescription>No entries returned.</EmptyDescription>
+              </Empty>
+            )}
+          </div>
+        </TabsContent>
+      </Tabs>
     </section>
   );
 }
 
 function EfficiencyTable({ efficiency }: { efficiency?: EfficiencyResult }) {
-  if (!efficiency) return <div className={styles.emptyResult}>No efficiency data returned.</div>;
+  if (!efficiency) {
+    return (
+      <Empty className={styles.emptyResult}>
+        <EmptyDescription>No efficiency data returned.</EmptyDescription>
+      </Empty>
+    );
+  }
   const summary = [
     ["Asteroid Ore", efficiency.averageAsteroid ?? 0],
     ["Moon Ore", efficiency.averageMoon ?? 0],
@@ -1038,85 +1050,68 @@ function PasteDialog({
     }
   }
   return (
-    <div
-      className={styles.backdrop}
-      role="presentation"
-      onMouseDown={(event) => event.target === event.currentTarget && onCancel()}
-    >
-      <form
-        className={styles.dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="compress-paste-title"
-        onSubmit={resolve}
-      >
+    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className={styles.dialog} render={<form onSubmit={resolve} />}>
         <div className={styles.panelHeader}>
           <div>
             <p className={styles.kicker}>BATCH IMPORT</p>
-            <h2 id="compress-paste-title">Paste multibuy list</h2>
+            <DialogTitle>Paste multibuy list</DialogTitle>
           </div>
-          <button
-            type="button"
-            className={styles.closeButton}
-            onClick={onCancel}
-            aria-label="Close paste dialog"
+        </div>
+        <div className="no-scrollbar max-h-[70vh] overflow-y-auto overscroll-contain">
+          <p className={styles.description}>
+            Compatible with Eve Multibuy. One item per line, with the quantity at the end.
+          </p>
+          <Textarea
+            value={text}
+            onChange={(event) => {
+              setText(event.target.value);
+              setError("");
+            }}
+            placeholder="Tritanium 120000\nPyerite 60000"
+            aria-label="Multibuy list"
+            spellCheck={false}
+            autoFocus
+          />
+          {error && (
+            <Alert variant="destructive" className={styles.error}>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          <RadioGroup
+            className={styles.modeToggle}
+            value={mode}
+            onValueChange={(value) => setMode(value as "add" | "replace")}
+            aria-label="Paste behavior"
           >
-            ×
-          </button>
+            <label className={`${styles.choiceCard} ${mode === "add" ? styles.modeActive : ""}`}>
+              <RadioGroupItem value="add" />
+              <span className={styles.choiceCardContent}>
+                <strong>Add to list</strong>
+                <small>Keep the imported items with the current list.</small>
+              </span>
+            </label>
+            <label
+              className={`${styles.choiceCard} ${mode === "replace" ? styles.modeActive : ""}`}
+            >
+              <RadioGroupItem value="replace" />
+              <span className={styles.choiceCardContent}>
+                <strong>Replace list</strong>
+                <small>Clear the current list before importing.</small>
+              </span>
+            </label>
+          </RadioGroup>
         </div>
-        <p className={styles.description}>
-          Compatible with Eve Multibuy. One item per line, with the quantity at the end.
-        </p>
-        <Textarea
-          value={text}
-          onChange={(event) => {
-            setText(event.target.value);
-            setError("");
-          }}
-          placeholder="Tritanium 120000\nPyerite 60000"
-          aria-label="Multibuy list"
-          spellCheck={false}
-          autoFocus
-        />
-        {error && <p className={styles.error}>{error}</p>}
-        <div className={styles.modeToggle} role="radiogroup" aria-label="Paste behavior">
-          <label className={`${styles.choiceCard} ${mode === "add" ? styles.modeActive : ""}`}>
-            <input
-              type="radio"
-              name="paste-behavior"
-              value="add"
-              checked={mode === "add"}
-              onChange={() => setMode("add")}
-            />
-            <span className={styles.choiceCardContent}>
-              <strong>Add to list</strong>
-              <small>Keep the imported items with the current list.</small>
-            </span>
-          </label>
-          <label className={`${styles.choiceCard} ${mode === "replace" ? styles.modeActive : ""}`}>
-            <input
-              type="radio"
-              name="paste-behavior"
-              value="replace"
-              checked={mode === "replace"}
-              onChange={() => setMode("replace")}
-            />
-            <span className={styles.choiceCardContent}>
-              <strong>Replace list</strong>
-              <small>Clear the current list before importing.</small>
-            </span>
-          </label>
-        </div>
-        <div className={styles.modalActions}>
-          <button
+        <DialogFooter>
+          <Button
             type="button"
             className={`actionButton ${styles.secondaryButton}`}
             onClick={onCancel}
           >
             <X aria-hidden="true" />
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             type="submit"
             className={`actionButton ${styles.primaryButton}`}
             disabled={!text.trim()}
@@ -1126,9 +1121,9 @@ function PasteDialog({
               <span>Import list</span>
             </span>
             <b aria-hidden="true">→</b>
-          </button>
-        </div>
-      </form>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

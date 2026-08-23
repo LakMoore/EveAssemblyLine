@@ -3,8 +3,8 @@
 import Image from "next/image";
 import { useState } from "react";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
+import { toast } from "@/components/ui/toast";
 import styles from "./TypeIdentity.module.css";
-import { useToast } from "./ToastProvider";
 
 type TypeIdentityProps = {
   name: string;
@@ -27,7 +27,6 @@ export default function TypeIdentity({
   blueprintType,
   className,
 }: TypeIdentityProps) {
-  const { showToast } = useToast();
   const [useIconFallback, setUseIconFallback] = useState(false);
   const blueprintVariation = blueprintType === "bpo" ? "bp" : "bpc";
   const activeVariation = useIconFallback ? "icon" : blueprintType ? blueprintVariation : variation;
@@ -35,10 +34,10 @@ export default function TypeIdentity({
   async function copyValue(value: string, label: string) {
     try {
       await navigator.clipboard.writeText(value);
-      showToast(`${label} copied`);
+      toast.add({ description: `${label} copied` });
     }
     catch {
-      showToast(`Could not copy ${label.toLowerCase()}`);
+      toast.add({ description: `Could not copy ${label.toLowerCase()}`, type: "error" });
     }
   }
 

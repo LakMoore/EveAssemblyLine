@@ -3,6 +3,10 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import styles from "./imagechecker.module.css";
 
 const variations = ["icon", "render", "bp", "bpc", "relic"] as const;
@@ -129,7 +133,7 @@ export default function ImageCheckerPage() {
       </div>
 
       <form className={styles.paging} onSubmit={submitStartId}>
-        <button
+        <Button
           type="button"
           className={styles.pageButton}
           aria-label="Previous batch"
@@ -137,10 +141,10 @@ export default function ImageCheckerPage() {
           onClick={() => pageTo(previousStartTypeId)}
         >
           ←
-        </button>
+        </Button>
         <label className={styles.startField}>
           <span>FIRST TYPE ID</span>
-          <input
+          <Input
             aria-label="First type ID"
             inputMode="numeric"
             min="0"
@@ -150,10 +154,10 @@ export default function ImageCheckerPage() {
             onChange={(event) => setStartTypeId(event.target.value)}
           />
         </label>
-        <button type="submit" className={styles.loadButton} disabled={isLoading}>
+        <Button type="submit" className={styles.loadButton} disabled={isLoading}>
           Load batch
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           className={styles.pageButton}
           aria-label="Next batch"
@@ -161,7 +165,7 @@ export default function ImageCheckerPage() {
           onClick={() => pageTo(nextStartTypeId)}
         >
           →
-        </button>
+        </Button>
         <span className={styles.batchNote}>100 published types per batch</span>
       </form>
 
@@ -175,9 +179,16 @@ export default function ImageCheckerPage() {
             {isLoading ? "Loading types..." : "Checks run in browser"}
           </span>
         </div>
-        {error ? <div className={styles.error}>{error}</div> : null}
+        {error ? (
+          <Alert variant="destructive" className={styles.error}>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
         {!error && isLoading ? (
-          <div className={styles.empty}>Loading the selected batch...</div>
+          <div className={styles.empty} aria-label="Loading the selected batch">
+            <Skeleton className="h-4 w-48" />
+            <Skeleton className="mt-3 h-4 w-64" />
+          </div>
         ) : null}
         {!error && !isLoading ? (
           <div className={styles.tableWrap}>

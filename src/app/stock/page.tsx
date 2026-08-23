@@ -16,6 +16,29 @@ import { fetchTypeMetadata } from "@/lib/reference/types";
 import { groupClientStockByLocation, loadClientStock } from "@/lib/client/requestCache";
 import { type KnownStructure } from "@/lib/planning/preferences";
 import TypeIdentity from "../components/TypeIdentity";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Empty, EmptyDescription } from "@/components/ui/empty";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../components/ui/select";
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  useComboboxAnchor,
+} from "@/components/ui/combobox";
+import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import styles from "../page.module.css";
 import {
   Atom,
@@ -121,10 +144,10 @@ export default function StockPage() {
   const { language } = useAppLanguage();
   const [locations, setLocations] = useState<StockRecord[]>([]);
   const [esiLocationIds, setEsiLocationIds] = useState<Set<string>>(new Set());
+  const [viewingFilter, setViewingFilter] = useState<StockFilter>({ kind: "all" });
   const [knownStructures, setKnownStructures] = useState<KnownStructure[]>([]);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [viewing, setViewing] = useState<StockRecord | null>(null);
-  const [viewingFilter, setViewingFilter] = useState<StockFilter>({ kind: "all" });
   const [stockSort, setStockSort] = useState<StockSort>("alphabetical");
   const [pasting, setPasting] = useState<StockRecord | null>(null);
   const [isHydratingVolumes, setIsHydratingVolumes] = useState(false);
@@ -381,25 +404,37 @@ export default function StockPage() {
           <div className={styles.locationControls}>
             <label>
               <span>SORT</span>
-              <select
+              <Select
                 aria-label="Sort stock locations"
                 value={stockSort}
-                onChange={(event) => setStockSort(event.target.value as StockSort)}
+                onValueChange={(value) => {
+                  if (value !== null) setStockSort(value as StockSort);
+                }}
+                items={stockSortOptions}
               >
-                {stockSortOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {stockSortOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </label>
             <span className={styles.panelDescription}>{locations.length} saved</span>
           </div>
         </div>
         {locations.length === 0 ? (
-          <div className={styles.emptyBuildList}>
-            No stock locations yet. Add a location to begin tracking items.
-          </div>
+          <Empty className={styles.emptyBuildList}>
+            <EmptyDescription>
+              No stock locations yet. Add a location to begin tracking items.
+            </EmptyDescription>
+          </Empty>
         ) : (
           <div className={styles.stockCardGrid}>
             {sortedLocations.map((location) => {
@@ -466,6 +501,7 @@ function AddLocationModal({
   const [isOpen, setIsOpen] = useState(false);
   const [structures, setStructures] = useState<StructureOption[]>([]);
   const [structureId, setStructureId] = useState("system");
+  const systemAnchor = useComboboxAnchor();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -552,88 +588,87 @@ function AddLocationModal({
   }
 
   return (
-    <div
-      className={styles.modalBackdrop}
-      role="presentation"
-      onMouseDown={(event) => event.target === event.currentTarget && onCancel()}
-    >
-      <form
-        className={styles.importModal}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="add-location-title"
-        onSubmit={submit}
-      >
+    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className={styles.importModal} render={<form onSubmit={submit} />}>
         <div className={styles.panelHeader}>
           <div>
             <p className={styles.panelKicker}>STOCK DIRECTORY</p>
-            <h2 id="add-location-title">Add location</h2>
+            <DialogTitle>Add location</DialogTitle>
           </div>
-          <button
-            type="button"
-            className={styles.iconButton}
-            aria-label="Close add location dialog"
-            onClick={onCancel}
-          >
-            ×
-          </button>
         </div>
-        <label className={styles.field}>
-          SYSTEM
-          <div className={styles.searchWrap}>
-            <div className={styles.search}>
-              ⌕{" "}
-              <input
-                role="combobox"
-                aria-expanded={isOpen}
-                aria-controls="add-location-system-options"
-                value={systemName}
-                onFocus={() => setIsOpen(true)}
-                onChange={(event) => {
-                  setSystemName(event.target.value);
+        <div className="no-scrollbar max-h-[70vh] overflow-y-auto overscroll-contain">
+          <label className={styles.field}>
+            SYSTEM
+            <div ref={systemAnchor} className={styles.searchWrap}>
+              <Combobox
+                open={isOpen && systemName.trim().length >= 2}
+                inputValue={systemName}
+                onOpenChange={setIsOpen}
+                onInputValueChange={(value) => {
+                  setSystemName(value);
                   setIsOpen(true);
                 }}
-                aria-label="Search systems"
-                aria-autocomplete="list"
-              />
+                onValueChange={(value) => {
+                  const match = suggestions.find((entry) => String(entry.id) === String(value));
+                  if (match) chooseSystem(match);
+                }}
+              >
+                <ComboboxInput
+                  showTrigger={false}
+                  onFocus={() => suggestions.length > 0 && setIsOpen(true)}
+                  placeholder="Type a system name"
+                  aria-label="Search systems"
+                />
+                <ComboboxContent anchor={systemAnchor} className={styles.searchResults}>
+                  <ComboboxList>
+                    {suggestions.length > 0 ? (
+                      uniqueById(suggestions).map((entry) => (
+                        <ComboboxItem key={entry.id} value={String(entry.id)}>
+                          <span>{entry.name}</span>
+                          <small>System ID {entry.id}</small>
+                        </ComboboxItem>
+                      ))
+                    ) : (
+                      <ComboboxEmpty>No matching systems.</ComboboxEmpty>
+                    )}
+                  </ComboboxList>
+                </ComboboxContent>
+              </Combobox>
             </div>
-            {isOpen && suggestions.length > 0 && (
-              <div className={styles.searchResults} id="add-location-system-options" role="listbox">
-                {uniqueById(suggestions).map((entry) => (
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={entry.id === system.id}
-                    className={
-                      entry.id === system.id ? styles.searchResultActive : styles.searchResult
-                    }
-                    key={entry.id}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => chooseSystem(entry)}
-                  >
-                    <span>{entry.name}</span>
-                    <small>System ID {entry.id}</small>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </label>
-        <label className={styles.field}>
-          STRUCTURE
-          <select value={structureId} onChange={(event) => setStructureId(event.target.value)}>
-            <option value="system">System stock (no specific structure)</option>
-            {uniqueById(structures).map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <Link className={styles.dialogLink} href="/locations">
-          Add or manage structures
-        </Link>
-        <div className={styles.modalActions}>
+          </label>
+          <label className={styles.field}>
+            STRUCTURE
+            <Select
+              value={structureId}
+              onValueChange={(value) => value && setStructureId(value)}
+              items={[
+                { value: "system", label: "System stock (no specific structure)" },
+                ...uniqueById(structures).map((entry) => ({
+                  value: String(entry.id),
+                  label: entry.name,
+                })),
+              ]}
+            >
+              <SelectTrigger aria-label="Stock structure">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="system">System stock (no specific structure)</SelectItem>
+                  {uniqueById(structures).map((entry) => (
+                    <SelectItem key={entry.id} value={String(entry.id)}>
+                      {entry.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </label>
+          <Link className={styles.dialogLink} href="/locations">
+            Add or manage structures
+          </Link>
+        </div>
+        <DialogFooter>
           <button type="button" className={styles.refresh} onClick={onCancel}>
             Cancel
           </button>
@@ -641,9 +676,9 @@ function AddLocationModal({
             <span>Add location</span>
             <b>→</b>
           </button>
-        </div>
-      </form>
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -750,7 +785,9 @@ function StockLocationCard({
       </div>
       <div className={styles.stockCardTotals}>
         {stockMetrics.length === 0 ? (
-          <p className={styles.stockMetricsEmpty}>No stock metrics available</p>
+          <Empty className={styles.stockMetricsEmpty}>
+            <EmptyDescription>No stock metrics available</EmptyDescription>
+          </Empty>
         ) : (
           stockMetrics.map((metric) => (
             <button
@@ -886,73 +923,60 @@ function ViewItemsModal({
             ? filter.value
             : stockCategories.find((category) => category.id === filter.value)?.label;
   return (
-    <div
-      className={styles.modalBackdrop}
-      role="presentation"
-      onMouseDown={(event) => event.target === event.currentTarget && onCancel()}
-    >
-      <div
-        className={styles.importModal}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="view-items-title"
-      >
+    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className={styles.importModal}>
         <div className={styles.panelHeader}>
           <div>
             <p className={styles.panelKicker}>LOCATION STOCK</p>
-            <h2 id="view-items-title">{location.structureName}</h2>
+            <DialogTitle>{location.structureName}</DialogTitle>
           </div>
-          <button
-            type="button"
-            className={styles.iconButton}
-            aria-label="Close items dialog"
-            onClick={onCancel}
-          >
-            ×
-          </button>
         </div>
-        <p className={styles.panelDescription}>
-          {location.systemName} · {title} · {buckets.length} item types
-        </p>
-        <div className={styles.stockViewFilters}>
-          <button
-            type="button"
-            className={filter.kind === "all" ? styles.stockFilterActive : ""}
-            onClick={() => onFilterChange({ kind: "all" })}
-          >
-            All
-          </button>
-          <button
-            type="button"
-            className={filter.kind === "sales" ? styles.stockFilterActive : ""}
-            onClick={() => onFilterChange({ kind: "sales" })}
-          >
-            Sales
-          </button>
-          <button
-            type="button"
-            className={filter.kind === "jobs" ? styles.stockFilterActive : ""}
-            onClick={() => onFilterChange({ kind: "jobs" })}
-          >
-            Jobs
-          </button>
-          {stockCategories.map((category) => (
+        <div className="no-scrollbar max-h-[70vh] overflow-y-auto overscroll-contain">
+          <p className={styles.panelDescription}>
+            {location.systemName} · {title} · {buckets.length} item types
+          </p>
+          <div className={styles.stockViewFilters}>
             <button
               type="button"
-              className={
-                filter.kind === "category" && filter.value === category.id
-                  ? styles.stockFilterActive
-                  : ""
-              }
-              key={category.id}
-              onClick={() => onFilterChange({ kind: "category", value: category.id })}
+              className={filter.kind === "all" ? styles.stockFilterActive : ""}
+              onClick={() => onFilterChange({ kind: "all" })}
             >
-              {category.label}
+              All
             </button>
-          ))}
+            <button
+              type="button"
+              className={filter.kind === "sales" ? styles.stockFilterActive : ""}
+              onClick={() => onFilterChange({ kind: "sales" })}
+            >
+              Sales
+            </button>
+            <button
+              type="button"
+              className={filter.kind === "jobs" ? styles.stockFilterActive : ""}
+              onClick={() => onFilterChange({ kind: "jobs" })}
+            >
+              Jobs
+            </button>
+            {stockCategories.map((category) => (
+              <button
+                type="button"
+                className={
+                  filter.kind === "category" && filter.value === category.id
+                    ? styles.stockFilterActive
+                    : ""
+                }
+                key={category.id}
+                onClick={() => onFilterChange({ kind: "category", value: category.id })}
+              >
+                {category.label}
+              </button>
+            ))}
+          </div>
         </div>
         {buckets.length === 0 ? (
-          <div className={styles.emptyBuildList}>No items recorded at this location.</div>
+          <Empty className={styles.emptyBuildList}>
+            <EmptyDescription>No items recorded at this location.</EmptyDescription>
+          </Empty>
         ) : (
           <div className={styles.stockList}>
             {buckets.map(
@@ -1054,8 +1078,8 @@ function ViewItemsModal({
             )}
           </div>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1133,56 +1157,33 @@ function StockPasteModal({
   }
 
   return (
-    <div
-      className={styles.modalBackdrop}
-      role="presentation"
-      onMouseDown={(event) => event.target === event.currentTarget && onCancel()}
-    >
-      <form
-        className={styles.importModal}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="paste-stock-title"
-        onSubmit={resolveItems}
-      >
+    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent className={styles.importModal} render={<form onSubmit={resolveItems} />}>
         <div className={styles.panelHeader}>
           <div>
             <p className={styles.panelKicker}>STOCK IMPORT</p>
-            <h2 id="paste-stock-title">Paste items</h2>
+            <DialogTitle>Paste items</DialogTitle>
           </div>
-          <button
-            type="button"
-            className={styles.iconButton}
-            aria-label="Close paste items dialog"
-            onClick={onCancel}
-          >
-            ×
-          </button>
         </div>
         <p className={styles.panelDescription}>
           One item per line. Put the quantity at the end of each line.
         </p>
-        <div className={styles.stockMode} role="group" aria-label="Paste mode">
+        <RadioGroup
+          className={styles.stockMode}
+          value={mode}
+          onValueChange={(value) => setMode(value as "add" | "replace")}
+          aria-label="Paste mode"
+        >
           <label>
-            <input
-              type="radio"
-              name="paste-mode"
-              checked={mode === "add"}
-              onChange={() => setMode("add")}
-            />
+            <RadioGroupItem value="add" />
             Add to existing
           </label>
           <label>
-            <input
-              type="radio"
-              name="paste-mode"
-              checked={mode === "replace"}
-              onChange={() => setMode("replace")}
-            />
+            <RadioGroupItem value="replace" />
             Replace existing
           </label>
-        </div>
-        <textarea
+        </RadioGroup>
+        <Textarea
           className={styles.importTextarea}
           value={text}
           onChange={(event) => {
@@ -1194,7 +1195,11 @@ function StockPasteModal({
           aria-label="Stock items and quantities"
           autoFocus
         />
-        {error && <p className={styles.importError}>{error}</p>}
+        {error && (
+          <Alert variant="destructive" className={styles.importError}>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
         {results.length > 0 && (
           <div className={styles.importResults}>
             {results.map((item, index) => (
@@ -1211,7 +1216,7 @@ function StockPasteModal({
             ))}
           </div>
         )}
-        <div className={styles.modalActions}>
+        <DialogFooter>
           <button type="button" className={styles.refresh} onClick={onCancel}>
             Cancel
           </button>
@@ -1223,9 +1228,9 @@ function StockPasteModal({
             <span>{isResolving ? "Checking list..." : "Save items"}</span>
             <b>→</b>
           </button>
-        </div>
-      </form>
-    </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

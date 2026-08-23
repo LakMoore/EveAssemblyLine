@@ -91,7 +91,10 @@ export default function TypeSearch({
   return (
     <div ref={anchor} className={styles.search}>
       <Combobox
+        items={results}
         open={isOpen && query.trim().length >= 2}
+        itemToStringLabel={(item: TypeSearchResult) => item.name}
+        filter={null}
         inputValue={query}
         onOpenChange={setIsOpen}
         onInputValueChange={(value) => {
@@ -99,8 +102,7 @@ export default function TypeSearch({
           setIsOpen(true);
         }}
         onValueChange={(value) => {
-          const item = results.find((result) => String(result.typeId) === String(value));
-          if (item) choose(item);
+          if (value) choose(value);
         }}
       >
         <ComboboxInput
@@ -112,26 +114,17 @@ export default function TypeSearch({
           aria-label={ariaLabel}
         />
         <ComboboxContent anchor={anchor} className={styles.searchResults}>
+          <ComboboxEmpty className={styles.noResults}>No matching published items.</ComboboxEmpty>
           <ComboboxList>
-            {results.length ? (
-              results.map((item) => (
-                <ComboboxItem
-                  key={item.typeId}
-                  value={String(item.typeId)}
-                  className={styles.searchResult}
-                >
-                  <TypeIdentity
-                    name={item.name}
-                    typeId={item.typeId}
-                    variation={resultVariation(item.category)}
-                  />
-                </ComboboxItem>
-              ))
-            ) : (
-              <ComboboxEmpty className={styles.noResults}>
-                No matching published items.
-              </ComboboxEmpty>
-            )}
+            {results.map((item) => (
+              <ComboboxItem key={item.typeId} value={item} className={styles.searchResult}>
+                <TypeIdentity
+                  name={item.name}
+                  typeId={item.typeId}
+                  variation={resultVariation(item.category)}
+                />
+              </ComboboxItem>
+            ))}
           </ComboboxList>
         </ComboboxContent>
       </Combobox>

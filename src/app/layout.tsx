@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import AppShell from "./AppShell";
-import { ToastProvider } from "./components/ToastProvider";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { Toaster } from "@/components/ui/toast";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -19,9 +19,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en">
       <body>
         <TooltipProvider>
-          <ToastProvider>
-            <AppShell>{children}</AppShell>
-          </ToastProvider>
+          <AppShell>{children}</AppShell>
+          <Toaster />
         </TooltipProvider>
       </body>
     </html>

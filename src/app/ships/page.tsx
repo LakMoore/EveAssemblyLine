@@ -5,6 +5,9 @@ import TypeIdentity from "../components/TypeIdentity";
 import { loadClientShips, type ClientShipsResponse } from "@/lib/client/requestCache";
 import styles from "../page.module.css";
 import { ArrowRight, X } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Empty, EmptyDescription } from "@/components/ui/empty";
 
 type ShipAsset = NonNullable<ClientShipsResponse["assets"]>[number];
 type ShipSummary = NonNullable<ClientShipsResponse["ships"]>[number];
@@ -152,9 +155,15 @@ export default function ShipsPage() {
           </div>
         </div>
       </div>
-      {error && <p className={styles.shipsEmpty}>Could not load ship assets.</p>}
+      {error && (
+        <Alert variant="destructive" className={styles.shipsEmpty}>
+          <AlertDescription>Could not load ship assets.</AlertDescription>
+        </Alert>
+      )}
       {!error && data && shipsBySystem.length === 0 && (
-        <p className={styles.shipsEmpty}>No ships found in the current ESI asset cache.</p>
+        <Empty className={styles.shipsEmpty}>
+          <EmptyDescription>No ships found in the current ESI asset cache.</EmptyDescription>
+        </Empty>
       )}
       <div className={styles.shipSystems}>
         {shipsBySystem.map((system) => (
@@ -178,6 +187,7 @@ export default function ShipsPage() {
                     key={ship.itemId}
                     onClick={() => selectShip(ship)}
                     onKeyDown={(event) => {
+                      if (event.target !== event.currentTarget) return;
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
                         selectShip(ship);
@@ -304,102 +314,93 @@ function ShipContentsModal({
   const shipDisplayName = ship.name ? `${ship.name} - ${shipTypeName}` : shipTypeName;
 
   return (
-    <div
-      className={styles.modalBackdrop}
-      role="presentation"
-      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
-    >
-      <div
-        ref={modalRef}
-        className={styles.shipModal}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${shipDisplayName} ship fitting`}
-      >
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent ref={modalRef} className={styles.shipModal}>
         <div className={styles.panelHeader}>
           <div className={styles.shipModalHeading}>
             <p className={styles.panelKicker}>SHIP FITTING</p>
-            <TypeIdentity
-              name={shipDisplayName}
-              typeId={ship.typeId}
-              variation="render"
-              imageSize={54}
-              className={styles.shipModalIdentity}
-            />
+            <DialogTitle>
+              <TypeIdentity
+                name={shipDisplayName}
+                typeId={ship.typeId}
+                variation="render"
+                imageSize={54}
+                className={styles.shipModalIdentity}
+              />
+            </DialogTitle>
             <p className={styles.shipModalSystem}>
               {ship.systemName ?? "Unknown system"} · ITEM ID {ship.itemId}
             </p>
           </div>
-          <button
-            type="button"
-            className={`actionButton ${styles.importButton}`}
-            aria-label="Close ship contents"
-            onClick={onClose}
-          >
-            <X aria-hidden="true" />
-            <span>Close</span>
-          </button>
         </div>
-        {orderedGroups.length === 0 ? (
-          <p className={styles.shipsEmpty}>No contained assets.</p>
-        ) : (
-          <div className={styles.shipAssetGroups}>
-            {orderedGroups.map((group) => (
-              <section key={group.label} className={styles.shipAssetGroup}>
-                <h3>{group.label}</h3>
-                {group.assets.map((asset) => (
-                  <div className={styles.shipAssetRow} key={asset.itemId}>
-                    <div className={styles.shipAssetLoadout}>
-                      <div className={styles.shipAssetItem}>
-                        <TypeIdentity
-                          name={asset.name ?? typeNames.get(asset.typeId) ?? `Type ${asset.typeId}`}
-                          typeName={asset.name ? typeNames.get(asset.typeId) : undefined}
-                          typeId={asset.typeId}
-                          imageSize={32}
-                        />
-                        {asset.quantity > 1 && (
-                          <span className={styles.shipAssetQuantity}>
-                            ×{asset.quantity.toLocaleString()}
-                          </span>
-                        )}
-                      </div>
-                      {(ammoByWeaponId.get(asset.itemId) ?? []).map((ammo) => (
-                        <div className={styles.shipAssetItem} key={ammo.itemId}>
+        <div className="no-scrollbar max-h-[70vh] overflow-y-auto overscroll-contain">
+          {orderedGroups.length === 0 ? (
+            <Empty className={styles.shipsEmpty}>
+              <EmptyDescription>No contained assets.</EmptyDescription>
+            </Empty>
+          ) : (
+            <div className={styles.shipAssetGroups}>
+              {orderedGroups.map((group) => (
+                <section key={group.label} className={styles.shipAssetGroup}>
+                  <h3>{group.label}</h3>
+                  {group.assets.map((asset) => (
+                    <div className={styles.shipAssetRow} key={asset.itemId}>
+                      <div className={styles.shipAssetLoadout}>
+                        <div className={styles.shipAssetItem}>
                           <TypeIdentity
-                            name={ammo.name ?? typeNames.get(ammo.typeId) ?? `Type ${ammo.typeId}`}
-                            typeName={ammo.name ? typeNames.get(ammo.typeId) : undefined}
-                            typeId={ammo.typeId}
+                            name={
+                              asset.name ?? typeNames.get(asset.typeId) ?? `Type ${asset.typeId}`
+                            }
+                            typeName={asset.name ? typeNames.get(asset.typeId) : undefined}
+                            typeId={asset.typeId}
                             imageSize={32}
                           />
-                          {ammo.quantity > 1 && (
+                          {asset.quantity > 1 && (
                             <span className={styles.shipAssetQuantity}>
-                              ×{ammo.quantity.toLocaleString()}
+                              ×{asset.quantity.toLocaleString()}
                             </span>
                           )}
                         </div>
-                      ))}
+                        {(ammoByWeaponId.get(asset.itemId) ?? []).map((ammo) => (
+                          <div className={styles.shipAssetItem} key={ammo.itemId}>
+                            <TypeIdentity
+                              name={
+                                ammo.name ?? typeNames.get(ammo.typeId) ?? `Type ${ammo.typeId}`
+                              }
+                              typeName={ammo.name ? typeNames.get(ammo.typeId) : undefined}
+                              typeId={ammo.typeId}
+                              imageSize={32}
+                            />
+                            {ammo.quantity > 1 && (
+                              <span className={styles.shipAssetQuantity}>
+                                ×{ammo.quantity.toLocaleString()}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                      {shipsByItemId.has(asset.itemId) && (
+                        <button
+                          type="button"
+                          className={`actionButton ${styles.importButton}`}
+                          title="View ship fitting"
+                          onClick={() => {
+                            const nestedShip = shipsByItemId.get(asset.itemId);
+                            if (nestedShip) onSelectShip(nestedShip);
+                          }}
+                        >
+                          <span>VIEW FITTING</span>
+                          <ArrowRight aria-hidden="true" />
+                        </button>
+                      )}
                     </div>
-                    {shipsByItemId.has(asset.itemId) && (
-                      <button
-                        type="button"
-                        className={`actionButton ${styles.importButton}`}
-                        title="View ship fitting"
-                        onClick={() => {
-                          const nestedShip = shipsByItemId.get(asset.itemId);
-                          if (nestedShip) onSelectShip(nestedShip);
-                        }}
-                      >
-                        <span>VIEW FITTING</span>
-                        <ArrowRight aria-hidden="true" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </section>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+                  ))}
+                </section>
+              ))}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
