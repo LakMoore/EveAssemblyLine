@@ -28,6 +28,7 @@ const rigCostAttribute = 2595;
 const reactionRigMaterialAttribute = 2714;
 const reactionRigTimeAttribute = 2713;
 const rigReprocessingAttribute = 379;
+const securityModifierAttributes = { high: 2355, low: 2356, null: 2357 } as const;
 
 function attributesFor(record: TypeDogmaRecord | undefined) {
   return new Map(
@@ -45,6 +46,11 @@ function multiplier(value: number | undefined) {
 
 function addPercentageModifier(multiplierValue: number, modifier: number) {
   return multiplierValue * (1 + modifier / 100);
+}
+
+function securityClass(securityStatus: number | undefined) {
+  if (securityStatus === undefined || securityStatus >= 0.5) return "high";
+  return securityStatus > 0 ? "low" : "null";
 }
 
 function effectModifiers(
@@ -80,6 +86,7 @@ export function calculateFacilityBonuses(
   rigTypeIds: readonly number[],
   typeDogma: Map<number, TypeDogmaRecord>,
   dogmaEffects: Map<number, DogmaEffectsRecord>,
+  securityStatus?: number,
 ): FacilityBonusResult {
   const structureAttributes = attributesFor(structure);
   let material = multiplier(structureAttributes.get(structureMaterialAttribute));
@@ -89,6 +96,7 @@ export function calculateFacilityBonuses(
   let reactionTime = 1;
   let reactionCost = 1;
   let reprocessingYield = 0;
+  let bestManufacturingMaterialModifier: number | undefined;
 
   for (const rigTypeId of rigTypeIds) {
     if (rigTypeId <= 0) continue;
@@ -101,7 +109,15 @@ export function calculateFacilityBonuses(
       materialModifier !== undefined
       && hasTarget(rig, dogmaEffects, rigMaterialAttribute, 2538, 2570)
     ) {
-      material = addPercentageModifier(material, materialModifier);
+      const securityMultiplier =
+        attributesFor(rig).get(securityModifierAttributes[securityClass(securityStatus)]) ?? 1;
+      const effectiveMaterialModifier = materialModifier * securityMultiplier;
+      if (
+        bestManufacturingMaterialModifier === undefined
+        || effectiveMaterialModifier < bestManufacturingMaterialModifier
+      ) {
+        bestManufacturingMaterialModifier = effectiveMaterialModifier;
+      }
     }
     if (timeModifier !== undefined && hasTarget(rig, dogmaEffects, rigTimeAttribute, 2538, 2570)) {
       time = addPercentageModifier(time, timeModifier);
@@ -124,6 +140,10 @@ export function calculateFacilityBonuses(
       reactionTime = addPercentageModifier(reactionTime, reactionTimeModifier);
     }
     reprocessingYield += rigAttributes.get(rigReprocessingAttribute) ?? 0;
+  }
+
+  if (bestManufacturingMaterialModifier !== undefined) {
+    material = addPercentageModifier(material, bestManufacturingMaterialModifier);
   }
 
   return {

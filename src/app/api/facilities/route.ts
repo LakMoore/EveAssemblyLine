@@ -267,6 +267,7 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
       facility.rigTypeIds,
       typeDogma,
       dogmaEffects,
+      facility.securityStatus,
     );
     const reactionSettingsAllowed = supportsReactionSettings(
       facility.typeId,

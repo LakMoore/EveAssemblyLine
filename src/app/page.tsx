@@ -322,7 +322,7 @@ function WelcomePage() {
             <h2>Bugs remaining to be fixed</h2>
           </div>
           <ul className={styles.roadmapList}>
-            <li>Correct the manufacturing and reaction ME calculation per structure.</li>
+            <li>Consider manufacturing ME bonus per item category as it is in-game.</li>
             <li>Remove unnecessary compressed items from the hauling section of the build plan.</li>
           </ul>
         </section>
@@ -413,60 +413,69 @@ function Planner() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise
-      .all([fetchFacilityResponse(), loadPlannerLocations()])
-      .then(([data, storedLocations]) => {
-        const options = (data?.facilities ?? [])
-          .filter(
-            (facility): facility is typeof facility & { id: number } =>
-              typeof facility.id === "number",
-          )
-          .map((facility) => ({
-            id: String(facility.id),
-            locationId: facility.id,
-            name: facility.name,
-            baseYield: (facility.activities.reprocessing.baseYield ?? 0) * 100,
-            baseManufacturingMe: facility.activities.manufacturing.materialConsumption ?? 0,
-            baseReactionMe: facility.activities.reactions.materialConsumption ?? 0,
-          }));
-        const manufacturingOptions = options
-          .slice()
-          .sort(
-            (left, right) =>
-              left.baseManufacturingMe - right.baseManufacturingMe
-              || left.name.localeCompare(right.name),
-          );
-        const reactionOptions = options
-          .slice()
-          .sort(
-            (left, right) =>
-              left.baseReactionMe - right.baseReactionMe || left.name.localeCompare(right.name),
-          );
-        const nextLocations = {
-          ...defaultLocations,
-          ...storedLocations,
-          manufacturing: selectSavedLocation(
-            manufacturingOptions,
-            storedLocations?.manufacturing,
-            defaultLocations.manufacturing,
-          ),
-          reactions: selectSavedLocation(
-            reactionOptions,
-            storedLocations?.reactions,
-            defaultLocations.reactions,
-          ),
-        };
-        if (!cancelled) {
-          setLocationOptions(options);
-          setLocations(nextLocations);
-          void savePlannerLocations(nextLocations);
-        }
-      })
-      .catch(() => {
+    async function loadLocationOptions(force = false) {
+      const [data, storedLocations] = await Promise.all([
+        fetchFacilityResponse(force),
+        loadPlannerLocations(),
+      ]);
+      if (cancelled) return;
+      const options = (data?.facilities ?? [])
+        .filter(
+          (facility): facility is typeof facility & { id: number } =>
+            typeof facility.id === "number",
+        )
+        .map((facility) => ({
+          id: String(facility.id),
+          locationId: facility.id,
+          name: facility.name,
+          baseYield: (facility.activities.reprocessing.baseYield ?? 0) * 100,
+          baseManufacturingMe: facility.activities.manufacturing.materialConsumption ?? 0,
+          baseReactionMe: facility.activities.reactions.materialConsumption ?? 0,
+        }));
+      const manufacturingOptions = options
+        .slice()
+        .sort(
+          (left, right) =>
+            left.baseManufacturingMe - right.baseManufacturingMe
+            || left.name.localeCompare(right.name),
+        );
+      const reactionOptions = options
+        .slice()
+        .sort(
+          (left, right) =>
+            left.baseReactionMe - right.baseReactionMe || left.name.localeCompare(right.name),
+        );
+      const nextLocations = {
+        ...defaultLocations,
+        ...storedLocations,
+        manufacturing: selectSavedLocation(
+          manufacturingOptions,
+          storedLocations?.manufacturing,
+          defaultLocations.manufacturing,
+        ),
+        reactions: selectSavedLocation(
+          reactionOptions,
+          storedLocations?.reactions,
+          defaultLocations.reactions,
+        ),
+      };
+      setLocationOptions(options);
+      setLocations(nextLocations);
+      void savePlannerLocations(nextLocations);
+    }
+
+    void loadLocationOptions().catch(() => {
+      if (!cancelled) setLocationOptions([]);
+    });
+    function handleFacilitiesRefresh() {
+      void loadLocationOptions(true).catch(() => {
         if (!cancelled) setLocationOptions([]);
       });
+    }
+    window.addEventListener("assembly-line-esi-refreshed", handleFacilitiesRefresh);
     return () => {
       cancelled = true;
+      window.removeEventListener("assembly-line-esi-refreshed", handleFacilitiesRefresh);
     };
   }, [language, locations.structures]);
 
