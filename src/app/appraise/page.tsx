@@ -3,11 +3,11 @@
 import { useState } from "react";
 import { BadgeDollarSign } from "lucide-react";
 import { useAppLanguage } from "../AppShell";
+import CalculateButton from "@/components/CalculateButton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
-import { Spinner } from "@/components/ui/spinner";
 import {
   Select,
   SelectContent,
@@ -157,22 +157,15 @@ export default function AppraisePage() {
           placeholder="100 Tritanium\n25,000 Mexallon"
           rows={10}
         />
-        <Button
-          type="button"
-          className={styles.actionButton}
+        <CalculateButton
+          type="submit"
           onClick={appraiseItems}
           disabled={isLoading}
-        >
-          <span className={styles.appraiseActionLead}>
-            {isLoading ? (
-              <Spinner aria-hidden="true" />
-            ) : (
-              <BadgeDollarSign size={16} aria-hidden="true" />
-            )}
-            <span>{isLoading ? "Checking market..." : "Appraise list"}</span>
-          </span>
-          <b aria-hidden="true">→</b>
-        </Button>
+          icon={BadgeDollarSign}
+          isLoading={isLoading}
+          label="Appraise list"
+          loadingLabel="Checking market..."
+        />
         {error && (
           <Alert variant="destructive" className={styles.formError}>
             <AlertDescription>{error}</AlertDescription>

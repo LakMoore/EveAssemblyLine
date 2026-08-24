@@ -4,6 +4,7 @@ import { FormEvent, KeyboardEvent, Suspense, useEffect, useRef, useState } from 
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAppLanguage } from "../AppShell";
+import CalculateButton from "@/components/CalculateButton";
 import TypeIdentity from "../components/TypeIdentity";
 import TypeSearch from "@/components/TypeSearch";
 import { toast } from "@/components/ui/toast";
@@ -718,17 +719,14 @@ function CompressContent() {
             </Alert>
           )}
           <div className={styles.actionBar}>
-            <Button
-              className="w-full justify-between"
+            <CalculateButton
               type="submit"
               disabled={items.length === 0 || isLoading}
-            >
-              <span className="flex min-w-0 items-center gap-1.5 text-left">
-                <Minimize2 aria-hidden="true" />
-                <span>{isLoading ? "Compressing..." : "Compress"}</span>
-              </span>
-              <b aria-hidden="true">→</b>
-            </Button>
+              icon={Minimize2}
+              isLoading={isLoading}
+              label="Compress"
+              loadingLabel="Compressing..."
+            />
           </div>
         </section>
       </form>

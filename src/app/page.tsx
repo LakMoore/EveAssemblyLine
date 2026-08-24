@@ -40,6 +40,7 @@ import type { SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import { useAppLanguage } from "./AppShell";
 import TypeIdentity from "./components/TypeIdentity";
+import CalculateButton from "@/components/CalculateButton";
 import TypeSearch from "@/components/TypeSearch";
 import { toast } from "@/components/ui/toast";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +54,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -382,6 +393,7 @@ function Planner() {
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
   const [isExcludedLocationsModalOpen, setIsExcludedLocationsModalOpen] = useState(false);
   const [plan, setPlan] = useState<PlanResult | null>(null);
+  const [isDeleteAllDialogOpen, setIsDeleteAllDialogOpen] = useState(false);
   const [characterStatuses, setCharacterStatuses] = useState<ClientCharacterStatus[]>([]);
   const [characterNamesById, setCharacterNamesById] = useState<Map<number, string>>(new Map());
   const [stock, setStock] = useState<PlanStockItem[]>([]);
@@ -636,6 +648,16 @@ function Planner() {
     setItems((current) => current.filter((item) => !item.fromCompression));
   }
 
+  function deleteAllItems() {
+    if (items.length === 0) return;
+    setIsDeleteAllDialogOpen(true);
+  }
+
+  function confirmDeleteAllItems() {
+    setItems([]);
+    setIsDeleteAllDialogOpen(false);
+  }
+
   const selectedManufacturingLocation = locationOptions.find(
     (location) => location.locationId === locations.manufacturing,
   );
@@ -665,32 +687,31 @@ function Planner() {
                 <h2>Build list</h2>
               </div>
               <div className={styles.panelHeaderActions}>
-                <button
-                  type="button"
-                  className={`actionButton ${styles.importButton}`}
-                  onClick={() => setIsPasteModalOpen(true)}
-                >
-                  <Clipboard aria-hidden="true" />
+                <Button variant="outline" onClick={() => setIsPasteModalOpen(true)}>
+                  <Clipboard data-icon="inline-start" aria-hidden="true" />
                   <span>Paste list</span>
-                </button>
-                <button
-                  type="button"
-                  className={`actionButton ${styles.importButton}`}
+                </Button>
+                <Button
+                  variant="outline"
                   onClick={() => void copyBuildList()}
                   disabled={items.length === 0}
                 >
-                  <CopyIcon aria-hidden="true" />
+                  <CopyIcon data-icon="inline-start" aria-hidden="true" />
                   <span>Copy list</span>
-                </button>
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={deleteAllItems}
+                  disabled={items.length === 0}
+                >
+                  <Trash2 data-icon="inline-start" aria-hidden="true" />
+                  <span>Delete all</span>
+                </Button>
                 {items.some((item) => item.fromCompression) && (
-                  <button
-                    type="button"
-                    className={`actionButton ${styles.importButton}`}
-                    onClick={removeCompressionItems}
-                  >
-                    <X aria-hidden="true" />
+                  <Button variant="outline" onClick={removeCompressionItems}>
+                    <X data-icon="inline-start" aria-hidden="true" />
                     <span>Remove Compression</span>
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
@@ -832,7 +853,6 @@ function Planner() {
                     />
                   </label>
                   <Button
-                    type="button"
                     variant="destructive"
                     size="icon-sm"
                     aria-label={`Remove ${item.name}`}
@@ -975,40 +995,29 @@ function Planner() {
               <div className={styles.excludedLocationsControl}>
                 <span>EXCLUDED LOCATIONS</span>
                 <div className={styles.excludedLocationsActions}>
-                  <button
-                    type="button"
-                    className={styles.excludedLocationsCount}
+                  <Button
                     disabled={excludedLocationIds.length === 0}
                     onClick={() => setIsExcludedLocationsModalOpen(true)}
                   >
                     {excludedLocationIds.length}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.clearExcludedButton}
+                  </Button>
+                  <Button
                     disabled={excludedLocationIds.length === 0 || isPlanLoading}
                     onClick={() => void clearExcludedLocations()}
                   >
                     Clear all
-                  </button>
+                  </Button>
                 </div>
               </div>
             </div>
-            <button
-              className={styles.calculate}
+            <CalculateButton
               type="submit"
               disabled={isPlanLoading || items.length === 0}
-            >
-              <span className={styles.calculateLead}>
-                {isPlanLoading ? (
-                  <Spinner aria-hidden="true" />
-                ) : (
-                  <ClipboardList size={16} aria-hidden="true" />
-                )}
-                <span>{isPlanLoading ? "Calculating..." : "Calculate production plan"}</span>
-              </span>
-              <b aria-hidden="true">→</b>
-            </button>
+              icon={ClipboardList}
+              isLoading={isPlanLoading}
+              label="Calculate production plan"
+              loadingLabel="Calculating..."
+            />
           </div>
         </div>
       </form>
@@ -1039,6 +1048,22 @@ function Planner() {
           onCancel={() => setIsExcludedLocationsModalOpen(false)}
         />
       )}
+      <AlertDialog open={isDeleteAllDialogOpen} onOpenChange={setIsDeleteAllDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete all build-list items?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove every item from the current build list. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmDeleteAllItems}>
+              Delete all
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div className={styles.results}>
         <div className={styles.resultsHeader} ref={resultsHeaderRef}>
           <div>

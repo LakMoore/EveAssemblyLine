@@ -901,6 +901,22 @@
   color: var(--cyan);
 }
 
+.deleteAllButton {
+  border: 1px solid #8b3e4d;
+  background: #3a2428;
+  color: #ffd8cf;
+}
+
+.deleteAllButton:hover:not(:disabled) {
+  background: #542c34;
+  color: #fff0eb;
+}
+
+.deleteAllButton:focus-visible {
+  border-color: #f29a82;
+  box-shadow: 0 0 0 2px #f29a824d;
+}
+
 .panelHeaderActions {
   display: flex;
   flex-wrap: wrap;
@@ -3737,6 +3753,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-top: 18px;
+  margin-bottom: 24px;
   padding-top: 18px;
   border-top: 1px solid var(--line);
 }
