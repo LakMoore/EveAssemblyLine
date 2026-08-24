@@ -389,7 +389,6 @@ function Planner() {
   const [locationOptions, setLocationOptions] = useState<PlanLocationOption[]>([]);
   const [includeStock, setIncludeStock] = useState(true);
   const [locations, setLocations] = useState<PlannerLocations>(defaultLocations);
-  const [areLocationsLoaded, setAreLocationsLoaded] = useState(false);
   const [settings] = useState<PlannerSettings>(() => {
     if (typeof window === "undefined") return defaultSettings;
     try {
@@ -402,7 +401,9 @@ function Planner() {
   });
 
   function updateLocations(next: Partial<Pick<PlannerLocations, "manufacturing" | "reactions">>) {
-    setLocations((current) => ({ ...current, ...next }));
+    const updatedLocations = { ...locations, ...next };
+    setLocations(updatedLocations);
+    void savePlannerLocations(updatedLocations);
   }
 
   useEffect(() => {
@@ -462,7 +463,7 @@ function Planner() {
       };
       setLocationOptions(options);
       setLocations(nextLocations);
-      setAreLocationsLoaded(true);
+      void savePlannerLocations(nextLocations);
     }
 
     void loadLocationOptions().catch(() => {
@@ -478,11 +479,7 @@ function Planner() {
       cancelled = true;
       window.removeEventListener("assembly-line-esi-refreshed", handleFacilitiesRefresh);
     };
-  }, [language, locations.structures]);
-
-  useEffect(() => {
-    if (areLocationsLoaded) void savePlannerLocations(locations);
-  }, [areLocationsLoaded, locations]);
+  }, [language]);
 
   useEffect(() => {
     if (isBuildListLoaded) void saveBuildList(items);
