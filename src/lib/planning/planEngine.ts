@@ -149,6 +149,12 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
           )
         : (typeRecords.get(item.typeId)?.volume ?? 0),
     }));
+  const stockByLocationAndType = new Map<number, Map<number, number>>();
+  for (const lot of stockLots) {
+    const locationStock = stockByLocationAndType.get(lot.rootLocationId) ?? new Map();
+    locationStock.set(lot.typeId, (locationStock.get(lot.typeId) ?? 0) + lot.quantity);
+    stockByLocationAndType.set(lot.rootLocationId, locationStock);
+  }
   const reprocessingStock = new Map(standardStock);
   const compressionEfficiencyByTypeId = new Map<number, number>();
   for (const item of request.items) {
@@ -249,6 +255,23 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       rootLocationId: reprocessingLocationId,
       volumePerUnit: type?.volume ?? 0,
     });
+  }
+  function getRunsAvailable(
+    blueprint: NonNullable<
+      Awaited<ReturnType<typeof getBuildBlueprintByProductTypeId>>
+    >["blueprint"],
+    activity: "manufacturing" | "reaction",
+    locationId: number | undefined,
+  ) {
+    if (locationId === undefined) return 0;
+    const materials = blueprint.activities[activity]?.materials ?? [];
+    if (materials.length === 0) return 0;
+    const locationStock = stockByLocationAndType.get(locationId) ?? new Map();
+    return Math.min(
+      ...materials.map((material) =>
+        Math.floor((locationStock.get(material.typeID) ?? 0) / material.quantity),
+      ),
+    );
   }
   if (reprocessingLocationId !== undefined) {
     for (const [typeId, quantity] of reprocessed.consumedCompressed) {
@@ -615,6 +638,11 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
               typeId: blueprint._key,
               name: typeName(blueprint._key, `${fallbackName} Blueprint`),
               runs: (existing?.runs ?? 0) + runsNeeded,
+              runsAvailable: Math.min(
+                existing?.runsAvailable ?? Number.MAX_SAFE_INTEGER,
+                getRunsAvailable(blueprint, "manufacturing", request.locations?.manufacturing),
+                runsNeeded,
+              ),
               totalTime:
                 (existing?.totalTime ?? 0)
                 + blueprint.activities.manufacturing!.time * (1 - efficiency.te / 100) * runsNeeded,
@@ -660,6 +688,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
               stockRuns: copyStock?.runs ?? 0,
               availableSourceCounts: sourceMetadata(blueprint._key)?.counts,
               bpoCount,
+              buildTime: blueprint.activities.copying?.time ?? 0,
               buyQuantity: (bpcs.get(blueprint._key)?.buyQuantity ?? 0) + bpcBuyQuantity,
             },
           );
@@ -674,6 +703,11 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
             typeId: blueprint._key,
             name: typeName(blueprint._key, `${fallbackName} Blueprint`),
             runs: (existing?.runs ?? 0) + runsNeeded,
+            runsAvailable: Math.min(
+              existing?.runsAvailable ?? Number.MAX_SAFE_INTEGER,
+              getRunsAvailable(blueprint, "reaction", request.locations?.reactions),
+              runsNeeded,
+            ),
             totalTime:
               (existing?.totalTime ?? 0)
               + blueprint.activities.reaction!.time * (1 - efficiency.te / 100) * runsNeeded,
@@ -806,6 +840,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
             stockRuns: sourceBpc?.stockRuns ?? 0,
             availableSourceCounts: sourceMetadata(inventingBlueprint._key)?.counts,
             bpoCount: sourceBpoCount,
+            buildTime: inventingBlueprint.activities.copying?.time ?? 0,
             buyQuantity:
               sourceBpoCount > 0
                 ? Math.ceil(sourceRemainingRuns / inventingBlueprint.maxProductionLimit)

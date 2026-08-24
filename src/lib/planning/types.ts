@@ -214,6 +214,7 @@ export interface PlanResult {
       stockRuns: number;
       buyQuantity: number;
       bpoCount: number;
+      buildTime: number;
       availableSourceCounts?: PlanSourceCounts;
     }>;
     bpcsToBuy: Array<{
@@ -225,6 +226,7 @@ export interface PlanResult {
       stockRuns: number;
       buyQuantity: number;
       bpoCount: number;
+      buildTime: number;
       availableSourceCounts?: PlanSourceCounts;
     }>;
     inventionJobs: Array<{ typeId: number; name: string; runs: number; locationId?: number }>;
@@ -232,6 +234,7 @@ export interface PlanResult {
       typeId: number;
       name: string;
       runs: number;
+      runsAvailable: number;
       totalTime: number;
       locationId?: number;
     }>;
@@ -239,6 +242,7 @@ export interface PlanResult {
       typeId: number;
       name: string;
       runs: number;
+      runsAvailable: number;
       totalTime: number;
       locationId?: number;
     }>;

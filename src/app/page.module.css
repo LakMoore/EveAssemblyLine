@@ -2269,12 +2269,229 @@
 }
 
 .planRowSeparator {
+  width: 100%;
+  margin: 0;
+  border: 0;
   border-top: 1px solid #1e3740;
 }
 
 .planList,
 .planTable {
   padding-bottom: 14px;
+}
+
+.planList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.locationGroupHeader {
+  margin: 18px 0 0;
+  padding-top: 12px;
+  border-top: 2px solid #315662;
+  color: #d4e6e9;
+  font: 12px "DM Mono";
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.copySummary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 14px 0 4px;
+  border-top: 2px solid #315662;
+}
+
+.copySummary strong {
+  color: #d4e6e9;
+  font: 20px "DM Mono";
+}
+
+.copySummary span {
+  color: #6e8a95;
+  font: 10px "DM Mono";
+  letter-spacing: 0.5px;
+}
+
+.reactionSummary {
+  display: grid;
+  flex: 1 0 100%;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 12px 18px;
+  min-width: 0;
+  order: 10;
+}
+
+.reactionPlanActions {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.reactionPlanControls,
+.reactionDisplayControls,
+.reactionResultsActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.reactionPlanControls {
+  flex-wrap: wrap;
+}
+
+.reactionDisplayControls {
+  min-height: 32px;
+}
+
+.reactionResultsActions {
+  justify-content: space-between;
+}
+
+.reactionResultsActions .reactionSummary {
+  flex: 1 1 auto;
+  order: 0;
+}
+
+.reactionSummary span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.reactionSummary strong {
+  color: #d4e6e9;
+  font: 14px "DM Mono";
+  white-space: nowrap;
+}
+
+.reactionSummary small {
+  color: #6e8a95;
+  font: 9px "DM Mono";
+  overflow-wrap: anywhere;
+}
+
+.modeSelect {
+  flex: 0 1 190px;
+  min-width: 170px;
+}
+
+.runCountSelect {
+  flex: 0 1 125px;
+  min-width: 125px;
+}
+
+.maxJobHours {
+  width: 100px;
+}
+
+.hoursControl {
+  display: flex;
+  flex: 0 0 150px;
+  align-items: center;
+  gap: 8px;
+}
+
+.hoursControl > label {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.reactionTableHeader,
+.reactionRow {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.9fr) repeat(4, minmax(0, 0.78fr));
+  gap: 13px;
+  align-items: center;
+}
+
+.reactionTableHeader {
+  padding: 14px 0 8px;
+  color: #6e8a95;
+  font: 10px "DM Mono";
+  letter-spacing: 0.5px;
+  text-align: right;
+}
+
+.reactionTableHeader > :first-child {
+  text-align: left;
+}
+
+.reactionSortButton {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.reactionTableHeader > :first-child {
+  justify-content: flex-start;
+}
+
+.reactionSortButton svg {
+  width: 12px;
+  height: 12px;
+}
+
+.reactionSortButton:hover,
+.reactionSortButton:focus-visible {
+  color: var(--cyan);
+}
+
+.reactionCells {
+  display: contents;
+}
+
+.reactionRow .planRowAmount {
+  display: contents;
+}
+
+.reactionCells strong {
+  min-width: 0;
+  font: 11px "DM Mono";
+  overflow-wrap: anywhere;
+}
+
+.buyReactionButton {
+  width: max-content;
+  min-height: 20px;
+  height: 20px;
+  padding: 0 4px;
+  font: 9px "DM Mono";
+  white-space: nowrap;
+}
+
+.reactionAvailableCell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+}
+
+.reactionValue {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  min-width: 0;
+}
+
+.reactionValue small {
+  color: #708c95;
+  font: 10px "DM Mono";
+  white-space: nowrap;
 }
 
 .haulGroups {
@@ -2556,8 +2773,22 @@
     flex-direction: column;
   }
 
+  .planActions > label,
+  .reactionSummary {
+    width: 100%;
+    min-width: 0;
+  }
+
   .planActions .copyButton {
     width: 100%;
+  }
+
+  .reactionResultsActions {
+    flex-wrap: wrap;
+  }
+
+  .reactionResultsActions .copyButton {
+    width: auto;
   }
 
   .planRow {
@@ -4180,9 +4411,17 @@
 
 .planActions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   justify-content: flex-end;
   padding: 14px 0 10px;
+}
+
+.planActions > label {
+  flex: 0 0 auto;
+  align-self: center;
+  min-width: 0;
+  width: auto;
 }
 
 .copyButton {

@@ -24,9 +24,11 @@ import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compr
 import { loadPlannerLocations, savePlannerLocations } from "@/lib/planning/plannerPreferencesStore";
 import {
   loadClientSession,
+  loadClientJobs,
   loadClientStateStatus,
   loadClientStock,
   type ClientCharacterStatus,
+  type ClientJobsResponse,
 } from "@/lib/client/requestCache";
 import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
 import {
@@ -48,6 +50,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -74,15 +78,16 @@ import {
 } from "@/components/ui/select";
 import styles from "./page.module.css";
 import {
+  ArrowDown,
+  ArrowUp,
   Atom,
   Brain,
   ChartLine,
-  Check,
   Clipboard,
-  ClipboardList,
   Copy as CopyIcon,
-  Factory,
+  Check,
   Info,
+  ClipboardList,
   Minimize2,
   Microscope,
   Repeat,
@@ -90,6 +95,7 @@ import {
   SquareX,
   Trash2,
   Truck,
+  Factory,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -121,8 +127,92 @@ type PlanLocationOption = {
   baseReactionMe: number;
 };
 
+type ReactionScheduleMode = "simple" | "available-slots" | "max-job-length";
+type ReactionSchedule = { installs: number; runs: number; time: number };
+type ReactionCoverage = { installable: number; total: number };
+type ReactionSortKey = "type" | "suggestedRuns" | "totalNeeded";
+type ReactionSort = { key: ReactionSortKey; direction: "asc" | "desc" };
+
+function buildReactionSchedule(
+  jobs: PlanResult["lists"]["reactionJobs"],
+  stock: PlanStockItem[],
+  showTotalRunCounts: boolean,
+  mode: ReactionScheduleMode,
+  availableReactionSlots: number,
+  maxJobHours: number,
+): Map<number, ReactionSchedule> {
+  const rows = jobs.map((job) => {
+    const blueprintCount = stock
+      .filter(
+        (item) => item.category === "reactionformula" && item.typeId === job.typeId && !item.inUse,
+      )
+      .reduce((total, item) => total + item.quantity, 0);
+    const runs = showTotalRunCounts ? job.runs : job.runsAvailable;
+    return { job, blueprintCount, runs, maxInstalls: Math.min(blueprintCount, Math.max(0, runs)) };
+  });
+  const installs = new Map<number, number>();
+  if (mode === "available-slots") {
+    let remainingSlots = Math.max(0, availableReactionSlots);
+    for (const row of rows.slice().sort((left, right) => right.runs - left.runs)) {
+      if (remainingSlots <= 0) break;
+      const count = Math.min(1, row.maxInstalls);
+      installs.set(row.job.typeId, count);
+      remainingSlots -= count;
+    }
+    while (remainingSlots > 0) {
+      const candidates = rows
+        .filter((row) => (installs.get(row.job.typeId) ?? 0) < row.maxInstalls)
+        .sort((left, right) => {
+          const leftRuns = Math.ceil(left.runs / Math.max(1, installs.get(left.job.typeId) ?? 0));
+          const rightRuns = Math.ceil(
+            right.runs / Math.max(1, installs.get(right.job.typeId) ?? 0),
+          );
+          return rightRuns - leftRuns || right.runs - left.runs;
+        });
+      if (candidates.length === 0) break;
+      const candidate = candidates[0];
+      installs.set(candidate.job.typeId, (installs.get(candidate.job.typeId) ?? 0) + 1);
+      remainingSlots -= 1;
+    }
+  }
+  return new Map(
+    rows.map(({ job, blueprintCount, runs, maxInstalls }) => {
+      const perRunTime = job.runs > 0 ? job.totalTime / job.runs : 0;
+      const timeLimitedRuns =
+        maxJobHours > 0 && perRunTime > 0 ? Math.floor((maxJobHours * 3600) / perRunTime) : runs;
+      const simpleInstalls = runs > 0 ? Math.min(blueprintCount, Math.ceil(runs / 10)) : 0;
+      const installCount =
+        mode === "available-slots"
+          ? (installs.get(job.typeId) ?? 0)
+          : mode === "max-job-length"
+            ? timeLimitedRuns > 0
+              ? Math.min(blueprintCount, Math.ceil(runs / timeLimitedRuns))
+              : 0
+            : simpleInstalls;
+      const runsPerInstall =
+        installCount > 0
+          ? mode === "max-job-length"
+            ? Math.min(timeLimitedRuns, Math.ceil(runs / installCount))
+            : Math.ceil(runs / installCount)
+          : 0;
+      return [
+        job.typeId,
+        {
+          installs: Math.min(installCount, maxInstalls),
+          runs: runsPerInstall,
+          time: perRunTime * runsPerInstall,
+        },
+      ];
+    }),
+  );
+}
+
 function getStockLocationId(item: PlanStockItem) {
   return item.rootLocationId ?? item.sourceLocationId ?? item.locationId;
+}
+
+function formatCoverage(coveredRuns: number, totalRuns: number) {
+  return totalRuns > 0 ? `${((coveredRuns / totalRuns) * 100).toFixed(1)}%` : "0.0%";
 }
 
 function selectSavedLocation(
@@ -395,6 +485,7 @@ function Planner() {
   const [plan, setPlan] = useState<PlanResult | null>(null);
   const [isDeleteAllDialogOpen, setIsDeleteAllDialogOpen] = useState(false);
   const [characterStatuses, setCharacterStatuses] = useState<ClientCharacterStatus[]>([]);
+  const [jobs, setJobs] = useState<ClientJobsResponse | null>(null);
   const [characterNamesById, setCharacterNamesById] = useState<Map<number, string>>(new Map());
   const [stock, setStock] = useState<PlanStockItem[]>([]);
   const [excludedLocationIds, setExcludedLocationIds] = useState<number[]>([]);
@@ -558,6 +649,8 @@ function Planner() {
       try {
         const session = await loadClientSession();
         const status = session.authenticated ? await loadClientStateStatus() : { characters: [] };
+        const jobsData = session.authenticated ? await loadClientJobs() : null;
+        setJobs(jobsData);
         setCharacterNamesById(
           new Map(
             (session.characters ?? []).map((character) => [
@@ -1124,6 +1217,12 @@ function Planner() {
                 plan={plan}
                 characterStatuses={characterStatuses}
                 characterNamesById={characterNamesById}
+                availableReactionSlots={(jobs?.characters ?? []).reduce(
+                  (total, character) =>
+                    total
+                    + Math.max(0, character.availableSlots.Reactions - character.slots.Reactions),
+                  0,
+                )}
                 stock={stock}
                 locationNamesById={
                   new Map([
@@ -1136,6 +1235,15 @@ function Planner() {
                   ])
                 }
                 onPlanChange={setPlan}
+                onAddBuildItem={(item) =>
+                  importItems([
+                    {
+                      ...item,
+                      categoryName: "Reaction Formula",
+                      iconCategory: "reactionformula",
+                    },
+                  ])
+                }
                 onExcludeHaulBucket={(fromLocationId) => void excludeHaulBucket(fromLocationId)}
                 resultsHeaderRef={resultsHeaderRef}
               />
@@ -1372,8 +1480,10 @@ function PlanList({
   characterStatuses,
   characterNamesById,
   stock,
+  availableReactionSlots,
   locationNamesById,
   onPlanChange,
+  onAddBuildItem,
   onExcludeHaulBucket,
   resultsHeaderRef,
 }: {
@@ -1382,13 +1492,25 @@ function PlanList({
   characterStatuses: ClientCharacterStatus[];
   characterNamesById: Map<number, string>;
   stock: PlanStockItem[];
+  availableReactionSlots: number;
   locationNamesById: Map<number, string>;
   onPlanChange: (plan: PlanResult) => void;
+  onAddBuildItem: (item: { name: string; typeId: number; quantity: number }) => void;
   onExcludeHaulBucket: (fromLocationId: number) => void;
   resultsHeaderRef: RefObject<HTMLElement | null>;
 }) {
   const router = useRouter();
   const [copyStatus, setCopyStatus] = useState("");
+  const [showTotalRunCounts, setShowTotalRunCounts] = useState(false);
+  const [reactionScheduleMode, setReactionScheduleMode] = useState<ReactionScheduleMode>("simple");
+  const [maxJobHours, setMaxJobHours] = useState("24");
+  const [reactionSort, setReactionSort] = useState<ReactionSort>({
+    key: "type",
+    direction: "asc",
+  });
+  const [addedReactionBuildItems, setAddedReactionBuildItems] = useState<Set<number>>(
+    () => new Set(),
+  );
   const planListHeaderRef = useRef<HTMLDivElement>(null);
   const skillRequirements = plan.lists.skillsRequired;
   const skillsByCharacter = characterStatuses.map((character) => {
@@ -1426,6 +1548,126 @@ function PlanList({
               : activeTab === "Manufacture"
                 ? plan.lists.manufacturingJobs
                 : plan.lists.haulingTasks;
+  const locationGroupedTab = activeTab === "React" || activeTab === "Manufacture";
+  type PlanListEntry =
+    | PlanResult["lists"]["planItems"][number]
+    | PlanResult["lists"]["materialsToBuy"][number]
+    | PlanResult["lists"]["bpcsNeeded"][number]
+    | PlanResult["lists"]["inventionJobs"][number]
+    | PlanResult["lists"]["reactionJobs"][number]
+    | PlanResult["lists"]["manufacturingJobs"][number]
+    | PlanResult["lists"]["haulingTasks"][number];
+  const locationBuckets = new Map<number | undefined, PlanListEntry[]>();
+  if (locationGroupedTab) {
+    for (const entry of list) {
+      const locationId = "locationId" in entry ? entry.locationId : undefined;
+      const bucket = locationBuckets.get(locationId) ?? [];
+      bucket.push(entry as PlanListEntry);
+      locationBuckets.set(locationId, bucket);
+    }
+  }
+  const sortedLocationBuckets = [...locationBuckets.entries()].sort(([left], [right]) => {
+    const leftName = locationNamesById.get(left ?? 0) ?? String(left ?? "Location unavailable");
+    const rightName = locationNamesById.get(right ?? 0) ?? String(right ?? "Location unavailable");
+    return leftName.localeCompare(rightName);
+  });
+  const displayBuckets = (
+    locationGroupedTab ? sortedLocationBuckets : [[undefined, list as PlanListEntry[]]]
+  ) as Array<[number | undefined, PlanListEntry[]]>;
+  const reactionSchedule = buildReactionSchedule(
+    plan.lists.reactionJobs,
+    stock,
+    showTotalRunCounts,
+    reactionScheduleMode,
+    availableReactionSlots,
+    Number(maxJobHours),
+  );
+  const reactionSummary = plan.lists.reactionJobs.reduce(
+    (summary, job) => {
+      const schedule = reactionSchedule.get(job.typeId);
+      return {
+        installs: summary.installs + (schedule?.installs ?? 0),
+        maxTime: Math.max(summary.maxTime, schedule?.time ?? 0),
+      };
+    },
+    { installs: 0, maxTime: 0 },
+  );
+  const reactionCoverage = plan.lists.reactionJobs
+    .map((job) => ({
+      job,
+      schedule: reactionSchedule.get(job.typeId),
+    }))
+    .sort((left, right) => (right.schedule?.runs ?? 0) - (left.schedule?.runs ?? 0))
+    .reduce<{ coverage: ReactionCoverage; remainingSlots: number }>(
+      (result, { job, schedule }) => {
+        const installCount = Math.min(schedule?.installs ?? 0, result.remainingSlots);
+        const coveredRuns = Math.min(job.runs, installCount * (schedule?.runs ?? 0));
+        const coveredInstallableRuns = Math.min(job.runsAvailable, coveredRuns);
+        return {
+          coverage: {
+            installable: result.coverage.installable + coveredInstallableRuns,
+            total: result.coverage.total + coveredRuns,
+          },
+          remainingSlots: result.remainingSlots - installCount,
+        };
+      },
+      {
+        coverage: { installable: 0, total: 0 },
+        remainingSlots: Math.max(0, availableReactionSlots),
+      },
+    ).coverage;
+  const totalInstallableReactionRuns = plan.lists.reactionJobs.reduce(
+    (total, job) => total + job.runsAvailable,
+    0,
+  );
+  const totalReactionRuns = plan.lists.reactionJobs.reduce((total, job) => total + job.runs, 0);
+  const sortedDisplayBuckets =
+    activeTab === "React"
+      ? (displayBuckets.map(([locationId, entries]) => [
+          locationId,
+          entries
+            .slice()
+            .sort((left, right) => {
+              const leftTypeId = "itemTypeId" in left ? left.itemTypeId : left.typeId;
+              const rightTypeId = "itemTypeId" in right ? right.itemTypeId : right.typeId;
+              const leftSchedule = reactionSchedule.get(leftTypeId);
+              const rightSchedule = reactionSchedule.get(rightTypeId);
+              const leftValue =
+                reactionSort.key === "type"
+                  ? left.name
+                  : reactionSort.key === "suggestedRuns"
+                    ? (leftSchedule?.runs ?? 0)
+                    : "runs" in left
+                      ? showTotalRunCounts
+                        ? left.runs
+                        : "runsAvailable" in left
+                          ? left.runsAvailable
+                          : left.runs
+                      : 0;
+              const rightValue =
+                reactionSort.key === "type"
+                  ? right.name
+                  : reactionSort.key === "suggestedRuns"
+                    ? (rightSchedule?.runs ?? 0)
+                    : "runs" in right
+                      ? showTotalRunCounts
+                        ? right.runs
+                        : "runsAvailable" in right
+                          ? right.runsAvailable
+                          : right.runs
+                      : 0;
+              const comparison =
+                typeof leftValue === "string" && typeof rightValue === "string"
+                  ? leftValue.localeCompare(rightValue)
+                  : Number(leftValue) - Number(rightValue);
+              return (
+                (reactionSort.direction === "asc" ? comparison : -comparison)
+                || leftTypeId - rightTypeId
+              );
+            }),
+        ]) as Array<[number | undefined, PlanListEntry[]]>)
+      : displayBuckets;
+  const maxCopyBuildTime = Math.max(...plan.lists.bpcsNeeded.map((entry) => entry.buildTime), 0);
   const haulBuckets = new Map<
     string,
     {
@@ -1680,21 +1922,117 @@ function PlanList({
   return (
     <>
       {activeTab !== "Haul" && (
-        <div className={styles.planActions}>
+        <div
+          className={`${styles.planActions} ${activeTab === "React" ? styles.reactionPlanActions : ""}`}
+        >
           {activeTab === "Buy" && (
-            <button
-              type="button"
-              className={`actionButton ${styles.copyButton}`}
-              onClick={() => void sendToCompress()}
-            >
+            <Button variant="outline" onClick={() => void sendToCompress()}>
               <Minimize2 aria-hidden="true" />
               <span>Send to Compress</span>
-            </button>
+            </Button>
           )}
-          <button type="button" className={`actionButton ${styles.copyButton}`} onClick={copyList}>
-            <CopyIcon aria-hidden="true" />
-            {copyStatus || (activeTab === "Plan" ? "Copy table" : "Copy list")}
-          </button>
+          {activeTab === "React" && (
+            <>
+              <div className={styles.reactionPlanControls}>
+                <Label htmlFor="reaction-schedule-mode">Plan Type:</Label>
+                <Select
+                  value={reactionScheduleMode}
+                  onValueChange={(value) => setReactionScheduleMode(value as ReactionScheduleMode)}
+                >
+                  <SelectTrigger
+                    id="reaction-schedule-mode"
+                    aria-label="Reaction scheduling mode"
+                    className={styles.modeSelect}
+                  >
+                    <SelectValue>
+                      {reactionScheduleMode === "available-slots"
+                        ? "Solve for available slots"
+                        : reactionScheduleMode === "max-job-length"
+                          ? "Max job length"
+                          : "Simple"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="simple">Simple</SelectItem>
+                    <SelectItem value="available-slots">Solve for available slots</SelectItem>
+                    <SelectItem value="max-job-length">Max job length</SelectItem>
+                  </SelectContent>
+                </Select>
+                {reactionScheduleMode === "max-job-length" && (
+                  <div className={styles.hoursControl}>
+                    <Input
+                      id="max-reaction-job-hours"
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={maxJobHours}
+                      onChange={(event) => setMaxJobHours(event.target.value)}
+                      aria-label="Maximum reaction job length in hours"
+                      className={styles.maxJobHours}
+                    />
+                    <Label htmlFor="max-reaction-job-hours">Hours</Label>
+                  </div>
+                )}
+              </div>
+              <div className={styles.reactionDisplayControls}>
+                <Label htmlFor="reaction-run-count-mode">Show</Label>
+                <Select
+                  value={showTotalRunCounts ? "total" : "installable"}
+                  onValueChange={(value) => setShowTotalRunCounts(value === "total")}
+                >
+                  <SelectTrigger
+                    id="reaction-run-count-mode"
+                    aria-label="Reaction run count display"
+                    className={styles.runCountSelect}
+                  >
+                    <SelectValue>{showTotalRunCounts ? "Total" : "Installable"}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="installable">Installable</SelectItem>
+                    <SelectItem value="total">Total</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
+          {activeTab === "React" && (
+            <div className={styles.reactionResultsActions}>
+              <div className={styles.reactionSummary}>
+                <span>
+                  <strong>{availableReactionSlots.toLocaleString()}</strong>
+                  <small>AVAILABLE SLOTS</small>
+                </span>
+                <span>
+                  <strong>{reactionSummary.installs.toLocaleString()}</strong>
+                  <small>SUGGESTED INSTALLS</small>
+                </span>
+                <span>
+                  <strong>{formatDuration(reactionSummary.maxTime)}</strong>
+                  <small>MAX JOB LENGTH</small>
+                </span>
+                <span>
+                  <strong>
+                    {formatCoverage(reactionCoverage.installable, totalInstallableReactionRuns)}
+                  </strong>
+                  <small>INSTALLABLE COVERAGE</small>
+                </span>
+                <span>
+                  <strong>{formatCoverage(reactionCoverage.total, totalReactionRuns)}</strong>
+                  <small>TOTAL COVERAGE</small>
+                </span>
+              </div>
+              <Button type="button" variant="outline" onClick={copyList}>
+                <CopyIcon aria-hidden="true" />
+                {copyStatus || "Copy list"}
+              </Button>
+            </div>
+          )}
+          {activeTab !== "React" && (
+            <Button type="button" variant="outline" onClick={copyList}>
+              <CopyIcon aria-hidden="true" />
+              {copyStatus || (activeTab === "Plan" ? "Copy table" : "Copy list")}
+            </Button>
+          )}
         </div>
       )}
       {activeTab === "Plan" && (
@@ -1703,6 +2041,77 @@ function PlanList({
           {planColumns.map((column) => (
             <span key={column}>{column}</span>
           ))}
+        </div>
+      )}
+      {activeTab === "React" && (
+        <div className={styles.reactionTableHeader}>
+          <button
+            type="button"
+            className={styles.reactionSortButton}
+            aria-label={`Sort reactions by Type${reactionSort.key === "type" ? `, currently ${reactionSort.direction}ending` : ""}`}
+            onClick={() =>
+              setReactionSort((current) => ({
+                key: "type",
+                direction: current.key === "type" && current.direction === "asc" ? "desc" : "asc",
+              }))
+            }
+          >
+            Type
+            {reactionSort.key === "type"
+              && (reactionSort.direction === "asc" ? (
+                <ArrowUp aria-hidden="true" />
+              ) : (
+                <ArrowDown aria-hidden="true" />
+              ))}
+          </button>
+          <span>BPs available</span>
+          <span>Suggested installs</span>
+          <button
+            type="button"
+            className={styles.reactionSortButton}
+            aria-label={`Sort reactions by Suggested runs${reactionSort.key === "suggestedRuns" ? `, currently ${reactionSort.direction}ending` : ""}`}
+            onClick={() =>
+              setReactionSort((current) => ({
+                key: "suggestedRuns",
+                direction:
+                  current.key === "suggestedRuns" && current.direction === "asc" ? "desc" : "asc",
+              }))
+            }
+          >
+            Suggested runs
+            {reactionSort.key === "suggestedRuns"
+              && (reactionSort.direction === "asc" ? (
+                <ArrowUp aria-hidden="true" />
+              ) : (
+                <ArrowDown aria-hidden="true" />
+              ))}
+          </button>
+          <button
+            type="button"
+            className={styles.reactionSortButton}
+            aria-label={`Sort reactions by Total needed${reactionSort.key === "totalNeeded" ? `, currently ${reactionSort.direction}ending` : ""}`}
+            onClick={() =>
+              setReactionSort((current) => ({
+                key: "totalNeeded",
+                direction:
+                  current.key === "totalNeeded" && current.direction === "asc" ? "desc" : "asc",
+              }))
+            }
+          >
+            Total needed
+            {reactionSort.key === "totalNeeded"
+              && (reactionSort.direction === "asc" ? (
+                <ArrowUp aria-hidden="true" />
+              ) : (
+                <ArrowDown aria-hidden="true" />
+              ))}
+          </button>
+        </div>
+      )}
+      {activeTab === "Copy" && (
+        <div className={styles.copySummary}>
+          <strong>{formatDuration(maxCopyBuildTime)}</strong>
+          <span>MAX BUILD TIME</span>
         </div>
       )}
       {activeTab === "Haul" ? (
@@ -1720,22 +2129,20 @@ function PlanList({
                 <span>To</span>
                 <strong>{locationNamesById.get(bucket.toLocationId) ?? bucket.toLocationId}</strong>
                 <div className={styles.haulHeaderActions}>
-                  <button
-                    type="button"
-                    className={`actionButton ${styles.copyButton} ${styles.rebuyButton}`}
+                  <Button
+                    variant="outline"
                     onClick={() => rebuyHaulBucket(bucket.fromLocationId, bucket.toLocationId)}
                   >
                     <Repeat aria-hidden="true" />
                     <span>Rebuy</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={`actionButton ${styles.copyButton} ${styles.excludeButton}`}
+                  </Button>
+                  <Button
+                    variant="outline"
                     onClick={() => onExcludeHaulBucket(bucket.fromLocationId)}
                   >
                     <SquareX aria-hidden="true" />
                     <span>Exclude and Recalculate</span>
-                  </button>
+                  </Button>
                 </div>
               </header>
               <div className={styles.haulGroupRows}>
@@ -1759,178 +2166,218 @@ function PlanList({
         </div>
       ) : (
         <div className={activeTab === "Plan" ? styles.planTable : styles.planList}>
-          {list.map((entry, index) => {
-            const typeId = "itemTypeId" in entry ? entry.itemTypeId : entry.typeId;
-            const name = entry.name;
-            const isPlanBpc = "kind" in entry && entry.kind === "bpc";
-            const isBpcPurchase = activeTab === "Buy" && "bpoCount" in entry;
-            const isCopyOfBpo = activeTab === "Copy" && "bpoCount" in entry && entry.bpoCount > 0;
-            const isBlueprintName = / blueprint$/i.test(name);
-            const isReactionFormulaName = / formula$/i.test(name);
-            const isPlanReaction = "kind" in entry && entry.kind === "reaction";
-            const planBlueprintVariation =
-              activeTab === "Plan" && (isPlanBpc || isBlueprintName)
-                ? isPlanBpc && entry.bpoCount > 0
-                  ? "bp"
-                  : "bpc"
-                : null;
-            const detail =
-              "fromLocationId" in entry && activeTab !== "Buy"
-                ? `From ${locationNamesById.get(entry.fromLocationId) ?? entry.fromLocationId} to ${locationNamesById.get(entry.toLocationId) ?? entry.toLocationId}`
-                : "locationId" in entry && activeTab !== "Buy"
-                  ? `Location ${entry.locationId}`
-                  : "";
-            const totalTime =
-              "totalTime" in entry && typeof entry.totalTime === "number" ? entry.totalTime : null;
-            const reactionFormulaCount =
-              activeTab === "React"
-                ? stock
-                    .filter(
-                      (stockItem) =>
-                        stockItem.category === "reactionformula"
-                        && stockItem.typeId === typeId
-                        && !stockItem.inUse,
-                    )
-                    .reduce((total, stockItem) => total + stockItem.quantity, 0)
-                : 0;
-            const installCount =
-              activeTab === "React"
-              && "runs" in entry
-              && entry.runs >= 10
-              && reactionFormulaCount > 0
-                ? entry.runs / reactionFormulaCount < 10
-                  ? Math.ceil(entry.runs / 10)
-                  : reactionFormulaCount
-                : null;
-            const runsPerInstall =
-              installCount !== null && "runs" in entry
-                ? Math.ceil(entry.runs / installCount)
-                : null;
-            const installTime =
-              totalTime !== null && runsPerInstall !== null && "runs" in entry && entry.runs > 0
-                ? (totalTime / entry.runs) * runsPerInstall
-                : totalTime;
-            const reactRunCalcs =
-              activeTab === "React" && "runs" in entry
-                ? installCount !== null && runsPerInstall !== null
-                  ? `${installCount.toLocaleString()} x ${runsPerInstall.toLocaleString()} runs${installTime !== null ? ` @ ${formatDuration(installTime)}` : ""}`
-                  : totalTime !== null
-                    ? formatDuration(totalTime)
-                    : null
-                : null;
-            const reactRunCount =
-              activeTab === "React" && "runs" in entry
-                ? `${entry.runs.toLocaleString()} runs`
-                : null;
-            const materialEntry =
-              (activeTab === "Buy" && !isBpcPurchase && "quantity" in entry)
-              || (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
-                ? (entry as PlanResult["lists"]["materialsToBuy"][number])
-                : null;
-            const amount =
-              "volume" in entry
-                ? `${entry.quantity.toLocaleString()} units | ${Math.ceil(entry.volume).toLocaleString()} m3`
-                : isBpcPurchase
-                  ? `${entry.buyQuantity.toLocaleString()} runs`
-                  : isPlanBpc
-                    ? `${entry.neededQuantity.toLocaleString()} needed`
-                    : isPlanReaction
-                      ? `${entry.runsNeeded.toLocaleString()} runs`
-                      : materialEntry
-                        ? `${(materialEntry.buildQuantity || materialEntry.buyQuantity).toLocaleString()} units`
-                        : activeTab === "Copy" && "neededQuantity" in entry
-                          ? `${Math.max(0, entry.neededQuantity - entry.stockRuns).toLocaleString()} runs`
-                          : "quantity" in entry
-                            ? `${entry.quantity.toLocaleString()} ${activeTab === "Copy" ? "runs" : "units"}`
-                            : "runs" in entry
-                              ? entry.runs >= 10
-                                && installCount !== null
-                                && installCount > 1
-                                && runsPerInstall !== null
-                                && installTime !== null
-                                ? `${installCount.toLocaleString()} x ${runsPerInstall.toLocaleString()} runs @ ${formatDuration(installTime)} | ${entry.runs.toLocaleString()} runs`
-                                : `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
-                              : "";
-            const imageVariation =
-              planBlueprintVariation
-              ?? ("imageVariation" in entry && entry.imageVariation
-                ? entry.imageVariation === "icon" && isBlueprintName
-                  ? "bp"
-                  : entry.imageVariation === "icon" && isReactionFormulaName
-                    ? "bpc"
-                    : entry.imageVariation
-                : isCopyOfBpo || (isPlanBpc && entry.bpoCount > 0)
-                  ? "bp"
-                  : isBlueprintName
-                    ? "bp"
-                    : isReactionFormulaName
-                      ? "bpc"
-                      : activeTab === "Manufacture"
-                          || activeTab === "React"
-                          || isPlanBpc
-                          || isBpcPurchase
-                          || isPlanReaction
-                          || activeTab === "Copy"
-                          || activeTab === "Invent"
+          {sortedDisplayBuckets.map(([locationId, entries]) => (
+            <Fragment key={locationId ?? "unlocated"}>
+              {locationGroupedTab && (
+                <h3 className={styles.locationGroupHeader}>
+                  {locationNamesById.get(locationId ?? 0) ?? locationId ?? "Location unavailable"}
+                </h3>
+              )}
+              {entries.map((entry, index) => {
+                const typeId = "itemTypeId" in entry ? entry.itemTypeId : entry.typeId;
+                const name = entry.name;
+                const isPlanBpc = "kind" in entry && entry.kind === "bpc";
+                const isBpcPurchase = activeTab === "Buy" && "bpoCount" in entry;
+                const isCopyOfBpo =
+                  activeTab === "Copy" && "bpoCount" in entry && entry.bpoCount > 0;
+                const isBlueprintName = / blueprint$/i.test(name);
+                const isReactionFormulaName = / formula$/i.test(name);
+                const isPlanReaction = "kind" in entry && entry.kind === "reaction";
+                const planBlueprintVariation =
+                  activeTab === "Plan" && (isPlanBpc || isBlueprintName)
+                    ? isPlanBpc && entry.bpoCount > 0
+                      ? "bp"
+                      : "bpc"
+                    : null;
+                const detail =
+                  "fromLocationId" in entry && activeTab !== "Buy"
+                    ? `From ${locationNamesById.get(entry.fromLocationId) ?? entry.fromLocationId} to ${locationNamesById.get(entry.toLocationId) ?? entry.toLocationId}`
+                    : "locationId" in entry && activeTab !== "Buy"
+                      ? `Location ${entry.locationId}`
+                      : "";
+                const totalTime =
+                  "totalTime" in entry && typeof entry.totalTime === "number"
+                    ? entry.totalTime
+                    : null;
+                const reactionFormulaCount =
+                  activeTab === "React"
+                    ? stock
+                        .filter(
+                          (stockItem) =>
+                            stockItem.category === "reactionformula"
+                            && stockItem.typeId === typeId
+                            && !stockItem.inUse,
+                        )
+                        .reduce((total, stockItem) => total + stockItem.quantity, 0)
+                    : 0;
+                const reactionPlan = activeTab === "React" ? reactionSchedule.get(typeId) : null;
+                const targetRuns = reactionPlan?.runs ?? null;
+                const suggestedInstallCount = reactionPlan?.installs ?? 0;
+                const installTime = reactionPlan?.time ?? totalTime;
+                const totalNeeded =
+                  activeTab === "React" && "runs" in entry && "runsAvailable" in entry
+                    ? showTotalRunCounts
+                      ? entry.runs
+                      : entry.runsAvailable
+                    : null;
+                const suggestedCapacity = suggestedInstallCount * (targetRuns ?? 0);
+                const additionalInstallCount =
+                  totalNeeded !== null && targetRuns !== null && targetRuns > 0
+                    ? Math.max(0, Math.ceil((totalNeeded - suggestedCapacity) / targetRuns))
+                    : 0;
+                const materialEntry =
+                  (activeTab === "Buy" && !isBpcPurchase && "quantity" in entry)
+                  || (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
+                    ? (entry as PlanResult["lists"]["materialsToBuy"][number])
+                    : null;
+                const amount =
+                  "volume" in entry
+                    ? `${entry.quantity.toLocaleString()} units | ${Math.ceil(entry.volume).toLocaleString()} m3`
+                    : isBpcPurchase
+                      ? `${entry.buyQuantity.toLocaleString()} runs`
+                      : isPlanBpc
+                        ? `${entry.neededQuantity.toLocaleString()} needed`
+                        : isPlanReaction
+                          ? `${entry.runsNeeded.toLocaleString()} runs`
+                          : materialEntry
+                            ? `${(materialEntry.buildQuantity || materialEntry.buyQuantity).toLocaleString()} units`
+                            : activeTab === "Copy" && "neededQuantity" in entry
+                              ? `${Math.max(0, entry.neededQuantity - entry.stockRuns).toLocaleString()} runs`
+                              : "quantity" in entry
+                                ? `${entry.quantity.toLocaleString()} ${activeTab === "Copy" ? "runs" : "units"}`
+                                : "runs" in entry
+                                  ? entry.runs >= 10
+                                    && suggestedInstallCount > 1
+                                    && targetRuns !== null
+                                    && installTime !== null
+                                    ? `${suggestedInstallCount.toLocaleString()} x ${targetRuns.toLocaleString()} runs @ ${formatDuration(installTime)} | ${entry.runs.toLocaleString()} runs`
+                                    : `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
+                                  : "";
+                const imageVariation =
+                  planBlueprintVariation
+                  ?? ("imageVariation" in entry && entry.imageVariation
+                    ? entry.imageVariation === "icon" && isBlueprintName
+                      ? "bp"
+                      : entry.imageVariation === "icon" && isReactionFormulaName
                         ? "bpc"
-                        : "icon");
-            const planCells =
-              activeTab === "Plan"
-                ? getPlanCells(entry as PlanResult["lists"]["planItems"][number])
-                : null;
-            return (
-              <Fragment key={`${activeTab}-${index}`}>
-                <div className={activeTab === "Plan" ? styles.planTableRow : styles.planRow}>
-                  <div className={styles.planTypeCell}>
-                    <TypeIdentity
-                      name={name}
-                      typeId={typeId}
-                      imageSize={40}
-                      variation={imageVariation}
-                      className={styles.planTypeIdentity}
-                    />
-                  </div>
-                  {activeTab === "Plan" ? (
-                    planColumns.map((column) =>
-                      planCells?.[column] ? (
-                        <span className={styles.planTableCell} data-label={column} key={column}>
-                          <span className={styles.planTableValue}>
-                            {column === "Available" && (
-                              <AvailableSourceIcons
-                                counts={
-                                  "availableSourceCounts" in entry
-                                    ? entry.availableSourceCounts
-                                    : undefined
-                                }
-                              />
-                            )}
-                            {planCells[column]}
-                          </span>
+                        : entry.imageVariation
+                    : isCopyOfBpo || (isPlanBpc && entry.bpoCount > 0)
+                      ? "bp"
+                      : isBlueprintName
+                        ? "bp"
+                        : isReactionFormulaName
+                          ? "bpc"
+                          : activeTab === "Manufacture"
+                              || activeTab === "React"
+                              || isPlanBpc
+                              || isBpcPurchase
+                              || isPlanReaction
+                              || activeTab === "Copy"
+                              || activeTab === "Invent"
+                            ? "bpc"
+                            : "icon");
+                const planCells =
+                  activeTab === "Plan"
+                    ? getPlanCells(entry as PlanResult["lists"]["planItems"][number])
+                    : null;
+                return (
+                  <Fragment key={`${activeTab}-${index}`}>
+                    <div
+                      className={`${activeTab === "Plan" ? styles.planTableRow : styles.planRow} ${activeTab === "React" ? styles.reactionRow : ""}`}
+                    >
+                      <div className={styles.planTypeCell}>
+                        <TypeIdentity
+                          name={name}
+                          typeId={typeId}
+                          imageSize={40}
+                          variation={imageVariation}
+                          className={styles.planTypeIdentity}
+                        />
+                      </div>
+                      {activeTab === "Plan" ? (
+                        planColumns.map((column) =>
+                          planCells?.[column] ? (
+                            <span className={styles.planTableCell} data-label={column} key={column}>
+                              <span className={styles.planTableValue}>
+                                {column === "Available" && (
+                                  <AvailableSourceIcons
+                                    counts={
+                                      "availableSourceCounts" in entry
+                                        ? entry.availableSourceCounts
+                                        : undefined
+                                    }
+                                  />
+                                )}
+                                {planCells[column]}
+                              </span>
+                            </span>
+                          ) : (
+                            <span className={styles.planTableCellEmpty} key={column} />
+                          ),
+                        )
+                      ) : (
+                        <span className={styles.planRowAmount}>
+                          {activeTab === "React" ? (
+                            <span className={styles.reactionCells}>
+                              <span className={styles.reactionAvailableCell}>
+                                {additionalInstallCount > 0
+                                  && !addedReactionBuildItems.has(typeId) && (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="xs"
+                                      className={styles.buyReactionButton}
+                                      onClick={() => {
+                                        onAddBuildItem({
+                                          name,
+                                          typeId,
+                                          quantity: additionalInstallCount,
+                                        });
+                                        setAddedReactionBuildItems((current) =>
+                                          new Set(current).add(typeId),
+                                        );
+                                      }}
+                                    >
+                                      Buy +{additionalInstallCount.toLocaleString()}
+                                    </Button>
+                                  )}
+                                <strong>{reactionFormulaCount.toLocaleString()}</strong>
+                              </span>
+                              <strong>{suggestedInstallCount.toLocaleString()}</strong>
+                              <span className={styles.reactionValue}>
+                                <strong>{targetRuns?.toLocaleString() ?? "-"}</strong>
+                                <small>
+                                  {installTime !== null ? formatDuration(installTime) : "-"}
+                                </small>
+                              </span>
+                              <span className={styles.reactionValue}>
+                                <strong>{totalNeeded?.toLocaleString() ?? "-"}</strong>
+                                <small>
+                                  {totalNeeded !== null && totalTime !== null && "runs" in entry
+                                    ? formatDuration(
+                                        totalNeeded > 0
+                                          ? (totalTime * totalNeeded) / entry.runs
+                                          : 0,
+                                      )
+                                    : "-"}
+                                </small>
+                              </span>
+                            </span>
+                          ) : (
+                            <strong>{amount}</strong>
+                          )}
+                          {detail && activeTab !== "React" && <small>{detail}</small>}
                         </span>
-                      ) : (
-                        <span className={styles.planTableCellEmpty} key={column} />
-                      ),
-                    )
-                  ) : (
-                    <span className={styles.planRowAmount}>
-                      {activeTab === "React" ? (
-                        <>
-                          <strong className={styles.planRowRunCalcs}>{reactRunCalcs}</strong>
-                          <strong className={styles.planRowRunCount}>{reactRunCount}</strong>
-                        </>
-                      ) : (
-                        <strong>{amount}</strong>
                       )}
-                      {detail && <small>{detail}</small>}
-                    </span>
-                  )}
-                </div>
-                {activeTab !== "Plan" && index < list.length - 1 && (
-                  <hr className={styles.planRowSeparator} />
-                )}
-              </Fragment>
-            );
-          })}
+                    </div>
+                    {activeTab !== "Plan" && index < entries.length - 1 && (
+                      <hr className={styles.planRowSeparator} />
+                    )}
+                  </Fragment>
+                );
+              })}
+            </Fragment>
+          ))}
         </div>
       )}
     </>
