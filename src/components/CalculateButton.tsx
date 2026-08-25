@@ -29,7 +29,7 @@ export default function CalculateButton({
     <Button
       {...props}
       className={cn(
-        "h-14 min-h-14 w-full justify-between px-4 has-data-[icon=inline-end]:pr-4 has-data-[icon=inline-start]:pl-4",
+        "h-auto min-h-14 w-full justify-between px-4 has-data-[icon=inline-end]:pr-4 has-data-[icon=inline-start]:pl-4",
         className,
       )}
       disabled={disabled || isLoading}
@@ -40,7 +40,9 @@ export default function CalculateButton({
         ) : (
           <Icon data-icon="inline-start" aria-hidden="true" />
         )}
-        <span>{isLoading ? loadingLabel : label}</span>
+        <span className="whitespace-normal text-sm leading-tight max-[640px]:text-xs">
+          {isLoading ? loadingLabel : label}
+        </span>
       </span>
       <b className="text-[var(--action-accent)]" aria-hidden="true">
         →

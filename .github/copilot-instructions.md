@@ -19,35 +19,175 @@ Do not present prototype data as live EVE data. When replacing a mock path, keep
 ## Working rules
 
 - Create well commented and easily readable code.
-- Now the SDE is in place don't use hard-coded recipes or fallback values in production paths. Group IDs or Type IDs may be used when dealing with the large Dogma dataset in the SDE, but do not hard-code values or lists for build recipes, materials, or products.
+- The SDE is in place and cached in memory on the server.  Don't use hard-coded recipes or fallback values in production paths. Group IDs or Type IDs may be used when dealing with the large Dogma dataset in the SDE, but do not hard-code values or lists for build recipes, materials, or products.
 - Prioritise readability of the main function over local convenience. Nested helper functions are acceptable only when they are very small and obvious; otherwise, extract them so the caller reads linearly from top to bottom. Treat closures as a useful tool, not the default, and prefer explicit parameters if that makes the code easier to follow.
 - Read the nearby implementation and relevant section of `CurrentPlan.md` before editing. Keep changes focused on the owning module.
-- Preserve existing user changes and avoid unrelated refactors.
 - Keep methods short, with low complexity and a single responsibility.
 - Name methods and variables clearly, using descriptive names that convey their purpose and intent.
 - Rename variables and methods when their purpose changes, rather than leaving misleading names in place.
 - Follow the existing TypeScript style: strict typing, double quotes, semicolons, the `@/*` alias, and small focused modules.
 - Generate well-commented code: add concise comments before non-obvious algorithms, data-flow boundaries, and important invariants.
-- Add JSDoc-style comments to all public functions, classes, and types. Include parameter and return types, and describe the purpose of the function or class. Add links to relevant EVE Online documentation or SDE/ESI references when applicable.
+- Add JSDoc-style comments to all functions, classes, and types. Include parameter and return types, and describe the purpose of the function or class. Add links to relevant EVE Online documentation or SDE/ESI references when applicable.
 - Keep server-only code and secrets out of client components. Never send access tokens or refresh tokens to the browser, log them, or include them in error messages.
 - Validate and narrow all external input at API boundaries by defining the API schema and using Zod's safeParse and associated methods. Do not rely on a TypeScript cast as runtime validation. Reject malformed IDs, quantities, locations, settings, and character selections with useful 4xx responses.
 - Use Next.js App Router conventions already in the project. This project uses Next.js 16; before changing framework APIs, consult the relevant guide under `node_modules/next/dist/docs/` as required by `AGENTS.md`.
 - Prefer existing platform and repository APIs over new abstractions. Firestore is the durable server-side store for accounts, sessions, tokens, and pending SSO state; SDE remains static build/runtime data.
 - Do not add fake ESI responses or silently fall back to hard-coded recipes in production paths. Test fixtures belong in tests or explicitly named fixture modules.
-- Keep UI changes consistent with the current visual language: dark technical workspace, Manrope and DM Mono, restrained cyan/teal/lime accents, dense operational layouts, and responsive controls. Do not replace the planner with a generic dashboard or marketing page.
-- For compact icon-and-label actions, use the global `actionButton` class and compose it with a visual variant such as `styles.importButton`, `styles.remove`, or `styles.characterRemove`. Keep the shared class responsible for height, alignment, spacing, padding, icon sizing, and typography; keep variants responsible for color, border, and state styling. At narrow breakpoints, override the shared class for icon-only controls rather than creating separate button dimensions.
+- ESI endpoints that require a character token must be called server-side. Do not call ESI from the client or expose a character token to the browser.  The call should not be made as part of any request except `/api/state/refresh`.  The refresh route should be called from the client, but the ESI call itself must be server-side.  Cache the various responses from the ESI endpoints, with useful indexes and cache the status of the most recent request.  Report the status of the refresh in `/api/state`.
 - For formatting workflow, run `npm run lint`, then `npm run format`, and only then do additional validation or issue triage. Prettier is the final style pass, not a substitute for linting.
 
 ### Component reuse and UI consistency
 
-- Before creating or copying a UI component, inspect `src/components/ui`, nearby page components, and the relevant shadcn configuration for an existing solution. Reuse the existing component when it covers the behavior, and extend it only when the missing behavior is broadly useful.
+- Components in `src/components/ui/` (e.g. `button.tsx`, `card.tsx`, `dialog.tsx`) are base shadcn/ui components. Treat them as mostly immutable.
+-	Do not modify files in `src/components/ui/` directly unless explicitly instructed.
+-	For project-specific behaviour, layout, or styling:
+    -	Create wrapper components outside `src/components/ui/` (e.g.  `src/components/app-button.tsx`,  `src/components/app-card.tsx`,  `src/components/app-dialog.tsx`).
+    -	Import the base shadcn/ui component and apply custom Tailwind classes, props, or logic in the wrapper.
+    -	Use these wrappers throughout the app instead of the raw `src/components/ui/*` components when custom behaviour is needed.
+-	When an upstream update is needed for a base component:
+    -	Use `npx shadcn@latest diff` (or `npx shadcn@latest diff <component> `) to inspect changes to an individual components.
+    - Use the local script `npm run shadcn:drift` to inspect all components for drift from the upstream shadcn/ui registry.
+    -	Use `npx shadcn@latest add <component> --overwrite ` only after confirming there are no important local changes.
+    - Manually migrate the changes to a wrapper first, if you have customised the base file.
+    -	If you are unsure whether to edit a base component or create a wrapper, default to creating a wrapper.
+
+- Before creating or copying a UI component, inspect `src/components/ui` and `src/components`, nearby page components, and the relevant shadcn configuration and agent skill for an existing solution. Reuse the existing component or wrapper when it covers the behavior, and extend it by making a new wrapper only when the missing behavior is broadly useful.
 - If a shadcn component exists for the required control or feedback state, import and use that shadcn component rather than implementing a native or app-local replacement. Follow the installed `base-nova`/Base UI implementation and existing local APIs; do not introduce a second primitive library or a competing wrapper for the same behavior.
-- Components added or substantially changed earlier in the current task or thread are especially strong reuse candidates. In this codebase, check for and prefer the shared `Alert`, `Badge`, `Dialog`, `Empty`, `Field`, `Input`, `Select`, `Skeleton`, `Spinner`, `Switch`, `Tabs`, and `Textarea` components before adding page-local versions.
-- Treat an official shadcn component and a project-local wrapper as different things. A wrapper that resembles shadcn or uses Base UI primitives is not permission to claim or recreate a shadcn component; reuse it as an existing project component, but do not create another competing implementation.
+- Components added or substantially changed earlier in the current task or thread are especially strong reuse candidates. In this codebase, check for and use the shared `Alert`, `Badge`, `Button`, `Dialog`, `Empty`, `Field`, `Input`, `Label`, `Select`, `Skeleton`, `Spinner`, `Switch`, `Tabs`, and `Textarea` components.  Do not create a new component that duplicates the behavior of an existing shared component.  If a new component is needed, first confirm that the behavior is genuinely new. Create components that wrap one or more shadcn ui components in `src/components`, for easy ingestion on other pages. Document the reason in the change when the new component intentionally does not use an available shadcn primitive.
+- Treat an official shadcn component and a project-local wrapper as different things. A wrapper that uses Base UI primitives is not permission to claim or recreate a shadcn component; reuse it as an existing project component, but do not create another competing implementation.
 - If the official shadcn registry or package runner is unavailable, do not hand-author a replacement "shadcn-style" component and do not silently substitute a different primitive library. Leave the current control in place when it remains usable, report the registry/install blocker, and defer the migration until the official component can be installed or explicitly approved as a new project-local component.
-- Share visual treatment across pages through shared components and shared styles. Keep page-specific classes for layout or domain-specific variants, but do not duplicate markup and styling for common alerts, empty states, loading states, forms, dialogs, tabs, badges, or actions.
-- When migrating an existing page, preserve its domain-specific copy, data flow, and behavior while replacing only the visual/control layer needed for consistency. Do not make a new component solely to avoid adapting an existing shared component.
-- If no suitable component exists, first confirm that the behavior is genuinely new and decide whether it belongs in `src/components/ui` or is limited to one page. Document the reason in the change when the new component intentionally does not use an available shadcn primitive.
+- When updating an existing page, preserve its domain-specific copy, data flow, and behavior while also taking the opportunity to migrate to shadcn primitives or a wrapper of those primitives. Remove legacy CSS style and defer to Tailwind in the primitive, wrapper, or on the page for structural placement.
+- Do not make a new component solely to avoid adapting an existing shared component.
+
+***
+
+## Styling architecture: shadcn/ui + Tailwind (no new CSS Modules)
+
+This project uses **shadcn/ui components** as the primary UI building blocks, with **Tailwind CSS** for layout/structure and **CSS variable tokens** in `globals.css` for theming. The goal is:
+
+- Rely on shadcn/ui’s **default styling** unless there is an explicit reason to override.
+- Use Tailwind utilities **only for structural needs** (layout, spacing, sizing, positioning).
+- Work towards **no `.module.css` files** for UI components.
+
+### 1. Prefer shadcn/ui defaults
+
+shadcn/ui components already include Tailwind classes that implement the design system. They are styled via semantic CSS variables such as:
+
+- `--background`, `--foreground`
+- `--primary`, `--primary-foreground`
+- `--secondary`, `--muted`, `--accent`
+- `--border`, `--ring`, `--radius`
+- etc.
+
+These variables are defined in `app/globals.css` under `:root` and `.dark`.
+
+**Agent rules:**
+
+- When using a shadcn/ui component (e.g. `Button`, `Card`, `Input`, `Dialog`):
+  - Assume its **default appearance is correct** unless the user explicitly requests a visual change.
+  - Do **not** add colour, font, radius, shadow, or other thematic overrides “just in case”.
+  - Do **not** assume you must provide styling for the component to look correct.
+- If a visual change is requested:
+  - First consider changing the relevant **CSS variable in `globals.css`** (e.g. `--primary`, `--radius`) so all components update consistently.
+  - Only override styles, using tailwind, on a specific component instance if the request is clearly scoped to that instance (e.g. “this button should be full‑width and muted”).
+
+### 2. Use Tailwind for structure, not theme
+
+Tailwind is used primarily for **structural concerns**:
+
+- Layout: `flex`, `grid`, `block`, `inline-flex`, etc.
+- Spacing: `p-*`, `m-*`, `gap-*`
+- Sizing: `w-*`, `h-*`, `min-w-*`, `max-w-*`
+- Positioning: `relative`, `absolute`, `sticky`, `top-*`, `z-*`
+- Alignment: `items-*`, `justify-*`, `self-*`
+
+Thematic concerns (colours, fonts, radii, shadows) should **normally come from shadcn/ui’s defaults** or from **CSS variables**, not from arbitrary Tailwind colour/font utilities.
+
+**Agent rules:**
+
+- When wrapping or arranging shadcn/ui components:
+  - Add Tailwind classes to the **wrapper** or to the component’s `className` prop **only for structural needs**.
+  - Examples:
+    - `<div className="flex flex-col gap-4">` to layout a form.
+    - `<Card className="w-full max-w-md">` to control width.
+    - `<Button className="w-full">` to make a button full‑width.
+- Do not add thematic Tailwind classes (e.g. `bg-blue-600`, `text-gray-500`, `rounded-lg`, `shadow-md`) unless:
+  - The user explicitly asks for a non‑standard visual treatment, **and**
+  - It cannot be achieved more cleanly by adjusting tokens in `globals.css`.
+
+### 3. Theming via `globals.css` tokens
+
+All visual design decisions live in **`app/globals.css`** via CSS variables.
+
+**Agent rules:**
+
+- If you identify a genuine, reusable thematic need (e.g. a new semantic colour like “success” or a new surface variant):
+  - Propose adding a new CSS variable in `globals.css` (for both `:root` and `.dark`), using a semantic name (e.g. `--success`, `--success-foreground`, `--surface-muted`).
+  - Propose the corresponding Tailwind mapping if needed (e.g. via `@theme inline` or `tailwind.config`), so utilities like `bg-success` can be used.
+  - Use the new token via utilities (e.g. `bg-success`, `text-success-foreground`) instead of hard‑coded values.
+- Do **not** hard‑code colours, fonts, radii, or shadows in components. Always go through:
+  - shadcn/ui’s existing tokens (`bg-background`, `text-primary`, etc.), or
+  - New/extended tokens in `globals.css`.
+
+### 4. No new `.module.css` files
+
+The long‑term goal is **no per‑component CSS Modules** for UI.
+
+**Agent rules:**
+
+- Do **not** create new `.module.css` files for components that use shadcn/ui or standard Tailwind.
+- When editing an existing component that has a `.module.css` file:
+  - If the styles are structural (layout, spacing, sizing, positioning):
+    - Consider removing the style rule so that the layout is expressed via Tailwind classes from the component or primitive instead.
+    - If unique to that component, migrate them to Tailwind utilities in TSX.
+  - If the styles are thematic (colours, fonts, radii, shadows):
+    - Replace them with token‑based utilities (`bg-background`, `text-foreground`, etc.) or adjust tokens in `globals.css` if the change should be global.
+  - Once the component no longer needs its `.module.css` file, **delete it**.
+- Keep `.module.css` only for exceptional cases that truly cannot be expressed with Tailwind + shadcn/ui (e.g. complex animations, very specific selectors), and only when migration cost is not justified yet.
+- If we're ever concerned that the UI components are drifting from shadcn/ui defaults, run `npm run shadcn:drift` to report on the differences between local and upstream versions.
+
+### 5. Typical patterns
+
+Use patterns like:
+
+```tsx
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+
+export function Example() {
+  return (
+    <div className="flex flex-col gap-4 w-full max-w-md">
+      <Card>
+        <CardContent className="p-6">
+          <p className="text-muted-foreground">
+            This card uses shadcn/ui defaults; only structural classes are added.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Button className="w-full">Full-width button, default theme</Button>
+    </div>
+  );
+}
+```
+
+Notes:
+
+- No `.module.css` is created or assumed.
+- shadcn/ui components keep their default look.
+- Tailwind classes are used only for layout/size/spacing.
+
+### 6. Summary of agent behaviour
+
+When working on UI:
+
+1. **Default to shadcn/ui styling** – assume components look correct as‑is.
+2. **Add Tailwind classes only for structure** (layout, spacing, sizing, positioning).
+3. **Change theme via `globals.css` tokens**, not by hard‑coding styles in components.
+4. **Do not create new `.module.css` files**; migrate existing ones away over time.
+5. If a new thematic token is needed, propose the exact `globals.css` changes and Tailwind mapping.
+
+Follow this architecture consistently. Do not fall back to adding rules in `.module.css` or other CSS files unless there is a clearly justified exception as described above.
 
 ## Formatting and readability rules
 
@@ -68,6 +208,8 @@ const allowed =
 ```
 
 - Do not reformat unrelated code while making a targeted fix. Keep the edit focused and let the repo-wide format pass clean up simple style drift only after linting succeeds.
+- Do not format or lint generated SDE JSONL or TypeScript files.  These files are generated by the SDE pipeline and should not be edited or reformatted manually.
+- Do not format or lint shadcn/ui components in `src/components/ui/`.  These files are generated by the shadcn registry and should not be edited or reformatted manually.
 
 ## Architecture boundaries
 

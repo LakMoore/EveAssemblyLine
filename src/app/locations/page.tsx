@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useAppLanguage } from "../AppShell";
 import { ArrowRight, Pencil, Plus, Trash2 } from "lucide-react";
+import DialogBody from "@/components/DialogBody";
 import {
   Combobox,
   ComboboxContent,
@@ -15,9 +16,10 @@ import {
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import {
   Dialog,
-  DialogBody,
   DialogContent,
+  DialogDescription,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -501,7 +503,7 @@ export default function LocationsPage() {
     <>
       <div className={`${styles.pageIntro} ${styles.locationsPageIntro}`}>
         <div>
-          <p className={styles.eyebrow}>CONFIGURATION / OPERATIONS</p>
+          <p className="eyebrow">CONFIGURATION / OPERATIONS</p>
           <h1>Locations</h1>
           <p className={styles.subtitle}>
             Choose operational sites and maintain the structures you use.
@@ -885,14 +887,16 @@ function StructureDialog({
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className={styles.importModal} render={<form onSubmit={submit} />}>
-        <div className={styles.panelHeader}>
+        <DialogHeader>
           <div>
-            <p className={styles.panelKicker}>STRUCTURE DIRECTORY</p>
             <DialogTitle>{structure ? "Edit structure" : "Add structure"}</DialogTitle>
+            <DialogDescription>
+              {structure ? "Edit the details of the structure." : "Add a new structure to the directory."}
+            </DialogDescription>
           </div>
-        </div>
-        <DialogBody className="no-scrollbar overscroll-contain">
-          <FieldGroup>
+        </DialogHeader>
+          <DialogBody>
+            <FieldGroup>
             <Field>
               <FieldLabel>SYSTEM</FieldLabel>
               <div ref={systemAnchor}>
@@ -991,7 +995,8 @@ function StructureDialog({
                 }
               />
             ))}
-          </FieldGroup>
+            </FieldGroup>
+          </DialogBody>
           <div className={styles.constructionGrid}>
             <div className={styles.constructionGridHeader} aria-hidden="true">
               <span />
@@ -1121,7 +1126,6 @@ function StructureDialog({
               />
             </div>
           </div>
-        </DialogBody>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onCancel}>
             Cancel

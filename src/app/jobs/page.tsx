@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { loadClientJobs, type ClientJobsResponse } from "@/lib/client/requestCache";
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
-import TypeIdentity from "../components/TypeIdentity";
+import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import styles from "../page.module.css";
 import { Atom, Factory, FlaskConical } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -100,7 +100,7 @@ export default function JobsPage() {
     <>
       <div className={styles.pageIntro}>
         <div>
-          <p className={styles.eyebrow}>INDUSTRY CONTROL</p>
+          <p className="eyebrow">INDUSTRY CONTROL</p>
           <h1>Jobs</h1>
           <p className={styles.subtitle}>
             Monitor active manufacturing, science, and reaction jobs across connected pilots.

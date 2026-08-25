@@ -14,6 +14,11 @@
   --green: #42c7b4;
   --lime: #d6ef72;
   --cyan: #5ed8ef;
+  --eyebrow-color: var(--cyan);
+  --eyebrow-font: "DM Mono", monospace;
+  --eyebrow-size: 10px;
+  --eyebrow-spacing: 1.5px;
+  --eyebrow-margin: 0 0 13px;
   --amber: #f2b35d;
   --action: #197b78;
   --action-accent: var(--lime);
@@ -73,6 +78,15 @@ body {
     linear-gradient(rgba(66, 199, 180, 0.035) 1px, transparent 1px),
     linear-gradient(90deg, rgba(66, 199, 180, 0.035) 1px, transparent 1px);
   background-size: 32px 32px;
+}
+
+.eyebrow {
+  color: var(--eyebrow-color);
+  font-family: var(--eyebrow-font);
+  font-size: var(--eyebrow-size);
+  letter-spacing: var(--eyebrow-spacing);
+  line-height: normal;
+  margin: var(--eyebrow-margin);
 }
 
 ::selection {

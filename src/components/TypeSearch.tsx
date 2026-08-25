@@ -2,7 +2,7 @@
 
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { SdeLanguage } from "@/lib/reference/languages";
-import TypeIdentity from "@/app/components/TypeIdentity";
+import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import {
   Combobox,
   ComboboxContent,

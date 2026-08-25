@@ -374,7 +374,7 @@ export default function CharactersPage() {
     <>
       <div className={styles.pageIntro}>
         <div>
-          <p className={styles.eyebrow}>CONFIGURATION / ACCESS</p>
+          <p className="eyebrow">CONFIGURATION / ACCESS</p>
           <h1>Characters</h1>
           <p className={styles.subtitle}>
             Manage the pilots available to the planner and verify corporation access.

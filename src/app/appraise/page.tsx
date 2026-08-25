@@ -106,7 +106,7 @@ export default function AppraisePage() {
   return (
     <div className={styles.appraisePage}>
       <div className={styles.pageIntro}>
-        <span className={styles.eyebrow}>TOOLS / APPRAISE</span>
+        <span className="eyebrow">TOOLS / APPRAISE</span>
         <h1>Appraise an item list</h1>
         <p>
           Paste an EVE item list to resolve names, check current sell orders, and total its ISK

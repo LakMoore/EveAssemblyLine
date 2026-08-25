@@ -6,7 +6,6 @@
   margin-bottom: 28px;
 }
 
-.eyebrow,
 .panelKicker,
 .typeId,
 .statusNote {
@@ -16,7 +15,6 @@
   letter-spacing: 0.08em;
 }
 
-.eyebrow,
 .panelKicker {
   color: var(--cyan);
 }

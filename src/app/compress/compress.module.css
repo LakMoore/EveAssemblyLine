@@ -5,14 +5,8 @@
   gap: 28px;
   margin-bottom: 34px;
 }
-.eyebrow,
 .kicker {
   margin: 0 0 9px;
-  color: var(--cyan);
-  font:
-    10px "DM Mono",
-    monospace;
-  letter-spacing: 1.4px;
 }
 .intro h1 {
   margin: 0;
@@ -103,6 +97,11 @@
   font:
     9px "DM Mono",
     monospace;
+}
+.resultViewSelect {
+  display: none;
+  align-items: center;
+  gap: 10px;
 }
 .resultPanel {
   margin-top: 24px;
@@ -347,6 +346,12 @@
   font-size: 11px;
 }
 @media (max-width: 680px) {
+  .resultTabs {
+    display: none;
+  }
+  .resultViewSelect {
+    display: flex;
+  }
   .efficiencySummary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

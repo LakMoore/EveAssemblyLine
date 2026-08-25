@@ -15,7 +15,8 @@ import type { SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import { groupClientStockByLocation, loadClientStock } from "@/lib/client/requestCache";
 import { type KnownStructure } from "@/lib/planning/preferences";
-import TypeIdentity from "../components/TypeIdentity";
+import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
+import DialogBody from "@/components/DialogBody";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
@@ -41,9 +42,10 @@ import {
 } from "@/components/ui/combobox";
 import {
   Dialog,
-  DialogBody,
   DialogContent,
+  DialogDescription,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import styles from "../page.module.css";
@@ -394,7 +396,7 @@ export default function StockPage() {
     <>
       <div className={styles.pageIntro}>
         <div>
-          <p className={styles.eyebrow}>WORKSPACE / INVENTORY</p>
+          <p className="eyebrow">WORKSPACE / INVENTORY</p>
           <h1>Stock</h1>
           <p className={styles.subtitle}>Track available materials and components by location.</p>
         </div>
@@ -598,86 +600,87 @@ function AddLocationModal({
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className={styles.importModal} render={<form onSubmit={submit} />}>
-        <div className={styles.panelHeader}>
-          <div>
-            <p className={styles.panelKicker}>STOCK DIRECTORY</p>
-            <DialogTitle>Add location</DialogTitle>
-          </div>
-        </div>
-        <DialogBody className="no-scrollbar overscroll-contain">
+        <DialogHeader>
+          <DialogTitle>Add location</DialogTitle>
+          <DialogDescription>
+            Add a new stock location to track items. You can select a system and optionally a specific
+            structure.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
           <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="stock-system-search">System</Label>
-              <div ref={systemAnchor}>
-                <Combobox
-                  open={isOpen && systemName.trim().length >= 2}
-                  inputValue={systemName}
-                  onOpenChange={setIsOpen}
-                  onInputValueChange={(value, eventDetails) => {
-                    if (eventDetails.reason !== "input-change") return;
-                    setSystemName(value);
-                    setIsOpen(true);
-                  }}
-                  onValueChange={(value) => {
-                    const match = suggestions.find((entry) => String(entry.id) === String(value));
-                    if (match) chooseSystem(match);
-                  }}
-                >
-                  <ComboboxInput
-                    id="stock-system-search"
-                    showTrigger={false}
-                    onFocus={() => suggestions.length > 0 && setIsOpen(true)}
-                    placeholder="Type a system name"
-                    aria-label="Search systems"
-                  />
-                  <ComboboxContent anchor={systemAnchor}>
-                    <ComboboxList>
-                      {suggestions.length > 0 ? (
-                        uniqueById(suggestions).map((entry) => (
-                          <ComboboxItem key={entry.id} value={String(entry.id)}>
-                            <span>{entry.name}</span>
-                            <small>System ID {entry.id}</small>
-                          </ComboboxItem>
-                        ))
-                      ) : (
-                        <ComboboxEmpty>No matching systems.</ComboboxEmpty>
-                      )}
-                    </ComboboxList>
-                  </ComboboxContent>
-                </Combobox>
-              </div>
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label>Structure</Label>
-              <Select
-                value={structureId}
-                onValueChange={(value) => value && setStructureId(value)}
-                items={[
-                  { value: "system", label: "System stock (no specific structure)" },
-                  ...uniqueById(structures).map((entry) => ({
-                    value: String(entry.id),
-                    label: entry.name,
-                  })),
-                ]}
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="stock-system-search">System</Label>
+            <div ref={systemAnchor}>
+              <Combobox
+                open={isOpen && systemName.trim().length >= 2}
+                inputValue={systemName}
+                onOpenChange={setIsOpen}
+                onInputValueChange={(value, eventDetails) => {
+                  if (eventDetails.reason !== "input-change") return;
+                  setSystemName(value);
+                  setIsOpen(true);
+                }}
+                onValueChange={(value) => {
+                  const match = suggestions.find((entry) => String(entry.id) === String(value));
+                  if (match) chooseSystem(match);
+                }}
               >
-                <SelectTrigger aria-label="Stock structure">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="system">System stock (no specific structure)</SelectItem>
-                    {uniqueById(structures).map((entry) => (
-                      <SelectItem key={entry.id} value={String(entry.id)}>
-                        {entry.name}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+                <ComboboxInput
+                  id="stock-system-search"
+                  showTrigger={false}
+                  onFocus={() => suggestions.length > 0 && setIsOpen(true)}
+                  placeholder="Type a system name"
+                  aria-label="Search systems"
+                />
+                <ComboboxContent anchor={systemAnchor}>
+                  <ComboboxList>
+                    {suggestions.length > 0 ? (
+                      uniqueById(suggestions).map((entry) => (
+                        <ComboboxItem key={entry.id} value={String(entry.id)}>
+                          <span>{entry.name}</span>
+                          <small>System ID {entry.id}</small>
+                        </ComboboxItem>
+                      ))
+                    ) : (
+                      <ComboboxEmpty>No matching systems.</ComboboxEmpty>
+                    )}
+                  </ComboboxList>
+                </ComboboxContent>
+              </Combobox>
             </div>
-            <Link className={styles.dialogLink} href="/locations">
-              Add or manage structures
-            </Link>
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label>Structure</Label>
+            <Select
+              value={structureId}
+              onValueChange={(value) => value && setStructureId(value)}
+              items={[
+                { value: "system", label: "System stock (no specific structure)" },
+                ...uniqueById(structures).map((entry) => ({
+                  value: String(entry.id),
+                  label: entry.name,
+                })),
+              ]}
+            >
+              <SelectTrigger aria-label="Stock structure">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="system">System stock (no specific structure)</SelectItem>
+                  {uniqueById(structures).map((entry) => (
+                    <SelectItem key={entry.id} value={String(entry.id)}>
+                      {entry.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+          <Link className={styles.dialogLink} href="/locations">
+            Add or manage structures
+          </Link>
           </div>
         </DialogBody>
         <DialogFooter>
@@ -936,17 +939,14 @@ function ViewItemsModal({
             : stockCategories.find((category) => category.id === filter.value)?.label;
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className={styles.importModal}>
-        <div className={styles.panelHeader}>
-          <div>
-            <p className={styles.panelKicker}>LOCATION STOCK</p>
-            <DialogTitle>{location.structureName}</DialogTitle>
-          </div>
-        </div>
-        <DialogBody className="no-scrollbar overscroll-contain">
-          <p className={styles.panelDescription}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{location.structureName}</DialogTitle>
+          <DialogDescription>
             {location.systemName} · {title} · {buckets.length} item types
-          </p>
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
           <div className={styles.stockViewFilters}>
             <button
               type="button"
@@ -989,107 +989,107 @@ function ViewItemsModal({
               <EmptyDescription>No items recorded at this location.</EmptyDescription>
             </Empty>
           ) : (
-            <div className={styles.stockList}>
-              {buckets.map(
-                (
-                  {
-                    item,
-                    stockQuantity,
-                    productionQuantity,
-                    marketQuantity,
-                    bpoCount,
-                    bpoInUseCount,
-                    bpcProductionCount,
-                    bpcProductionRuns,
-                    bpcStockCount,
-                    bpcStockRuns,
-                  },
-                  itemIndex,
-                ) => {
-                  const categoryLabel = item.marketCategory ?? item.category ?? "Item";
-                  const showCategory =
-                    filter.kind === "all"
-                    || (filter.kind === "category" && filter.value === "item");
-                  const isBlueprint = isBlueprintStockItem(item);
-                  const isReaction = item.category === "reactionformula";
-                  return (
-                    <div className={styles.stockRow} key={`${item.typeId}:${itemIndex}`}>
-                      <div className={styles.stockIdentityStack}>
-                        <TypeIdentity
-                          name={item.name}
-                          subline={showCategory ? categoryLabel : undefined}
-                          typeId={item.typeId}
-                          imageSize={40}
-                          className={styles.stockTypeIdentity}
-                          variation={item.category === "reactionformula" ? "bpc" : "icon"}
-                          blueprintType={
-                            isBlueprintStockItem(item) ? (bpoCount > 0 ? "bpo" : "bpc") : undefined
-                          }
-                        />
-                      </div>
-                      {isBlueprint ? (
-                        <div className={styles.stockAggregateList}>
-                          {bpoCount > 0 && (
-                            <span>
-                              <FileBox aria-hidden="true" />
-                              <b>{`${bpoInUseCount.toLocaleString()} / ${bpoCount.toLocaleString()}`}</b>
-                              <small>BPO in use</small>
-                            </span>
-                          )}
-                          {bpcProductionCount > 0 && (
-                            <span>
-                              <Files aria-hidden="true" />
-                              <b>
-                                {`${bpcProductionRuns.toLocaleString()} Runs on ${bpcProductionCount.toLocaleString()} BPC`}
-                              </b>
-                              <small>In production</small>
-                            </span>
-                          )}
-                          <span>
-                            <Package aria-hidden="true" />
-                            <b>
-                              {`${bpcStockRuns.toLocaleString()} Runs on ${bpcStockCount.toLocaleString()} BPC`}
-                            </b>
-                            <small>In stock</small>
-                          </span>
-                        </div>
-                      ) : (
-                        <div className={styles.stockAggregateList}>
-                          {productionQuantity > 0 && (
-                            <span>
-                              {isReaction ? (
-                                <Atom aria-hidden="true" />
-                              ) : (
-                                <Factory aria-hidden="true" />
-                              )}
-                              <b>{productionQuantity.toLocaleString()}</b>
-                              <small>{isReaction ? "In use" : "In production"}</small>
-                            </span>
-                          )}
-                          <span
-                            className={`${styles.stockAggregateStock} ${
-                              isReaction ? styles.stockAggregateReactionStock : ""
-                            }`}
-                          >
-                            <Package aria-hidden="true" />
-                            <b>{stockQuantity.toLocaleString()}</b>
-                            <small>Available</small>
-                          </span>
-                          {marketQuantity > 0 && (
-                            <span>
-                              <ShoppingCart aria-hidden="true" />
-                              <b>{marketQuantity.toLocaleString()}</b>
-                              <small>On market</small>
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
+          <div className={styles.stockList}>
+            {buckets.map(
+              (
+                {
+                  item,
+                  stockQuantity,
+                  productionQuantity,
+                  marketQuantity,
+                  bpoCount,
+                  bpoInUseCount,
+                  bpcProductionCount,
+                  bpcProductionRuns,
+                  bpcStockCount,
+                  bpcStockRuns,
                 },
-              )}
-            </div>
-          )}
+                itemIndex,
+              ) => {
+                const categoryLabel = item.marketCategory ?? item.category ?? "Item";
+                const showCategory =
+                  filter.kind === "all"
+                  || (filter.kind === "category" && filter.value === "item");
+                const isBlueprint = isBlueprintStockItem(item);
+                const isReaction = item.category === "reactionformula";
+                return (
+                  <div className={styles.stockRow} key={`${item.typeId}:${itemIndex}`}>
+                    <div className={styles.stockIdentityStack}>
+                      <TypeIdentity
+                        name={item.name}
+                        subline={showCategory ? categoryLabel : undefined}
+                        typeId={item.typeId}
+                        imageSize={40}
+                        className={styles.stockTypeIdentity}
+                        variation={item.category === "reactionformula" ? "bpc" : "icon"}
+                        blueprintType={
+                          isBlueprintStockItem(item) ? (bpoCount > 0 ? "bpo" : "bpc") : undefined
+                        }
+                      />
+                    </div>
+                    {isBlueprint ? (
+                      <div className={styles.stockAggregateList}>
+                        {bpoCount > 0 && (
+                          <span>
+                            <FileBox aria-hidden="true" />
+                            <b>{`${bpoInUseCount.toLocaleString()} / ${bpoCount.toLocaleString()}`}</b>
+                            <small>BPO in use</small>
+                          </span>
+                        )}
+                        {bpcProductionCount > 0 && (
+                          <span>
+                            <Files aria-hidden="true" />
+                            <b>
+                              {`${bpcProductionRuns.toLocaleString()} Runs on ${bpcProductionCount.toLocaleString()} BPC`}
+                            </b>
+                            <small>In production</small>
+                          </span>
+                        )}
+                        <span>
+                          <Package aria-hidden="true" />
+                          <b>
+                            {`${bpcStockRuns.toLocaleString()} Runs on ${bpcStockCount.toLocaleString()} BPC`}
+                          </b>
+                          <small>In stock</small>
+                        </span>
+                      </div>
+                    ) : (
+                      <div className={styles.stockAggregateList}>
+                        {productionQuantity > 0 && (
+                          <span>
+                            {isReaction ? (
+                              <Atom aria-hidden="true" />
+                            ) : (
+                              <Factory aria-hidden="true" />
+                            )}
+                            <b>{productionQuantity.toLocaleString()}</b>
+                            <small>{isReaction ? "In use" : "In production"}</small>
+                          </span>
+                        )}
+                        <span
+                          className={`${styles.stockAggregateStock} ${
+                            isReaction ? styles.stockAggregateReactionStock : ""
+                          }`}
+                        >
+                          <Package aria-hidden="true" />
+                          <b>{stockQuantity.toLocaleString()}</b>
+                          <small>Available</small>
+                        </span>
+                        {marketQuantity > 0 && (
+                          <span>
+                            <ShoppingCart aria-hidden="true" />
+                            <b>{marketQuantity.toLocaleString()}</b>
+                            <small>On market</small>
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              },
+            )}
+          </div>
+        )}
         </DialogBody>
       </DialogContent>
     </Dialog>
@@ -1172,16 +1172,14 @@ function StockPasteModal({
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className={styles.importModal} render={<form onSubmit={resolveItems} />}>
-        <div className={styles.panelHeader}>
-          <div>
-            <p className={styles.panelKicker}>STOCK IMPORT</p>
-            <DialogTitle>Paste items</DialogTitle>
-          </div>
-        </div>
-        <DialogBody>
-          <p className={styles.panelDescription}>
+        <DialogHeader>
+          <DialogTitle>Paste items</DialogTitle>
+          <DialogDescription>
+            Paste the items you want to add or replace in your stock.
             One item per line. Put the quantity at the end of each line.
-          </p>
+          </DialogDescription>
+        </DialogHeader> 
+        <DialogBody>
           <RadioGroup
             className={styles.stockMode}
             value={mode}

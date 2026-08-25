@@ -118,7 +118,7 @@ export default function ImageCheckerPage() {
     <>
       <div className={styles.pageIntro}>
         <div>
-          <p className={styles.eyebrow}>DIAGNOSTICS / IMAGE CDN</p>
+          <p className="eyebrow">DIAGNOSTICS / IMAGE CDN</p>
           <h1>Image checker</h1>
           <p className={styles.subtitle}>
             Probe the EVE image service across a sample of 100 published item types.

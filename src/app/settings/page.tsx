@@ -39,7 +39,7 @@ export default function SettingsPage() {
     <>
       <div className={styles.pageIntro}>
         <div>
-          <p className={styles.eyebrow}>CONFIGURATION / PLANNING</p>
+          <p className="eyebrow">CONFIGURATION / PLANNING</p>
           <h1>Settings</h1>
           <p className={styles.subtitle}>
             Control which assets and in-flight work are considered by the planner.

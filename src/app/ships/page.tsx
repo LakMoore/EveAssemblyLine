@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import TypeIdentity from "../components/TypeIdentity";
+import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { loadClientShips, type ClientShipsResponse } from "@/lib/client/requestCache";
 import styles from "../page.module.css";
 import { ArrowRight, X } from "lucide-react";
@@ -145,7 +145,7 @@ export default function ShipsPage() {
     <>
       <div className={styles.pageHeader}>
         <div>
-          <p className={styles.pageKicker}>FLEET INVENTORY</p>
+          <p className="eyebrow">FLEET INVENTORY</p>
           <h1>Ships</h1>
         </div>
         <div className={styles.shipsStats}>

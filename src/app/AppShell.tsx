@@ -60,6 +60,7 @@ import {
 } from "@/components/ui/select";
 import styles from "./page.module.css";
 import { PlanStockItem } from "@/lib/planning/types";
+import { Avatar, AvatarBadge, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 const languageStorageKey = "assembly-line-language";
 const sidebarStorageKey = "assembly-line-sidebar-collapsed";
@@ -166,7 +167,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const pilotListSentinelRef = useRef<HTMLSpanElement | null>(null);
   const language = localLanguage;
   const activePage: ActivePage =
-    pathname === "/"
+    pathname === "/" || pathname === "/welcome"
       ? "welcome"
       : pathname === "/planner"
         ? "planner"
@@ -772,19 +773,17 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   );
                   return (
                     <div className={styles.pilot} key={character.characterId}>
-                      <span
-                        className={`${styles.pilotDot} ${isNotAuthenticated ? styles.pilotNotOk : styles.pilotOk}`}
-                      >
-                        <Image
-                          src={eveCharacterPortraitUrl(character.characterId, 64)}
-                          alt=""
-                          width={36}
-                          height={36}
+                      <Avatar>
+                        <AvatarImage 
+                          src={eveCharacterPortraitUrl(character.characterId, 64)} 
+                          alt={character.characterName} 
                         />
-                        <i
+                        <AvatarFallback>{character.characterName.split(" ").filter(n => n).map((n) => n[0]).join("").toLocaleUpperCase()}</AvatarFallback>
+                        <AvatarBadge 
+                          className={`${isNotAuthenticated ? styles.pilotNotOk : styles.pilotOk}`} 
                           aria-label={isNotAuthenticated ? "Authorization required" : "Authorized"}
                         />
-                      </span>
+                      </Avatar>
                       <span className={styles.navText}>
                         <strong>{character.characterName}</strong>
                         <small>

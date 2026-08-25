@@ -5,7 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAppLanguage } from "../AppShell";
 import CalculateButton from "@/components/CalculateButton";
-import TypeIdentity from "../components/TypeIdentity";
+import DialogBody from "@/components/DialogBody";
+import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import TypeSearch from "@/components/TypeSearch";
 import { toast } from "@/components/ui/toast";
 import type { SdeLanguage } from "@/lib/reference/languages";
@@ -38,10 +39,10 @@ import { loadEndpointRecord, saveEndpointResponse } from "@/lib/client/refreshCa
 import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
 import {
   Dialog,
-  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -457,7 +458,7 @@ function CompressContent() {
     <>
       <div className={styles.intro}>
         <div>
-          <p className={styles.eyebrow}>MATERIALS / REPROCESSING</p>
+          <p className="eyebrow">MATERIALS / REPROCESSING</p>
           <h1>Compress</h1>
           <p className={styles.subtitle}>
             Reverse-reprocess a raw material requirement into the smallest useful ore list.
@@ -855,7 +856,7 @@ function Results({ result }: { result: CompressResult }) {
         value={activeTab}
         onValueChange={(value) => setActiveTab(value as (typeof tabs)[number]["key"])}
       >
-        <TabsList variant="line">
+        <TabsList className={styles.resultTabs} variant="line">
           {tabs.map((tab) => (
             <TabsTrigger key={tab.key} value={tab.key}>
               <tab.icon data-icon="inline-start" aria-hidden="true" />
@@ -863,6 +864,36 @@ function Results({ result }: { result: CompressResult }) {
             </TabsTrigger>
           ))}
         </TabsList>
+        <div className={styles.resultViewSelect}>
+          <Label htmlFor="compress-result-view" className="shrink-0">
+            View
+          </Label>
+          <Select
+            value={activeTab}
+            onValueChange={(value) => setActiveTab(value as (typeof tabs)[number]["key"])}
+          >
+            <SelectTrigger
+              id="compress-result-view"
+              className="min-w-36 *:data-[slot=select-value]:gap-2"
+              aria-label="Compression result view"
+            >
+              <SelectValue>
+                <active.icon data-icon="inline-start" aria-hidden="true" />
+                {active.label}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {tabs.map((tab) => (
+                  <SelectItem key={tab.key} value={tab.key}>
+                    <tab.icon data-icon="inline-start" aria-hidden="true" className="self-center" />
+                    {tab.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </div>
         <TabsContent value={activeTab}>
           <div className={styles.resultPanel}>
             <div className={styles.resultPanelHeader}>
@@ -1092,16 +1123,13 @@ function PasteDialog({
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
       <DialogContent render={<form onSubmit={resolve} />}>
-        <div className={styles.panelHeader}>
-          <div>
-            <p className={styles.kicker}>BATCH IMPORT</p>
-            <DialogTitle>Paste multibuy list</DialogTitle>
-          </div>
-        </div>
-        <DialogBody className="no-scrollbar overscroll-contain">
+        <DialogHeader>
+          <DialogTitle>BATCH IMPORT</DialogTitle>
           <DialogDescription>
             Compatible with Eve Multibuy. One item per line, with the quantity at the end.
           </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
           <Textarea
             value={text}
             onChange={(event) => {
