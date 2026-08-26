@@ -891,12 +891,14 @@ function StructureDialog({
           <div>
             <DialogTitle>{structure ? "Edit structure" : "Add structure"}</DialogTitle>
             <DialogDescription>
-              {structure ? "Edit the details of the structure." : "Add a new structure to the directory."}
+              {structure
+                ? "Edit the details of the structure."
+                : "Add a new structure to the directory."}
             </DialogDescription>
           </div>
         </DialogHeader>
-          <DialogBody>
-            <FieldGroup>
+        <DialogBody>
+          <FieldGroup>
             <Field>
               <FieldLabel>SYSTEM</FieldLabel>
               <div ref={systemAnchor}>
@@ -995,137 +997,137 @@ function StructureDialog({
                 }
               />
             ))}
-            </FieldGroup>
-          </DialogBody>
-          <div className={styles.constructionGrid}>
-            <div className={styles.constructionGridHeader} aria-hidden="true">
-              <span />
-              <span>ENABLED</span>
-              <span>TAX RATE</span>
-            </div>
-            <div className={styles.constructionGridRow}>
-              <span>REPROCESSING</span>
-              <ActivitySwitch
-                label="reprocessing"
-                checked={allowReprocessing}
-                onCheckedChange={setAllowReprocessing}
-              />
-              <TaxRateInput
-                label="Reprocessing"
-                value={taxRate("reprocessing")}
-                onChange={(value) => setTaxRate("reprocessing", value)}
-              />
-            </div>
-            <div className={styles.constructionGridRow}>
-              <span>STANDARD MANUFACTURING</span>
-              <ActivitySwitch
-                label="standard manufacturing"
-                checked={allowStandardBuilds}
-                onCheckedChange={setAllowStandardBuilds}
-              />
-              <TaxRateInput
-                label="Standard manufacturing"
-                value={taxRate("standard")}
-                onChange={(value) => setTaxRate("standard", value)}
-              />
-            </div>
-            <div className={styles.constructionGridRow}>
-              <span>CAPITAL MANUFACTURING</span>
-              <ActivitySwitch
-                label="capital manufacturing"
-                checked={allowCapitalBuilds}
-                onCheckedChange={setAllowCapitalBuilds}
-              />
-              <TaxRateInput
-                label="Capital manufacturing"
-                value={taxRate("capital")}
-                onChange={(value) => setTaxRate("capital", value)}
-              />
-            </div>
-            <div
-              className={`${styles.constructionGridRow} ${
-                !reactionsAllowed ? styles.constructionGridRowDisabled : ""
-              }`}
-            >
-              <span>BIOCHEMICAL REACTIONS</span>
-              <ActivitySwitch
-                label="biochemical reactions"
-                checked={reactionsAllowed && allowBiochemicalReactions}
-                disabled={!reactionsAllowed}
-                onCheckedChange={setAllowBiochemicalReactions}
-              />
-              <TaxRateInput
-                label="Biochemical reaction"
-                value={reactionsAllowed ? taxRate("biochemical") : "0.0"}
-                disabled={!reactionsAllowed}
-                onChange={(value) => setTaxRate("biochemical", value)}
-              />
-            </div>
-            <div
-              className={`${styles.constructionGridRow} ${
-                !reactionsAllowed ? styles.constructionGridRowDisabled : ""
-              }`}
-            >
-              <span>COMPOSITE REACTIONS</span>
-              <ActivitySwitch
-                label="composite reactions"
-                checked={reactionsAllowed && allowCompositeReactions}
-                disabled={!reactionsAllowed}
-                onCheckedChange={setAllowCompositeReactions}
-              />
-              <TaxRateInput
-                label="Composite reaction"
-                value={reactionsAllowed ? taxRate("composite") : "0.0"}
-                disabled={!reactionsAllowed}
-                onChange={(value) => setTaxRate("composite", value)}
-              />
-            </div>
-            <div
-              className={`${styles.constructionGridRow} ${
-                !reactionsAllowed ? styles.constructionGridRowDisabled : ""
-              }`}
-            >
-              <span>HYBRID REACTIONS</span>
-              <ActivitySwitch
-                label="hybrid reactions"
-                checked={reactionsAllowed && allowHybridReactions}
-                disabled={!reactionsAllowed}
-                onCheckedChange={setAllowHybridReactions}
-              />
-              <TaxRateInput
-                label="Hybrid reaction"
-                value={reactionsAllowed ? taxRate("hybrid") : "0.0"}
-                disabled={!reactionsAllowed}
-                onChange={(value) => setTaxRate("hybrid", value)}
-              />
-            </div>
-            <div className={styles.constructionGridRow}>
-              <span>INVENTION</span>
-              <ActivitySwitch
-                label="invention"
-                checked={allowInvention}
-                onCheckedChange={setAllowInvention}
-              />
-              <TaxRateInput
-                label="Invention"
-                value={taxRate("invention")}
-                onChange={(value) => setTaxRate("invention", value)}
-              />
-            </div>
-            <div className={styles.constructionGridRow}>
-              <span>RESEARCH</span>
-              <ActivitySwitch
-                label="research"
-                checked={allowResearch}
-                onCheckedChange={setAllowResearch}
-              />
-              <TaxRateInput
-                label="Research"
-                value={taxRate("research")}
-                onChange={(value) => setTaxRate("research", value)}
-              />
-            </div>
+          </FieldGroup>
+        </DialogBody>
+        <div className={styles.constructionGrid}>
+          <div className={styles.constructionGridHeader} aria-hidden="true">
+            <span />
+            <span>ENABLED</span>
+            <span>TAX RATE</span>
           </div>
+          <div className={styles.constructionGridRow}>
+            <span>REPROCESSING</span>
+            <ActivitySwitch
+              label="reprocessing"
+              checked={allowReprocessing}
+              onCheckedChange={setAllowReprocessing}
+            />
+            <TaxRateInput
+              label="Reprocessing"
+              value={taxRate("reprocessing")}
+              onChange={(value) => setTaxRate("reprocessing", value)}
+            />
+          </div>
+          <div className={styles.constructionGridRow}>
+            <span>STANDARD MANUFACTURING</span>
+            <ActivitySwitch
+              label="standard manufacturing"
+              checked={allowStandardBuilds}
+              onCheckedChange={setAllowStandardBuilds}
+            />
+            <TaxRateInput
+              label="Standard manufacturing"
+              value={taxRate("standard")}
+              onChange={(value) => setTaxRate("standard", value)}
+            />
+          </div>
+          <div className={styles.constructionGridRow}>
+            <span>CAPITAL MANUFACTURING</span>
+            <ActivitySwitch
+              label="capital manufacturing"
+              checked={allowCapitalBuilds}
+              onCheckedChange={setAllowCapitalBuilds}
+            />
+            <TaxRateInput
+              label="Capital manufacturing"
+              value={taxRate("capital")}
+              onChange={(value) => setTaxRate("capital", value)}
+            />
+          </div>
+          <div
+            className={`${styles.constructionGridRow} ${
+              !reactionsAllowed ? styles.constructionGridRowDisabled : ""
+            }`}
+          >
+            <span>BIOCHEMICAL REACTIONS</span>
+            <ActivitySwitch
+              label="biochemical reactions"
+              checked={reactionsAllowed && allowBiochemicalReactions}
+              disabled={!reactionsAllowed}
+              onCheckedChange={setAllowBiochemicalReactions}
+            />
+            <TaxRateInput
+              label="Biochemical reaction"
+              value={reactionsAllowed ? taxRate("biochemical") : "0.0"}
+              disabled={!reactionsAllowed}
+              onChange={(value) => setTaxRate("biochemical", value)}
+            />
+          </div>
+          <div
+            className={`${styles.constructionGridRow} ${
+              !reactionsAllowed ? styles.constructionGridRowDisabled : ""
+            }`}
+          >
+            <span>COMPOSITE REACTIONS</span>
+            <ActivitySwitch
+              label="composite reactions"
+              checked={reactionsAllowed && allowCompositeReactions}
+              disabled={!reactionsAllowed}
+              onCheckedChange={setAllowCompositeReactions}
+            />
+            <TaxRateInput
+              label="Composite reaction"
+              value={reactionsAllowed ? taxRate("composite") : "0.0"}
+              disabled={!reactionsAllowed}
+              onChange={(value) => setTaxRate("composite", value)}
+            />
+          </div>
+          <div
+            className={`${styles.constructionGridRow} ${
+              !reactionsAllowed ? styles.constructionGridRowDisabled : ""
+            }`}
+          >
+            <span>HYBRID REACTIONS</span>
+            <ActivitySwitch
+              label="hybrid reactions"
+              checked={reactionsAllowed && allowHybridReactions}
+              disabled={!reactionsAllowed}
+              onCheckedChange={setAllowHybridReactions}
+            />
+            <TaxRateInput
+              label="Hybrid reaction"
+              value={reactionsAllowed ? taxRate("hybrid") : "0.0"}
+              disabled={!reactionsAllowed}
+              onChange={(value) => setTaxRate("hybrid", value)}
+            />
+          </div>
+          <div className={styles.constructionGridRow}>
+            <span>INVENTION</span>
+            <ActivitySwitch
+              label="invention"
+              checked={allowInvention}
+              onCheckedChange={setAllowInvention}
+            />
+            <TaxRateInput
+              label="Invention"
+              value={taxRate("invention")}
+              onChange={(value) => setTaxRate("invention", value)}
+            />
+          </div>
+          <div className={styles.constructionGridRow}>
+            <span>RESEARCH</span>
+            <ActivitySwitch
+              label="research"
+              checked={allowResearch}
+              onCheckedChange={setAllowResearch}
+            />
+            <TaxRateInput
+              label="Research"
+              value={taxRate("research")}
+              onChange={(value) => setTaxRate("research", value)}
+            />
+          </div>
+        </div>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onCancel}>
             Cancel

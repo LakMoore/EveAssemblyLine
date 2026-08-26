@@ -153,7 +153,6 @@ function uniqueById<T extends { id: string | number }>(entries: T[]) {
 export default function StockPage() {
   const { language } = useAppLanguage();
   const [locations, setLocations] = useState<StockRecord[]>([]);
-  const [esiLocationIds, setEsiLocationIds] = useState<Set<string>>(new Set());
   const [viewingFilter, setViewingFilter] = useState<StockFilter>({ kind: "all" });
   const [knownStructures, setKnownStructures] = useState<KnownStructure[]>([]);
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -191,7 +190,6 @@ export default function StockPage() {
               }))
             )
           : [];
-        setEsiLocationIds(new Set(esiLocations.map((location) => String(location.structureId))));
         setKnownStructures(structures);
         const correctedRecords = records.map((record) => {
           const structure = structures.find((entry) => entry.id === record.structureId);
@@ -221,36 +219,14 @@ export default function StockPage() {
           };
         });
         const esiKeys = new Set(esiRecords.map((record) => locationKey(record)));
-        const esiLocationIds = new Set(
-          esiLocations.map((location) => String(location.structureId)),
-        );
-        const esiBlueprintItemIds = new Set(
-          esiLocations.flatMap((location) =>
-            location.items.flatMap(
-              (item) => item.blueprintPrints?.map((print) => print.itemId) ?? [],
-            ),
-          ),
-        );
-        const filteredEsiLocationIds = new Set(esiData.filteredLocationIds ?? []);
-        const esiStructureIds = new Set(
-          structures
-            .map((structure) => structure.esiStructureId)
-            .filter((structureId): structureId is number => structureId !== undefined),
-        );
-        const isEsiRecord = (record: StockRecord) =>
-          esiKeys.has(locationKey(record))
-          || esiLocationIds.has(record.structureId ?? "")
-          || filteredEsiLocationIds.has(Number(record.structureId))
-          || esiStructureIds.has(Number(record.structureId))
-          || record.items.some((item) =>
-            item.blueprintPrints?.some((print) => esiBlueprintItemIds.has(print.itemId)),
-          )
-          || (
-            record.systemName === "Unknown system"
-            && record.structureName.startsWith("Location ")
-          );
+        const isEsiRecord = (record: StockRecord) => record.source === "esi";
         const combinedRecords = esiResponse.ok
-          ? [...esiRecords, ...correctedRecords.filter((record) => !isEsiRecord(record))]
+          ? [
+              ...esiRecords,
+              ...correctedRecords.filter(
+                (record) => !esiKeys.has(locationKey(record)) && !isEsiRecord(record),
+              ),
+            ]
           : correctedRecords;
         const hydratedRecords = await hydrateVolumes(combinedRecords, language);
         const marketOrderQuantities = new Map<number, number>();
@@ -306,7 +282,6 @@ export default function StockPage() {
         ]);
       }
       catch {
-        setEsiLocationIds(new Set());
         setLocations([]);
       }
       finally {
@@ -452,7 +427,6 @@ export default function StockPage() {
                 <StockLocationCard
                   key={locationKey(location)}
                   location={location}
-                  isEsiLocation={esiLocationIds.has(location.structureId ?? "")}
                   isVolumesLoading={isHydratingVolumes}
                   onView={openItems}
                   onPaste={() => setPasting(location)}
@@ -603,84 +577,84 @@ function AddLocationModal({
         <DialogHeader>
           <DialogTitle>Add location</DialogTitle>
           <DialogDescription>
-            Add a new stock location to track items. You can select a system and optionally a specific
-            structure.
+            Add a new stock location to track items. You can select a system and optionally a
+            specific structure.
           </DialogDescription>
         </DialogHeader>
         <DialogBody>
           <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="stock-system-search">System</Label>
-            <div ref={systemAnchor}>
-              <Combobox
-                open={isOpen && systemName.trim().length >= 2}
-                inputValue={systemName}
-                onOpenChange={setIsOpen}
-                onInputValueChange={(value, eventDetails) => {
-                  if (eventDetails.reason !== "input-change") return;
-                  setSystemName(value);
-                  setIsOpen(true);
-                }}
-                onValueChange={(value) => {
-                  const match = suggestions.find((entry) => String(entry.id) === String(value));
-                  if (match) chooseSystem(match);
-                }}
-              >
-                <ComboboxInput
-                  id="stock-system-search"
-                  showTrigger={false}
-                  onFocus={() => suggestions.length > 0 && setIsOpen(true)}
-                  placeholder="Type a system name"
-                  aria-label="Search systems"
-                />
-                <ComboboxContent anchor={systemAnchor}>
-                  <ComboboxList>
-                    {suggestions.length > 0 ? (
-                      uniqueById(suggestions).map((entry) => (
-                        <ComboboxItem key={entry.id} value={String(entry.id)}>
-                          <span>{entry.name}</span>
-                          <small>System ID {entry.id}</small>
-                        </ComboboxItem>
-                      ))
-                    ) : (
-                      <ComboboxEmpty>No matching systems.</ComboboxEmpty>
-                    )}
-                  </ComboboxList>
-                </ComboboxContent>
-              </Combobox>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="stock-system-search">System</Label>
+              <div ref={systemAnchor}>
+                <Combobox
+                  open={isOpen && systemName.trim().length >= 2}
+                  inputValue={systemName}
+                  onOpenChange={setIsOpen}
+                  onInputValueChange={(value, eventDetails) => {
+                    if (eventDetails.reason !== "input-change") return;
+                    setSystemName(value);
+                    setIsOpen(true);
+                  }}
+                  onValueChange={(value) => {
+                    const match = suggestions.find((entry) => String(entry.id) === String(value));
+                    if (match) chooseSystem(match);
+                  }}
+                >
+                  <ComboboxInput
+                    id="stock-system-search"
+                    showTrigger={false}
+                    onFocus={() => suggestions.length > 0 && setIsOpen(true)}
+                    placeholder="Type a system name"
+                    aria-label="Search systems"
+                  />
+                  <ComboboxContent anchor={systemAnchor}>
+                    <ComboboxList>
+                      {suggestions.length > 0 ? (
+                        uniqueById(suggestions).map((entry) => (
+                          <ComboboxItem key={entry.id} value={String(entry.id)}>
+                            <span>{entry.name}</span>
+                            <small>System ID {entry.id}</small>
+                          </ComboboxItem>
+                        ))
+                      ) : (
+                        <ComboboxEmpty>No matching systems.</ComboboxEmpty>
+                      )}
+                    </ComboboxList>
+                  </ComboboxContent>
+                </Combobox>
+              </div>
             </div>
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label>Structure</Label>
-            <Select
-              value={structureId}
-              onValueChange={(value) => value && setStructureId(value)}
-              items={[
-                { value: "system", label: "System stock (no specific structure)" },
-                ...uniqueById(structures).map((entry) => ({
-                  value: String(entry.id),
-                  label: entry.name,
-                })),
-              ]}
-            >
-              <SelectTrigger aria-label="Stock structure">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value="system">System stock (no specific structure)</SelectItem>
-                  {uniqueById(structures).map((entry) => (
-                    <SelectItem key={entry.id} value={String(entry.id)}>
-                      {entry.name}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-          <Link className={styles.dialogLink} href="/locations">
-            Add or manage structures
-          </Link>
+            <div className="flex flex-col gap-2">
+              <Label>Structure</Label>
+              <Select
+                value={structureId}
+                onValueChange={(value) => value && setStructureId(value)}
+                items={[
+                  { value: "system", label: "System stock (no specific structure)" },
+                  ...uniqueById(structures).map((entry) => ({
+                    value: String(entry.id),
+                    label: entry.name,
+                  })),
+                ]}
+              >
+                <SelectTrigger aria-label="Stock structure">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="system">System stock (no specific structure)</SelectItem>
+                    {uniqueById(structures).map((entry) => (
+                      <SelectItem key={entry.id} value={String(entry.id)}>
+                        {entry.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+            <Link className={styles.dialogLink} href="/locations">
+              Add or manage structures
+            </Link>
           </div>
         </DialogBody>
         <DialogFooter>
@@ -705,14 +679,12 @@ const stockCategories = [
 
 function StockLocationCard({
   location,
-  isEsiLocation,
   isVolumesLoading,
   onView,
   onPaste,
   onRemove,
 }: {
   location: StockRecord;
-  isEsiLocation: boolean;
   isVolumesLoading: boolean;
   onView: (location: StockRecord, filter?: StockFilter) => void;
   onPaste: () => void;
@@ -773,7 +745,7 @@ function StockLocationCard({
           <p className={styles.panelKicker}>{location.systemName}</p>
           <h3>{location.structureName}</h3>
         </div>
-        {!isEsiLocation && location.source !== "marketOrder" && (
+        {location.source !== "esi" && location.source !== "marketOrder" && (
           <div className={styles.stockCardActions}>
             <button
               type="button"
@@ -989,107 +961,107 @@ function ViewItemsModal({
               <EmptyDescription>No items recorded at this location.</EmptyDescription>
             </Empty>
           ) : (
-          <div className={styles.stockList}>
-            {buckets.map(
-              (
-                {
-                  item,
-                  stockQuantity,
-                  productionQuantity,
-                  marketQuantity,
-                  bpoCount,
-                  bpoInUseCount,
-                  bpcProductionCount,
-                  bpcProductionRuns,
-                  bpcStockCount,
-                  bpcStockRuns,
-                },
-                itemIndex,
-              ) => {
-                const categoryLabel = item.marketCategory ?? item.category ?? "Item";
-                const showCategory =
-                  filter.kind === "all"
-                  || (filter.kind === "category" && filter.value === "item");
-                const isBlueprint = isBlueprintStockItem(item);
-                const isReaction = item.category === "reactionformula";
-                return (
-                  <div className={styles.stockRow} key={`${item.typeId}:${itemIndex}`}>
-                    <div className={styles.stockIdentityStack}>
-                      <TypeIdentity
-                        name={item.name}
-                        subline={showCategory ? categoryLabel : undefined}
-                        typeId={item.typeId}
-                        imageSize={40}
-                        className={styles.stockTypeIdentity}
-                        variation={item.category === "reactionformula" ? "bpc" : "icon"}
-                        blueprintType={
-                          isBlueprintStockItem(item) ? (bpoCount > 0 ? "bpo" : "bpc") : undefined
-                        }
-                      />
-                    </div>
-                    {isBlueprint ? (
-                      <div className={styles.stockAggregateList}>
-                        {bpoCount > 0 && (
+            <div className={styles.stockList}>
+              {buckets.map(
+                (
+                  {
+                    item,
+                    stockQuantity,
+                    productionQuantity,
+                    marketQuantity,
+                    bpoCount,
+                    bpoInUseCount,
+                    bpcProductionCount,
+                    bpcProductionRuns,
+                    bpcStockCount,
+                    bpcStockRuns,
+                  },
+                  itemIndex,
+                ) => {
+                  const categoryLabel = item.marketCategory ?? item.category ?? "Item";
+                  const showCategory =
+                    filter.kind === "all"
+                    || (filter.kind === "category" && filter.value === "item");
+                  const isBlueprint = isBlueprintStockItem(item);
+                  const isReaction = item.category === "reactionformula";
+                  return (
+                    <div className={styles.stockRow} key={`${item.typeId}:${itemIndex}`}>
+                      <div className={styles.stockIdentityStack}>
+                        <TypeIdentity
+                          name={item.name}
+                          subline={showCategory ? categoryLabel : undefined}
+                          typeId={item.typeId}
+                          imageSize={40}
+                          className={styles.stockTypeIdentity}
+                          variation={item.category === "reactionformula" ? "bpc" : "icon"}
+                          blueprintType={
+                            isBlueprintStockItem(item) ? (bpoCount > 0 ? "bpo" : "bpc") : undefined
+                          }
+                        />
+                      </div>
+                      {isBlueprint ? (
+                        <div className={styles.stockAggregateList}>
+                          {bpoCount > 0 && (
+                            <span>
+                              <FileBox aria-hidden="true" />
+                              <b>{`${bpoInUseCount.toLocaleString()} / ${bpoCount.toLocaleString()}`}</b>
+                              <small>BPO in use</small>
+                            </span>
+                          )}
+                          {bpcProductionCount > 0 && (
+                            <span>
+                              <Files aria-hidden="true" />
+                              <b>
+                                {`${bpcProductionRuns.toLocaleString()} Runs on ${bpcProductionCount.toLocaleString()} BPC`}
+                              </b>
+                              <small>In production</small>
+                            </span>
+                          )}
                           <span>
-                            <FileBox aria-hidden="true" />
-                            <b>{`${bpoInUseCount.toLocaleString()} / ${bpoCount.toLocaleString()}`}</b>
-                            <small>BPO in use</small>
-                          </span>
-                        )}
-                        {bpcProductionCount > 0 && (
-                          <span>
-                            <Files aria-hidden="true" />
+                            <Package aria-hidden="true" />
                             <b>
-                              {`${bpcProductionRuns.toLocaleString()} Runs on ${bpcProductionCount.toLocaleString()} BPC`}
+                              {`${bpcStockRuns.toLocaleString()} Runs on ${bpcStockCount.toLocaleString()} BPC`}
                             </b>
-                            <small>In production</small>
+                            <small>In stock</small>
                           </span>
-                        )}
-                        <span>
-                          <Package aria-hidden="true" />
-                          <b>
-                            {`${bpcStockRuns.toLocaleString()} Runs on ${bpcStockCount.toLocaleString()} BPC`}
-                          </b>
-                          <small>In stock</small>
-                        </span>
-                      </div>
-                    ) : (
-                      <div className={styles.stockAggregateList}>
-                        {productionQuantity > 0 && (
-                          <span>
-                            {isReaction ? (
-                              <Atom aria-hidden="true" />
-                            ) : (
-                              <Factory aria-hidden="true" />
-                            )}
-                            <b>{productionQuantity.toLocaleString()}</b>
-                            <small>{isReaction ? "In use" : "In production"}</small>
+                        </div>
+                      ) : (
+                        <div className={styles.stockAggregateList}>
+                          {productionQuantity > 0 && (
+                            <span>
+                              {isReaction ? (
+                                <Atom aria-hidden="true" />
+                              ) : (
+                                <Factory aria-hidden="true" />
+                              )}
+                              <b>{productionQuantity.toLocaleString()}</b>
+                              <small>{isReaction ? "In use" : "In production"}</small>
+                            </span>
+                          )}
+                          <span
+                            className={`${styles.stockAggregateStock} ${
+                              isReaction ? styles.stockAggregateReactionStock : ""
+                            }`}
+                          >
+                            <Package aria-hidden="true" />
+                            <b>{stockQuantity.toLocaleString()}</b>
+                            <small>Available</small>
                           </span>
-                        )}
-                        <span
-                          className={`${styles.stockAggregateStock} ${
-                            isReaction ? styles.stockAggregateReactionStock : ""
-                          }`}
-                        >
-                          <Package aria-hidden="true" />
-                          <b>{stockQuantity.toLocaleString()}</b>
-                          <small>Available</small>
-                        </span>
-                        {marketQuantity > 0 && (
-                          <span>
-                            <ShoppingCart aria-hidden="true" />
-                            <b>{marketQuantity.toLocaleString()}</b>
-                            <small>On market</small>
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              },
-            )}
-          </div>
-        )}
+                          {marketQuantity > 0 && (
+                            <span>
+                              <ShoppingCart aria-hidden="true" />
+                              <b>{marketQuantity.toLocaleString()}</b>
+                              <small>On market</small>
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                },
+              )}
+            </div>
+          )}
         </DialogBody>
       </DialogContent>
     </Dialog>
@@ -1175,10 +1147,10 @@ function StockPasteModal({
         <DialogHeader>
           <DialogTitle>Paste items</DialogTitle>
           <DialogDescription>
-            Paste the items you want to add or replace in your stock.
-            One item per line. Put the quantity at the end of each line.
+            Paste the items you want to add or replace in your stock. One item per line. Put the
+            quantity at the end of each line.
           </DialogDescription>
-        </DialogHeader> 
+        </DialogHeader>
         <DialogBody>
           <RadioGroup
             className={styles.stockMode}

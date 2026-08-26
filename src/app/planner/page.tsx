@@ -657,29 +657,25 @@ function Planner() {
                 </p>
                 <h2>Build list</h2>
               </div>
-                <Button variant="outline" onClick={() => setIsPasteModalOpen(true)}>
-                  <Clipboard data-icon="inline-start" aria-hidden="true" />
-                  <span>Paste list</span>
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => void copyBuildList()}
-                  disabled={items.length === 0}
-                >
-                  <CopyIcon data-icon="inline-start" aria-hidden="true" />
-                  <span>Copy list</span>
-                </Button>
-                {items.some((item) => item.fromCompression) && (
-                  <Button variant="outline" onClick={removeCompressionItems}>
-                    <X data-icon="inline-start" aria-hidden="true" />
-                    <span>Remove Compression</span>
-                  </Button>
-                )}
+              <Button variant="outline" onClick={() => setIsPasteModalOpen(true)}>
+                <Clipboard data-icon="inline-start" aria-hidden="true" />
+                <span>Paste list</span>
+              </Button>
               <Button
-                variant="destructive"
-                onClick={deleteAllItems}
+                variant="outline"
+                onClick={() => void copyBuildList()}
                 disabled={items.length === 0}
               >
+                <CopyIcon data-icon="inline-start" aria-hidden="true" />
+                <span>Copy list</span>
+              </Button>
+              {items.some((item) => item.fromCompression) && (
+                <Button variant="outline" onClick={removeCompressionItems}>
+                  <X data-icon="inline-start" aria-hidden="true" />
+                  <span>Remove Compression</span>
+                </Button>
+              )}
+              <Button variant="destructive" onClick={deleteAllItems} disabled={items.length === 0}>
                 <Trash2 data-icon="inline-start" aria-hidden="true" />
                 <span>Delete all</span>
               </Button>

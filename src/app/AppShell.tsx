@@ -774,13 +774,20 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   return (
                     <div className={styles.pilot} key={character.characterId}>
                       <Avatar>
-                        <AvatarImage 
-                          src={eveCharacterPortraitUrl(character.characterId, 64)} 
-                          alt={character.characterName} 
+                        <AvatarImage
+                          src={eveCharacterPortraitUrl(character.characterId, 64)}
+                          alt={character.characterName}
                         />
-                        <AvatarFallback>{character.characterName.split(" ").filter(n => n).map((n) => n[0]).join("").toLocaleUpperCase()}</AvatarFallback>
-                        <AvatarBadge 
-                          className={`${isNotAuthenticated ? styles.pilotNotOk : styles.pilotOk}`} 
+                        <AvatarFallback>
+                          {character.characterName
+                            .split(" ")
+                            .filter((n) => n)
+                            .map((n) => n[0])
+                            .join("")
+                            .toLocaleUpperCase()}
+                        </AvatarFallback>
+                        <AvatarBadge
+                          className={`${isNotAuthenticated ? styles.pilotNotOk : styles.pilotOk}`}
                           aria-label={isNotAuthenticated ? "Authorization required" : "Authorized"}
                         />
                       </Avatar>

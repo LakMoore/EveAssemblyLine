@@ -512,8 +512,7 @@
     display: block;
   }
 
-  .pageIntro > .addButton {
-    display: inline-flex;
+  .pageIntroActions {
     margin-top: 16px;
   }
 
@@ -3353,7 +3352,13 @@
   gap: 28px;
 }
 
-.pageIntro > .addButton {
+.pageIntroActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pageIntroActions .addButton {
   width: auto;
   margin-top: 0;
 }

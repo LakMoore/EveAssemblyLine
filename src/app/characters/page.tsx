@@ -3,14 +3,16 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { GitMerge, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { GitMerge, LogOut, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { languageStorageKey } from "../AppShell";
 import { replaceEsiStock } from "@/lib/planning/stockStore";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageServer";
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   groupClientStockByLocation,
   invalidateClientCharacterData,
@@ -206,6 +208,7 @@ export default function CharactersPage() {
   const [error, setError] = useState<string | null>(null);
   const [mergeDetails, setMergeDetails] = useState<MergeDetails | null>(null);
   const [isMerging, setIsMerging] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   async function loadCharacters() {
     const [loaded, corpStatus] = await Promise.all([
@@ -336,6 +339,22 @@ export default function CharactersPage() {
     }
   }
 
+  async function logoutAll() {
+    setIsLoggingOut(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/auth/logout", { method: "POST" });
+      if (!response.ok) throw new Error("Could not log out of this session.");
+      window.location.assign("/");
+    }
+    catch (logoutError) {
+      setError(
+        logoutError instanceof Error ? logoutError.message : "Could not log out of this session.",
+      );
+      setIsLoggingOut(false);
+    }
+  }
+
   const corporations = [
     ...new Set(characters.map((character) => character.corporationId).filter(Boolean)),
   ].map((corporationId) => {
@@ -380,10 +399,31 @@ export default function CharactersPage() {
             Manage the pilots available to the planner and verify corporation access.
           </p>
         </div>
-        <Link className={`actionButton ${styles.addButton}`} href="/api/auth/eve/start">
-          <Plus aria-hidden="true" />
-          <span>Add character</span>
-        </Link>
+        <div className={styles.pageIntroActions}>
+          <Link className={`actionButton ${styles.addButton}`} href="/api/auth/eve/start">
+            <Plus aria-hidden="true" />
+            <span>Add character</span>
+          </Link>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  className={`actionButton ${styles.addButton}`}
+                  disabled={isLoggingOut}
+                />
+              }
+              aria-label="Logout all"
+              onClick={() => {
+                void logoutAll();
+              }}
+            >
+              <LogOut aria-hidden="true" />
+              <span>{isLoggingOut ? "Logging out..." : "Logout all"}</span>
+            </TooltipTrigger>
+            <TooltipContent>Detach all characters from this session</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
       {error && (
         <Alert variant="destructive" className={styles.importError}>
