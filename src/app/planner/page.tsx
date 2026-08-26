@@ -22,7 +22,9 @@ import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
 import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
 import {
   loadBuildBlacklist,
+  loadExcludedLocationIds,
   loadPlannerLocations,
+  saveExcludedLocationIds,
   savePlannerLocations,
 } from "@/lib/planning/plannerPreferencesStore";
 import {
@@ -388,6 +390,7 @@ function Planner() {
     void loadBuildBlacklist().then((buildBlacklist) => {
       if (buildBlacklist) setSettings((current) => ({ ...current, buildBlacklist }));
     });
+    void loadExcludedLocationIds().then(setExcludedLocationIds);
     loadBuildList()
       .then((savedItems) => localizeItems(savedItems, language).then(setItems))
       .catch(() => setItems([]))
@@ -562,19 +565,23 @@ function Planner() {
   async function excludeHaulBucket(fromLocationId: number) {
     const nextExcludedLocationIds = new Set(excludedLocationIds);
     nextExcludedLocationIds.add(fromLocationId);
-    setExcludedLocationIds([...nextExcludedLocationIds]);
+    const nextIds = [...nextExcludedLocationIds];
+    setExcludedLocationIds(nextIds);
+    await saveExcludedLocationIds(nextIds);
     await submitPlan(nextExcludedLocationIds);
   }
 
   async function removeExcludedLocation(locationId: number) {
     const nextExcludedLocationIds = excludedLocationIds.filter((id) => id !== locationId);
     setExcludedLocationIds(nextExcludedLocationIds);
+    await saveExcludedLocationIds(nextExcludedLocationIds);
     await submitPlan(new Set(nextExcludedLocationIds));
   }
 
   async function clearExcludedLocations() {
     setExcludedLocationIds([]);
     setIsExcludedLocationsModalOpen(false);
+    await saveExcludedLocationIds([]);
     await submitPlan(new Set());
   }
 
@@ -1478,70 +1485,6 @@ function PlanList({
     };
   }
 
-  function rebuyHaulBucket(fromLocationId: number, toLocationId: number) {
-    const bucketTasks = plan.lists.haulingTasks.filter(
-      (task) => task.fromLocationId === fromLocationId && task.toLocationId === toLocationId,
-    );
-    if (bucketTasks.length === 0) return;
-    const rebuyQuantities = new Map<number, number>();
-    for (const task of bucketTasks) {
-      rebuyQuantities.set(
-        task.itemTypeId,
-        (rebuyQuantities.get(task.itemTypeId) ?? 0) + task.quantity,
-      );
-    }
-    const materialsToBuy = plan.lists.materialsToBuy.map((material) => {
-      const quantity = rebuyQuantities.get(material.typeId);
-      if (quantity === undefined) return material;
-      return {
-        ...material,
-        quantity: material.quantity + quantity,
-        buyQuantity: material.buyQuantity + quantity,
-      };
-    });
-    for (const [typeId, quantity] of rebuyQuantities) {
-      if (materialsToBuy.some((material) => material.typeId === typeId)) continue;
-      const task = bucketTasks.find((entry) => entry.itemTypeId === typeId);
-      if (!task) continue;
-      materialsToBuy.push({
-        typeId,
-        name: task.name,
-        quantity,
-        requiredQuantity: 0,
-        stockQuantity: 0,
-        availableStockQuantity: 0,
-        productionQuantity: 0,
-        buildQuantity: 0,
-        buyQuantity: quantity,
-        remainingStockQuantity: 0,
-        remainingProductionQuantity: 0,
-        imageVariation: "icon",
-      });
-    }
-    const planItems = plan.lists.planItems.map((entry) => {
-      if (entry.kind !== "material") return entry;
-      const quantity = rebuyQuantities.get(entry.typeId);
-      return quantity === undefined
-        ? entry
-        : {
-            ...entry,
-            quantity: entry.quantity + quantity,
-            buyQuantity: entry.buyQuantity + quantity,
-          };
-    });
-    onPlanChange({
-      ...plan,
-      lists: {
-        ...plan.lists,
-        planItems,
-        materialsToBuy,
-        haulingTasks: plan.lists.haulingTasks.filter(
-          (task) => task.fromLocationId !== fromLocationId || task.toLocationId !== toLocationId,
-        ),
-      },
-    });
-  }
-
   function getListAmount(entry: (typeof list)[number]) {
     return activeTab === "Copy" && "neededQuantity" in entry
       ? Math.max(0, entry.neededQuantity - entry.stockRuns)
@@ -1953,13 +1896,6 @@ function PlanList({
                 <span>To</span>
                 <strong>{locationNamesById.get(bucket.toLocationId) ?? bucket.toLocationId}</strong>
                 <div className={styles.haulHeaderActions}>
-                  <Button
-                    variant="outline"
-                    onClick={() => rebuyHaulBucket(bucket.fromLocationId, bucket.toLocationId)}
-                  >
-                    <Repeat aria-hidden="true" />
-                    <span>Rebuy</span>
-                  </Button>
                   <Button
                     variant="outline"
                     onClick={() => onExcludeHaulBucket(bucket.fromLocationId)}

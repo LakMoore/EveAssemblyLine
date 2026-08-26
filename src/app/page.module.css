@@ -1867,6 +1867,16 @@
   margin: 0;
 }
 
+.stockLocationToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--muted);
+  font: 9px "DM Mono";
+  white-space: nowrap;
+}
+
 .stockCardActions {
   display: flex;
   align-items: center;
@@ -2496,8 +2506,6 @@
   gap: 8px;
   align-items: baseline;
   padding: 11px 0;
-  color: var(--muted-foreground);
-  font: 10px "DM Mono";
   text-transform: uppercase;
 }
 
@@ -2506,11 +2514,6 @@
   grid-column: 5;
   justify-self: end;
   gap: 6px;
-}
-
-.haulHeaderActions svg {
-  width: 14px;
-  height: 14px;
 }
 
 .haulGroupHeader strong {

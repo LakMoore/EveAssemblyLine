@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAppLanguage } from "../AppShell";
 import {
@@ -11,6 +11,10 @@ import {
   type StockRecord,
 } from "@/lib/planning/stockStore";
 import { loadStructures } from "@/lib/planning/structureStore";
+import {
+  loadExcludedLocationIds,
+  saveExcludedLocationIds,
+} from "@/lib/planning/plannerPreferencesStore";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import { groupClientStockByLocation, loadClientStock } from "@/lib/client/requestCache";
@@ -23,6 +27,7 @@ import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -151,6 +156,14 @@ function uniqueById<T extends { id: string | number }>(entries: T[]) {
   return [...new Map(entries.map((entry) => [String(entry.id), entry])).values()];
 }
 
+function stockLocationId(location: StockRecord) {
+  if (location.structureId !== null) {
+    const structureId = Number(location.structureId);
+    if (Number.isInteger(structureId)) return structureId;
+  }
+  return location.systemId;
+}
+
 export default function StockPage() {
   const { language } = useAppLanguage();
   const [locations, setLocations] = useState<StockRecord[]>([]);
@@ -161,6 +174,26 @@ export default function StockPage() {
   const [stockSort, setStockSort] = useState<StockSort>("alphabetical");
   const [pasting, setPasting] = useState<StockRecord | null>(null);
   const [isHydratingVolumes, setIsHydratingVolumes] = useState(false);
+  const [excludedLocationIds, setExcludedLocationIds] = useState<number[]>([]);
+  const excludedLocationIdsRef = useRef<number[]>([]);
+
+  useEffect(() => {
+    void loadExcludedLocationIds().then((locationIds) => {
+      excludedLocationIdsRef.current = locationIds;
+      setExcludedLocationIds(locationIds);
+    });
+  }, []);
+
+  async function setLocationIncluded(location: StockRecord, included: boolean) {
+    const locationId = stockLocationId(location);
+    const nextLocationIds = included
+      ? excludedLocationIdsRef.current.filter((id) => id !== locationId)
+      : [...new Set([...excludedLocationIdsRef.current, locationId])];
+    excludedLocationIdsRef.current = nextLocationIds;
+    setExcludedLocationIds(nextLocationIds);
+    await saveExcludedLocationIds(nextLocationIds);
+  }
+
   useEffect(() => {
     async function loadPageData(
       refreshedLocations?: EsiStockResponse["locations"],
@@ -429,9 +462,11 @@ export default function StockPage() {
                   key={locationKey(location)}
                   location={location}
                   isVolumesLoading={isHydratingVolumes}
+                  isIncluded={!excludedLocationIds.includes(stockLocationId(location))}
                   onView={openItems}
                   onPaste={() => setPasting(location)}
                   onRemove={() => removeLocation(location)}
+                  onIncludeChange={(included) => void setLocationIncluded(location, included)}
                 />
               );
             })}
@@ -681,15 +716,19 @@ const stockCategories = [
 function StockLocationCard({
   location,
   isVolumesLoading,
+  isIncluded,
   onView,
   onPaste,
   onRemove,
+  onIncludeChange,
 }: {
   location: StockRecord;
   isVolumesLoading: boolean;
+  isIncluded: boolean;
   onView: (location: StockRecord, filter?: StockFilter) => void;
   onPaste: () => void;
   onRemove: () => void;
+  onIncludeChange: (included: boolean) => void;
 }) {
   const marketCategories = [
     ...new Set(
@@ -745,6 +784,15 @@ function StockLocationCard({
         <div>
           <p className={styles.panelKicker}>{location.systemName}</p>
           <h3>{location.structureName}</h3>
+        </div>
+        <div className={styles.stockLocationToggle}>
+          <Label htmlFor={`include-location-${stockLocationId(location)}`}>Include Location</Label>
+          <Switch
+            id={`include-location-${stockLocationId(location)}`}
+            aria-label={`Include ${location.structureName}`}
+            checked={isIncluded}
+            onCheckedChange={onIncludeChange}
+          />
         </div>
         {location.source !== "esi" && location.source !== "marketOrder" && (
           <div className={styles.stockCardActions}>

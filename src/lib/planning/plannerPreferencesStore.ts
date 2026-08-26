@@ -9,6 +9,7 @@ import type { TypeMetadata } from "@/lib/reference/types";
 
 const locationsKey = "locations";
 const buildBlacklistKey = "build-blacklist";
+const excludedLocationIdsKey = "excluded-location-ids";
 
 export async function loadPlannerLocations(): Promise<Partial<PlannerLocations> | null> {
   try {
@@ -90,6 +91,47 @@ export async function saveBuildBlacklist(buildBlacklist: PlannerSettings["buildB
       transaction.oncomplete = () => resolve();
       transaction.onerror = () =>
         reject(transaction.error ?? new Error("Could not save the build blacklist."));
+    });
+  }
+  catch {}
+}
+
+/** Loads the planner locations excluded from hauling. */
+export async function loadExcludedLocationIds(): Promise<number[]> {
+  try {
+    const database = await getPlanningDatabase();
+    return await new Promise((resolve, reject) => {
+      const request = database
+        .transaction(plannerPreferencesStoreName, "readonly")
+        .objectStore(plannerPreferencesStoreName)
+        .get(excludedLocationIdsKey);
+      request.onsuccess = () => {
+        const stored = request.result;
+        resolve(
+          Array.isArray(stored)
+            ? stored.filter((locationId): locationId is number => Number.isInteger(locationId))
+            : [],
+        );
+      };
+      request.onerror = () =>
+        reject(request.error ?? new Error("Could not load excluded planner locations."));
+    });
+  }
+  catch {
+    return [];
+  }
+}
+
+/** Saves the planner locations excluded from hauling. */
+export async function saveExcludedLocationIds(locationIds: number[]) {
+  try {
+    const database = await getPlanningDatabase();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(plannerPreferencesStoreName, "readwrite");
+      transaction.objectStore(plannerPreferencesStoreName).put(locationIds, excludedLocationIdsKey);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("Could not save excluded planner locations."));
     });
   }
   catch {}
