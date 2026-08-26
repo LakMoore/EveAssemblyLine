@@ -491,7 +491,7 @@ export default function CharactersPage() {
                   className={`${styles.characterRow} ${hasAuthorizationError ? styles.characterRowWithReauthorize : ""}`}
                   key={character.characterId}
                 >
-                  <div className={styles.characterRowTop}>
+                  <div className="flex min-w-0 flex-[1_1_100%] items-center justify-between gap-3">
                     <button
                       type="button"
                       className={styles.characterRowButton}
@@ -564,7 +564,7 @@ export default function CharactersPage() {
                       </button>
                     </span>
                   </div>
-                  <ItemGroup className={styles.statusItems}>
+                  <ItemGroup className="w-full flex-row flex-wrap gap-3">
                     {(["assets", "skills", "blueprints", "jobs", "orders"] as const).map(
                       (endpoint) => {
                         const endpointStatus = status?.[endpoint];
@@ -572,26 +572,26 @@ export default function CharactersPage() {
                           <Item
                             aria-label={`View ${endpoint} details for ${character.characterName}`}
                             key={endpoint}
-                            className={styles.statusItem}
+                            className="min-w-0 flex-1 basis-0"
                             onClick={() => setSelectedCharacter(character)}
                             render={<button type="button" />}
                             size="sm"
                             title={`${endpoint}: ${availabilityLabel(endpointStatus)}${endpointStatus?.error ? `; ${endpointStatus.error}` : ""}${endpointStatus?.lastModified ? `; modified ${formatDate(endpointStatus.lastModified)}` : ""}`}
                             variant="outline"
                           >
-                            <ItemContent className={styles.statusItemContent}>
-                              <ItemTitle className={styles.statusItemTitle}>
+                            <ItemContent className="flex flex-1 flex-col items-center gap-1">
+                              <ItemTitle className="w-full justify-center text-center">
                                 {endpoint.toUpperCase()}
                               </ItemTitle>
-                              <ItemDescription className={styles.statusItemDescription}>
-                                <span className={styles.statusItemState}>
+                              <ItemDescription className="flex flex-col items-center gap-1 text-center">
+                                <span className="flex items-center justify-center gap-1 text-center">
                                   {statusIndicator(endpointStatus, isRefreshing)}
                                   {statusLabel(endpointStatus)}
                                 </span>
-                                <span className={styles.availabilityWide}>
+                                <span className={`${styles.availabilityWide} text-center`}>
                                   {availabilityLabel(endpointStatus)}
                                 </span>
-                                <span className={styles.availabilityNarrow}>
+                                <span className={`${styles.availabilityNarrow} text-center`}>
                                   {availabilityLabel(endpointStatus).replace(/^Available /, "")}
                                 </span>
                               </ItemDescription>
@@ -657,26 +657,32 @@ export default function CharactersPage() {
                       {roleLabel(selectedCharacter.hasTraderRole)}
                     </small>
                   </div>
-                  <ItemGroup className={styles.characterModalStatuses}>
+                  <ItemGroup className="mt-5 grid w-full grid-cols-3 gap-2.5 max-[640px]:grid-cols-1">
                     {(["assets", "skills", "blueprints", "jobs", "orders"] as const).map(
                       (endpoint) => {
                         const endpointStatus = selectedStatus?.[endpoint];
                         return (
-                          <Item key={endpoint} size="sm" variant="outline">
-                            <ItemContent>
-                              <ItemTitle>{endpoint.toUpperCase()}</ItemTitle>
-                              <ItemDescription className={styles.characterModalStatusDescription}>
-                                <span className={styles.characterModalStatusState}>
+                          <Item key={endpoint} className="min-w-0" size="sm" variant="outline">
+                            <ItemContent className="flex flex-col items-center gap-1">
+                              <ItemTitle className="w-full justify-center text-center">
+                                {endpoint.toUpperCase()}
+                              </ItemTitle>
+                              <ItemDescription className="flex flex-col items-center gap-1 text-center">
+                                <span className="flex items-center justify-center gap-1 text-center">
                                   <span
                                     className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
                                   />
                                   <span>{statusLabel(endpointStatus)}</span>
                                 </span>
                                 {endpointStatus?.lastModified && (
-                                  <span>Modified {formatDate(endpointStatus.lastModified)}</span>
+                                  <span className="text-center">
+                                    Modified {formatDate(endpointStatus.lastModified)}
+                                  </span>
                                 )}
-                                <span>{expiryLabel(endpointStatus)}</span>
-                                {endpointStatus?.error && <span>{endpointStatus.error}</span>}
+                                <span className="text-center">{expiryLabel(endpointStatus)}</span>
+                                {endpointStatus?.error && (
+                                  <span className="text-center">{endpointStatus.error}</span>
+                                )}
                               </ItemDescription>
                             </ItemContent>
                           </Item>
@@ -800,13 +806,16 @@ export default function CharactersPage() {
                 .flatMap((status) => status.corporations ?? [])
                 .find((status) => status.corporationId === corporation.corporationId);
               return (
-                <div className={styles.eligibilityRow} key={corporation.corporationId}>
+                <div
+                  className={`${styles.eligibilityRow} flex flex-col items-stretch gap-4`}
+                  key={corporation.corporationId}
+                >
                   <button
                     type="button"
-                    className={styles.eligibilityIdentity}
+                    className="flex w-full flex-col items-start gap-1 text-left"
                     onClick={() => setSelectedCorporationId(corporation.corporationId)}
                   >
-                    <span className={styles.eligibilityIdentityHeading}>
+                    <span className="flex items-center gap-2">
                       <Image
                         className={styles.eligibilityCorporationLogo}
                         src={eveCorporationLogoUrl(corporation.corporationId)}
@@ -822,36 +831,36 @@ export default function CharactersPage() {
                       {corporation.pilots.map((pilot) => pilot.characterName).join(" · ")}
                     </small>
                   </button>
-                  <ItemGroup className={styles.endpointList}>
+                  <ItemGroup className="w-full flex-row flex-wrap gap-3">
                     {(["assets", "blueprints", "structures", "jobs", "orders"] as const).map(
                       (endpoint) => {
                         const endpointStatus = corporationStatus?.[endpoint];
                         return (
                           <Item
                             aria-label={`View ${endpoint} details for ${corporation.corporationName ?? `Corporation ${corporation.corporationId}`}`}
-                            className={styles.endpointStatus}
+                            className="min-w-0 flex-1 basis-0"
                             key={endpoint}
                             onClick={() => setSelectedCorporationId(corporation.corporationId)}
                             render={<button type="button" />}
                             size="sm"
                             variant="outline"
                           >
-                            <ItemContent>
-                              <ItemTitle className={styles.endpointName}>
+                            <ItemContent className="flex flex-1 flex-col items-center gap-1">
+                              <ItemTitle className="w-full justify-center text-center">
                                 {endpoint.toUpperCase()}
                               </ItemTitle>
-                              <ItemDescription className={styles.endpointDescription}>
-                                <span className={styles.endpointState}>
+                              <ItemDescription className="flex flex-col items-center gap-1 text-center">
+                                <span className="flex items-center justify-center gap-1 text-center">
                                   <span
                                     className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
                                   />
                                   {statusLabel(endpointStatus, corporation.eligible.length === 0)}
                                 </span>
-                                <span className={styles.endpointAvailability}>
-                                  <span className={styles.availabilityWide}>
+                                <span className="flex flex-col items-center text-center">
+                                  <span className={`${styles.availabilityWide} text-center`}>
                                     {availabilityLabel(endpointStatus)}
                                   </span>
-                                  <span className={styles.availabilityNarrow}>
+                                  <span className={`${styles.availabilityNarrow} text-center`}>
                                     {availabilityLabel(endpointStatus).replace(/^Available /, "")}
                                   </span>
                                 </span>

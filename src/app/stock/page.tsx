@@ -785,7 +785,7 @@ function StockLocationCard({
           <p className={styles.panelKicker}>{location.systemName}</p>
           <h3>{location.structureName}</h3>
         </div>
-        <div className={styles.stockLocationToggle}>
+        <div className="ml-auto flex items-center gap-2 whitespace-nowrap text-xs text-foreground font-mono">
           <Label htmlFor={`include-location-${stockLocationId(location)}`}>Include Location</Label>
           <Switch
             id={`include-location-${stockLocationId(location)}`}

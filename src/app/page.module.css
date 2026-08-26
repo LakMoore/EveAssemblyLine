@@ -1867,16 +1867,6 @@
   margin: 0;
 }
 
-.stockLocationToggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-  color: var(--muted);
-  font: 9px "DM Mono";
-  white-space: nowrap;
-}
-
 .stockCardActions {
   display: flex;
   align-items: center;
@@ -1922,7 +1912,6 @@
   display: grid;
   grid-template-columns: repeat(5, max-content);
   gap: 12px;
-  overflow-x: auto;
   padding: 15px 0;
 }
 
@@ -4640,13 +4629,6 @@
   line-height: 1.5;
 }
 
-.characterModalStatuses {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 22px;
-}
-
 .characterModalRoles > .panelKicker {
   color: #6d8b95;
   font: 9px "DM Mono";
@@ -4825,10 +4807,6 @@
 }
 
 @media (max-width: 640px) {
-  .characterModalStatuses {
-    grid-template-columns: 1fr;
-  }
-
   .characterTableHeader {
     display: none;
   }
