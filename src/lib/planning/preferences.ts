@@ -40,6 +40,7 @@ export type PlannerSettings = {
   allCorporationSellOrdersAsStock: boolean;
   myCorporationSellOrdersAsStock: boolean;
   respectActiveJobs: boolean;
+  buildBlacklist: import("@/lib/reference/types").TypeMetadata[];
   defaultMe: number;
   defaultTe: number;
 };
@@ -60,6 +61,7 @@ export const defaultSettings: PlannerSettings = {
   allCorporationSellOrdersAsStock: true,
   myCorporationSellOrdersAsStock: true,
   respectActiveJobs: true,
+  buildBlacklist: [],
   defaultMe: 10,
   defaultTe: 20,
 };

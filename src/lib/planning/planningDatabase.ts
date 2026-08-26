@@ -1,5 +1,5 @@
 const databaseName = "assembly-line";
-const databaseVersion = 8;
+const databaseVersion = 9;
 
 export const buildStoreName = "build-lists";
 export const stockStoreName = "stock";

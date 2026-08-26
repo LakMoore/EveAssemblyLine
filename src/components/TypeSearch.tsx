@@ -25,6 +25,7 @@ type TypeSearchProps = {
   onSelect: (item: TypeSearchResult) => void;
   placeholder: string;
   ariaLabel: string;
+  inputId?: string;
 };
 
 function resultVariation(category?: string) {
@@ -38,6 +39,7 @@ export default function TypeSearch({
   onSelect,
   placeholder,
   ariaLabel,
+  inputId,
 }: TypeSearchProps) {
   const anchor = useComboboxAnchor();
   const [query, setQuery] = useState("");
@@ -111,6 +113,7 @@ export default function TypeSearch({
         }}
       >
         <ComboboxInput
+          id={inputId}
           className="w-full"
           showTrigger={false}
           onFocus={() => results.length > 0 && setIsOpen(true)}

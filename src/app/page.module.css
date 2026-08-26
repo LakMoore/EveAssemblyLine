@@ -3448,46 +3448,6 @@
   max-width: 860px;
 }
 
-.appraiseTool > button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  min-height: 54px;
-  border: 0;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  padding: 14px 16px;
-  margin-top: 10px;
-  font-size: 12px;
-}
-
-.appraiseTool > button > svg {
-  flex: 0 0 16px;
-}
-
-.appraiseTool > button > b {
-  color: var(--action-accent);
-  font-size: 19px;
-  font-weight: 400;
-}
-
-.calculateLead,
-.appraiseActionLead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  text-align: left;
-}
-
-.calculateLead > span,
-.appraiseActionLead > span {
-  min-width: 0;
-}
-
-.appraiseInputHeader,
 .appraiseSummary,
 .appraiseRow {
   display: flex;
@@ -3495,26 +3455,27 @@
   gap: 14px;
 }
 
-.appraiseInputHeader {
-  justify-content: space-between;
-  color: var(--ink);
-  font: 11px "DM Mono";
-  letter-spacing: 1px;
-  text-transform: uppercase;
+.appraiseItems {
+  display: grid;
+  gap: 8px;
 }
 
-.appraiseTextarea {
+.appraiseInputRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px 28px;
+  gap: 12px;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.appraiseInputRow input {
   width: 100%;
-  border: 1px solid var(--line);
-  color: var(--ink);
-  padding: 14px;
-  resize: vertical;
-  font: 12px/1.6 "DM Mono";
 }
 
-.appraiseTextarea:focus {
-  outline: 1px solid var(--ring);
-  outline-offset: 2px;
+.appraiseEmpty {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .appraiseSummary {
@@ -3525,8 +3486,7 @@
 }
 
 .appraiseSummary div span,
-.appraiseSummary small,
-.appraiseRow small {
+.appraiseSummary small {
   display: block;
   color: var(--muted);
   font: 10px "DM Mono";
@@ -3538,29 +3498,6 @@
   margin-top: 6px;
   color: var(--cyan);
   font: 17px "DM Mono";
-}
-
-.appraiseRow {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) 150px 150px;
-  border-bottom: 1px solid #17343d;
-  padding: 14px 0;
-  color: var(--ink);
-}
-
-.appraiseRow > svg {
-  color: var(--cyan);
-}
-
-.appraiseRow span strong,
-.appraiseRow > strong {
-  display: block;
-  font-size: 12px;
-}
-
-.appraiseRow > span:nth-child(3),
-.appraiseRow > strong {
-  text-align: right;
 }
 
 .formError {

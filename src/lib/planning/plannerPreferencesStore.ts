@@ -1,7 +1,14 @@
 import { plannerPreferencesStoreName, getPlanningDatabase } from "./planningDatabase";
-import { locationsStorageKey, type PlannerLocations } from "./preferences";
+import {
+  locationsStorageKey,
+  settingsStorageKey,
+  type PlannerSettings,
+  type PlannerLocations,
+} from "./preferences";
+import type { TypeMetadata } from "@/lib/reference/types";
 
 const locationsKey = "locations";
+const buildBlacklistKey = "build-blacklist";
 
 export async function loadPlannerLocations(): Promise<Partial<PlannerLocations> | null> {
   try {
@@ -46,4 +53,68 @@ export async function savePlannerLocations(locations: PlannerLocations) {
     });
   }
   catch {}
+}
+
+/** Loads the build blacklist from IndexedDB, migrating the legacy localStorage value if needed. */
+export async function loadBuildBlacklist(): Promise<TypeMetadata[] | null> {
+  try {
+    const database = await getPlanningDatabase();
+    return await new Promise((resolve, reject) => {
+      const request = database
+        .transaction(plannerPreferencesStoreName, "readonly")
+        .objectStore(plannerPreferencesStoreName)
+        .get(buildBlacklistKey);
+      request.onsuccess = () => {
+        if (Array.isArray(request.result)) {
+          resolve(request.result as TypeMetadata[]);
+          return;
+        }
+        resolve(readLegacyBuildBlacklist());
+      };
+      request.onerror = () =>
+        reject(request.error ?? new Error("Could not load the build blacklist."));
+    });
+  }
+  catch {
+    return readLegacyBuildBlacklist();
+  }
+}
+
+/** Saves the build blacklist in the shared browser planning database. */
+export async function saveBuildBlacklist(buildBlacklist: PlannerSettings["buildBlacklist"]) {
+  try {
+    const database = await getPlanningDatabase();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(plannerPreferencesStoreName, "readwrite");
+      transaction.objectStore(plannerPreferencesStoreName).put(buildBlacklist, buildBlacklistKey);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("Could not save the build blacklist."));
+    });
+  }
+  catch {}
+}
+
+function readLegacyBuildBlacklist(): TypeMetadata[] | null {
+  try {
+    const stored = window.localStorage.getItem(settingsStorageKey);
+    if (!stored) return null;
+    const raw = JSON.parse(stored) as { buildBlacklist?: unknown };
+    if (!Array.isArray(raw.buildBlacklist)) return null;
+    return raw.buildBlacklist.flatMap((item) => {
+      if (typeof item === "number") return [{ typeId: item, name: `Type ${item}` }];
+      if (
+        item
+        && typeof item === "object"
+        && Number.isInteger(item.typeId)
+        && typeof item.name === "string"
+      ) {
+        return [item as TypeMetadata];
+      }
+      return [];
+    });
+  }
+  catch {
+    return null;
+  }
 }

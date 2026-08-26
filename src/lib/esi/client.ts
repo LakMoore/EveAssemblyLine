@@ -365,19 +365,19 @@ type EsiEndpointResult<T> = {
   fromCache: boolean;
 };
 
-async function fetchEsiEndpoint<T>(
+export async function fetchEsiEndpoint<T>(
   path: string,
   tokenSet: TokenSet,
   etag: string | undefined,
   options: { paginated: true },
 ): Promise<EsiEndpointResult<T[]>>;
-async function fetchEsiEndpoint<T>(
+export async function fetchEsiEndpoint<T>(
   path: string,
   tokenSet: TokenSet,
   etag: string | undefined,
   options?: { paginated?: false },
 ): Promise<EsiEndpointResult<T>>;
-async function fetchEsiEndpoint<T>(
+export async function fetchEsiEndpoint<T>(
   path: string,
   tokenSet: TokenSet,
   etag: string | undefined,

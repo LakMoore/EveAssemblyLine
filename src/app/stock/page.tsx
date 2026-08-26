@@ -19,8 +19,8 @@ import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import DialogBody from "@/components/DialogBody";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
+import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
@@ -674,7 +674,7 @@ function AddLocationModal({
 
 const stockCategories = [
   { id: "bpc" as const, label: "Blueprints", icon: FileBox },
-  { id: "reaction" as const, label: "Reaction formulas", icon: Atom },
+  { id: "reactionformula" as const, label: "Reaction formulas", icon: Atom },
   { id: "item" as const, label: "Items", icon: Package },
 ];
 
@@ -777,28 +777,32 @@ function StockLocationCard({
             <EmptyDescription>No stock metrics available</EmptyDescription>
           </Empty>
         ) : (
-          stockMetrics.map((metric) => (
-            <Card size="sm" className={styles.stockMetric} key={metric.id}>
-              <CardContent className="p-0">
-                <button
-                  type="button"
-                  className="grid w-full cursor-pointer grid-rows-[25px_25px_20px] p-2 text-left text-card-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground"
-                  onClick={() => onView(location, metric.filter)}
-                >
-                  <span className="flex min-h-[25px] flex-row-reverse items-center justify-start gap-1 whitespace-nowrap text-right text-xs text-muted-foreground">
-                    <metric.icon aria-hidden="true" />
-                    {metric.label}
-                  </span>
-                  <strong className="mt-1 text-right text-base">
-                    {metric.count.toLocaleString()}
-                  </strong>
-                  <small className="mt-1 text-right text-xs text-muted-foreground">
-                    {metric.detail}
-                  </small>
-                </button>
-              </CardContent>
-            </Card>
-          ))
+          <ItemGroup className="min-w-0 flex-row flex-wrap justify-start gap-3">
+            {stockMetrics.map((metric) => (
+              <Item
+                aria-label={`View ${metric.label.toLowerCase()}`}
+                className="w-fit min-w-0 flex-[0_1_auto] max-w-28 hover:bg-muted"
+                key={metric.id}
+                onClick={() => onView(location, metric.filter)}
+                render={<button type="button" />}
+                size="sm"
+                variant="outline"
+              >
+                <ItemContent className="w-fit min-w-0 flex-[0_1_auto] items-end text-right">
+                  <ItemTitle className="w-fit min-w-0 max-w-full justify-start gap-1 overflow-visible text-left text-muted-foreground whitespace-normal break-words">
+                    <metric.icon className="shrink-0" aria-hidden="true" />
+                    <span className="w-min">{metric.label}</span>
+                  </ItemTitle>
+                  <ItemDescription className="flex min-w-0 flex-col items-end gap-0.5 text-right">
+                    <strong className="text-base text-foreground">
+                      {metric.count.toLocaleString()}
+                    </strong>
+                    <small className="text-muted-foreground">{metric.detail}</small>
+                  </ItemDescription>
+                </ItemContent>
+              </Item>
+            ))}
+          </ItemGroup>
         )}
       </div>
       <div className={styles.stockMarketCategories}>

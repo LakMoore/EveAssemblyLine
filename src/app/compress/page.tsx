@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useAppLanguage } from "../AppShell";
 import CalculateButton from "@/components/CalculateButton";
 import DialogBody from "@/components/DialogBody";
+import PasteListDialog from "@/components/PasteListDialog";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import TypeSearch from "@/components/TypeSearch";
 import { toast } from "@/components/ui/toast";
@@ -14,7 +15,6 @@ import {
   Clipboard,
   ClipboardList,
   Copy,
-  FileUp,
   Gauge,
   Info,
   Minimize2,
@@ -50,8 +50,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -734,12 +732,24 @@ function CompressContent() {
 
       {result && <Results result={result} />}
       {isPasteOpen && (
-        <PasteDialog
+        <PasteListDialog
           language={language}
+          title="BATCH IMPORT"
+          description="Compatible with Eve Multibuy. One item per line, with the quantity at the end."
+          placeholder={`Tritanium 120000
+Pyerite 60000`}
+          ariaLabel="Multibuy list"
           currentItems={items}
           onCancel={() => setIsPasteOpen(false)}
-          onReplace={(next) => {
-            updateItems(next);
+          onImport={(next) => {
+            updateItems(
+              next.map((item) => ({
+                name: item.name,
+                typeId: item.typeId,
+                quantity: item.quantity ?? 1,
+                category: item.category as CompressItem["category"],
+              })),
+            );
             setResult(null);
             setIsPasteOpen(false);
           }}
@@ -1048,144 +1058,5 @@ function EfficiencyTable({ efficiency }: { efficiency?: EfficiencyResult }) {
         ))}
       </div>
     </div>
-  );
-}
-
-function PasteDialog({
-  language,
-  currentItems,
-  onCancel,
-  onReplace,
-}: {
-  language: SdeLanguage;
-  currentItems: CompressItem[];
-  onCancel: () => void;
-  onReplace: (items: CompressItem[]) => void;
-}) {
-  const [text, setText] = useState("");
-  const [mode, setMode] = useState<"add" | "replace">("add");
-  const [error, setError] = useState("");
-  async function resolve(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const parsed = text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const match = line.match(/^(.*?)\s+(\d+)$/);
-        return match ? { name: match[1].trim(), quantity: Number(match[2]) } : { name: line };
-      });
-    if (!parsed.length) {
-      setError("Paste at least one item and quantity.");
-      return;
-    }
-    try {
-      const response = await fetch(
-        "/api/reference/types",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ language, items: parsed }),
-        },
-      );
-      const data = (await response.json()) as { items?: PasteResult[]; error?: string };
-      if (!response.ok) throw new Error(data.error ?? "Could not resolve the pasted list.");
-      const resolved = (data.items ?? []).filter(
-        (item): item is PasteResult & { typeId: number; quantity: number } =>
-          Boolean(item.typeId && item.quantity && !item.error),
-      );
-      if (resolved.length !== parsed.length) {
-        throw new Error("Every line must contain a published item name and quantity.");
-      }
-      const imported = resolved.map(({ name, typeId, quantity, category }) => ({
-        name,
-        typeId,
-        quantity,
-        category,
-      }));
-      if (mode === "add") {
-        const merged = [...currentItems];
-        for (const item of imported) {
-          const existing = merged.find((entry) => entry.typeId === item.typeId);
-          if (existing) existing.quantity += item.quantity;
-          else merged.push(item);
-        }
-        onReplace(merged);
-      }
-      else onReplace(imported);
-    }
-    catch (resolveError) {
-      setError(
-        resolveError instanceof Error ? resolveError.message : "Could not resolve the pasted list.",
-      );
-    }
-  }
-  return (
-    <Dialog open onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent render={<form onSubmit={resolve} />}>
-        <DialogHeader>
-          <DialogTitle>BATCH IMPORT</DialogTitle>
-          <DialogDescription>
-            Compatible with Eve Multibuy. One item per line, with the quantity at the end.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogBody>
-          <Textarea
-            value={text}
-            onChange={(event) => {
-              setText(event.target.value);
-              setError("");
-            }}
-            placeholder="Tritanium 120000\nPyerite 60000"
-            aria-label="Multibuy list"
-            spellCheck={false}
-            autoFocus
-          />
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-          <RadioGroup
-            className="mt-4 sm:grid-cols-2"
-            value={mode}
-            onValueChange={(value) => setMode(value as "add" | "replace")}
-            aria-label="Paste behavior"
-          >
-            <label className="flex items-start gap-2">
-              <RadioGroupItem value="add" />
-              <span className="grid min-w-0 gap-1">
-                <span className="text-sm font-medium">Add to list</span>
-                <span className="text-muted-foreground text-xs">
-                  Keep the imported items with the current list.
-                </span>
-              </span>
-            </label>
-            <label className="flex items-start gap-2">
-              <RadioGroupItem value="replace" />
-              <span className="grid min-w-0 gap-1">
-                <span className="text-sm font-medium">Replace list</span>
-                <span className="text-muted-foreground text-xs">
-                  Clear the current list before importing.
-                </span>
-              </span>
-            </label>
-          </RadioGroup>
-        </DialogBody>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onCancel}>
-            <X aria-hidden="true" />
-            Cancel
-          </Button>
-          <Button type="submit" disabled={!text.trim()}>
-            <span className="flex min-w-0 items-center gap-1.5 text-left">
-              <FileUp aria-hidden="true" />
-              <span>Import list</span>
-            </span>
-            <b aria-hidden="true">→</b>
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }

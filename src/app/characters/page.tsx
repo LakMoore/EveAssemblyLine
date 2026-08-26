@@ -12,8 +12,8 @@ import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageS
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
+import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   groupClientStockByLocation,
@@ -480,15 +480,6 @@ export default function CharactersPage() {
           </Empty>
         ) : (
           <>
-            <div className={styles.characterTableHeader}>
-              <span>PILOT</span>
-              <span>ASSETS</span>
-              <span>SKILLS</span>
-              <span>BLUEPRINTS</span>
-              <span>JOBS</span>
-              <span>ORDERS</span>
-              <span />
-            </div>
             {characters.map((character) => {
               const status = statuses.find((entry) => entry.characterId === character.characterId);
               const hasAuthorizationError = status
@@ -500,157 +491,116 @@ export default function CharactersPage() {
                   className={`${styles.characterRow} ${hasAuthorizationError ? styles.characterRowWithReauthorize : ""}`}
                   key={character.characterId}
                 >
-                  <button
-                    type="button"
-                    className={styles.characterRowButton}
-                    onClick={() => setSelectedCharacter(character)}
-                  >
-                    <span className={styles.characterIdentity}>
-                      <Image
-                        className={styles.characterCardPortrait}
-                        src={eveCharacterPortraitUrl(character.characterId)}
-                        alt=""
-                        width={40}
-                        height={40}
-                      />
-                      <span className={styles.characterIdentityText}>
-                        <strong>{character.characterName}</strong>
-                        <small>
-                          {character.corporationName
-                            ?? (character.corporationId
-                              ? `Corporation ${character.corporationId}`
-                              : "Corporation unavailable")}{" "}
-                          / {hasCorpAccess ? "Director access" : "Character access only"}
-                        </small>
-                        <small>
-                          Director: {roleLabel(character.hasDirectorRole)} · Accountant:{" "}
-                          {roleLabel(character.hasAccountantRole)} · Trader:{" "}
-                          {roleLabel(character.hasTraderRole)}
-                        </small>
-                      </span>
-                    </span>
-                    <span
-                      className={styles.statusCell}
-                      title={`Assets: ${availabilityLabel(status?.assets)}${status?.assets?.error ? `; ${status.assets.error}` : ""}${status?.assets?.lastModified ? `; modified ${formatDate(status.assets.lastModified)}` : ""}`}
-                    >
-                      <small className={styles.endpointName}>ASSETS</small>
-                      {statusIndicator(status?.assets, isRefreshing)}
-                      <small className={styles.endpointState}>{statusLabel(status?.assets)}</small>
-                      <small className={styles.statusDate}>
-                        <span className={styles.availabilityWide}>
-                          {availabilityLabel(status?.assets)}
-                        </span>
-                        <span className={styles.availabilityNarrow}>
-                          {availabilityLabel(status?.assets).replace(/^Available /, "")}
-                        </span>
-                      </small>
-                    </span>
-                    <span
-                      className={styles.statusCell}
-                      title={`Skills: ${availabilityLabel(status?.skills)}${status?.skills?.error ? `; ${status.skills.error}` : ""}${status?.skills?.lastModified ? `; modified ${formatDate(status.skills.lastModified)}` : ""}`}
-                    >
-                      <small className={styles.endpointName}>SKILLS</small>
-                      {statusIndicator(status?.skills, isRefreshing)}
-                      <small className={styles.endpointState}>{statusLabel(status?.skills)}</small>
-                      <small className={styles.statusDate}>
-                        <span className={styles.availabilityWide}>
-                          {availabilityLabel(status?.skills)}
-                        </span>
-                        <span className={styles.availabilityNarrow}>
-                          {availabilityLabel(status?.skills).replace(/^Available /, "")}
-                        </span>
-                      </small>
-                    </span>
-                    <span
-                      className={styles.statusCell}
-                      title={`Blueprints: ${availabilityLabel(status?.blueprints)}${status?.blueprints?.error ? `; ${status.blueprints.error}` : ""}${status?.blueprints?.lastModified ? `; modified ${formatDate(status.blueprints.lastModified)}` : ""}`}
-                    >
-                      <small className={styles.endpointName}>BLUEPRINTS</small>
-                      {statusIndicator(status?.blueprints, isRefreshing)}
-                      <small className={styles.endpointState}>
-                        {statusLabel(status?.blueprints)}
-                      </small>
-                      <small className={styles.statusDate}>
-                        <span className={styles.availabilityWide}>
-                          {availabilityLabel(status?.blueprints)}
-                        </span>
-                        <span className={styles.availabilityNarrow}>
-                          {availabilityLabel(status?.blueprints).replace(/^Available /, "")}
-                        </span>
-                      </small>
-                    </span>
-                    <span
-                      className={styles.statusCell}
-                      title={`Jobs: ${availabilityLabel(status?.jobs)}${status?.jobs?.error ? `; ${status.jobs.error}` : ""}${status?.jobs?.lastModified ? `; modified ${formatDate(status.jobs.lastModified)}` : ""}`}
-                    >
-                      <small className={styles.endpointName}>JOBS</small>
-                      {statusIndicator(status?.jobs, isRefreshing)}
-                      <small className={styles.endpointState}>{statusLabel(status?.jobs)}</small>
-                      <small className={styles.statusDate}>
-                        <span className={styles.availabilityWide}>
-                          {availabilityLabel(status?.jobs)}
-                        </span>
-                        <span className={styles.availabilityNarrow}>
-                          {availabilityLabel(status?.jobs).replace(/^Available /, "")}
-                        </span>
-                      </small>
-                    </span>
-                    <span
-                      className={styles.statusCell}
-                      title={`Orders: ${availabilityLabel(status?.orders)}${status?.orders?.error ? `; ${status.orders.error}` : ""}${status?.orders?.lastModified ? `; modified ${formatDate(status.orders.lastModified)}` : ""}`}
-                    >
-                      <small className={styles.endpointName}>ORDERS</small>
-                      {statusIndicator(status?.orders, isRefreshing)}
-                      <small className={styles.endpointState}>{statusLabel(status?.orders)}</small>
-                      <small className={styles.statusDate}>
-                        <span className={styles.availabilityWide}>
-                          {availabilityLabel(status?.orders)}
-                        </span>
-                        <span className={styles.availabilityNarrow}>
-                          {availabilityLabel(status?.orders).replace(/^Available /, "")}
-                        </span>
-                      </small>
-                    </span>
-                  </button>
-                  <span className={styles.characterActions}>
-                    {hasAuthorizationError && (
-                      <button
-                        type="button"
-                        className={`actionButton ${styles.characterReauthorize}`}
-                        onClick={() => {
-                          window.location.assign(
-                            `/api/auth/eve/start?characterId=${character.characterId}`,
-                          );
-                        }}
-                        aria-label={`Re-authorise ${character.characterName}`}
-                        title="Re-authorise character"
-                      >
-                        <RotateCcw aria-hidden="true" strokeWidth={1.8} />
-                        <span>Re-authorise</span>
-                      </button>
-                    )}
+                  <div className={styles.characterRowTop}>
                     <button
                       type="button"
-                      className={`actionButton ${styles.characterRemove}`}
-                      onClick={() => {
-                        void removeCharacter(character);
-                      }}
-                      disabled={removingId === character.characterId}
-                      aria-label={
-                        removingId === character.characterId
-                          ? "Removing character"
-                          : `Remove ${character.characterName}`
-                      }
-                      title={
-                        removingId === character.characterId
-                          ? "Removing character"
-                          : "Remove character"
-                      }
+                      className={styles.characterRowButton}
+                      onClick={() => setSelectedCharacter(character)}
                     >
-                      <Trash2 aria-hidden="true" strokeWidth={1.8} />
-                      <span>{removingId === character.characterId ? "Removing..." : "Remove"}</span>
+                      <span className={styles.characterIdentity}>
+                        <Image
+                          className={styles.characterCardPortrait}
+                          src={eveCharacterPortraitUrl(character.characterId)}
+                          alt=""
+                          width={40}
+                          height={40}
+                        />
+                        <span className={styles.characterIdentityText}>
+                          <strong>{character.characterName}</strong>
+                          <small>
+                            {character.corporationName
+                              ?? (character.corporationId
+                                ? `Corporation ${character.corporationId}`
+                                : "Corporation unavailable")}{" "}
+                            / {hasCorpAccess ? "Director access" : "Character access only"}
+                          </small>
+                          <small>
+                            Director: {roleLabel(character.hasDirectorRole)} · Accountant:{" "}
+                            {roleLabel(character.hasAccountantRole)} · Trader:{" "}
+                            {roleLabel(character.hasTraderRole)}
+                          </small>
+                        </span>
+                      </span>
                     </button>
-                  </span>
+                    <span className={styles.characterActions}>
+                      {hasAuthorizationError && (
+                        <button
+                          type="button"
+                          className={`actionButton ${styles.characterReauthorize}`}
+                          onClick={() => {
+                            window.location.assign(
+                              `/api/auth/eve/start?characterId=${character.characterId}`,
+                            );
+                          }}
+                          aria-label={`Re-authorise ${character.characterName}`}
+                          title="Re-authorise character"
+                        >
+                          <RotateCcw aria-hidden="true" strokeWidth={1.8} />
+                          <span>Re-authorise</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className={`actionButton ${styles.characterRemove}`}
+                        onClick={() => {
+                          void removeCharacter(character);
+                        }}
+                        disabled={removingId === character.characterId}
+                        aria-label={
+                          removingId === character.characterId
+                            ? "Removing character"
+                            : `Remove ${character.characterName}`
+                        }
+                        title={
+                          removingId === character.characterId
+                            ? "Removing character"
+                            : "Remove character"
+                        }
+                      >
+                        <Trash2 aria-hidden="true" strokeWidth={1.8} />
+                        <span>
+                          {removingId === character.characterId ? "Removing..." : "Remove"}
+                        </span>
+                      </button>
+                    </span>
+                  </div>
+                  <ItemGroup className={styles.statusItems}>
+                    {(["assets", "skills", "blueprints", "jobs", "orders"] as const).map(
+                      (endpoint) => {
+                        const endpointStatus = status?.[endpoint];
+                        return (
+                          <Item
+                            aria-label={`View ${endpoint} details for ${character.characterName}`}
+                            key={endpoint}
+                            className={styles.statusItem}
+                            onClick={() => setSelectedCharacter(character)}
+                            render={<button type="button" />}
+                            size="sm"
+                            title={`${endpoint}: ${availabilityLabel(endpointStatus)}${endpointStatus?.error ? `; ${endpointStatus.error}` : ""}${endpointStatus?.lastModified ? `; modified ${formatDate(endpointStatus.lastModified)}` : ""}`}
+                            variant="outline"
+                          >
+                            <ItemContent className={styles.statusItemContent}>
+                              <ItemTitle className={styles.statusItemTitle}>
+                                {endpoint.toUpperCase()}
+                              </ItemTitle>
+                              <ItemDescription className={styles.statusItemDescription}>
+                                <span className={styles.statusItemState}>
+                                  {statusIndicator(endpointStatus, isRefreshing)}
+                                  {statusLabel(endpointStatus)}
+                                </span>
+                                <span className={styles.availabilityWide}>
+                                  {availabilityLabel(endpointStatus)}
+                                </span>
+                                <span className={styles.availabilityNarrow}>
+                                  {availabilityLabel(endpointStatus).replace(/^Available /, "")}
+                                </span>
+                              </ItemDescription>
+                            </ItemContent>
+                          </Item>
+                        );
+                      },
+                    )}
+                  </ItemGroup>
                 </div>
               );
             })}
@@ -707,33 +657,33 @@ export default function CharactersPage() {
                       {roleLabel(selectedCharacter.hasTraderRole)}
                     </small>
                   </div>
-                  <div className={styles.characterModalStatuses}>
+                  <ItemGroup className={styles.characterModalStatuses}>
                     {(["assets", "skills", "blueprints", "jobs", "orders"] as const).map(
                       (endpoint) => {
                         const endpointStatus = selectedStatus?.[endpoint];
                         return (
-                          <Card key={endpoint} size="sm">
-                            <CardHeader>
-                              <CardTitle>{endpoint.toUpperCase()}</CardTitle>
-                            </CardHeader>
-                            <CardContent className="flex flex-col gap-1">
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
-                                />
-                                <span>{statusLabel(endpointStatus)}</span>
-                              </div>
-                              {endpointStatus?.lastModified && (
-                                <span>Modified {formatDate(endpointStatus.lastModified)}</span>
-                              )}
-                              <span>{expiryLabel(endpointStatus)}</span>
-                              {endpointStatus?.error && <span>{endpointStatus.error}</span>}
-                            </CardContent>
-                          </Card>
+                          <Item key={endpoint} size="sm" variant="outline">
+                            <ItemContent>
+                              <ItemTitle>{endpoint.toUpperCase()}</ItemTitle>
+                              <ItemDescription className={styles.characterModalStatusDescription}>
+                                <span className={styles.characterModalStatusState}>
+                                  <span
+                                    className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
+                                  />
+                                  <span>{statusLabel(endpointStatus)}</span>
+                                </span>
+                                {endpointStatus?.lastModified && (
+                                  <span>Modified {formatDate(endpointStatus.lastModified)}</span>
+                                )}
+                                <span>{expiryLabel(endpointStatus)}</span>
+                                {endpointStatus?.error && <span>{endpointStatus.error}</span>}
+                              </ItemDescription>
+                            </ItemContent>
+                          </Item>
                         );
                       },
                     )}
-                  </div>
+                  </ItemGroup>
                   <div className={styles.characterModalRoles}>
                     <p className={styles.panelKicker}>CORPORATION ROLES</p>
                     <div>
@@ -850,54 +800,69 @@ export default function CharactersPage() {
                 .flatMap((status) => status.corporations ?? [])
                 .find((status) => status.corporationId === corporation.corporationId);
               return (
-                <button
-                  type="button"
-                  className={styles.eligibilityRow}
-                  key={corporation.corporationId}
-                  onClick={() => setSelectedCorporationId(corporation.corporationId)}
-                >
-                  <span>
-                    <strong>
-                      {corporation.corporationName ?? `Corporation ${corporation.corporationId}`}
-                    </strong>
+                <div className={styles.eligibilityRow} key={corporation.corporationId}>
+                  <button
+                    type="button"
+                    className={styles.eligibilityIdentity}
+                    onClick={() => setSelectedCorporationId(corporation.corporationId)}
+                  >
+                    <span className={styles.eligibilityIdentityHeading}>
+                      <Image
+                        className={styles.eligibilityCorporationLogo}
+                        src={eveCorporationLogoUrl(corporation.corporationId)}
+                        alt=""
+                        width={32}
+                        height={32}
+                      />
+                      <strong>
+                        {corporation.corporationName ?? `Corporation ${corporation.corporationId}`}
+                      </strong>
+                    </span>
                     <small>
                       {corporation.pilots.map((pilot) => pilot.characterName).join(" · ")}
                     </small>
-                  </span>
-                  <span className={styles.endpointList}>
-                    <span className={styles.endpointHeaders}>
-                      <small>ASSETS</small>
-                      <small>BLUEPRINTS</small>
-                      <small>STRUCTURES</small>
-                      <small>JOBS</small>
-                      <small>ORDERS</small>
-                    </span>
+                  </button>
+                  <ItemGroup className={styles.endpointList}>
                     {(["assets", "blueprints", "structures", "jobs", "orders"] as const).map(
                       (endpoint) => {
                         const endpointStatus = corporationStatus?.[endpoint];
                         return (
-                          <span className={styles.endpointStatus} key={endpoint}>
-                            <small className={styles.endpointName}>{endpoint.toUpperCase()}</small>
-                            <span
-                              className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
-                            />
-                            <small className={styles.endpointState}>
-                              {statusLabel(endpointStatus, corporation.eligible.length === 0)}
-                            </small>
-                            <small className={styles.endpointAvailability}>
-                              <span className={styles.availabilityWide}>
-                                {availabilityLabel(endpointStatus)}
-                              </span>
-                              <span className={styles.availabilityNarrow}>
-                                {availabilityLabel(endpointStatus).replace(/^Available /, "")}
-                              </span>
-                            </small>
-                          </span>
+                          <Item
+                            aria-label={`View ${endpoint} details for ${corporation.corporationName ?? `Corporation ${corporation.corporationId}`}`}
+                            className={styles.endpointStatus}
+                            key={endpoint}
+                            onClick={() => setSelectedCorporationId(corporation.corporationId)}
+                            render={<button type="button" />}
+                            size="sm"
+                            variant="outline"
+                          >
+                            <ItemContent>
+                              <ItemTitle className={styles.endpointName}>
+                                {endpoint.toUpperCase()}
+                              </ItemTitle>
+                              <ItemDescription className={styles.endpointDescription}>
+                                <span className={styles.endpointState}>
+                                  <span
+                                    className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
+                                  />
+                                  {statusLabel(endpointStatus, corporation.eligible.length === 0)}
+                                </span>
+                                <span className={styles.endpointAvailability}>
+                                  <span className={styles.availabilityWide}>
+                                    {availabilityLabel(endpointStatus)}
+                                  </span>
+                                  <span className={styles.availabilityNarrow}>
+                                    {availabilityLabel(endpointStatus).replace(/^Available /, "")}
+                                  </span>
+                                </span>
+                              </ItemDescription>
+                            </ItemContent>
+                          </Item>
                         );
                       },
                     )}
-                  </span>
-                </button>
+                  </ItemGroup>
+                </div>
               );
             })}
           </div>

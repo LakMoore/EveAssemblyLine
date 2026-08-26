@@ -116,7 +116,7 @@ async function refreshBlueprintInstances(
   const result = await fetchBlueprints(character, cache.blueprintInstances?.etag);
   cache.blueprintInstances =
     result.notModified && cache.blueprintInstances
-      ? setFresh(cache.blueprintInstances.lastBody, result.headers, cache.blueprintInstances)
+      ? setFresh(cache.blueprintInstances.lastBody, result.headers, cache.blueprintInstances, true)
       : setFresh(result.blueprints ?? [], result.headers, cache.blueprintInstances);
   return cache.blueprintInstances;
 }
@@ -174,8 +174,16 @@ function normalizeUtcTimestamp(value: string | null | undefined, fallback?: stri
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : fallback;
 }
 
-function setFresh<T>(body: T, headers?: Headers, previous?: EndpointCache<T>): EndpointCache<T> {
-  const lastModified = normalizeUtcTimestamp(headers?.get("last-modified"))?? previous?.lastModified;
+export function setFresh<T>(
+  body: T,
+  headers?: Headers,
+  previous?: EndpointCache<T>,
+  preserveLastModified = false,
+): EndpointCache<T> {
+  const lastModified = normalizeUtcTimestamp(
+    headers?.get("last-modified"),
+    preserveLastModified ? previous?.lastModified : undefined,
+  );
   const nextRefreshAllowed = normalizeUtcTimestamp(headers?.get("expires"));
   return {
     lastBody: body,
@@ -186,7 +194,10 @@ function setFresh<T>(body: T, headers?: Headers, previous?: EndpointCache<T>): E
     status: endpointDataStatus(lastModified, nextRefreshAllowed),
   };
 }
-function endpointDataStatus(lastModified?: string, nextRefreshAllowed?: string): EndpointStatus {
+export function endpointDataStatus(
+  lastModified?: string,
+  nextRefreshAllowed?: string,
+): EndpointStatus {
   if (nextRefreshAllowed && Date.parse(nextRefreshAllowed) <= Date.now()) return "stale";
   if (lastModified && Date.now() - Date.parse(lastModified) <= 2 * 60 * 1000) return "fresh";
   return "cached";
@@ -309,6 +320,7 @@ async function cacheResolvedAssets(
   headers?: Headers,
   previous?: EndpointCache<AssetRecord[]>,
   assetNamePath?: string,
+  preserveLastModified = false,
 ) {
   const assetIndexes = await indexAssetsByPurpose(rawAssets);
   let namedAssets = rawAssets;
@@ -374,7 +386,7 @@ async function cacheResolvedAssets(
   }
   const resolvedByItemId = new Map(resolvedStockAssets.map((asset) => [asset.itemId, asset]));
 
-  cache.allAssetsRaw = setFresh(namedAssets, headers, previous);
+  cache.allAssetsRaw = setFresh(namedAssets, headers, previous, preserveLastModified);
   cache.stockAssetsByItemId = resolvedByItemId;
   cache.rootLocationsByItemId = rootLocationsByItemId;
   const resolvedShipAssets = await Promise.all(
@@ -638,7 +650,7 @@ export async function refreshCharacterState(
         const skills = await fetchCharacterSkills(character, cache.skills?.etag);
         cache.skills =
           skills.notModified && cache.skills
-            ? setFresh(cache.skills.lastBody, skills.headers, cache.skills)
+            ? setFresh(cache.skills.lastBody, skills.headers, cache.skills, true)
             : setFresh(skills.skills ?? [], skills.headers, cache.skills);
       }
       else {
@@ -677,6 +689,7 @@ export async function refreshCharacterState(
             result.headers,
             cache.allAssetsRaw,
             `/characters/${character.characterId}`,
+            true,
           );
           cache.allAssetsRaw.status = endpointDataStatus(
             cache.allAssetsRaw.lastModified,
@@ -711,7 +724,7 @@ export async function refreshCharacterState(
         const jobs = await fetchCharacterIndustryJobs(character, cache.jobs?.etag);
         cache.jobs =
           jobs.notModified && cache.jobs
-            ? setFresh(cache.jobs.lastBody, jobs.headers, cache.jobs)
+            ? setFresh(cache.jobs.lastBody, jobs.headers, cache.jobs, true)
             : setFresh(jobs.jobs ?? [], jobs.headers, cache.jobs);
       }
       else {
@@ -743,6 +756,7 @@ export async function refreshCharacterState(
             cache.marketOrders.lastBody,
             orders.headers,
             cache.marketOrders,
+            true,
           );
           cache.marketOrders.status = endpointDataStatus(
             cache.marketOrders.lastModified,
@@ -823,6 +837,7 @@ export async function refreshCharacterState(
               result.headers,
               corpCache.allAssetsRaw,
               `/corporations/${character.corporationId}`,
+              true,
             );
             corpCache.allAssetsRaw.status = endpointDataStatus(
               corpCache.allAssetsRaw.lastModified,
@@ -875,7 +890,7 @@ export async function refreshCharacterState(
           const jobs = await fetchCorporationIndustryJobs(character, corpCache.jobs?.etag);
           corpCache.jobs =
             jobs.notModified && corpCache.jobs
-              ? setFresh(corpCache.jobs.lastBody, jobs.headers, corpCache.jobs)
+              ? setFresh(corpCache.jobs.lastBody, jobs.headers, corpCache.jobs, true)
               : setFresh(jobs.jobs ?? [], jobs.headers, corpCache.jobs);
         }
         else {
@@ -911,6 +926,7 @@ export async function refreshCharacterState(
               corpCache.marketOrders.lastBody,
               orders.headers,
               corpCache.marketOrders,
+              true,
             );
             corpCache.marketOrders.status = endpointDataStatus(
               corpCache.marketOrders.lastModified,

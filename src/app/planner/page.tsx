@@ -20,7 +20,11 @@ import type {
 } from "@/lib/planning/types";
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
 import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
-import { loadPlannerLocations, savePlannerLocations } from "@/lib/planning/plannerPreferencesStore";
+import {
+  loadBuildBlacklist,
+  loadPlannerLocations,
+  savePlannerLocations,
+} from "@/lib/planning/plannerPreferencesStore";
 import {
   loadClientSession,
   loadClientJobs,
@@ -53,7 +57,6 @@ import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
@@ -98,6 +101,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
+import PasteListDialog from "@/components/PasteListDialog";
 
 type PlannerTab = "Plan" | "Haul" | "Buy" | "Copy" | "Invent" | "React" | "Manufacture" | "Skills";
 const tabs: { value: PlannerTab; icon: LucideIcon }[] = [
@@ -110,13 +114,6 @@ const tabs: { value: PlannerTab; icon: LucideIcon }[] = [
   { value: "Manufacture", icon: Factory },
   { value: "Skills", icon: Brain },
 ];
-type PasteResult = {
-  name: string;
-  quantity?: number;
-  typeId?: number;
-  iconCategory?: ClientBuildItem["iconCategory"];
-  error?: string;
-};
 type PlanLocationOption = {
   id: string;
   locationId: number;
@@ -370,7 +367,7 @@ function Planner() {
   const [locationOptions, setLocationOptions] = useState<PlanLocationOption[]>([]);
   const [includeStock, setIncludeStock] = useState(true);
   const [locations, setLocations] = useState<PlannerLocations>(defaultLocations);
-  const [settings] = useState<PlannerSettings>(() => {
+  const [settings, setSettings] = useState<PlannerSettings>(() => {
     if (typeof window === "undefined") return defaultSettings;
     try {
       const stored = window.localStorage.getItem(settingsStorageKey);
@@ -388,6 +385,9 @@ function Planner() {
   }
 
   useEffect(() => {
+    void loadBuildBlacklist().then((buildBlacklist) => {
+      if (buildBlacklist) setSettings((current) => ({ ...current, buildBlacklist }));
+    });
     loadBuildList()
       .then((savedItems) => localizeItems(savedItems, language).then(setItems))
       .catch(() => setItems([]))
@@ -510,7 +510,7 @@ function Planner() {
               personalSellOrdersAsStock: settings.personalSellOrdersAsStock,
               allCorporationSellOrdersAsStock: settings.allCorporationSellOrdersAsStock,
               myCorporationSellOrdersAsStock: settings.myCorporationSellOrdersAsStock,
-              buildBlacklist: [],
+              buildBlacklist: settings.buildBlacklist.map((item) => item.typeId),
               buyBlacklist: [],
               defaultMe: settings.defaultMe,
               defaultTe: settings.defaultTe,
@@ -990,10 +990,19 @@ function Planner() {
         </div>
       </form>
       {isPasteModalOpen && (
-        <PasteListModal
+        <PasteListDialog
           language={language}
+          currentItems={items}
           onCancel={() => setIsPasteModalOpen(false)}
-          onImport={importItems}
+          onImport={(importedItems) =>
+            importItems(
+              importedItems.map((item) => ({
+                ...item,
+                categoryName: "Unknown",
+                quantity: item.quantity ?? 1,
+              })),
+            )
+          }
         />
       )}
       {isExcludedLocationsModalOpen && (
@@ -1186,158 +1195,6 @@ function ExcludedLocationsModal({
             Close
           </Button>
           <Button type="button" className="min-w-32" disabled={isLoading} onClick={onClearAll}>
-            <b>→</b>
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function PasteListModal({
-  language,
-  onCancel,
-  onImport,
-}: {
-  language: SdeLanguage;
-  onCancel: () => void;
-  onImport: (
-    items: Array<{
-      name: string;
-      categoryName: string;
-      typeId: number;
-      quantity: number;
-      iconCategory?: ClientBuildItem["iconCategory"];
-    }>,
-  ) => void;
-}) {
-  const [text, setText] = useState("");
-  const [results, setResults] = useState<PasteResult[]>([]);
-  const [isResolving, setIsResolving] = useState(false);
-  const [error, setError] = useState("");
-
-  async function resolveItems(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const lines = text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    const parsed = lines.map((line) => {
-      const match = line.match(/^(.*?)\s+(\d+)$/);
-      return match ? { name: match[1].trim(), quantity: Number(match[2]) } : { name: line };
-    });
-    if (parsed.length === 0) {
-      setError("Paste at least one item and quantity.");
-      setResults([]);
-      return;
-    }
-    setIsResolving(true);
-    setError("");
-    try {
-      const response = await fetch(
-        "/api/reference/types",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ language, items: parsed }),
-        },
-      );
-      const data = (await response.json()) as { items?: PasteResult[]; error?: string };
-      if (!response.ok) throw new Error(data.error ?? "Could not resolve the pasted list.");
-      const resolvedItems = data.items ?? [];
-      setResults(resolvedItems);
-      if (resolvedItems.length > 0 && resolvedItems.every((item) => !item.error)) {
-        onImport(
-          resolvedItems.map((item) => ({
-            name: item.name,
-            categoryName: "Unknown",
-            typeId: item.typeId!,
-            quantity: item.quantity!,
-            iconCategory: item.iconCategory,
-          })),
-        );
-      }
-    }
-    catch (resolveError) {
-      setResults([]);
-      setError(
-        resolveError instanceof Error ? resolveError.message : "Could not resolve the pasted list.",
-      );
-    }
-    finally {
-      setIsResolving(false);
-    }
-  }
-
-  return (
-    <Dialog open onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className={styles.importModal} render={<form onSubmit={resolveItems} />}>
-        <div className={styles.panelHeader}>
-          <div>
-            <p className={styles.panelKicker}>BATCH IMPORT</p>
-            <DialogTitle>Paste build list</DialogTitle>
-          </div>
-        </div>
-        <div className="no-scrollbar max-h-[70vh] overflow-y-auto overscroll-contain">
-          <p className={styles.panelDescription}>
-            One item per line. Put the quantity at the end of each line.
-          </p>
-          <Textarea
-            className={styles.importTextarea}
-            value={text}
-            onChange={(event) => {
-              setText(event.target.value);
-              setResults([]);
-              setError("");
-            }}
-            placeholder={"Raven 2\nVargur 1"}
-            aria-label="Build items and quantities"
-            autoFocus
-          />
-          {error && (
-            <Alert variant="destructive" className={styles.importError}>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-          {results.length > 0 && (
-            <div className={styles.importResults}>
-              {results.map((item, index) => (
-                <div
-                  className={item.error ? styles.importResultInvalid : styles.importResult}
-                  key={`${item.name}-${index}`}
-                >
-                  {item.typeId ? (
-                    <TypeIdentity
-                      name={item.name}
-                      typeId={item.typeId}
-                      variation={
-                        item.iconCategory === "bpo"
-                          ? "bp"
-                          : item.iconCategory === "bpc" || item.iconCategory === "reactionformula"
-                            ? "bpc"
-                            : "icon"
-                      }
-                    />
-                  ) : (
-                    <span>{item.name}</span>
-                  )}
-                  {item.quantity ? <small>Quantity {item.quantity}</small> : null}
-                  {item.error ? <small>{item.error}</small> : null}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            className="min-w-32"
-            disabled={isResolving || text.trim().length === 0}
-          >
-            <span>{isResolving ? "Checking list..." : "OK"}</span>
             <b>→</b>
           </Button>
         </DialogFooter>
