@@ -73,7 +73,7 @@ type ActivePage =
   | "stock"
   | "jobs"
   | "ships"
-  | "locations"
+  | "structures"
   | "settings"
   | "imagechecker"
   | "characters";
@@ -182,8 +182,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 ? "jobs"
                 : pathname === "/ships"
                   ? "ships"
-                  : pathname === "/locations"
-                    ? "locations"
+                  : pathname === "/structures"
+                    ? "structures"
                     : pathname === "/settings"
                       ? "settings"
                       : pathname === "/imagechecker"
@@ -707,16 +707,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
               <span className={styles.navText}>Stock</span>
             </Link>
             <Link
-              className={`${styles.navItem} ${activePage === "locations" ? styles.navActive : ""}`}
-              href="/locations"
-              onClick={closeSidebarOnNavigation}
-            >
-              <span>
-                <MapPinned size={17} strokeWidth={1.8} aria-hidden="true" />
-              </span>
-              <span className={styles.navText}>Locations</span>
-            </Link>
-            <Link
               className={`${styles.navItem} ${activePage === "jobs" ? styles.navActive : ""}`}
               href="/jobs"
               onClick={closeSidebarOnNavigation}
@@ -737,6 +727,16 @@ export default function AppShell({ children }: { children: ReactNode }) {
               <span className={styles.navText}>Ships</span>
             </Link>
             <div className={styles.sectionLabel}>CONFIGURATION</div>
+            <Link
+              className={`${styles.navItem} ${activePage === "structures" ? styles.navActive : ""}`}
+              href="/structures"
+              onClick={closeSidebarOnNavigation}
+            >
+              <span>
+                <MapPinned size={17} strokeWidth={1.8} aria-hidden="true" />
+              </span>
+              <span className={styles.navText}>Structures</span>
+            </Link>
             <Link
               className={`${styles.navItem} ${activePage === "settings" ? styles.navActive : ""}`}
               href="/settings"

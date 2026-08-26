@@ -25,7 +25,7 @@ export default function WelcomePage() {
           <span className="eyebrow">INFORMATION</span>
           <h2>See the operation</h2>
           <p>
-            Stock, Locations, and Jobs show what you have, where it lives, and what is already
+            Stock, Structures, and Jobs show what you have, where it lives, and what is already
             moving through your facilities.
           </p>
         </section>

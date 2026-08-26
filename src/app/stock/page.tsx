@@ -652,7 +652,7 @@ function AddLocationModal({
                 </SelectContent>
               </Select>
             </div>
-            <Link className={styles.dialogLink} href="/locations">
+            <Link className={styles.dialogLink} href="/structures">
               Add or manage structures
             </Link>
           </div>

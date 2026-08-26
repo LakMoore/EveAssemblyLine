@@ -3899,7 +3899,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 58px 150px;
   margin-top: 22px;
-  border-top: 1px solid #1e3740;
+  border-top: 1px solid var(--border);
 }
 
 .constructionGridHeader,
@@ -3913,26 +3913,17 @@
 
 .constructionGridHeader {
   padding: 12px 0 8px;
-  color: #76949e;
-  font:
-    9px "DM Mono",
-    monospace;
-  letter-spacing: 1px;
+  color: var(--muted-foreground);
 }
 
 .constructionGridRow {
   min-height: 48px;
-  border-top: 1px solid #1e3740;
-  color: var(--ink);
-  font:
-    10px "DM Mono",
-    monospace;
-  letter-spacing: 0.6px;
+  border-top: 1px solid var(--border);
 }
 
 .constructionGridRowDisabled {
-  color: #58717a;
-  background: #08141a;
+  color: var(--muted-foreground);
+  background: var(--muted);
 }
 
 .constructionGridRowDisabled .constructionTaxField {
@@ -3944,43 +3935,13 @@
   min-width: 0;
 }
 
-.constructionTaxInput {
-  width: 100%;
-  min-width: 0;
-  height: 36px;
-  padding: 8px 28px 8px 10px;
-  border: 1px solid #2b4b57;
-  outline: 0;
-  color: var(--ink);
-  background: #09171d;
-  text-align: right;
-  font:
-    12px "DM Mono",
-    monospace;
-}
-
 .constructionTaxField > span {
   position: absolute;
   top: 50%;
   right: 10px;
-  color: #76949e;
-  font:
-    11px "DM Mono",
-    monospace;
+  color: var(--muted-foreground);
   pointer-events: none;
   transform: translateY(-50%);
-}
-
-.constructionTaxInput:focus {
-  border-color: var(--cyan);
-  box-shadow: 0 0 0 1px #5ed8ef33;
-}
-
-.constructionTaxInput:disabled {
-  border-color: #203941;
-  color: #58717a;
-  background: #071117;
-  cursor: not-allowed;
 }
 
 .rule {

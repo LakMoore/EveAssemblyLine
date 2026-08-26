@@ -1,6 +1,6 @@
 import type { PlanStockItem } from "@/lib/planning/types";
 import type { SdeLanguage } from "@/lib/reference/languages";
-import { saveEndpointResponse } from "./refreshCache";
+import { loadEndpointRecord, saveEndpointResponse } from "./refreshCache";
 
 export type ClientSession = {
   authenticated?: boolean;
@@ -195,18 +195,37 @@ export function loadClientStock(language: SdeLanguage, force = false) {
   if (!force && cached) return Promise.resolve(cached);
 
   const query = new URLSearchParams({ language });
-  const request = fetch(
-    `/api/state/stock?${query.toString()}`,
-    {
-      cache: "no-store",
-    },
-  )
-    .then(async (response) => {
-      const data = (await response.json()) as ClientStockResponse;
-      if (!response.ok) throw new Error("Could not load stock.");
-      await saveEndpointResponse("state/stock", `/api/state/stock?${query.toString()}`, data);
-      stockResponses.set(key, data);
-      return data;
+  const loadCachedStock = !force
+    ? loadEndpointRecord<ClientStockResponse>("state/stock").then((record) => {
+        if (!record) return null;
+        try {
+          const cachedLanguage = new URL(record.url, window.location.origin).searchParams.get(
+            "language",
+          );
+          if (cachedLanguage !== language) return null;
+        }
+        catch {
+          return null;
+        }
+        stockResponses.set(key, record.data);
+        return record.data;
+      })
+    : Promise.resolve(null);
+  const request = loadCachedStock
+    .then((cachedStock) => {
+      if (cachedStock) return cachedStock;
+      return fetch(
+        `/api/state/stock?${query.toString()}`,
+        {
+          cache: "no-store",
+        },
+      ).then(async (response) => {
+        const data = (await response.json()) as ClientStockResponse;
+        if (!response.ok) throw new Error("Could not load stock.");
+        await saveEndpointResponse("state/stock", `/api/state/stock?${query.toString()}`, data);
+        stockResponses.set(key, data);
+        return data;
+      });
     })
     .finally(() => stockRequests.delete(key));
   stockRequests.set(key, request);

@@ -541,7 +541,7 @@ function CompressContent() {
                 <Info aria-hidden="true" />
                 <AlertTitle>No reprocessing locations found.</AlertTitle>
                 <AlertDescription>
-                  Add a reprocessing location on the <Link href="/locations">Locations</Link> page
+                  Add a reprocessing location on the <Link href="/structures">Structures</Link> page
                   or <Link href="/api/auth/eve/start">authenticate a character</Link> to find the
                   best location automatically.
                 </AlertDescription>

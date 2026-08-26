@@ -18,7 +18,7 @@ export const refreshDependentEndpoints = {
   stock: ["state/stock"],
   jobs: ["state/jobs"],
   ships: ["state/ships"],
-  locations: ["state/stock", "facilities"],
+  structures: ["state/stock", "facilities"],
   characters: ["state/status", "characters", "auth/corp/status", "state/stock"],
   settings: [],
   imagechecker: [],

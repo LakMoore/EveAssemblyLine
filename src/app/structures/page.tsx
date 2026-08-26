@@ -484,7 +484,9 @@ export default function LocationsPage() {
       "manufacturing" | "research" | "reactions" | "invention",
       "me" | "te" | "cost",
     ];
-    return (right.asset?.bonuses[activity][metric] ?? 0) - (left.asset?.bonuses[activity][metric] ?? 0);
+    return (
+      (right.asset?.bonuses[activity][metric] ?? 0) - (left.asset?.bonuses[activity][metric] ?? 0)
+    );
   });
 
   function openAddDialog() {
@@ -542,9 +544,7 @@ export default function LocationsPage() {
         <div>
           <p className="eyebrow">CONFIGURATION / OPERATIONS</p>
           <h1>Structures</h1>
-          <p className={styles.subtitle}>
-            Maintain the structures you use for production.
-          </p>
+          <p className={styles.subtitle}>Maintain the structures you use for production.</p>
         </div>
       </div>
       <section className={styles.panel}>
@@ -602,53 +602,75 @@ export default function LocationsPage() {
               const structure = item.asset;
               const knownStructure = item.configured;
               return (
-              <div className={styles.knownStructure} key={knownStructure?.id ?? structure?.structureId}>
-                <span>
-                  <strong>{item.systemName ? `${item.systemName} - ` : ""}{item.name}</strong>
-                  <span className={styles.knownStructureMeta}>
-                    <small>
-                      {item.type ?? "Structure"}{item.size ? ` · ${item.size}` : ""} · {item.rigs.filter((rig) => rig !== "No Rig").length} rig{item.rigs.filter((rig) => rig !== "No Rig").length === 1 ? "" : "s"}
-                      {structure
-                        ? ` · ${structure.assetCount.toLocaleString()} records · ${structure.totalCount.toLocaleString()} quantity · ${structure.totalVolume.toLocaleString(undefined, { maximumFractionDigits: 2 })} m³ volume · ${structure.personalAssetCount.toLocaleString()} character · ${structure.corporationAssetCount.toLocaleString()} corp`
-                        : " · No asset data"}
-                      {structure?.state ? ` · ${structure.state}` : ""}
-                      {structure?.services?.length
-                        ? ` · ${structure.services.filter((service) => service.state === "online").length} services online`
-                        : ""}
-                      {structure?.fuelExpires
-                        ? ` · Fuel expires ${new Date(structure.fuelExpires).toLocaleDateString()}`
-                        : ""}
-                      {structure && !structure.resolved ? " · Name or metadata unavailable" : ""}
-                    </small>
-                    {structure && visibleBonusSummaries(structure.bonuses).length > 0 && (
-                      <small className={styles.locationBonusLine}>
-                        {visibleBonusSummaries(structure.bonuses).map(([label, bonuses], index) => (
-                          <span key={label}>
-                            {index > 0 ? " · " : ""}
-                            {formatBonusSummary(label, bonuses)}
-                          </span>
-                        ))}
+                <div
+                  className={styles.knownStructure}
+                  key={knownStructure?.id ?? structure?.structureId}
+                >
+                  <span>
+                    <strong>
+                      {item.systemName ? `${item.systemName} - ` : ""}
+                      {item.name}
+                    </strong>
+                    <span className={styles.knownStructureMeta}>
+                      <small>
+                        {item.type ?? "Structure"}
+                        {item.size ? ` · ${item.size}` : ""} ·{" "}
+                        {item.rigs.filter((rig) => rig !== "No Rig").length} rig
+                        {item.rigs.filter((rig) => rig !== "No Rig").length === 1 ? "" : "s"}
+                        {structure
+                          ? ` · ${structure.assetCount.toLocaleString()} records · ${structure.totalCount.toLocaleString()} quantity · ${structure.totalVolume.toLocaleString(undefined, { maximumFractionDigits: 2 })} m³ volume · ${structure.personalAssetCount.toLocaleString()} character · ${structure.corporationAssetCount.toLocaleString()} corp`
+                          : " · No asset data"}
+                        {structure?.state ? ` · ${structure.state}` : ""}
+                        {structure?.services?.length
+                          ? ` · ${structure.services.filter((service) => service.state === "online").length} services online`
+                          : ""}
+                        {structure?.fuelExpires
+                          ? ` · Fuel expires ${new Date(structure.fuelExpires).toLocaleDateString()}`
+                          : ""}
+                        {structure && !structure.resolved ? " · Name or metadata unavailable" : ""}
                       </small>
-                    )}
+                      {structure && visibleBonusSummaries(structure.bonuses).length > 0 && (
+                        <small className={styles.locationBonusLine}>
+                          {visibleBonusSummaries(structure.bonuses).map(
+                            ([label, bonuses], index) => (
+                              <span key={label}>
+                                {index > 0 ? " · " : ""}
+                                {formatBonusSummary(label, bonuses)}
+                              </span>
+                            ),
+                          )}
+                        </small>
+                      )}
+                    </span>
                   </span>
-                </span>
-                <button type="button" className={`actionButton ${styles.importButton}`} aria-label={`Edit ${item.name}`} title={`Edit ${item.name}`} onClick={() => {
-                  if (knownStructure) setEditingStructure(knownStructure);
-                  else if (structure) openEsiEditDialog(structure);
-                  setIsDialogOpen(true);
-                }}>
-                  <Pencil aria-hidden="true" />
-                  <span className={styles.structureActionLabel}>Edit</span>
-                </button>
-                {knownStructure && (
-                  <button type="button" className={`actionButton ${styles.remove}`} aria-label={`Remove ${knownStructure.name}`} onClick={() => removeStructure(knownStructure.id)}>
-                    <Trash2 aria-hidden="true" />
+                  <button
+                    type="button"
+                    className={`actionButton ${styles.importButton}`}
+                    aria-label={`Edit ${item.name}`}
+                    title={`Edit ${item.name}`}
+                    onClick={() => {
+                      if (knownStructure) setEditingStructure(knownStructure);
+                      else if (structure) openEsiEditDialog(structure);
+                      setIsDialogOpen(true);
+                    }}
+                  >
                     <Pencil aria-hidden="true" />
                     <span className={styles.structureActionLabel}>Edit</span>
                   </button>
-                )}
-              </div>
-            ))}
+                  {knownStructure && (
+                    <button
+                      type="button"
+                      className={`actionButton ${styles.remove}`}
+                      aria-label={`Remove ${knownStructure.name}`}
+                      onClick={() => removeStructure(knownStructure.id)}
+                    >
+                      <Trash2 aria-hidden="true" />
+                      <span className={styles.structureActionLabel}>Delete</span>
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </section>
@@ -964,136 +986,136 @@ function StructureDialog({
               />
             ))}
           </FieldGroup>
+          <div className={styles.constructionGrid}>
+            <div className={styles.constructionGridHeader} aria-hidden="true">
+              <span />
+              <span>ENABLED</span>
+              <span>TAX RATE</span>
+            </div>
+            <div className={styles.constructionGridRow}>
+              <span>REPROCESSING</span>
+              <ActivitySwitch
+                label="reprocessing"
+                checked={allowReprocessing}
+                onCheckedChange={setAllowReprocessing}
+              />
+              <TaxRateInput
+                label="Reprocessing"
+                value={taxRate("reprocessing")}
+                onChange={(value) => setTaxRate("reprocessing", value)}
+              />
+            </div>
+            <div className={styles.constructionGridRow}>
+              <span>STANDARD MANUFACTURING</span>
+              <ActivitySwitch
+                label="standard manufacturing"
+                checked={allowStandardBuilds}
+                onCheckedChange={setAllowStandardBuilds}
+              />
+              <TaxRateInput
+                label="Standard manufacturing"
+                value={taxRate("standard")}
+                onChange={(value) => setTaxRate("standard", value)}
+              />
+            </div>
+            <div className={styles.constructionGridRow}>
+              <span>CAPITAL MANUFACTURING</span>
+              <ActivitySwitch
+                label="capital manufacturing"
+                checked={allowCapitalBuilds}
+                onCheckedChange={setAllowCapitalBuilds}
+              />
+              <TaxRateInput
+                label="Capital manufacturing"
+                value={taxRate("capital")}
+                onChange={(value) => setTaxRate("capital", value)}
+              />
+            </div>
+            <div
+              className={`${styles.constructionGridRow} ${
+                !reactionsAllowed ? styles.constructionGridRowDisabled : ""
+              }`}
+            >
+              <span>BIOCHEMICAL REACTIONS</span>
+              <ActivitySwitch
+                label="biochemical reactions"
+                checked={reactionsAllowed && allowBiochemicalReactions}
+                disabled={!reactionsAllowed}
+                onCheckedChange={setAllowBiochemicalReactions}
+              />
+              <TaxRateInput
+                label="Biochemical reaction"
+                value={reactionsAllowed ? taxRate("biochemical") : "0.0"}
+                disabled={!reactionsAllowed}
+                onChange={(value) => setTaxRate("biochemical", value)}
+              />
+            </div>
+            <div
+              className={`${styles.constructionGridRow} ${
+                !reactionsAllowed ? styles.constructionGridRowDisabled : ""
+              }`}
+            >
+              <span>COMPOSITE REACTIONS</span>
+              <ActivitySwitch
+                label="composite reactions"
+                checked={reactionsAllowed && allowCompositeReactions}
+                disabled={!reactionsAllowed}
+                onCheckedChange={setAllowCompositeReactions}
+              />
+              <TaxRateInput
+                label="Composite reaction"
+                value={reactionsAllowed ? taxRate("composite") : "0.0"}
+                disabled={!reactionsAllowed}
+                onChange={(value) => setTaxRate("composite", value)}
+              />
+            </div>
+            <div
+              className={`${styles.constructionGridRow} ${
+                !reactionsAllowed ? styles.constructionGridRowDisabled : ""
+              }`}
+            >
+              <span>HYBRID REACTIONS</span>
+              <ActivitySwitch
+                label="hybrid reactions"
+                checked={reactionsAllowed && allowHybridReactions}
+                disabled={!reactionsAllowed}
+                onCheckedChange={setAllowHybridReactions}
+              />
+              <TaxRateInput
+                label="Hybrid reaction"
+                value={reactionsAllowed ? taxRate("hybrid") : "0.0"}
+                disabled={!reactionsAllowed}
+                onChange={(value) => setTaxRate("hybrid", value)}
+              />
+            </div>
+            <div className={styles.constructionGridRow}>
+              <span>INVENTION</span>
+              <ActivitySwitch
+                label="invention"
+                checked={allowInvention}
+                onCheckedChange={setAllowInvention}
+              />
+              <TaxRateInput
+                label="Invention"
+                value={taxRate("invention")}
+                onChange={(value) => setTaxRate("invention", value)}
+              />
+            </div>
+            <div className={styles.constructionGridRow}>
+              <span>RESEARCH</span>
+              <ActivitySwitch
+                label="research"
+                checked={allowResearch}
+                onCheckedChange={setAllowResearch}
+              />
+              <TaxRateInput
+                label="Research"
+                value={taxRate("research")}
+                onChange={(value) => setTaxRate("research", value)}
+              />
+            </div>
+          </div>
         </DialogBody>
-        <div className={styles.constructionGrid}>
-          <div className={styles.constructionGridHeader} aria-hidden="true">
-            <span />
-            <span>ENABLED</span>
-            <span>TAX RATE</span>
-          </div>
-          <div className={styles.constructionGridRow}>
-            <span>REPROCESSING</span>
-            <ActivitySwitch
-              label="reprocessing"
-              checked={allowReprocessing}
-              onCheckedChange={setAllowReprocessing}
-            />
-            <TaxRateInput
-              label="Reprocessing"
-              value={taxRate("reprocessing")}
-              onChange={(value) => setTaxRate("reprocessing", value)}
-            />
-          </div>
-          <div className={styles.constructionGridRow}>
-            <span>STANDARD MANUFACTURING</span>
-            <ActivitySwitch
-              label="standard manufacturing"
-              checked={allowStandardBuilds}
-              onCheckedChange={setAllowStandardBuilds}
-            />
-            <TaxRateInput
-              label="Standard manufacturing"
-              value={taxRate("standard")}
-              onChange={(value) => setTaxRate("standard", value)}
-            />
-          </div>
-          <div className={styles.constructionGridRow}>
-            <span>CAPITAL MANUFACTURING</span>
-            <ActivitySwitch
-              label="capital manufacturing"
-              checked={allowCapitalBuilds}
-              onCheckedChange={setAllowCapitalBuilds}
-            />
-            <TaxRateInput
-              label="Capital manufacturing"
-              value={taxRate("capital")}
-              onChange={(value) => setTaxRate("capital", value)}
-            />
-          </div>
-          <div
-            className={`${styles.constructionGridRow} ${
-              !reactionsAllowed ? styles.constructionGridRowDisabled : ""
-            }`}
-          >
-            <span>BIOCHEMICAL REACTIONS</span>
-            <ActivitySwitch
-              label="biochemical reactions"
-              checked={reactionsAllowed && allowBiochemicalReactions}
-              disabled={!reactionsAllowed}
-              onCheckedChange={setAllowBiochemicalReactions}
-            />
-            <TaxRateInput
-              label="Biochemical reaction"
-              value={reactionsAllowed ? taxRate("biochemical") : "0.0"}
-              disabled={!reactionsAllowed}
-              onChange={(value) => setTaxRate("biochemical", value)}
-            />
-          </div>
-          <div
-            className={`${styles.constructionGridRow} ${
-              !reactionsAllowed ? styles.constructionGridRowDisabled : ""
-            }`}
-          >
-            <span>COMPOSITE REACTIONS</span>
-            <ActivitySwitch
-              label="composite reactions"
-              checked={reactionsAllowed && allowCompositeReactions}
-              disabled={!reactionsAllowed}
-              onCheckedChange={setAllowCompositeReactions}
-            />
-            <TaxRateInput
-              label="Composite reaction"
-              value={reactionsAllowed ? taxRate("composite") : "0.0"}
-              disabled={!reactionsAllowed}
-              onChange={(value) => setTaxRate("composite", value)}
-            />
-          </div>
-          <div
-            className={`${styles.constructionGridRow} ${
-              !reactionsAllowed ? styles.constructionGridRowDisabled : ""
-            }`}
-          >
-            <span>HYBRID REACTIONS</span>
-            <ActivitySwitch
-              label="hybrid reactions"
-              checked={reactionsAllowed && allowHybridReactions}
-              disabled={!reactionsAllowed}
-              onCheckedChange={setAllowHybridReactions}
-            />
-            <TaxRateInput
-              label="Hybrid reaction"
-              value={reactionsAllowed ? taxRate("hybrid") : "0.0"}
-              disabled={!reactionsAllowed}
-              onChange={(value) => setTaxRate("hybrid", value)}
-            />
-          </div>
-          <div className={styles.constructionGridRow}>
-            <span>INVENTION</span>
-            <ActivitySwitch
-              label="invention"
-              checked={allowInvention}
-              onCheckedChange={setAllowInvention}
-            />
-            <TaxRateInput
-              label="Invention"
-              value={taxRate("invention")}
-              onChange={(value) => setTaxRate("invention", value)}
-            />
-          </div>
-          <div className={styles.constructionGridRow}>
-            <span>RESEARCH</span>
-            <ActivitySwitch
-              label="research"
-              checked={allowResearch}
-              onCheckedChange={setAllowResearch}
-            />
-            <TaxRateInput
-              label="Research"
-              value={taxRate("research")}
-              onChange={(value) => setTaxRate("research", value)}
-            />
-          </div>
-        </div>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onCancel}>
             Cancel

@@ -945,9 +945,9 @@ function Planner() {
                   <div className={styles.locationAlertContent}>
                     <AlertTitle>No build or reaction locations available.</AlertTitle>
                     <AlertDescription>
-                      Optionally add structures on the <Link href="/locations">Locations</Link> page
-                      or <Link href="/api/auth/eve/start">add character(s) via ESI</Link> to improve
-                      plan results.
+                      Optionally add structures on the <Link href="/structures">Structures</Link>{" "}
+                      page or <Link href="/api/auth/eve/start">add character(s) via ESI</Link> to
+                      improve plan results.
                     </AlertDescription>
                   </div>
                 </Alert>
