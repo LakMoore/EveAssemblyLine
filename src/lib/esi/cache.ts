@@ -37,13 +37,11 @@ import {
   getUsableToken,
 } from "./client";
 import { getStation } from "@/cache/services/sdeCache";
-import { parseCacheControlMaxAge } from "@/cache/esiTtl";
 
 export type EndpointStatus = "fresh" | "cached" | "stale" | "rate_limited" | "error";
 export type EndpointCache<T> = {
   lastBody: T;
   etag?: string;
-  lastUpdated?: string;
   lastModified?: string;
   expires?: string;
   nextRefreshAllowed?: string;
@@ -115,26 +113,11 @@ async function refreshBlueprintInstances(
     );
     return cache.blueprintInstances;
   }
-  const result = await fetchBlueprints(character, cache.blueprintInstances?.etag, true);
+  const result = await fetchBlueprints(character, cache.blueprintInstances?.etag);
   cache.blueprintInstances =
     result.notModified && cache.blueprintInstances
       ? setFresh(cache.blueprintInstances.lastBody, result.headers, cache.blueprintInstances)
-      : result.fromCache && cache.blueprintInstances
-        ? {
-            ...cache.blueprintInstances,
-            status: endpointDataStatus(
-              cache.blueprintInstances.lastModified,
-              cache.blueprintInstances.nextRefreshAllowed,
-            ),
-          }
-        : setFresh(
-            result.blueprints ?? [],
-            result.headers,
-            cache.blueprintInstances,
-            20 * 60 * 1000,
-            false,
-            true,
-          );
+      : setFresh(result.blueprints ?? [], result.headers, cache.blueprintInstances);
   return cache.blueprintInstances;
 }
 
@@ -191,40 +174,18 @@ function normalizeUtcTimestamp(value: string | null | undefined, fallback?: stri
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : fallback;
 }
 
-function setFresh<T>(
-  body: T,
-  headers?: Headers,
-  previous?: EndpointCache<T>,
-  lifetimeMs = 5 * 60 * 1000,
-  preserveExpiry = false,
-  useFallbackLifetime = false,
-): EndpointCache<T> {
-  const now = new Date();
-  const expiresAt = Date.parse(headers?.get("expires") ?? "");
-  const maxAge = parseCacheControlMaxAge(headers?.get("cache-control") ?? null);
-  const lastModified = normalizeUtcTimestamp(headers?.get("last-modified"), previous?.lastModified);
-  const previousExpiry = previous?.expires ?? previous?.nextRefreshAllowed;
-  const nextRefreshAllowed =
-    preserveExpiry && previousExpiry
-      ? previousExpiry
-      : Number.isFinite(expiresAt) && expiresAt > now.getTime()
-        ? new Date(expiresAt).toISOString()
-        : maxAge != null && maxAge > 0
-          ? new Date(now.getTime() + maxAge * 1_000).toISOString()
-          : useFallbackLifetime
-            ? new Date(now.getTime() + lifetimeMs).toISOString()
-            : now.toISOString();
+function setFresh<T>(body: T, headers?: Headers, previous?: EndpointCache<T>): EndpointCache<T> {
+  const lastModified = normalizeUtcTimestamp(headers?.get("last-modified"))?? previous?.lastModified;
+  const nextRefreshAllowed = normalizeUtcTimestamp(headers?.get("expires"));
   return {
     lastBody: body,
     etag: headers?.get("etag") ?? previous?.etag,
-    lastUpdated: now.toISOString(),
     lastModified,
     expires: nextRefreshAllowed,
     nextRefreshAllowed,
     status: endpointDataStatus(lastModified, nextRefreshAllowed),
   };
 }
-
 function endpointDataStatus(lastModified?: string, nextRefreshAllowed?: string): EndpointStatus {
   if (nextRefreshAllowed && Date.parse(nextRefreshAllowed) <= Date.now()) return "stale";
   if (lastModified && Date.now() - Date.parse(lastModified) <= 2 * 60 * 1000) return "fresh";
@@ -348,10 +309,6 @@ async function cacheResolvedAssets(
   headers?: Headers,
   previous?: EndpointCache<AssetRecord[]>,
   assetNamePath?: string,
-  preserveExpiry = false,
-  useFallbackLifetime = false,
-  markRefreshed = false,
-  preserveLastModified = false,
 ) {
   const assetIndexes = await indexAssetsByPurpose(rawAssets);
   let namedAssets = rawAssets;
@@ -417,25 +374,7 @@ async function cacheResolvedAssets(
   }
   const resolvedByItemId = new Map(resolvedStockAssets.map((asset) => [asset.itemId, asset]));
 
-  const refreshedAt = markRefreshed ? new Date().toISOString() : undefined;
-  cache.allAssetsRaw = setFresh(
-    namedAssets,
-    headers,
-    previous,
-    assetNamePath?.startsWith("/corporations/") ? 60 * 60 * 1000 : 5 * 60 * 1000,
-    preserveExpiry,
-    useFallbackLifetime,
-  );
-  if (preserveLastModified && previous?.lastModified) {
-    cache.allAssetsRaw.lastModified = previous.lastModified;
-  }
-  if (refreshedAt) cache.allAssetsRaw.lastModified = refreshedAt;
-  if (refreshedAt) {
-    cache.allAssetsRaw.status = endpointDataStatus(
-      cache.allAssetsRaw.lastModified,
-      cache.allAssetsRaw.nextRefreshAllowed,
-    );
-  }
+  cache.allAssetsRaw = setFresh(namedAssets, headers, previous);
   cache.stockAssetsByItemId = resolvedByItemId;
   cache.rootLocationsByItemId = rootLocationsByItemId;
   const resolvedShipAssets = await Promise.all(
@@ -681,45 +620,26 @@ async function rebuildResolvedAssets(
   }
 }
 
-export async function refreshCharacterState(characterIds: number[], sessionId: string) {
-  const characters = await getCharacters();
+export async function refreshCharacterState(
+  characterIds: number[],
+  sessionId: string,
+): Promise<void> {
   const refreshedCorporationIds = new Set<number>();
-  const summary: {
-    characterId: number;
-    assets?: EndpointCache<AssetRecord[] | null>;
-    blueprints?: EndpointCache<BlueprintInstanceRecord[] | null>;
-    jobs?: EndpointCache<IndustryJobRecord[] | null>;
-    skills?: EndpointCache<CharacterSkillRecord[] | null>;
-    marketOrders?: EndpointCache<MarketOrderRecord[] | null>;
-    corporations?: Array<{
-      corporationId: number;
-      assets?: EndpointCache<AssetRecord[] | null>;
-      blueprints?: EndpointCache<BlueprintInstanceRecord[] | null>;
-      structures?: EndpointCache<EsiCorporationStructure[] | null>;
-    }>;
-  }[] = [];
   for (const characterId of characterIds) {
     const character = await getCharacter(characterId);
     if (!character) continue;
     const cache = getCache(characterCaches, characterId, sessionId);
-    const characterSummary: (typeof summary)[number] = { characterId };
     try {
       if (
         !cache.skills
         || !cache.skills.nextRefreshAllowed
         || Date.parse(cache.skills.nextRefreshAllowed) <= Date.now()
       ) {
-        const skills = await fetchCharacterSkills(character);
+        const skills = await fetchCharacterSkills(character, cache.skills?.etag);
         cache.skills =
-          skills.fromCache && cache.skills
-            ? {
-                ...cache.skills,
-                status: endpointDataStatus(
-                  cache.skills.lastModified,
-                  cache.skills.nextRefreshAllowed,
-                ),
-              }
-            : setFresh(skills.skills ?? [], skills.headers, cache.skills, 5 * 60 * 1000);
+          skills.notModified && cache.skills
+            ? setFresh(cache.skills.lastBody, skills.headers, cache.skills)
+            : setFresh(skills.skills ?? [], skills.headers, cache.skills);
       }
       else {
         cache.skills.status = endpointDataStatus(
@@ -727,49 +647,28 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
           cache.skills.nextRefreshAllowed,
         );
       }
-      characterSummary.skills = cache.skills;
     }
     catch (error) {
       cache.skills = {
         ...(cache.skills ?? { lastBody: [] }),
         ...endpointStatus(error),
       };
-      characterSummary.skills = cache.skills;
+    }
+    try {
+      await refreshBlueprintInstances(cache, character, fetchCharacterBlueprints);
+    }
+    catch (error) {
+      cache.blueprintInstances = {
+        ...(cache.blueprintInstances ?? { lastBody: [] }),
+        ...endpointStatus(error),
+      };
     }
     try {
       if (
-        cache.allAssetsRaw?.nextRefreshAllowed
-        && Date.parse(cache.allAssetsRaw.nextRefreshAllowed) > Date.now()
+        !cache.allAssetsRaw?.nextRefreshAllowed
+        || Date.parse(cache.allAssetsRaw.nextRefreshAllowed) <= Date.now()
       ) {
-        characterSummary.assets = {
-          ...cache.allAssetsRaw,
-          status: endpointDataStatus(
-            cache.allAssetsRaw.lastModified,
-            cache.allAssetsRaw.nextRefreshAllowed,
-          ),
-        };
-        if (Array.isArray(cache.allAssetsRaw.lastBody)) {
-          const token = await getUsableToken(character);
-          await cacheResolvedAssets(
-            cache,
-            cache.allAssetsRaw.lastBody as AssetRecord[],
-            token,
-            undefined,
-            cache.allAssetsRaw,
-            `/characters/${character.characterId}`,
-            true,
-            false,
-            false,
-            true,
-          );
-        }
-      }
-      else {
-        const previousAssetTiming = cache.allAssetsRaw && {
-          lastUpdated: cache.allAssetsRaw.lastUpdated,
-          nextRefreshAllowed: cache.allAssetsRaw.nextRefreshAllowed,
-        };
-        const result = await fetchCharacterAssets(character, cache.allAssetsRaw?.etag, true);
+        const result = await fetchCharacterAssets(character, cache.allAssetsRaw?.etag);
         if (result.notModified && cache.allAssetsRaw) {
           await cacheResolvedAssets(
             cache,
@@ -778,10 +677,6 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
             result.headers,
             cache.allAssetsRaw,
             `/characters/${character.characterId}`,
-            false,
-            true,
-            false,
-            true,
           );
           cache.allAssetsRaw.status = endpointDataStatus(
             cache.allAssetsRaw.lastModified,
@@ -796,23 +691,8 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
             result.headers,
             cache.allAssetsRaw,
             `/characters/${character.characterId}`,
-            result.fromCache,
-            true,
-            true,
           );
         }
-        if (result.fromCache && cache.allAssetsRaw) {
-          if (previousAssetTiming) {
-            cache.allAssetsRaw.lastUpdated = previousAssetTiming.lastUpdated;
-            cache.allAssetsRaw.expires = previousAssetTiming.nextRefreshAllowed;
-            cache.allAssetsRaw.nextRefreshAllowed = previousAssetTiming.nextRefreshAllowed;
-          }
-          cache.allAssetsRaw.status = endpointDataStatus(
-            cache.allAssetsRaw.lastModified,
-            cache.allAssetsRaw.nextRefreshAllowed,
-          );
-        }
-        characterSummary.assets = cache.allAssetsRaw;
       }
     }
     catch (error) {
@@ -821,23 +701,6 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
         ...(cache.allAssetsRaw ?? { lastBody: [] }),
         ...endpointStatus(error),
       };
-      characterSummary.assets = {
-        ...cache.allAssetsRaw,
-      };
-    }
-    try {
-      characterSummary.blueprints = await refreshBlueprintInstances(
-        cache,
-        character,
-        fetchCharacterBlueprints,
-      );
-    }
-    catch (error) {
-      cache.blueprintInstances = {
-        ...(cache.blueprintInstances ?? { lastBody: [] }),
-        ...endpointStatus(error),
-      };
-      characterSummary.blueprints = cache.blueprintInstances;
     }
     try {
       if (
@@ -845,19 +708,11 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
         || !cache.jobs.nextRefreshAllowed
         || Date.parse(cache.jobs.nextRefreshAllowed) <= Date.now()
       ) {
-        const jobs = await fetchCharacterIndustryJobs(character, cache.jobs?.etag, true);
+        const jobs = await fetchCharacterIndustryJobs(character, cache.jobs?.etag);
         cache.jobs =
           jobs.notModified && cache.jobs
             ? setFresh(cache.jobs.lastBody, jobs.headers, cache.jobs)
-            : jobs.fromCache && cache.jobs
-              ? {
-                  ...cache.jobs,
-                  status: endpointDataStatus(
-                    cache.jobs.lastModified,
-                    cache.jobs.nextRefreshAllowed,
-                  ),
-                }
-              : setFresh(jobs.jobs ?? [], jobs.headers, cache.jobs);
+            : setFresh(jobs.jobs ?? [], jobs.headers, cache.jobs);
       }
       else {
         cache.jobs.status = endpointDataStatus(
@@ -865,14 +720,12 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
           cache.jobs.nextRefreshAllowed,
         );
       }
-      characterSummary.jobs = cache.jobs;
     }
     catch (error) {
       cache.jobs = {
         ...(cache.jobs ?? { lastBody: [] }),
         ...endpointStatus(error),
       };
-      characterSummary.jobs = cache.jobs;
     }
     try {
       if (
@@ -884,16 +737,12 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
         const orders = await fetchCharacterMarketOrders(
           character,
           getUsableMarketOrdersEtag(cache),
-          true,
         );
         if (orders.notModified && cache.marketOrders) {
           cache.marketOrders = setFresh(
             cache.marketOrders.lastBody,
             orders.headers,
             cache.marketOrders,
-            5 * 60 * 1000,
-            false,
-            true,
           );
           cache.marketOrders.status = endpointDataStatus(
             cache.marketOrders.lastModified,
@@ -901,25 +750,10 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
           );
         }
         else if (orders.notModified) {
-          cache.marketOrders = setFresh([], orders.headers);
+          cache.marketOrders = setFresh([], orders.headers, undefined);
         }
         else if (orders.orders) {
-          cache.marketOrders =
-            orders.fromCache && cache.marketOrders
-              ? {
-                  ...cache.marketOrders,
-                  status: endpointDataStatus(
-                    cache.marketOrders.lastModified,
-                    cache.marketOrders.nextRefreshAllowed,
-                  ),
-                }
-              : setFresh(
-                  orders.orders,
-                  orders.headers,
-                  cache.marketOrders,
-                  5 * 60 * 1000,
-                  orders.fromCache,
-                );
+          cache.marketOrders = setFresh(orders.orders, orders.headers, cache.marketOrders);
         }
       }
       else {
@@ -928,15 +762,11 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
           cache.marketOrders.nextRefreshAllowed,
         );
       }
-      characterSummary.marketOrders = cache.marketOrders;
     }
     catch (error) {
       cache.marketOrders = {
         ...(cache.marketOrders ?? { lastBody: [] }),
         ...endpointStatus(error),
-      };
-      characterSummary.marketOrders = {
-        ...cache.marketOrders,
       };
     }
 
@@ -962,14 +792,7 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
           || Date.parse(corpCache.structures.nextRefreshAllowed) <= Date.now()
         ) {
           const structures = await fetchCorporationStructures(character);
-          corpCache.structures = setFresh(
-            structures,
-            undefined,
-            corpCache.structures,
-            5 * 60 * 1000,
-            false,
-            true,
-          );
+          corpCache.structures = setFresh(structures, undefined, corpCache.structures);
         }
         else {
           corpCache.structures.status = endpointDataStatus(
@@ -988,42 +811,10 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
       }
       try {
         if (
-          corpCache.allAssetsRaw?.nextRefreshAllowed
-          && Date.parse(corpCache.allAssetsRaw.nextRefreshAllowed) > Date.now()
+          !corpCache.allAssetsRaw?.nextRefreshAllowed
+          || Date.parse(corpCache.allAssetsRaw.nextRefreshAllowed) <= Date.now()
         ) {
-          corpSummary.assets = {
-            ...corpCache.allAssetsRaw,
-            status: endpointDataStatus(
-              corpCache.allAssetsRaw.lastModified,
-              corpCache.allAssetsRaw.nextRefreshAllowed,
-            ),
-          };
-          if (Array.isArray(corpCache.allAssetsRaw.lastBody)) {
-            const token = await getUsableToken(character);
-            await cacheResolvedAssets(
-              corpCache,
-              corpCache.allAssetsRaw.lastBody as AssetRecord[],
-              token,
-              undefined,
-              corpCache.allAssetsRaw,
-              `/corporations/${character.corporationId}`,
-              true,
-              false,
-              false,
-              true,
-            );
-          }
-        }
-        else {
-          const previousAssetTiming = corpCache.allAssetsRaw && {
-            lastUpdated: corpCache.allAssetsRaw.lastUpdated,
-            nextRefreshAllowed: corpCache.allAssetsRaw.nextRefreshAllowed,
-          };
-          const result = await fetchCorporationAssets(
-            character,
-            corpCache.allAssetsRaw?.etag,
-            true,
-          );
+          const result = await fetchCorporationAssets(character, corpCache.allAssetsRaw?.etag);
           if (result.notModified && corpCache.allAssetsRaw) {
             await cacheResolvedAssets(
               corpCache,
@@ -1032,10 +823,6 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
               result.headers,
               corpCache.allAssetsRaw,
               `/corporations/${character.corporationId}`,
-              false,
-              true,
-              false,
-              true,
             );
             corpCache.allAssetsRaw.status = endpointDataStatus(
               corpCache.allAssetsRaw.lastModified,
@@ -1050,23 +837,9 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
               result.headers,
               corpCache.allAssetsRaw,
               `/corporations/${character.corporationId}`,
-              result.fromCache,
-              true,
-              true,
             );
           }
           corpSummary.assets = corpCache.allAssetsRaw;
-          if (result.fromCache && corpCache.allAssetsRaw) {
-            if (previousAssetTiming) {
-              corpCache.allAssetsRaw.lastUpdated = previousAssetTiming.lastUpdated;
-              corpCache.allAssetsRaw.expires = previousAssetTiming.nextRefreshAllowed;
-              corpCache.allAssetsRaw.nextRefreshAllowed = previousAssetTiming.nextRefreshAllowed;
-            }
-            corpCache.allAssetsRaw.status = endpointDataStatus(
-              corpCache.allAssetsRaw.lastModified,
-              corpCache.allAssetsRaw.nextRefreshAllowed,
-            );
-          }
         }
       }
       catch (error) {
@@ -1099,25 +872,11 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
           || !corpCache.jobs.nextRefreshAllowed
           || Date.parse(corpCache.jobs.nextRefreshAllowed) <= Date.now()
         ) {
-          const jobs = await fetchCorporationIndustryJobs(character, corpCache.jobs?.etag, true);
+          const jobs = await fetchCorporationIndustryJobs(character, corpCache.jobs?.etag);
           corpCache.jobs =
             jobs.notModified && corpCache.jobs
               ? setFresh(corpCache.jobs.lastBody, jobs.headers, corpCache.jobs)
-              : jobs.fromCache && corpCache.jobs
-                ? {
-                    ...corpCache.jobs,
-                    status: endpointDataStatus(
-                      corpCache.jobs.lastModified,
-                      corpCache.jobs.nextRefreshAllowed,
-                    ),
-                  }
-                : setFresh(
-                    jobs.jobs ?? [],
-                    jobs.headers,
-                    corpCache.jobs,
-                    5 * 60 * 1000,
-                    jobs.fromCache,
-                  );
+              : setFresh(jobs.jobs ?? [], jobs.headers, corpCache.jobs);
         }
         else {
           corpCache.jobs.status = endpointDataStatus(
@@ -1146,16 +905,12 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
           const orders = await fetchCorporationMarketOrders(
             character,
             getUsableMarketOrdersEtag(corpCache),
-            true,
           );
           if (orders.notModified && corpCache.marketOrders) {
             corpCache.marketOrders = setFresh(
               corpCache.marketOrders.lastBody,
               orders.headers,
               corpCache.marketOrders,
-              20 * 60 * 1000,
-              false,
-              true,
             );
             corpCache.marketOrders.status = endpointDataStatus(
               corpCache.marketOrders.lastModified,
@@ -1163,15 +918,13 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
             );
           }
           else if (orders.notModified) {
-            corpCache.marketOrders = setFresh([], orders.headers);
+            corpCache.marketOrders = setFresh([], orders.headers, undefined);
           }
           else if (orders.orders) {
             corpCache.marketOrders = setFresh(
               orders.orders,
               orders.headers,
               corpCache.marketOrders,
-              20 * 60 * 1000,
-              orders.fromCache,
             );
           }
         }
@@ -1192,11 +945,8 @@ export async function refreshCharacterState(characterIds: number[], sessionId: s
           ...corpCache.marketOrders,
         };
       }
-      characterSummary.corporations = [corpSummary];
     }
-    summary.push(characterSummary);
   }
-  return { characters: summary };
 }
 
 export async function getRunningIndustryJobs(
@@ -1489,18 +1239,6 @@ export async function getAssetCacheMetadata(
   );
   const allCaches = [...characterCachesForPlan, ...corporationCachesForPlan];
   return {
-    assetsLastUpdated:
-      allCaches
-        .map((cache) => cache.allAssetsRaw?.lastUpdated)
-        .filter((value): value is string => Boolean(value))
-        .sort()
-        .at(-1) ?? null,
-    jobsLastUpdated:
-      allCaches
-        .map((cache) => cache.jobs?.lastUpdated)
-        .filter((value): value is string => Boolean(value))
-        .sort()
-        .at(-1) ?? null,
     unresolvedAssetCount: allCaches.reduce((total, cache) => total + cache.unresolvedAssetCount, 0),
     corporationAssetSources: corporations,
   };

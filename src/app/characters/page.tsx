@@ -5,12 +5,14 @@ import Link from "next/link";
 import Image from "next/image";
 import { GitMerge, LogOut, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { languageStorageKey } from "../AppShell";
+import DialogBody from "@/components/DialogBody";
 import { replaceEsiStock } from "@/lib/planning/stockStore";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageServer";
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -37,7 +39,6 @@ type MergeDetails = {
 type EndpointStatus = {
   status: "fresh" | "cached" | "stale" | "rate_limited" | "error";
   hasBody: boolean;
-  lastUpdated?: string;
   lastModified?: string;
   expires?: string;
   nextRefreshAllowed?: string;
@@ -75,10 +76,9 @@ function statusLabel(status: EndpointStatus | undefined, noAccess = false) {
   if (currentStatus?.status === "error") {
     return currentStatus.reauthorizeRequired ? "Reauthorize required" : "Refresh failed";
   }
-  if (!currentStatus || !currentStatus.hasBody) return "Unknown";
+  if (!currentStatus || !currentStatus.hasBody) return "Refresh required";
   if (
     currentStatus.status !== "rate_limited"
-    && !currentStatus.lastUpdated
     && !currentStatus.expires
     && !currentStatus.nextRefreshAllowed
   ) return "Refresh required";
@@ -115,12 +115,17 @@ function availabilityLabel(status?: EndpointStatus) {
     return `Available ${formatDate(status.rateLimitedUntil)}`;
   }
   if (!status.expires && !status.nextRefreshAllowed) return "Refresh required";
-  if (!status.lastUpdated && !status.nextRefreshAllowed) return "Refresh required";
   const blockedUntil = status.rateLimitedUntil ?? status.nextRefreshAllowed;
   if (blockedUntil && Date.parse(blockedUntil) > Date.now()) {
     return `Available ${formatDate(blockedUntil)}`;
   }
   return "Available now";
+}
+
+function expiryLabel(status?: EndpointStatus) {
+  if (!status) return "Expires unavailable";
+  const expiresAt = status.expires ?? status.nextRefreshAllowed;
+  return expiresAt ? `Expires ${formatDate(expiresAt)}` : "Expires unavailable";
 }
 
 function roleLabel(hasRole: boolean) {
@@ -221,8 +226,8 @@ export default function CharactersPage() {
     );
   }
 
-  async function loadStatuses(force = false) {
-    const data = await loadClientStateStatus(force);
+  async function loadStatuses(reload = false) {
+    const data = await loadClientStateStatus(reload);
     setStatuses(data.characters ?? []);
     setFreshnessTick((tick) => tick + 1);
   }
@@ -661,22 +666,22 @@ export default function CharactersPage() {
           return (
             <Dialog open onOpenChange={(open) => !open && setSelectedCharacter(null)}>
               <DialogContent className={styles.importModal}>
-                <div className={styles.panelHeader}>
-                  <div className={styles.characterModalHeading}>
-                    <Image
-                      className={styles.characterPortrait}
-                      src={eveCharacterPortraitUrl(selectedCharacter.characterId)}
-                      alt=""
-                      width={64}
-                      height={64}
-                    />
-                    <div>
-                      <p className={styles.panelKicker}>CHARACTER DETAILS</p>
-                      <DialogTitle>{selectedCharacter.characterName}</DialogTitle>
+                <DialogBody>
+                  <div className={styles.panelHeader}>
+                    <div className={styles.characterModalHeading}>
+                      <Image
+                        className={styles.characterPortrait}
+                        src={eveCharacterPortraitUrl(selectedCharacter.characterId)}
+                        alt=""
+                        width={64}
+                        height={64}
+                      />
+                      <div>
+                        <p className={styles.panelKicker}>CHARACTER DETAILS</p>
+                        <DialogTitle>{selectedCharacter.characterName}</DialogTitle>
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="no-scrollbar max-h-[70vh] overflow-y-auto overscroll-contain">
                   <div className={styles.characterModalIdentity}>
                     <strong className={styles.characterModalCorporation}>
                       {selectedCharacter.corporationId && (
@@ -707,20 +712,24 @@ export default function CharactersPage() {
                       (endpoint) => {
                         const endpointStatus = selectedStatus?.[endpoint];
                         return (
-                          <div className={styles.characterModalStatus} key={endpoint}>
-                            <small>{endpoint.toUpperCase()}</small>
-                            <span>
-                              <span
-                                className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
-                              />
-                              {statusLabel(endpointStatus)}
-                            </span>
-                            <small>{availabilityLabel(endpointStatus)}</small>
-                            {endpointStatus?.lastModified && (
-                              <small>Modified {formatDate(endpointStatus.lastModified)}</small>
-                            )}
-                            {endpointStatus?.error && <small>{endpointStatus.error}</small>}
-                          </div>
+                          <Card key={endpoint} size="sm">
+                            <CardHeader>
+                              <CardTitle>{endpoint.toUpperCase()}</CardTitle>
+                            </CardHeader>
+                            <CardContent className="flex flex-col gap-1">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
+                                />
+                                <span>{statusLabel(endpointStatus)}</span>
+                              </div>
+                              {endpointStatus?.lastModified && (
+                                <span>Modified {formatDate(endpointStatus.lastModified)}</span>
+                              )}
+                              <span>{expiryLabel(endpointStatus)}</span>
+                              {endpointStatus?.error && <span>{endpointStatus.error}</span>}
+                            </CardContent>
+                          </Card>
                         );
                       },
                     )}
@@ -733,7 +742,7 @@ export default function CharactersPage() {
                         : "No corporation roles reported"}
                     </div>
                   </div>
-                </div>
+                </DialogBody>
               </DialogContent>
             </Dialog>
           );

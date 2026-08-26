@@ -22,7 +22,7 @@ const eslintConfig = defineConfig([
   ...nextTs,
   {
     files: ["**/*.{ts,tsx,mts,cts}"],
-    excludedFiles: ["src/app/components/ui/**"],
+    ignores: ["src/components/ui/**"],
     languageOptions: {
       parserOptions: {
         projectService: true,

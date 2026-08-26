@@ -160,8 +160,6 @@ export type PlanSkillRequirement = {
 export interface PlanResult {
   metadata: {
     generatedAt: string;
-    assetsLastUpdated: string | null;
-    jobsLastUpdated: string | null;
     unresolvedAssetCount?: number;
     corporationAssetSources?: number[];
   };

@@ -131,7 +131,6 @@ export type ClientCharacterStatus = {
 export type ClientEndpointStatus = {
   status: "fresh" | "cached" | "stale" | "rate_limited" | "error";
   hasBody: boolean;
-  lastUpdated?: string;
   lastModified?: string;
   expires?: string;
   nextRefreshAllowed?: string;
@@ -187,15 +186,15 @@ export function loadClientSession() {
   return sessionRequest;
 }
 
-export function loadClientStock(language: SdeLanguage, force = false) {
+export function loadClientStock(language: SdeLanguage, reload = false) {
   const key = language;
   const pending = stockRequests.get(key);
   if (pending) return pending;
   const cached = stockResponses.get(key);
-  if (!force && cached) return Promise.resolve(cached);
+  if (!reload && cached) return Promise.resolve(cached);
 
   const query = new URLSearchParams({ language });
-  const loadCachedStock = !force
+  const loadCachedStock = !reload
     ? loadEndpointRecord<ClientStockResponse>("state/stock").then((record) => {
         if (!record) return null;
         try {
@@ -238,8 +237,8 @@ export function clearClientStockCache(language: SdeLanguage) {
   }
 }
 
-export function loadClientShips(force = false) {
-  if (!force && shipsResponse) return Promise.resolve(shipsResponse);
+export function loadClientShips(reload = false) {
+  if (!reload && shipsResponse) return Promise.resolve(shipsResponse);
   shipsRequest
     ??= fetch("/api/state/ships", { cache: "no-store" })
       .then(async (response) => {
@@ -255,8 +254,8 @@ export function loadClientShips(force = false) {
   return shipsRequest;
 }
 
-export function loadClientJobs(force = false) {
-  if (!force && jobsResponse) return Promise.resolve(jobsResponse);
+export function loadClientJobs(reload = false) {
+  if (!reload && jobsResponse) return Promise.resolve(jobsResponse);
   jobsRequest
     ??= fetch("/api/state/jobs", { cache: "no-store" })
       .then(async (response) => {
@@ -272,8 +271,8 @@ export function loadClientJobs(force = false) {
   return jobsRequest;
 }
 
-export function loadClientCharacters(force = false) {
-  if (force) {
+export function loadClientCharacters(reload = false) {
+  if (reload) {
     charactersRequest = undefined;
     charactersResponse = undefined;
   }
@@ -292,8 +291,8 @@ export function loadClientCharacters(force = false) {
   return charactersRequest;
 }
 
-export function loadClientCorpStatus(force = false) {
-  if (force) {
+export function loadClientCorpStatus(reload = false) {
+  if (reload) {
     corpStatusRequest = undefined;
     corpStatusResponse = undefined;
   }
@@ -312,9 +311,9 @@ export function loadClientCorpStatus(force = false) {
   return corpStatusRequest;
 }
 
-export function loadClientStateStatus(force = false) {
-  if (force) stateStatusRequest = undefined;
-  if (!force && stateStatusResponse) return Promise.resolve(stateStatusResponse);
+export function loadClientStateStatus(reload = false) {
+  if (reload) stateStatusRequest = undefined;
+  if (!reload && stateStatusResponse) return Promise.resolve(stateStatusResponse);
   stateStatusRequest = loadJson(
     "/api/state/status",
     "state/status",

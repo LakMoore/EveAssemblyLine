@@ -396,9 +396,9 @@ function Planner() {
 
   useEffect(() => {
     let cancelled = false;
-    async function loadLocationOptions(force = false) {
+    async function loadLocationOptions(reload = false) {
       const [data, storedLocations] = await Promise.all([
-        fetchFacilityResponse(force),
+        fetchFacilityResponse(reload),
         loadPlannerLocations(),
       ]);
       if (cancelled) return;

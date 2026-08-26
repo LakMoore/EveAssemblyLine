@@ -244,8 +244,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
       return;
     }
     let cancelled = false;
-    const loadStatuses = (force = false) => {
-      void loadClientStateStatus(force)
+    const loadStatuses = (reload = false) => {
+      void loadClientStateStatus(reload)
         .then((data) => {
           if (cancelled) return;
           setStateStatuses(data.characters ?? []);

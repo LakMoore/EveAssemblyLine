@@ -903,8 +903,6 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
   const result = {
     metadata: {
       generatedAt: new Date().toISOString(),
-      assetsLastUpdated: null,
-      jobsLastUpdated: null,
       unresolvedAssetCount: request.stock.length,
       corporationAssetSources: [
         ...new Set(

@@ -19,6 +19,7 @@ import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import DialogBody from "@/components/DialogBody";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -777,19 +778,26 @@ function StockLocationCard({
           </Empty>
         ) : (
           stockMetrics.map((metric) => (
-            <button
-              type="button"
-              className={styles.stockMetric}
-              key={metric.id}
-              onClick={() => onView(location, metric.filter)}
-            >
-              <span>
-                <metric.icon aria-hidden="true" />
-                {metric.label}
-              </span>
-              <strong>{metric.count.toLocaleString()}</strong>
-              <small>{metric.detail}</small>
-            </button>
+            <Card size="sm" className={styles.stockMetric} key={metric.id}>
+              <CardContent className="p-0">
+                <button
+                  type="button"
+                  className="grid w-full cursor-pointer grid-rows-[25px_25px_20px] p-2 text-left text-card-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground"
+                  onClick={() => onView(location, metric.filter)}
+                >
+                  <span className="flex min-h-[25px] flex-row-reverse items-center justify-start gap-1 whitespace-nowrap text-right text-xs text-muted-foreground">
+                    <metric.icon aria-hidden="true" />
+                    {metric.label}
+                  </span>
+                  <strong className="mt-1 text-right text-base">
+                    {metric.count.toLocaleString()}
+                  </strong>
+                  <small className="mt-1 text-right text-xs text-muted-foreground">
+                    {metric.detail}
+                  </small>
+                </button>
+              </CardContent>
+            </Card>
           ))
         )}
       </div>

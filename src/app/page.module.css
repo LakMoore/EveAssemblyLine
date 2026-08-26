@@ -1919,68 +1919,11 @@
 .stockMetricsEmpty {
   grid-column: 1 / -1;
   padding: 8px 5px;
-  color: #78959e;
   font: 9px "DM Mono";
 }
 
 .stockMetric {
-  display: grid;
-  grid-template-rows: 25px 25px 20px;
-  align-content: start;
   min-width: 0;
-  padding: 8px 5px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: #a9c3c9;
-  text-align: left;
-  cursor: pointer;
-}
-
-.stockMetric:hover,
-.stockMetric:focus-visible {
-  border-color: #37606c;
-  background: #132f37;
-}
-
-.stockMetric span,
-.stockMetric strong,
-.stockMetric small {
-  display: block;
-}
-
-.stockMetric span {
-  min-height: 25px;
-  color: #78959e;
-  font: 9px "DM Mono";
-  line-height: 1.3;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  flex-direction: row-reverse;
-  gap: 5px;
-  text-align: right;
-  white-space: nowrap;
-}
-
-.stockMetric span svg {
-  width: 12px;
-  height: 12px;
-  flex: 0 0 auto;
-}
-
-.stockMetric strong {
-  margin-top: 5px;
-  color: #e0eef0;
-  font: 16px "DM Mono";
-  text-align: right;
-}
-
-.stockMetric small {
-  margin-top: 4px;
-  color: #8eb1b9;
-  font: 9px "DM Mono";
-  text-align: right;
-  white-space: nowrap;
 }
 
 .stockMarketCategories {
@@ -4721,8 +4664,8 @@
   width: 64px;
   height: 64px;
   object-fit: cover;
-  border: 1px solid #37606c;
-  background: #102b34;
+  border: 1px solid var(--border);
+  background: var(--muted);
 }
 
 .characterModalIdentity,
@@ -4746,8 +4689,8 @@
   width: 28px;
   height: 28px;
   object-fit: cover;
-  border: 1px solid #37606c;
-  background: #102b34;
+  border: 1px solid var(--border);
+  background: var(--muted);
 }
 
 .characterModalIdentity small,
@@ -4764,31 +4707,10 @@
   margin-top: 22px;
 }
 
-.characterModalStatus {
-  display: grid;
-  gap: 7px;
-  min-width: 0;
-  padding: 12px;
-  background: #102b34;
-}
-
-.characterModalStatus > small:first-child,
 .characterModalRoles > .panelKicker {
   color: #6d8b95;
   font: 9px "DM Mono";
   letter-spacing: 1px;
-}
-
-.characterModalStatus span {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-}
-
-.characterModalStatus > small:last-child {
-  color: #78929b;
-  font-size: 10px;
 }
 
 .characterModalRoles div {
@@ -4806,8 +4728,8 @@
   height: 32px;
   flex: 0 0 32px;
   object-fit: cover;
-  border: 1px solid #37606c;
-  background: #102b34;
+  border: 1px solid var(--border);
+  background: var(--muted);
 }
 
 .corporationPilot > div {

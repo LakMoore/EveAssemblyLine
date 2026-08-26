@@ -51,8 +51,8 @@ export async function fetchFacilities(): Promise<FacilitySettingsPayload> {
   }
 }
 
-export async function fetchFacilityResponse(force = false): Promise<FacilityResponse | null> {
-  if (!force) {
+export async function fetchFacilityResponse(reload = false): Promise<FacilityResponse | null> {
+  if (!reload) {
     const cached = await loadEndpointRecord<FacilityResponse>("facilities");
     if (cached) return cached.data;
   }
