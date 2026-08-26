@@ -132,7 +132,7 @@
 .panel {
   overflow: hidden;
   border: 1px solid var(--line);
-  background: var(--surface);
+  background: var(--card);
 }
 
 .panelHeader {

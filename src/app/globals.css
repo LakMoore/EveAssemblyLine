@@ -5,55 +5,287 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Theme contract
+ *
+ * The application applies a theme by setting data-theme on the html element. Keep
+ * component styles on the semantic shadcn tokens below; the theme blocks only
+ * define palette values. AssemblyLine is the default theme.
+ */
 :root {
-  --ink: #d8e8ec;
-  --muted: #174047;
-  --line: #203842;
-  --paper: #071116;
-  --white: var(--surface);
-  --green: #42c7b4;
-  --lime: #d6ef72;
-  --cyan: #5ed8ef;
-  --eyebrow-color: var(--cyan);
-  --eyebrow-font: "DM Mono", monospace;
+  --theme-canvas: #071116;
+  --theme-background: #102b31;
+  --theme-surface: #0d1d25;
+  --theme-popover: #0d252d;
+  --theme-foreground: #d8e8ec;
+  --theme-muted: #174047;
+  --theme-muted-foreground: #78929d;
+  --theme-border: #28515a;
+  --theme-input: #203f48;
+  --theme-primary: #197b78;
+  --theme-primary-foreground: #e8ffff;
+  --theme-secondary: #203842;
+  --theme-accent: #16404b;
+  --theme-accent-foreground: #e4f4f0;
+  --theme-destructive: #8b3e4d;
+  --theme-ring: #d6ef72;
+  --theme-success: #42c7b4;
+  --theme-highlight: #d6ef72;
+  --theme-info: #5ed8ef;
+  --theme-warning: #f2b35d;
+  --theme-link-border: var(--theme-info);
+  --theme-radius: 0.25rem;
+  --theme-font-sans: "Manrope", sans-serif;
+  --theme-font-mono: "DM Mono", monospace;
+  --theme-color-scheme: dark;
+}
+
+/* The neutral shadcn baseline. */
+:root[data-theme="base"] {
+  --theme-canvas: #ffffff;
+  --theme-background: #ffffff;
+  --theme-surface: #ffffff;
+  --theme-popover: #ffffff;
+  --theme-foreground: #18181b;
+  --theme-muted: #f4f4f5;
+  --theme-muted-foreground: #71717a;
+  --theme-border: #e4e4e7;
+  --theme-input: #e4e4e7;
+  --theme-primary: #18181b;
+  --theme-primary-foreground: #fafafa;
+  --theme-secondary: #f4f4f5;
+  --theme-accent: #f4f4f5;
+  --theme-accent-foreground: #18181b;
+  --theme-destructive: #dc2626;
+  --theme-ring: #18181b;
+  --theme-success: #16a34a;
+  --theme-highlight: #ca8a04;
+  --theme-info: #2563eb;
+  --theme-warning: #d97706;
+  --theme-link-border: transparent;
+  --theme-radius: 0.625rem;
+  --theme-font-sans: ui-sans-serif, system-ui, sans-serif;
+  --theme-font-mono: ui-monospace, monospace;
+  --theme-color-scheme: light;
+}
+
+/* The neutral shadcn dark baseline. */
+:root[data-theme="base-dark"] {
+  --theme-canvas: #09090b;
+  --theme-background: #18181b;
+  --theme-surface: #18181b;
+  --theme-popover: #18181b;
+  --theme-foreground: #fafafa;
+  --theme-muted: #27272a;
+  --theme-muted-foreground: #a1a1aa;
+  --theme-border: #27272a;
+  --theme-input: #27272a;
+  --theme-primary: #fafafa;
+  --theme-primary-foreground: #18181b;
+  --theme-secondary: #27272a;
+  --theme-accent: #27272a;
+  --theme-accent-foreground: #fafafa;
+  --theme-destructive: #7f1d1d;
+  --theme-ring: #d4d4d8;
+  --theme-success: #22c55e;
+  --theme-highlight: #eab308;
+  --theme-info: #3b82f6;
+  --theme-warning: #f59e0b;
+  --theme-link-border: transparent;
+  --theme-radius: 0.625rem;
+  --theme-font-sans: ui-sans-serif, system-ui, sans-serif;
+  --theme-font-mono: ui-monospace, monospace;
+}
+
+/* AssemblyLine is the default dark technical palette. */
+:root[data-theme="assemblyline"] {
+  --theme-canvas: #071116;
+  --theme-background: #102b31;
+  --theme-surface: #0d1d25;
+  --theme-popover: #0d252d;
+  --theme-foreground: #d8e8ec;
+  --theme-muted: #174047;
+  --theme-muted-foreground: #78929d;
+  --theme-border: #28515a;
+  --theme-input: #203f48;
+  --theme-primary: #197b78;
+  --theme-primary-foreground: #e8ffff;
+  --theme-secondary: #203842;
+  --theme-accent: #16404b;
+  --theme-accent-foreground: #e4f4f0;
+  --theme-destructive: #8b3e4d;
+  --theme-ring: #d6ef72;
+  --theme-success: #42c7b4;
+  --theme-highlight: #d6ef72;
+  --theme-info: #5ed8ef;
+  --theme-warning: #f2b35d;
+  --theme-link-border: var(--theme-info);
+  --theme-radius: 0.25rem;
+  --theme-font-sans: "Manrope", sans-serif;
+  --theme-font-mono: "DM Mono", monospace;
+}
+
+/* Amarr draws from its gold, ivory, and deep-blue heraldry. */
+:root[data-theme="amarr"] {
+  --theme-canvas: #14120f;
+  --theme-background: #211e19;
+  --theme-surface: #2b2821;
+  --theme-popover: #353128;
+  --theme-foreground: #f1ede3;
+  --theme-muted: #37332b;
+  --theme-muted-foreground: #aaa394;
+  --theme-border: #514b3e;
+  --theme-input: #454033;
+  --theme-primary: #7f6c50;
+  --theme-primary-foreground: #fffaf1;
+  --theme-secondary: #3d3930;
+  --theme-accent: #494234;
+  --theme-accent-foreground: #f1ede3;
+  --theme-destructive: #a65b54;
+  --theme-ring: #c7b58e;
+  --theme-success: #83a582;
+  --theme-highlight: #c7b58e;
+  --theme-info: #86a9b6;
+  --theme-warning: #c1915a;
+  --theme-link-border: var(--theme-info);
+  --theme-radius: 0.25rem;
+  --theme-font-sans: "Manrope", sans-serif;
+  --theme-font-mono: "DM Mono", monospace;
+}
+
+/* Caldari uses cold navy surfaces with cyan operational signals. */
+:root[data-theme="caldari"] {
+  --theme-canvas: #0d1419;
+  --theme-background: #18242c;
+  --theme-surface: #202f39;
+  --theme-popover: #293a45;
+  --theme-foreground: #e3edf0;
+  --theme-muted: #2c3a43;
+  --theme-muted-foreground: #9aaab2;
+  --theme-border: #465a65;
+  --theme-input: #3b4e59;
+  --theme-primary: #4a6c7f;
+  --theme-primary-foreground: #f1f7fa;
+  --theme-secondary: #34434d;
+  --theme-accent: #405866;
+  --theme-accent-foreground: #e3edf0;
+  --theme-destructive: #a35c61;
+  --theme-ring: #9fc8d8;
+  --theme-success: #75af9b;
+  --theme-highlight: #afc77b;
+  --theme-info: #8cc0d4;
+  --theme-warning: #cf9a62;
+  --theme-link-border: var(--theme-info);
+  --theme-radius: 0.25rem;
+  --theme-font-sans: "Manrope", sans-serif;
+  --theme-font-mono: "DM Mono", monospace;
+}
+
+/* Minmatar emphasizes oxidized steel, ember, and weathered copper. */
+:root[data-theme="minmatar"] {
+  --theme-canvas: #17110f;
+  --theme-background: #251917;
+  --theme-surface: #30201d;
+  --theme-popover: #3a2824;
+  --theme-foreground: #f1e2d8;
+  --theme-muted: #46312d;
+  --theme-muted-foreground: #b8a099;
+  --theme-border: #63483f;
+  --theme-input: #543b35;
+  --theme-primary: #653834;
+  --theme-primary-foreground: #fff6f0;
+  --theme-secondary: #40302b;
+  --theme-accent: #513831;
+  --theme-accent-foreground: #f1e2d8;
+  --theme-destructive: #a34d45;
+  --theme-ring: #d69a6e;
+  --theme-success: #91ad78;
+  --theme-highlight: #d69a6e;
+  --theme-info: #80b9c3;
+  --theme-warning: #dc9b55;
+  --theme-link-border: var(--theme-info);
+  --theme-radius: 0.25rem;
+  --theme-font-sans: "Manrope", sans-serif;
+  --theme-font-mono: "DM Mono", monospace;
+}
+
+/* Gallente pairs jade industrial surfaces with a restrained magenta accent. */
+:root[data-theme="gallente"] {
+  --theme-canvas: #0c1615;
+  --theme-background: #142523;
+  --theme-surface: #1b312f;
+  --theme-popover: #23403c;
+  --theme-foreground: #dfefea;
+  --theme-muted: #294540;
+  --theme-muted-foreground: #9ab8b0;
+  --theme-border: #417069;
+  --theme-input: #365d57;
+  --theme-primary: #366565;
+  --theme-primary-foreground: #f0fffa;
+  --theme-secondary: #31514c;
+  --theme-accent: #3d625c;
+  --theme-accent-foreground: #dfefea;
+  --theme-destructive: #a65766;
+  --theme-ring: #9accc0;
+  --theme-success: #7eb38a;
+  --theme-highlight: #d57dab;
+  --theme-info: #83c6c0;
+  --theme-warning: #d2af66;
+  --theme-link-border: var(--theme-info);
+  --theme-radius: 0.25rem;
+  --theme-font-sans: "Manrope", sans-serif;
+  --theme-font-mono: "DM Mono", monospace;
+}
+
+/* Semantic shadcn tokens and temporary aliases for legacy CSS modules. */
+:root {
+  --background: var(--theme-background);
+  --foreground: var(--theme-foreground);
+  --card: var(--theme-surface);
+  --card-foreground: var(--theme-foreground);
+  --popover: var(--theme-popover);
+  --popover-foreground: var(--theme-foreground);
+  --primary: var(--theme-primary);
+  --primary-foreground: var(--theme-primary-foreground);
+  --secondary: var(--theme-secondary);
+  --secondary-foreground: var(--theme-foreground);
+  --muted: var(--theme-muted);
+  --muted-foreground: var(--theme-muted-foreground);
+  --accent: var(--theme-accent);
+  --accent-foreground: var(--theme-accent-foreground);
+  --destructive: var(--theme-destructive);
+  --border: var(--theme-border);
+  --input: var(--theme-input);
+  --ring: var(--theme-ring);
+  --chart-1: var(--theme-success);
+  --chart-2: var(--theme-info);
+  --chart-3: var(--theme-highlight);
+  --chart-4: var(--theme-warning);
+  --chart-5: var(--theme-destructive);
+  --radius: var(--theme-radius);
+  --sidebar: var(--theme-surface);
+  --sidebar-foreground: var(--theme-foreground);
+  --sidebar-primary: var(--theme-primary);
+  --sidebar-primary-foreground: var(--theme-primary-foreground);
+  --sidebar-accent: var(--theme-accent);
+  --sidebar-accent-foreground: var(--theme-accent-foreground);
+  --sidebar-border: var(--theme-border);
+  --sidebar-ring: var(--theme-ring);
+  --ink: var(--foreground);
+  --line: var(--border);
+  --paper: var(--theme-canvas);
+  --green: var(--theme-success);
+  --lime: var(--theme-highlight);
+  --cyan: var(--theme-info);
+  --amber: var(--theme-warning);
+  --action: var(--primary);
+  --action-accent: var(--theme-highlight);
+  --link-border: var(--theme-link-border);
+  --eyebrow-color: var(--theme-info);
+  --eyebrow-font: var(--theme-font-mono);
   --eyebrow-size: 10px;
   --eyebrow-spacing: 1.5px;
   --eyebrow-margin: 0 0 13px;
-  --amber: #f2b35d;
-  --action: #197b78;
-  --action-accent: var(--lime);
-  --background: #102b31;
-  --foreground: #d8e8ec;
-  --card: #0d1d25;
-  --surface: var(--card);
-  --card-foreground: #d8e8ec;
-  --popover: #0d252d;
-  --popover-foreground: #d8e8ec;
-  --primary: #197b78;
-  --primary-foreground: #e8ffff;
-  --secondary: #203842;
-  --secondary-foreground: #d8e8ec;
-  --muted-foreground: #78929d;
-  --accent: #16404b;
-  --accent-foreground: #e4f4f0;
-  --destructive: #8b3e4d;
-  --border: #28515a;
-  --input: #203f48;
-  --ring: #d6ef72;
-  --chart-1: #42c7b4;
-  --chart-2: #5ed8ef;
-  --chart-3: #d6ef72;
-  --chart-4: #f2b35d;
-  --chart-5: #8b3e4d;
-  --radius: 0.25rem;
-  --sidebar: #0d1d25;
-  --sidebar-foreground: #d8e8ec;
-  --sidebar-primary: #197b78;
-  --sidebar-primary-foreground: #e8ffff;
-  --sidebar-accent: #16404b;
-  --sidebar-accent-foreground: #e4f4f0;
-  --sidebar-border: #315863;
-  --sidebar-ring: #d6ef72;
 }
 
 @layer base {
@@ -73,10 +305,14 @@
 body {
   background: var(--paper);
   color: var(--ink);
-  font-family: "Manrope", sans-serif;
+  font-family: var(--theme-font-sans);
   background-image:
-    linear-gradient(rgba(66, 199, 180, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(66, 199, 180, 0.035) 1px, transparent 1px);
+    linear-gradient(color-mix(in srgb, var(--primary) 3.5%, transparent) 1px, transparent 1px),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--primary) 3.5%, transparent) 1px,
+      transparent 1px
+    );
   background-size: 32px 32px;
 }
 
@@ -135,9 +371,9 @@ button {
 }
 
 @theme inline {
-  --font-heading: "Manrope", sans-serif;
-  --font-sans: "Manrope", sans-serif;
-  --font-mono: "DM Mono", monospace;
+  --font-heading: var(--theme-font-sans);
+  --font-sans: var(--theme-font-sans);
+  --font-mono: var(--theme-font-mono);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -167,7 +403,6 @@ button {
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --color-surface: var(--surface);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
   --radius-sm: calc(var(--radius) * 0.6);
@@ -177,27 +412,6 @@ button {
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
-}
-
-.dark {
-  --background: #102b31;
-  --foreground: #d8e8ec;
-  --card: #0d1d25;
-  --card-foreground: #d8e8ec;
-  --popover: #0d252d;
-  --popover-foreground: #d8e8ec;
-  --primary: #197b78;
-  --primary-foreground: #e8ffff;
-  --secondary: #203842;
-  --secondary-foreground: #d8e8ec;
-  --muted: #174047;
-  --muted-foreground: #78929d;
-  --accent: #16404b;
-  --accent-foreground: #e4f4f0;
-  --destructive: #8b3e4d;
-  --border: #28515a;
-  --input: #203f48;
-  --ring: #d6ef72;
 }
 
 @layer base {

@@ -400,18 +400,19 @@ export default function CharactersPage() {
           </p>
         </div>
         <div className={styles.pageIntroActions}>
-          <Link className={`actionButton ${styles.addButton}`} href="/api/auth/eve/start">
+          <Button
+            variant="link"
+            className={styles.characterAction}
+            nativeButton={false}
+            render={<Link href="/api/auth/eve/start" />}
+          >
             <Plus aria-hidden="true" />
             <span>Add character</span>
-          </Link>
+          </Button>
           <Tooltip>
             <TooltipTrigger
               render={
-                <Button
-                  variant="ghost"
-                  className={`actionButton ${styles.addButton}`}
-                  disabled={isLoggingOut}
-                />
+                <Button variant="link" className={styles.characterAction} disabled={isLoggingOut} />
               }
               aria-label="Logout all"
               onClick={() => {
@@ -462,10 +463,15 @@ export default function CharactersPage() {
             <EmptyDescription>
               Connect an EVE character to make assets, jobs, and corporation access available.
             </EmptyDescription>
-            <Link className={`actionButton ${styles.addButton}`} href="/api/auth/eve/start">
+            <Button
+              variant="link"
+              className={styles.characterAction}
+              nativeButton={false}
+              render={<Link href="/api/auth/eve/start" />}
+            >
               <Plus aria-hidden="true" />
               <span>Connect with EVE SSO</span>
-            </Link>
+            </Button>
           </Empty>
         ) : (
           <>

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { ThemeSelect } from "@/components/ThemeSelect";
 import {
   defaultSettings,
   settingsStorageKey,
@@ -53,6 +54,13 @@ export default function SettingsPage() {
             <h2>Planning settings</h2>
           </div>
         </div>
+        <Field className={styles.rule} orientation="horizontal">
+          <FieldContent>
+            <FieldLabel htmlFor="theme">Theme</FieldLabel>
+            <FieldDescription>Choose the application color palette</FieldDescription>
+          </FieldContent>
+          <ThemeSelect id="theme" className="w-40" />
+        </Field>
         <Field className={styles.rule} orientation="horizontal">
           <FieldContent>
             <FieldLabel id="include-corporation-assets-label">

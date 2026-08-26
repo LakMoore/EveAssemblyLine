@@ -746,7 +746,7 @@ function Planner() {
                             </Badge>
                           }
                         />
-                        <TooltipContent className={styles.compressionTooltip}>
+                        <TooltipContent>
                           Will be reprocessed at {(item.reprocessingEfficiency ?? 50).toFixed(1)}%
                         </TooltipContent>
                       </Tooltip>
@@ -755,6 +755,7 @@ function Planner() {
                   <label className={`${styles.itemField} ${styles.quantityField}`}>
                     <span>Quantity</span>
                     <Input
+                      className="text-right"
                       aria-label={`${item.name} quantity`}
                       type="number"
                       min="1"
@@ -774,6 +775,7 @@ function Planner() {
                   <label className={`${styles.itemField} ${styles.meField}`}>
                     <span>ME</span>
                     <Input
+                      className="text-right"
                       aria-label={`${item.name} material efficiency`}
                       type="number"
                       min="0"
@@ -797,6 +799,7 @@ function Planner() {
                   <label className={`${styles.itemField} ${styles.teField}`}>
                     <span>TE</span>
                     <Input
+                      className="text-right"
                       aria-label={`${item.name} time efficiency`}
                       type="number"
                       min="0"

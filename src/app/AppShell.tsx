@@ -61,6 +61,7 @@ import {
 import styles from "./page.module.css";
 import { PlanStockItem } from "@/lib/planning/types";
 import { Avatar, AvatarBadge, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ThemeSelect } from "@/components/ThemeSelect";
 
 const languageStorageKey = "assembly-line-language";
 const sidebarStorageKey = "assembly-line-sidebar-collapsed";
@@ -521,6 +522,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
             <div
               className={`${styles.topMeta} ${isMobileMetaExpanded || isMobileMetaCollapsing ? styles.topMetaExpanded : ""} ${isMobileMetaCollapsing ? styles.topMetaCollapsing : ""}`}
             >
+              <label className={styles.themeControl}>
+                <span>THEME</span>
+                <ThemeSelect className="w-36" />
+              </label>
               <label className={styles.languageControl}>
                 <span>LANGUAGE</span>
                 <Select
