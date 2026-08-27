@@ -1,125 +1,134 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { reprocessCompressedStock, specialReprocessableTypeIds } from "./reprocessStock";
+import {
+  allocateReprocessing,
+  type ReprocessingCandidate,
+  reprocessCommittedPurchases,
+} from "./reprocessStock";
 
-const types = new Map([[62516, { _key: 62516, portionSize: 100 }]]);
-const materials = new Map([
-  [62516, { _key: 62516, materials: [{ materialTypeID: 34, quantity: 400 }] }],
-]);
-const compressibleTypes = new Map([[34, 62516]]);
+function candidate(overrides: Partial<ReprocessingCandidate> = {}): ReprocessingCandidate {
+  return {
+    typeId: 62516,
+    availableQuantity: 1_000,
+    portionSize: 100,
+    efficiency: 100,
+    yields: new Map([[34, 400]]),
+    source: "owned",
+    volumePerUnit: 0.01,
+    ...overrides,
+  };
+}
 
-test("reprocesses complete compressed portions into SDE material yields", () => {
-  const result = reprocessCompressedStock(
-    new Map([[62516, 250]]),
-    new Map(),
-    compressibleTypes,
-    materials,
-    types,
-    undefined,
-    new Map([[62516, 100]]),
-  );
+test("does not allocate reprocessable stock without a material shortage", () => {
+  const result = allocateReprocessing(new Map(), [candidate()]);
 
-  assert.deepEqual(result.consumedCompressed, new Map([[62516, 200]]));
-  assert.deepEqual(result.producedMaterials, new Map([[34, 800]]));
-  assert.deepEqual(
-    result.stock,
-    new Map([
-      [62516, 50],
-      [34, 800],
-    ]),
-  );
-});
-
-test("defaults missing reprocessing efficiency to the base 50% yield", () => {
-  const result = reprocessCompressedStock(
-    new Map([[62516, 100]]),
-    new Map(),
-    compressibleTypes,
-    materials,
-    types,
-  );
-
-  assert.deepEqual(result.producedMaterials, new Map([[34, 200]]));
-});
-
-test("does not consume partial portions or unrelated compressed stock", () => {
-  const result = reprocessCompressedStock(
-    new Map([
-      [62516, 99],
-      [70000, 500],
-    ]),
-    new Map(),
-    compressibleTypes,
-    materials,
-    types,
-  );
-
-  assert.deepEqual(result.consumedCompressed, new Map());
+  assert.deepEqual(result.consumedOwned, new Map());
   assert.deepEqual(result.producedMaterials, new Map());
-  assert.deepEqual(
-    result.stock,
+});
+
+test("allocates only the complete portions needed to cover a shortage", () => {
+  const result = allocateReprocessing(new Map([[34, 500]]), [candidate()]);
+
+  assert.deepEqual(result.consumedOwned, new Map([[62516, 200]]));
+  assert.deepEqual(result.producedMaterials, new Map([[34, 800]]));
+  assert.deepEqual(result.remainingRequirements, new Map([[34, 0]]));
+});
+
+test("uses mixed yields to satisfy several shortages", () => {
+  const result = allocateReprocessing(
     new Map([
-      [62516, 99],
-      [70000, 500],
+      [34, 150],
+      [35, 110],
+    ]),
+    [
+      candidate({
+        typeId: 62520,
+        yields: new Map([
+          [34, 150],
+          [35, 110],
+        ]),
+      }),
+    ],
+  );
+
+  assert.deepEqual(result.consumedOwned, new Map([[62520, 100]]));
+  assert.deepEqual(
+    result.producedMaterials,
+    new Map([
+      [34, 150],
+      [35, 110],
     ]),
   );
 });
 
-test("reserves compressed stock needed as a direct build requirement", () => {
-  const result = reprocessCompressedStock(
-    new Map([[62516, 250]]),
-    new Map([[62516, 100]]),
-    compressibleTypes,
-    materials,
-    types,
-    undefined,
-    new Map([[62516, 100]]),
+test("prefers stock already at the reprocessing location", () => {
+  const result = allocateReprocessing(
+    new Map([[34, 400]]),
+    [
+      candidate({ typeId: 62520, volumePerUnit: 0.005 }),
+      candidate({ quantityAtReprocessingLocation: 100 }),
+    ],
   );
 
-  assert.deepEqual(result.consumedCompressed, new Map([[62516, 100]]));
-  assert.deepEqual(result.producedMaterials, new Map([[34, 400]]));
+  assert.deepEqual(result.consumedOwned, new Map([[62516, 100]]));
+  assert.deepEqual(result.readyToReprocess, new Map([[62516, 100]]));
+});
+
+test("rescores candidates after exhausting locally held portions", () => {
+  const result = allocateReprocessing(
+    new Map([[34, 800]]),
+    [
+      candidate({ quantityAtReprocessingLocation: 100, volumePerUnit: 1 }),
+      candidate({ typeId: 62520, volumePerUnit: 0.005 }),
+    ],
+  );
+
   assert.deepEqual(
-    result.stock,
+    result.consumedOwned,
     new Map([
-      [62516, 150],
-      [34, 400],
+      [62516, 100],
+      [62520, 100],
     ]),
   );
 });
 
-test("reprocesses scrap metal and reinforced scrap metal with separate yields", () => {
-  const scrapTypes = new Map([
-    [15331, { portionSize: 1 }],
-    [30497, { portionSize: 1 }],
-  ]);
-  const scrapMaterials = new Map([
-    [15331, { _key: 15331, materials: [{ materialTypeID: 34, quantity: 500 }] }],
-    [30497, { _key: 30497, materials: [{ materialTypeID: 34, quantity: 2500 }] }],
-  ]);
-
-  const result = reprocessCompressedStock(
-    new Map([
-      [15331, 2],
-      [30497, 3],
-    ]),
-    new Map(),
-    new Map(),
-    scrapMaterials,
-    scrapTypes,
-    specialReprocessableTypeIds,
-    new Map([
-      [15331, 100],
-      [30497, 100],
-    ]),
+test("prioritizes owned candidates when mixed sources are supplied", () => {
+  const result = allocateReprocessing(
+    new Map([[34, 1_000]]),
+    [
+      candidate({ availableQuantity: 200 }),
+      candidate({ typeId: 62520, availableQuantity: 1_000, source: "purchase" }),
+    ],
   );
 
-  assert.deepEqual(
-    result.consumedCompressed,
-    new Map([
-      [15331, 2],
-      [30497, 3],
-    ]),
-  );
-  assert.deepEqual(result.producedMaterials, new Map([[34, 8500]]));
-  assert.deepEqual(result.stock, new Map([[34, 8500]]));
+  assert.deepEqual(result.consumedOwned, new Map([[62516, 200]]));
+  assert.deepEqual(result.consumedPurchases, new Map([[62520, 100]]));
+});
+
+test("reprocesses every complete portion of a committed purchase", () => {
+  const result = reprocessCommittedPurchases([
+    candidate({ availableQuantity: 250, source: "purchase" }),
+  ]);
+
+  assert.deepEqual(result.purchased, new Map([[62516, 250]]));
+  assert.deepEqual(result.producedMaterials, new Map([[34, 800]]));
+});
+
+test("aggregates fractional gas yields before rounding to whole units", () => {
+  const gas = candidate({
+    typeId: 62377,
+    availableQuantity: 106,
+    portionSize: 1,
+    efficiency: 95,
+    yields: new Map([[28694, 1]]),
+    source: "purchase",
+  });
+
+  const committed = reprocessCommittedPurchases([gas]);
+  const allocated = allocateReprocessing(new Map([[28694, 100]]), [{ ...gas, source: "owned" }]);
+
+  assert.deepEqual(committed.producedMaterials, new Map([[28694, 100]]));
+  assert.deepEqual(allocated.consumedOwned, new Map([[62377, 106]]));
+  assert.deepEqual(allocated.producedMaterials, new Map([[28694, 100]]));
+  assert.deepEqual(allocated.remainingRequirements, new Map([[28694, 0]]));
 });

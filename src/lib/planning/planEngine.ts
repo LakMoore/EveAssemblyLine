@@ -6,7 +6,13 @@ import {
 } from "@/cache/services/sdeCache";
 import { getTypes } from "@/lib/sde/loader";
 import { PlannerRequest, PlanResult, PlanSourceCounts, PlanSourceIcon } from "./types";
-import { reprocessCompressedStock, specialReprocessableTypeIds } from "./reprocessStock";
+import {
+  allocateReprocessing,
+  type ReprocessingAllocation,
+  type ReprocessingCandidate,
+  reprocessCommittedPurchases,
+  specialReprocessableTypeIds,
+} from "./reprocessStock";
 
 type Material = PlanResult["lists"]["materialsToBuy"][number];
 type Efficiency = { me: number; te: number };
@@ -101,7 +107,135 @@ function clampEfficiency(value: number, maximum: number) {
   return Math.min(maximum, Math.max(0, Number.isFinite(value) ? value : 0));
 }
 
+/** Builds bounded owned-stock and purchase candidates for demand-limited reprocessing. */
+async function allocatePlanReprocessing(
+  request: PlannerRequest,
+  preliminaryPlan: PlanResult,
+): Promise<ReprocessingAllocation> {
+  const [types, compressibleTypes, typeMaterials] = await Promise.all([
+    getTypes(),
+    getCompressibleTypes(),
+    getTypeMaterials(),
+  ]);
+  const reprocessableTypeIds = new Set([
+    ...compressibleTypes.values(),
+    ...specialReprocessableTypeIds,
+  ]);
+  const requiredMaterials = new Map(
+    preliminaryPlan.lists.materialsToBuy
+      .filter((material) => material.buyQuantity > 0)
+      .map((material) => [material.typeId, material.buyQuantity]),
+  );
+  const reservedDirectStock = new Map(
+    preliminaryPlan.lists.materialsToBuy
+      .filter((material) => reprocessableTypeIds.has(material.typeId))
+      .map((material) => [material.typeId, material.stockQuantity]),
+  );
+  const reprocessingLocationId =
+    request.locations?.reprocessing ?? request.locations?.manufacturing;
+  const ownedQuantityByTypeId = new Map<number, number>();
+  const localQuantityByTypeId = new Map<number, number>();
+  for (const item of request.stock) {
+    if (
+      item.category === "blueprint"
+      || item.category === "reactionformula"
+      || !reprocessableTypeIds.has(item.typeId)
+    ) continue;
+    ownedQuantityByTypeId.set(
+      item.typeId,
+      (ownedQuantityByTypeId.get(item.typeId) ?? 0) + item.quantity,
+    );
+    if (
+      item.source !== "marketOrder"
+      && reprocessingLocationId !== undefined
+      && getStockRootLocationId(item) === reprocessingLocationId
+    ) {
+      localQuantityByTypeId.set(
+        item.typeId,
+        (localQuantityByTypeId.get(item.typeId) ?? 0) + item.quantity,
+      );
+    }
+  }
+
+  const candidateFor = (
+    typeId: number,
+    availableQuantity: number,
+    source: ReprocessingCandidate["source"],
+  ): ReprocessingCandidate | undefined => {
+    const materialRecord = typeMaterials.get(typeId);
+    const type = types.get(typeId);
+    const portionSize = type?.portionSize ?? 1;
+    if (!type || !materialRecord?.materials?.length || portionSize <= 0 || availableQuantity <= 0) {
+      return undefined;
+    }
+    return {
+      typeId,
+      availableQuantity,
+      portionSize,
+      efficiency: request.reprocessingEfficiencies?.[String(typeId)] ?? 50,
+      yields: new Map(
+        materialRecord.materials.map((material) => [material.materialTypeID, material.quantity]),
+      ),
+      source,
+      volumePerUnit: type.packagedVolume ?? type.volume ?? 0,
+      ...(source === "owned"
+        ? {
+            quantityAtReprocessingLocation: Math.min(
+              availableQuantity,
+              localQuantityByTypeId.get(typeId) ?? 0,
+            ),
+          }
+        : {}),
+    };
+  };
+  const ownedCandidates = [...ownedQuantityByTypeId].flatMap(([typeId, quantity]) => {
+    const availableQuantity = Math.max(0, quantity - (reservedDirectStock.get(typeId) ?? 0));
+    const candidate = candidateFor(typeId, availableQuantity, "owned");
+    return candidate ? [candidate] : [];
+  });
+  const purchaseQuantityByTypeId = request.items
+    .filter((item) => item.fromCompression)
+    .reduce(
+      (quantities, item) =>
+        quantities.set(item.typeId, (quantities.get(item.typeId) ?? 0) + item.quantity),
+      new Map<number, number>(),
+    );
+  const purchaseCandidates = [...purchaseQuantityByTypeId].flatMap(([typeId, quantity]) => {
+    const candidate = candidateFor(typeId, quantity, "purchase");
+    return candidate ? [candidate] : [];
+  });
+  const committed = reprocessCommittedPurchases(purchaseCandidates);
+  const remainingMaterials = new Map(requiredMaterials);
+  for (const [typeId, quantity] of committed.producedMaterials) {
+    remainingMaterials.set(typeId, Math.max(0, (remainingMaterials.get(typeId) ?? 0) - quantity));
+  }
+  const owned = allocateReprocessing(remainingMaterials, ownedCandidates);
+  const producedMaterials = new Map(committed.producedMaterials);
+  for (const [typeId, quantity] of owned.producedMaterials) {
+    producedMaterials.set(typeId, (producedMaterials.get(typeId) ?? 0) + quantity);
+  }
+  return {
+    ...owned,
+    consumedPurchases: committed.purchased,
+    producedMaterials,
+  };
+}
+
+/** Calculates a plan after selecting only reprocessing portions that satisfy real shortages. */
 export async function calculatePlan(request: PlannerRequest): Promise<PlanResult> {
+  const preliminaryPlan = await calculatePlanPass({
+    ...request,
+    items: request.items.filter((item) => !item.fromCompression),
+  });
+  const reprocessing = await allocatePlanReprocessing(request, preliminaryPlan);
+  return calculatePlanPass(request, reprocessing);
+}
+
+/** Executes one deterministic planning pass with an optional prepared reprocessing allocation. */
+async function calculatePlanPass(
+  request: PlannerRequest,
+  reprocessing?: ReprocessingAllocation,
+): Promise<PlanResult> {
   const profiler = new PlanProfiler();
   const startedAt = performance.now();
   profiler.count("calculatePlan");
@@ -155,45 +289,6 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     locationStock.set(lot.typeId, (locationStock.get(lot.typeId) ?? 0) + lot.quantity);
     stockByLocationAndType.set(lot.rootLocationId, locationStock);
   }
-  const reprocessingStock = new Map(standardStock);
-  const compressionEfficiencyByTypeId = new Map<number, number>();
-  for (const item of request.items) {
-    if (!item.fromCompression) continue;
-    reprocessingStock.set(item.typeId, (reprocessingStock.get(item.typeId) ?? 0) + item.quantity);
-    if (item.reprocessingEfficiency !== undefined) {
-      compressionEfficiencyByTypeId.set(item.typeId, item.reprocessingEfficiency);
-    }
-  }
-  for (const [typeId, quantity] of marketOrderStock) {
-    reprocessingStock.set(typeId, (reprocessingStock.get(typeId) ?? 0) + quantity);
-  }
-  const compressedTypeIds = new Set([
-    ...compressibleTypes.values(),
-    ...specialReprocessableTypeIds,
-  ]);
-  const reprocessed = reprocessCompressedStock(
-    reprocessingStock,
-    request.items.reduce(
-      (quantities, item) => {
-        if (!item.fromCompression && compressedTypeIds.has(item.typeId)) {
-          const availableDirectStock =
-            (standardStock.get(item.typeId) ?? 0) + (marketOrderStock.get(item.typeId) ?? 0);
-          const reserved = Math.min(
-            availableDirectStock,
-            (quantities.get(item.typeId) ?? 0) + item.quantity,
-          );
-          quantities.set(item.typeId, reserved);
-        }
-        return quantities;
-      },
-      new Map<number, number>(),
-    ),
-    compressibleTypes,
-    typeMaterials,
-    typeRecords,
-    specialReprocessableTypeIds,
-    compressionEfficiencyByTypeId,
-  );
   const haulingByKey = new Map<string, PlanResult["lists"]["haulingTasks"][number]>();
   const reprocessingLocationId =
     request.locations?.reprocessing ?? request.locations?.manufacturing;
@@ -236,7 +331,9 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       .sort(
         (left, right) =>
           Number(left.rootLocationId !== destinationRootLocationId)
-          - Number(right.rootLocationId !== destinationRootLocationId),
+            - Number(right.rootLocationId !== destinationRootLocationId)
+          || left.rootLocationId - right.rootLocationId
+          || (left.ownerId ?? 0) - (right.ownerId ?? 0),
       );
     for (const lot of candidateLots) {
       if (remaining <= 0) break;
@@ -245,16 +342,6 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       lot.quantity -= consumed;
       remaining -= consumed;
     }
-  }
-  function addReprocessedStock(typeId: number, quantity: number) {
-    if (quantity <= 0 || reprocessingLocationId === undefined) return;
-    const type = typeRecords.get(typeId);
-    stockLots.push({
-      typeId,
-      quantity,
-      rootLocationId: reprocessingLocationId,
-      volumePerUnit: type?.volume ?? 0,
-    });
   }
   function getRunsAvailable(
     blueprint: NonNullable<
@@ -273,25 +360,24 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       ),
     );
   }
-  if (reprocessingLocationId !== undefined) {
-    for (const [typeId, quantity] of reprocessed.consumedCompressed) {
-      consumeTrackedStock(typeId, quantity, reprocessingLocationId);
+  if (reprocessing) {
+    for (const [typeId, quantity] of reprocessing.consumedOwned) {
+      const marketAvailable = marketOrderStock.get(typeId) ?? 0;
+      const marketConsumed = Math.min(marketAvailable, quantity);
+      if (marketConsumed > 0) {
+        const remainingMarket = marketAvailable - marketConsumed;
+        if (remainingMarket > 0) marketOrderStock.set(typeId, remainingMarket);
+        else marketOrderStock.delete(typeId);
+      }
+      const standardAvailable = standardStock.get(typeId) ?? 0;
+      const standardConsumed = Math.min(standardAvailable, quantity - marketConsumed);
+      if (standardConsumed > 0) {
+        consumeTrackedStock(typeId, standardConsumed, reprocessingLocationId);
+        const remainingStandard = standardAvailable - standardConsumed;
+        if (remainingStandard > 0) standardStock.set(typeId, remainingStandard);
+        else standardStock.delete(typeId);
+      }
     }
-    for (const [typeId, quantity] of reprocessed.producedMaterials) {
-      addReprocessedStock(typeId, quantity);
-    }
-  }
-  standardStock.clear();
-  for (const [typeId, quantity] of reprocessed.stock) standardStock.set(typeId, quantity);
-  for (const [typeId, quantity] of marketOrderStock) {
-    const consumed = reprocessed.consumedCompressed.get(typeId) ?? 0;
-    const remainingMarketQuantity = quantity - consumed;
-    const standardQuantity = standardStock.get(typeId) ?? 0;
-    const remainingStandardQuantity = standardQuantity - remainingMarketQuantity;
-    if (remainingStandardQuantity > 0) standardStock.set(typeId, remainingStandardQuantity);
-    else standardStock.delete(typeId);
-    if (remainingMarketQuantity > 0) marketOrderStock.set(typeId, remainingMarketQuantity);
-    else marketOrderStock.delete(typeId);
   }
 
   const materials = new Map<number, Material>();
@@ -302,7 +388,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
   const inventionJobs = new Map<number, PlanResult["lists"]["inventionJobs"][number]>();
   const requiredSkillLevels = new Map<number, number>();
   const inventedBpcTypeIds = new Set<number>();
-  const producedParts = new Map<number, number>();
+  const producedParts = new Map(reprocessing?.producedMaterials ?? []);
   const sourceCountsByTypeId = new Map<number, Map<PlanSourceIcon, number>>();
   for (const stockItem of request.stock) {
     const sourceCounts =
@@ -438,6 +524,40 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
     );
   }
 
+  for (const [typeId, quantity] of reprocessing?.producedMaterials ?? []) {
+    updateMaterial(typeId, `Type ${typeId}`, { productionQuantity: quantity });
+  }
+
+  const selectedReprocessingTypeIds = new Set([
+    ...(reprocessing?.consumedOwned.keys() ?? []),
+    ...(reprocessing?.consumedPurchases.keys() ?? []),
+  ]);
+  for (const typeId of selectedReprocessingTypeIds) {
+    const ownedQuantity = request.stock
+      .filter(
+        (item) =>
+          item.typeId === typeId
+          && item.category !== "blueprint"
+          && item.category !== "reactionformula",
+      )
+      .reduce((total, item) => total + item.quantity, 0);
+    const consumedOwned = reprocessing?.consumedOwned.get(typeId) ?? 0;
+    const consumedPurchases = reprocessing?.consumedPurchases.get(typeId) ?? 0;
+    updateMaterial(
+      typeId,
+      `Type ${typeId}`,
+      {
+        quantity: consumedPurchases,
+        requiredQuantity: consumedOwned + consumedPurchases,
+        stockQuantity: consumedOwned,
+        availableStockQuantity: ownedQuantity,
+        buyQuantity: consumedPurchases,
+        remainingStockQuantity: Math.max(0, ownedQuantity - consumedOwned),
+        imageVariation: "icon",
+      },
+    );
+  }
+
   async function addMaterial(
     typeId: number,
     quantity: number,
@@ -476,11 +596,6 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
         );
       },
     );
-  }
-
-  for (const item of request.items) {
-    if (!item.fromCompression) continue;
-    await addMaterial(item.typeId, item.quantity, item.name, false, "icon", false);
   }
 
   async function expand(
@@ -884,6 +999,16 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
   for (const job of inventionJobs.values()) job.name = resolvedName(job.typeId);
   for (const bpc of bpcs.values()) bpc.name = resolvedName(bpc.typeId);
   for (const formula of reactionFormulas.values()) formula.name = resolvedName(formula.typeId);
+  const reprocessingJobs: PlanResult["lists"]["reprocessingJobs"] =
+    reprocessingLocationId === undefined
+      ? []
+      : [...(reprocessing?.readyToReprocess ?? [])].map(([typeId, quantity]) => ({
+          typeId,
+          name: resolvedName(typeId),
+          quantity,
+          efficiency: request.reprocessingEfficiencies?.[String(typeId)] ?? 50,
+          locationId: reprocessingLocationId,
+        }));
 
   const materialsToBuy = [...materials.values()];
   const bpcRequirements = [...bpcs.values()];
@@ -921,6 +1046,7 @@ export async function calculatePlan(request: PlannerRequest): Promise<PlanResult
       inventionJobs: [...inventionJobs.values()],
       reactionJobs: [...reactionJobs.values()],
       manufacturingJobs: [...manufacturingJobs.values()],
+      reprocessingJobs,
       skillsRequired,
       haulingTasks,
     },

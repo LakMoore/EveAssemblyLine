@@ -836,9 +836,6 @@ function Results({ result }: { result: CompressResult }) {
             me: 0,
             te: 0,
             fromCompression: true,
-            ...(item.reprocessingEfficiency === undefined
-              ? {}
-              : { reprocessingEfficiency: item.reprocessingEfficiency }),
           });
         }
       }

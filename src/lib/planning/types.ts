@@ -7,7 +7,6 @@ export interface PlanBuildItem {
   me: number;
   te: number;
   fromCompression: boolean;
-  reprocessingEfficiency?: number;
 }
 
 // shape of the build item used on the server
@@ -117,6 +116,7 @@ export interface BlueprintPrint {
 export interface PlanRequest {
   language?: SdeLanguage;
   toBuild: PlanBuildItem[];
+  reprocessingEfficiencies?: Record<string, number>;
   assets?: {
     items: PlanItemInput[];
     blueprints: PlanBlueprintInput[];
@@ -243,6 +243,13 @@ export interface PlanResult {
       runsAvailable: number;
       totalTime: number;
       locationId?: number;
+    }>;
+    reprocessingJobs: Array<{
+      typeId: number;
+      name: string;
+      quantity: number;
+      efficiency: number;
+      locationId: number;
     }>;
     skillsRequired: PlanSkillRequirement[];
     haulingTasks: Array<{

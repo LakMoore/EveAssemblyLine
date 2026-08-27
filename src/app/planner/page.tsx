@@ -36,6 +36,7 @@ import {
   type ClientJobsResponse,
 } from "@/lib/client/requestCache";
 import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
+import { loadPlannerReprocessingEfficiencies } from "@/lib/planning/reprocessingClient";
 import {
   defaultLocations,
   defaultSettings,
@@ -105,11 +106,21 @@ import {
 } from "lucide-react";
 import PasteListDialog from "@/components/PasteListDialog";
 
-type PlannerTab = "Plan" | "Haul" | "Buy" | "Copy" | "Invent" | "React" | "Manufacture" | "Skills";
+type PlannerTab =
+  | "Plan"
+  | "Haul"
+  | "Buy"
+  | "Reprocess"
+  | "Copy"
+  | "Invent"
+  | "React"
+  | "Manufacture"
+  | "Skills";
 const tabs: { value: PlannerTab; icon: LucideIcon }[] = [
   { value: "Plan", icon: ClipboardList },
   { value: "Haul", icon: Truck },
   { value: "Buy", icon: ShoppingCart },
+  { value: "Reprocess", icon: Minimize2 },
   { value: "Copy", icon: CopyIcon },
   { value: "Invent", icon: Microscope },
   { value: "React", icon: Atom },
@@ -484,6 +495,10 @@ function Planner() {
       const planningLocations = Number.isInteger(compressLocationId)
         ? { ...locations, reprocessing: compressLocationId }
         : locations;
+      const reprocessingEfficiencies = await loadPlannerReprocessingEfficiencies(
+        language,
+        planningLocations.reprocessing,
+      );
       const requestStock = workingStock.filter((item) => {
         const locationId = getStockLocationId(item);
         return locationId === undefined || !exclusions.has(locationId);
@@ -496,16 +511,14 @@ function Planner() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             language,
-            toBuild: items.map(
-              ({ typeId, quantity, me, te, fromCompression, reprocessingEfficiency }) => ({
-                typeId,
-                quantity,
-                me,
-                te,
-                fromCompression,
-                reprocessingEfficiency,
-              }),
-            ),
+            toBuild: items.map(({ typeId, quantity, me, te, fromCompression }) => ({
+              typeId,
+              quantity,
+              me,
+              te,
+              fromCompression,
+            })),
+            reprocessingEfficiencies,
             stock: requestStock.map(({ sourceLocationName: _sourceLocationName, ...item }) => item),
             locations: planningLocations,
             settings: {
@@ -746,15 +759,15 @@ function Planner() {
                           render={
                             <Badge
                               variant="default"
-                              aria-label={`Will be reprocessed at ${(item.reprocessingEfficiency ?? 50).toFixed(1)}%`}
+                              aria-label="Will be reprocessed using the selected refinery settings"
                             >
                               <Minimize2 aria-hidden="true" />
-                              <span>{Math.round(item.reprocessingEfficiency ?? 50)}%</span>
+                              <span>Reprocess</span>
                             </Badge>
                           }
                         />
                         <TooltipContent>
-                          Will be reprocessed at {(item.reprocessingEfficiency ?? 50).toFixed(1)}%
+                          Will be reprocessed using the selected refinery settings
                         </TooltipContent>
                       </Tooltip>
                     )}
@@ -1272,6 +1285,12 @@ function PlanList({
         .filter((skill) => skill.currentLevel < skill.requiredLevel),
     };
   });
+  const reprocessingJobs =
+    (
+      plan.lists as Omit<PlanResult["lists"], "reprocessingJobs"> & {
+        reprocessingJobs?: PlanResult["lists"]["reprocessingJobs"];
+      }
+    ).reprocessingJobs ?? [];
   const list =
     activeTab === "Plan"
       ? plan.lists.planItems
@@ -1282,19 +1301,23 @@ function PlanList({
           ]
         : activeTab === "Copy"
           ? plan.lists.bpcsNeeded.filter((entry) => entry.buyQuantity > 0)
-          : activeTab === "Invent"
-            ? plan.lists.inventionJobs
-            : activeTab === "React"
-              ? plan.lists.reactionJobs
-              : activeTab === "Manufacture"
-                ? plan.lists.manufacturingJobs
-                : plan.lists.haulingTasks;
-  const locationGroupedTab = activeTab === "React" || activeTab === "Manufacture";
+          : activeTab === "Reprocess"
+            ? reprocessingJobs
+            : activeTab === "Invent"
+              ? plan.lists.inventionJobs
+              : activeTab === "React"
+                ? plan.lists.reactionJobs
+                : activeTab === "Manufacture"
+                  ? plan.lists.manufacturingJobs
+                  : plan.lists.haulingTasks;
+  const locationGroupedTab =
+    activeTab === "Reprocess" || activeTab === "React" || activeTab === "Manufacture";
   type PlanListEntry =
     | PlanResult["lists"]["planItems"][number]
     | PlanResult["lists"]["materialsToBuy"][number]
     | PlanResult["lists"]["bpcsNeeded"][number]
     | PlanResult["lists"]["inventionJobs"][number]
+    | PlanResult["lists"]["reprocessingJobs"][number]
     | PlanResult["lists"]["reactionJobs"][number]
     | PlanResult["lists"]["manufacturingJobs"][number]
     | PlanResult["lists"]["haulingTasks"][number];
@@ -1950,11 +1973,13 @@ function PlanList({
                       : "bpc"
                     : null;
                 const detail =
-                  "fromLocationId" in entry && activeTab !== "Buy"
-                    ? `From ${locationNamesById.get(entry.fromLocationId) ?? entry.fromLocationId} to ${locationNamesById.get(entry.toLocationId) ?? entry.toLocationId}`
-                    : "locationId" in entry && activeTab !== "Buy" && activeTab !== "Manufacture"
-                      ? `Location ${entry.locationId}`
-                      : "";
+                  activeTab === "Reprocess" && "efficiency" in entry
+                    ? `${entry.efficiency.toFixed(1)}% yield`
+                    : "fromLocationId" in entry && activeTab !== "Buy"
+                      ? `From ${locationNamesById.get(entry.fromLocationId) ?? entry.fromLocationId} to ${locationNamesById.get(entry.toLocationId) ?? entry.toLocationId}`
+                      : "locationId" in entry && activeTab !== "Buy" && activeTab !== "Manufacture"
+                        ? `Location ${entry.locationId}`
+                        : "";
                 const totalTime =
                   "totalTime" in entry && typeof entry.totalTime === "number"
                     ? entry.totalTime

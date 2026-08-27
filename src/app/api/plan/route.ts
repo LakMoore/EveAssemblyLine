@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { calculatePlan } from "@/lib/planning/planEngine";
 import { hydrateStockCategories } from "@/lib/planning/stockHydration";
 import {
@@ -23,6 +24,11 @@ export const revalidate = 0;
 const noStoreResponseInit: ResponseInit = {
   headers: { "Cache-Control": "no-store" },
 };
+
+const reprocessingEfficienciesSchema = z.record(
+  z.string().regex(/^\d+$/, "Reprocessable type IDs must be numeric."),
+  z.number().finite().min(0).max(100),
+);
 
 function validLocation(value: { locationId: number; rootLocationId: number }) {
   return Number.isInteger(value.locationId) && Number.isInteger(value.rootLocationId);
@@ -83,9 +89,6 @@ async function calculateWorkingStockPlan(input: PlanRequest, stock: PlanStockIte
   const buildItems: BuildItem[] = input.toBuild.map((item) => ({
     ...item,
     fromCompression: item.fromCompression === true,
-    ...(item.reprocessingEfficiency === undefined
-      ? {}
-      : { reprocessingEfficiency: item.reprocessingEfficiency }),
     name:
       types.get(item.typeId)?.name[input.language ?? "en"]
       ?? types.get(item.typeId)?.name.en
@@ -94,6 +97,7 @@ async function calculateWorkingStockPlan(input: PlanRequest, stock: PlanStockIte
   const result = await calculatePlan({
     language: input.language,
     items: buildItems,
+    reprocessingEfficiencies: input.reprocessingEfficiencies,
     stock: await hydrateStockCategories(stock),
     locations: input.locations,
     settings: input.settings,
@@ -105,6 +109,16 @@ async function calculateWorkingStockPlan(input: PlanRequest, stock: PlanStockIte
 export async function POST(request: Request) {
   try {
     const input = (await request.json()) as PlanRequest;
+    const parsedEfficiencies = reprocessingEfficienciesSchema.safeParse(
+      input.reprocessingEfficiencies ?? {},
+    );
+    if (!parsedEfficiencies.success) {
+      return NextResponse.json(
+        { error: "Reprocessing efficiencies must map numeric type IDs to percentages." },
+        { status: 400 },
+      );
+    }
+    input.reprocessingEfficiencies = parsedEfficiencies.data;
     if (!Array.isArray(input.toBuild) || input.toBuild.length === 0) {
       return NextResponse.json({ error: "Add at least one build item." }, { status: 400 });
     }
@@ -276,6 +290,7 @@ export async function POST(request: Request) {
     const result = await calculatePlan({
       language: input.language,
       items: buildItems,
+      reprocessingEfficiencies: input.reprocessingEfficiencies,
       stock,
       locations: input.locations,
       settings: input.settings,

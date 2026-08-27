@@ -797,6 +797,13 @@ Implement in `planning/planEngine.ts`:
      - `availableQuantity[typeId] = sum of all relevant assets`.
      - Also retain `availableByLocation[typeId][effectiveLocationId]` and the owning character or corporation for hauling decisions.
      - Exclude unresolved assets from location-specific hauling tasks, but include them in an explicit planning warning and do not count them as safely available for a location-constrained job.
+   - Treat compressed resources, Metal Scraps, and Reinforced Metal Scraps as bounded reprocessing candidates rather than eagerly converting all available stock:
+     - Discover the plan's remaining raw-material requirements before selecting reprocessing portions.
+     - Preserve reprocessable items required directly by manufacturing or reaction jobs.
+     - Treat build-input rows marked for reprocessing as committed purchases: retain their full quantities in the Plan and Buy lists and credit the future output of every complete reprocessing portion before allocating owned stock.
+     - Select only complete SDE reprocessing portions that contribute to those requirements, preferring stock already at the refinery and then lower hauling volume.
+     - After committed purchases are applied, select owned reprocessable assets only for any remaining material requirements.
+   - Calculate yields from the selected refinery, rig, character skills, and implant snapshot supplied with the plan request; aggregate fractional output across the selected portions before rounding down to whole material units, and use 50% when that snapshot is unavailable.
 3. **SDE-based expansion**
    - For each item in `items`:
      - Use SDE maps to:
@@ -809,39 +816,46 @@ Implement in `planning/planEngine.ts`:
        - Mark it as “must buy”, not “build”.
      - If in buy blacklist:
        - Mark it as “must build”, not “buy”.
-4. **Compute six lists**
+4. **Compute seven operational lists**
    - **1. Raw materials to buy**
      - For each required material:
        - Compare required quantity to available inventory (character + corp).
        - If required > available and material is not in build blacklist:
          - Add to “materialsToBuy” list with quantity difference, target `locations.market`.
-   - **2. BPCs needed**
+   - **2. Reprocessing jobs**
+     - List only selected reprocessable assets already located at `locations.reprocessing`.
+     - Include the input type, quantity, efficiency, and reprocessing location.
+     - Do not list remote or purchased inputs until a later plan refresh observes them at the refinery.
+     - Treat reprocessing output as future production in the plan summary, not currently available stock.
+   - **3. BPCs needed**
      - Determine which blueprints/BPCs are required for the planned builds.
      - Check inventory and active jobs for existing BPCs.
      - List missing BPCs in “bpcsNeeded”.
-   - **3. Invention jobs**
-     - For required BPCs that must be invented (T2, etc.):
-       - Use SDE blueprint activities and invention data to compute required invention jobs.
-       - Add each job with location `locations.manufacturing` or user-selected structure.
-   - **4. Reaction jobs**
-     - For materials produced via reactions:
-       - Determine reaction formulas (from SDE).
-       - Determine number of runs needed.
-       - Add reaction jobs with location `locations.reactions`.
-   - **5. Manufacturing jobs**
-     - For final items to build and intermediary items (due to buy blacklist):
-       - Compute manufacturing job requirements:
-         - number of runs,
-         - locations (manufacturing system/station or structure),
-         - required input materials.
-       - Add to “manufacturingJobs”.
-   - **6. Hauling tasks**
-     - Simple from X to Y (no route planning):
-       - For each manufacturing/reaction/market location:
-         - Determine where required items currently sit from resolved asset records, using the effective location after nested-container resolution.
-           - Compute tasks like:
-             - “Move X units of typeId from system/station A to location B.”
-       - Represent tasks as:
+
+- **4. Invention jobs**
+  - For required BPCs that must be invented (T2, etc.):
+    - Use SDE blueprint activities and invention data to compute required invention jobs.
+    - Add each job with location `locations.manufacturing` or user-selected structure.
+- **5. Reaction jobs**
+  - For materials produced via reactions:
+    - Determine reaction formulas (from SDE).
+    - Determine number of runs needed.
+    - Add reaction jobs with location `locations.reactions`.
+- **6. Manufacturing jobs**
+  - For final items to build and intermediary items (due to buy blacklist):
+    - Compute manufacturing job requirements:
+      - number of runs,
+      - locations (manufacturing system/station or structure),
+      - required input materials.
+    - Add to “manufacturingJobs”.
+- **7. Hauling tasks**
+  - Simple from X to Y (no route planning):
+    - For each manufacturing/reaction/market location:
+      - Determine where required items currently sit from resolved asset records, using the effective location after nested-container resolution.
+        - Compute tasks like:
+          - “Move X units of typeId from system/station A to location B.”
+        - Never create hauling tasks for projected purchases, reprocessing output, or other future production.
+    - Represent tasks as:
 
 ```json
 {
@@ -876,6 +890,7 @@ Never create a hauling task with a guessed origin. If assets are unresolved, ret
   },
   "lists": {
     "materialsToBuy": [...],
+    "reprocessingJobs": [...],
     "bpcsNeeded": [...],
     "inventionJobs": [...],
     "reactionJobs": [...],
@@ -945,7 +960,7 @@ Components:
     - Same as above for `buyBlacklist`.
   - For now, no complex presets; just basic lists.
 - **PlanTabs**:
-  - Tabs or vertical navigation for the six lists, plus a plan overview
+  - Tabs or vertical navigation for the seven operational lists, plus a plan overview
     - Plan Overview.
     - Materials to buy.
     - BPCs needed.
@@ -974,7 +989,7 @@ Components:
 8. User clicks **“Calculate plan”**:
    - Frontend sends `POST /api/plan` with the build list, cached/working stock, locations, and settings.
    - On response:
-     - Populates the planner output views with the six lists.
+   - Populates the planner output views with the seven operational lists.
 9. User navigates between tabs to inspect each resulting list.
 
 Optional UX enhancements:
@@ -991,7 +1006,7 @@ You mentioned offline would be a benefit but not mandatory. Given our design:
 
 - ESI calls and SDE usage are server-side.
 - The client can cache:
-  - The last successful plan response (six lists), once client-side plan recovery is implemented.
+  - The last successful plan response (seven operational lists), once client-side plan recovery is implemented.
     - The current build list and settings.
 - For partial offline behavior:
   - When the app cannot reach the server:
@@ -1058,7 +1073,7 @@ Unit tests should be written for the planning logic, especially:
 - BOM expansion from SDE.
 - Inventory merging.
 - Blacklist handling.
-- Each of the six lists.
+- Each of the seven operational lists.
 - PKCE state and callback character matching.
 - Access-token refresh for character token sets, including refresh-token rotation.
 - Pagination and rate-limit handling for personal and corporation assets.

@@ -27,15 +27,16 @@ export async function loadBuildList(): Promise<ClientBuildItem[]> {
         Array.isArray(request.result)
           ? request.result
               .filter(isBuildItem)
-              .map((item) => ({
-                ...item,
-                me: typeof item.me === "number" ? item.me : 0,
-                te: typeof item.te === "number" ? item.te : 0,
-                fromCompression: item.fromCompression === true,
-                ...(typeof item.reprocessingEfficiency === "number"
-                  ? { reprocessingEfficiency: item.reprocessingEfficiency }
-                  : {}),
-              }))
+              .map((item) => {
+                const { reprocessingEfficiency: _legacyEfficiency, ...buildItem } =
+                  item as ClientBuildItem & { reprocessingEfficiency?: number };
+                return {
+                  ...buildItem,
+                  me: typeof item.me === "number" ? item.me : 0,
+                  te: typeof item.te === "number" ? item.te : 0,
+                  fromCompression: item.fromCompression === true,
+                };
+              })
           : [],
       );
     };
