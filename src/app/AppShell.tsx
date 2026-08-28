@@ -50,6 +50,7 @@ import {
   UserRoundPlus,
   UsersRound,
 } from "lucide-react";
+import { FaDiscord, FaGithub } from "react-icons/fa6";
 import {
   Select,
   SelectContent,
@@ -815,6 +816,31 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   ref={pilotListSentinelRef}
                   aria-hidden="true"
                 />
+              </div>
+              <div className={styles.sidebarCommunity}>
+                <div className={styles.sectionLabel}>COMMUNITY</div>
+                <a
+                  className={styles.navItem}
+                  href="https://github.com/LakMoore/EveAssemblyLine"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span>
+                    <FaGithub size={17} aria-hidden="true" />
+                  </span>
+                  <span>GitHub</span>
+                </a>
+                <a
+                  className={styles.navItem}
+                  href="https://discord.gg/VdGZWzXahh"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span>
+                    <FaDiscord size={17} aria-hidden="true" />
+                  </span>
+                  <span>Discord</span>
+                </a>
               </div>
               <div className={styles.sidebarFooter}>
                 <span

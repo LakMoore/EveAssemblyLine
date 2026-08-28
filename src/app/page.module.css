@@ -230,6 +230,10 @@
   display: none;
 }
 
+.layoutCollapsed .sidebarCommunity {
+  display: none;
+}
+
 .tableHead {
   grid-template-columns: 1fr 72px 44px 44px 15px;
 }
@@ -3009,6 +3013,10 @@
 
 .pilotList {
   min-height: 0;
+}
+
+.sidebarCommunity .sectionLabel {
+  margin-top: 0;
 }
 
 .sidebarSentinel {
