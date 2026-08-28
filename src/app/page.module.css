@@ -223,7 +223,11 @@
 }
 
 .layoutCollapsed .sidebarFooter .addButton {
-  display: block;
+  display: flex;
+}
+
+.layoutCollapsed .sidebarFooter .addButton > span {
+  display: none;
 }
 
 .tableHead {
@@ -3200,6 +3204,8 @@
 }
 
 .layoutCollapsed .sidebarFooter .addButton svg {
+  width: 26px;
+  height: 26px;
   margin-right: 0;
 }
 
@@ -3230,11 +3236,6 @@
 
   .layout.layoutCollapsed .sidebarFooter .addButton > span {
     display: none;
-  }
-
-  .layout.layoutCollapsed .sidebarFooter .addButton svg {
-    width: 26px;
-    height: 26px;
   }
 }
 
