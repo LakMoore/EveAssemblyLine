@@ -3323,9 +3323,18 @@
   gap: 30px;
 }
 
-.welcomePage .pageIntro,
+.welcomePage .pageIntro {
+  display: block;
+  max-width: none;
+}
+
 .appraisePage .pageIntro {
   display: block;
+  max-width: 760px;
+}
+
+.welcomeIntroCopy {
+  min-width: 0;
   max-width: 760px;
 }
 
@@ -3333,10 +3342,25 @@
 .appraisePage .pageIntro p,
 .welcomeNote {
   max-width: 680px;
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 14px;
   line-height: 1.7;
   margin-top: 12px;
+}
+
+@media (min-width: 641px) {
+  .welcomePage .pageIntro {
+    display: grid;
+    grid-template-columns: minmax(0, 760px) auto;
+    gap: 32px;
+  }
+
+  .welcomePage .pageIntro .addButton {
+    display: flex;
+    width: fit-content;
+    margin: 0 0 0 auto;
+    align-self: start;
+  }
 }
 
 .welcomeGrid {
@@ -3359,7 +3383,7 @@
 }
 
 .welcomePanel p {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 13px;
   line-height: 1.65;
 }
@@ -3396,7 +3420,7 @@
 
 .aboutCopy p,
 .roadmapList {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 13px;
   line-height: 1.7;
 }

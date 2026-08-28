@@ -1,14 +1,20 @@
 import Link from "next/link";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import styles from "../page.module.css";
 
 export default function WelcomePage() {
   return (
     <div className={styles.welcomePage}>
       <div className={styles.pageIntro}>
-        <span className="eyebrow">EVE INDUSTRY CONTROL</span>
-        <h1>Welcome to Eve AssemblyLine</h1>
-        <p>Plan production, inspect your stock, and keep every industrial decision in one place.</p>
-        <Link className={styles.addButton} href="/planner">
+        <div className={styles.welcomeIntroCopy}>
+          <span className="eyebrow">EVE INDUSTRY CONTROL</span>
+          <h1>Welcome to Eve AssemblyLine</h1>
+          <p>
+            Plan production, inspect your stock, and keep every industrial decision in one place.
+          </p>
+        </div>
+        <Link className={cn(buttonVariants({ variant: "link" }), styles.addButton)} href="/planner">
           Open production planner
         </Link>
       </div>
