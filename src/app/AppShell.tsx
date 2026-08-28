@@ -828,7 +828,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <span>
                     <FaGithub size={17} aria-hidden="true" />
                   </span>
-                  <span>GitHub</span>
+                  <span className={styles.navText}>GitHub</span>
                 </a>
                 <a
                   className={styles.navItem}
@@ -839,7 +839,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <span>
                     <FaDiscord size={17} aria-hidden="true" />
                   </span>
-                  <span>Discord</span>
+                  <span className={styles.navText}>Discord</span>
                 </a>
               </div>
               <div className={styles.sidebarFooter}>

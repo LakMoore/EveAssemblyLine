@@ -64,6 +64,9 @@ type OwnerCache = {
   blueprintInstances?: EndpointCache<BlueprintInstanceRecord[]>;
   stockAssetsByItemId?: Map<number, AssetRecord>;
   rootLocationsByItemId: Map<number, AssetLocation>;
+  locationResolverCharacterIds: Map<number, number>;
+  jobLocationResolverCharacterIds: Map<number, number>;
+  endpointLocationResolverCharacterIds: Map<number, number>;
   shipAssetsByItemId: Map<number, AssetRecord>;
   assembledShipsByItemId: Map<number, AssetRecord>;
   assembledStructureRigs: AssetRecord[];
@@ -97,6 +100,38 @@ function getUsableMarketOrdersEtag(cache: OwnerCache | undefined) {
     : undefined;
 }
 
+function indexJobLocationResolvers(
+  cache: OwnerCache,
+  jobs: IndustryJobRecord[],
+  characterId: number,
+) {
+  for (const job of jobs) {
+    for (const locationId of [job.blueprintLocationId, job.locationId, job.outputLocationId]) {
+      cache.jobLocationResolverCharacterIds.set(locationId, characterId);
+    }
+  }
+}
+
+function indexBlueprintLocationResolvers(
+  cache: OwnerCache,
+  blueprints: BlueprintInstanceRecord[],
+  characterId: number,
+) {
+  for (const blueprint of blueprints) {
+    cache.endpointLocationResolverCharacterIds.set(blueprint.locationId, characterId);
+  }
+}
+
+function indexMarketOrderLocationResolvers(
+  cache: OwnerCache,
+  orders: MarketOrderRecord[],
+  characterId: number,
+) {
+  for (const order of orders) {
+    cache.endpointLocationResolverCharacterIds.set(order.locationId, characterId);
+  }
+}
+
 async function refreshBlueprintInstances(
   cache: OwnerCache,
   character: CharacterTokenRecord,
@@ -118,6 +153,9 @@ async function refreshBlueprintInstances(
     result.notModified && cache.blueprintInstances
       ? setFresh(cache.blueprintInstances.lastBody, result.headers, cache.blueprintInstances, true)
       : setFresh(result.blueprints ?? [], result.headers, cache.blueprintInstances);
+  if (result.blueprints) {
+    indexBlueprintLocationResolvers(cache, result.blueprints, character.characterId);
+  }
   return cache.blueprintInstances;
 }
 
@@ -128,6 +166,9 @@ function getCache(map: Map<string, OwnerCache>, id: number, sessionId: string): 
   const created: OwnerCache = {
     assembledStructureRigs: [],
     rootLocationsByItemId: new Map(),
+    locationResolverCharacterIds: new Map(),
+    jobLocationResolverCharacterIds: new Map(),
+    endpointLocationResolverCharacterIds: new Map(),
     shipAssetsByItemId: new Map(),
     assembledShipsByItemId: new Map(),
     unresolvedAssetCount: 0,
@@ -323,6 +364,7 @@ async function cacheResolvedAssets(
   headers?: Headers,
   previous?: EndpointCache<AssetRecord[]>,
   assetNamePath?: string,
+  resolverCharacterId?: number,
   preserveLastModified = false,
 ) {
   const assetIndexes = await indexAssetsByPurpose(rawAssets);
@@ -392,6 +434,11 @@ async function cacheResolvedAssets(
   cache.allAssetsRaw = setFresh(namedAssets, headers, previous, preserveLastModified);
   cache.stockAssetsByItemId = resolvedByItemId;
   cache.rootLocationsByItemId = rootLocationsByItemId;
+  if (resolverCharacterId !== undefined) {
+    cache.locationResolverCharacterIds = new Map(
+      rawAssets.map((asset) => [asset.locationId, resolverCharacterId]),
+    );
+  }
   const resolvedShipAssets = await Promise.all(
     [...assetIndexes.shipAssetsByItemId.values()].map(async (asset) => {
       const cachedRoot = rootLocationsByItemId.get(asset.locationId);
@@ -628,6 +675,7 @@ async function rebuildResolvedAssets(
       undefined,
       cache.allAssetsRaw,
       ownerPath,
+      record.characterId,
     );
   }
   catch {
@@ -692,6 +740,7 @@ export async function refreshCharacterState(
             result.headers,
             cache.allAssetsRaw,
             `/characters/${character.characterId}`,
+            character.characterId,
             true,
           );
           cache.allAssetsRaw.status = endpointDataStatus(
@@ -707,6 +756,7 @@ export async function refreshCharacterState(
             result.headers,
             cache.allAssetsRaw,
             `/characters/${character.characterId}`,
+            character.characterId,
           );
         }
       }
@@ -729,6 +779,7 @@ export async function refreshCharacterState(
           jobs.notModified && cache.jobs
             ? setFresh(cache.jobs.lastBody, jobs.headers, cache.jobs, true)
             : setFresh(jobs.jobs ?? [], jobs.headers, cache.jobs);
+        if (jobs.jobs) indexJobLocationResolvers(cache, jobs.jobs, character.characterId);
       }
       else {
         cache.jobs.status = endpointDataStatus(
@@ -771,6 +822,9 @@ export async function refreshCharacterState(
         }
         else if (orders.orders) {
           cache.marketOrders = setFresh(orders.orders, orders.headers, cache.marketOrders);
+        }
+        if (orders.orders) {
+          indexMarketOrderLocationResolvers(cache, orders.orders, character.characterId);
         }
       }
       else {
@@ -840,6 +894,7 @@ export async function refreshCharacterState(
               result.headers,
               corpCache.allAssetsRaw,
               `/corporations/${character.corporationId}`,
+              character.characterId,
               true,
             );
             corpCache.allAssetsRaw.status = endpointDataStatus(
@@ -855,6 +910,7 @@ export async function refreshCharacterState(
               result.headers,
               corpCache.allAssetsRaw,
               `/corporations/${character.corporationId}`,
+              character.characterId,
             );
           }
           corpSummary.assets = corpCache.allAssetsRaw;
@@ -895,6 +951,7 @@ export async function refreshCharacterState(
             jobs.notModified && corpCache.jobs
               ? setFresh(corpCache.jobs.lastBody, jobs.headers, corpCache.jobs, true)
               : setFresh(jobs.jobs ?? [], jobs.headers, corpCache.jobs);
+          if (jobs.jobs) indexJobLocationResolvers(corpCache, jobs.jobs, character.characterId);
         }
         else {
           corpCache.jobs.status = endpointDataStatus(
@@ -945,6 +1002,9 @@ export async function refreshCharacterState(
               orders.headers,
               corpCache.marketOrders,
             );
+          }
+          if (orders.orders) {
+            indexMarketOrderLocationResolvers(corpCache, orders.orders, character.characterId);
           }
         }
         else {
@@ -1158,6 +1218,76 @@ export async function getRootLocationsByItemId(
       return map;
     },
     new Map<number, AssetLocation>(),
+  );
+}
+
+export async function getLocationResolverCharacterIds(
+  characterIds: number[],
+  includeCorporationAssets: boolean,
+  sessionId = "default",
+): Promise<Map<number, number>> {
+  const resolvers = characterIds.flatMap((id) => [
+    ...getCache(characterCaches, id, sessionId).locationResolverCharacterIds.entries(),
+    ...getCache(characterCaches, id, sessionId).endpointLocationResolverCharacterIds.entries(),
+  ]);
+  if (!includeCorporationAssets) return new Map(resolvers);
+  const characters = await getCharacters();
+  const corporations = new Set(
+    characters
+      .filter(
+        (character) =>
+          characterIds.includes(character.characterId)
+          && character.hasDirectorRole
+          && character.corporationId,
+      )
+      .map((character) => character.corporationId!),
+  );
+  return [
+    ...resolvers,
+    ...[...corporations].flatMap((id) => [
+      ...getCache(corporationCaches, id, sessionId).locationResolverCharacterIds.entries(),
+      ...getCache(corporationCaches, id, sessionId).endpointLocationResolverCharacterIds.entries(),
+    ]),
+  ].reduce(
+    (map, [locationId, characterId]) => {
+      map.set(locationId, characterId);
+      return map;
+    },
+    new Map<number, number>(),
+  );
+}
+
+export async function getJobLocationResolverCharacterIds(
+  characterIds: number[],
+  includeCorporationAssets: boolean,
+  sessionId = "default",
+): Promise<Map<number, number>> {
+  const resolvers = characterIds.flatMap((id) => [
+    ...getCache(characterCaches, id, sessionId).jobLocationResolverCharacterIds.entries(),
+  ]);
+  if (!includeCorporationAssets) return new Map(resolvers);
+  const characters = await getCharacters();
+  const corporations = new Set(
+    characters
+      .filter(
+        (character) =>
+          characterIds.includes(character.characterId)
+          && character.hasDirectorRole
+          && character.corporationId,
+      )
+      .map((character) => character.corporationId!),
+  );
+  return [
+    ...resolvers,
+    ...[...corporations].flatMap((id) => [
+      ...getCache(corporationCaches, id, sessionId).jobLocationResolverCharacterIds.entries(),
+    ]),
+  ].reduce(
+    (map, [locationId, characterId]) => {
+      map.set(locationId, characterId);
+      return map;
+    },
+    new Map<number, number>(),
   );
 }
 

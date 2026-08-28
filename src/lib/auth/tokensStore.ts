@@ -421,7 +421,19 @@ export async function saveSession(record: SessionRecord) {
 }
 
 export async function savePendingMerge(mergeId: string, record: PendingMergeRecord) {
-  await (await initStorage()).setItem(`pending-merge:${mergeId}`, record);
+  const storage = await initStorage();
+  await storage.runTransaction(async (transaction) => {
+    const pendingMerges =
+      await transaction.getItemsByPrefix<Partial<PendingMergeRecord>>("pending-merge:");
+    const now = Date.now();
+    for (const pendingMerge of pendingMerges) {
+      const expiresAt = pendingMerge.value?.expiresAt;
+      if (!expiresAt || !Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= now) {
+        transaction.deleteItem(pendingMerge.key);
+      }
+    }
+    transaction.setItem(`pending-merge:${mergeId}`, record);
+  });
 }
 
 export async function getPendingMerge(mergeId: string) {

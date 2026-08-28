@@ -230,10 +230,6 @@
   display: none;
 }
 
-.layoutCollapsed .sidebarCommunity {
-  display: none;
-}
-
 .tableHead {
   grid-template-columns: 1fr 72px 44px 44px 15px;
 }

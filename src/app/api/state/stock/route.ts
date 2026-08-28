@@ -5,6 +5,8 @@ import {
   getResolvedAssets,
   getBlueprintInstances,
   getRootLocationsByItemId,
+  getLocationResolverCharacterIds,
+  getJobLocationResolverCharacterIds,
   getRunningIndustryJobs,
   getMarketOrderStock,
 } from "@/lib/esi/cache";
@@ -112,10 +114,11 @@ function rootLocationFromAssetLocation(root: AssetLocation): RootLocation {
 async function resolveLocation(
   locationId: number,
   rootLocationsByItemId: Map<number, AssetLocation>,
+  locationResolverCharacterIds: Map<number, number>,
+  jobLocationResolverCharacterIds: Map<number, number>,
   structureTypeIds: Set<number>,
   stations: Awaited<ReturnType<typeof getStations>>,
   types: Awaited<ReturnType<typeof getTypesByIds>>,
-  characterIds: number[],
 ): Promise<RootLocation | undefined> {
   const cachedRoot = rootLocationsByItemId.get(locationId);
   if (cachedRoot) return rootLocationFromAssetLocation(cachedRoot);
@@ -131,24 +134,16 @@ async function resolveLocation(
     };
   }
 
-  const characters = await Promise.all(characterIds.map((id) => getCharacter(id)));
-  const tokens = (
-    await Promise.all(
-      characters.map(async (character) => {
-        if (!character) return [];
-        const usable = [];
-        try {
-          usable.push(await getUsableToken(character));
-        }
-        catch {}
-        return usable;
-      }),
-    )
-  ).flat();
-
-  for (const token of tokens) {
+  const resolverCharacterId =
+    jobLocationResolverCharacterIds.get(locationId) ?? locationResolverCharacterIds.get(locationId);
+  const character =
+    resolverCharacterId === undefined ? undefined : await getCharacter(resolverCharacterId);
+  if (character) {
     try {
-      const result = await fetchStructureMetadataPerCharacter(locationId, token);
+      const result = await fetchStructureMetadataPerCharacter(
+        locationId,
+        await getUsableToken(character),
+      );
       if (result.data) {
         const resolved: RootLocation = {
           locationId,
@@ -429,6 +424,8 @@ export async function GET(request: NextRequest) {
     stations,
     systems,
     rootLocationsByItemId,
+    locationResolverCharacterIds,
+    jobLocationResolverCharacterIds,
   ] = await Promise.all([
     getResolvedAssets(characterIds, true, session.sessionId),
     getRunningIndustryJobs(characterIds, true, session.sessionId),
@@ -440,6 +437,8 @@ export async function GET(request: NextRequest) {
     getStations(),
     getSystems(),
     getRootLocationsByItemId(characterIds, true, session.sessionId),
+    getLocationResolverCharacterIds(characterIds, true, session.sessionId),
+    getJobLocationResolverCharacterIds(characterIds, true, session.sessionId),
   ]);
   markPhase("data");
   const types = await getTypesByIds([
@@ -451,25 +450,29 @@ export async function GET(request: NextRequest) {
     ]),
   ]);
   markPhase("types");
-  const jobLocationIds = [
+  const locationIds = [
     ...new Set([
       ...jobs.flatMap((job) => [job.blueprintLocationId, job.locationId, job.outputLocationId]),
       ...blueprintInstances.map((blueprint) => blueprint.locationId),
+      ...(marketStock ?? [])
+        .map((item) => item.sourceLocationId)
+        .filter((locationId): locationId is number => locationId !== undefined),
     ]),
   ];
   const jobLocations = new Map(
     await Promise.all(
-      jobLocationIds.map(async (locationId) => {
+      locationIds.map(async (locationId) => {
         const cachedRoot = rootLocationsByItemId.get(locationId);
         const location = cachedRoot
           ? rootLocationFromAssetLocation(cachedRoot)
           : await resolveLocation(
               locationId,
               rootLocationsByItemId,
+              locationResolverCharacterIds,
+              jobLocationResolverCharacterIds,
               structureTypeIds,
               stations,
               types,
-              characterIds,
             );
         return [locationId, location] as const;
       }),

@@ -11,6 +11,7 @@ import type {
 import { getCachedEsiResponse, setCachedEsiResponse } from "@/cache/services/esiCache";
 import { refreshTokenSet } from "@/lib/auth/eveSso";
 import { getCharacter, saveCharacterTokens } from "@/lib/auth/tokensStore";
+import { logEsiRequest } from "@/lib/esi/logger";
 
 const esiBaseUrl = process.env.ESI_BASE_URL ?? "https://esi.evetech.net/latest";
 const refreshLocks = new Map<string, Promise<TokenSet>>();
@@ -198,6 +199,48 @@ async function requestEsi<T>(
   init?: RequestInit,
   options: { skipCacheWrite?: boolean; retryAuthorization?: boolean } = {},
 ): Promise<{ data: T | null; headers: Headers; status: number; fromCache: boolean }> {
+  const startedAt = Date.now();
+  try {
+    const result = await requestEsiAttempt<T>(path, tokenSet, init, options);
+    logEsiRequest({
+      requestedAt: new Date(startedAt).toISOString(),
+      method: init?.method ?? "GET",
+      path,
+      ...(tokenSet && tokenContexts.get(tokenSet)?.characterId !== undefined
+        ? { characterId: tokenContexts.get(tokenSet)?.characterId }
+        : {}),
+      status: result.status,
+      outcome: "success",
+      durationMs: Date.now() - startedAt,
+    });
+    return result;
+  }
+  catch (error) {
+    logEsiRequest({
+      requestedAt: new Date(startedAt).toISOString(),
+      method: init?.method ?? "GET",
+      path,
+      ...(tokenSet && tokenContexts.get(tokenSet)?.characterId !== undefined
+        ? { characterId: tokenContexts.get(tokenSet)?.characterId }
+        : {}),
+      status:
+        typeof (error as { status?: unknown }).status === "number"
+          ? (error as { status: number }).status
+          : null,
+      outcome: "error",
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message.slice(0, 240) : "ESI request failed",
+    });
+    throw error;
+  }
+}
+
+async function requestEsiAttempt<T>(
+  path: string,
+  tokenSet?: TokenSet,
+  init?: RequestInit,
+  options: { skipCacheWrite?: boolean; retryAuthorization?: boolean } = {},
+): Promise<{ data: T | null; headers: Headers; status: number; fromCache: boolean }> {
   if (esiRateLimitedUntil > Date.now()) {
     const error = new Error(
       `ESI requests paused until ${new Date(esiRateLimitedUntil).toISOString()}`,
@@ -234,7 +277,7 @@ async function requestEsi<T>(
         );
       if (tokenChanged) {
         tokenContexts.set(currentTokenSet, context!);
-        return requestEsi<T>(
+        return requestEsiAttempt<T>(
           path,
           currentTokenSet,
           init,
@@ -249,7 +292,7 @@ async function requestEsi<T>(
             context.characterId,
             tokenSet,
           );
-          return requestEsi<T>(
+          return requestEsiAttempt<T>(
             path,
             refreshedTokenSet,
             init,
