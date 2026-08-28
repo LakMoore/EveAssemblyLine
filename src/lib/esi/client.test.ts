@@ -129,3 +129,30 @@ test("aggregates all pages while preserving first-page metadata", async (t) => {
   assert.equal(result.headers.get("expires"), "Wed, 26 Aug 2026 17:00:00 GMT");
   assert.equal(result.notModified, false);
 });
+
+test("treats a 420 error-limit response as rate limited", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    new Response(
+      null,
+      {
+        status: 420,
+        headers: {
+          "x-esi-error-limit-reset": "30",
+        },
+      },
+    );
+
+  await assert.rejects(
+    fetchEsiEndpoint("/characters/42/assets/", token, undefined, { paginated: false }),
+    (error: Error & { status?: number; retryAfter?: string }) => {
+      assert.equal(error.status, 420);
+      assert.equal(error.retryAfter, "30");
+      return true;
+    },
+  );
+});

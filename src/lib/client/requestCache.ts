@@ -8,6 +8,7 @@ export type ClientSession = {
     characterId: number;
     characterName: string;
     hasDirectorRole: boolean;
+    onDeployment: boolean;
   }>;
 };
 
@@ -101,6 +102,7 @@ export type ClientJobsResponse = {
 export type ClientCharacter = {
   characterId: number;
   characterName: string;
+  onDeployment: boolean;
   corporationId?: number;
   corporationName?: string;
   corporationRoles: string[];
@@ -329,7 +331,10 @@ export function loadClientStateStatus(reload = false) {
 }
 
 export function invalidateClientCharacterData() {
+  sessionRequest = undefined;
   charactersResponse = undefined;
   corpStatusResponse = undefined;
   stateStatusResponse = undefined;
+  jobsRequest = undefined;
+  jobsResponse = undefined;
 }

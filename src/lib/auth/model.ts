@@ -11,6 +11,7 @@ export interface TokenSet {
 export interface CharacterTokenRecord {
   characterId: number;
   characterName: string;
+  onDeployment?: boolean;
   collectionId?: string;
   personalAuth: TokenSet;
   corporationId?: number;

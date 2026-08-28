@@ -120,6 +120,7 @@ export async function GET(request: Request) {
       ...existingCharacter,
       characterId: identity.characterId,
       characterName: identity.characterName ?? `Character ${identity.characterId}`,
+      onDeployment: existingCharacter?.onDeployment ?? false,
       collectionId: resolvedCollectionId,
       personalAuth: tokenSet,
       corporationId,

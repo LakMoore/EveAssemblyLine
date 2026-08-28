@@ -132,6 +132,14 @@ export interface PlanRequest {
     copying?: number;
     invention?: number;
   };
+  facilityTimeMultipliers?: {
+    manufacturing: number;
+    reactions: number;
+  };
+  skillTimeMultipliers?: {
+    manufacturing: number;
+    reactions: number;
+  };
   settings: {
     includeCorporationAssets: boolean;
     personalSellOrdersAsStock: boolean;

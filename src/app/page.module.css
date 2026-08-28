@@ -3889,6 +3889,25 @@
   letter-spacing: 1px;
 }
 
+.planOptionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.planOptionHeader > span:first-child {
+  min-width: 0;
+}
+
+.planOptionBonus {
+  flex: 0 0 auto;
+  color: var(--cyan);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
 .locationSelectTrigger {
   width: 100%;
   min-width: 0;
@@ -3996,18 +4015,10 @@
   color: var(--foreground);
 }
 
-.excludedLocationsControl > span {
-  color: var(--muted);
-  font:
-    9px "DM Mono",
-    monospace;
-  letter-spacing: 1px;
-}
-
 .excludedLocationsActions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
 }
 
@@ -4539,15 +4550,18 @@
 }
 
 .characterActions {
-  flex: 0 1 110px;
+  flex: 0 0 auto;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: nowrap;
   gap: 6px;
+  height: fit-content;
   min-width: 0;
 }
 
 .characterActions > .actionButton {
-  width: 100%;
+  flex: 1 1 0;
+  width: auto;
 }
 
 .characterReauthorize {

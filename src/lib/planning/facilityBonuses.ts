@@ -28,6 +28,7 @@ const rigCostAttribute = 2595;
 const reactionRigMaterialAttribute = 2714;
 const reactionRigTimeAttribute = 2713;
 const rigReprocessingAttribute = 379;
+const reactionStructureTimeMultiplierAttribute = 2721;
 const securityModifierAttributes = { high: 2355, low: 2356, null: 2357 } as const;
 
 function attributesFor(record: TypeDogmaRecord | undefined) {
@@ -97,6 +98,8 @@ export function calculateFacilityBonuses(
   let reactionCost = 1;
   let reprocessingYield = 0;
   let bestManufacturingMaterialModifier: number | undefined;
+
+  reactionTime = multiplier(structureAttributes.get(reactionStructureTimeMultiplierAttribute));
 
   for (const rigTypeId of rigTypeIds) {
     if (rigTypeId <= 0) continue;

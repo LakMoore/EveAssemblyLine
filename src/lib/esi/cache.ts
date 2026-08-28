@@ -140,7 +140,7 @@ function endpointStatus<T>(
   error: unknown,
 ): Pick<EndpointCache<T>, "status" | "rateLimitedUntil" | "error"> {
   const status = (error as { status?: number }).status;
-  if (status !== 429) {
+  if (status !== 420 && status !== 429) {
     const errorMessage =
       status === 401
         ? error instanceof Error
@@ -158,9 +158,12 @@ function endpointStatus<T>(
   }
   const retryAfterValue = (error as { retryAfter?: string }).retryAfter;
   const retryAfterSeconds = Number(retryAfterValue);
+  const retryAfterTimestamp = Date.parse(retryAfterValue ?? "");
   const retryAfterMs = Number.isFinite(retryAfterSeconds)
     ? Math.max(1, retryAfterSeconds) * 1_000
-    : Math.max(1_000, Date.parse(retryAfterValue ?? "") - Date.now());
+    : Number.isFinite(retryAfterTimestamp)
+      ? Math.max(1_000, retryAfterTimestamp - Date.now())
+      : 60_000;
   return {
     status: "rate_limited",
     rateLimitedUntil: new Date(Date.now() + retryAfterMs).toISOString(),
@@ -1385,6 +1388,7 @@ export async function getBlueprintInstances(
 
 export async function getStateStatus(characterIds: number[], sessionId: string) {
   const characters = await getCharacters();
+  const characterById = new Map(characters.map((character) => [character.characterId, character]));
   const corporationsByCharacter = new Map<number, number[]>();
   for (const character of characters) {
     if (
@@ -1399,6 +1403,7 @@ export async function getStateStatus(characterIds: number[], sessionId: string) 
   return {
     characters: characterIds.map((characterId) => ({
       characterId,
+      onDeployment: characterById.get(characterId)?.onDeployment ?? false,
       assets: toClientEndpointStatus(
         getCache(characterCaches, characterId, sessionId).allAssetsRaw,
       ) ?? {

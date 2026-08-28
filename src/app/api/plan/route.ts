@@ -29,6 +29,11 @@ const reprocessingEfficienciesSchema = z.record(
   z.string().regex(/^\d+$/, "Reprocessable type IDs must be numeric."),
   z.number().finite().min(0).max(100),
 );
+const facilityTimeMultipliersSchema = z.object({
+  manufacturing: z.number().finite().min(0).max(1),
+  reactions: z.number().finite().min(0).max(1),
+});
+const skillTimeMultipliersSchema = facilityTimeMultipliersSchema;
 
 function validLocation(value: { locationId: number; rootLocationId: number }) {
   return Number.isInteger(value.locationId) && Number.isInteger(value.rootLocationId);
@@ -100,6 +105,8 @@ async function calculateWorkingStockPlan(input: PlanRequest, stock: PlanStockIte
     reprocessingEfficiencies: input.reprocessingEfficiencies,
     stock: await hydrateStockCategories(stock),
     locations: input.locations,
+    facilityTimeMultipliers: input.facilityTimeMultipliers,
+    skillTimeMultipliers: input.skillTimeMultipliers,
     settings: input.settings,
   });
   result.metadata.unresolvedAssetCount = 0;
@@ -119,6 +126,28 @@ export async function POST(request: Request) {
       );
     }
     input.reprocessingEfficiencies = parsedEfficiencies.data;
+    if (input.facilityTimeMultipliers !== undefined) {
+      const parsedMultipliers = facilityTimeMultipliersSchema.safeParse(
+        input.facilityTimeMultipliers,
+      );
+      if (!parsedMultipliers.success) {
+        return NextResponse.json(
+          { error: "Facility time multipliers must be between 0 and 1." },
+          { status: 400 },
+        );
+      }
+      input.facilityTimeMultipliers = parsedMultipliers.data;
+    }
+    if (input.skillTimeMultipliers !== undefined) {
+      const parsedMultipliers = skillTimeMultipliersSchema.safeParse(input.skillTimeMultipliers);
+      if (!parsedMultipliers.success) {
+        return NextResponse.json(
+          { error: "Skill time multipliers must be between 0 and 1." },
+          { status: 400 },
+        );
+      }
+      input.skillTimeMultipliers = parsedMultipliers.data;
+    }
     if (!Array.isArray(input.toBuild) || input.toBuild.length === 0) {
       return NextResponse.json({ error: "Add at least one build item." }, { status: 400 });
     }
@@ -293,6 +322,8 @@ export async function POST(request: Request) {
       reprocessingEfficiencies: input.reprocessingEfficiencies,
       stock,
       locations: input.locations,
+      facilityTimeMultipliers: input.facilityTimeMultipliers,
+      skillTimeMultipliers: input.skillTimeMultipliers,
       settings: input.settings,
     });
     result.metadata.unresolvedAssetCount = 0;

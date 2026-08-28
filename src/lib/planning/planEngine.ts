@@ -490,6 +490,10 @@ async function calculatePlanPass(
     me: clampEfficiency(request.settings.defaultMe, 10),
     te: clampEfficiency(request.settings.defaultTe, 20),
   };
+  const manufacturingTimeMultiplier = request.facilityTimeMultipliers?.manufacturing ?? 1;
+  const reactionTimeMultiplier = request.facilityTimeMultipliers?.reactions ?? 1;
+  const manufacturingSkillTimeMultiplier = request.skillTimeMultipliers?.manufacturing ?? 1;
+  const reactionSkillTimeMultiplier = request.skillTimeMultipliers?.reactions ?? 1;
 
   function addRequiredSkills(skills: Array<{ typeID: number; level: number }> | undefined) {
     for (const skill of skills ?? []) {
@@ -760,7 +764,11 @@ async function calculatePlanPass(
               ),
               totalTime:
                 (existing?.totalTime ?? 0)
-                + blueprint.activities.manufacturing!.time * (1 - efficiency.te / 100) * runsNeeded,
+                + blueprint.activities.manufacturing!.time
+                  * (1 - efficiency.te / 100)
+                  * manufacturingTimeMultiplier
+                  * manufacturingSkillTimeMultiplier
+                  * runsNeeded,
               ...(request.locations ? { locationId: request.locations.manufacturing } : {}),
             },
           );
@@ -816,7 +824,7 @@ async function calculatePlanPass(
           blueprint._key,
           {
             typeId: blueprint._key,
-            name: typeName(blueprint._key, `${fallbackName} Blueprint`),
+            name: typeName(blueprint._key, `${fallbackName} Reaction Formula`),
             runs: (existing?.runs ?? 0) + runsNeeded,
             runsAvailable: Math.min(
               existing?.runsAvailable ?? Number.MAX_SAFE_INTEGER,
@@ -825,7 +833,11 @@ async function calculatePlanPass(
             ),
             totalTime:
               (existing?.totalTime ?? 0)
-              + blueprint.activities.reaction!.time * (1 - efficiency.te / 100) * runsNeeded,
+              + blueprint.activities.reaction!.time
+                * (1 - efficiency.te / 100)
+                * reactionTimeMultiplier
+                * reactionSkillTimeMultiplier
+                * runsNeeded,
             ...(request.locations ? { locationId: request.locations.reactions } : {}),
           },
         );

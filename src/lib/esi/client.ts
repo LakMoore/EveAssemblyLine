@@ -264,9 +264,12 @@ async function requestEsi<T>(
       }
     }
     const details = response.status === 401 ? await response.text() : "";
-    if (response.status === 429) {
-      const retryAfter = response.headers.get("retry-after");
-      const retryAfterMs = parseRetryAfterMs(retryAfter);
+    const retryAfter = response.headers.get("retry-after");
+    const errorLimitReset = response.headers.get("x-esi-error-limit-reset");
+    if (response.status === 429 || response.status === 420) {
+      const retryAfterMs = parseRetryAfterMs(
+        response.status === 420 ? errorLimitReset : retryAfter,
+      );
       esiRateLimitedUntil = Math.max(esiRateLimitedUntil, Date.now() + retryAfterMs);
     }
     let message = `ESI request failed (${response.status})`;
@@ -284,7 +287,7 @@ async function requestEsi<T>(
     const error = new Error(message);
     (error as Error & { status?: number; retryAfter?: string }).status = response.status;
     (error as Error & { status?: number; retryAfter?: string }).retryAfter =
-      response.headers.get("retry-after") ?? undefined;
+      retryAfter ?? (response.status === 420 ? errorLimitReset : undefined) ?? undefined;
     throw error;
   }
   const data = (await response.json()) as T;
@@ -752,7 +755,8 @@ export async function fetchAssetLocations(
       if (result.data) locations.push(...result.data);
     }
     catch (error) {
-      if ((error as { status?: number }).status !== 429) throw error;
+      const status = (error as { status?: number }).status;
+      if (status !== 420 && status !== 429) throw error;
     }
   }
   return locations;

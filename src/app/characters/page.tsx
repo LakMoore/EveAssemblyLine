@@ -14,6 +14,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
+import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   groupClientStockByLocation,
@@ -208,6 +209,7 @@ export default function CharactersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [removingId, setRemovingId] = useState<number | null>(null);
+  const [updatingDeploymentId, setUpdatingDeploymentId] = useState<number | null>(null);
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
   const [selectedCorporationId, setSelectedCorporationId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -222,7 +224,11 @@ export default function CharactersPage() {
     ]);
     const corpById = new Map(corpStatus.map((character) => [character.characterId, character]));
     setCharacters(
-      loaded.map((character) => ({ ...character, ...corpById.get(character.characterId) })),
+      loaded.map((character) => ({
+        ...character,
+        ...corpById.get(character.characterId),
+        onDeployment: Boolean(character.onDeployment),
+      })),
     );
   }
 
@@ -360,6 +366,49 @@ export default function CharactersPage() {
     }
   }
 
+  async function updateDeploymentStatus(character: Character, onDeployment: boolean) {
+    const previousValue = character.onDeployment;
+    setCharacters((current) =>
+      current.map((entry) =>
+        entry.characterId === character.characterId ? { ...entry, onDeployment } : entry,
+      ),
+    );
+    setUpdatingDeploymentId(character.characterId);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/characters/${character.characterId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ onDeployment }),
+        },
+      );
+      if (!response.ok) {
+        const data = (await response.json()) as { error?: string };
+        throw new Error(data.error ?? "Could not update deployment status.");
+      }
+      invalidateClientCharacterData();
+    }
+    catch (deploymentError) {
+      setCharacters((current) =>
+        current.map((entry) =>
+          entry.characterId === character.characterId
+            ? { ...entry, onDeployment: previousValue }
+            : entry,
+        ),
+      );
+      setError(
+        deploymentError instanceof Error
+          ? deploymentError.message
+          : "Could not update deployment status.",
+      );
+    }
+    finally {
+      setUpdatingDeploymentId(null);
+    }
+  }
+
   const corporations = [
     ...new Set(characters.map((character) => character.corporationId).filter(Boolean)),
   ].map((corporationId) => {
@@ -491,7 +540,7 @@ export default function CharactersPage() {
                   className={`${styles.characterRow} ${hasAuthorizationError ? styles.characterRowWithReauthorize : ""}`}
                   key={character.characterId}
                 >
-                  <div className="flex min-w-0 flex-[1_1_100%] items-center justify-between gap-3">
+                  <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
                     <button
                       type="button"
                       className={styles.characterRowButton}
@@ -522,47 +571,60 @@ export default function CharactersPage() {
                         </span>
                       </span>
                     </button>
-                    <span className={styles.characterActions}>
-                      {hasAuthorizationError && (
+                    <div className="flex min-w-44 flex-col items-end gap-2">
+                      <label className="flex items-center gap-2 text-xs">
+                        <span>On Deployment</span>
+                        <Switch
+                          checked={character.onDeployment}
+                          disabled={updatingDeploymentId === character.characterId}
+                          onCheckedChange={(checked) => {
+                            void updateDeploymentStatus(character, checked);
+                          }}
+                          aria-label={`On Deployment for ${character.characterName}`}
+                        />
+                      </label>
+                      <span className={styles.characterActions}>
+                        {hasAuthorizationError && (
+                          <button
+                            type="button"
+                            className={`actionButton ${styles.characterReauthorize}`}
+                            onClick={() => {
+                              window.location.assign(
+                                `/api/auth/eve/start?characterId=${character.characterId}`,
+                              );
+                            }}
+                            aria-label={`Re-authorise ${character.characterName}`}
+                            title="Re-authorise character"
+                          >
+                            <RotateCcw aria-hidden="true" strokeWidth={1.8} />
+                            <span>Re-authorise</span>
+                          </button>
+                        )}
                         <button
                           type="button"
-                          className={`actionButton ${styles.characterReauthorize}`}
+                          className={`actionButton ${styles.characterRemove}`}
                           onClick={() => {
-                            window.location.assign(
-                              `/api/auth/eve/start?characterId=${character.characterId}`,
-                            );
+                            void removeCharacter(character);
                           }}
-                          aria-label={`Re-authorise ${character.characterName}`}
-                          title="Re-authorise character"
+                          disabled={removingId === character.characterId}
+                          aria-label={
+                            removingId === character.characterId
+                              ? "Removing character"
+                              : `Remove ${character.characterName}`
+                          }
+                          title={
+                            removingId === character.characterId
+                              ? "Removing character"
+                              : "Remove character"
+                          }
                         >
-                          <RotateCcw aria-hidden="true" strokeWidth={1.8} />
-                          <span>Re-authorise</span>
+                          <Trash2 aria-hidden="true" strokeWidth={1.8} />
+                          <span>
+                            {removingId === character.characterId ? "Removing..." : "Remove"}
+                          </span>
                         </button>
-                      )}
-                      <button
-                        type="button"
-                        className={`actionButton ${styles.characterRemove}`}
-                        onClick={() => {
-                          void removeCharacter(character);
-                        }}
-                        disabled={removingId === character.characterId}
-                        aria-label={
-                          removingId === character.characterId
-                            ? "Removing character"
-                            : `Remove ${character.characterName}`
-                        }
-                        title={
-                          removingId === character.characterId
-                            ? "Removing character"
-                            : "Remove character"
-                        }
-                      >
-                        <Trash2 aria-hidden="true" strokeWidth={1.8} />
-                        <span>
-                          {removingId === character.characterId ? "Removing..." : "Remove"}
-                        </span>
-                      </button>
-                    </span>
+                      </span>
+                    </div>
                   </div>
                   <ItemGroup className="w-full flex-row flex-wrap gap-3">
                     {(["assets", "skills", "blueprints", "jobs", "orders"] as const).map(

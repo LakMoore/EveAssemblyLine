@@ -21,6 +21,7 @@ export async function GET(request: Request) {
       ({
         characterId,
         characterName,
+        onDeployment,
         corporationId,
         corporationRoles,
         hasDirectorRole,
@@ -29,6 +30,7 @@ export async function GET(request: Request) {
       }) => ({
         characterId,
         characterName,
+        onDeployment: Boolean(onDeployment),
         corporationId,
         corporationName: corporationId ? corporationNames.get(corporationId) : undefined,
         corporationRoles: corporationRoles ?? [],

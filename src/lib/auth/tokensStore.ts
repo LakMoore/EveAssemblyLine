@@ -49,6 +49,7 @@ function normalizeCharacter(value: unknown): CharacterTokenRecord | null {
   return {
     characterId,
     characterName: record.characterName,
+    onDeployment: record.onDeployment ?? false,
     collectionId: record.collectionId ?? record.accountId,
     personalAuth,
     corporationId: record.corporationId,
@@ -330,6 +331,26 @@ export async function upsertCharacter(record: CharacterTokenRecord) {
     const index = records.findIndex((existing) => existing.characterId === record.characterId);
     if (index === -1) records.push(record);
     else records[index] = record;
+    transaction.setItem("characters", records);
+  });
+}
+
+export async function setCharacterOnDeployment(
+  characterId: number,
+  collectionId: string,
+  onDeployment: boolean,
+) {
+  const storage = await initStorage();
+  await storage.runTransaction(async (transaction) => {
+    const raw = (await transaction.getItem("characters")) as unknown[] | undefined;
+    const records = (raw ?? [])
+      .map(normalizeCharacter)
+      .filter((existing): existing is CharacterTokenRecord => existing !== null);
+    const record = records.find((existing) => existing.characterId === characterId);
+    if (!record || record.collectionId !== collectionId) {
+      throw new Error("Character is not attached to this collection.");
+    }
+    record.onDeployment = onDeployment;
     transaction.setItem("characters", records);
   });
 }

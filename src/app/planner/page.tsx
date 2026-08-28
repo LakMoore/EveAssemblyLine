@@ -134,6 +134,8 @@ type PlanLocationOption = {
   baseYield: number;
   baseManufacturingMe: number;
   baseReactionMe: number;
+  manufacturingTimeMultiplier: number;
+  reactionTimeMultiplier: number;
 };
 
 type ReactionScheduleMode = "simple" | "available-slots" | "max-job-length";
@@ -142,6 +144,24 @@ type ReactionCoverage = { installable: number; total: number };
 type ReactionSortKey = "type" | "suggestedRuns" | "totalNeeded";
 type ReactionSort = { key: ReactionSortKey; direction: "asc" | "desc" };
 type ManufacturingSort = { key: "type" | "runs"; direction: "asc" | "desc" };
+
+const industrySkillIds = {
+  industry: 3380,
+  advancedIndustry: 3388,
+  reactions: 45746,
+} as const;
+
+function skillTimeMultiplier(
+  skills: Array<{ skillId: number; activeSkillLevel: number }> | undefined,
+  skillBonuses: Array<{ skillId: number; bonusPerLevel: number }>,
+) {
+  const levels = new Map((skills ?? []).map((skill) => [skill.skillId, skill.activeSkillLevel]));
+  return skillBonuses.reduce(
+    (multiplier, bonus) =>
+      multiplier * (1 - (levels.get(bonus.skillId) ?? 0) * bonus.bonusPerLevel),
+    1,
+  );
+}
 
 function buildReactionSchedule(
   jobs: PlanResult["lists"]["reactionJobs"],
@@ -372,9 +392,12 @@ function Planner() {
   const [isExcludedLocationsModalOpen, setIsExcludedLocationsModalOpen] = useState(false);
   const [plan, setPlan] = useState<PlanResult | null>(null);
   const [isDeleteAllDialogOpen, setIsDeleteAllDialogOpen] = useState(false);
+  const [isClearExcludedLocationsDialogOpen, setIsClearExcludedLocationsDialogOpen] =
+    useState(false);
   const [characterStatuses, setCharacterStatuses] = useState<ClientCharacterStatus[]>([]);
   const [jobs, setJobs] = useState<ClientJobsResponse | null>(null);
   const [characterNamesById, setCharacterNamesById] = useState<Map<number, string>>(new Map());
+  const [planningCharacterId, setPlanningCharacterId] = useState<number | undefined>();
   const [stock, setStock] = useState<PlanStockItem[]>([]);
   const [excludedLocationIds, setExcludedLocationIds] = useState<number[]>([]);
   const [locationOptions, setLocationOptions] = useState<PlanLocationOption[]>([]);
@@ -391,10 +414,47 @@ function Planner() {
     }
   });
 
+  useEffect(() => {
+    let cancelled = false;
+    void loadClientSession()
+      .then(async (session) => {
+        if (cancelled || !session.authenticated) return;
+        const activeCharacters = (session.characters ?? []).filter(
+          (character) => !character.onDeployment,
+        );
+        setCharacterNamesById(
+          new Map(
+            activeCharacters.map((character) => [character.characterId, character.characterName]),
+          ),
+        );
+        const state = await loadClientStateStatus();
+        const activeCharacterIds = new Set(
+          activeCharacters.map((character) => character.characterId),
+        );
+        const activeStatuses = (state.characters ?? []).filter((character) =>
+          activeCharacterIds.has(character.characterId),
+        );
+        setCharacterStatuses(activeStatuses);
+        setPlanningCharacterId((current) => current ?? activeStatuses[0]?.characterId);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function updateLocations(next: Partial<Pick<PlannerLocations, "manufacturing" | "reactions">>) {
     const updatedLocations = { ...locations, ...next };
     setLocations(updatedLocations);
     void savePlannerLocations(updatedLocations);
+  }
+
+  function reactionSkillBonus(characterId: number | undefined) {
+    const character = characterStatuses.find((entry) => entry.characterId === characterId);
+    const skill = character?.skills?.body?.find(
+      (entry) => entry.skillId === industrySkillIds.reactions,
+    );
+    return (skill?.activeSkillLevel ?? 0) * 4;
   }
 
   useEffect(() => {
@@ -428,6 +488,9 @@ function Planner() {
           baseYield: (facility.activities.reprocessing.baseYield ?? 0) * 100,
           baseManufacturingMe: facility.activities.manufacturing.materialConsumption ?? 0,
           baseReactionMe: facility.activities.reactions.materialConsumption ?? 0,
+          manufacturingTimeMultiplier:
+            facility.activities.manufacturing.rawJobDurationMultiplier ?? 1,
+          reactionTimeMultiplier: facility.activities.reactions.rawJobDurationMultiplier ?? 1,
         }));
       const manufacturingOptions = options
         .slice()
@@ -495,6 +558,12 @@ function Planner() {
       const planningLocations = Number.isInteger(compressLocationId)
         ? { ...locations, reprocessing: compressLocationId }
         : locations;
+      const freshFacilities = await fetchFacilityResponse(true);
+      const freshFacilityById = new Map(
+        (freshFacilities?.facilities ?? []).map((facility) => [facility.id, facility]),
+      );
+      const manufacturingFacility = freshFacilityById.get(planningLocations.manufacturing);
+      const reactionFacility = freshFacilityById.get(planningLocations.reactions);
       const reprocessingEfficiencies = await loadPlannerReprocessingEfficiencies(
         language,
         planningLocations.reprocessing,
@@ -504,6 +573,10 @@ function Planner() {
         return locationId === undefined || !exclusions.has(locationId);
       });
       setStock(requestStock);
+      const planningCharacter = characterStatuses.find(
+        (character) => character.characterId === planningCharacterId,
+      );
+      const planningSkills = planningCharacter?.skills?.body ?? undefined;
       const response = await fetch(
         "/api/plan",
         {
@@ -521,6 +594,29 @@ function Planner() {
             reprocessingEfficiencies,
             stock: requestStock.map(({ sourceLocationName: _sourceLocationName, ...item }) => item),
             locations: planningLocations,
+            facilityTimeMultipliers: {
+              manufacturing:
+                manufacturingFacility?.activities.manufacturing.rawJobDurationMultiplier
+                ?? selectedManufacturingLocation?.manufacturingTimeMultiplier
+                ?? 1,
+              reactions:
+                reactionFacility?.activities.reactions.rawJobDurationMultiplier
+                ?? selectedReactionLocation?.reactionTimeMultiplier
+                ?? 1,
+            },
+            skillTimeMultipliers: {
+              manufacturing: skillTimeMultiplier(
+                planningSkills,
+                [
+                  { skillId: industrySkillIds.industry, bonusPerLevel: 0.04 },
+                  { skillId: industrySkillIds.advancedIndustry, bonusPerLevel: 0.03 },
+                ],
+              ),
+              reactions: skillTimeMultiplier(
+                planningSkills,
+                [{ skillId: industrySkillIds.reactions, bonusPerLevel: 0.04 }],
+              ),
+            },
             settings: {
               includeCorporationAssets: settings.includeCorporationAssets,
               personalSellOrdersAsStock: settings.personalSellOrdersAsStock,
@@ -545,15 +641,22 @@ function Planner() {
         const status = session.authenticated ? await loadClientStateStatus() : { characters: [] };
         const jobsData = session.authenticated ? await loadClientJobs() : null;
         setJobs(jobsData);
+        const activeCharacters = (session.characters ?? []).filter(
+          (character) => !character.onDeployment,
+        );
         setCharacterNamesById(
           new Map(
-            (session.characters ?? []).map((character) => [
-              character.characterId,
-              character.characterName,
-            ]),
+            activeCharacters.map((character) => [character.characterId, character.characterName]),
           ),
         );
-        setCharacterStatuses(status.characters ?? []);
+        const activeCharacterIds = new Set(
+          activeCharacters.map((character) => character.characterId),
+        );
+        setCharacterStatuses(
+          (status.characters ?? []).filter((character) =>
+            activeCharacterIds.has(character.characterId),
+          ),
+        );
       }
       catch {
         setCharacterNamesById(new Map());
@@ -855,7 +958,15 @@ function Planner() {
               {locationOptions.length > 0 ? (
                 <>
                   <label>
-                    <span>BUILD LOCATION</span>
+                    <div className={`${styles.planOptionHeader} text-xs`}>
+                      <span>BUILD LOCATION</span>
+                      <span className={styles.planOptionBonus}>
+                        MANUFACTURING ME{" "}
+                        {selectedManufacturingLocation
+                          ? `${selectedManufacturingLocation.baseManufacturingMe.toFixed(1)}%`
+                          : "0.0%"}
+                      </span>
+                    </div>
                     <Select
                       value={String(locations.manufacturing)}
                       onValueChange={(value) =>
@@ -907,7 +1018,15 @@ function Planner() {
                     </Select>
                   </label>
                   <label>
-                    <span>REACTION LOCATION</span>
+                    <div className={`${styles.planOptionHeader} text-xs`}>
+                      <span>REACTION LOCATION</span>
+                      <span className={styles.planOptionBonus}>
+                        REACTION ME{" "}
+                        {selectedReactionLocation
+                          ? `${selectedReactionLocation.baseReactionMe.toFixed(1)}%`
+                          : "0.0%"}
+                      </span>
+                    </div>
                     <Select
                       value={String(locations.reactions)}
                       onValueChange={(value) =>
@@ -972,8 +1091,50 @@ function Planner() {
                   </div>
                 </Alert>
               )}
+              {characterNamesById.size > 0 && (
+                <label>
+                  <div className={`${styles.planOptionHeader} text-xs`}>
+                    <span>INDUSTRY SKILLS</span>
+                    <span className={styles.planOptionBonus}>
+                      REACTION TE -{reactionSkillBonus(planningCharacterId).toFixed(1)}%
+                    </span>
+                  </div>
+                  <Select
+                    value={planningCharacterId === undefined ? "" : String(planningCharacterId)}
+                    onValueChange={(value) => value && setPlanningCharacterId(Number(value))}
+                  >
+                    <SelectTrigger
+                      className={styles.locationSelectTrigger}
+                      aria-label="Industry skills character"
+                    >
+                      <SelectValue>
+                        <span className={styles.locationSelectName}>
+                          {characterNamesById.get(planningCharacterId ?? -1) ?? "Select character"}
+                        </span>
+                        <span className={styles.locationSelectYield}>
+                          -{reactionSkillBonus(planningCharacterId).toFixed(1)}%
+                        </span>
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {[...characterNamesById.entries()].map(([characterId, characterName]) => (
+                          <SelectItem key={characterId} value={String(characterId)}>
+                            <span className={styles.locationOptionName}>{characterName}</span>
+                            <span className={styles.locationOptionYield}>
+                              -{reactionSkillBonus(characterId).toFixed(1)}%
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </label>
+              )}
               <label className={styles.checkboxOption}>
-                <span>INCLUDE STOCK</span>
+                <div className={`${styles.planOptionHeader} text-xs`}>
+                  <span>INCLUDE STOCK</span>
+                </div>
                 <Switch
                   aria-label="Include stock"
                   checked={includeStock}
@@ -981,7 +1142,9 @@ function Planner() {
                 />
               </label>
               <div className={styles.excludedLocationsControl}>
-                <span>EXCLUDED LOCATIONS</span>
+                <div className={`${styles.planOptionHeader} text-xs`}>
+                  <span>EXCLUDED LOCATIONS</span>
+                </div>
                 <div className={styles.excludedLocationsActions}>
                   <Button
                     disabled={excludedLocationIds.length === 0}
@@ -989,12 +1152,20 @@ function Planner() {
                   >
                     {excludedLocationIds.length}
                   </Button>
-                  <Button
-                    disabled={excludedLocationIds.length === 0 || isPlanLoading}
-                    onClick={() => void clearExcludedLocations()}
-                  >
-                    Clear all
-                  </Button>
+                  <div className="ml-auto flex gap-2">
+                    <Button
+                      disabled={excludedLocationIds.length === 0}
+                      onClick={() => setIsExcludedLocationsModalOpen(true)}
+                    >
+                      View
+                    </Button>
+                    <Button
+                      disabled={excludedLocationIds.length === 0 || isPlanLoading}
+                      onClick={() => setIsClearExcludedLocationsDialogOpen(true)}
+                    >
+                      Clear all
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1042,6 +1213,7 @@ function Planner() {
           isLoading={isPlanLoading}
           onRemove={(locationId) => void removeExcludedLocation(locationId)}
           onClearAll={() => void clearExcludedLocations()}
+          onSave={() => setIsExcludedLocationsModalOpen(false)}
           onCancel={() => setIsExcludedLocationsModalOpen(false)}
         />
       )}
@@ -1057,6 +1229,34 @@ function Planner() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction variant="destructive" onClick={confirmDeleteAllItems}>
               Delete all
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
+        open={isClearExcludedLocationsDialogOpen}
+        onOpenChange={setIsClearExcludedLocationsDialogOpen}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear excluded locations?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove all excluded locations and recalculate the plan. This action cannot
+              be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setIsClearExcludedLocationsDialogOpen(false)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isPlanLoading}
+              onClick={() => {
+                setIsClearExcludedLocationsDialogOpen(false);
+                void clearExcludedLocations();
+              }}
+            >
+              Clear all
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1123,8 +1323,13 @@ function Planner() {
                 characterNamesById={characterNamesById}
                 availableReactionSlots={(jobs?.characters ?? []).reduce(
                   (total, character) =>
-                    total
-                    + Math.max(0, character.availableSlots.Reactions - character.slots.Reactions),
+                    characterNamesById.has(character.characterId)
+                      ? total
+                        + Math.max(
+                          0,
+                          character.availableSlots.Reactions - character.slots.Reactions,
+                        )
+                      : total,
                   0,
                 )}
                 stock={stock}
@@ -1148,7 +1353,7 @@ function Planner() {
                     },
                   ])
                 }
-                onExcludeHaulBucket={(fromLocationId) => void excludeHaulBucket(fromLocationId)}
+                onExcludeHaulBucket={excludeHaulBucket}
                 resultsHeaderRef={resultsHeaderRef}
               />
             ) : (
@@ -1175,6 +1380,7 @@ function ExcludedLocationsModal({
   isLoading,
   onRemove,
   onClearAll,
+  onSave,
   onCancel,
 }: {
   locationIds: number[];
@@ -1182,6 +1388,7 @@ function ExcludedLocationsModal({
   isLoading: boolean;
   onRemove: (locationId: number) => void;
   onClearAll: () => void;
+  onSave: () => void;
   onCancel: () => void;
 }) {
   return (
@@ -1214,7 +1421,7 @@ function ExcludedLocationsModal({
           <Button type="button" variant="outline" onClick={onCancel}>
             Close
           </Button>
-          <Button type="button" className="min-w-32" disabled={isLoading} onClick={onClearAll}>
+          <Button type="button" className="min-w-32" disabled={isLoading} onClick={onSave}>
             <b>→</b>
           </Button>
         </DialogFooter>
@@ -1245,11 +1452,14 @@ function PlanList({
   locationNamesById: Map<number, string>;
   onPlanChange: (plan: PlanResult) => void;
   onAddBuildItem: (item: { name: string; typeId: number; quantity: number }) => void;
-  onExcludeHaulBucket: (fromLocationId: number) => void;
+  onExcludeHaulBucket: (fromLocationId: number) => Promise<void>;
   resultsHeaderRef: RefObject<HTMLElement | null>;
 }) {
   const router = useRouter();
   const [copyStatus, setCopyStatus] = useState("");
+  const [excludingHaulFromLocationId, setExcludingHaulFromLocationId] = useState<number | null>(
+    null,
+  );
   const [showTotalRunCounts, setShowTotalRunCounts] = useState(false);
   const [showTotalManufacturingRunCounts, setShowTotalManufacturingRunCounts] = useState(false);
   const [reactionScheduleMode, setReactionScheduleMode] = useState<ReactionScheduleMode>("simple");
@@ -1921,10 +2131,24 @@ function PlanList({
                 <div className={styles.haulHeaderActions}>
                   <Button
                     variant="outline"
-                    onClick={() => onExcludeHaulBucket(bucket.fromLocationId)}
+                    disabled={excludingHaulFromLocationId !== null}
+                    onClick={() => {
+                      setExcludingHaulFromLocationId(bucket.fromLocationId);
+                      void onExcludeHaulBucket(bucket.fromLocationId).finally(() => {
+                        setExcludingHaulFromLocationId(null);
+                      });
+                    }}
                   >
-                    <SquareX aria-hidden="true" />
-                    <span>Exclude and Recalculate</span>
+                    {excludingHaulFromLocationId === bucket.fromLocationId ? (
+                      <Spinner aria-hidden="true" />
+                    ) : (
+                      <SquareX aria-hidden="true" />
+                    )}
+                    <span>
+                      {excludingHaulFromLocationId === bucket.fromLocationId
+                        ? "Recalculating..."
+                        : "Exclude and Recalculate"}
+                    </span>
                   </Button>
                 </div>
               </header>

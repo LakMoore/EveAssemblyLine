@@ -181,11 +181,15 @@ export async function GET(request: Request) {
       characterId: character.characterId,
       characterName: character.characterName,
       slots: slots.get(character.characterId) ?? {},
-      availableSlots: availableSlots.get(character.characterId) ?? {
-        Manufacturing: 1,
-        Reactions: 1,
-        Science: 1,
-      },
+      availableSlots: character.onDeployment
+        ? { Manufacturing: 0, Reactions: 0, Science: 0 }
+        : (
+            availableSlots.get(character.characterId) ?? {
+              Manufacturing: 1,
+              Reactions: 1,
+              Science: 1,
+            }
+          ),
     })),
     jobs: jobs
       .sort((left, right) => Date.parse(left.endDate) - Date.parse(right.endDate))
