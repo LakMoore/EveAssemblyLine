@@ -24,6 +24,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
+import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -111,12 +112,8 @@ function statusClass(status: EndpointStatus | undefined) {
 }
 
 function statusIndicator(status: EndpointStatus | undefined, isRefreshing: boolean) {
-  return (
-    <span
-      className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(status)}`}
-      aria-label={isRefreshing ? "Refreshing" : undefined}
-    />
-  );
+  if (isRefreshing) return <Spinner className={styles.statusDot} aria-label="Refreshing" />;
+  return <span className={`${styles.statusDot} ${statusClass(status)}`} />;
 }
 
 function availabilityLabel(status?: EndpointStatus) {
@@ -150,6 +147,9 @@ function missingScopes(statuses: CharacterStatus[]) {
         .flatMap((character) => [
           character.assets?.error,
           character.skills?.error,
+          character.location?.error,
+          character.ship?.error,
+          character.clones?.error,
           character.blueprints?.error,
           character.jobs?.error,
           character.orders?.error,
@@ -170,7 +170,16 @@ function missingScopes(statuses: CharacterStatus[]) {
 }
 
 function personalEndpointStatuses(status: CharacterStatus) {
-  return [status.assets, status.skills, status.blueprints, status.jobs, status.orders];
+  return [
+    status.assets,
+    status.skills,
+    status.location,
+    status.ship,
+    status.clones,
+    status.blueprints,
+    status.jobs,
+    status.orders,
+  ];
 }
 
 async function refreshStockAfterCharacterRemoval() {
@@ -641,41 +650,50 @@ export default function CharactersPage() {
                     </div>
                   </div>
                   <ItemGroup className="w-full flex-row flex-wrap gap-3">
-                    {(["assets", "skills", "blueprints", "jobs", "orders"] as const).map(
-                      (endpoint) => {
-                        const endpointStatus = status?.[endpoint];
-                        return (
-                          <Item
-                            aria-label={`View ${endpoint} details for ${character.characterName}`}
-                            key={endpoint}
-                            className="min-w-0 flex-1 basis-0"
-                            onClick={() => setSelectedCharacter(character)}
-                            render={<button type="button" />}
-                            size="sm"
-                            title={`${endpoint}: ${availabilityLabel(endpointStatus)}${endpointStatus?.error ? `; ${endpointStatus.error}` : ""}${endpointStatus?.lastModified ? `; modified ${formatDate(endpointStatus.lastModified)}` : ""}`}
-                            variant="outline"
-                          >
-                            <ItemContent className="flex flex-1 flex-col items-center gap-1">
-                              <ItemTitle className="w-full justify-center text-center">
-                                {endpoint.toUpperCase()}
-                              </ItemTitle>
-                              <ItemDescription className="flex flex-col items-center gap-1 text-center">
-                                <span className="flex items-center justify-center gap-1 text-center">
-                                  {statusIndicator(endpointStatus, isRefreshing)}
-                                  {statusLabel(endpointStatus)}
-                                </span>
-                                <span className={`${styles.availabilityWide} text-center`}>
-                                  {availabilityLabel(endpointStatus)}
-                                </span>
-                                <span className={`${styles.availabilityNarrow} text-center`}>
-                                  {availabilityLabel(endpointStatus).replace(/^Available /, "")}
-                                </span>
-                              </ItemDescription>
-                            </ItemContent>
-                          </Item>
-                        );
-                      },
-                    )}
+                    {(
+                      [
+                        "assets",
+                        "skills",
+                        "location",
+                        "ship",
+                        "clones",
+                        "blueprints",
+                        "jobs",
+                        "orders",
+                      ] as const
+                    ).map((endpoint) => {
+                      const endpointStatus = status?.[endpoint];
+                      return (
+                        <Item
+                          aria-label={`View ${endpoint} details for ${character.characterName}`}
+                          key={endpoint}
+                          className="min-w-0 flex-1 basis-0"
+                          onClick={() => setSelectedCharacter(character)}
+                          render={<button type="button" />}
+                          size="sm"
+                          title={`${endpoint}: ${availabilityLabel(endpointStatus)}${endpointStatus?.error ? `; ${endpointStatus.error}` : ""}${endpointStatus?.lastModified ? `; modified ${formatDate(endpointStatus.lastModified)}` : ""}`}
+                          variant="outline"
+                        >
+                          <ItemContent className="flex flex-1 flex-col items-center gap-1">
+                            <ItemTitle className="w-full justify-center text-center">
+                              {endpoint.toUpperCase()}
+                            </ItemTitle>
+                            <ItemDescription className="flex flex-col items-center gap-1 text-center">
+                              <span className="flex items-center justify-center gap-1 text-center">
+                                {statusIndicator(endpointStatus, isRefreshing)}
+                                {statusLabel(endpointStatus)}
+                              </span>
+                              <span className={`${styles.availabilityWide} text-center`}>
+                                {availabilityLabel(endpointStatus)}
+                              </span>
+                              <span className={`${styles.availabilityNarrow} text-center`}>
+                                {availabilityLabel(endpointStatus).replace(/^Available /, "")}
+                              </span>
+                            </ItemDescription>
+                          </ItemContent>
+                        </Item>
+                      );
+                    })}
                   </ItemGroup>
                 </div>
               );
@@ -734,37 +752,44 @@ export default function CharactersPage() {
                     </small>
                   </div>
                   <ItemGroup className="mt-5 grid w-full grid-cols-3 gap-2.5 max-[640px]:grid-cols-1">
-                    {(["assets", "skills", "blueprints", "jobs", "orders"] as const).map(
-                      (endpoint) => {
-                        const endpointStatus = selectedStatus?.[endpoint];
-                        return (
-                          <Item key={endpoint} className="min-w-0" size="sm" variant="outline">
-                            <ItemContent className="flex flex-col items-center gap-1">
-                              <ItemTitle className="w-full justify-center text-center">
-                                {endpoint.toUpperCase()}
-                              </ItemTitle>
-                              <ItemDescription className="flex flex-col items-center gap-1 text-center">
-                                <span className="flex items-center justify-center gap-1 text-center">
-                                  <span
-                                    className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
-                                  />
-                                  <span>{statusLabel(endpointStatus)}</span>
+                    {(
+                      [
+                        "assets",
+                        "skills",
+                        "location",
+                        "ship",
+                        "clones",
+                        "blueprints",
+                        "jobs",
+                        "orders",
+                      ] as const
+                    ).map((endpoint) => {
+                      const endpointStatus = selectedStatus?.[endpoint];
+                      return (
+                        <Item key={endpoint} className="min-w-0" size="sm" variant="outline">
+                          <ItemContent className="flex flex-col items-center gap-1">
+                            <ItemTitle className="w-full justify-center text-center">
+                              {endpoint.toUpperCase()}
+                            </ItemTitle>
+                            <ItemDescription className="flex flex-col items-center gap-1 text-center">
+                              <span className="flex items-center justify-center gap-1 text-center">
+                                {statusIndicator(endpointStatus, isRefreshing)}
+                                <span>{statusLabel(endpointStatus)}</span>
+                              </span>
+                              {endpointStatus?.lastModified && (
+                                <span className="text-center">
+                                  Modified {formatDate(endpointStatus.lastModified)}
                                 </span>
-                                {endpointStatus?.lastModified && (
-                                  <span className="text-center">
-                                    Modified {formatDate(endpointStatus.lastModified)}
-                                  </span>
-                                )}
-                                <span className="text-center">{expiryLabel(endpointStatus)}</span>
-                                {endpointStatus?.error && (
-                                  <span className="text-center">{endpointStatus.error}</span>
-                                )}
-                              </ItemDescription>
-                            </ItemContent>
-                          </Item>
-                        );
-                      },
-                    )}
+                              )}
+                              <span className="text-center">{expiryLabel(endpointStatus)}</span>
+                              {endpointStatus?.error && (
+                                <span className="text-center">{endpointStatus.error}</span>
+                              )}
+                            </ItemDescription>
+                          </ItemContent>
+                        </Item>
+                      );
+                    })}
                   </ItemGroup>
                   <div className={styles.characterModalRoles}>
                     <p className={styles.panelKicker}>CORPORATION ROLES</p>
@@ -927,9 +952,7 @@ export default function CharactersPage() {
                               </ItemTitle>
                               <ItemDescription className="flex flex-col items-center gap-1 text-center">
                                 <span className="flex items-center justify-center gap-1 text-center">
-                                  <span
-                                    className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
-                                  />
+                                  {statusIndicator(endpointStatus, isRefreshing)}
                                   {statusLabel(endpointStatus, corporation.eligible.length === 0)}
                                 </span>
                                 <span className="flex flex-col items-center text-center">
@@ -1008,9 +1031,7 @@ export default function CharactersPage() {
                           <div className={styles.characterModalStatus} key={endpoint}>
                             <small>{endpoint.toUpperCase()}</small>
                             <span>
-                              <span
-                                className={`${styles.statusDot} ${isRefreshing ? styles.statusRefreshing : statusClass(endpointStatus)}`}
-                              />
+                              {statusIndicator(endpointStatus, isRefreshing)}
                               {statusLabel(endpointStatus, corporation.eligible.length === 0)}
                             </span>
                             <small>{availabilityLabel(endpointStatus)}</small>

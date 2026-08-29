@@ -1251,6 +1251,80 @@
   padding-top: 15px;
 }
 
+.shipsInSpaceSection {
+  margin-bottom: 24px;
+  padding: 16px 0 20px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.shipsInSpaceList {
+  display: grid;
+  gap: 10px;
+}
+
+.shipInSpaceCard {
+  display: grid;
+  grid-template-columns: minmax(165px, 0.7fr) minmax(240px, 1.3fr) minmax(150px, 0.7fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.shipPilotIdentity,
+.shipPilotIdentity > div,
+.shipInSpaceLocation {
+  min-width: 0;
+}
+
+.shipPilotIdentity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.shipPilotIdentity img {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+}
+
+.shipPilotIdentity > div,
+.shipInSpaceLocation {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.shipPilotIdentity span,
+.shipInSpaceLocation span,
+.shipInSpaceLocation small {
+  color: var(--muted-foreground);
+  font: 9px "DM Mono";
+  text-transform: uppercase;
+}
+
+.shipPilotIdentity strong,
+.shipInSpaceLocation h3 {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shipInSpaceIdentity {
+  min-width: 0;
+}
+
+.shipInSpaceAction {
+  justify-self: end;
+  white-space: nowrap;
+}
+
 .shipSystemHeader {
   display: flex;
   align-items: end;
@@ -1405,6 +1479,33 @@
 
   .shipModal {
     width: min(720px, 100%);
+  }
+
+  .shipInSpaceCard {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .shipPilotIdentity,
+  .shipInSpaceIdentity {
+    grid-column: 1 / -1;
+  }
+
+  .shipInSpaceAction {
+    align-self: end;
+  }
+}
+
+@media (min-width: 641px) and (max-width: 1000px) {
+  .shipInSpaceCard {
+    grid-template-columns: minmax(150px, 0.8fr) minmax(220px, 1.2fr) auto;
+  }
+
+  .shipInSpaceLocation {
+    grid-column: 1 / 3;
+  }
+
+  .shipInSpaceAction {
+    grid-column: 3;
   }
 }
 
@@ -4513,37 +4614,11 @@
   flex: 0 0 auto;
 }
 
-.statusCell .statusRefreshing {
-  position: relative;
-}
-
 .statusDot {
   display: inline-block;
   width: 10px;
   height: 10px;
   border-radius: 50%;
-}
-
-.statusRefreshing {
-  position: relative;
-  overflow: hidden;
-  background: transparent;
-}
-
-.statusRefreshing::before {
-  position: absolute;
-  inset: 1px;
-  border: 2px solid #5ed8ef55;
-  border-top-color: var(--cyan);
-  border-radius: 50%;
-  animation: statusRefreshSpin 0.8s linear infinite;
-  content: "";
-}
-
-@keyframes statusRefreshSpin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .statusFresh {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
 import { getShipAssets } from "@/lib/esi/cache";
+import { getCharacters } from "@/lib/auth/tokensStore";
 import {
   getMarketGroups,
   getShipTypeIds,
@@ -29,13 +30,19 @@ export async function GET(request: Request) {
   if (!session) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   const characterIds = await getSessionCharacterIds(session);
 
-  const [assets, shipTypeIds, stations, systems, marketGroups] = await Promise.all([
+  const [assets, shipTypeIds, stations, systems, marketGroups, characters] = await Promise.all([
     getShipAssets(characterIds, true, session.sessionId),
     getShipTypeIds(),
     getStations(),
     getSystems(),
     getMarketGroups(),
+    getCharacters(),
   ]);
+  const characterNamesById = new Map(
+    characters
+      .filter((character) => characterIds.includes(character.characterId))
+      .map((character) => [character.characterId, character.characterName]),
+  );
   const types = await getTypesByIds([...new Set(assets.map((asset) => asset.typeId))]);
   const annotatedAssets = assets.map((asset) => ({
     ...asset,
@@ -51,12 +58,22 @@ export async function GET(request: Request) {
         root?.systemId
         ?? station?.solarSystemID
         ?? (asset.locationType === "solar_system" ? asset.locationId : undefined);
+      const systemName = systemId === undefined ? undefined : systems.get(systemId)?.name.en;
+      const isInSpace = asset.locationFlag === "Pilot" && asset.locationType === "solar_system";
       return {
         itemId: asset.itemId,
         typeId: asset.typeId,
         name: asset.name,
         systemId,
-        systemName: systemId === undefined ? undefined : systems.get(systemId)?.name.en,
+        systemName,
+        ...(isInSpace
+          ? {
+              isInSpace: true,
+              pilotId: asset.ownerId,
+              pilotName: characterNamesById.get(asset.ownerId) ?? `Character ${asset.ownerId}`,
+              locationName: systemName ?? `System ${systemId}`,
+            }
+          : {}),
       };
     });
   return NextResponse.json({

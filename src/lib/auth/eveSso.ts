@@ -8,6 +8,8 @@ const pendingAuthPrefix = "pending-auth:";
 const pendingAuthTtlMs = 10 * 60 * 1000;
 
 export const authorizationScopes = [
+  "esi-location.read_location.v1",
+  "esi-location.read_ship_type.v1",
   "esi-skills.read_skills.v1",
   "esi-clones.read_clones.v1",
   "esi-corporations.read_corporation_membership.v1",

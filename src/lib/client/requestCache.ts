@@ -65,6 +65,10 @@ export type ClientShipsResponse = {
     name?: string;
     systemId?: number;
     systemName?: string;
+    isInSpace?: boolean;
+    pilotId?: number;
+    pilotName?: string;
+    locationName?: string;
   }>;
   types?: Array<{ typeId: number; name: string }>;
 };
@@ -117,6 +121,9 @@ export type ClientCharacterStatus = {
   skills?: ClientEndpointStatus & {
     body?: Array<{ skillId: number; activeSkillLevel: number }> | null;
   };
+  location?: ClientEndpointStatus;
+  ship?: ClientEndpointStatus;
+  clones?: ClientEndpointStatus;
   blueprints?: ClientEndpointStatus;
   jobs?: ClientEndpointStatus;
   orders?: ClientEndpointStatus;

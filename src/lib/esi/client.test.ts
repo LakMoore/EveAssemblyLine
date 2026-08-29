@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { TokenSet } from "@/lib/auth/model";
-import { fetchEsiEndpoint } from "./client";
+import type { CharacterTokenRecord, TokenSet } from "@/lib/auth/model";
+import { fetchCharacterLocation, fetchCharacterShip, fetchEsiEndpoint } from "./client";
 
 const token: TokenSet = {
   refreshToken: "refresh-token",
@@ -9,6 +9,12 @@ const token: TokenSet = {
   accessTokenExpiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
   scopes: [],
   lastUsedAt: 0,
+};
+
+const character: CharacterTokenRecord = {
+  characterId: 42,
+  characterName: "Test Pilot",
+  personalAuth: token,
 };
 
 test("sends the cached ETag for a non-paginated endpoint", async (t) => {
@@ -130,6 +136,52 @@ test("aggregates all pages while preserving first-page metadata", async (t) => {
   assert.equal(result.notModified, false);
 });
 
+test("maps current ship and location responses", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const scopedCharacter: CharacterTokenRecord = {
+    ...character,
+    personalAuth: {
+      ...token,
+      scopes: ["esi-location.read_location.v1", "esi-location.read_ship_type.v1"],
+    },
+  };
+  const requests: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    requests.push(url);
+    return Response.json(
+      url.endsWith("/location/")
+        ? { solar_system_id: 30_000_142 }
+        : { ship_item_id: 9_001, ship_name: "Active ship", ship_type_id: 587 },
+    );
+  };
+
+  const location = await fetchCharacterLocation(scopedCharacter);
+  const ship = await fetchCharacterShip(scopedCharacter);
+
+  assert.deepEqual(location.location, { solarSystemId: 30_000_142 });
+  assert.deepEqual(
+    ship.ship,
+    {
+      characterId: 42,
+      itemId: 9_001,
+      name: "Active ship",
+      typeId: 587,
+    },
+  );
+  assert.deepEqual(
+    requests,
+    [
+      "https://esi.evetech.net/latest/characters/42/location/",
+      "https://esi.evetech.net/latest/characters/42/ship/",
+    ],
+  );
+});
+
 test("treats a 420 error-limit response as rate limited", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
@@ -155,4 +207,35 @@ test("treats a 420 error-limit response as rate limited", async (t) => {
       return true;
     },
   );
+});
+
+test("requires current-location scopes before making an ESI request", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  let requestCount = 0;
+  globalThis.fetch = async () => {
+    requestCount += 1;
+    return new Response(null, { status: 500 });
+  };
+
+  await assert.rejects(
+    fetchCharacterLocation(character),
+    (error: Error & { reauthorizeRequired?: boolean }) => {
+      assert.match(error.message, /esi-location\.read_location\.v1/);
+      assert.equal(error.reauthorizeRequired, true);
+      return true;
+    },
+  );
+  await assert.rejects(
+    fetchCharacterShip(character),
+    (error: Error & { reauthorizeRequired?: boolean }) => {
+      assert.match(error.message, /esi-location\.read_ship_type\.v1/);
+      assert.equal(error.reauthorizeRequired, true);
+      return true;
+    },
+  );
+  assert.equal(requestCount, 0);
 });

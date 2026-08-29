@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import type {
   AssetRecord,
   BlueprintInstanceRecord,
+  CharacterLocationRecord,
+  CharacterShipRecord,
   CharacterSkillRecord,
   CharacterTokenRecord,
   IndustryJobRecord,
@@ -75,6 +77,28 @@ export type EsiAssetLocation = {
 type EsiCharacterSkill = {
   skill_id: number;
   active_skill_level: number;
+};
+
+type EsiCharacterLocation = {
+  solar_system_id: number;
+  station_id?: number;
+  structure_id?: number;
+};
+
+type EsiCharacterShip = {
+  ship_item_id: number;
+  ship_name: string;
+  ship_type_id: number;
+};
+
+export type EsiCharacterClone = {
+  clone_id: number;
+  implants?: number[];
+};
+
+export type EsiCharacterClones = {
+  active_clone_id?: number;
+  clones?: EsiCharacterClone[];
 };
 
 export type EsiAsset = {
@@ -523,6 +547,14 @@ function mapAsset(
   };
 }
 
+/** Throws a reconnectable error before calling an endpoint whose scope is absent. */
+function requireCharacterScope(record: CharacterTokenRecord, scope: string) {
+  if (record.personalAuth.scopes.includes(scope)) return;
+  const error = new Error(`Missing required ESI scope: ${scope}`);
+  (error as Error & { reauthorizeRequired?: boolean }).reauthorizeRequired = true;
+  throw error;
+}
+
 function mapBlueprintInstance(
   blueprint: EsiBlueprint,
   ownerType: BlueprintInstanceRecord["ownerType"],
@@ -632,6 +664,70 @@ export async function fetchCorporationAssets(record: CharacterTokenRecord, etag?
     headers: result.headers,
     notModified: result.notModified,
   };
+}
+
+/**
+ * Fetches the character's current solar system and optional docked location.
+ * https://developers.eveonline.com/api-explorer#/operations/GetCharactersCharacterIdLocation
+ */
+export async function fetchCharacterLocation(record: CharacterTokenRecord, etag?: string) {
+  requireCharacterScope(record, "esi-location.read_location.v1");
+  const token = await getUsableToken(record);
+  const result = await fetchEsiEndpoint<EsiCharacterLocation>(
+    `/characters/${record.characterId}/location/`,
+    token,
+    etag,
+    { paginated: false },
+  );
+  const location: CharacterLocationRecord | null = result.data
+    ? {
+        solarSystemId: result.data.solar_system_id,
+        ...(result.data.station_id !== undefined ? { stationId: result.data.station_id } : {}),
+        ...(result.data.structure_id !== undefined
+          ? { structureId: result.data.structure_id }
+          : {}),
+      }
+    : null;
+  return {
+    location,
+    headers: result.headers,
+    notModified: result.notModified,
+  };
+}
+
+/**
+ * Fetches the ship currently piloted by the character.
+ * https://developers.eveonline.com/api-explorer#/operations/GetCharactersCharacterIdShip
+ */
+export async function fetchCharacterShip(record: CharacterTokenRecord, etag?: string) {
+  requireCharacterScope(record, "esi-location.read_ship_type.v1");
+  const token = await getUsableToken(record);
+  const result = await fetchEsiEndpoint<EsiCharacterShip>(
+    `/characters/${record.characterId}/ship/`,
+    token,
+    etag,
+    { paginated: false },
+  );
+  const ship: CharacterShipRecord | null = result.data
+    ? {
+        characterId: record.characterId,
+        itemId: result.data.ship_item_id,
+        name: result.data.ship_name,
+        typeId: result.data.ship_type_id,
+      }
+    : null;
+  return {
+    ship,
+    headers: result.headers,
+    notModified: result.notModified,
+  };
+}
+
+export async function fetchCharacterClones(record: CharacterTokenRecord) {
+  requireCharacterScope(record, "esi-clones.read_clones.v1");
+  requireCharacterScope(record, "esi-clones.read_implants.v1");
+  const token = await getUsableToken(record);
+  return requestCachedEsi<EsiCharacterClones>(`/characters/${record.characterId}/clones/`, token);
 }
 
 function mapIndustryJob(
@@ -904,26 +1000,30 @@ export function fetchIndustrySystems() {
 
 /**
  * Fetches structure metadata for a specific character.
- * Response or 503 errors are cached for 1 hour to reduce ESI load.
+ * Response or 403 errors are cached for 1 hour to reduce ESI load.
  * https://developers.eveonline.com/api-explorer#/operations/GetUniverseStructuresStructureId
  *
  * @param structureId The ID of the structure.
- * @param token The token of the character.
+ * @param token A token already associated with the character that reported the structure ID.
  * @returns The structure metadata response.
  */
-export async function fetchStructureMetadataPerCharacter(structureId: number, token?: TokenSet) {
-  const characterId = token === undefined ? undefined : tokenContexts.get(token)?.characterId;
-  const cacheKey = characterId === undefined ? undefined : `${characterId}:${structureId}`;
-  const cached = cacheKey === undefined ? undefined : structureMetadataCache.get(cacheKey);
+export async function fetchStructureMetadataPerCharacter(structureId: number, token: TokenSet) {
+  const characterId = tokenContexts.get(token)?.characterId;
+  if (characterId === undefined) {
+    throw new Error("Structure metadata requires a character-associated token.");
+  }
+  const cacheKey = `${characterId}:${structureId}`;
+  const cached = structureMetadataCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return { ...cached.response, fromCache: true };
   try {
     const response = await requestCachedEsi<LocationMetadata>(
       `/universe/structures/${structureId}/`,
       token,
       undefined,
+      // Structure metadata is access-controlled, so it must not enter the shared ESI cache.
       { skipCacheWrite: true },
     );
-    if (response.data && cacheKey !== undefined) {
+    if (response.data) {
       structureMetadataCache.set(
         cacheKey,
         {
@@ -935,7 +1035,7 @@ export async function fetchStructureMetadataPerCharacter(structureId: number, to
     return response;
   }
   catch (error) {
-    if ((error as { status?: number }).status !== 403 || cacheKey === undefined) throw error;
+    if ((error as { status?: number }).status !== 403) throw error;
     const response: LocationMetadataResponse = {
       data: null,
       headers: new Headers(),

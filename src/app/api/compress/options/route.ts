@@ -10,7 +10,7 @@ import {
   getTypeDogma,
   getTypes,
 } from "@/cache/services/sdeCache";
-import { fetchStationMetadata, getUsableToken, requestCachedEsi } from "@/lib/esi/client";
+import { fetchCharacterClones, fetchStationMetadata } from "@/lib/esi/client";
 import { calculateReprocessingEfficiency } from "@/lib/planning/reprocessingEfficiency";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 
@@ -180,13 +180,7 @@ async function getOptions(
   markPhase("structures");
   const characters = await Promise.all(
     records.map(async (record) => {
-      const token = await getUsableToken(record).catch(() => null);
-      const clones = token
-        ? await requestCachedEsi<{
-            active_clone_id?: number;
-            clones?: Array<{ clone_id: number; implants?: number[] }>;
-          }>(`/characters/${record.characterId}/clones/`, token).catch(() => ({ data: null }))
-        : { data: null };
+      const clones = await fetchCharacterClones(record).catch(() => ({ data: null }));
       return {
         id: `character:${record.characterId}`,
         characterId: record.characterId,

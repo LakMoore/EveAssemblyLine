@@ -6,15 +6,16 @@ import {
   getResolvedAssetIndex,
   getRootLocationsByItemId,
   getRunningIndustryJobs,
+  resolveStructureLocationForOwner,
 } from "@/lib/esi/cache";
-import { getCharacter, getCharacters } from "@/lib/auth/tokensStore";
+import type { StructureLocationSource } from "@/lib/esi/cache";
+import { getCharacters } from "@/lib/auth/tokensStore";
 import {
   getBlueprintById,
   getStations,
   getSystems,
   getTypesByIds,
 } from "@/cache/services/sdeCache";
-import { fetchStructureMetadataPerCharacter, getUsableToken } from "@/lib/esi/client";
 
 const activityNames: Record<number, string> = {
   1: "Manufacturing",
@@ -39,11 +40,13 @@ function isActiveJob(status: string) {
 
 async function resolveOutputLocationName(
   locationId: number,
+  source: StructureLocationSource,
   rootLocations: Awaited<ReturnType<typeof getRootLocationsByItemId>>,
   stations: Awaited<ReturnType<typeof getStations>>,
   systems: Awaited<ReturnType<typeof getSystems>>,
   types: Awaited<ReturnType<typeof getTypesByIds>>,
   characterIds: number[],
+  sessionId: string,
 ) {
   const root = rootLocations.get(locationId);
   if (root?.name) return root.name;
@@ -52,16 +55,13 @@ async function resolveOutputLocationName(
   const system = systems.get(locationId);
   if (system) return system.name.en;
 
-  for (const characterId of characterIds) {
-    const character = await getCharacter(characterId);
-    if (!character) continue;
-    try {
-      const token = await getUsableToken(character);
-      const result = await fetchStructureMetadataPerCharacter(locationId, token);
-      if (result.data?.name) return result.data.name;
-    }
-    catch {}
-  }
+  const structure = await resolveStructureLocationForOwner(
+    locationId,
+    source,
+    characterIds,
+    sessionId,
+  ).catch(() => undefined);
+  if (structure?.name) return structure.name;
   return `Location ${locationId}`;
 }
 
@@ -132,17 +132,23 @@ export async function GET(request: Request) {
   );
   const outputLocationNames = new Map(
     await Promise.all(
-      [...new Set(jobs.map((job) => job.outputLocationId))].map(
-        async (locationId) =>
+      [...new Map(jobs.map((job) => [job.outputLocationId, job])).values()].map(
+        async (job) =>
           [
-            locationId,
+            job.outputLocationId,
             await resolveOutputLocationName(
-              locationId,
+              job.outputLocationId,
+              {
+                ownerType: job.ownerType,
+                ownerId: job.ownerId,
+                recordType: "job",
+              },
               rootLocations,
               stations,
               systems,
               types,
               characterIds,
+              session.sessionId,
             ),
           ] as const,
       ),

@@ -109,6 +109,21 @@ export interface CharacterSkillRecord {
   activeSkillLevel: number;
 }
 
+/** The character's current ESI location. */
+export interface CharacterLocationRecord {
+  solarSystemId: number;
+  stationId?: number;
+  structureId?: number;
+}
+
+/** The ship currently piloted by a character. */
+export interface CharacterShipRecord {
+  characterId: number;
+  itemId: number;
+  name: string;
+  typeId: number;
+}
+
 export interface BlueprintInstanceRecord {
   itemId: number;
   typeId: number;

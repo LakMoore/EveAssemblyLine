@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { loadClientShips, type ClientShipsResponse } from "@/lib/client/requestCache";
+import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import styles from "../page.module.css";
 import { ArrowRight, X } from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -13,6 +15,7 @@ type ShipAsset = NonNullable<ClientShipsResponse["assets"]>[number];
 type ShipSummary = NonNullable<ClientShipsResponse["ships"]>[number];
 type TypeName = Map<number, string>;
 const shipItemIdParam = "shipItemId";
+const shipThumbnailSize = 54;
 
 const priorityFlagPattern = /^(HiSlot|MedSlot|LoSlot|RigSlot)(\d+)$/;
 const slotGroupDetails = new Map([
@@ -120,14 +123,26 @@ export default function ShipsPage() {
     }
     setSelectedShipItemId(null);
   }
+  const shipsInSpace = useMemo(
+    () =>
+      (data?.ships ?? [])
+        .filter(
+          (ship): ship is ShipSummary & { pilotId: number; pilotName: string } =>
+            ship.isInSpace === true && ship.pilotId !== undefined && ship.pilotName !== undefined,
+        )
+        .sort((left, right) => left.pilotName.localeCompare(right.pilotName)),
+    [data],
+  );
   const shipsBySystem = useMemo(() => {
     const buckets = new Map<
       string,
-      { systemId?: number; systemName: string; ships: ShipSummary[] }
+      { key: string; systemId?: number; systemName: string; ships: ShipSummary[] }
     >();
     for (const ship of data?.ships ?? []) {
+      if (ship.isInSpace) continue;
       const key = ship.systemId === undefined ? `unknown:${ship.itemId}` : String(ship.systemId);
       const bucket = buckets.get(key) ?? {
+        key,
         systemId: ship.systemId,
         systemName: ship.systemName ?? "Unknown system",
         ships: [],
@@ -160,14 +175,69 @@ export default function ShipsPage() {
           <AlertDescription>Could not load ship assets.</AlertDescription>
         </Alert>
       )}
-      {!error && data && shipsBySystem.length === 0 && (
+      {!error && data && shipsInSpace.length === 0 && shipsBySystem.length === 0 && (
         <Empty className={styles.shipsEmpty}>
           <EmptyDescription>No ships found in the current ESI asset cache.</EmptyDescription>
         </Empty>
       )}
+      {shipsInSpace.length > 0 && (
+        <section className={styles.shipsInSpaceSection}>
+          <div className={styles.shipSystemHeader}>
+            <div>
+              <p className={styles.panelKicker}>ACTIVE PILOTS</p>
+              <h2>Ships in Space</h2>
+            </div>
+            <span className={styles.shipCount}>{shipsInSpace.length} active</span>
+          </div>
+          <div className={styles.shipsInSpaceList}>
+            {shipsInSpace.map((ship) => {
+              const shipTypeName = typeNames.get(ship.typeId) ?? `Type ${ship.typeId}`;
+              const shipDisplayName = ship.name ? `${ship.name} - ${shipTypeName}` : shipTypeName;
+              return (
+                <article className={styles.shipInSpaceCard} key={ship.itemId}>
+                  <div className={styles.shipPilotIdentity}>
+                    <Image
+                      src={eveCharacterPortraitUrl(ship.pilotId, 64)}
+                      alt={`${ship.pilotName} portrait`}
+                      width={shipThumbnailSize}
+                      height={shipThumbnailSize}
+                    />
+                    <div>
+                      <span>PILOT</span>
+                      <strong>{ship.pilotName}</strong>
+                    </div>
+                  </div>
+                  <TypeIdentity
+                    name={shipDisplayName}
+                    typeId={ship.typeId}
+                    variation="render"
+                    imageSize={shipThumbnailSize}
+                    className={styles.shipInSpaceIdentity}
+                  />
+                  <div className={styles.shipInSpaceLocation}>
+                    <h3>{ship.systemName ?? "Unknown system"} &laquo;Undocked&raquo;</h3>
+                    <small>ITEM ID {ship.itemId}</small>
+                  </div>
+                  <a
+                    href={`/ships?${shipItemIdParam}=${ship.itemId}`}
+                    className={`actionButton ${styles.shipInSpaceAction}`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      selectShip(ship);
+                    }}
+                  >
+                    <span>VIEW FITTING</span>
+                    <ArrowRight aria-hidden="true" />
+                  </a>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
       <div className={styles.shipSystems}>
         {shipsBySystem.map((system) => (
-          <section className={styles.shipSystem} key={system.systemId ?? system.systemName}>
+          <section className={styles.shipSystem} key={system.key}>
             <div className={styles.shipSystemHeader}>
               <div>
                 <p className={styles.panelKicker}>SYSTEM</p>
@@ -198,7 +268,7 @@ export default function ShipsPage() {
                       name={shipDisplayName}
                       typeId={ship.typeId}
                       variation="render"
-                      imageSize={54}
+                      imageSize={shipThumbnailSize}
                       className={styles.shipCardIdentity}
                     />
                     <span className={styles.shipCardMeta}>ITEM ID {ship.itemId}</span>

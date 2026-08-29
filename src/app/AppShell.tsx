@@ -97,8 +97,11 @@ type EsiStockResponse = {
     items: PlanStockItem[];
   }>;
 };
-type StateEndpoint = keyof Pick<ClientCharacterStatus, "assets" | "skills" | "jobs" | "orders">;
-const stateEndpoints: StateEndpoint[] = ["assets", "skills", "jobs", "orders"];
+type StateEndpoint = keyof Pick<
+  ClientCharacterStatus,
+  "assets" | "skills" | "location" | "ship" | "jobs" | "orders"
+>;
+const stateEndpoints: StateEndpoint[] = ["assets", "skills", "location", "ship", "jobs", "orders"];
 const corporationStateEndpoints: Array<"assets" | "jobs" | "orders"> = ["assets", "jobs", "orders"];
 
 function showRefreshError(details: string) {
@@ -117,6 +120,7 @@ function showRefreshSuccess() {
   toast.add({
     description: "Refresh completed successfully.",
     type: "success",
+    timeout: 5000,
   });
 }
 
@@ -156,7 +160,7 @@ function hasEndpointErrors(statuses: ClientCharacterStatus[]) {
 
 function characterNeedsReauthorization(status: ClientCharacterStatus | undefined) {
   return [
-    ...(status ? [status.assets, status.skills, status.jobs, status.orders] : []),
+    ...(status ? stateEndpoints.map((endpoint) => status[endpoint]) : []),
     ...(status?.corporations ?? []).flatMap((corporation) => [
       corporation.assets,
       corporation.jobs,

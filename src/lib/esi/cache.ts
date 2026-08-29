@@ -2,13 +2,15 @@ import type {
   AssetLocation,
   AssetRecord,
   BlueprintInstanceRecord,
+  CharacterLocationRecord,
+  CharacterShipRecord,
   CharacterSkillRecord,
   CharacterTokenRecord,
   IndustryJobRecord,
   MarketOrderRecord,
   TokenSet,
 } from "@/lib/auth/model";
-import type { EsiCorporationStructure } from "./client";
+import type { EsiCharacterClones, EsiCorporationStructure } from "./client";
 import type { PlanStockItem } from "@/lib/planning/types";
 import {
   getGroups,
@@ -22,12 +24,15 @@ import { getCharacter, getCharacters } from "@/lib/auth/tokensStore";
 import {
   fetchCharacterAssets,
   fetchAssetNames,
+  fetchCharacterLocation,
+  fetchCharacterShip,
   fetchCorporationAssets,
   fetchCharacterBlueprints,
   fetchCorporationBlueprints,
   fetchCharacterIndustryJobs,
   fetchCorporationIndustryJobs,
   fetchCharacterMarketOrders,
+  fetchCharacterClones,
   fetchCharacterSkills,
   fetchCorporationMarketOrders,
   fetchCorporationStructures,
@@ -47,7 +52,15 @@ export type EndpointCache<T> = {
   nextRefreshAllowed?: string;
   rateLimitedUntil?: string;
   error?: string;
+  reauthorizeRequired?: boolean;
   status: EndpointStatus;
+};
+
+/** Identifies the owner and endpoint that reported a location ID. */
+export type StructureLocationSource = {
+  ownerType: AssetRecord["ownerType"];
+  ownerId: number;
+  recordType: "asset" | "blueprint" | "job" | "order";
 };
 
 export function toClientEndpointStatus<T>(cache: EndpointCache<T> | undefined) {
@@ -61,12 +74,13 @@ export function toClientEndpointStatus<T>(cache: EndpointCache<T> | undefined) {
 
 type OwnerCache = {
   allAssetsRaw?: EndpointCache<AssetRecord[]>;
+  assetItemIds: Set<number>;
   blueprintInstances?: EndpointCache<BlueprintInstanceRecord[]>;
+  currentLocation?: EndpointCache<CharacterLocationRecord | null>;
+  currentShip?: EndpointCache<CharacterShipRecord | null>;
+  clones?: EndpointCache<EsiCharacterClones | null>;
   stockAssetsByItemId?: Map<number, AssetRecord>;
   rootLocationsByItemId: Map<number, AssetLocation>;
-  locationResolverCharacterIds: Map<number, number>;
-  jobLocationResolverCharacterIds: Map<number, number>;
-  endpointLocationResolverCharacterIds: Map<number, number>;
   shipAssetsByItemId: Map<number, AssetRecord>;
   assembledShipsByItemId: Map<number, AssetRecord>;
   assembledStructureRigs: AssetRecord[];
@@ -100,38 +114,6 @@ function getUsableMarketOrdersEtag(cache: OwnerCache | undefined) {
     : undefined;
 }
 
-function indexJobLocationResolvers(
-  cache: OwnerCache,
-  jobs: IndustryJobRecord[],
-  characterId: number,
-) {
-  for (const job of jobs) {
-    for (const locationId of [job.blueprintLocationId, job.locationId, job.outputLocationId]) {
-      cache.jobLocationResolverCharacterIds.set(locationId, characterId);
-    }
-  }
-}
-
-function indexBlueprintLocationResolvers(
-  cache: OwnerCache,
-  blueprints: BlueprintInstanceRecord[],
-  characterId: number,
-) {
-  for (const blueprint of blueprints) {
-    cache.endpointLocationResolverCharacterIds.set(blueprint.locationId, characterId);
-  }
-}
-
-function indexMarketOrderLocationResolvers(
-  cache: OwnerCache,
-  orders: MarketOrderRecord[],
-  characterId: number,
-) {
-  for (const order of orders) {
-    cache.endpointLocationResolverCharacterIds.set(order.locationId, characterId);
-  }
-}
-
 async function refreshBlueprintInstances(
   cache: OwnerCache,
   character: CharacterTokenRecord,
@@ -153,10 +135,59 @@ async function refreshBlueprintInstances(
     result.notModified && cache.blueprintInstances
       ? setFresh(cache.blueprintInstances.lastBody, result.headers, cache.blueprintInstances, true)
       : setFresh(result.blueprints ?? [], result.headers, cache.blueprintInstances);
-  if (result.blueprints) {
-    indexBlueprintLocationResolvers(cache, result.blueprints, character.characterId);
-  }
   return cache.blueprintInstances;
+}
+
+/** Refreshes the character's current location and reports whether its body changed. */
+async function refreshCurrentLocation(cache: OwnerCache, character: CharacterTokenRecord) {
+  if (
+    cache.currentLocation?.nextRefreshAllowed
+    && Date.parse(cache.currentLocation.nextRefreshAllowed) > Date.now()
+  ) {
+    cache.currentLocation.status = endpointDataStatus(
+      cache.currentLocation.lastModified,
+      cache.currentLocation.nextRefreshAllowed,
+    );
+    return false;
+  }
+  const previous = cache.currentLocation?.lastBody;
+  const result = await fetchCharacterLocation(character, cache.currentLocation?.etag);
+  cache.currentLocation =
+    result.notModified && cache.currentLocation
+      ? setFresh(cache.currentLocation.lastBody, result.headers, cache.currentLocation, true)
+      : setFresh(result.location, result.headers, cache.currentLocation);
+  const current = cache.currentLocation.lastBody;
+  return (
+    previous?.solarSystemId !== current?.solarSystemId
+    || previous?.stationId !== current?.stationId
+    || previous?.structureId !== current?.structureId
+  );
+}
+
+/** Refreshes the character's current ship and reports whether its body changed. */
+async function refreshCurrentShip(cache: OwnerCache, character: CharacterTokenRecord) {
+  if (
+    cache.currentShip?.nextRefreshAllowed
+    && Date.parse(cache.currentShip.nextRefreshAllowed) > Date.now()
+  ) {
+    cache.currentShip.status = endpointDataStatus(
+      cache.currentShip.lastModified,
+      cache.currentShip.nextRefreshAllowed,
+    );
+    return false;
+  }
+  const previous = cache.currentShip?.lastBody;
+  const result = await fetchCharacterShip(character, cache.currentShip?.etag);
+  cache.currentShip =
+    result.notModified && cache.currentShip
+      ? setFresh(cache.currentShip.lastBody, result.headers, cache.currentShip, true)
+      : setFresh(result.ship, result.headers, cache.currentShip);
+  const current = cache.currentShip.lastBody;
+  return (
+    previous?.itemId !== current?.itemId
+    || previous?.typeId !== current?.typeId
+    || previous?.name !== current?.name
+  );
 }
 
 function getCache(map: Map<string, OwnerCache>, id: number, sessionId: string): OwnerCache {
@@ -164,11 +195,9 @@ function getCache(map: Map<string, OwnerCache>, id: number, sessionId: string): 
   const existing = map.get(key);
   if (existing) return existing;
   const created: OwnerCache = {
+    assetItemIds: new Set(),
     assembledStructureRigs: [],
     rootLocationsByItemId: new Map(),
-    locationResolverCharacterIds: new Map(),
-    jobLocationResolverCharacterIds: new Map(),
-    endpointLocationResolverCharacterIds: new Map(),
     shipAssetsByItemId: new Map(),
     assembledShipsByItemId: new Map(),
     unresolvedAssetCount: 0,
@@ -179,7 +208,7 @@ function getCache(map: Map<string, OwnerCache>, id: number, sessionId: string): 
 
 function endpointStatus<T>(
   error: unknown,
-): Pick<EndpointCache<T>, "status" | "rateLimitedUntil" | "error"> {
+): Pick<EndpointCache<T>, "status" | "rateLimitedUntil" | "error" | "reauthorizeRequired"> {
   const status = (error as { status?: number }).status;
   if (status !== 420 && status !== 429) {
     const errorMessage =
@@ -195,6 +224,9 @@ function endpointStatus<T>(
     return {
       status: "error",
       error: errorMessage,
+      ...((error as { reauthorizeRequired?: boolean }).reauthorizeRequired
+        ? { reauthorizeRequired: true }
+        : {}),
     };
   }
   const retryAfterValue = (error as { retryAfter?: string }).retryAfter;
@@ -210,6 +242,64 @@ function endpointStatus<T>(
     rateLimitedUntil: new Date(Date.now() + retryAfterMs).toISOString(),
     error: error instanceof Error ? error.message : "ESI rate limit reached",
   };
+}
+
+/** Builds the derived asset record used for a character's currently piloted ship. */
+export function buildCurrentShipAsset(
+  ship: CharacterShipRecord,
+  location: CharacterLocationRecord,
+): AssetRecord {
+  const locationId = location.stationId ?? location.structureId ?? location.solarSystemId;
+  const kind = location.stationId ? "station" : location.structureId ? "structure" : "solar_system";
+  return {
+    itemId: ship.itemId,
+    typeId: ship.typeId,
+    name: ship.name,
+    quantity: 1,
+    locationId,
+    locationType: kind,
+    locationFlag: "Pilot",
+    isSingleton: true,
+    ownerType: "character",
+    ownerId: ship.characterId,
+    rootLocation: {
+      locationId,
+      kind,
+      systemId: location.solarSystemId,
+      resolved: kind !== "structure",
+    },
+  };
+}
+
+/** Returns the active ship when both current-location endpoints have cached bodies. */
+function getCurrentShipAsset(cache: OwnerCache) {
+  const ship = cache.currentShip?.lastBody;
+  const location = cache.currentLocation?.lastBody;
+  return ship && location ? buildCurrentShipAsset(ship, location) : undefined;
+}
+
+/** Adds or enriches the current ship without persisting it into the raw assets response. */
+function includeCurrentShip(rawAssets: AssetRecord[], cache: OwnerCache) {
+  const currentShip = getCurrentShipAsset(cache);
+  if (!currentShip) return rawAssets;
+  const existingIndex = rawAssets.findIndex((asset) => asset.itemId === currentShip.itemId);
+  if (existingIndex < 0) return [...rawAssets, currentShip];
+  const indexedAssets = [...rawAssets];
+  indexedAssets[existingIndex] = {
+    ...indexedAssets[existingIndex],
+    ...currentShip,
+  };
+  return indexedAssets;
+}
+
+/** Adds a current ship ID to the item IDs that must never be resolved as structures. */
+export function getKnownNonStructureItemIds(
+  assetItemIds: ReadonlySet<number>,
+  currentShipItemId?: number,
+) {
+  const knownItemIds = new Set(assetItemIds);
+  if (currentShipItemId !== undefined) knownItemIds.add(currentShipItemId);
+  return knownItemIds;
 }
 
 function normalizeUtcTimestamp(value: string | null | undefined, fallback?: string) {
@@ -364,40 +454,35 @@ async function cacheResolvedAssets(
   headers?: Headers,
   previous?: EndpointCache<AssetRecord[]>,
   assetNamePath?: string,
-  resolverCharacterId?: number,
   preserveLastModified = false,
 ) {
-  const assetIndexes = await indexAssetsByPurpose(rawAssets);
+  const initialAssetIndexes = await indexAssetsByPurpose(rawAssets);
   let namedAssets = rawAssets;
   if (assetNamePath) {
-    const stockAssetIds = new Set(assetIndexes.stockAssetsByItemId.keys());
+    const stockAssetIds = new Set(initialAssetIndexes.stockAssetsByItemId.keys());
     namedAssets = await mergeAssetNames(rawAssets, token, assetNamePath, stockAssetIds);
-    if (namedAssets !== rawAssets) {
-      const namesByItemId = new Map(namedAssets.map((asset) => [asset.itemId, asset]));
-      const replaceMapValues = <T extends AssetRecord>(assets: Map<number, T>) => {
-        for (const itemId of assets.keys()) {
-          const namedAsset = namesByItemId.get(itemId);
-          if (namedAsset) assets.set(itemId, namedAsset as T);
-        }
-      };
-      replaceMapValues(assetIndexes.stockAssetsByItemId);
-      replaceMapValues(assetIndexes.shipAssetsByItemId);
-      replaceMapValues(assetIndexes.stockLocationItemsByItemId);
-      replaceMapValues(assetIndexes.assembledShipsByItemId);
-    }
   }
 
+  const indexedAssets = includeCurrentShip(namedAssets, cache);
+  const assetIndexes =
+    indexedAssets === rawAssets ? initialAssetIndexes : await indexAssetsByPurpose(indexedAssets);
+  const assetItemIds = new Set(indexedAssets.map((asset) => asset.itemId));
+  const knownNonStructureItemIds = getKnownNonStructureItemIds(
+    assetItemIds,
+    cache.currentShip?.lastBody?.itemId,
+  );
   const rootLocationsByItemId = await resolveRootLocations(
     assetIndexes.stockLocationItemsByItemId,
     assetIndexes.shipTypeIds,
     token,
+    knownNonStructureItemIds,
   );
   const inferredRoots = new Map<number, Promise<AssetLocation | null>>();
 
   function inferRoot(locationId: number, asset: AssetRecord) {
     const existing = inferredRoots.get(locationId);
     if (existing) return existing;
-    const resolution = getRealParent(asset, token);
+    const resolution = getRealParent(asset, token, knownNonStructureItemIds);
     inferredRoots.set(locationId, resolution);
     return resolution;
   }
@@ -432,13 +517,9 @@ async function cacheResolvedAssets(
   const resolvedByItemId = new Map(resolvedStockAssets.map((asset) => [asset.itemId, asset]));
 
   cache.allAssetsRaw = setFresh(namedAssets, headers, previous, preserveLastModified);
+  cache.assetItemIds = assetItemIds;
   cache.stockAssetsByItemId = resolvedByItemId;
   cache.rootLocationsByItemId = rootLocationsByItemId;
-  if (resolverCharacterId !== undefined) {
-    cache.locationResolverCharacterIds = new Map(
-      rawAssets.map((asset) => [asset.locationId, resolverCharacterId]),
-    );
-  }
   const resolvedShipAssets = await Promise.all(
     [...assetIndexes.shipAssetsByItemId.values()].map(async (asset) => {
       const cachedRoot = rootLocationsByItemId.get(asset.locationId);
@@ -540,7 +621,12 @@ function directKind(locationType: AssetRecord["locationType"]): AssetLocation["k
   return null;
 }
 
-async function getRealParent(current: AssetRecord, token: TokenSet): Promise<AssetLocation | null> {
+async function getRealParent(
+  current: AssetRecord,
+  token: TokenSet,
+  assetItemIds: ReadonlySet<number>,
+): Promise<AssetLocation | null> {
+  if (current.rootLocation && "kind" in current.rootLocation) return current.rootLocation;
   const locationId = current.locationId;
   const kind = directKind(current.locationType);
   const station = kind === "station" || kind === null ? await getStation(locationId) : null;
@@ -561,13 +647,20 @@ async function getRealParent(current: AssetRecord, token: TokenSet): Promise<Ass
       resolved: true,
     };
   }
+  if (assetItemIds.has(locationId)) return null;
   if (kind === "solar_system" || kind === "structure" || kind === null) {
     const result = await (
       kind === "solar_system"
         ? fetchSolarSystemMetadata(locationId, token)
         : fetchStructureMetadataPerCharacter(locationId, token)
     ).catch(() => null);
-    if (!result?.data) return null;
+    if (!result?.data) {
+      return {
+        locationId,
+        kind: kind === "solar_system" ? "solar_system" : "structure",
+        resolved: false,
+      };
+    }
     return {
       locationId,
       kind: kind === "solar_system" ? "solar_system" : "structure",
@@ -587,6 +680,7 @@ async function resolveRootLocations(
   containerItemsByItemId: Map<number, AssetRecord>,
   shipTypeIds: Set<number>,
   token: TokenSet,
+  assetItemIds: ReadonlySet<number>,
 ) {
   // Cache already-resolved roots
   const rootCache = new Map<number, AssetLocation>();
@@ -605,7 +699,7 @@ async function resolveRootLocations(
       }
       visited.add(current.itemId);
       if (shipTypeIds.has(current.typeId)) {
-        const realParent = await getRealParent(current, token);
+        const realParent = await getRealParent(current, token, assetItemIds);
         if (!realParent) return null;
         for (const id of visited) rootCache.set(id, realParent);
         return realParent;
@@ -613,7 +707,7 @@ async function resolveRootLocations(
       const parent = containerItemsByItemId.get(current.locationId);
       if (!parent) {
         // The first parent outside the container index must be resolved through SDE or ESI.
-        const realParent = await getRealParent(current, token);
+        const realParent = await getRealParent(current, token, assetItemIds);
         if (!realParent) return null;
         for (const id of visited) rootCache.set(id, realParent);
         return realParent;
@@ -658,8 +752,13 @@ async function rebuildResolvedAssets(
   cache: OwnerCache,
   record: Awaited<ReturnType<typeof getCharacter>>,
   purpose: "personal" | "corp",
+  force = false,
 ) {
-  if (!record || !needsCompleteAssetGraph(cache) || !Array.isArray(cache.allAssetsRaw?.lastBody)) {
+  if (
+    !record
+    || (!force && !needsCompleteAssetGraph(cache))
+    || !Array.isArray(cache.allAssetsRaw?.lastBody)
+  ) {
     return;
   }
   try {
@@ -675,7 +774,6 @@ async function rebuildResolvedAssets(
       undefined,
       cache.allAssetsRaw,
       ownerPath,
-      record.characterId,
     );
   }
   catch {
@@ -692,6 +790,48 @@ export async function refreshCharacterState(
     const character = await getCharacter(characterId);
     if (!character) continue;
     const cache = getCache(characterCaches, characterId, sessionId);
+    let currentShipStateChanged = false;
+    try {
+      currentShipStateChanged = await refreshCurrentLocation(cache, character);
+    }
+    catch (error) {
+      cache.currentLocation = {
+        ...(cache.currentLocation ?? { lastBody: null }),
+        ...endpointStatus(error),
+      };
+    }
+    try {
+      currentShipStateChanged =
+        (await refreshCurrentShip(cache, character)) || currentShipStateChanged;
+    }
+    catch (error) {
+      cache.currentShip = {
+        ...(cache.currentShip ?? { lastBody: null }),
+        ...endpointStatus(error),
+      };
+    }
+    try {
+      if (
+        !cache.clones
+        || !cache.clones.nextRefreshAllowed
+        || Date.parse(cache.clones.nextRefreshAllowed) <= Date.now()
+      ) {
+        const clones = await fetchCharacterClones(character);
+        cache.clones = setFresh(clones.data, clones.headers, cache.clones);
+      }
+      else {
+        cache.clones.status = endpointDataStatus(
+          cache.clones.lastModified,
+          cache.clones.nextRefreshAllowed,
+        );
+      }
+    }
+    catch (error) {
+      cache.clones = {
+        ...(cache.clones ?? { lastBody: null }),
+        ...endpointStatus(error),
+      };
+    }
     try {
       if (
         !cache.skills
@@ -717,6 +857,7 @@ export async function refreshCharacterState(
         ...endpointStatus(error),
       };
     }
+    let assetsRebuilt = false;
     try {
       await refreshBlueprintInstances(cache, character, fetchCharacterBlueprints);
     }
@@ -740,9 +881,9 @@ export async function refreshCharacterState(
             result.headers,
             cache.allAssetsRaw,
             `/characters/${character.characterId}`,
-            character.characterId,
             true,
           );
+          assetsRebuilt = true;
           cache.allAssetsRaw.status = endpointDataStatus(
             cache.allAssetsRaw.lastModified,
             cache.allAssetsRaw.nextRefreshAllowed,
@@ -756,8 +897,8 @@ export async function refreshCharacterState(
             result.headers,
             cache.allAssetsRaw,
             `/characters/${character.characterId}`,
-            character.characterId,
           );
+          assetsRebuilt = true;
         }
       }
     }
@@ -767,6 +908,9 @@ export async function refreshCharacterState(
         ...(cache.allAssetsRaw ?? { lastBody: [] }),
         ...endpointStatus(error),
       };
+    }
+    if (currentShipStateChanged && !assetsRebuilt) {
+      await rebuildResolvedAssets(cache, character, "personal", true);
     }
     try {
       if (
@@ -779,7 +923,6 @@ export async function refreshCharacterState(
           jobs.notModified && cache.jobs
             ? setFresh(cache.jobs.lastBody, jobs.headers, cache.jobs, true)
             : setFresh(jobs.jobs ?? [], jobs.headers, cache.jobs);
-        if (jobs.jobs) indexJobLocationResolvers(cache, jobs.jobs, character.characterId);
       }
       else {
         cache.jobs.status = endpointDataStatus(
@@ -822,9 +965,6 @@ export async function refreshCharacterState(
         }
         else if (orders.orders) {
           cache.marketOrders = setFresh(orders.orders, orders.headers, cache.marketOrders);
-        }
-        if (orders.orders) {
-          indexMarketOrderLocationResolvers(cache, orders.orders, character.characterId);
         }
       }
       else {
@@ -894,7 +1034,6 @@ export async function refreshCharacterState(
               result.headers,
               corpCache.allAssetsRaw,
               `/corporations/${character.corporationId}`,
-              character.characterId,
               true,
             );
             corpCache.allAssetsRaw.status = endpointDataStatus(
@@ -910,7 +1049,6 @@ export async function refreshCharacterState(
               result.headers,
               corpCache.allAssetsRaw,
               `/corporations/${character.corporationId}`,
-              character.characterId,
             );
           }
           corpSummary.assets = corpCache.allAssetsRaw;
@@ -951,7 +1089,6 @@ export async function refreshCharacterState(
             jobs.notModified && corpCache.jobs
               ? setFresh(corpCache.jobs.lastBody, jobs.headers, corpCache.jobs, true)
               : setFresh(jobs.jobs ?? [], jobs.headers, corpCache.jobs);
-          if (jobs.jobs) indexJobLocationResolvers(corpCache, jobs.jobs, character.characterId);
         }
         else {
           corpCache.jobs.status = endpointDataStatus(
@@ -1002,9 +1139,6 @@ export async function refreshCharacterState(
               orders.headers,
               corpCache.marketOrders,
             );
-          }
-          if (orders.orders) {
-            indexMarketOrderLocationResolvers(corpCache, orders.orders, character.characterId);
           }
         }
         else {
@@ -1094,9 +1228,19 @@ export async function getShipAssets(
   includeCorporationAssets: boolean,
   sessionId = "default",
 ): Promise<AssetRecord[]> {
-  const assets = characterIds.flatMap((id) => [
-    ...getCache(characterCaches, id, sessionId).shipAssetsByItemId.values(),
-  ]);
+  const assets = characterIds.flatMap((id) => {
+    const cache = getCache(characterCaches, id, sessionId);
+    const assetsByItemId = new Map(cache.shipAssetsByItemId);
+    const currentShip = getCurrentShipAsset(cache);
+    if (currentShip) {
+      const existing = assetsByItemId.get(currentShip.itemId);
+      assetsByItemId.set(
+        currentShip.itemId,
+        existing ? { ...existing, ...currentShip } : currentShip,
+      );
+    }
+    return [...assetsByItemId.values()];
+  });
   if (!includeCorporationAssets) return assets;
 
   const characters = await getCharacters();
@@ -1221,74 +1365,91 @@ export async function getRootLocationsByItemId(
   );
 }
 
-export async function getLocationResolverCharacterIds(
+/** Selects the character authorized to resolve a location reported by an owned record. */
+async function getStructureResolverCharacter(
+  source: StructureLocationSource,
   characterIds: number[],
-  includeCorporationAssets: boolean,
-  sessionId = "default",
-): Promise<Map<number, number>> {
-  const resolvers = characterIds.flatMap((id) => [
-    ...getCache(characterCaches, id, sessionId).locationResolverCharacterIds.entries(),
-    ...getCache(characterCaches, id, sessionId).endpointLocationResolverCharacterIds.entries(),
-  ]);
-  if (!includeCorporationAssets) return new Map(resolvers);
+) {
+  if (source.ownerType === "character") {
+    return characterIds.includes(source.ownerId) ? getCharacter(source.ownerId) : undefined;
+  }
+
   const characters = await getCharacters();
-  const corporations = new Set(
-    characters
-      .filter(
-        (character) =>
-          characterIds.includes(character.characterId)
-          && character.hasDirectorRole
-          && character.corporationId,
-      )
-      .map((character) => character.corporationId!),
-  );
-  return [
-    ...resolvers,
-    ...[...corporations].flatMap((id) => [
-      ...getCache(corporationCaches, id, sessionId).locationResolverCharacterIds.entries(),
-      ...getCache(corporationCaches, id, sessionId).endpointLocationResolverCharacterIds.entries(),
-    ]),
-  ].reduce(
-    (map, [locationId, characterId]) => {
-      map.set(locationId, characterId);
-      return map;
-    },
-    new Map<number, number>(),
+  return characters.find(
+    (character) =>
+      characterIds.includes(character.characterId)
+      && character.corporationId === source.ownerId
+      && (
+        character.hasDirectorRole
+        || (
+          source.recordType === "order"
+          && (character.hasAccountantRole || character.hasTraderRole)
+        )
+      ),
   );
 }
 
-export async function getJobLocationResolverCharacterIds(
+/** Returns the cache belonging to the record that reported a location. */
+function getSourceOwnerCache(source: StructureLocationSource, sessionId: string) {
+  return source.ownerType === "character"
+    ? getCache(characterCaches, source.ownerId, sessionId)
+    : getCache(corporationCaches, source.ownerId, sessionId);
+}
+
+/** Returns whether the candidate is an assembled or currently piloted ship item. */
+function isKnownShipItemId(locationId: number, source: StructureLocationSource, sessionId: string) {
+  const cache = getSourceOwnerCache(source, sessionId);
+  return (
+    cache.assembledShipsByItemId.has(locationId)
+    || cache.currentShip?.lastBody?.itemId === locationId
+  );
+}
+
+/** Returns whether the source owner's asset cache contains the candidate location as an item. */
+function isAssetItemId(locationId: number, source: StructureLocationSource, sessionId: string) {
+  return getSourceOwnerCache(source, sessionId).assetItemIds.has(locationId);
+}
+
+/**
+ * Resolves a structure location with the token belonging to the character that reported it.
+ * Asset item IDs are never sent to the structure endpoint because they are container IDs,
+ * not public structure IDs.
+ */
+export async function resolveStructureLocationForOwner(
+  locationId: number,
+  source: StructureLocationSource,
   characterIds: number[],
-  includeCorporationAssets: boolean,
   sessionId = "default",
-): Promise<Map<number, number>> {
-  const resolvers = characterIds.flatMap((id) => [
-    ...getCache(characterCaches, id, sessionId).jobLocationResolverCharacterIds.entries(),
-  ]);
-  if (!includeCorporationAssets) return new Map(resolvers);
-  const characters = await getCharacters();
-  const corporations = new Set(
-    characters
-      .filter(
-        (character) =>
-          characterIds.includes(character.characterId)
-          && character.hasDirectorRole
-          && character.corporationId,
-      )
-      .map((character) => character.corporationId!),
+): Promise<AssetLocation | undefined> {
+  const rootLocations = await getRootLocationsByItemId(
+    characterIds,
+    source.ownerType === "corporation",
+    sessionId,
   );
-  return [
-    ...resolvers,
-    ...[...corporations].flatMap((id) => [
-      ...getCache(corporationCaches, id, sessionId).jobLocationResolverCharacterIds.entries(),
-    ]),
-  ].reduce(
-    (map, [locationId, characterId]) => {
-      map.set(locationId, characterId);
-      return map;
-    },
-    new Map<number, number>(),
+  const cachedRoot = rootLocations.get(locationId);
+  if (cachedRoot?.name) return cachedRoot;
+
+  if (
+    isKnownShipItemId(locationId, source, sessionId)
+    || isAssetItemId(locationId, source, sessionId)
+  ) return undefined;
+
+  const character = await getStructureResolverCharacter(source, characterIds);
+  if (!character) return undefined;
+  const result = await fetchStructureMetadataPerCharacter(
+    locationId,
+    await getUsableToken(character),
   );
+  if (!result.data) return undefined;
+  return {
+    locationId,
+    kind: "structure",
+    ...(result.data.type_id !== undefined ? { typeId: result.data.type_id } : {}),
+    name: result.data.name,
+    ...(result.data.system_id !== undefined ? { systemId: result.data.system_id } : {}),
+    ...(result.data.region_id !== undefined ? { regionId: result.data.region_id } : {}),
+    resolved: true,
+  };
 }
 
 export async function getCachedCorporationStructures(
@@ -1548,6 +1709,22 @@ export async function getStateStatus(characterIds: number[], sessionId: string) 
           }
         ),
         body: getCache(characterCaches, characterId, sessionId).skills?.lastBody ?? null,
+      },
+      location: toClientEndpointStatus(
+        getCache(characterCaches, characterId, sessionId).currentLocation,
+      ) ?? {
+        status: "cached" as const,
+        hasBody: false,
+      },
+      ship: toClientEndpointStatus(
+        getCache(characterCaches, characterId, sessionId).currentShip,
+      ) ?? {
+        status: "cached" as const,
+        hasBody: false,
+      },
+      clones: toClientEndpointStatus(getCache(characterCaches, characterId, sessionId).clones) ?? {
+        status: "cached" as const,
+        hasBody: false,
       },
       blueprints: toClientEndpointStatus(
         getCache(characterCaches, characterId, sessionId).blueprintInstances,

@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
 import {
+  getAllAssetsRaw,
   getResolvedAssetIndex,
   getResolvedAssets,
   getBlueprintInstances,
   getRootLocationsByItemId,
-  getLocationResolverCharacterIds,
-  getJobLocationResolverCharacterIds,
+  resolveStructureLocationForOwner,
   getRunningIndustryJobs,
   getMarketOrderStock,
 } from "@/lib/esi/cache";
-import { fetchStructureMetadataPerCharacter, getUsableToken } from "@/lib/esi/client";
-import { getCharacter } from "@/lib/auth/tokensStore";
+import type { StructureLocationSource } from "@/lib/esi/cache";
 import {
   getGroups,
   getMarketGroups,
@@ -40,6 +40,7 @@ import type {
 type RootLocation = {
   locationId: number;
   kind: "station" | "structure" | "anchored";
+  resolved: boolean;
   typeId?: number;
   name?: string;
   systemId?: number;
@@ -63,6 +64,16 @@ type StockBucket = {
   totalVolume: number;
   items: Map<string, StockItem>;
 };
+
+const rawAssetDiagnosticSchema = z
+  .object({
+    rawAsset: z.coerce.number().int().positive().safe().optional(),
+    rawAssetsAtLocation: z.coerce.number().int().positive().safe().optional(),
+  })
+  .refine(
+    (query) => (query.rawAsset === undefined) !== (query.rawAssetsAtLocation === undefined),
+    { message: "Specify exactly one raw asset diagnostic." },
+  );
 
 function isDirectLocation(asset: AssetRecord): asset is AssetRecord & {
   rootLocation: AssetLocation;
@@ -108,17 +119,19 @@ function rootLocationFromAssetLocation(root: AssetLocation): RootLocation {
     ...(root.kind === "solar_system" && root.systemId === undefined
       ? { systemId: root.locationId }
       : {}),
+    resolved: root.resolved,
   };
 }
 
 async function resolveLocation(
   locationId: number,
+  source: StructureLocationSource,
   rootLocationsByItemId: Map<number, AssetLocation>,
-  locationResolverCharacterIds: Map<number, number>,
-  jobLocationResolverCharacterIds: Map<number, number>,
   structureTypeIds: Set<number>,
   stations: Awaited<ReturnType<typeof getStations>>,
   types: Awaited<ReturnType<typeof getTypesByIds>>,
+  characterIds: number[],
+  sessionId: string,
 ): Promise<RootLocation | undefined> {
   const cachedRoot = rootLocationsByItemId.get(locationId);
   if (cachedRoot) return rootLocationFromAssetLocation(cachedRoot);
@@ -131,44 +144,34 @@ async function resolveLocation(
       typeId: station.typeID,
       name: types.get(station.typeID)?.name.en,
       systemId: station.solarSystemID,
+      resolved: true,
     };
   }
 
-  const resolverCharacterId =
-    jobLocationResolverCharacterIds.get(locationId) ?? locationResolverCharacterIds.get(locationId);
-  const character =
-    resolverCharacterId === undefined ? undefined : await getCharacter(resolverCharacterId);
-  if (character) {
-    try {
-      const result = await fetchStructureMetadataPerCharacter(
-        locationId,
-        await getUsableToken(character),
-      );
-      if (result.data) {
-        const resolved: RootLocation = {
-          locationId,
-          kind: "structure",
-          ...(result.data.type_id !== undefined ? { typeId: result.data.type_id } : {}),
-          name: result.data.name,
-          systemId: result.data.system_id,
-          regionId: result.data.region_id,
-        };
-        if (!resolved.typeId || !structureTypeIds.has(resolved.typeId)) {
-          console.warn(
-            "[stock] Could not resolve root location",
-            {
-              locationId,
-              locationType: resolved.kind,
-              typeId: resolved.typeId,
-              typeName: resolved.typeId ? types.get(resolved.typeId)?.name.en : undefined,
-            },
-          );
-        }
-        return resolved;
+  try {
+    const structure = await resolveStructureLocationForOwner(
+      locationId,
+      source,
+      characterIds,
+      sessionId,
+    );
+    if (structure) {
+      const resolved = rootLocationFromAssetLocation(structure);
+      if (!resolved.typeId || !structureTypeIds.has(resolved.typeId)) {
+        console.warn(
+          "[stock] Could not resolve root location",
+          {
+            locationId,
+            locationType: resolved.kind,
+            typeId: resolved.typeId,
+            typeName: resolved.typeId ? types.get(resolved.typeId)?.name.en : undefined,
+          },
+        );
       }
+      return resolved;
     }
-    catch {}
   }
+  catch {}
   console.warn(
     "[stock] Could not resolve root location",
     {
@@ -190,8 +193,12 @@ function addStockContribution(
   systems: Awaited<ReturnType<typeof getSystems>>,
 ) {
   const type = types.get(contribution.typeId);
-  if (!type?.published) return;
-  const categorized = categorizeType(type, language, marketGroups, groups);
+  const categorized = categorizeType(
+    type ?? { name: { en: `Type ${contribution.typeId}` } },
+    language,
+    marketGroups,
+    groups,
+  );
   const category = categorized.category;
   const blueprintType: BlueprintType | undefined =
     category === "blueprint" ? (contribution.blueprintType ?? "bpc") : undefined;
@@ -202,7 +209,7 @@ function addStockContribution(
       name:
         location.kind === "anchored"
           ? "Anchored"
-          : (location.name ?? `Location ${location.locationId}`),
+          : (location.name ?? `Location ID ${location.locationId}`),
       locationType: location.kind,
       typeId: location.typeId,
       systemId: location.systemId,
@@ -212,7 +219,7 @@ function addStockContribution(
           ? undefined
           : systems.get(location.systemId)?.securityStatus,
       regionId: location.regionId,
-      resolved: true,
+      resolved: location.resolved,
       assetCount: 0,
       personalAssetCount: 0,
       corporationAssetCount: 0,
@@ -227,15 +234,15 @@ function addStockContribution(
   const itemKey = `${contribution.typeId}:${category}:${blueprintType ?? "item"}:${contribution.locationId ?? location.locationId}:${contribution.rootLocationId ?? location.locationId}${jobKey}`;
   const item: StockItem = bucket.items.get(itemKey) ?? {
     typeId: contribution.typeId,
-    name: type.name[language] ?? type.name.en,
+    name: type?.name[language] ?? type?.name.en ?? `Type ${contribution.typeId}`,
     quantity: 0,
     locationId: contribution.locationId ?? location.locationId,
     rootLocationId: contribution.rootLocationId ?? location.locationId,
     sourceLocationName: location.name,
     isPackaged: contribution.isPackaged,
-    assembledVolume: type.volume ?? 0,
-    packagedVolume: type.packagedVolume,
-    techLevel: type.techLevel,
+    assembledVolume: type?.volume ?? 0,
+    packagedVolume: type?.packagedVolume,
+    techLevel: type?.techLevel,
     ...categorized,
     category,
     ...(blueprintType ? { blueprintType } : {}),
@@ -272,7 +279,7 @@ function addStockContribution(
   bucket.totalCount += contribution.quantity;
   bucket.totalVolume
     += contribution.quantity
-    * (contribution.isPackaged ? (type.packagedVolume ?? type.volume ?? 0) : (type.volume ?? 0));
+    * (contribution.isPackaged ? (type?.packagedVolume ?? type?.volume ?? 0) : (type?.volume ?? 0));
   buckets.set(location.locationId, bucket);
 }
 
@@ -401,6 +408,32 @@ export async function GET(request: NextRequest) {
   if (!session) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   const characterIds = await getSessionCharacterIds(session);
   const url = new URL(request.url);
+  if (url.searchParams.has("rawAsset") || url.searchParams.has("rawAssetsAtLocation")) {
+    const parsedDiagnostic = rawAssetDiagnosticSchema.safeParse({
+      rawAsset: url.searchParams.get("rawAsset") ?? undefined,
+      rawAssetsAtLocation: url.searchParams.get("rawAssetsAtLocation") ?? undefined,
+    });
+    if (!parsedDiagnostic.success) {
+      return NextResponse.json({ error: "Invalid raw asset diagnostic query." }, { status: 400 });
+    }
+    const rawAssets = await getAllAssetsRaw(characterIds, true, session.sessionId);
+    if (parsedDiagnostic.data.rawAsset !== undefined) {
+      const itemId = parsedDiagnostic.data.rawAsset;
+      return NextResponse.json({
+        query: "rawAsset",
+        itemId,
+        asset: rawAssets.find((asset) => asset.itemId === itemId) ?? null,
+      });
+    }
+    const locationId = parsedDiagnostic.data.rawAssetsAtLocation!;
+    const assetsAtLocation = rawAssets.filter((asset) => asset.locationId === locationId);
+    return NextResponse.json({
+      query: "rawAssetsAtLocation",
+      locationId,
+      count: assetsAtLocation.length,
+      assets: assetsAtLocation,
+    });
+  }
   const requestedLanguage = url.searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
   const marketStock = await getMarketOrderStock(
@@ -424,8 +457,6 @@ export async function GET(request: NextRequest) {
     stations,
     systems,
     rootLocationsByItemId,
-    locationResolverCharacterIds,
-    jobLocationResolverCharacterIds,
   ] = await Promise.all([
     getResolvedAssets(characterIds, true, session.sessionId),
     getRunningIndustryJobs(characterIds, true, session.sessionId),
@@ -437,8 +468,6 @@ export async function GET(request: NextRequest) {
     getStations(),
     getSystems(),
     getRootLocationsByItemId(characterIds, true, session.sessionId),
-    getLocationResolverCharacterIds(characterIds, true, session.sessionId),
-    getJobLocationResolverCharacterIds(characterIds, true, session.sessionId),
   ]);
   markPhase("data");
   const types = await getTypesByIds([
@@ -450,29 +479,61 @@ export async function GET(request: NextRequest) {
     ]),
   ]);
   markPhase("types");
-  const locationIds = [
-    ...new Set([
-      ...jobs.flatMap((job) => [job.blueprintLocationId, job.locationId, job.outputLocationId]),
-      ...blueprintInstances.map((blueprint) => blueprint.locationId),
-      ...(marketStock ?? [])
-        .map((item) => item.sourceLocationId)
-        .filter((locationId): locationId is number => locationId !== undefined),
-    ]),
-  ];
+  const locationSources = new Map<number, StructureLocationSource>();
+  for (const job of jobs) {
+    const source = {
+      ownerType: job.ownerType,
+      ownerId: job.ownerId,
+      recordType: "job",
+    } as const;
+    for (const locationId of [job.blueprintLocationId, job.locationId, job.outputLocationId]) {
+      if (!locationSources.has(locationId)) locationSources.set(locationId, source);
+    }
+  }
+  for (const blueprint of blueprintInstances) {
+    if (locationSources.has(blueprint.locationId)) continue;
+    locationSources.set(
+      blueprint.locationId,
+      {
+        ownerType: blueprint.ownerType,
+        ownerId: blueprint.ownerId,
+        recordType: "blueprint",
+      },
+    );
+  }
+  for (const order of marketStock ?? []) {
+    if (
+      order.sourceLocationId === undefined
+      || order.ownerType === undefined
+      || order.ownerId === undefined
+      || locationSources.has(order.sourceLocationId)
+    ) {
+      continue;
+    }
+    locationSources.set(
+      order.sourceLocationId,
+      {
+        ownerType: order.ownerType,
+        ownerId: order.ownerId,
+        recordType: "order",
+      },
+    );
+  }
   const jobLocations = new Map(
     await Promise.all(
-      locationIds.map(async (locationId) => {
+      [...locationSources.entries()].map(async ([locationId, source]) => {
         const cachedRoot = rootLocationsByItemId.get(locationId);
         const location = cachedRoot
           ? rootLocationFromAssetLocation(cachedRoot)
           : await resolveLocation(
               locationId,
+              source,
               rootLocationsByItemId,
-              locationResolverCharacterIds,
-              jobLocationResolverCharacterIds,
               structureTypeIds,
               stations,
               types,
+              characterIds,
+              session.sessionId,
             );
         return [locationId, location] as const;
       }),
@@ -581,6 +642,7 @@ export async function GET(request: NextRequest) {
       ?? jobLocations.get(job.locationId) ?? {
         locationId: job.blueprintLocationId,
         kind: "anchored" as const,
+        resolved: false,
       };
     if (blueprintLocation.typeId !== undefined && shipTypeIds.has(blueprintLocation.typeId)) {
       continue;
@@ -595,6 +657,7 @@ export async function GET(request: NextRequest) {
         ?? jobLocations.get(job.locationId) ?? {
           locationId: job.outputLocationId,
           kind: "anchored" as const,
+          resolved: false,
         };
       addStockContribution(
         buckets,

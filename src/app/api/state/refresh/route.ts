@@ -14,6 +14,8 @@ function firstRefreshError(status: Awaited<ReturnType<typeof getStateStatus>>) {
     const endpoints = [
       character.assets,
       character.skills,
+      character.location,
+      character.ship,
       character.blueprints,
       character.jobs,
       character.orders,
