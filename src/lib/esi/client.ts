@@ -35,6 +35,36 @@ const structureMetadataCache = new Map<
 const structureMetadataCacheTtlMs = 60 * 60 * 1000;
 let esiRateLimitedUntil = 0;
 
+type EsiRateLimitHeaders = {
+  rateLimitGroup?: string;
+  rateLimitLimit?: string;
+  rateLimitRemaining?: string;
+  rateLimitUsed?: string;
+  errorLimitRemaining?: string;
+  errorLimitReset?: string;
+};
+
+function getEsiRateLimitHeaders(headers: Headers): EsiRateLimitHeaders {
+  return {
+    ...(headers.get("x-ratelimit-group")
+      ? { rateLimitGroup: headers.get("x-ratelimit-group")! }
+      : {}),
+    ...(headers.get("x-ratelimit-limit")
+      ? { rateLimitLimit: headers.get("x-ratelimit-limit")! }
+      : {}),
+    ...(headers.get("x-ratelimit-remaining")
+      ? { rateLimitRemaining: headers.get("x-ratelimit-remaining")! }
+      : {}),
+    ...(headers.get("x-ratelimit-used") ? { rateLimitUsed: headers.get("x-ratelimit-used")! } : {}),
+    ...(headers.get("x-esi-error-limit-remain")
+      ? { errorLimitRemaining: headers.get("x-esi-error-limit-remain")! }
+      : {}),
+    ...(headers.get("x-esi-error-limit-reset")
+      ? { errorLimitReset: headers.get("x-esi-error-limit-reset")! }
+      : {}),
+  };
+}
+
 export type EsiAssetLocation = {
   item_id: number;
   name: string;
@@ -212,10 +242,15 @@ async function requestEsi<T>(
       status: result.status,
       outcome: "success",
       durationMs: Date.now() - startedAt,
+      ...getEsiRateLimitHeaders(result.headers),
     });
     return result;
   }
   catch (error) {
+    const esiHeaders =
+      typeof (error as { esiRateLimitHeaders?: unknown }).esiRateLimitHeaders === "object"
+        ? (error as { esiRateLimitHeaders: EsiRateLimitHeaders }).esiRateLimitHeaders
+        : {};
     logEsiRequest({
       requestedAt: new Date(startedAt).toISOString(),
       method: init?.method ?? "GET",
@@ -229,6 +264,7 @@ async function requestEsi<T>(
           : null,
       outcome: "error",
       durationMs: Date.now() - startedAt,
+      ...esiHeaders,
       error: error instanceof Error ? error.message.slice(0, 240) : "ESI request failed",
     });
     throw error;
@@ -328,6 +364,8 @@ async function requestEsiAttempt<T>(
       }
     }
     const error = new Error(message);
+    (error as Error & { esiRateLimitHeaders?: EsiRateLimitHeaders }).esiRateLimitHeaders =
+      getEsiRateLimitHeaders(response.headers);
     (error as Error & { status?: number; retryAfter?: string }).status = response.status;
     (error as Error & { status?: number; retryAfter?: string }).retryAfter =
       retryAfter ?? (response.status === 420 ? errorLimitReset : undefined) ?? undefined;

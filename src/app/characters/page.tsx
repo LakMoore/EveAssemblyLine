@@ -1076,7 +1076,8 @@ export default function CharactersPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Log out all characters?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will detach every character from this session.  You will need to sign in again or work without ESI support.
+              This will detach every character from this session. You will need to sign in again or
+              work without ESI support.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

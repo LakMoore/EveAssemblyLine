@@ -15,6 +15,12 @@ export type EsiRequestLog = {
   outcome: "success" | "error";
   durationMs: number;
   error?: string;
+  rateLimitGroup?: string;
+  rateLimitLimit?: string;
+  rateLimitRemaining?: string;
+  rateLimitUsed?: string;
+  errorLimitRemaining?: string;
+  errorLimitReset?: string;
   characterName?: string;
   corporationId?: number;
   corporationName?: string;

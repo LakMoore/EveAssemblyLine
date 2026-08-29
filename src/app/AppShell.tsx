@@ -63,6 +63,7 @@ import styles from "./page.module.css";
 import { PlanStockItem } from "@/lib/planning/types";
 import { Avatar, AvatarBadge, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ThemeSelect } from "@/components/ThemeSelect";
+import { toast } from "@/components/ui/toast";
 
 const languageStorageKey = "assembly-line-language";
 const sidebarStorageKey = "assembly-line-sidebar-collapsed";
@@ -99,6 +100,25 @@ type EsiStockResponse = {
 type StateEndpoint = keyof Pick<ClientCharacterStatus, "assets" | "skills" | "jobs" | "orders">;
 const stateEndpoints: StateEndpoint[] = ["assets", "skills", "jobs", "orders"];
 const corporationStateEndpoints: Array<"assets" | "jobs" | "orders"> = ["assets", "jobs", "orders"];
+
+function showRefreshError(details: string) {
+  toast.add({
+    description: details,
+    type: "error",
+    timeout: 0,
+    actionProps: {
+      children: "View details",
+      onClick: () => window.location.assign("/characters"),
+    },
+  });
+}
+
+function showRefreshSuccess() {
+  toast.add({
+    description: "Refresh completed successfully.",
+    type: "success",
+  });
+}
 
 function hasExpiredEndpoint(statuses: ClientCharacterStatus[]) {
   return statuses.some((character) => {
@@ -328,8 +348,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
         success?: boolean;
         refreshedAt?: string;
         rateLimitedUntil?: string | null;
+        error?: string;
+        errors?: string[];
       };
-      if (!response.ok || data.success !== true) return false;
+      if (!response.ok || data.success !== true) {
+        const details =
+          data.errors?.[0]
+          ?? data.error
+          ?? (data.rateLimitedUntil
+            ? `Refresh is rate limited until ${new Date(data.rateLimitedUntil).toLocaleString()}.`
+            : "Could not refresh ESI data.");
+        showRefreshError(details);
+        return false;
+      }
       refreshSucceeded = true;
       const refreshedAt = data.refreshedAt ?? new Date().toISOString();
       await saveLastRefreshAt(refreshedAt);
@@ -385,9 +416,11 @@ export default function AppShell({ children }: { children: ReactNode }) {
           },
         ),
       );
+      showRefreshSuccess();
       return true;
     }
-    catch {
+    catch (error) {
+      showRefreshError(error instanceof Error ? error.message : "Could not refresh ESI data.");
       return false;
     }
     finally {
