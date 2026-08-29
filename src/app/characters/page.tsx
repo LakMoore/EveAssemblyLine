@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { GitMerge, LogOut, Plus, RotateCcw, Trash2, X } from "lucide-react";
-import { languageStorageKey } from "../AppShell";
+import { languageStorageKey, useAppRefreshStatus } from "../AppShell";
 import DialogBody from "@/components/DialogBody";
 import { replaceEsiStock } from "@/lib/planning/stockStore";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
@@ -207,7 +207,7 @@ export default function CharactersPage() {
   const [statuses, setStatuses] = useState<CharacterStatus[]>([]);
   const [, setFreshnessTick] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const isRefreshing = useAppRefreshStatus();
   const [removingId, setRemovingId] = useState<number | null>(null);
   const [updatingDeploymentId, setUpdatingDeploymentId] = useState<number | null>(null);
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
@@ -244,16 +244,12 @@ export default function CharactersPage() {
       .catch(() => setError("Could not reach the character service."))
       .finally(() => setIsLoading(false));
     const freshnessTimer = window.setInterval(() => setFreshnessTick((tick) => tick + 1), 5_000);
-    const handleRefreshStarted = () => setIsRefreshing(true);
     const handleRefreshFinished = () => {
-      setIsRefreshing(false);
       void loadStatuses(true);
     };
-    window.addEventListener("assembly-line-esi-refresh-started", handleRefreshStarted);
     window.addEventListener("assembly-line-esi-refresh-finished", handleRefreshFinished);
     return () => {
       window.clearInterval(freshnessTimer);
-      window.removeEventListener("assembly-line-esi-refresh-started", handleRefreshStarted);
       window.removeEventListener("assembly-line-esi-refresh-finished", handleRefreshFinished);
     };
   }, []);
