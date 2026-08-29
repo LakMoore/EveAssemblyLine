@@ -73,7 +73,8 @@ export async function getCharacters(): Promise<CharacterTokenRecord[]> {
 export async function saveCharacters(records: CharacterTokenRecord[]) {
   await (await initStorage()).setItem("characters", records);
 }
-function normalizeSessions(
+
+export function normalizeSessions(
   raw: Array<SessionRecord & { accountId?: string; characterIds?: number[] }> | undefined,
 ): SessionRecord[] {
   return (raw ?? []).map((session) => ({
@@ -390,6 +391,7 @@ export async function saveCharacterTokens(
 export async function getSession(sessionId: string) {
   return (await getSessions()).find((session) => session.sessionId === sessionId) ?? null;
 }
+
 export async function deleteSession(sessionId: string) {
   const storage = await initStorage();
   await storage.runTransaction(async (transaction) => {

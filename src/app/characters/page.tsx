@@ -10,6 +10,16 @@ import { replaceEsiStock } from "@/lib/planning/stockStore";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageServer";
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
@@ -209,6 +219,7 @@ export default function CharactersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const isRefreshing = useAppRefreshStatus();
   const [removingId, setRemovingId] = useState<number | null>(null);
+  const [characterPendingRemoval, setCharacterPendingRemoval] = useState<Character | null>(null);
   const [updatingDeploymentId, setUpdatingDeploymentId] = useState<number | null>(null);
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
   const [selectedCorporationId, setSelectedCorporationId] = useState<number | null>(null);
@@ -216,6 +227,7 @@ export default function CharactersPage() {
   const [mergeDetails, setMergeDetails] = useState<MergeDetails | null>(null);
   const [isMerging, setIsMerging] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false);
 
   async function loadCharacters() {
     const [loaded, corpStatus] = await Promise.all([
@@ -310,7 +322,6 @@ export default function CharactersPage() {
   }, [selectedCharacter, selectedCorporationId]);
 
   async function removeCharacter(character: Character) {
-    if (!window.confirm(`Remove ${character.characterName} from this session?`)) return;
     setRemovingId(character.characterId);
     setError(null);
     try {
@@ -360,6 +371,13 @@ export default function CharactersPage() {
       );
       setIsLoggingOut(false);
     }
+  }
+
+  async function confirmCharacterRemoval() {
+    if (!characterPendingRemoval) return;
+    const character = characterPendingRemoval;
+    setCharacterPendingRemoval(null);
+    await removeCharacter(character);
   }
 
   async function updateDeploymentStatus(character: Character, onDeployment: boolean) {
@@ -466,7 +484,7 @@ export default function CharactersPage() {
               }
               aria-label="Logout all"
               onClick={() => {
-                void logoutAll();
+                setIsLogoutDialogOpen(true);
               }}
             >
               <LogOut aria-hidden="true" />
@@ -600,7 +618,7 @@ export default function CharactersPage() {
                           type="button"
                           className={`actionButton ${styles.characterRemove}`}
                           onClick={() => {
-                            void removeCharacter(character);
+                            setCharacterPendingRemoval(character);
                           }}
                           disabled={removingId === character.characterId}
                           aria-label={
@@ -1031,6 +1049,51 @@ export default function CharactersPage() {
             </Dialog>
           );
         })()}
+      <AlertDialog
+        open={characterPendingRemoval !== null}
+        onOpenChange={(open) => {
+          if (!open && !removingId) setCharacterPendingRemoval(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove character?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Remove {characterPendingRemoval?.characterName} from this session? Their cached data
+              will no longer be available here.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removingId !== null}>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => void confirmCharacterRemoval()}>
+              Remove character
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={isLogoutDialogOpen} onOpenChange={setIsLogoutDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Log out all characters?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will detach every character from this session.  You will need to sign in again or work without ESI support.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isLoggingOut}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={isLoggingOut}
+              onClick={() => {
+                setIsLogoutDialogOpen(false);
+                void logoutAll();
+              }}
+            >
+              {isLoggingOut ? "Logging out..." : "Logout all"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
