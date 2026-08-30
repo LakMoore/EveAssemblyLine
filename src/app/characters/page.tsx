@@ -607,7 +607,7 @@ export default function CharactersPage() {
                         />
                       </label>
                       <span className={styles.characterActions}>
-                        {hasAuthorizationError && (
+                        {hasAuthorizationError && !isRefreshing && (
                           <button
                             type="button"
                             className={`actionButton ${styles.characterReauthorize}`}
