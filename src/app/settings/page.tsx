@@ -2,11 +2,28 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import PasteListDialog from "@/components/PasteListDialog";
+import StationSearch, { type StationSearchResult } from "@/components/StationSearch";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@/components/ui/item";
 import { Switch } from "@/components/ui/switch";
 import { ThemeSelect } from "@/components/ThemeSelect";
 import type { TypeMetadata } from "@/lib/reference/types";
@@ -15,10 +32,11 @@ import TypeSearch, { type TypeSearchResult } from "@/components/TypeSearch";
 import { useAppLanguage } from "../AppShell";
 import { toast } from "@/components/ui/toast";
 import {
-  defaultSettings,
+  readPlannerSettings,
   settingsStorageKey,
   type PlannerSettings,
 } from "@/lib/planning/preferences";
+import type { ConfiguredMarketStation } from "@/lib/market/stations";
 import { loadBuildBlacklist, saveBuildBlacklist } from "@/lib/planning/plannerPreferencesStore";
 import styles from "../page.module.css";
 import { ClipboardPaste, Copy, Trash2 } from "lucide-react";
@@ -59,42 +77,12 @@ function BuildBlacklistSummary({ items }: { items: TypeMetadata[] }) {
   );
 }
 
-function readSettings(): PlannerSettings {
-  if (typeof window === "undefined") return defaultSettings;
-  try {
-    const stored = window.localStorage.getItem(settingsStorageKey);
-    if (!stored) return defaultSettings;
-    const raw = JSON.parse(stored) as Record<string, unknown>;
-    const parsed = raw as Partial<PlannerSettings>;
-    const rawBlacklist = raw.buildBlacklist;
-    const buildBlacklist = Array.isArray(rawBlacklist)
-      ? rawBlacklist.flatMap((item) => {
-          if (typeof item === "number") {
-            return [{ typeId: item, name: `Type ${item}` }];
-          }
-          if (
-            item
-            && typeof item === "object"
-            && Number.isInteger(item.typeId)
-            && typeof item.name === "string"
-          ) {
-            return [item as TypeMetadata];
-          }
-          return [];
-        })
-      : [];
-    return { ...defaultSettings, ...parsed, buildBlacklist };
-  }
-  catch {
-    return defaultSettings;
-  }
-}
-
 export default function SettingsPage() {
   const { language } = useAppLanguage();
-  const [settings, setSettings] = useState<PlannerSettings>(readSettings);
+  const [settings, setSettings] = useState<PlannerSettings>(readPlannerSettings);
   const [saved, setSaved] = useState(false);
   const [isBlacklistOpen, setIsBlacklistOpen] = useState(false);
+  const [isMarketStationsOpen, setIsMarketStationsOpen] = useState(false);
 
   useEffect(() => {
     void loadBuildBlacklist().then((buildBlacklist) => {
@@ -128,7 +116,7 @@ export default function SettingsPage() {
           <p className="eyebrow">CONFIGURATION / PLANNING</p>
           <h1>Settings</h1>
           <p className={styles.subtitle}>
-            Control which assets and in-flight work are considered by the planner.
+            Control planning inputs, market stations, and sale calculations.
           </p>
         </div>
       </div>
@@ -159,6 +147,48 @@ export default function SettingsPage() {
             checked={settings.includeCorporationAssets}
             onCheckedChange={(checked) =>
               setSettings({ ...settings, includeCorporationAssets: checked })
+            }
+          />
+        </Field>
+        <Field className={styles.rule} orientation="horizontal">
+          <FieldContent>
+            <FieldLabel>Signals market locations</FieldLabel>
+            <FieldDescription>
+              Check stock held at these exact stations or known structures, not their whole systems
+            </FieldDescription>
+          </FieldContent>
+          <div className="flex min-w-0 max-w-xl flex-wrap items-center justify-end gap-2">
+            <span
+              className="max-w-sm truncate text-right text-sm text-muted-foreground"
+              title={settings.marketStations.map((station) => station.name).join(", ")}
+            >
+              {settings.marketStations.length === 0
+                ? "No locations selected"
+                : `${settings.marketStations.length} location${settings.marketStations.length === 1 ? "" : "s"}`}
+            </span>
+            <Button type="button" variant="outline" onClick={() => setIsMarketStationsOpen(true)}>
+              Edit
+            </Button>
+          </div>
+        </Field>
+        <Field className={styles.rule} orientation="horizontal">
+          <FieldContent>
+            <FieldLabel htmlFor="market-sales-tax">Market sales tax</FieldLabel>
+            <FieldDescription>Percentage deducted from projected Signals proceeds</FieldDescription>
+          </FieldContent>
+          <Input
+            id="market-sales-tax"
+            className={styles.ruleNumber}
+            type="number"
+            min="0"
+            max="100"
+            step="0.1"
+            value={settings.marketSalesTaxPercent}
+            onChange={(event) =>
+              setSettings({
+                ...settings,
+                marketSalesTaxPercent: boundedNumber(event.target.value, 100),
+              })
             }
           />
         </Field>
@@ -314,7 +344,109 @@ export default function SettingsPage() {
           }}
         />
       )}
+      {isMarketStationsOpen && (
+        <MarketStationsDialog
+          language={language}
+          stations={settings.marketStations}
+          onCancel={() => setIsMarketStationsOpen(false)}
+          onSave={(marketStations) => {
+            const nextSettings = { ...settings, marketStations };
+            setSettings(nextSettings);
+            window.localStorage.setItem(settingsStorageKey, JSON.stringify(nextSettings));
+            setIsMarketStationsOpen(false);
+          }}
+        />
+      )}
     </>
+  );
+}
+
+function MarketStationsDialog({
+  language,
+  stations,
+  onCancel,
+  onSave,
+}: {
+  language: SdeLanguage;
+  stations: ConfiguredMarketStation[];
+  onCancel: () => void;
+  onSave: (stations: ConfiguredMarketStation[]) => void;
+}) {
+  const [draft, setDraft] = useState(stations);
+  const [error, setError] = useState("");
+
+  function addStation(station: StationSearchResult) {
+    if (draft.some((entry) => entry.stationId === station.stationId)) {
+      setError("That market location is already selected.");
+      return;
+    }
+    if (draft.length >= 20) {
+      setError("Signals supports up to 20 market locations.");
+      return;
+    }
+    setError("");
+    setDraft((current) => [...current, { stationId: station.stationId, name: station.name }]);
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Signals market locations</DialogTitle>
+          <DialogDescription>
+            Search NPC stations and structures already resolved from your assets. Stock elsewhere in
+            the same system is not included.
+          </DialogDescription>
+        </DialogHeader>
+        <Field>
+          <FieldLabel htmlFor="signals-station-search">Search market locations</FieldLabel>
+          <StationSearch
+            language={language}
+            excludedStationIds={draft.map((station) => station.stationId)}
+            onError={setError}
+            onSelect={addStation}
+          />
+        </Field>
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        <ItemGroup className="max-h-80 overflow-y-auto">
+          {draft.map((station) => (
+            <Item key={station.stationId} variant="outline" size="sm">
+              <ItemContent>
+                <ItemTitle>{station.name}</ItemTitle>
+                <ItemDescription>Location ID {station.stationId}</ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="icon-sm"
+                  aria-label={`Remove ${station.name}`}
+                  onClick={() =>
+                    setDraft((current) =>
+                      current.filter((entry) => entry.stationId !== station.stationId),
+                    )
+                  }
+                >
+                  <Trash2 aria-hidden="true" />
+                </Button>
+              </ItemActions>
+            </Item>
+          ))}
+        </ItemGroup>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button type="button" onClick={() => onSave(draft)}>
+            Save locations
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

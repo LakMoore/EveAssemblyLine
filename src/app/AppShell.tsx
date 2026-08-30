@@ -45,6 +45,7 @@ import {
   Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
+  TrendingUp,
   Rocket,
   Settings2,
   UserRoundPlus,
@@ -72,6 +73,7 @@ type ActivePage =
   | "welcome"
   | "compress"
   | "appraise"
+  | "signals"
   | "stock"
   | "jobs"
   | "ships"
@@ -202,21 +204,23 @@ export default function AppShell({ children }: { children: ReactNode }) {
           ? "compress"
           : pathname === "/appraise"
             ? "appraise"
-            : pathname === "/stock"
-              ? "stock"
-              : pathname === "/jobs"
-                ? "jobs"
-                : pathname === "/ships"
-                  ? "ships"
-                  : pathname === "/structures"
-                    ? "structures"
-                    : pathname === "/settings"
-                      ? "settings"
-                      : pathname === "/imagechecker"
-                        ? "imagechecker"
-                        : pathname === "/characters"
-                          ? "characters"
-                          : "planner";
+            : pathname === "/signals"
+              ? "signals"
+              : pathname === "/stock"
+                ? "stock"
+                : pathname === "/jobs"
+                  ? "jobs"
+                  : pathname === "/ships"
+                    ? "ships"
+                    : pathname === "/structures"
+                      ? "structures"
+                      : pathname === "/settings"
+                        ? "settings"
+                        : pathname === "/imagechecker"
+                          ? "imagechecker"
+                          : pathname === "/characters"
+                            ? "characters"
+                            : "planner";
   const hasExpiredState =
     authenticated
     && characters.length > 0
@@ -738,6 +742,16 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <BadgeDollarSign size={17} strokeWidth={1.8} aria-hidden="true" />
                 </span>
                 <span className={styles.navText}>Appraise</span>
+              </Link>
+              <Link
+                className={`${styles.navItem} ${activePage === "signals" ? styles.navActive : ""}`}
+                href="/signals"
+                onClick={closeSidebarOnNavigation}
+              >
+                <span>
+                  <TrendingUp size={17} strokeWidth={1.8} aria-hidden="true" />
+                </span>
+                <span className={styles.navText}>Signals</span>
               </Link>
               <div className={styles.sectionLabel}>INFORMATION</div>
               <Link

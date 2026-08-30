@@ -14,6 +14,7 @@ export const refreshDependentEndpoints = {
   welcome: [],
   planner: ["state/stock", "facilities"],
   appraise: [],
+  signals: ["state/stock"],
   compress: ["state/stock", "state/status", "facilities", "compress/options"],
   stock: ["state/stock"],
   jobs: ["state/jobs"],
