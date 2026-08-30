@@ -224,7 +224,7 @@ function endpointStatus<T>(
     return {
       status: "error",
       error: errorMessage,
-      ...((error as { reauthorizeRequired?: boolean }).reauthorizeRequired
+      ...((error as { reauthorizeRequired?: boolean }).reauthorizeRequired || (status && status >= 400 && status < 500)
         ? { reauthorizeRequired: true }
         : {}),
     };
