@@ -211,28 +211,9 @@ function personalEndpointStatuses(status: CharacterStatus) {
   ];
 }
 
-async function refreshStockAfterCharacterRemoval() {
+async function reloadStockAfterCharacterRemoval() {
   const savedLanguage = window.localStorage.getItem(languageStorageKey);
   const language: SdeLanguage = isSdeLanguage(savedLanguage) ? savedLanguage : "en";
-  const response = await fetch(
-    "/api/state/refresh",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    },
-  );
-
-  if (response.status === 401) {
-    clearClientStockCache(language);
-    await replaceEsiStock([]);
-    window.dispatchEvent(
-      new CustomEvent("assembly-line-esi-refreshed", { detail: { stockLocations: [] } }),
-    );
-    return;
-  }
-  if (!response.ok) throw new Error("Could not refresh stock.");
-
   const stockData = await loadClientStock(language, true);
   const stockLocations = groupClientStockByLocation(stockData);
   await replaceEsiStock(
@@ -381,7 +362,7 @@ export default function CharactersPage() {
       );
       invalidateClientCharacterData();
       try {
-        await refreshStockAfterCharacterRemoval();
+        await reloadStockAfterCharacterRemoval();
       }
       catch {
         setError("Character removed, but stock could not be refreshed.");

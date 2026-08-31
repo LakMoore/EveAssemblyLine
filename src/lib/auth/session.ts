@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { NextResponse } from "next/server";
-import type { SessionRecord } from "./model";
+import type { CharacterTokenRecord, SessionRecord } from "./model";
 import { getCollection, getSession, saveSession } from "./tokensStore";
 
 export const sessionCookieName = "assembly_line_session";
@@ -26,8 +26,16 @@ export async function createSession(collectionId?: string): Promise<SessionRecor
   return record;
 }
 
-export async function getSessionCharacterIds(session: SessionRecord) {
+export async function getSessionCharacterIds(
+  session: SessionRecord,
+  characters?: readonly CharacterTokenRecord[],
+) {
   if (!session.collectionId) return [];
+  if (characters) {
+    return characters
+      .filter((character) => character.collectionId === session.collectionId)
+      .map((character) => character.characterId);
+  }
   return (await getCollection(session.collectionId))?.characterIds ?? [];
 }
 

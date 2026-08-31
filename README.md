@@ -71,6 +71,8 @@ await setEsiResponse(path, responseData, response.headers.get("cache-control"), 
 
 `InMemoryCacheProvider` is process-local and useful for development and tests. `UpstashRedisCacheProvider` stores JSON values in Redis and translates positive TTL values from milliseconds to Redis seconds.
 
+In development, each refresh GET logs one `[ESI refresh profile]` record per character or corporation request. Each record includes the full request duration, outer request phases, and the named character or corporation cache-section durations in milliseconds; profiling is disabled outside development.
+
 SDE cache entries do not use a time-based TTL. Every SDE key is namespaced by the build number reported in `sde/processed/_sde.json`, for example `sde:123456:type:34`. Entries remain usable until the SDE build changes; a new build automatically uses a new namespace and cannot read the previous build's entries.
 
 To reclaim old Redis namespaces, run the cleanup command after the new SDE build is available:

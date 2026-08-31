@@ -17,6 +17,7 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import {
   defaultSettings,
   readPlannerSettings,
@@ -36,6 +37,7 @@ type SignalItem = {
   stationName: string;
   typeId: number;
   name: string;
+  canBeManufactured: boolean;
   quantity: number;
   averagePrice: number;
   averagePriceSource: "regional-history";
@@ -78,6 +80,7 @@ export default function SignalsPage() {
   const [appliedThresholdIsk, setAppliedThresholdIsk] = useState(
     defaultSettings.marketSignalThresholdIsk,
   );
+  const [manufacturableOnly, setManufacturableOnly] = useState(false);
   const thresholdIskRef = useRef(appliedThresholdIsk);
 
   const loadSignals = useCallback(
@@ -176,6 +179,15 @@ export default function SignalsPage() {
               onChange={(event) => setThresholdInput(event.target.value)}
             />
           </Field>
+          <Field orientation="horizontal" className="items-center gap-2 pb-2">
+            <FieldLabel htmlFor="signals-manufacturable-only">Manufacturable only</FieldLabel>
+            <Switch
+              id="signals-manufacturable-only"
+              checked={manufacturableOnly}
+              onCheckedChange={setManufacturableOnly}
+              aria-label="Show only manufacturable items"
+            />
+          </Field>
           <Button type="submit" disabled={isLoading}>
             Apply
           </Button>
@@ -231,7 +243,11 @@ export default function SignalsPage() {
         </Empty>
       ) : (
         stations.map((station) => {
-          const stationItems = items.filter((item) => item.stationId === station.stationId);
+          const stationItems = items.filter(
+            (item) =>
+              item.stationId === station.stationId
+              && (!manufacturableOnly || item.canBeManufactured),
+          );
           return (
             <section className={styles.panel} key={station.stationId}>
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -248,7 +264,9 @@ export default function SignalsPage() {
                   <EmptyHeader>
                     <EmptyTitle>No sale signals</EmptyTitle>
                     <EmptyDescription>
-                      No cached stock here currently meets the price threshold.
+                      {manufacturableOnly
+                        ? "No cached stock here currently has a blueprint and recipe that meet the price threshold."
+                        : "No cached stock here currently meets the price threshold."}
                     </EmptyDescription>
                   </EmptyHeader>
                 </Empty>

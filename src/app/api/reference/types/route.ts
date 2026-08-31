@@ -1,44 +1,54 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { getGroups, getMarketGroups, getTypes } from "@/cache/services/sdeCache";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { categorizeType, type ItemCategory } from "@/lib/reference/category";
 
 const resultLimit = 12;
+const typeMetadataRequestSchema = z.object({
+  language: z.string().optional(),
+  typeIds: z.array(z.number().int().safe().positive()),
+});
+const itemNameRequestSchema = z.object({
+  language: z.string().optional(),
+  items: z.array(
+    z.object({
+      name: z.string().optional(),
+      quantity: z.number().optional(),
+    }),
+  ),
+});
+
+async function resolveTypeMetadata(typeIds: number[], language: SdeLanguage) {
+  const [typeById, marketGroupById, groupById] = await Promise.all([
+    getTypes(),
+    getMarketGroups(),
+    getGroups(),
+  ]);
+  return typeIds.flatMap((typeId) => {
+    const item = typeById.get(typeId);
+    if (!item || !item.published) return [];
+    return [
+      {
+        typeId: item._key,
+        techLevel: item.techLevel,
+        assembledVolume: item.volume ?? 0,
+        packagedVolume: item.packagedVolume,
+        ...categorizeType(item, language, marketGroupById, groupById),
+        name: item.name[language] ?? item.name.en,
+      },
+    ];
+  });
+}
 
 export async function GET(request: Request) {
   const searchParams = new URL(request.url).searchParams;
   const query = searchParams.get("query")?.trim() ?? "";
-  const typeIdValues = searchParams.getAll("typeId");
-  const typeIds = typeIdValues.flatMap((value) => value.split(",")).map((value) => value.trim());
   const requestedLanguage = searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
 
   try {
     const typeById = await getTypes();
-    if (typeIdValues.length > 0) {
-      const [marketGroupById, groupById] = await Promise.all([getMarketGroups(), getGroups()]);
-      const requestedTypeIds = typeIds
-        .filter((value) => /^\d+$/.test(value))
-        .map(Number)
-        .filter((typeId) => Number.isSafeInteger(typeId));
-      const items = requestedTypeIds.flatMap((typeId) => {
-        const item = typeById.get(typeId);
-        if (!item || !item.published) return [];
-        return [
-          {
-            typeId: item._key,
-            techLevel: item.techLevel,
-            assembledVolume: item.volume ?? 0,
-            packagedVolume: item.packagedVolume,
-            ...categorizeType(item, language, marketGroupById, groupById),
-            name: item.name[language] ?? item.name.en,
-          },
-        ];
-      });
-      return NextResponse.json({
-        items,
-      });
-    }
     if (query.length < 2) return NextResponse.json({ items: [] });
     const [marketGroupById, groupById] = await Promise.all([getMarketGroups(), getGroups()]);
     const normalizedQuery = query.toLocaleLowerCase();
@@ -80,18 +90,24 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as {
-      language?: string;
-      items?: Array<{ name?: string; quantity?: number }>;
-    };
-    const requestedLanguage = body.language ?? null;
-    const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
-    if (!Array.isArray(body.items)) {
+    const body: unknown = await request.json();
+    const metadataRequest = typeMetadataRequestSchema.safeParse(body);
+    if (metadataRequest.success) {
+      const requestedLanguage = metadataRequest.data.language ?? null;
+      const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
+      const items = await resolveTypeMetadata(metadataRequest.data.typeIds, language);
+      return NextResponse.json({ items });
+    }
+
+    const itemRequest = itemNameRequestSchema.safeParse(body);
+    if (!itemRequest.success) {
       return NextResponse.json(
-        { error: "A list of item names and quantities is required." },
+        { error: "A language and list of type IDs is required." },
         { status: 400 },
       );
     }
+    const requestedLanguage = itemRequest.data.language ?? null;
+    const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
 
     const [typeById, marketGroupById, groupById] = await Promise.all([
       getTypes(),
@@ -126,7 +142,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const resolved = body.items.map((item) => {
+    const resolved = itemRequest.data.items.map((item) => {
       const name = item.name?.trim() ?? "";
       const quantity = item.quantity;
       const match = byName.get(name.toLocaleLowerCase(language));

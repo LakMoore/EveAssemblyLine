@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getTypesByIds } from "@/cache/services/sdeCache";
+import { getBlueprintIndexes, getTypesByIds } from "@/cache/services/sdeCache";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
 import { getCollectionFacilities } from "@/lib/auth/tokensStore";
 import { getResolvedAssets } from "@/lib/esi/cache";
@@ -54,6 +54,15 @@ export async function POST(request: Request) {
       session.sessionId,
     );
     const types = await getTypesByIds([...new Set(assets.map((asset) => asset.typeId))]);
+    const blueprintIndexes = await getBlueprintIndexes();
+    const manufacturableTypeIds = new Set(
+      [...blueprintIndexes.byBuildProductTypeId].flatMap(([typeId, entry]) =>
+        entry.activity === "manufacturing"
+        && (entry.blueprint.activities.manufacturing?.materials?.length ?? 0) > 0
+          ? [typeId]
+          : [],
+      ),
+    );
     const marketableAssets = assets.filter((asset) => {
       const type = types.get(asset.typeId);
       return type?.published === true && type.marketGroupID !== undefined;
@@ -68,6 +77,7 @@ export async function POST(request: Request) {
     const items = signals
       .map((signal) => ({
         ...signal,
+        canBeManufactured: manufacturableTypeIds.has(signal.typeId),
         name: types.get(signal.typeId)?.name[language] ?? types.get(signal.typeId)?.name.en,
         stationName: stationById.get(signal.stationId)?.name ?? String(signal.stationId),
       }))

@@ -84,11 +84,11 @@ export async function runRefreshUnits(
   return results;
 }
 
-/** Coalesces concurrent work for the same session-scoped refresh unit. */
+/** Coalesces concurrent work for the same character or corporation owner. */
 export class RefreshCoordinator {
   private readonly active = new Map<string, Promise<unknown>>();
 
-  /** Runs work once for a key while sharing its result with concurrent callers. */
+  /** Runs owner work once while sharing the same promise with concurrent callers. */
   run<T>(key: string, work: () => Promise<T>): Promise<T> {
     const existing = this.active.get(key);
     if (existing) return existing as Promise<T>;

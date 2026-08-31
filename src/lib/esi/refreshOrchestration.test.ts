@@ -106,11 +106,33 @@ test("coalesces overlapping work for the same owner across sessions", async () =
 
   const first = coordinator.run("character:10", work);
   const second = coordinator.run("character:10", work);
+  assert.strictEqual(first, second);
   release();
 
   assert.strictEqual(await first, result);
   assert.strictEqual(await second, result);
   assert.equal(calls, 1);
+});
+
+test("shares an in-flight failure with every caller", async () => {
+  const coordinator = new RefreshCoordinator();
+  const failure = new Error("refresh failed");
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const work = async () => {
+    await blocked;
+    throw failure;
+  };
+
+  const first = coordinator.run("corporation:20", work);
+  const second = coordinator.run("corporation:20", work);
+  assert.strictEqual(first, second);
+  release();
+
+  await assert.rejects(first, failure);
+  await assert.rejects(second, failure);
 });
 
 test("allows a unit to run again after its previous refresh settles", async () => {
