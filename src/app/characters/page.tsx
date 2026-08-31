@@ -52,6 +52,7 @@ type EndpointStatus = {
   status: "fresh" | "cached" | "stale" | "rate_limited" | "error";
   hasBody: boolean;
   lastModified?: string;
+  lastUpdated?: string;
   expires?: string;
   nextRefreshAllowed?: string;
   rateLimitedUntil?: string;
@@ -71,14 +72,14 @@ function formatDate(value?: string) {
 function renderedStatus(status: EndpointStatus | undefined): EndpointStatus | undefined {
   if (!status || status.status === "error" || status.status === "rate_limited") return status;
   const expiresAt = Date.parse(status.expires ?? status.nextRefreshAllowed ?? "");
-  const modifiedAt = Date.parse(status.lastModified ?? "");
+  const updatedAt = Date.parse(status.lastUpdated ?? "");
   const now = Date.now();
-  if (Number.isFinite(expiresAt) && expiresAt <= now) return { ...status, status: "stale" };
   const recentlyModified =
-    Number.isFinite(modifiedAt) && modifiedAt <= now && now - modifiedAt <= 2 * 60 * 1000;
+    Number.isFinite(updatedAt) && updatedAt <= now && now - updatedAt <= 2 * 60 * 1000;
   if (recentlyModified) {
     return { ...status, status: "fresh" };
   }
+  if (Number.isFinite(expiresAt) && expiresAt <= now) return { ...status, status: "stale" };
   return { ...status, status: "cached" };
 }
 
@@ -266,7 +267,7 @@ export default function CharactersPage() {
       .finally(() => setIsLoading(false));
     const freshnessTimer = window.setInterval(() => setFreshnessTick((tick) => tick + 1), 5_000);
     const handleRefreshFinished = () => {
-      void loadStatuses(true);
+      void loadStatuses();
     };
     window.addEventListener("assembly-line-esi-refresh-finished", handleRefreshFinished);
     return () => {
@@ -649,7 +650,7 @@ export default function CharactersPage() {
                       </span>
                     </div>
                   </div>
-                  <ItemGroup className="w-full flex-row flex-wrap gap-3">
+                  <ItemGroup className="grid w-full grid-cols-[repeat(auto-fit,minmax(6rem,1fr))] gap-3">
                     {(
                       [
                         "assets",
@@ -667,7 +668,7 @@ export default function CharactersPage() {
                         <Item
                           aria-label={`View ${endpoint} details for ${character.characterName}`}
                           key={endpoint}
-                          className="min-w-0 flex-1 basis-0"
+                          className="min-w-0"
                           onClick={() => setSelectedCharacter(character)}
                           render={<button type="button" />}
                           size="sm"
@@ -932,14 +933,14 @@ export default function CharactersPage() {
                       {corporation.pilots.map((pilot) => pilot.characterName).join(" · ")}
                     </small>
                   </button>
-                  <ItemGroup className="w-full flex-row flex-wrap gap-3">
+                  <ItemGroup className="grid w-full grid-cols-[repeat(auto-fit,minmax(6rem,1fr))] gap-3">
                     {(["assets", "blueprints", "structures", "jobs", "orders"] as const).map(
                       (endpoint) => {
                         const endpointStatus = corporationStatus?.[endpoint];
                         return (
                           <Item
                             aria-label={`View ${endpoint} details for ${corporation.corporationName ?? `Corporation ${corporation.corporationId}`}`}
-                            className="min-w-0 flex-1 basis-0"
+                            className="min-w-0"
                             key={endpoint}
                             onClick={() => setSelectedCorporationId(corporation.corporationId)}
                             render={<button type="button" />}

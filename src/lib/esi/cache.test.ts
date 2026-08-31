@@ -27,6 +27,8 @@ test("uses only response Last-Modified and Expires metadata", () => {
   );
 
   assert.equal(current.lastModified, "2026-08-26T16:55:00.000Z");
+  assert.ok(current.lastUpdated);
+  assert.ok(Date.parse(current.lastUpdated) <= Date.now());
   assert.equal(current.expires, "2026-08-26T17:00:00.000Z");
   assert.equal(current.nextRefreshAllowed, "2026-08-26T17:00:00.000Z");
   assert.equal(current.etag, "new-etag");
@@ -72,6 +74,8 @@ test("preserves Last-Modified when a 304 response omits it", () => {
   );
 
   assert.equal(current.lastModified, "2026-08-26T16:00:00.000Z");
+  assert.ok(current.lastUpdated);
+  assert.ok(Date.parse(current.lastUpdated) > Date.parse("2026-08-26T16:00:00.000Z"));
   assert.equal(current.expires, "2026-08-26T17:00:00.000Z");
 });
 

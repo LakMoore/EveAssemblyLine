@@ -528,7 +528,7 @@ function Planner() {
       if (!cancelled) setLocationOptions([]);
     });
     function handleFacilitiesRefresh() {
-      void loadLocationOptions(true).catch(() => {
+      void loadLocationOptions().catch(() => {
         if (!cancelled) setLocationOptions([]);
       });
     }

@@ -143,8 +143,12 @@ function hasExpiredEndpoint(statuses: ClientCharacterStatus[]) {
         && endpoint.rateLimitedUntil
         && Date.parse(endpoint.rateLimitedUntil) > now
       ) return false;
+      const lastUpdated = Date.parse(endpoint.lastUpdated ?? "");
+      const recentlyUpdated =
+        Number.isFinite(lastUpdated) && lastUpdated <= now && now - lastUpdated <= 2 * 60 * 1000;
       const expiresAt = Date.parse(endpoint.expires ?? endpoint.nextRefreshAllowed ?? "");
-      return endpoint.status === "stale" || !Number.isFinite(expiresAt) || expiresAt <= now;
+      const isExpired = Number.isFinite(expiresAt) && expiresAt <= now;
+      return endpoint.status === "stale" || (isExpired && !recentlyUpdated);
     });
   });
 }

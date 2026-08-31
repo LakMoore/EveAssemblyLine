@@ -48,6 +48,7 @@ export type EndpointCache<T> = {
   lastBody: T;
   etag?: string;
   lastModified?: string;
+  lastUpdated?: string;
   expires?: string;
   nextRefreshAllowed?: string;
   rateLimitedUntil?: string;
@@ -224,7 +225,8 @@ function endpointStatus<T>(
     return {
       status: "error",
       error: errorMessage,
-      ...((error as { reauthorizeRequired?: boolean }).reauthorizeRequired || (status && status >= 400 && status < 500)
+      ...((error as { reauthorizeRequired?: boolean }).reauthorizeRequired
+      || (status && status >= 400 && status < 500)
         ? { reauthorizeRequired: true }
         : {}),
     };
@@ -323,6 +325,7 @@ export function setFresh<T>(
     lastBody: body,
     etag: headers?.get("etag") ?? previous?.etag,
     lastModified,
+    lastUpdated: new Date().toISOString(),
     expires: nextRefreshAllowed,
     nextRefreshAllowed,
     status: endpointDataStatus(lastModified, nextRefreshAllowed),

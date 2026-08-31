@@ -141,6 +141,7 @@ export type ClientEndpointStatus = {
   status: "fresh" | "cached" | "stale" | "rate_limited" | "error";
   hasBody: boolean;
   lastModified?: string;
+  lastUpdated?: string;
   expires?: string;
   nextRefreshAllowed?: string;
   rateLimitedUntil?: string;
