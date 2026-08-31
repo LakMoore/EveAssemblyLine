@@ -615,6 +615,7 @@ export async function GET(request: NextRequest) {
         isPackaged: !asset.isSingleton,
         ownerType: asset.ownerType,
         blueprintType,
+        ...(asset.inUse || blueprintInstance?.inUse ? { inUse: true } : {}),
         me: blueprintInstance?.me,
         te: blueprintInstance?.te,
         ...(blueprintInstance
@@ -656,6 +657,13 @@ export async function GET(request: NextRequest) {
         && instance.ownerType === job.ownerType
         && instance.ownerId === job.ownerId,
     );
+    const installedBlueprintInstance =
+      blueprintInstance?.runsBeforeJobAdjustments === undefined
+        ? blueprintInstance
+        : {
+            ...blueprintInstance,
+            runs: blueprintInstance.runsBeforeJobAdjustments,
+          };
     const preferredBlueprintLocation =
       (blueprintInstance && jobLocations.get(blueprintInstance.locationId))
       ?? (blueprint && isDirectLocation(blueprint)
@@ -673,7 +681,7 @@ export async function GET(request: NextRequest) {
     for (const contribution of installedJobContributions(
       job,
       blueprint,
-      blueprintInstance,
+      installedBlueprintInstance,
       job.productTypeId !== undefined ? productQuantities.get(job.productTypeId) : undefined,
       industryJobStatus === "ready" || industryJobStatus === "delivered",
       industryJobStatus !== "delivered",

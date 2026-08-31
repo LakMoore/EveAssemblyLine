@@ -19,6 +19,7 @@ import {
   getTypesByIds,
   getShipTypeIds,
   getHaulerShipTypeIds,
+  getBlueprintById,
 } from "@/cache/services/sdeCache";
 import { getCharacter, getCharacters } from "@/lib/auth/tokensStore";
 import {
@@ -85,6 +86,8 @@ type OwnerCache = {
   shipAssetsByItemId: Map<number, AssetRecord>;
   assembledShipsByItemId: Map<number, AssetRecord>;
   assembledStructureRigs: AssetRecord[];
+  jobAssetDeductions: Map<string, number>;
+  jobBlueprintAdjustments: Map<number, { consumedRuns: number; inUse: boolean }>;
   jobs?: EndpointCache<IndustryJobRecord[]>;
   skills?: EndpointCache<CharacterSkillRecord[]>;
   marketOrders?: EndpointCache<MarketOrderRecord[]>;
@@ -201,6 +204,8 @@ function getCache(map: Map<string, OwnerCache>, id: number, sessionId: string): 
     rootLocationsByItemId: new Map(),
     shipAssetsByItemId: new Map(),
     assembledShipsByItemId: new Map(),
+    jobAssetDeductions: new Map(),
+    jobBlueprintAdjustments: new Map(),
     unresolvedAssetCount: 0,
   };
   map.set(key, created);
@@ -407,6 +412,175 @@ export function endpointDataStatus(
   if (nextRefreshAllowed && Date.parse(nextRefreshAllowed) <= Date.now()) return "stale";
   if (lastModified && Date.now() - Date.parse(lastModified) <= 2 * 60 * 1000) return "fresh";
   return "cached";
+}
+
+function jobStartedAfter(job: IndustryJobRecord, lastModified: string | undefined) {
+  const jobStartedAt = Date.parse(job.startDate);
+  const endpointModifiedAt = Date.parse(lastModified ?? "");
+  return (
+    Number.isFinite(jobStartedAt)
+    && Number.isFinite(endpointModifiedAt)
+    && jobStartedAt > endpointModifiedAt
+  );
+}
+
+function getJobMaterials(
+  job: IndustryJobRecord,
+  blueprint: Awaited<ReturnType<typeof getBlueprintById>>,
+) {
+  if (!blueprint) return [];
+  switch (job.activityId) {
+  case 1:
+    return blueprint.activities.manufacturing?.materials ?? [];
+  case 3:
+    return blueprint.activities.research_time?.materials ?? [];
+  case 4:
+    return blueprint.activities.research_material?.materials ?? [];
+  case 5:
+    return blueprint.activities.copying?.materials ?? [];
+  case 8:
+    return blueprint.activities.invention?.materials ?? [];
+  case 9:
+    return blueprint.activities.reaction?.materials ?? [];
+  default:
+    return [];
+  }
+}
+
+async function refreshJobAdjustments(
+  cache: OwnerCache,
+  jobs: IndustryJobRecord[],
+  assetsLastModified: string | undefined,
+  blueprintsLastModified: string | undefined,
+) {
+  cache.jobAssetDeductions = new Map();
+  cache.jobBlueprintAdjustments = new Map();
+  if (!assetsLastModified && !blueprintsLastModified) return;
+
+  const blueprintIds = [
+    ...new Set(
+      jobs
+        .filter(
+          (job) =>
+            jobStartedAfter(job, assetsLastModified)
+            || jobStartedAfter(job, blueprintsLastModified),
+        )
+        .map((job) => job.blueprintTypeId),
+    ),
+  ];
+  const blueprints = new Map(
+    await Promise.all(
+      blueprintIds.map(async (typeId) => [typeId, await getBlueprintById(typeId)] as const),
+    ),
+  );
+  const blueprintInstances = new Map(
+    (cache.blueprintInstances?.lastBody ?? []).map((blueprint) => [blueprint.itemId, blueprint]),
+  );
+
+  for (const job of jobs) {
+    const blueprint = blueprints.get(job.blueprintTypeId) ?? null;
+    if (jobStartedAfter(job, assetsLastModified)) {
+      for (const material of getJobMaterials(job, blueprint)) {
+        const key = `${material.typeID}:${job.facilityId}`;
+        cache.jobAssetDeductions.set(
+          key,
+          (cache.jobAssetDeductions.get(key) ?? 0) + material.quantity * job.runs,
+        );
+      }
+    }
+
+    if (!jobStartedAfter(job, blueprintsLastModified) || job.activityId === 9) continue;
+    const blueprintInstance = blueprintInstances.get(job.blueprintId);
+    if (!blueprintInstance) continue;
+    const adjustment = cache.jobBlueprintAdjustments.get(job.blueprintId) ?? {
+      consumedRuns: 0,
+      inUse: false,
+    };
+    if (blueprintInstance.quantity === -1) adjustment.inUse = true;
+    else adjustment.consumedRuns += job.runs;
+    cache.jobBlueprintAdjustments.set(job.blueprintId, adjustment);
+  }
+}
+
+function effectiveAssets(cache: OwnerCache) {
+  const deductions = new Map(cache.jobAssetDeductions);
+  return [...(cache.stockAssetsByItemId?.values() ?? [])].flatMap((asset) => {
+    const rootLocationId =
+      asset.rootLocation && "kind" in asset.rootLocation
+        ? asset.rootLocation.locationId
+        : asset.locationId;
+    const key = `${asset.typeId}:${rootLocationId}`;
+    const deduction = deductions.get(key) ?? 0;
+    const blueprintAdjustment = cache.jobBlueprintAdjustments.get(asset.itemId);
+    if (deduction <= 0) return blueprintAdjustment?.inUse ? [{ ...asset, inUse: true }] : [asset];
+    const deductedQuantity = Math.min(asset.quantity, deduction);
+    const quantity = asset.quantity - deductedQuantity;
+    deductions.set(key, deduction - deductedQuantity);
+    if (quantity <= 0) return [];
+    return [
+      {
+        ...asset,
+        quantity,
+        ...(blueprintAdjustment?.inUse ? { inUse: true } : {}),
+      },
+    ];
+  });
+}
+
+function effectiveBlueprints(cache: OwnerCache) {
+  return (cache.blueprintInstances?.lastBody ?? []).map((blueprint) => {
+    const adjustment = cache.jobBlueprintAdjustments.get(blueprint.itemId);
+    if (!adjustment) return blueprint;
+    return {
+      ...blueprint,
+      runsBeforeJobAdjustments: blueprint.runs,
+      runs:
+        blueprint.quantity === -1
+          ? blueprint.runs
+          : Math.max(0, blueprint.runs - adjustment.consumedRuns),
+      ...(adjustment.inUse ? { inUse: true } : {}),
+    };
+  });
+}
+
+type IndustryJobsFetcher = (
+  record: CharacterTokenRecord,
+  etag?: string,
+) => ReturnType<typeof fetchCharacterIndustryJobs>;
+
+async function refreshIndustryJobs(
+  cache: OwnerCache,
+  character: CharacterTokenRecord,
+  fetchJobs: IndustryJobsFetcher,
+  assetsLastModified: string | undefined,
+  blueprintsLastModified: string | undefined,
+) {
+  if (
+    !cache.jobs
+    || !cache.jobs.nextRefreshAllowed
+    || Date.parse(cache.jobs.nextRefreshAllowed) <= Date.now()
+  ) {
+    const jobs = await fetchJobs(character, cache.jobs?.etag);
+    cache.jobs =
+      jobs.notModified && cache.jobs
+        ? setFresh(cache.jobs.lastBody, jobs.headers, cache.jobs, true)
+        : setFresh(jobs.jobs ?? [], jobs.headers, cache.jobs);
+  }
+  else {
+    cache.jobs.status = endpointDataStatus(cache.jobs.lastModified, cache.jobs.nextRefreshAllowed);
+  }
+  try {
+    await refreshJobAdjustments(
+      cache,
+      cache.jobs.lastBody,
+      assetsLastModified,
+      blueprintsLastModified,
+    );
+  }
+  catch {
+    cache.jobAssetDeductions = new Map();
+    cache.jobBlueprintAdjustments = new Map();
+  }
 }
 
 async function indexAssetsByPurpose(rawAssets: AssetRecord[]) {
@@ -1026,23 +1200,13 @@ export async function refreshCharacterState(
   }
   profiler.start("jobs");
   try {
-    if (
-      !cache.jobs
-      || !cache.jobs.nextRefreshAllowed
-      || Date.parse(cache.jobs.nextRefreshAllowed) <= Date.now()
-    ) {
-      const jobs = await fetchCharacterIndustryJobs(character, cache.jobs?.etag);
-      cache.jobs =
-        jobs.notModified && cache.jobs
-          ? setFresh(cache.jobs.lastBody, jobs.headers, cache.jobs, true)
-          : setFresh(jobs.jobs ?? [], jobs.headers, cache.jobs);
-    }
-    else {
-      cache.jobs.status = endpointDataStatus(
-        cache.jobs.lastModified,
-        cache.jobs.nextRefreshAllowed,
-      );
-    }
+    await refreshIndustryJobs(
+      cache,
+      character,
+      fetchCharacterIndustryJobs,
+      cache.allAssetsRaw?.lastModified,
+      cache.blueprintInstances?.lastModified,
+    );
   }
   catch (error) {
     cache.jobs = {
@@ -1211,23 +1375,13 @@ async function refreshCorporationCache(
   }
   profiler.start("jobs");
   try {
-    if (
-      !corpCache.jobs
-      || !corpCache.jobs.nextRefreshAllowed
-      || Date.parse(corpCache.jobs.nextRefreshAllowed) <= Date.now()
-    ) {
-      const jobs = await fetchCorporationIndustryJobs(character, corpCache.jobs?.etag);
-      corpCache.jobs =
-        jobs.notModified && corpCache.jobs
-          ? setFresh(corpCache.jobs.lastBody, jobs.headers, corpCache.jobs, true)
-          : setFresh(jobs.jobs ?? [], jobs.headers, corpCache.jobs);
-    }
-    else {
-      corpCache.jobs.status = endpointDataStatus(
-        corpCache.jobs.lastModified,
-        corpCache.jobs.nextRefreshAllowed,
-      );
-    }
+    await refreshIndustryJobs(
+      corpCache,
+      character,
+      fetchCorporationIndustryJobs,
+      corpCache.allAssetsRaw?.lastModified,
+      corpCache.blueprintInstances?.lastModified,
+    );
     corpSummary.jobs = corpCache.jobs;
   }
   catch (error) {
@@ -1345,7 +1499,7 @@ export async function getResolvedAssets(
   sessionId = "default",
 ): Promise<AssetRecord[]> {
   const assets = characterIds.flatMap((id) =>
-    Array.from(getCache(characterCaches, id, sessionId).stockAssetsByItemId?.values() ?? []),
+    effectiveAssets(getCache(characterCaches, id, sessionId)),
   );
   if (!includeCorporationAssets) return [...assets];
 
@@ -1363,7 +1517,7 @@ export async function getResolvedAssets(
   return [
     ...assets,
     ...[...corporations].flatMap((id) =>
-      Array.from(getCache(corporationCaches, id, sessionId).stockAssetsByItemId?.values() ?? []),
+      effectiveAssets(getCache(corporationCaches, id, sessionId)),
     ),
   ];
 }
@@ -1457,20 +1611,12 @@ export async function getResolvedAssetIndex(
       )
     : new Set<number>();
   for (const characterId of characterIds) {
-    for (const asset of getCache(
-      characterCaches,
-      characterId,
-      sessionId,
-    ).stockAssetsByItemId?.values() ?? []) {
+    for (const asset of effectiveAssets(getCache(characterCaches, characterId, sessionId))) {
       index.set(asset.itemId, asset);
     }
   }
   for (const corporationId of corporationIds) {
-    for (const asset of getCache(
-      corporationCaches,
-      corporationId,
-      sessionId,
-    ).stockAssetsByItemId?.values() ?? []) {
+    for (const asset of effectiveAssets(getCache(corporationCaches, corporationId, sessionId))) {
       index.set(asset.itemId, asset);
     }
   }
@@ -1798,9 +1944,8 @@ export async function getBlueprintInstances(
   includeCorporationBlueprints: boolean,
   sessionId = "default",
 ) {
-  const instances = characterIds.flatMap(
-    (characterId) =>
-      getCache(characterCaches, characterId, sessionId).blueprintInstances?.lastBody ?? [],
+  const instances = characterIds.flatMap((characterId) =>
+    effectiveBlueprints(getCache(characterCaches, characterId, sessionId)),
   );
   if (!includeCorporationBlueprints) return instances;
   const characters = await getCharacters();
@@ -1816,9 +1961,8 @@ export async function getBlueprintInstances(
   );
   return [
     ...instances,
-    ...[...corporationIds].flatMap(
-      (corporationId) =>
-        getCache(corporationCaches, corporationId, sessionId).blueprintInstances?.lastBody ?? [],
+    ...[...corporationIds].flatMap((corporationId) =>
+      effectiveBlueprints(getCache(corporationCaches, corporationId, sessionId)),
     ),
   ];
 }

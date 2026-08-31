@@ -36,6 +36,7 @@ export interface AssetRecord {
   typeId: number;
   name?: string;
   quantity: number;
+  inUse?: boolean;
   runCount?: number;
   me?: number;
   te?: number;
@@ -131,6 +132,8 @@ export interface BlueprintInstanceRecord {
   locationFlag: string;
   quantity: number;
   runs: number;
+  runsBeforeJobAdjustments?: number;
+  inUse?: boolean;
   me: number;
   te: number;
   ownerType: "character" | "corporation";
