@@ -784,209 +784,230 @@ async function rebuildResolvedAssets(
   }
 }
 
+export function copyRefreshCache(
+  kind: "character" | "corporation",
+  ownerId: number,
+  sourceSessionId: string,
+  targetSessionId: string,
+) {
+  if (sourceSessionId === targetSessionId) return;
+  const cacheMap = kind === "character" ? characterCaches : corporationCaches;
+  const sourceCache = cacheMap.get(`${sourceSessionId}:${ownerId}`);
+  if (!sourceCache) return;
+  cacheMap.set(`${targetSessionId}:${ownerId}`, structuredClone(sourceCache));
+}
+
 export async function refreshCharacterState(
   characterIds: number[],
   sessionId: string,
+  options: {
+    mode?: "character" | "corporation";
+    corporationId?: number;
+  } = {},
 ): Promise<void> {
   const refreshedCorporationIds = new Set<number>();
   for (const characterId of characterIds) {
     const character = await getCharacter(characterId);
     if (!character) continue;
     const cache = getCache(characterCaches, characterId, sessionId);
-    let currentShipStateChanged = false;
-    try {
-      currentShipStateChanged = await refreshCurrentLocation(cache, character);
-    }
-    catch (error) {
-      cache.currentLocation = {
-        ...(cache.currentLocation ?? { lastBody: null }),
-        ...endpointStatus(error),
-      };
-    }
-    try {
-      currentShipStateChanged =
-        (await refreshCurrentShip(cache, character)) || currentShipStateChanged;
-    }
-    catch (error) {
-      cache.currentShip = {
-        ...(cache.currentShip ?? { lastBody: null }),
-        ...endpointStatus(error),
-      };
-    }
-    try {
-      if (
-        !cache.clones
-        || !cache.clones.nextRefreshAllowed
-        || Date.parse(cache.clones.nextRefreshAllowed) <= Date.now()
-      ) {
-        const clones = await fetchCharacterClones(character);
-        cache.clones = setFresh(clones.data, clones.headers, cache.clones);
+    if (options.mode !== "corporation") {
+      let currentShipStateChanged = false;
+      try {
+        currentShipStateChanged = await refreshCurrentLocation(cache, character);
       }
-      else {
-        cache.clones.status = endpointDataStatus(
-          cache.clones.lastModified,
-          cache.clones.nextRefreshAllowed,
-        );
+      catch (error) {
+        cache.currentLocation = {
+          ...(cache.currentLocation ?? { lastBody: null }),
+          ...endpointStatus(error),
+        };
       }
-    }
-    catch (error) {
-      cache.clones = {
-        ...(cache.clones ?? { lastBody: null }),
-        ...endpointStatus(error),
-      };
-    }
-    try {
-      if (
-        !cache.skills
-        || !cache.skills.nextRefreshAllowed
-        || Date.parse(cache.skills.nextRefreshAllowed) <= Date.now()
-      ) {
-        const skills = await fetchCharacterSkills(character, cache.skills?.etag);
-        cache.skills =
-          skills.notModified && cache.skills
-            ? setFresh(cache.skills.lastBody, skills.headers, cache.skills, true)
-            : setFresh(skills.skills ?? [], skills.headers, cache.skills);
+      try {
+        currentShipStateChanged =
+          (await refreshCurrentShip(cache, character)) || currentShipStateChanged;
       }
-      else {
-        cache.skills.status = endpointDataStatus(
-          cache.skills.lastModified,
-          cache.skills.nextRefreshAllowed,
-        );
+      catch (error) {
+        cache.currentShip = {
+          ...(cache.currentShip ?? { lastBody: null }),
+          ...endpointStatus(error),
+        };
       }
-    }
-    catch (error) {
-      cache.skills = {
-        ...(cache.skills ?? { lastBody: [] }),
-        ...endpointStatus(error),
-      };
-    }
-    let assetsRebuilt = false;
-    try {
-      await refreshBlueprintInstances(cache, character, fetchCharacterBlueprints);
-    }
-    catch (error) {
-      cache.blueprintInstances = {
-        ...(cache.blueprintInstances ?? { lastBody: [] }),
-        ...endpointStatus(error),
-      };
-    }
-    try {
-      if (
-        !cache.allAssetsRaw?.nextRefreshAllowed
-        || Date.parse(cache.allAssetsRaw.nextRefreshAllowed) <= Date.now()
-      ) {
-        const result = await fetchCharacterAssets(character, cache.allAssetsRaw?.etag);
-        if (result.notModified && cache.allAssetsRaw) {
-          await cacheResolvedAssets(
-            cache,
-            cache.allAssetsRaw.lastBody as AssetRecord[],
-            result.token,
-            result.headers,
-            cache.allAssetsRaw,
-            `/characters/${character.characterId}`,
-            true,
-          );
-          assetsRebuilt = true;
-          cache.allAssetsRaw.status = endpointDataStatus(
-            cache.allAssetsRaw.lastModified,
-            cache.allAssetsRaw.nextRefreshAllowed,
+      try {
+        if (
+          !cache.clones
+          || !cache.clones.nextRefreshAllowed
+          || Date.parse(cache.clones.nextRefreshAllowed) <= Date.now()
+        ) {
+          const clones = await fetchCharacterClones(character);
+          cache.clones = setFresh(clones.data, clones.headers, cache.clones);
+        }
+        else {
+          cache.clones.status = endpointDataStatus(
+            cache.clones.lastModified,
+            cache.clones.nextRefreshAllowed,
           );
         }
-        else if (result.assets) {
-          await cacheResolvedAssets(
-            cache,
-            result.assets,
-            result.token,
-            result.headers,
-            cache.allAssetsRaw,
-            `/characters/${character.characterId}`,
+      }
+      catch (error) {
+        cache.clones = {
+          ...(cache.clones ?? { lastBody: null }),
+          ...endpointStatus(error),
+        };
+      }
+      try {
+        if (
+          !cache.skills
+          || !cache.skills.nextRefreshAllowed
+          || Date.parse(cache.skills.nextRefreshAllowed) <= Date.now()
+        ) {
+          const skills = await fetchCharacterSkills(character, cache.skills?.etag);
+          cache.skills =
+            skills.notModified && cache.skills
+              ? setFresh(cache.skills.lastBody, skills.headers, cache.skills, true)
+              : setFresh(skills.skills ?? [], skills.headers, cache.skills);
+        }
+        else {
+          cache.skills.status = endpointDataStatus(
+            cache.skills.lastModified,
+            cache.skills.nextRefreshAllowed,
           );
-          assetsRebuilt = true;
         }
       }
-    }
-    catch (error) {
-      await rebuildResolvedAssets(cache, character, "personal");
-      cache.allAssetsRaw = {
-        ...(cache.allAssetsRaw ?? { lastBody: [] }),
-        ...endpointStatus(error),
-      };
-    }
-    if (currentShipStateChanged && !assetsRebuilt) {
-      await rebuildResolvedAssets(cache, character, "personal", true);
-    }
-    try {
-      if (
-        !cache.jobs
-        || !cache.jobs.nextRefreshAllowed
-        || Date.parse(cache.jobs.nextRefreshAllowed) <= Date.now()
-      ) {
-        const jobs = await fetchCharacterIndustryJobs(character, cache.jobs?.etag);
-        cache.jobs =
-          jobs.notModified && cache.jobs
-            ? setFresh(cache.jobs.lastBody, jobs.headers, cache.jobs, true)
-            : setFresh(jobs.jobs ?? [], jobs.headers, cache.jobs);
+      catch (error) {
+        cache.skills = {
+          ...(cache.skills ?? { lastBody: [] }),
+          ...endpointStatus(error),
+        };
       }
-      else {
-        cache.jobs.status = endpointDataStatus(
-          cache.jobs.lastModified,
-          cache.jobs.nextRefreshAllowed,
-        );
+      let assetsRebuilt = false;
+      try {
+        await refreshBlueprintInstances(cache, character, fetchCharacterBlueprints);
       }
-    }
-    catch (error) {
-      cache.jobs = {
-        ...(cache.jobs ?? { lastBody: [] }),
-        ...endpointStatus(error),
-      };
-    }
-    try {
-      if (
-        cache.marketOrders?.status === "stale"
-        || !cache.marketOrders
-        || !cache.marketOrders.nextRefreshAllowed
-        || Date.parse(cache.marketOrders.nextRefreshAllowed) <= Date.now()
-      ) {
-        const orders = await fetchCharacterMarketOrders(
-          character,
-          getUsableMarketOrdersEtag(cache),
-        );
-        if (orders.notModified && cache.marketOrders) {
-          cache.marketOrders = setFresh(
-            cache.marketOrders.lastBody,
-            orders.headers,
-            cache.marketOrders,
-            true,
+      catch (error) {
+        cache.blueprintInstances = {
+          ...(cache.blueprintInstances ?? { lastBody: [] }),
+          ...endpointStatus(error),
+        };
+      }
+      try {
+        if (
+          !cache.allAssetsRaw?.nextRefreshAllowed
+          || Date.parse(cache.allAssetsRaw.nextRefreshAllowed) <= Date.now()
+        ) {
+          const result = await fetchCharacterAssets(character, cache.allAssetsRaw?.etag);
+          if (result.notModified && cache.allAssetsRaw) {
+            await cacheResolvedAssets(
+              cache,
+              cache.allAssetsRaw.lastBody as AssetRecord[],
+              result.token,
+              result.headers,
+              cache.allAssetsRaw,
+              `/characters/${character.characterId}`,
+              true,
+            );
+            assetsRebuilt = true;
+            cache.allAssetsRaw.status = endpointDataStatus(
+              cache.allAssetsRaw.lastModified,
+              cache.allAssetsRaw.nextRefreshAllowed,
+            );
+          }
+          else if (result.assets) {
+            await cacheResolvedAssets(
+              cache,
+              result.assets,
+              result.token,
+              result.headers,
+              cache.allAssetsRaw,
+              `/characters/${character.characterId}`,
+            );
+            assetsRebuilt = true;
+          }
+        }
+      }
+      catch (error) {
+        await rebuildResolvedAssets(cache, character, "personal");
+        cache.allAssetsRaw = {
+          ...(cache.allAssetsRaw ?? { lastBody: [] }),
+          ...endpointStatus(error),
+        };
+      }
+      if (currentShipStateChanged && !assetsRebuilt) {
+        await rebuildResolvedAssets(cache, character, "personal", true);
+      }
+      try {
+        if (
+          !cache.jobs
+          || !cache.jobs.nextRefreshAllowed
+          || Date.parse(cache.jobs.nextRefreshAllowed) <= Date.now()
+        ) {
+          const jobs = await fetchCharacterIndustryJobs(character, cache.jobs?.etag);
+          cache.jobs =
+            jobs.notModified && cache.jobs
+              ? setFresh(cache.jobs.lastBody, jobs.headers, cache.jobs, true)
+              : setFresh(jobs.jobs ?? [], jobs.headers, cache.jobs);
+        }
+        else {
+          cache.jobs.status = endpointDataStatus(
+            cache.jobs.lastModified,
+            cache.jobs.nextRefreshAllowed,
           );
+        }
+      }
+      catch (error) {
+        cache.jobs = {
+          ...(cache.jobs ?? { lastBody: [] }),
+          ...endpointStatus(error),
+        };
+      }
+      try {
+        if (
+          cache.marketOrders?.status === "stale"
+          || !cache.marketOrders
+          || !cache.marketOrders.nextRefreshAllowed
+          || Date.parse(cache.marketOrders.nextRefreshAllowed) <= Date.now()
+        ) {
+          const orders = await fetchCharacterMarketOrders(
+            character,
+            getUsableMarketOrdersEtag(cache),
+          );
+          if (orders.notModified && cache.marketOrders) {
+            cache.marketOrders = setFresh(
+              cache.marketOrders.lastBody,
+              orders.headers,
+              cache.marketOrders,
+              true,
+            );
+            cache.marketOrders.status = endpointDataStatus(
+              cache.marketOrders.lastModified,
+              cache.marketOrders.nextRefreshAllowed,
+            );
+          }
+          else if (orders.notModified) {
+            cache.marketOrders = setFresh([], orders.headers, undefined);
+          }
+          else if (orders.orders) {
+            cache.marketOrders = setFresh(orders.orders, orders.headers, cache.marketOrders);
+          }
+        }
+        else {
           cache.marketOrders.status = endpointDataStatus(
             cache.marketOrders.lastModified,
             cache.marketOrders.nextRefreshAllowed,
           );
         }
-        else if (orders.notModified) {
-          cache.marketOrders = setFresh([], orders.headers, undefined);
-        }
-        else if (orders.orders) {
-          cache.marketOrders = setFresh(orders.orders, orders.headers, cache.marketOrders);
-        }
       }
-      else {
-        cache.marketOrders.status = endpointDataStatus(
-          cache.marketOrders.lastModified,
-          cache.marketOrders.nextRefreshAllowed,
-        );
+      catch (error) {
+        cache.marketOrders = {
+          ...(cache.marketOrders ?? { lastBody: [] }),
+          ...endpointStatus(error),
+        };
       }
-    }
-    catch (error) {
-      cache.marketOrders = {
-        ...(cache.marketOrders ?? { lastBody: [] }),
-        ...endpointStatus(error),
-      };
     }
 
     if (
-      character.hasDirectorRole
+      options.mode !== "character"
+      && character.hasDirectorRole
       && character.corporationId
+      && (options.corporationId === undefined || options.corporationId === character.corporationId)
       && !refreshedCorporationIds.has(character.corporationId)
     ) {
       refreshedCorporationIds.add(character.corporationId);
@@ -1163,6 +1184,22 @@ export async function refreshCharacterState(
       }
     }
   }
+}
+
+export async function refreshCorporationState(
+  corporationId: number,
+  authorizationCharacterId: number,
+  sessionId: string,
+): Promise<void> {
+  const character = await getCharacter(authorizationCharacterId);
+  if (!character || !character.hasDirectorRole || character.corporationId !== corporationId) {
+    throw new Error("Corporation authorization is incomplete");
+  }
+  await refreshCharacterState(
+    [authorizationCharacterId],
+    sessionId,
+    { mode: "corporation", corporationId },
+  );
 }
 
 export async function getRunningIndustryJobs(

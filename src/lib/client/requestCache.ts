@@ -7,6 +7,7 @@ export type ClientSession = {
   characters?: Array<{
     characterId: number;
     characterName: string;
+    corporationId?: number;
     hasDirectorRole: boolean;
     onDeployment: boolean;
   }>;
@@ -162,19 +163,21 @@ let corpStatusRequest: Promise<ClientCharacter[]> | undefined;
 let corpStatusResponse: ClientCharacter[] | undefined;
 let stateStatusRequest: Promise<{ characters?: ClientCharacterStatus[] }> | undefined;
 let stateStatusResponse: { characters?: ClientCharacterStatus[] } | undefined;
+let stateStatusGeneration = 0;
 
 function loadJson<T>(
   url: string,
   endpointKey: string,
   pending: Promise<T> | undefined,
   setPending: (value: Promise<T> | undefined) => void,
+  shouldSave = () => true,
 ) {
   if (pending) return pending;
   const request = fetch(url, { cache: "no-store" })
     .then(async (response) => {
       const data = (await response.json()) as T;
       if (!response.ok) throw new Error(`Could not load ${url}.`);
-      await saveEndpointResponse(endpointKey, url, data);
+      if (shouldSave()) await saveEndpointResponse(endpointKey, url, data);
       return data;
     })
     .catch((error) => {
@@ -322,17 +325,23 @@ export function loadClientCorpStatus(reload = false) {
 }
 
 export function loadClientStateStatus(reload = false) {
-  if (reload) stateStatusRequest = undefined;
+  if (reload) {
+    stateStatusGeneration += 1;
+    stateStatusRequest = undefined;
+    stateStatusResponse = undefined;
+  }
   if (!reload && stateStatusResponse) return Promise.resolve(stateStatusResponse);
+  const requestGeneration = stateStatusGeneration;
   stateStatusRequest = loadJson(
     "/api/state/status",
     "state/status",
     stateStatusRequest,
     (value) => {
-      stateStatusRequest = value;
+      if (requestGeneration === stateStatusGeneration) stateStatusRequest = value;
     },
+    () => requestGeneration === stateStatusGeneration,
   ).then((data) => {
-    stateStatusResponse = data;
+    if (requestGeneration === stateStatusGeneration) stateStatusResponse = data;
     return data;
   });
   return stateStatusRequest;
@@ -343,6 +352,8 @@ export function invalidateClientCharacterData() {
   charactersResponse = undefined;
   corpStatusResponse = undefined;
   stateStatusResponse = undefined;
+  stateStatusRequest = undefined;
+  stateStatusGeneration += 1;
   jobsRequest = undefined;
   jobsResponse = undefined;
 }

@@ -2992,6 +2992,7 @@
 }
 
 .topbar {
+  position: relative;
   min-height: 72px;
   display: flex;
   align-items: center;
@@ -3000,6 +3001,19 @@
   background: var(--paper);
   color: var(--foreground);
   border-bottom: 1px solid var(--border);
+}
+
+.refreshProgress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  gap: 0;
+}
+
+.refreshProgress [data-slot="progress-indicator"] {
+  background: var(--cyan);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--cyan) 75%, transparent);
 }
 
 .topbarActions {
@@ -4688,6 +4702,7 @@
 
 .statusDot {
   display: inline-block;
+  flex-shrink: 0;
   width: 10px;
   height: 10px;
   border-radius: 50%;

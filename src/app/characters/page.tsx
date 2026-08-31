@@ -131,6 +131,34 @@ function availabilityLabel(status?: EndpointStatus) {
   return "Available now";
 }
 
+function compactAvailabilityText(status?: EndpointStatus) {
+  if (!status) return "Not loaded";
+  if (status.status === "error") return "Refresh failed";
+  if (!status.expires && !status.nextRefreshAllowed && !status.rateLimitedUntil) {
+    return "Refresh required";
+  }
+  const availableAt = status.rateLimitedUntil ?? status.nextRefreshAllowed ?? status.expires;
+  const availableAtTime = Date.parse(availableAt ?? "");
+  if (Number.isFinite(availableAtTime) && availableAtTime > Date.now()) {
+    const minutes = Math.max(1, Math.ceil((availableAtTime - Date.now()) / 60_000));
+    return `Available in ${minutes} minute${minutes === 1 ? "" : "s"}`;
+  }
+  return "Available now";
+}
+
+function compactAvailabilityLabel(status?: EndpointStatus) {
+  const label = compactAvailabilityText(status);
+  const match = label.match(/^Available in (\d+) (minute|minutes)$/);
+  if (!match) return label;
+  return (
+    <span className="flex flex-col items-center text-center">
+      <span>Available in</span>
+      <span className="text-sm">{match[1]}</span>
+      <span>{match[2]}</span>
+    </span>
+  );
+}
+
 function expiryLabel(status?: EndpointStatus) {
   if (!status) return "Expires unavailable";
   const expiresAt = status.expires ?? status.nextRefreshAllowed;
@@ -267,7 +295,7 @@ export default function CharactersPage() {
       .finally(() => setIsLoading(false));
     const freshnessTimer = window.setInterval(() => setFreshnessTick((tick) => tick + 1), 5_000);
     const handleRefreshFinished = () => {
-      void loadStatuses();
+      void loadStatuses(true);
     };
     window.addEventListener("assembly-line-esi-refresh-finished", handleRefreshFinished);
     return () => {
@@ -672,7 +700,7 @@ export default function CharactersPage() {
                           onClick={() => setSelectedCharacter(character)}
                           render={<button type="button" />}
                           size="sm"
-                          title={`${endpoint}: ${availabilityLabel(endpointStatus)}${endpointStatus?.error ? `; ${endpointStatus.error}` : ""}${endpointStatus?.lastModified ? `; modified ${formatDate(endpointStatus.lastModified)}` : ""}`}
+                          title={`${endpoint}: ${compactAvailabilityText(endpointStatus)}${endpointStatus?.error ? `; ${endpointStatus.error}` : ""}${endpointStatus?.lastModified ? `; modified ${formatDate(endpointStatus.lastModified)}` : ""}`}
                           variant="outline"
                         >
                           <ItemContent className="flex flex-1 flex-col items-center gap-1">
@@ -685,10 +713,10 @@ export default function CharactersPage() {
                                 {statusLabel(endpointStatus)}
                               </span>
                               <span className={`${styles.availabilityWide} text-center`}>
-                                {availabilityLabel(endpointStatus)}
+                                {compactAvailabilityLabel(endpointStatus)}
                               </span>
                               <span className={`${styles.availabilityNarrow} text-center`}>
-                                {availabilityLabel(endpointStatus).replace(/^Available /, "")}
+                                {compactAvailabilityLabel(endpointStatus)}
                               </span>
                             </ItemDescription>
                           </ItemContent>
@@ -780,6 +808,11 @@ export default function CharactersPage() {
                               {endpointStatus?.lastModified && (
                                 <span className="text-center">
                                   Modified {formatDate(endpointStatus.lastModified)}
+                                </span>
+                              )}
+                              {endpointStatus?.lastUpdated && (
+                                <span className="text-center">
+                                  Updated {formatDate(endpointStatus.lastUpdated)}
                                 </span>
                               )}
                               <span className="text-center">{expiryLabel(endpointStatus)}</span>
@@ -958,10 +991,10 @@ export default function CharactersPage() {
                                 </span>
                                 <span className="flex flex-col items-center text-center">
                                   <span className={`${styles.availabilityWide} text-center`}>
-                                    {availabilityLabel(endpointStatus)}
+                                    {compactAvailabilityLabel(endpointStatus)}
                                   </span>
                                   <span className={`${styles.availabilityNarrow} text-center`}>
-                                    {availabilityLabel(endpointStatus).replace(/^Available /, "")}
+                                    {compactAvailabilityLabel(endpointStatus)}
                                   </span>
                                 </span>
                               </ItemDescription>
@@ -1024,27 +1057,46 @@ export default function CharactersPage() {
                       {corporation.pilots.length === 1 ? "" : "s"}
                     </small>
                   </div>
-                  <div className={styles.characterModalStatuses}>
+                  <ItemGroup className="mt-5 grid w-full grid-cols-3 gap-2.5 max-[640px]:grid-cols-1">
                     {(["assets", "blueprints", "structures", "jobs", "orders"] as const).map(
                       (endpoint) => {
                         const endpointStatus = corporationStatus?.[endpoint];
                         return (
-                          <div className={styles.characterModalStatus} key={endpoint}>
-                            <small>{endpoint.toUpperCase()}</small>
-                            <span>
-                              {statusIndicator(endpointStatus, isRefreshing)}
-                              {statusLabel(endpointStatus, corporation.eligible.length === 0)}
-                            </span>
-                            <small>{availabilityLabel(endpointStatus)}</small>
-                            {endpointStatus?.lastModified && (
-                              <small>Modified {formatDate(endpointStatus.lastModified)}</small>
-                            )}
-                            {endpointStatus?.error && <small>{endpointStatus.error}</small>}
-                          </div>
+                          <Item key={endpoint} className="min-w-0" size="sm" variant="outline">
+                            <ItemContent className="flex flex-col items-center gap-1">
+                              <ItemTitle className="w-full justify-center text-center">
+                                {endpoint.toUpperCase()}
+                              </ItemTitle>
+                              <ItemDescription className="flex flex-col items-center gap-1 text-center">
+                                <span className="flex items-center justify-center gap-1 text-center">
+                                  {statusIndicator(endpointStatus, isRefreshing)}
+                                  <span>
+                                    {statusLabel(endpointStatus, corporation.eligible.length === 0)}
+                                  </span>
+                                </span>
+                                <span className="text-center">
+                                  {availabilityLabel(endpointStatus)}
+                                </span>
+                                {endpointStatus?.lastModified && (
+                                  <span className="text-center">
+                                    Modified {formatDate(endpointStatus.lastModified)}
+                                  </span>
+                                )}
+                                {endpointStatus?.lastUpdated && (
+                                  <span className="text-center">
+                                    Updated {formatDate(endpointStatus.lastUpdated)}
+                                  </span>
+                                )}
+                                {endpointStatus?.error && (
+                                  <span className="text-center">{endpointStatus.error}</span>
+                                )}
+                              </ItemDescription>
+                            </ItemContent>
+                          </Item>
                         );
                       },
                     )}
-                  </div>
+                  </ItemGroup>
                   <div className={styles.characterModalRoles}>
                     <p className={styles.panelKicker}>CONNECTED PILOTS AND ROLES</p>
                     {corporation.pilots.map((pilot) => (

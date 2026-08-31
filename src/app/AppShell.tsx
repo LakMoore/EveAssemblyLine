@@ -65,6 +65,8 @@ import { PlanStockItem } from "@/lib/planning/types";
 import { Avatar, AvatarBadge, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ThemeSelect } from "@/components/ThemeSelect";
 import { toast } from "@/components/ui/toast";
+import { Progress, ProgressLabel } from "@/components/ui/progress";
+import { buildRefreshUnits, runRefreshUnits } from "@/lib/esi/refreshOrchestration";
 
 const languageStorageKey = "assembly-line-language";
 const sidebarStorageKey = "assembly-line-sidebar-collapsed";
@@ -87,6 +89,7 @@ const RefreshContext = createContext<boolean>(false);
 type CharacterSummary = {
   characterId: number;
   characterName: string;
+  corporationId?: number;
   hasDirectorRole: boolean;
 };
 
@@ -187,6 +190,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [authenticated, setAuthenticated] = useState(false);
   const [characters, setCharacters] = useState<CharacterSummary[]>([]);
   const [isRefreshingData, setIsRefreshingData] = useState(false);
+  const [refreshProgress, setRefreshProgress] = useState<{
+    completed: number;
+    total: number;
+  } | null>(null);
   const [isMobileMetaExpanded, setIsMobileMetaExpanded] = useState(false);
   const [isMobileMetaCollapsing, setIsMobileMetaCollapsing] = useState(false);
   const [stateStatuses, setStateStatuses] = useState<ClientCharacterStatus[]>([]);
@@ -292,7 +299,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     };
     loadStatuses();
     const handleRefresh = () => {
-      if (activePage !== "imagechecker") loadStatuses(true);
+      if (activePage !== "imagechecker" && activePage !== "characters") loadStatuses(true);
     };
     const statusTimer = window.setInterval(() => setStatusCheckAt(Date.now()), 5_000);
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
@@ -344,38 +351,64 @@ export default function AppShell({ children }: { children: ReactNode }) {
     if (isRefreshingDataRef.current || !authenticated || characters.length === 0) return false;
     isRefreshingDataRef.current = true;
     setIsRefreshingData(true);
+    const units = buildRefreshUnits(
+      characters.map((character) => ({
+        characterId: character.characterId,
+        corporationId: character.corporationId,
+        hasDirectorRole: character.hasDirectorRole,
+      })),
+    );
+    setRefreshProgress({ completed: 0, total: units.length });
     window.dispatchEvent(new CustomEvent("assembly-line-esi-refresh-started"));
     let stockLocations: EsiStockResponse["locations"] | undefined;
     let refreshSucceeded = false;
     try {
-      const response = await fetch(
-        "/api/state/refresh",
+      const results = await runRefreshUnits(
+        units,
+        async (unit) => {
+          const response = await fetch(
+            "/api/state/refresh",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ kind: unit.kind, id: unit.ownerId }),
+            },
+          );
+          const data = (await response.json()) as {
+            success?: boolean;
+            rateLimitedUntil?: string | null;
+            error?: string;
+            errors?: string[];
+          };
+          if (!response.ok || data.success !== true) {
+            throw new Error(
+              data.errors?.[0]
+                ?? data.error
+                ?? (data.rateLimitedUntil
+                  ? `Refresh is rate limited until ${new Date(data.rateLimitedUntil).toLocaleString()}.`
+                  : "Could not refresh ESI data."),
+            );
+          }
+        },
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
+          concurrency: units.length,
+          onSettled: () => {
+            setRefreshProgress((current) =>
+              current
+                ? { ...current, completed: Math.min(current.total, current.completed + 1) }
+                : current,
+            );
+          },
         },
       );
-      const data = (await response.json()) as {
-        success?: boolean;
-        refreshedAt?: string;
-        rateLimitedUntil?: string | null;
-        error?: string;
-        errors?: string[];
-      };
-      if (!response.ok || data.success !== true) {
-        const details =
-          data.errors?.[0]
-          ?? data.error
-          ?? (data.rateLimitedUntil
-            ? `Refresh is rate limited until ${new Date(data.rateLimitedUntil).toLocaleString()}.`
-            : "Could not refresh ESI data.");
-        showRefreshError(details);
-        return false;
+      refreshSucceeded = results.every((result) => result.success);
+      if (!refreshSucceeded) {
+        const failure = results.find((result) => !result.success)?.error;
+        showRefreshError(
+          failure instanceof Error ? failure.message : "Could not refresh ESI data.",
+        );
       }
-      refreshSucceeded = true;
-      const refreshedAt = data.refreshedAt ?? new Date().toISOString();
-      await saveLastRefreshAt(refreshedAt);
+      const refreshedAt = new Date().toISOString();
       const requiredEndpoints = new Set<string>(refreshDependentEndpoints[activePage]);
       let shipsResponse;
       if (requiredEndpoints.has("state/ships")) {
@@ -414,13 +447,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
         }
         catch {}
       }
+      if (refreshSucceeded) await saveLastRefreshAt(refreshedAt);
       window.dispatchEvent(
         new CustomEvent(
           "assembly-line-esi-refreshed",
           {
             detail: {
               refreshedAt,
-              rateLimitedUntil: data.rateLimitedUntil ?? null,
+              rateLimitedUntil: null,
               stockLocations,
               ships: shipsResponse ?? null,
               jobs: jobsResponse ?? null,
@@ -428,8 +462,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
           },
         ),
       );
-      showRefreshSuccess();
-      return true;
+      if (refreshSucceeded) showRefreshSuccess();
+      return refreshSucceeded;
     }
     catch (error) {
       showRefreshError(error instanceof Error ? error.message : "Could not refresh ESI data.");
@@ -438,6 +472,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     finally {
       isRefreshingDataRef.current = false;
       setIsRefreshingData(false);
+      setRefreshProgress(null);
       window.dispatchEvent(
         new CustomEvent(
           "assembly-line-esi-refresh-finished",
@@ -447,7 +482,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         ),
       );
     }
-  }, [activePage, authenticated, characters.length, language]);
+  }, [activePage, authenticated, characters, language]);
 
   useEffect(() => {
     if (!authenticated || characters.length === 0 || activePage === "imagechecker") return;
@@ -680,6 +715,15 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 )}
               </div>
             </div>
+            {isRefreshingData && refreshProgress && (
+              <Progress
+                value={Math.round((refreshProgress.completed / refreshProgress.total) * 100)}
+                className={styles.refreshProgress}
+                aria-label="Refreshing ESI data"
+              >
+                <ProgressLabel className="sr-only">Refreshing ESI data</ProgressLabel>
+              </Progress>
+            )}
           </header>
           <div
             className={`${styles.layout} ${isSidebarCollapsed ? styles.layoutCollapsed : ""} ${!isSidebarReady ? styles.sidebarInitialising : ""}`}
