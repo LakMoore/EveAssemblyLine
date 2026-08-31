@@ -5,7 +5,15 @@ import {
   getTypeMaterials,
 } from "@/cache/services/sdeCache";
 import { getTypes } from "@/lib/sde/loader";
-import { PlannerRequest, PlanResult, PlanSourceCounts, PlanSourceIcon } from "./types";
+import {
+  PlanJobInput,
+  PlanJobInputs,
+  PlanJobInputStatus,
+  PlannerRequest,
+  PlanResult,
+  PlanSourceCounts,
+  PlanSourceIcon,
+} from "./types";
 import {
   allocateReprocessing,
   type ReprocessingAllocation,
@@ -22,11 +30,27 @@ type StockLot = {
   rootLocationId: number;
   ownerType?: "character" | "corporation";
   ownerId?: number;
+  industryJobOutput: boolean;
   volumePerUnit: number;
 };
 
 function getStockRootLocationId(item: PlannerRequest["stock"][number]) {
   return item.rootLocationId ?? item.sourceLocationId ?? item.locationId;
+}
+
+function isIndustryProductionOutput(item: PlannerRequest["stock"][number]) {
+  const activity = item.activityName?.toLowerCase();
+  return (
+    item.inBuild === true
+    && item.jobId !== undefined
+    && item.category === "item"
+    && (activity === "manufacturing" || activity === "reactions" || activity === "reaction")
+  );
+}
+
+function isUsableIndustryProductionOutput(item: PlannerRequest["stock"][number]) {
+  if (!isIndustryProductionOutput(item)) return true;
+  return item.industryJobStatus === "ready" || item.industryJobStatus === "delivered";
 }
 
 function getPreferredActivityLocationIds(locations: PlannerRequest["locations"]) {
@@ -140,6 +164,7 @@ async function allocatePlanReprocessing(
       item.category === "blueprint"
       || item.category === "reactionformula"
       || !reprocessableTypeIds.has(item.typeId)
+      || !isUsableIndustryProductionOutput(item)
     ) continue;
     ownedQuantityByTypeId.set(
       item.typeId,
@@ -257,6 +282,7 @@ async function calculatePlanPass(
       new Map<number, number>(),
     );
   const standardStock = request.stock
+    .filter(isUsableIndustryProductionOutput)
     .filter((item) => item.category !== "blueprint" && item.category !== "reactionformula")
     .filter((item) => item.source !== "marketOrder")
     .reduce(
@@ -264,6 +290,7 @@ async function calculatePlanPass(
       new Map<number, number>(),
     );
   const stockLots: StockLot[] = request.stock
+    .filter(isUsableIndustryProductionOutput)
     .filter((item) => item.category !== "blueprint" && item.category !== "reactionformula")
     .filter((item) => item.source !== "marketOrder")
     .filter((item): item is typeof item & { rootLocationId: number } =>
@@ -275,6 +302,7 @@ async function calculatePlanPass(
       rootLocationId: getStockRootLocationId(item)!,
       ownerType: item.ownerType,
       ownerId: item.ownerId,
+      industryJobOutput: isIndustryProductionOutput(item),
       volumePerUnit: item.isPackaged
         ? (
             typeRecords.get(item.typeId)?.packagedVolume
@@ -284,10 +312,37 @@ async function calculatePlanPass(
         : (typeRecords.get(item.typeId)?.volume ?? 0),
     }));
   const stockByLocationAndType = new Map<number, Map<number, number>>();
+  const inStockByLocationAndType = new Map<number, Map<number, number>>();
+  const initialInBuildByLocationAndType = new Map<number, Map<number, number>>();
+  const industryOutputByLocationAndType = new Map<number, Map<number, number>>();
+  const industryOutputByType = new Map<number, number>();
   for (const lot of stockLots) {
     const locationStock = stockByLocationAndType.get(lot.rootLocationId) ?? new Map();
     locationStock.set(lot.typeId, (locationStock.get(lot.typeId) ?? 0) + lot.quantity);
     stockByLocationAndType.set(lot.rootLocationId, locationStock);
+    const inStock = lot.industryJobOutput ? undefined : inStockByLocationAndType;
+    if (inStock) {
+      const stockAtLocation = inStock.get(lot.rootLocationId) ?? new Map<number, number>();
+      stockAtLocation.set(lot.typeId, (stockAtLocation.get(lot.typeId) ?? 0) + lot.quantity);
+      inStock.set(lot.rootLocationId, stockAtLocation);
+    }
+    if (lot.industryJobOutput) {
+      const outputAtLocation =
+        industryOutputByLocationAndType.get(lot.rootLocationId) ?? new Map<number, number>();
+      outputAtLocation.set(lot.typeId, (outputAtLocation.get(lot.typeId) ?? 0) + lot.quantity);
+      industryOutputByLocationAndType.set(lot.rootLocationId, outputAtLocation);
+      const initialOutputAtLocation =
+        initialInBuildByLocationAndType.get(lot.rootLocationId) ?? new Map<number, number>();
+      initialOutputAtLocation.set(
+        lot.typeId,
+        (initialOutputAtLocation.get(lot.typeId) ?? 0) + lot.quantity,
+      );
+      initialInBuildByLocationAndType.set(lot.rootLocationId, initialOutputAtLocation);
+      industryOutputByType.set(
+        lot.typeId,
+        (industryOutputByType.get(lot.typeId) ?? 0) + lot.quantity,
+      );
+    }
   }
   const haulingByKey = new Map<string, PlanResult["lists"]["haulingTasks"][number]>();
   const reprocessingLocationId =
@@ -324,10 +379,19 @@ async function calculatePlanPass(
     typeId: number,
     quantity: number,
     destinationRootLocationId: number | undefined,
+    source: "inStock" | "inBuild" = "inStock",
+    allowRemoteInBuild = false,
   ) {
     let remaining = quantity;
     const candidateLots = stockLots
       .filter((lot) => lot.typeId === typeId && lot.quantity > 0)
+      .filter((lot) => (source === "inBuild" ? lot.industryJobOutput : !lot.industryJobOutput))
+      .filter(
+        (lot) =>
+          source !== "inBuild"
+          || allowRemoteInBuild
+          || lot.rootLocationId === destinationRootLocationId,
+      )
       .sort(
         (left, right) =>
           Number(left.rootLocationId !== destinationRootLocationId)
@@ -342,6 +406,64 @@ async function calculatePlanPass(
       lot.quantity -= consumed;
       remaining -= consumed;
     }
+  }
+  function getInBuildStock(typeId: number, locationId: number | undefined) {
+    if (locationId === undefined) return 0;
+    return industryOutputByLocationAndType.get(locationId)?.get(typeId) ?? 0;
+  }
+  function consumeAvailableStock(
+    typeId: number,
+    quantity: number,
+    destinationRootLocationId: number | undefined,
+    allowRemoteInBuild = false,
+  ) {
+    const totalAvailable = standardStock.get(typeId) ?? 0;
+    const totalInBuild = industryOutputByType.get(typeId) ?? 0;
+    const inBuildAvailable = allowRemoteInBuild
+      ? totalInBuild
+      : getInBuildStock(typeId, destinationRootLocationId);
+    const inStockAvailable = Math.max(0, totalAvailable - totalInBuild);
+    const consumed = Math.min(quantity, inStockAvailable + inBuildAvailable);
+    if (consumed <= 0) return 0;
+
+    const inStockConsumed = Math.min(consumed, inStockAvailable);
+    const inBuildConsumed = consumed - inStockConsumed;
+    const remainingTotal = totalAvailable - consumed;
+    if (remainingTotal > 0) standardStock.set(typeId, remainingTotal);
+    else standardStock.delete(typeId);
+    if (inStockConsumed > 0) {
+      consumeTrackedStock(typeId, inStockConsumed, destinationRootLocationId, "inStock");
+    }
+    if (inBuildConsumed > 0) {
+      let remainingInBuild = inBuildConsumed;
+      const outputLots = stockLots
+        .filter((lot) => lot.typeId === typeId && lot.industryJobOutput && lot.quantity > 0)
+        .filter((lot) => allowRemoteInBuild || lot.rootLocationId === destinationRootLocationId)
+        .sort(
+          (left, right) =>
+            Number(left.rootLocationId !== destinationRootLocationId)
+              - Number(right.rootLocationId !== destinationRootLocationId)
+            || left.rootLocationId - right.rootLocationId,
+        );
+      for (const lot of outputLots) {
+        if (remainingInBuild <= 0) break;
+        const consumedFromLot = Math.min(lot.quantity, remainingInBuild);
+        const outputAtLocation = industryOutputByLocationAndType.get(lot.rootLocationId);
+        const remainingAtLocation = (outputAtLocation?.get(typeId) ?? 0) - consumedFromLot;
+        if (remainingAtLocation > 0) outputAtLocation?.set(typeId, remainingAtLocation);
+        else outputAtLocation?.delete(typeId);
+        if (outputAtLocation?.size === 0) {
+          industryOutputByLocationAndType.delete(lot.rootLocationId);
+        }
+        lot.quantity -= consumedFromLot;
+        addHauling(lot, consumedFromLot, destinationRootLocationId);
+        remainingInBuild -= consumedFromLot;
+      }
+      const remainingOutputTotal = totalInBuild - inBuildConsumed;
+      if (remainingOutputTotal > 0) industryOutputByType.set(typeId, remainingOutputTotal);
+      else industryOutputByType.delete(typeId);
+    }
+    return consumed;
   }
   function getRunsAvailable(
     blueprint: NonNullable<
@@ -369,14 +491,7 @@ async function calculatePlanPass(
         if (remainingMarket > 0) marketOrderStock.set(typeId, remainingMarket);
         else marketOrderStock.delete(typeId);
       }
-      const standardAvailable = standardStock.get(typeId) ?? 0;
-      const standardConsumed = Math.min(standardAvailable, quantity - marketConsumed);
-      if (standardConsumed > 0) {
-        consumeTrackedStock(typeId, standardConsumed, reprocessingLocationId);
-        const remainingStandard = standardAvailable - standardConsumed;
-        if (remainingStandard > 0) standardStock.set(typeId, remainingStandard);
-        else standardStock.delete(typeId);
-      }
+      consumeAvailableStock(typeId, quantity - marketConsumed, reprocessingLocationId, true);
     }
   }
 
@@ -386,6 +501,7 @@ async function calculatePlanPass(
   const manufacturingJobs = new Map<number, PlanResult["lists"]["manufacturingJobs"][number]>();
   const reactionJobs = new Map<number, PlanResult["lists"]["reactionJobs"][number]>();
   const inventionJobs = new Map<number, PlanResult["lists"]["inventionJobs"][number]>();
+  const jobInputsByBlueprint = new Map<number, PlanJobInputs>();
   const requiredSkillLevels = new Map<number, number>();
   const inventedBpcTypeIds = new Set<number>();
   const producedParts = new Map(reprocessing?.producedMaterials ?? []);
@@ -476,6 +592,141 @@ async function calculatePlanPass(
       item.typeId,
       (reactionFormulaCounts.get(item.typeId) ?? 0) + item.quantity,
     );
+  }
+  const reactionFormulaStockByLocation = new Map<number, Map<number, number>>();
+  for (const item of availableReactionFormulas) {
+    const locationId = getStockRootLocationId(item);
+    if (locationId === undefined) continue;
+    const formulasAtLocation =
+      reactionFormulaStockByLocation.get(locationId) ?? new Map<number, number>();
+    formulasAtLocation.set(item.typeId, (formulasAtLocation.get(item.typeId) ?? 0) + item.quantity);
+    reactionFormulaStockByLocation.set(locationId, formulasAtLocation);
+  }
+  function getLocationQuantity(
+    stock: Map<number, Map<number, number>>,
+    locationId: number | undefined,
+    typeId: number,
+  ) {
+    return locationId === undefined ? 0 : (stock.get(locationId)?.get(typeId) ?? 0);
+  }
+  function inputStatus(availableQuantity: number, requiredQuantity: number): PlanJobInputStatus {
+    if (requiredQuantity <= 0 || availableQuantity >= requiredQuantity) return "ready";
+    return availableQuantity > 0 ? "partial" : "blocked";
+  }
+  function inputItem(
+    kind: PlanJobInput["kind"],
+    typeId: number,
+    name: string,
+    availableQuantity: number,
+    requiredQuantity: number,
+  ): PlanJobInput {
+    return {
+      kind,
+      typeId,
+      name,
+      availableQuantity,
+      requiredQuantity,
+      completionPercent:
+        requiredQuantity <= 0
+          ? 100
+          : Math.min(100, Math.round((availableQuantity / requiredQuantity) * 100)),
+      status: inputStatus(availableQuantity, requiredQuantity),
+    };
+  }
+  function jobInputStatus(inputs: PlanJobInput[]): PlanJobInputStatus {
+    const completionPercent = Math.min(...inputs.map((input) => input.completionPercent));
+    return inputStatus(completionPercent, 100);
+  }
+  function createJobInputs(
+    activity: "manufacturing" | "reaction",
+    blueprint: NonNullable<
+      Awaited<ReturnType<typeof getBuildBlueprintByProductTypeId>>
+    >["blueprint"],
+    runs: number,
+    efficiency: Efficiency,
+    locationId: number | undefined,
+  ): PlanJobInputs {
+    const activityData = blueprint.activities[activity];
+    const materials = (activityData?.materials ?? []).map((material) => {
+      const requiredQuantity =
+        activity === "manufacturing"
+          ? Math.ceil(material.quantity * runs * (1 - efficiency.me / 100))
+          : material.quantity * runs;
+      const availableQuantity =
+        getLocationQuantity(inStockByLocationAndType, locationId, material.typeID)
+        + getLocationQuantity(initialInBuildByLocationAndType, locationId, material.typeID);
+      return inputItem(
+        "material",
+        material.typeID,
+        typeName(material.typeID, `Type ${material.typeID}`),
+        availableQuantity,
+        requiredQuantity,
+      );
+    });
+    const bpoCount = blueprintOriginalCounts.get(blueprint._key) ?? 0;
+    const copyStock = blueprintCopyStock.get(blueprint._key);
+    const availableBlueprintQuantity =
+      activity === "reaction"
+        ? getLocationQuantity(reactionFormulaStockByLocation, locationId, blueprint._key)
+        : bpoCount > 0
+          ? bpoCount
+          : (copyStock?.runs ?? 0);
+    const requiredBlueprintQuantity = activity === "reaction" || bpoCount > 0 ? 1 : runs;
+    const blueprintInput = inputItem(
+      "blueprint",
+      blueprint._key,
+      typeName(blueprint._key, activity === "reaction" ? "Reaction Formula" : "Blueprint"),
+      availableBlueprintQuantity,
+      requiredBlueprintQuantity,
+    );
+    const allInputs = [blueprintInput, ...materials];
+    const completionPercent = Math.min(...allInputs.map((input) => input.completionPercent));
+    return {
+      blueprint: blueprintInput,
+      materials,
+      completionPercent,
+      status: jobInputStatus(allInputs),
+    };
+  }
+  function mergeJobInputs(
+    existing: PlanJobInputs | undefined,
+    next: PlanJobInputs,
+    reusableBlueprint: boolean,
+  ): PlanJobInputs {
+    if (!existing) return next;
+    const materialByTypeId = new Map(
+      existing.materials.map((material) => [material.typeId, material]),
+    );
+    for (const material of next.materials) {
+      const previous = materialByTypeId.get(material.typeId);
+      materialByTypeId.set(
+        material.typeId,
+        inputItem(
+          "material",
+          material.typeId,
+          material.name,
+          material.availableQuantity,
+          (previous?.requiredQuantity ?? 0) + material.requiredQuantity,
+        ),
+      );
+    }
+    const blueprint = inputItem(
+      "blueprint",
+      next.blueprint.typeId,
+      next.blueprint.name,
+      next.blueprint.availableQuantity,
+      reusableBlueprint
+        ? Math.max(existing.blueprint.requiredQuantity, next.blueprint.requiredQuantity)
+        : existing.blueprint.requiredQuantity + next.blueprint.requiredQuantity,
+    );
+    const materials = [...materialByTypeId.values()];
+    const allInputs = [blueprint, ...materials];
+    return {
+      blueprint,
+      materials,
+      completionPercent: Math.min(...allInputs.map((input) => input.completionPercent)),
+      status: jobInputStatus(allInputs),
+    };
   }
   const usedRunsByBlueprint = new Map<number, number>();
   const consumedStock = new Map<number, number>();
@@ -568,21 +819,19 @@ async function calculatePlanPass(
     fallbackName: string,
     demandAlreadyRecorded = false,
     imageVariation: "icon" | "bp" | "bpc" = "icon",
-    consumeAvailableStock = true,
+    useAvailableStock = true,
     activityRootLocationId?: number,
   ) {
     return profiler.measure(
       "addMaterial",
       async () => {
-        const stockAvailable = standardStock.get(typeId) ?? 0;
-        const stockConsumed = consumeAvailableStock ? Math.min(stockAvailable, quantity) : 0;
+        const stockConsumed = useAvailableStock
+          ? consumeAvailableStock(typeId, quantity, activityRootLocationId)
+          : 0;
         if (stockConsumed > 0) {
           consumedStock.set(typeId, (consumedStock.get(typeId) ?? 0) + stockConsumed);
-          consumeTrackedStock(typeId, stockConsumed, activityRootLocationId);
         }
-        const remainingStock = stockAvailable - stockConsumed;
-        if (remainingStock > 0) standardStock.set(typeId, remainingStock);
-        else if (stockConsumed > 0) standardStock.delete(typeId);
+        const remainingStock = standardStock.get(typeId) ?? 0;
         const existing = materials.get(typeId);
         updateMaterial(
           typeId,
@@ -619,8 +868,7 @@ async function calculatePlanPass(
       async () => {
         if (quantity <= 0) return;
 
-        const standardAvailable = standardStock.get(typeId) ?? 0;
-        const standardConsumed = Math.min(standardAvailable, quantity);
+        const standardConsumed = consumeAvailableStock(typeId, quantity, activityRootLocationId);
         const marketAvailable = allowMarketOrderStock ? (marketOrderStock.get(typeId) ?? 0) : 0;
         const marketConsumed = Math.min(marketAvailable, quantity - standardConsumed);
         const stockConsumed = standardConsumed + marketConsumed;
@@ -634,14 +882,8 @@ async function calculatePlanPass(
         );
         if (stockConsumed > 0) {
           consumedStock.set(typeId, (consumedStock.get(typeId) ?? 0) + stockConsumed);
-          consumeTrackedStock(typeId, standardConsumed, activityRootLocationId);
         }
         if (stockConsumed > 0) {
-          if (standardConsumed > 0) {
-            const remainingStandard = standardAvailable - standardConsumed;
-            if (remainingStandard > 0) standardStock.set(typeId, remainingStandard);
-            else standardStock.delete(typeId);
-          }
           if (marketConsumed > 0) {
             const remainingMarket = marketAvailable - marketConsumed;
             if (remainingMarket > 0) marketOrderStock.set(typeId, remainingMarket);
@@ -751,6 +993,20 @@ async function calculatePlanPass(
         if (activity === "manufacturing") {
           addRequiredSkills(blueprint.activities.manufacturing?.skills);
           const existing = manufacturingJobs.get(blueprint._key);
+          const existingInputs = jobInputsByBlueprint.get(blueprint._key);
+          const jobInputs = createJobInputs(
+            "manufacturing",
+            blueprint,
+            runsNeeded,
+            efficiency,
+            request.locations?.manufacturing,
+          );
+          const mergedJobInputs = mergeJobInputs(
+            existingInputs,
+            jobInputs,
+            (blueprintOriginalCounts.get(blueprint._key) ?? 0) > 0,
+          );
+          jobInputsByBlueprint.set(blueprint._key, mergedJobInputs);
           manufacturingJobs.set(
             blueprint._key,
             {
@@ -769,6 +1025,7 @@ async function calculatePlanPass(
                   * manufacturingTimeMultiplier
                   * manufacturingSkillTimeMultiplier
                   * runsNeeded,
+              inputs: mergedJobInputs,
               ...(request.locations ? { locationId: request.locations.manufacturing } : {}),
             },
           );
@@ -820,6 +1077,16 @@ async function calculatePlanPass(
 
         addRequiredSkills(blueprint.activities.reaction?.skills);
         const existing = reactionJobs.get(blueprint._key);
+        const existingInputs = jobInputsByBlueprint.get(blueprint._key);
+        const jobInputs = createJobInputs(
+          "reaction",
+          blueprint,
+          runsNeeded,
+          efficiency,
+          request.locations?.reactions,
+        );
+        const mergedJobInputs = mergeJobInputs(existingInputs, jobInputs, false);
+        jobInputsByBlueprint.set(blueprint._key, mergedJobInputs);
         reactionJobs.set(
           blueprint._key,
           {
@@ -838,6 +1105,7 @@ async function calculatePlanPass(
                 * reactionTimeMultiplier
                 * reactionSkillTimeMultiplier
                 * runsNeeded,
+            inputs: mergedJobInputs,
             ...(request.locations ? { locationId: request.locations.reactions } : {}),
           },
         );
@@ -997,6 +1265,10 @@ async function calculatePlanPass(
     const name = typeRecords.get(typeId)?.name;
     return name?.[language] ?? name?.en ?? fallbackByTypeId.get(typeId) ?? `Type ${typeId}`;
   };
+  const resolveJobInputs = (inputs: PlanJobInputs) => {
+    inputs.blueprint.name = resolvedName(inputs.blueprint.typeId);
+    for (const material of inputs.materials) material.name = resolvedName(material.typeId);
+  };
   const skillsRequired: PlanResult["lists"]["skillsRequired"] = [...requiredSkillLevels]
     .map(([skillId, requiredLevel]) => ({
       skillId,
@@ -1008,6 +1280,8 @@ async function calculatePlanPass(
   for (const bpc of bpcs.values()) bpc.name = resolvedName(bpc.typeId);
   for (const job of manufacturingJobs.values()) job.name = resolvedName(job.typeId);
   for (const job of reactionJobs.values()) job.name = resolvedName(job.typeId);
+  for (const job of manufacturingJobs.values()) resolveJobInputs(job.inputs);
+  for (const job of reactionJobs.values()) resolveJobInputs(job.inputs);
   for (const job of inventionJobs.values()) job.name = resolvedName(job.typeId);
   for (const bpc of bpcs.values()) bpc.name = resolvedName(bpc.typeId);
   for (const formula of reactionFormulas.values()) formula.name = resolvedName(formula.typeId);

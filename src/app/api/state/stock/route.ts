@@ -32,6 +32,7 @@ import type {
 } from "@/lib/auth/model";
 import type {
   BlueprintType,
+  IndustryJobStatus,
   PlanStockItem,
   StockContribution,
   StockItem,
@@ -94,6 +95,13 @@ function activityName(activityId: number) {
       } as Record<number, string>
     )[activityId] ?? "Industry job"
   );
+}
+
+function normalizeIndustryJobStatus(status: string): IndustryJobStatus | undefined {
+  const normalized = status.toLowerCase();
+  return ["active", "cancelled", "delivered", "paused", "ready", "reverted"].includes(normalized)
+    ? (normalized as IndustryJobStatus)
+    : undefined;
 }
 
 function jobUsesOriginalWithoutAssetMetadata(job: IndustryJobRecord, isCopying: boolean) {
@@ -294,6 +302,9 @@ function installedJobContributions(
   blueprint: AssetRecord | undefined,
   blueprintInstance: BlueprintInstanceRecord | undefined,
   productQuantityPerRun?: number,
+  includeOutput = false,
+  includeInstalledBlueprint = true,
+  industryJobStatus?: IndustryJobStatus,
 ): StockContribution[] {
   const isCopying = job.activityId === 5;
   const installedRunCount = blueprintInstance?.runs ?? blueprint?.runCount;
@@ -313,11 +324,14 @@ function installedJobContributions(
       : 0;
   const contributions: StockContribution[] = [];
   if (
-    installedBlueprintIsOriginal
-    || installedBlueprintRemainingRuns > 0
-    // Research jobs may have no product output. Keep their installed blueprint visible
-    // even when all finite runs are consumed so the active job remains trackable.
-    || job.productTypeId === undefined
+    includeInstalledBlueprint
+    && (
+      installedBlueprintIsOriginal
+      || installedBlueprintRemainingRuns > 0
+      // Research jobs may have no product output. Keep their installed blueprint visible
+      // even when all finite runs are consumed so the active job remains trackable.
+      || job.productTypeId === undefined
+    )
   ) {
     contributions.push({
       itemId: job.blueprintId,
@@ -329,6 +343,7 @@ function installedJobContributions(
       inBuild: true,
       inUse: true,
       jobId: job.jobId,
+      industryJobStatus,
       jobRuns: job.runs,
       licensedRuns: job.licensedRuns,
       blueprintRunsAtInstall: installedRunCount,
@@ -346,7 +361,8 @@ function installedJobContributions(
   const productionRuns = job.installedRuns ?? getInstalledJobRuns(job);
   const isProduction = job.activityId === 1 || job.activityId === 9;
   if (
-    job.productTypeId
+    includeOutput
+    && job.productTypeId
     && productionRuns > 0
     && (!isProduction || productQuantityPerRun !== undefined)
   ) {
@@ -367,6 +383,7 @@ function installedJobContributions(
           },
           inBuild: true,
           jobId: job.jobId,
+          industryJobStatus,
           jobRuns: job.runs,
           licensedRuns: job.licensedRuns,
           activityName: activityName(job.activityId),
@@ -382,6 +399,7 @@ function installedJobContributions(
         ownerType: job.ownerType,
         inBuild: true,
         jobId: job.jobId,
+        industryJobStatus,
         jobRuns: job.runs,
         licensedRuns: job.licensedRuns,
         activityName: activityName(job.activityId),
@@ -623,7 +641,12 @@ export async function GET(request: NextRequest) {
   // Jobs can contain the only usable copy of a blueprint. Preserve that installed blueprint even
   // when its asset record is unavailable or its structure metadata is only partially resolved.
   for (const job of jobs) {
-    if (job.status === "cancelled" || job.status === "delivered") continue;
+    const industryJobStatus = normalizeIndustryJobStatus(job.status);
+    if (
+      industryJobStatus === undefined
+      || industryJobStatus === "cancelled"
+      || industryJobStatus === "reverted"
+    ) continue;
     const blueprint =
       allAssetIndex.get(job.blueprintId)
       ?? assets.find((asset) => asset.itemId === job.blueprintId);
@@ -652,6 +675,9 @@ export async function GET(request: NextRequest) {
       blueprint,
       blueprintInstance,
       job.productTypeId !== undefined ? productQuantities.get(job.productTypeId) : undefined,
+      industryJobStatus === "ready" || industryJobStatus === "delivered",
+      industryJobStatus !== "delivered",
+      industryJobStatus,
     )) {
       const location = jobLocations.get(job.outputLocationId)
         ?? jobLocations.get(job.locationId) ?? {

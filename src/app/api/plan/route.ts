@@ -276,6 +276,7 @@ export async function POST(request: Request) {
                 jobId: job.jobId,
                 jobRuns: job.runs,
                 activityName: job.activity,
+                ...(job.status ? { industryJobStatus: job.status } : {}),
                 blueprintRunsAtInstall: job.blueprintRunsAtInstall,
                 licensedRuns: job.licensedRuns,
               },
@@ -289,6 +290,7 @@ export async function POST(request: Request) {
                 jobId: job.jobId,
                 jobRuns: job.runs,
                 activityName: job.activity,
+                ...(job.status ? { industryJobStatus: job.status } : {}),
               },
             ),
       );

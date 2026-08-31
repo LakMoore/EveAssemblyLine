@@ -48,6 +48,7 @@ import type { SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import { useAppLanguage } from "../AppShell";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
+import JobInputsResponsive from "@/components/JobInputsResponsive";
 import CalculateButton from "@/components/CalculateButton";
 import TypeSearch from "@/components/TypeSearch";
 import { toast } from "@/components/ui/toast";
@@ -2316,6 +2317,12 @@ function PlanList({
                           variation={imageVariation}
                           className={styles.planTypeIdentity}
                         />
+                        {(activeTab === "React" || activeTab === "Manufacture")
+                          && "inputs" in entry && (
+                            <span className={styles.jobInputsTrigger}>
+                              <JobInputsResponsive inputs={entry.inputs} />
+                            </span>
+                          )}
                       </div>
                       {activeTab === "Plan" ? (
                         planColumns.map((column) =>
@@ -2347,7 +2354,10 @@ function PlanList({
                         <span className={styles.planRowAmount}>
                           {activeTab === "React" ? (
                             <span className={styles.reactionCells}>
-                              <span className={styles.reactionAvailableCell}>
+                              <span
+                                className={styles.reactionAvailableCell}
+                                data-label="BPs available"
+                              >
                                 {additionalInstallCount > 0
                                   && !addedReactionBuildItems.has(typeId) && (
                                     <Button
@@ -2371,14 +2381,19 @@ function PlanList({
                                   )}
                                 <strong>{reactionFormulaCount.toLocaleString()}</strong>
                               </span>
-                              <strong>{suggestedInstallCount.toLocaleString()}</strong>
-                              <span className={styles.reactionValue}>
+                              <span
+                                className={styles.reactionValue}
+                                data-label="Suggested installs"
+                              >
+                                <strong>{suggestedInstallCount.toLocaleString()}</strong>
+                              </span>
+                              <span className={styles.reactionValue} data-label="Suggested runs">
                                 <strong>{targetRuns?.toLocaleString() ?? "-"}</strong>
                                 <small>
                                   {installTime !== null ? formatDuration(installTime) : "-"}
                                 </small>
                               </span>
-                              <span className={styles.reactionValue}>
+                              <span className={styles.reactionValue} data-label="Total needed">
                                 <strong>{totalNeeded?.toLocaleString() ?? "-"}</strong>
                                 <small>
                                   {totalNeeded !== null && totalTime !== null && "runs" in entry

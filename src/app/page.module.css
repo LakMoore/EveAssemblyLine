@@ -2803,6 +2803,10 @@
   gap: 8px;
 }
 
+.jobInputsTrigger {
+  flex: 0 0 auto;
+}
+
 .planRowMain strong,
 .planRowMain small,
 .planRowAmount strong,
@@ -2856,6 +2860,42 @@
     flex-direction: column;
   }
 
+  .reactionTableHeader {
+    display: none;
+  }
+
+  .reactionRow .planRowAmount {
+    display: block;
+    width: 100%;
+  }
+
+  .reactionCells {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 13px;
+  }
+
+  .reactionCells > * {
+    position: relative;
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding-top: 14px;
+    text-align: left;
+  }
+
+  .reactionCells > *::before {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: block;
+    margin-bottom: 3px;
+    color: var(--muted-foreground);
+    content: attr(data-label);
+    font: 9px "DM Mono";
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+  }
+
   .planActions > label,
   .reactionSummary {
     width: 100%;
@@ -2889,6 +2929,38 @@
   .planRow .planRowAmount {
     grid-column: 1;
     width: 100%;
+  }
+
+  .planTypeCell {
+    flex-wrap: wrap;
+  }
+
+  .jobInputsTrigger {
+    flex-basis: 100%;
+    padding-left: 48px;
+  }
+
+  .manufacturingRow {
+    grid-template-columns: minmax(0, 1fr) minmax(85px, auto);
+  }
+
+  .manufacturingRow .planTypeCell {
+    display: contents;
+  }
+
+  .manufacturingRow .planTypeIdentity {
+    grid-column: 1 / -1;
+  }
+
+  .manufacturingRow .jobInputsTrigger {
+    grid-column: 1;
+    flex-basis: auto;
+    padding-left: 0;
+  }
+
+  .manufacturingRow .manufacturingRunCell {
+    grid-column: 2;
+    grid-row: 2;
   }
 
   .planRowAmount {

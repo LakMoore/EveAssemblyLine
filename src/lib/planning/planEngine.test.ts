@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { calculatePlan } from "./planEngine";
-import type { PlannerRequest } from "./types";
+import type { IndustryJobStatus, PlannerRequest } from "./types";
 
 const tritaniumTypeId = 34;
 const compressedVeldsparTypeId = 62516;
 const amberMykoserocinTypeId = 28694;
 const compressedAmberMykoserocinTypeId = 62377;
+const rifterTypeId = 587;
+const rifterBlueprintTypeId = 691;
+const reactionProductTypeId = 16672;
+const reactionFormulaTypeId = 46207;
 const reprocessingLocationId = 10;
 const manufacturingLocationId = 20;
 const sourceLocationId = 40;
@@ -59,6 +63,222 @@ function compressedStock(quantity: number): PlannerRequest["stock"][number] {
     rootLocationId: sourceLocationId,
   };
 }
+
+function industryOutputStock(
+  status: IndustryJobStatus,
+  rootLocationId: number,
+  activityName = "Manufacturing",
+): PlannerRequest["stock"][number] {
+  return {
+    typeId: tritaniumTypeId,
+    name: "Tritanium",
+    quantity: 100,
+    category: "item",
+    locationId: rootLocationId,
+    rootLocationId,
+    inBuild: true,
+    inBuildQuantity: 100,
+    jobId: 123,
+    activityName,
+    industryJobStatus: status,
+  };
+}
+
+test("does not use output from an active industry job as stock", async () => {
+  const result = await calculatePlan(
+    request(100, [industryOutputStock("active", manufacturingLocationId)]),
+  );
+  const tritanium = result.lists.materialsToBuy.find(
+    (material) => material.typeId === tritaniumTypeId,
+  );
+
+  assert(tritanium);
+  assert.equal(tritanium.stockQuantity, 0);
+  assert.equal(tritanium.buyQuantity, 100);
+  assert.deepEqual(result.lists.haulingTasks, []);
+});
+
+test("uses ready and delivered manufacturing and reaction output locally", async () => {
+  for (const status of ["ready", "delivered"] as const) {
+    for (const activityName of ["Manufacturing", "Reactions"]) {
+      const result = await calculatePlan(
+        request(100, [industryOutputStock(status, manufacturingLocationId, activityName)]),
+      );
+      const tritanium = result.lists.materialsToBuy.find(
+        (material) => material.typeId === tritaniumTypeId,
+      );
+
+      assert(tritanium);
+      assert.equal(tritanium.stockQuantity, 100);
+      assert.equal(tritanium.buyQuantity, 0);
+      assert.deepEqual(result.lists.haulingTasks, []);
+    }
+  }
+});
+
+test("does not use industry output at another location as a future job input", async () => {
+  const result = await calculatePlan(
+    request(100, [industryOutputStock("ready", sourceLocationId)]),
+  );
+  const tritanium = result.lists.materialsToBuy.find(
+    (material) => material.typeId === tritaniumTypeId,
+  );
+
+  assert(tritanium);
+  assert.equal(tritanium.stockQuantity, 0);
+  assert.equal(tritanium.buyQuantity, 100);
+  assert.deepEqual(result.lists.haulingTasks, []);
+});
+
+test("reports manufacturing blueprint and material inputs", async () => {
+  const result = await calculatePlan(
+    request(
+      1,
+      [
+        {
+          typeId: rifterBlueprintTypeId,
+          name: "Rifter Blueprint",
+          quantity: 1,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [{ itemId: 9001, type: "bpo", runs: -1 }],
+        },
+        {
+          typeId: tritaniumTypeId,
+          name: "Tritanium",
+          quantity: 32_000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const job = result.lists.manufacturingJobs.find(
+    (entry) => entry.typeId === rifterBlueprintTypeId,
+  );
+  assert(job);
+  assert.equal(job.inputs.blueprint.availableQuantity, 1);
+  assert.equal(job.inputs.blueprint.requiredQuantity, 1);
+  const tritanium = job.inputs.materials.find((input) => input.typeId === tritaniumTypeId);
+  assert(tritanium);
+  assert.equal(tritanium.availableQuantity, 32_000);
+  assert.equal(tritanium.requiredQuantity, 32_000);
+  assert.equal(tritanium.completionPercent, 100);
+});
+
+test("reports total available BPC runs for manufacturing inputs", async () => {
+  const result = await calculatePlan(
+    request(
+      88,
+      [
+        {
+          typeId: rifterBlueprintTypeId,
+          name: "Rifter Blueprint",
+          quantity: 3,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [
+            { itemId: 9002, type: "bpc", runs: 30 },
+            { itemId: 9003, type: "bpc", runs: 29 },
+            { itemId: 9004, type: "bpc", runs: 29 },
+          ],
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 88,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const job = result.lists.manufacturingJobs.find(
+    (entry) => entry.typeId === rifterBlueprintTypeId,
+  );
+
+  assert(job);
+  assert.equal(job.inputs.blueprint.availableQuantity, 88);
+  assert.equal(job.inputs.blueprint.requiredQuantity, 88);
+  assert.equal(job.inputs.blueprint.completionPercent, 100);
+});
+
+test("reports reaction formula and material inputs", async () => {
+  const result = await calculatePlan(
+    request(
+      20,
+      [
+        {
+          typeId: reactionFormulaTypeId,
+          name: "Reaction Formula",
+          quantity: 1,
+          category: "reactionformula",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 16657,
+          name: "Reaction Material A",
+          quantity: 100,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 16661,
+          name: "Reaction Material B",
+          quantity: 100,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 4051,
+          name: "Reaction Material C",
+          quantity: 5,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: reactionProductTypeId,
+            name: "Reaction Product",
+            quantity: 20,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const job = result.lists.reactionJobs.find((entry) => entry.typeId === reactionFormulaTypeId);
+  assert(job);
+  assert.equal(job.inputs.blueprint.availableQuantity, 1);
+  assert.equal(job.inputs.blueprint.requiredQuantity, 1);
+  assert.equal(job.inputs.materials.length, 3);
+  assert.equal(
+    job.inputs.materials.every((input) => input.completionPercent === 100),
+    true,
+  );
+  assert.equal(job.inputs.status, "ready");
+});
 
 test("does not reprocess or haul compressed stock when direct materials cover demand", async () => {
   const result = await calculatePlan(

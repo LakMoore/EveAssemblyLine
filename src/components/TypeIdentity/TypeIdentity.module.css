@@ -1,7 +1,6 @@
 .identity {
   display: flex;
   min-width: 0;
-  align-items: center;
   gap: 9px;
 }
 
@@ -13,6 +12,8 @@
 
 .details {
   display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 6px;
   min-width: 0;
   justify-items: start;
 }
@@ -32,17 +33,23 @@
 }
 
 .name {
+  grid-column: 1 / -1;
   font: inherit;
   font-weight: 700;
 }
 
 .typeId {
+  min-width: 0;
   margin-top: 3px;
   color: var(--muted-foreground);
   font: 9px "DM Mono";
 }
 
 .subline {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   margin-top: 3px;
   color: var(--muted-foreground);
   font: 9px "DM Mono";

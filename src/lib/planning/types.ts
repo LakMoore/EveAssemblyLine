@@ -47,6 +47,7 @@ export interface PlanIndustryInput extends PlanAssetLocation {
   quantity: number;
   runs: number;
   activity: string;
+  status?: IndustryJobStatus;
   blueprintTypeId?: number;
   blueprintRunsAtInstall?: number;
   licensedRuns?: number;
@@ -60,6 +61,13 @@ export interface PlanMarketInput extends PlanAssetLocation {
 
 export type StockOwnerType = "character" | "corporation";
 export type BlueprintType = "bpo" | "bpc";
+export type IndustryJobStatus =
+  | "active"
+  | "cancelled"
+  | "delivered"
+  | "paused"
+  | "ready"
+  | "reverted";
 
 export interface StockItemBase {
   typeId: number;
@@ -72,6 +80,7 @@ export interface StockItemBase {
   inBuild?: boolean;
   inUse?: boolean;
   jobId?: number;
+  industryJobStatus?: IndustryJobStatus;
   blueprintRunsAtInstall?: number;
   licensedRuns?: number;
   blueprintType?: BlueprintType;
@@ -159,6 +168,26 @@ export type PlannerRequest = Omit<PlanRequest, "toBuild" | "assets"> & {
 
 export type PlanSourceIcon = "market" | "industry" | "invention" | "copying";
 export type PlanSourceCounts = Partial<Record<PlanSourceIcon, number>>;
+export type PlanJobInputKind = "blueprint" | "material";
+export type PlanJobInputStatus = "ready" | "partial" | "blocked";
+
+export interface PlanJobInput {
+  kind: PlanJobInputKind;
+  typeId: number;
+  name: string;
+  availableQuantity: number;
+  requiredQuantity: number;
+  completionPercent: number;
+  status: PlanJobInputStatus;
+}
+
+export interface PlanJobInputs {
+  blueprint: PlanJobInput;
+  materials: PlanJobInput[];
+  completionPercent: number;
+  status: PlanJobInputStatus;
+}
+
 export type PlanSkillRequirement = {
   skillId: number;
   name: string;
@@ -243,6 +272,7 @@ export interface PlanResult {
       runsAvailable: number;
       totalTime: number;
       locationId?: number;
+      inputs: PlanJobInputs;
     }>;
     manufacturingJobs: Array<{
       typeId: number;
@@ -251,6 +281,7 @@ export interface PlanResult {
       runsAvailable: number;
       totalTime: number;
       locationId?: number;
+      inputs: PlanJobInputs;
     }>;
     reprocessingJobs: Array<{
       typeId: number;

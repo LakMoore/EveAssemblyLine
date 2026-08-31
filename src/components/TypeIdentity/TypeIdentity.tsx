@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useState } from "react";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import { toast } from "@/components/ui/toast";
+import { cn } from "@/lib/utils";
 import styles from "./TypeIdentity.module.css";
 
 type TypeIdentityProps = {
@@ -42,7 +43,7 @@ export default function TypeIdentity({
   }
 
   return (
-    <div className={`${styles.identity} ${className ?? ""}`}>
+    <div className={cn(styles.identity, "items-center", className)}>
       <Image
         className={styles.image}
         src={eveTypeImageUrl(typeId, activeVariation)}
