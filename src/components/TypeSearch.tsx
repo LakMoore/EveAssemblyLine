@@ -13,6 +13,8 @@ import {
   useComboboxAnchor,
 } from "./ui/combobox";
 
+const minimumQueryLength = 3;
+
 type TypeSearchResult = {
   name: string;
   typeId: number;
@@ -49,8 +51,8 @@ export default function TypeSearch({
 
   useEffect(() => {
     const trimmedQuery = query.trim();
-    if (trimmedQuery.length < 2) return;
     const currentRequestId = ++requestId.current;
+    if (trimmedQuery.length < minimumQueryLength) return;
     const controller = new AbortController();
     const timeout = window.setTimeout(
       async () => {
@@ -93,7 +95,7 @@ export default function TypeSearch({
     <div ref={anchor} className="w-full">
       <Combobox
         items={results}
-        open={isOpen && query.trim().length >= 2}
+        open={isOpen && query.trim().length >= minimumQueryLength}
         itemToStringLabel={(item: TypeSearchResult) => item.name}
         filter={null}
         inputValue={query}
@@ -105,8 +107,10 @@ export default function TypeSearch({
             setIsOpen(false);
             return;
           }
+          const hasSearchQuery = value.trim().length >= minimumQueryLength;
           setQuery(value);
-          setIsOpen(value.trim().length >= 2);
+          setIsOpen(hasSearchQuery);
+          if (!hasSearchQuery) setResults([]);
         }}
         onValueChange={(value) => {
           if (value) choose(value);
@@ -116,7 +120,9 @@ export default function TypeSearch({
           id={inputId}
           className="w-full"
           showTrigger={false}
-          onFocus={() => results.length > 0 && setIsOpen(true)}
+          onFocus={() =>
+            results.length > 0 && query.trim().length >= minimumQueryLength && setIsOpen(true)
+          }
           onKeyDown={onKeyDown}
           placeholder={placeholder}
           aria-label={ariaLabel}

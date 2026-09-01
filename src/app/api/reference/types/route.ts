@@ -4,7 +4,6 @@ import { getGroups, getMarketGroups, getTypes } from "@/cache/services/sdeCache"
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { categorizeType, type ItemCategory } from "@/lib/reference/category";
 
-const resultLimit = 12;
 const typeMetadataRequestSchema = z.object({
   language: z.string().optional(),
   typeIds: z.array(z.number().int().safe().positive()),
@@ -49,7 +48,7 @@ export async function GET(request: Request) {
 
   try {
     const typeById = await getTypes();
-    if (query.length < 2) return NextResponse.json({ items: [] });
+    if (query.length < 3) return NextResponse.json({ items: [] });
     const [marketGroupById, groupById] = await Promise.all([getMarketGroups(), getGroups()]);
     const normalizedQuery = query.toLocaleLowerCase();
     const numericQuery = /^\d+$/.test(query) ? Number(query) : null;
@@ -73,7 +72,6 @@ export async function GET(request: Request) {
         const rightStarts = rightName.startsWith(normalizedQuery) ? 0 : 1;
         return leftStarts - rightStarts || leftName.localeCompare(rightName);
       })
-      .slice(0, resultLimit)
       .map((item) => ({
         typeId: item._key,
         ...categorizeType(item, language, marketGroupById, groupById),
