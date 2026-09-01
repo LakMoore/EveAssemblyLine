@@ -65,7 +65,8 @@ type ProfileEntry = { count: number; totalMs: number; maxMs: number };
 
 class PlanProfiler {
   private readonly entries = new Map<string, ProfileEntry>();
-  private readonly enabled = process.env.DEBUG_PLAN === "1";
+  private readonly enabled =
+    process.env.NODE_ENV === "development" && process.env.DEBUG_PLAN === "1";
 
   get isEnabled() {
     return this.enabled;

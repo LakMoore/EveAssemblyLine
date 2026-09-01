@@ -287,29 +287,34 @@ async function getOptions(
     };
   });
   markPhase("derived");
+  const profilingEnabled = process.env.NODE_ENV === "development";
   const totalMs = Math.round(performance.now() - startedAt);
-  const timingHeader = [
-    `total;dur=${totalMs}`,
-    ...Object.entries(phaseDurations).map(([name, duration]) => `${name};dur=${duration}`),
-  ].join(", ");
-  console.info(
-    "[compress/options] timing",
-    {
-      totalMs,
-      phasesMs: phaseDurations,
-      assetLocations: assetLocations.length,
-      structures: structureLocations.length,
-      corporationStructures: corporationStructures.length,
-      characters: records.length,
-      suppliedStructures: suppliedStructures.length,
-    },
-  );
+  if (profilingEnabled) {
+    console.info(
+      "[compress/options] timing",
+      {
+        totalMs,
+        phasesMs: phaseDurations,
+        assetLocations: assetLocations.length,
+        structures: structureLocations.length,
+        corporationStructures: corporationStructures.length,
+        characters: records.length,
+        suppliedStructures: suppliedStructures.length,
+      },
+    );
+  }
   const response = NextResponse.json({
     characters,
     relevantSkillIds,
     implants: [{ id: "none", name: "No implant", level: 0 }, ...implantNames, ...cloneImplants],
   });
-  response.headers.set("Server-Timing", timingHeader);
+  if (profilingEnabled) {
+    const timingHeader = [
+      `total;dur=${totalMs}`,
+      ...Object.entries(phaseDurations).map(([name, duration]) => `${name};dur=${duration}`),
+    ].join(", ");
+    response.headers.set("Server-Timing", timingHeader);
+  }
   return response;
 }
 

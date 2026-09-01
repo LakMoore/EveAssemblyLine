@@ -725,23 +725,28 @@ export async function GET(request: NextRequest) {
     ] as PlanStockItem[],
   };
   const totalMs = Math.round(performance.now() - startedAt);
-  const timingHeader = [
-    `total;dur=${totalMs}`,
-    ...Object.entries(phaseDurations).map(([name, duration]) => `${name};dur=${duration}`),
-  ].join(", ");
-  console.info(
-    "[state/stock] timing",
-    {
-      totalMs,
-      phasesMs: phaseDurations,
-      characters: characterIds.length,
-      assets: assets.length,
-      jobs: jobs.length,
-      jobLocations: jobLocations.size,
-      locations: payload.locations.length,
-    },
-  );
+  const profilingEnabled = process.env.NODE_ENV === "development";
+  if (profilingEnabled) {
+    console.info(
+      "[state/stock] timing",
+      {
+        totalMs,
+        phasesMs: phaseDurations,
+        characters: characterIds.length,
+        assets: assets.length,
+        jobs: jobs.length,
+        jobLocations: jobLocations.size,
+        locations: payload.locations.length,
+      },
+    );
+  }
   const response = NextResponse.json(payload);
-  response.headers.set("Server-Timing", timingHeader);
+  if (profilingEnabled) {
+    const timingHeader = [
+      `total;dur=${totalMs}`,
+      ...Object.entries(phaseDurations).map(([name, duration]) => `${name};dur=${duration}`),
+    ].join(", ");
+    response.headers.set("Server-Timing", timingHeader);
+  }
   return response;
 }

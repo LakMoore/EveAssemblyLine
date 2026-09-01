@@ -376,20 +376,22 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
     };
   });
   markPhase("calculateFacilities");
-  console.info(
-    "[facilities] timing",
-    {
-      totalMs: Number((performance.now() - startedAt).toFixed(1)),
-      phases: phaseTimings,
-      characters: characterIds.length,
-      roots: roots.size,
-      corporationStructures: corpStructures.length,
-      corporationsRequested: authorizedByCorporation.size,
-      candidates: candidates.size,
-      stationsWithMetadata: stationMetadata.length,
-      facilities: facilities.length,
-    },
-  );
+  if (process.env.NODE_ENV === "development") {
+    console.info(
+      "[facilities] timing",
+      {
+        totalMs: Number((performance.now() - startedAt).toFixed(1)),
+        phases: phaseTimings,
+        characters: characterIds.length,
+        roots: roots.size,
+        corporationStructures: corpStructures.length,
+        corporationsRequested: authorizedByCorporation.size,
+        candidates: candidates.size,
+        stationsWithMetadata: stationMetadata.length,
+        facilities: facilities.length,
+      },
+    );
+  }
   return { facilities, settings };
 }
 
