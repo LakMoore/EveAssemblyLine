@@ -764,7 +764,7 @@ function mapIndustryJob(
 export async function fetchCharacterIndustryJobs(record: CharacterTokenRecord, etag?: string) {
   const token = await getUsableToken(record);
   const result = await fetchEsiEndpoint<EsiIndustryJob[]>(
-    `/characters/${record.characterId}/industry/jobs/`,
+    `/characters/${record.characterId}/industry/jobs/?include_completed=true`,
     token,
     etag,
     { paginated: false },
@@ -774,7 +774,7 @@ export async function fetchCharacterIndustryJobs(record: CharacterTokenRecord, e
       result.data === null
         ? null
         : result.data
-            .filter((job) => job.status !== "cancelled" && job.status !== "delivered")
+            .filter((job) => job.status !== "cancelled" && job.status !== "reverted")
             .map((job) => mapIndustryJob(job, "character", record.characterId)),
     headers: result.headers,
     notModified: result.notModified,
@@ -808,7 +808,7 @@ export async function fetchCorporationIndustryJobs(record: CharacterTokenRecord,
   }
   const token = await getUsableToken(record);
   const result = await fetchEsiEndpoint<EsiIndustryJob[]>(
-    `/corporations/${record.corporationId}/industry/jobs/`,
+    `/corporations/${record.corporationId}/industry/jobs/?include_completed=true`,
     token,
     etag,
     { paginated: false },
@@ -818,7 +818,7 @@ export async function fetchCorporationIndustryJobs(record: CharacterTokenRecord,
       result.data === null
         ? null
         : result.data
-            .filter((job) => job.status !== "cancelled" && job.status !== "delivered")
+            .filter((job) => job.status !== "cancelled" && job.status !== "reverted")
             .map((job) => mapIndustryJob(job, "corporation", record.corporationId!)),
     headers: result.headers,
     notModified: result.notModified,

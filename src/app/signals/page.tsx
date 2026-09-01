@@ -68,7 +68,7 @@ function formatQuantity(value: number) {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value);
 }
 
-/** Displays cached stock with unusually favorable current sell prices. */
+/** Displays cached assets with unusually favorable current sell prices. */
 export default function SignalsPage() {
   const { language } = useAppLanguage();
   const [data, setData] = useState<SignalsResponse | null>(null);
@@ -164,7 +164,7 @@ export default function SignalsPage() {
           <p className="eyebrow">TOOLS / SIGNALS</p>
           <h1>Signals</h1>
           <p className={styles.subtitle}>
-            Stock worth listing now, based on regional order-book spreads and recent prices.
+            Assets worth listing now, based on regional order-book spreads and recent prices.
           </p>
         </div>
         <form className="flex flex-wrap items-end justify-end gap-2" onSubmit={applyThreshold}>

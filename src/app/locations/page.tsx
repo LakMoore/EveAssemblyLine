@@ -34,7 +34,7 @@ import {
   type PlannerLocations,
 } from "@/lib/planning/preferences";
 import type { SdeLanguage } from "@/lib/reference/languages";
-import { loadClientSession, loadClientStock } from "@/lib/client/requestCache";
+import { loadClientAssets, loadClientSession } from "@/lib/client/requestCache";
 import { fetchRigs } from "@/lib/reference/rigs";
 import {
   fetchStructureTypes,
@@ -258,7 +258,7 @@ export default function LocationsPage() {
 
     async function loadEsiStructures() {
       try {
-        const data = await (loadClientStock(language) as Promise<{
+        const data = await (loadClientAssets(language) as Promise<{
           locations?: Array<{
             locationId: number;
             name: string;
@@ -593,7 +593,7 @@ export default function LocationsPage() {
         {structureListItems.length === 0 ? (
           <Empty className={styles.emptyBuildList}>
             <EmptyDescription>
-              No known structures. Add a structure to make it available in Stock.
+              No known structures. Add a structure to make it available in Assets.
             </EmptyDescription>
           </Empty>
         ) : (

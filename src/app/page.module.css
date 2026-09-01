@@ -2379,6 +2379,7 @@
 
 .reactionPlanControls,
 .reactionDisplayControls,
+.planViewControls,
 .reactionResultsActions {
   display: flex;
   align-items: center;
@@ -2780,6 +2781,10 @@
 
 .availableSourceIcon[data-source="invention"] {
   color: #c5a6e8;
+}
+
+.availableSourceIcon[data-source="haul"] {
+  color: #e18e76;
 }
 
 .availableSourceIcon[data-source="copying"] {

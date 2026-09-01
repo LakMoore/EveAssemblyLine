@@ -11,7 +11,7 @@ export default function WelcomePage() {
           <span className="eyebrow">EVE INDUSTRY CONTROL</span>
           <h1>Welcome to Eve AssemblyLine</h1>
           <p>
-            Plan production, inspect your stock, and keep every industrial decision in one place.
+            Plan production, inspect your assets, and keep every industrial decision in one place.
           </p>
         </div>
         <Link className={cn(buttonVariants({ variant: "link" }), styles.addButton)} href="/planner">
@@ -31,7 +31,7 @@ export default function WelcomePage() {
           <span className="eyebrow">INFORMATION</span>
           <h2>See the operation</h2>
           <p>
-            Stock, Structures, and Jobs show what you have, where it lives, and what is already
+            Assets, Structures, and Jobs show what you have, where it lives, and what is already
             moving through your facilities.
           </p>
         </section>
@@ -94,9 +94,9 @@ export default function WelcomePage() {
             <h2>Future features</h2>
           </div>
           <ul className={styles.roadmapList}>
-            <li>Ship fittings added to build plans and compared wholesale against stock.</li>
+            <li>Ship fittings added to build plans and compared wholesale against assets.</li>
             <li>More precise asset exclusion per location.</li>
-            <li>Multiple build lists, one for each stock location.</li>
+            <li>Multiple build lists, one for each asset location.</li>
             <li>
               Share structure information and settings with anyone on that structure&apos;s ACL.
             </li>

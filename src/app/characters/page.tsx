@@ -28,13 +28,12 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
-  groupClientStockByLocation,
+  groupClientAssetsByLocation,
   invalidateClientCharacterData,
-  clearClientStockCache,
   loadClientCharacters,
   loadClientCorpStatus,
   loadClientStateStatus,
-  loadClientStock,
+  loadClientAssets,
   type ClientCharacter,
   type ClientCharacterStatus,
 } from "@/lib/client/requestCache";
@@ -214,10 +213,10 @@ function personalEndpointStatuses(status: CharacterStatus) {
 async function reloadStockAfterCharacterRemoval() {
   const savedLanguage = window.localStorage.getItem(languageStorageKey);
   const language: SdeLanguage = isSdeLanguage(savedLanguage) ? savedLanguage : "en";
-  const stockData = await loadClientStock(language, true);
-  const stockLocations = groupClientStockByLocation(stockData);
+  const assetsData = await loadClientAssets(language, true);
+  const assetLocations = groupClientAssetsByLocation(assetsData);
   await replaceEsiStock(
-    stockLocations.map((location) => ({
+    assetLocations.map((location) => ({
       systemId: location.systemId ?? 0,
       systemName: location.systemName ?? "Unknown system",
       structureId: String(location.locationId),
@@ -227,7 +226,7 @@ async function reloadStockAfterCharacterRemoval() {
     })),
   );
   window.dispatchEvent(
-    new CustomEvent("assembly-line-esi-refreshed", { detail: { stockLocations } }),
+    new CustomEvent("assembly-line-esi-refreshed", { detail: { assetLocations } }),
   );
 }
 

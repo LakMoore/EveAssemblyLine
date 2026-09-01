@@ -12,15 +12,15 @@ export type ClientEndpointRecord<T = unknown> = {
 
 export const refreshDependentEndpoints = {
   welcome: [],
-  planner: ["state/stock", "facilities"],
+  planner: ["state/assets", "facilities"],
   appraise: [],
-  signals: ["state/stock"],
-  compress: ["state/stock", "state/status", "facilities", "compress/options"],
-  stock: ["state/stock"],
+  signals: ["state/assets"],
+  compress: ["state/assets", "state/status", "facilities", "compress/options"],
+  assets: ["state/assets"],
   jobs: ["state/jobs"],
   ships: ["state/ships"],
-  structures: ["state/stock", "facilities"],
-  characters: ["state/status", "characters", "auth/corp/status", "state/stock"],
+  structures: ["state/assets", "facilities"],
+  characters: ["state/status", "characters", "auth/corp/status", "state/assets"],
   settings: [],
   imagechecker: [],
 } as const satisfies Record<string, readonly string[]>;

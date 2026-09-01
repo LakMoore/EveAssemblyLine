@@ -16,14 +16,14 @@ import { usePathname } from "next/navigation";
 import { isSdeLanguage, sdeLanguages, type SdeLanguage } from "@/lib/reference/languages";
 import { loadStockSnapshotTime, replaceEsiStock } from "@/lib/planning/stockStore";
 import {
-  groupClientStockByLocation,
+  groupClientAssetsByLocation,
   loadClientJobs,
   loadClientCharacters,
   loadClientCorpStatus,
   loadClientSession,
   loadClientShips,
   loadClientStateStatus,
-  loadClientStock,
+  loadClientAssets,
   type ClientCharacterStatus,
 } from "@/lib/client/requestCache";
 import {
@@ -76,7 +76,7 @@ type ActivePage =
   | "compress"
   | "appraise"
   | "signals"
-  | "stock"
+  | "assets"
   | "jobs"
   | "ships"
   | "structures"
@@ -217,8 +217,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
             ? "appraise"
             : pathname === "/signals"
               ? "signals"
-              : pathname === "/stock"
-                ? "stock"
+              : pathname === "/assets"
+                ? "assets"
                 : pathname === "/jobs"
                   ? "jobs"
                   : pathname === "/ships"
@@ -360,7 +360,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     );
     setRefreshProgress({ completed: 0, total: units.length });
     window.dispatchEvent(new CustomEvent("assembly-line-esi-refresh-started"));
-    let stockLocations: EsiStockResponse["locations"] | undefined;
+    let assetLocations: EsiStockResponse["locations"] | undefined;
     let refreshSucceeded = false;
     try {
       const results = await runRefreshUnits(
@@ -417,12 +417,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
         }
         catch {}
       }
-      if (requiredEndpoints.has("state/stock")) {
+      if (requiredEndpoints.has("state/assets")) {
         try {
-          const stockData = await loadClientStock(language, true);
-          stockLocations = groupClientStockByLocation(stockData);
+          const assetsData = await loadClientAssets(language, true);
+          assetLocations = groupClientAssetsByLocation(assetsData);
           await replaceEsiStock(
-            stockLocations.map((location) => ({
+            assetLocations.map((location) => ({
               systemId: location.systemId ?? 0,
               systemName: location.systemName ?? "Unknown system",
               structureId: String(location.locationId),
@@ -448,7 +448,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
             detail: {
               refreshedAt,
               rateLimitedUntil: null,
-              stockLocations,
+              assetLocations,
               ships: shipsResponse ?? null,
               jobs: jobsResponse ?? null,
             },
@@ -495,7 +495,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         const staleEndpoints = new Set(
           stale.filter((entry) => entry.stale).map((entry) => entry.endpoint),
         );
-        if (staleEndpoints.has("state/stock")) await loadClientStock(language, true);
+        if (staleEndpoints.has("state/assets")) await loadClientAssets(language, true);
         if (staleEndpoints.has("state/jobs")) await loadClientJobs(true);
         if (staleEndpoints.has("state/ships")) await loadClientShips(true);
         if (staleEndpoints.has("state/status")) await loadClientStateStatus(true);
@@ -796,14 +796,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
               </Link>
               <div className={styles.sectionLabel}>INFORMATION</div>
               <Link
-                className={`${styles.navItem} ${activePage === "stock" ? styles.navActive : ""}`}
-                href="/stock"
+                className={`${styles.navItem} ${activePage === "assets" ? styles.navActive : ""}`}
+                href="/assets"
                 onClick={closeSidebarOnNavigation}
               >
                 <span>
                   <Boxes size={17} strokeWidth={1.8} aria-hidden="true" />
                 </span>
-                <span className={styles.navText}>Stock</span>
+                <span className={styles.navText}>Assets</span>
               </Link>
               <Link
                 className={`${styles.navItem} ${activePage === "jobs" ? styles.navActive : ""}`}

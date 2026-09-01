@@ -11,6 +11,7 @@ import type {
   BuildItem,
   ClientBuildItem,
   PlanBlueprintInput,
+  PlanBuildItem,
   PlanIndustryInput,
   PlanItemInput,
   PlanMarketInput,
@@ -34,6 +35,44 @@ const facilityTimeMultipliersSchema = z.object({
   reactions: z.number().finite().min(0).max(1),
 });
 const skillTimeMultipliersSchema = facilityTimeMultipliersSchema;
+const planBuildItemSchema = z.object({
+  typeId: z.number().int().positive(),
+  quantity: z.number().finite().positive(),
+  me: z.number().finite().min(0).max(10),
+  te: z.number().finite().min(0).max(20),
+  fromCompression: z.boolean(),
+});
+const planBucketSchema = z.object({
+  id: z.string().trim().min(1).max(100),
+  name: z.string().trim().min(1).max(100),
+  locations: z.object({
+    stock: z.number().int().positive(),
+    manufacturing: z.number().int().positive(),
+    reactions: z.number().int().positive(),
+    reprocessing: z.number().int().positive(),
+    copying: z.number().int().positive(),
+    invention: z.number().int().positive(),
+  }),
+  items: z.array(planBuildItemSchema),
+});
+const planBucketsSchema = z
+  .array(planBucketSchema)
+  .min(1)
+  .max(100)
+  .superRefine((buckets, context) => {
+    const seen = new Set<string>();
+    for (const [index, bucket] of buckets.entries()) {
+      const key = `${bucket.locations.stock}:${bucket.locations.manufacturing}`;
+      if (seen.has(key)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index, "locations"],
+          message: "Stock and build locations must be unique across buckets",
+        });
+      }
+      seen.add(key);
+    }
+  });
 
 function validLocation(value: { locationId: number; rootLocationId: number }) {
   return Number.isInteger(value.locationId) && Number.isInteger(value.rootLocationId);
@@ -87,23 +126,33 @@ function industryProduct(
   };
 }
 
-async function calculateWorkingStockPlan(input: PlanRequest, stock: PlanStockItem[]) {
+async function calculateWorkingAssetsPlan(input: PlanRequest, assets: PlanStockItem[]) {
+  const requestedItems = input.buckets?.flatMap((bucket) => bucket.items) ?? input.toBuild ?? [];
   const types = await getTypesByIds([
-    ...new Set([...input.toBuild.map((item) => item.typeId), ...stock.map((item) => item.typeId)]),
+    ...new Set([
+      ...requestedItems.map((item) => item.typeId),
+      ...assets.map((item) => item.typeId),
+    ]),
   ]);
-  const buildItems: BuildItem[] = input.toBuild.map((item) => ({
+  const resolveBuildItem = (item: PlanBuildItem): BuildItem => ({
     ...item,
     fromCompression: item.fromCompression === true,
     name:
       types.get(item.typeId)?.name[input.language ?? "en"]
       ?? types.get(item.typeId)?.name.en
       ?? `Type ${item.typeId}`,
+  });
+  const buildItems = requestedItems.map(resolveBuildItem);
+  const buckets = input.buckets?.map((bucket) => ({
+    ...bucket,
+    items: bucket.items.map(resolveBuildItem),
   }));
   const result = await calculatePlan({
     language: input.language,
     items: buildItems,
+    buckets,
     reprocessingEfficiencies: input.reprocessingEfficiencies,
-    stock: await hydrateStockCategories(stock),
+    stock: await hydrateStockCategories(assets),
     locations: input.locations,
     facilityTimeMultipliers: input.facilityTimeMultipliers,
     skillTimeMultipliers: input.skillTimeMultipliers,
@@ -148,18 +197,31 @@ export async function POST(request: Request) {
       }
       input.skillTimeMultipliers = parsedMultipliers.data;
     }
-    if (!Array.isArray(input.toBuild) || input.toBuild.length === 0) {
+    const parsedBuckets =
+      input.buckets === undefined ? undefined : planBucketsSchema.safeParse(input.buckets);
+    if (parsedBuckets && !parsedBuckets.success) {
+      return NextResponse.json(
+        { error: "Every bucket needs a name, six valid locations, and valid build items." },
+        { status: 400 },
+      );
+    }
+    if (parsedBuckets?.success) input.buckets = parsedBuckets.data;
+    const requestedItems = input.buckets?.flatMap((bucket) => bucket.items) ?? input.toBuild ?? [];
+    if (requestedItems.length === 0) {
       return NextResponse.json({ error: "Add at least one build item." }, { status: 400 });
     }
-    if (Array.isArray(input.stock)) {
+    input.toBuild = requestedItems;
+    const workingAssets = Array.isArray(input.assets) ? input.assets : input.stock;
+    if (Array.isArray(workingAssets)) {
       return NextResponse.json(
-        await calculateWorkingStockPlan(input, input.stock),
+        await calculateWorkingAssetsPlan(input, workingAssets),
         noStoreResponseInit,
       );
     }
     const assets = input.assets;
     if (
       !assets
+      || Array.isArray(assets)
       || !Array.isArray(assets.items)
       || !Array.isArray(assets.blueprints)
       || !Array.isArray(assets.industry)
@@ -169,7 +231,7 @@ export async function POST(request: Request) {
     }
     const allRows = [...assets.items, ...assets.blueprints, ...assets.industry, ...assets.market];
     if (
-      input.toBuild.some((item) => !Number.isInteger(item.typeId) || !validQuantity(item.quantity))
+      requestedItems.some((item) => !Number.isInteger(item.typeId) || !validQuantity(item.quantity))
       || allRows.some(
         (item) =>
           !Number.isInteger(item.typeId) || !validQuantity(item.quantity) || !validLocation(item),
@@ -191,20 +253,25 @@ export async function POST(request: Request) {
       );
     }
     const typeIds = [
-      ...input.toBuild.map((item) => item.typeId),
+      ...requestedItems.map((item) => item.typeId),
       ...allRows.flatMap((item) => [
         item.typeId,
         "blueprintTypeId" in item ? item.blueprintTypeId : undefined,
       ]),
     ].filter((typeId): typeId is number => typeId !== undefined);
     const types = await getTypesByIds([...new Set(typeIds)]);
-    const buildItems: BuildItem[] = input.toBuild.map((item) => ({
+    const resolveBuildItem = (item: PlanBuildItem): BuildItem => ({
       ...item,
       fromCompression: item.fromCompression === true,
       name:
         types.get(item.typeId)?.name[input.language ?? "en"]
         ?? types.get(item.typeId)?.name.en
         ?? `Type ${item.typeId}`,
+    });
+    const buildItems = requestedItems.map(resolveBuildItem);
+    const buckets = input.buckets?.map((bucket) => ({
+      ...bucket,
+      items: bucket.items.map(resolveBuildItem),
     }));
     const normalizedBlueprints = assets.blueprints.map((blueprint) => ({ ...blueprint }));
     const industryStock: PlanStockItem[] = [];
@@ -321,6 +388,7 @@ export async function POST(request: Request) {
     const result = await calculatePlan({
       language: input.language,
       items: buildItems,
+      buckets,
       reprocessingEfficiencies: input.reprocessingEfficiencies,
       stock,
       locations: input.locations,

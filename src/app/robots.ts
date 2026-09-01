@@ -25,7 +25,7 @@ export default function robots(): MetadataRoute.Robots {
         "/settings",
         "/ships",
         "/signals",
-        "/stock",
+        "/assets",
         "/structures",
       ],
     },

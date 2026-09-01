@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  type ChangeEvent,
   Fragment,
   FormEvent,
   KeyboardEvent,
@@ -13,12 +14,16 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type {
   ClientBuildItem,
+  ClientPlanBucket,
+  PlanBucketLocations,
   PlanResult,
   PlanSourceCounts,
   PlanSourceIcon,
   PlanStockItem,
 } from "@/lib/planning/types";
 import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
+import { loadPlannerBuckets, savePlannerBuckets } from "@/lib/planning/plannerBucketsStore";
+import { loadStructures } from "@/lib/planning/structureStore";
 import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
 import {
   loadBuildBlacklist,
@@ -31,15 +36,22 @@ import {
   loadClientSession,
   loadClientJobs,
   loadClientStateStatus,
-  loadClientStock,
+  loadClientAssets,
   type ClientCharacterStatus,
   type ClientJobsResponse,
 } from "@/lib/client/requestCache";
 import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
 import { loadPlannerReprocessingEfficiencies } from "@/lib/planning/reprocessingClient";
 import {
+  getNonProductionHaulingQuantity,
+  groupPlanItemEntriesByBuildLocation,
+  mergePlanItemEntries,
+  type PlanItemEntry,
+} from "@/lib/planning/planView";
+import {
   defaultLocations,
   defaultSettings,
+  parsePlannerSettings,
   settingsStorageKey,
   type PlannerLocations,
   type PlannerSettings,
@@ -99,13 +111,22 @@ import {
   Repeat,
   ShoppingCart,
   SquareX,
+  TestTubes,
   Trash2,
   Truck,
   Factory,
   X,
+  Download,
+  Pencil,
+  Plus,
+  Upload,
   type LucideIcon,
 } from "lucide-react";
 import PasteListDialog from "@/components/PasteListDialog";
+import PlannerBucketEditor, {
+  type ActivityLocationOption,
+  type StockLocationOption,
+} from "@/components/PlannerBucketEditor";
 
 type PlannerTab =
   | "Plan"
@@ -122,7 +143,7 @@ const tabs: { value: PlannerTab; icon: LucideIcon }[] = [
   { value: "Haul", icon: Truck },
   { value: "Buy", icon: ShoppingCart },
   { value: "Reprocess", icon: Minimize2 },
-  { value: "Copy", icon: CopyIcon },
+  { value: "Copy", icon: TestTubes },
   { value: "Invent", icon: Microscope },
   { value: "React", icon: Atom },
   { value: "Manufacture", icon: Factory },
@@ -145,6 +166,7 @@ type ReactionCoverage = { installable: number; total: number };
 type ReactionSortKey = "type" | "suggestedRuns" | "totalNeeded";
 type ReactionSort = { key: ReactionSortKey; direction: "asc" | "desc" };
 type ManufacturingSort = { key: "type" | "runs"; direction: "asc" | "desc" };
+type PlanViewMode = "all" | "build-location";
 
 const industrySkillIds = {
   industry: 3380,
@@ -256,11 +278,17 @@ function selectSavedLocation(
     : (options[0]?.locationId ?? defaultLocationId);
 }
 
-function AvailableSourceIcons({ counts }: { counts?: PlanSourceCounts }) {
+function AvailableSourceIcons({
+  counts,
+  haulingQuantity = 0,
+}: {
+  counts?: PlanSourceCounts;
+  haulingQuantity?: number;
+}) {
   const icons = (Object.keys(counts ?? {}) as PlanSourceIcon[]).filter(
     (icon) => (counts?.[icon] ?? 0) > 0,
   );
-  if (!icons.length) return null;
+  if (!icons.length && haulingQuantity <= 0) return null;
   return (
     <span className={styles.availableSourceIcons} aria-label="Available sources">
       {icons.map((icon) => {
@@ -271,7 +299,7 @@ function AvailableSourceIcons({ counts }: { counts?: PlanSourceCounts }) {
               ? Factory
               : icon === "invention"
                 ? Microscope
-                : Brain;
+                : TestTubes;
         const quantity = counts?.[icon] ?? 0;
         const label =
           icon === "market"
@@ -295,6 +323,18 @@ function AvailableSourceIcons({ counts }: { counts?: PlanSourceCounts }) {
           </span>
         );
       })}
+      {haulingQuantity > 0 && (
+        <span
+          className={styles.availableSourceIcon}
+          data-source="haul"
+          data-tooltip={`${haulingQuantity.toLocaleString()} to haul`}
+          aria-label={`${haulingQuantity.toLocaleString()} to haul`}
+          role="img"
+          tabIndex={0}
+        >
+          <Truck size={14} strokeWidth={1.8} aria-hidden="true" />
+        </span>
+      )}
     </span>
   );
 }
@@ -377,6 +417,61 @@ async function localizeItems(
   }
 }
 
+function bucketLocationsFromPlannerLocations(locations: PlannerLocations): PlanBucketLocations {
+  return {
+    stock: locations.manufacturing,
+    manufacturing: locations.manufacturing,
+    reactions: locations.reactions,
+    reprocessing: locations.reprocessing ?? locations.manufacturing,
+    copying: locations.copying ?? locations.manufacturing,
+    invention: locations.invention ?? locations.manufacturing,
+  };
+}
+
+function createPlannerBucket(
+  locations: PlannerLocations,
+  items: ClientBuildItem[] = [],
+  name = "New stock destination",
+): ClientPlanBucket {
+  return {
+    id: `bucket-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    locations: bucketLocationsFromPlannerLocations(locations),
+    items,
+  };
+}
+
+function isImportedPlan(value: unknown): value is {
+  buckets: ClientPlanBucket[];
+  settings?: unknown;
+  includeAssets?: unknown;
+  excludedLocationIds?: unknown;
+} {
+  if (!value || typeof value !== "object") return false;
+  const buckets = (value as { buckets?: unknown }).buckets;
+  if (!Array.isArray(buckets) || buckets.length === 0) return false;
+  return buckets.every((bucket) => {
+    if (!bucket || typeof bucket !== "object") return false;
+    const candidate = bucket as Partial<ClientPlanBucket>;
+    return (
+      typeof candidate.id === "string"
+      && typeof candidate.name === "string"
+      && Array.isArray(candidate.items)
+      && candidate.items.every(
+        (item) =>
+          Number.isInteger(item.typeId)
+          && Number.isFinite(item.quantity)
+          && item.quantity > 0
+          && typeof item.name === "string",
+      )
+      && candidate.locations !== undefined
+      && Object
+        .values(candidate.locations)
+        .every((locationId) => Number.isSafeInteger(locationId) && Number(locationId) > 0)
+    );
+  });
+}
+
 function Planner() {
   const [items, setItems] = useState<ClientBuildItem[]>([]);
   const requirementsHeaderRef = useRef<HTMLParagraphElement>(null);
@@ -400,6 +495,14 @@ function Planner() {
   const [characterNamesById, setCharacterNamesById] = useState<Map<number, string>>(new Map());
   const [planningCharacterId, setPlanningCharacterId] = useState<number | undefined>();
   const [stock, setStock] = useState<PlanStockItem[]>([]);
+  const [buckets, setBuckets] = useState<ClientPlanBucket[]>([]);
+  const [areBucketsLoaded, setAreBucketsLoaded] = useState(false);
+  const [editingBucket, setEditingBucket] = useState<ClientPlanBucket | null>(null);
+  const [isBucketEditorOpen, setIsBucketEditorOpen] = useState(false);
+  const [knownStructures, setKnownStructures] = useState<
+    Awaited<ReturnType<typeof loadStructures>>
+  >([]);
+  const [planImportInputKey, setPlanImportInputKey] = useState(0);
   const [excludedLocationIds, setExcludedLocationIds] = useState<number[]>([]);
   const [locationOptions, setLocationOptions] = useState<PlanLocationOption[]>([]);
   const [includeStock, setIncludeStock] = useState(true);
@@ -463,11 +566,34 @@ function Planner() {
       if (buildBlacklist) setSettings((current) => ({ ...current, buildBlacklist }));
     });
     void loadExcludedLocationIds().then(setExcludedLocationIds);
-    loadBuildList()
-      .then((savedItems) => localizeItems(savedItems, language).then(setItems))
-      .catch(() => setItems([]))
-      .finally(() => setIsBuildListLoaded(true));
+    loadPlannerBuckets()
+      .then(async (savedBuckets) => {
+        if (savedBuckets !== null) {
+          const localizedBuckets = await Promise.all(
+            savedBuckets.map(async (bucket) => ({
+              ...bucket,
+              items: await localizeItems(bucket.items, language),
+            })),
+          );
+          setBuckets(localizedBuckets);
+          setItems(localizedBuckets[0]?.items ?? []);
+          return;
+        }
+        const savedItems = await loadBuildList();
+        const localizedItems = await localizeItems(savedItems, language);
+        setItems(localizedItems);
+        setBuckets([createPlannerBucket(defaultLocations, localizedItems, "Primary destination")]);
+      })
+      .catch(() => {
+        setItems([]);
+        setBuckets([]);
+      })
+      .finally(() => setAreBucketsLoaded(true));
   }, [language]);
+
+  useEffect(() => {
+    void loadStructures().then(setKnownStructures);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -541,24 +667,26 @@ function Planner() {
   }, [language]);
 
   useEffect(() => {
-    if (isBuildListLoaded) void saveBuildList(items);
-  }, [isBuildListLoaded, items]);
+    if (areBucketsLoaded) void savePlannerBuckets(buckets);
+  }, [areBucketsLoaded, buckets]);
 
   async function submitPlan(exclusions: Set<number>) {
-    if (items.length === 0 || isPlanLoading) return;
+    const plannerItems = buckets.flatMap((bucket) => bucket.items);
+    if (plannerItems.length === 0 || isPlanLoading) return;
     setIsPlanLoading(true);
     setPlanStatus("Calculating...");
     try {
-      let workingStock: PlanStockItem[] = [];
+      let workingAssets: PlanStockItem[] = [];
       if (includeStock && (await loadClientSession()).authenticated) {
-        const stockData = await loadClientStock(language);
-        workingStock = stockData.workingStock ?? [];
+        const assetsData = await loadClientAssets(language, true);
+        workingAssets = assetsData.assets ?? [];
       }
       const compressSettings = await loadCompressSettings();
       const compressLocationId = Number(compressSettings.locationId);
+      const primaryBucketLocations = buckets[0]?.locations;
       const planningLocations = Number.isInteger(compressLocationId)
-        ? { ...locations, reprocessing: compressLocationId }
-        : locations;
+        ? { ...locations, ...primaryBucketLocations, reprocessing: compressLocationId }
+        : { ...locations, ...primaryBucketLocations };
       const freshFacilities = await fetchFacilityResponse(true);
       const freshFacilityById = new Map(
         (freshFacilities?.facilities ?? []).map((facility) => [facility.id, facility]),
@@ -569,7 +697,7 @@ function Planner() {
         language,
         planningLocations.reprocessing,
       );
-      const requestStock = workingStock.filter((item) => {
+      const requestStock = workingAssets.filter((item) => {
         const locationId = getStockLocationId(item);
         return locationId === undefined || !exclusions.has(locationId);
       });
@@ -585,15 +713,27 @@ function Planner() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             language,
-            toBuild: items.map(({ typeId, quantity, me, te, fromCompression }) => ({
+            toBuild: plannerItems.map(({ typeId, quantity, me, te, fromCompression }) => ({
               typeId,
               quantity,
               me,
               te,
               fromCompression,
             })),
+            buckets: buckets.map((bucket) => ({
+              ...bucket,
+              items: bucket.items.map(({ typeId, quantity, me, te, fromCompression }) => ({
+                typeId,
+                quantity,
+                me,
+                te,
+                fromCompression,
+              })),
+            })),
             reprocessingEfficiencies,
-            stock: requestStock.map(({ sourceLocationName: _sourceLocationName, ...item }) => item),
+            assets: requestStock.map(
+              ({ sourceLocationName: _sourceLocationName, ...item }) => item,
+            ),
             locations: planningLocations,
             facilityTimeMultipliers: {
               manufacturing:
@@ -702,6 +842,117 @@ function Planner() {
     await submitPlan(new Set());
   }
 
+  function saveBucket(bucket: ClientPlanBucket): boolean {
+    const duplicate = buckets.some(
+      (existing) =>
+        existing.id !== bucket.id
+        && existing.locations.stock === bucket.locations.stock
+        && existing.locations.manufacturing === bucket.locations.manufacturing,
+    );
+    if (duplicate) {
+      toast.add({
+        description: "A bucket already uses this stock destination and build location.",
+        type: "error",
+      });
+      return false;
+    }
+    setBuckets((current) => {
+      const existingIndex = current.findIndex((existing) => existing.id === bucket.id);
+      if (existingIndex < 0) return [...current, bucket];
+      return current.map((existing, index) => (index === existingIndex ? bucket : existing));
+    });
+    setEditingBucket(null);
+    return true;
+  }
+
+  function openNewBucket() {
+    setEditingBucket(
+      createPlannerBucket(
+        {
+          ...locations,
+          manufacturing: buckets[0]?.locations.manufacturing ?? locations.manufacturing,
+          reactions: buckets[0]?.locations.reactions ?? locations.reactions,
+        },
+        [],
+        `Stock destination ${buckets.length + 1}`,
+      ),
+    );
+    setIsBucketEditorOpen(true);
+  }
+
+  function openBucket(bucket: ClientPlanBucket) {
+    setEditingBucket(bucket);
+    setIsBucketEditorOpen(true);
+  }
+
+  function removeBucket(bucketId: string) {
+    if (buckets.length <= 1) {
+      toast.add({ description: "Keep at least one stock bucket.", type: "error" });
+      return;
+    }
+    setBuckets((current) => current.filter((bucket) => bucket.id !== bucketId));
+    setPlan(null);
+  }
+
+  function exportPlan() {
+    const payload = {
+      format: "assembly-line-plan",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      buckets,
+      settings,
+      includeAssets: includeStock,
+      excludedLocationIds,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "assembly-line-plan.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function importPlan(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      if (!isImportedPlan(parsed)) throw new Error("The file does not contain valid plan buckets.");
+      const localizedBuckets = await Promise.all(
+        parsed.buckets.map(async (bucket) => ({
+          ...bucket,
+          items: await localizeItems(bucket.items, language),
+        })),
+      );
+      setBuckets(localizedBuckets);
+      if (typeof parsed.settings === "object" && parsed.settings !== null) {
+        setSettings(parsePlannerSettings(parsed.settings));
+      }
+      if (typeof parsed.includeAssets === "boolean") setIncludeStock(parsed.includeAssets);
+      if (
+        Array.isArray(parsed.excludedLocationIds)
+        && parsed.excludedLocationIds.every(
+          (locationId) => Number.isSafeInteger(locationId) && locationId > 0,
+        )
+      ) {
+        const importedExcludedLocationIds = parsed.excludedLocationIds as number[];
+        setExcludedLocationIds(importedExcludedLocationIds);
+        await saveExcludedLocationIds(importedExcludedLocationIds);
+      }
+      setPlan(null);
+      toast.add({ description: "Plan imported" });
+    }
+    catch (error) {
+      toast.add({
+        description: error instanceof Error ? error.message : "Could not import plan",
+        type: "error",
+      });
+    }
+    setPlanImportInputKey((key) => key + 1);
+  }
+
   function importItems(
     importedItems: Array<{
       name: string;
@@ -759,6 +1010,37 @@ function Planner() {
   const selectedReactionLocation = locationOptions.find(
     (location) => location.locationId === locations.reactions,
   );
+  const activityLocationOptions: ActivityLocationOption[] = locationOptions.map((location) => ({
+    locationId: location.locationId,
+    name: location.name,
+    baseManufacturingMe: location.baseManufacturingMe,
+    baseReactionMe: location.baseReactionMe,
+  }));
+  const stockLocationOptions: StockLocationOption[] = [
+    ...locationOptions.map((location) => ({
+      locationId: location.locationId,
+      name: location.name,
+    })),
+    ...knownStructures.flatMap((structure) =>
+      structure.esiStructureId === undefined
+        ? []
+        : [{ locationId: structure.esiStructureId, name: structure.name }],
+    ),
+  ].filter(
+    (location, index, allLocations) =>
+      allLocations.findIndex((candidate) => candidate.locationId === location.locationId) === index,
+  );
+  const plannerLocationNames = new Map<number, string>([
+    ...locationOptions.map((location) => [location.locationId, location.name] as const),
+    ...knownStructures.flatMap((structure) =>
+      structure.esiStructureId === undefined
+        ? []
+        : [[structure.esiStructureId, structure.name] as const],
+    ),
+    ...buckets.flatMap((bucket) =>
+      bucket.stockLocationName ? [[bucket.locations.stock, bucket.stockLocationName] as const] : [],
+    ),
+  ]);
 
   return (
     <>
@@ -771,7 +1053,110 @@ function Planner() {
           </p>
         </div>
       </div>
-      <form onSubmit={calculatePlan}>
+      <section className="flex min-w-0 flex-col gap-4">
+        <div className={styles.panel}>
+          <div className={styles.panelHeader}>
+            <div className="min-w-0">
+              <p className={styles.panelKicker}>01 / DESTINATIONS</p>
+              <h2>Stock buckets</h2>
+              <p className={styles.panelDescription}>
+                Define what you want to stock and where each independent build plan finishes.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <input
+                key={planImportInputKey}
+                id="planner-plan-import"
+                className="hidden"
+                type="file"
+                accept="application/json,.json"
+                onChange={(event) => void importPlan(event)}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={exportPlan}
+                disabled={buckets.length === 0}
+              >
+                <Download data-icon="inline-start" aria-hidden="true" />
+                Export plan
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => document.getElementById("planner-plan-import")?.click()}
+              >
+                <Upload data-icon="inline-start" aria-hidden="true" />
+                Import plan
+              </Button>
+              <Button type="button" onClick={openNewBucket}>
+                <Plus data-icon="inline-start" aria-hidden="true" />
+                Add new Stock location
+              </Button>
+            </div>
+          </div>
+          <div className="grid min-w-0 gap-3">
+            {buckets.length === 0 ? (
+              <Empty>
+                <EmptyDescription>Add a stock location to begin your plan.</EmptyDescription>
+              </Empty>
+            ) : (
+              buckets.map((bucket) => (
+                <PlannerBucketSummary
+                  key={bucket.id}
+                  bucket={bucket}
+                  locationNamesById={plannerLocationNames}
+                  onEdit={() => openBucket(bucket)}
+                  onRemove={() => removeBucket(bucket.id)}
+                />
+              ))
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-4 border-t pt-4">
+            <label className="flex items-center gap-2 text-sm">
+              <Switch
+                aria-label="Include assets"
+                checked={includeStock}
+                onCheckedChange={setIncludeStock}
+              />
+              Include shared assets
+            </label>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={excludedLocationIds.length === 0}
+              onClick={() => setIsExcludedLocationsModalOpen(true)}
+            >
+              Excluded asset locations ({excludedLocationIds.length})
+            </Button>
+            <CalculateButton
+              type="button"
+              className="ml-auto"
+              disabled={isPlanLoading || buckets.every((bucket) => bucket.items.length === 0)}
+              icon={ClipboardList}
+              isLoading={isPlanLoading}
+              label="Calculate production plan"
+              loadingLabel="Calculating..."
+              onClick={() => void submitPlan(new Set(excludedLocationIds))}
+            />
+          </div>
+        </div>
+      </section>
+      <PlannerBucketEditor
+        key={editingBucket?.id ?? "new-bucket"}
+        bucket={editingBucket}
+        open={isBucketEditorOpen}
+        language={language}
+        activityLocations={activityLocationOptions}
+        stockLocations={stockLocationOptions}
+        excludedStockLocationIds={buckets.map((bucket) => bucket.locations.stock)}
+        onOpenChange={(open) => {
+          setIsBucketEditorOpen(open);
+          if (!open) setEditingBucket(null);
+        }}
+        onSave={saveBucket}
+      />
+      <form className="hidden" onSubmit={calculatePlan}>
         <div className={styles.workspaceGrid}>
           <div className={styles.panel}>
             <div className={styles.panelHeader}>
@@ -1134,10 +1519,10 @@ function Planner() {
               )}
               <label className={styles.checkboxOption}>
                 <div className={`${styles.planOptionHeader} text-xs`}>
-                  <span>INCLUDE STOCK</span>
+                  <span>INCLUDE ASSETS</span>
                 </div>
                 <Switch
-                  aria-label="Include stock"
+                  aria-label="Include assets"
                   checked={includeStock}
                   onCheckedChange={setIncludeStock}
                 />
@@ -1334,6 +1719,24 @@ function Planner() {
                   0,
                 )}
                 stock={stock}
+                activityLocationIds={[
+                  ...new Set(
+                    [
+                      locations.manufacturing,
+                      locations.reactions,
+                      locations.reprocessing,
+                      locations.copying,
+                      locations.invention,
+                      ...buckets.flatMap((bucket) => [
+                        bucket.locations.manufacturing,
+                        bucket.locations.reactions,
+                        bucket.locations.reprocessing,
+                        bucket.locations.copying,
+                        bucket.locations.invention,
+                      ]),
+                    ].filter((locationId): locationId is number => locationId !== undefined),
+                  ),
+                ]}
                 locationNamesById={
                   new Map([
                     ...locationOptions.map((option) => [option.locationId, option.name] as const),
@@ -1375,6 +1778,66 @@ function Planner() {
 
 export default Planner;
 
+function PlannerBucketSummary({
+  bucket,
+  locationNamesById,
+  onEdit,
+  onRemove,
+}: {
+  bucket: ClientPlanBucket;
+  locationNamesById: Map<number, string>;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  const locationName = (locationId: number) =>
+    locationNamesById.get(locationId) ?? String(locationId);
+
+  return (
+    <article className="grid min-w-0 gap-3 border p-4">
+      <div className="flex min-w-0 flex-wrap items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="truncate text-base font-medium">{bucket.name}</h3>
+          <p className="text-sm text-muted-foreground">
+            {bucket.items.length.toLocaleString()} item types,{" "}
+            {bucket.items.reduce((total, item) => total + item.quantity, 0).toLocaleString()} units
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Button type="button" variant="outline" onClick={onEdit}>
+            <Pencil data-icon="inline-start" aria-hidden="true" />
+            View / edit
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="icon"
+            onClick={onRemove}
+            aria-label={`Remove ${bucket.name}`}
+          >
+            <Trash2 aria-hidden="true" />
+          </Button>
+        </div>
+      </div>
+      <div className="grid min-w-0 gap-2 text-sm sm:grid-cols-3">
+        <div className="min-w-0">
+          <span className="block text-xs uppercase text-muted-foreground">Stock destination</span>
+          <span className="block truncate">
+            {bucket.stockLocationName ?? locationName(bucket.locations.stock)}
+          </span>
+        </div>
+        <div className="min-w-0">
+          <span className="block text-xs uppercase text-muted-foreground">Build location</span>
+          <span className="block truncate">{locationName(bucket.locations.manufacturing)}</span>
+        </div>
+        <div className="min-w-0">
+          <span className="block text-xs uppercase text-muted-foreground">Reaction location</span>
+          <span className="block truncate">{locationName(bucket.locations.reactions)}</span>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 function ExcludedLocationsModal({
   locationIds,
   locationNamesById,
@@ -1397,7 +1860,7 @@ function ExcludedLocationsModal({
       <DialogContent className={styles.importModal}>
         <div className={styles.panelHeader}>
           <div>
-            <p className={styles.panelKicker}>STOCK FILTER</p>
+            <p className={styles.panelKicker}>ASSET FILTER</p>
             <DialogTitle>Excluded locations</DialogTitle>
           </div>
         </div>
@@ -1437,6 +1900,7 @@ function PlanList({
   characterStatuses,
   characterNamesById,
   stock,
+  activityLocationIds,
   availableReactionSlots,
   locationNamesById,
   onPlanChange,
@@ -1449,6 +1913,7 @@ function PlanList({
   characterStatuses: ClientCharacterStatus[];
   characterNamesById: Map<number, string>;
   stock: PlanStockItem[];
+  activityLocationIds: number[];
   availableReactionSlots: number;
   locationNamesById: Map<number, string>;
   onPlanChange: (plan: PlanResult) => void;
@@ -1463,6 +1928,7 @@ function PlanList({
   );
   const [showTotalRunCounts, setShowTotalRunCounts] = useState(false);
   const [showTotalManufacturingRunCounts, setShowTotalManufacturingRunCounts] = useState(false);
+  const [planViewMode, setPlanViewMode] = useState<PlanViewMode>("all");
   const [reactionScheduleMode, setReactionScheduleMode] = useState<ReactionScheduleMode>("simple");
   const [maxJobHours, setMaxJobHours] = useState("24");
   const [reactionSort, setReactionSort] = useState<ReactionSort>({
@@ -1502,7 +1968,7 @@ function PlanList({
         reprocessingJobs?: PlanResult["lists"]["reprocessingJobs"];
       }
     ).reprocessingJobs ?? [];
-  const list =
+  const rawList =
     activeTab === "Plan"
       ? plan.lists.planItems
       : activeTab === "Buy"
@@ -1521,8 +1987,15 @@ function PlanList({
                 : activeTab === "Manufacture"
                   ? plan.lists.manufacturingJobs
                   : plan.lists.haulingTasks;
+  const list =
+    activeTab === "Plan" && planViewMode === "all"
+      ? mergePlanItemEntries(rawList as PlanItemEntry[])
+      : rawList;
   const locationGroupedTab =
-    activeTab === "Reprocess" || activeTab === "React" || activeTab === "Manufacture";
+    activeTab === "Reprocess"
+    || activeTab === "React"
+    || activeTab === "Manufacture"
+    || (activeTab === "Plan" && planViewMode === "build-location");
   type PlanListEntry =
     | PlanResult["lists"]["planItems"][number]
     | PlanResult["lists"]["materialsToBuy"][number]
@@ -1534,11 +2007,20 @@ function PlanList({
     | PlanResult["lists"]["haulingTasks"][number];
   const locationBuckets = new Map<number | undefined, PlanListEntry[]>();
   if (locationGroupedTab) {
-    for (const entry of list) {
-      const locationId = "locationId" in entry ? entry.locationId : undefined;
-      const bucket = locationBuckets.get(locationId) ?? [];
-      bucket.push(entry as PlanListEntry);
-      locationBuckets.set(locationId, bucket);
+    if (activeTab === "Plan") {
+      for (const [locationId, entries] of groupPlanItemEntriesByBuildLocation(
+        rawList as PlanItemEntry[],
+      )) {
+        locationBuckets.set(locationId, entries);
+      }
+    }
+    else {
+      for (const entry of list) {
+        const locationId = "locationId" in entry ? entry.locationId : undefined;
+        const bucket = locationBuckets.get(locationId) ?? [];
+        bucket.push(entry as PlanListEntry);
+        locationBuckets.set(locationId, bucket);
+      }
     }
   }
   const sortedLocationBuckets = [...locationBuckets.entries()].sort(([left], [right]) => {
@@ -1705,18 +2187,38 @@ function PlanList({
     }
     if (entry.kind === "bpc") {
       return {
-        Required: entry.neededQuantity.toLocaleString(),
-        Available: entry.stockRuns.toLocaleString(),
-        "Buy/Build": Math.max(0, entry.neededQuantity - entry.stockRuns).toLocaleString(),
-        Surplus: "0",
+        Required: `${entry.neededQuantity.toLocaleString()} runs`,
+        Available: `${entry.stockRuns.toLocaleString()} runs`,
+        "Buy/Build": `${Math.max(0, entry.neededQuantity - entry.stockRuns).toLocaleString()} runs`,
+        Surplus: `${Math.max(0, entry.stockRuns - entry.neededQuantity).toLocaleString()} runs`,
       };
     }
     return {
       Required: `${entry.runsNeeded.toLocaleString()} runs`,
       Available: entry.availableQuantity.toLocaleString(),
-      "Buy/Build": Math.max(0, entry.runsNeeded - entry.availableQuantity).toLocaleString(),
-      Surplus: "0",
+      "Buy/Build": "-",
+      Surplus: "-",
     };
+  }
+
+  function getPlanHaulingQuantity(entry: PlanResult["lists"]["planItems"][number]) {
+    const bucketId = "bucketId" in entry ? entry.bucketId : undefined;
+    const buildLocationId = "buildLocationId" in entry ? entry.buildLocationId : undefined;
+    const haulActivityLocationIds = new Set(activityLocationIds);
+    if (buildLocationId !== undefined) haulActivityLocationIds.add(buildLocationId);
+    if (haulActivityLocationIds.size === 0) return 0;
+    return plan.lists.haulingTasks
+      .filter(
+        (task) =>
+          task.itemTypeId === entry.typeId
+          && haulActivityLocationIds.has(task.toLocationId)
+          && (bucketId === undefined || task.bucketId === bucketId),
+      )
+      .reduce(
+        (total, task) =>
+          total + getNonProductionHaulingQuantity(task.quantity, task.productionQuantity ?? 0),
+        0,
+      );
   }
 
   function getListAmount(entry: (typeof list)[number]) {
@@ -1758,10 +2260,12 @@ function PlanList({
       activeTab === "Plan"
         ? [
             ["Type", ...planColumns].join("\t"),
-            ...plan.lists.planItems.map((entry) => {
-              const cells = getPlanCells(entry);
-              return [entry.name, ...planColumns.map((column) => cells[column] || "")].join("\t");
-            }),
+            ...displayBuckets
+              .flatMap(([, entries]) => entries)
+              .map((entry) => {
+                const cells = getPlanCells(entry as PlanItemEntry);
+                return [entry.name, ...planColumns.map((column) => cells[column] || "")].join("\t");
+              }),
           ]
         : list.map((entry) => {
             return `${entry.name}\t${getListAmount(entry)}`;
@@ -1986,6 +2490,29 @@ function PlanList({
               </Select>
             </div>
           )}
+          {activeTab === "Plan" && (
+            <div className={styles.planViewControls}>
+              <Label htmlFor="plan-view-mode">View</Label>
+              <Select
+                value={planViewMode}
+                onValueChange={(value) => setPlanViewMode(value as PlanViewMode)}
+              >
+                <SelectTrigger
+                  id="plan-view-mode"
+                  aria-label="Plan view mode"
+                  className={styles.modeSelect}
+                >
+                  <SelectValue>
+                    {planViewMode === "build-location" ? "By Build Location" : "All Items"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Items</SelectItem>
+                  <SelectItem value="build-location">By Build Location</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           {activeTab !== "React" && (
             <Button type="button" variant="outline" onClick={copyList}>
               <CopyIcon aria-hidden="true" />
@@ -2155,7 +2682,10 @@ function PlanList({
               </header>
               <div className={styles.haulGroupRows}>
                 {bucket.tasks.map((task) => (
-                  <div className={styles.haulRow} key={task.itemTypeId}>
+                  <div
+                    className={styles.haulRow}
+                    key={`${task.itemTypeId}:${task.bucketId ?? "unbucketed"}`}
+                  >
                     <TypeIdentity
                       name={task.name}
                       typeId={task.itemTypeId}
@@ -2290,6 +2820,10 @@ function PlanList({
                   activeTab === "Plan"
                     ? getPlanCells(entry as PlanResult["lists"]["planItems"][number])
                     : null;
+                const planHaulingQuantity =
+                  activeTab === "Plan"
+                    ? getPlanHaulingQuantity(entry as PlanResult["lists"]["planItems"][number])
+                    : 0;
                 const manufacturingEntry =
                   activeTab === "Manufacture"
                     ? (entry as PlanResult["lists"]["manufacturingJobs"][number])
@@ -2336,6 +2870,7 @@ function PlanList({
                                         ? entry.availableSourceCounts
                                         : undefined
                                     }
+                                    haulingQuantity={planHaulingQuantity}
                                   />
                                 )}
                                 {planCells[column]}

@@ -13,8 +13,8 @@ export type ClientSession = {
   }>;
 };
 
-export type ClientStockResponse = {
-  workingStock?: PlanStockItem[];
+export type ClientAssetsResponse = {
+  assets?: PlanStockItem[];
   locations?: Array<{
     locationId: number;
     name: string;
@@ -26,10 +26,10 @@ export type ClientStockResponse = {
   filteredLocationIds?: number[];
 };
 
-export function groupClientStockByLocation(data: ClientStockResponse) {
+export function groupClientAssetsByLocation(data: ClientAssetsResponse) {
   return (data.locations ?? []).map((location) => ({
     ...location,
-    items: (data.workingStock ?? []).filter(
+    items: (data.assets ?? []).filter(
       (item) =>
         item.rootLocationId === location.locationId
         || item.sourceLocationId === location.locationId,
@@ -151,8 +151,8 @@ export type ClientEndpointStatus = {
 };
 
 let sessionRequest: Promise<ClientSession> | undefined;
-const stockRequests = new Map<string, Promise<ClientStockResponse>>();
-const stockResponses = new Map<string, ClientStockResponse>();
+const assetsRequests = new Map<string, Promise<ClientAssetsResponse>>();
+const assetsResponses = new Map<string, ClientAssetsResponse>();
 let shipsRequest: Promise<ClientShipsResponse> | undefined;
 let shipsResponse: ClientShipsResponse | undefined;
 let jobsRequest: Promise<ClientJobsResponse> | undefined;
@@ -199,16 +199,16 @@ export function loadClientSession() {
   return sessionRequest;
 }
 
-export function loadClientStock(language: SdeLanguage, reload = false) {
+export function loadClientAssets(language: SdeLanguage, reload = false) {
   const key = language;
-  const pending = stockRequests.get(key);
+  const pending = assetsRequests.get(key);
   if (pending) return pending;
-  const cached = stockResponses.get(key);
+  const cached = assetsResponses.get(key);
   if (!reload && cached) return Promise.resolve(cached);
 
   const query = new URLSearchParams({ language });
   const loadCachedStock = !reload
-    ? loadEndpointRecord<ClientStockResponse>("state/stock").then((record) => {
+    ? loadEndpointRecord<ClientAssetsResponse>("state/assets").then((record) => {
         if (!record) return null;
         try {
           const cachedLanguage = new URL(record.url, window.location.origin).searchParams.get(
@@ -219,7 +219,7 @@ export function loadClientStock(language: SdeLanguage, reload = false) {
         catch {
           return null;
         }
-        stockResponses.set(key, record.data);
+        assetsResponses.set(key, record.data);
         return record.data;
       })
     : Promise.resolve(null);
@@ -227,26 +227,26 @@ export function loadClientStock(language: SdeLanguage, reload = false) {
     .then((cachedStock) => {
       if (cachedStock) return cachedStock;
       return fetch(
-        `/api/state/stock?${query.toString()}`,
+        `/api/state/assets?${query.toString()}`,
         {
           cache: "no-store",
         },
       ).then(async (response) => {
-        const data = (await response.json()) as ClientStockResponse;
-        if (!response.ok) throw new Error("Could not load stock.");
-        await saveEndpointResponse("state/stock", `/api/state/stock?${query.toString()}`, data);
-        stockResponses.set(key, data);
+        const data = (await response.json()) as ClientAssetsResponse;
+        if (!response.ok) throw new Error("Could not load assets.");
+        await saveEndpointResponse("state/assets", `/api/state/assets?${query.toString()}`, data);
+        assetsResponses.set(key, data);
         return data;
       });
     })
-    .finally(() => stockRequests.delete(key));
-  stockRequests.set(key, request);
+    .finally(() => assetsRequests.delete(key));
+  assetsRequests.set(key, request);
   return request;
 }
 
-export function clearClientStockCache(language: SdeLanguage) {
-  for (const key of stockResponses.keys()) {
-    if (key.startsWith(`${language}:`)) stockResponses.set(key, { locations: [] });
+export function clearClientAssetsCache(language: SdeLanguage) {
+  for (const key of assetsResponses.keys()) {
+    if (key.startsWith(`${language}:`)) assetsResponses.set(key, { locations: [] });
   }
 }
 

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { CharacterTokenRecord, TokenSet } from "@/lib/auth/model";
-import { fetchCharacterLocation, fetchCharacterShip, fetchEsiEndpoint } from "./client";
+import {
+  fetchCharacterIndustryJobs,
+  fetchCharacterLocation,
+  fetchCharacterShip,
+  fetchEsiEndpoint,
+} from "./client";
 
 const token: TokenSet = {
   refreshToken: "refresh-token",
@@ -55,6 +60,63 @@ test("sends the cached ETag for a non-paginated endpoint", async (t) => {
   assert.deepEqual(result.data, { skills: [] });
   assert.equal(result.notModified, false);
   assert.equal(result.headers.get("expires"), "Wed, 26 Aug 2026 17:00:00 GMT");
+});
+
+test("fetches completed industry jobs and excludes unusable terminal jobs", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  let requestUrl = "";
+  globalThis.fetch = async (input) => {
+    requestUrl = String(input);
+    return Response.json([
+      {
+        job_id: 1,
+        installer_id: 42,
+        facility_id: 6001,
+        location_id: 6001,
+        output_location_id: 6001,
+        activity_id: 1,
+        blueprint_id: 2,
+        blueprint_type_id: 3,
+        blueprint_location_id: 6001,
+        runs: 10,
+        successful_runs: 10,
+        product_type_id: 4,
+        status: "delivered",
+        start_date: "2026-08-31T00:00:00Z",
+        end_date: "2026-09-01T00:00:00Z",
+      },
+      {
+        job_id: 5,
+        installer_id: 42,
+        facility_id: 6001,
+        location_id: 6001,
+        output_location_id: 6001,
+        activity_id: 1,
+        blueprint_id: 6,
+        blueprint_type_id: 7,
+        blueprint_location_id: 6001,
+        runs: 1,
+        status: "cancelled",
+        start_date: "2026-08-31T00:00:00Z",
+        end_date: "2026-09-01T00:00:00Z",
+      },
+    ]);
+  };
+
+  const result = await fetchCharacterIndustryJobs(character);
+
+  assert.equal(
+    requestUrl,
+    "https://esi.evetech.net/latest/characters/42/industry/jobs/?include_completed=true",
+  );
+  assert.deepEqual(
+    result.jobs?.map((job) => ({ jobId: job.jobId, status: job.status })),
+    [{ jobId: 1, status: "delivered" }],
+  );
 });
 
 test("returns response metadata for a 304 without fetching another page", async (t) => {

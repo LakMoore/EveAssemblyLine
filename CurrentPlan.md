@@ -17,7 +17,7 @@ Build a single-container web application as a 3rd party support tool for complet
   - Choose locations (systems/stations/structures) for manufacturing, reactions, market.
   - Set simple preferences (include corp assets, basic build/buy blacklists).
   - Refresh character and corp state (subject to ESI rate limits).
-  - Review stock assets, industry jobs, ship stocks, ship fittings, location settings, and general settings.
+  - Review assets, industry jobs, ship assets, ship fittings, location settings, and general settings.
 
 - Primary tool is a Planning Engine, which computes a plan that outputs results in lists, including:
 
@@ -43,17 +43,17 @@ This section is authoritative where the older design below differs from the runn
 - Authentication uses the custom EVE SSO PKCE flow in `src/lib/auth/eveSso.ts` and the `/api/auth/eve/start` and `/api/auth/eve/callback` routes. There is no NextAuth integration and no separate corporation-auth callback. The callback records corporation identity and roles from the authenticated character's token scopes and corporation roles.
 - A durable character belongs to a `CharacterCollectionRecord`. A session points to one collection through `collectionId`; it is not itself the account or the authoritative character list. Attaching a character that belongs to another collection enters an explicit merge flow.
 - ESI refresh is session-scoped in the in-process cache. It refreshes the selected collection's character data and eligible corporation data, including assets, blueprints, industry jobs, skills, market orders, and structure/location data. The refresh endpoint deduplicates concurrent refreshes and exposes endpoint status without exposing tokens.
-- `/api/state/stock` is the boundary between ESI state and planning. It resolves and groups stock by root location, includes blueprint/job/market-order context, filters special ship and structure records as appropriate, and carries personal/corporation ownership into the planner input.
-- `/api/plan` is intentionally unauthenticated and makes no ESI calls. It accepts a build list plus client-supplied working stock, locations, and settings. Do not reintroduce `characterIds` ownership checks or server-side refreshes into this endpoint; authenticated state preparation belongs in the state routes.
-- The planner is stock-aware and supports compressed/reprocessable material handling, blueprint print/run accounting, industry-in-progress output, market orders, localized SDE names, ME/TE settings, and source metadata. Its request model is not the original minimal `typeId + quantity` plus raw assets model.
-- The UI is a multi-page production-control application. The build planner is one workflow alongside stock, jobs, ships, compression, locations, characters, and settings. The original component-only single-page layout is descriptive history, not an implementation requirement.
+- `/api/state/assets` is the boundary between ESI state and planning. It resolves and groups assets by root location, includes blueprint/job/market-order context, filters special ship and structure records as appropriate, and carries personal/corporation ownership into the planner input.
+- `/api/plan` is intentionally unauthenticated and makes no ESI calls. It accepts a build list plus client-supplied assets, locations, and settings. Do not reintroduce `characterIds` ownership checks or server-side refreshes into this endpoint; authenticated state preparation belongs in the state routes.
+- The planner is asset-aware and supports compressed/reprocessable material handling, blueprint print/run accounting, industry-in-progress output, market orders, localized SDE names, ME/TE settings, and source metadata. Its request model is not the original minimal `typeId + quantity` plus raw assets model.
+- The UI is a multi-page production-control application. The build planner is one workflow alongside assets, jobs, ships, compression, locations, characters, and settings. The original component-only single-page layout is descriptive history, not an implementation requirement.
 - The deployment target is Firebase App Hosting with a Cloud Run backend configuration and Firestore. The repository does not currently define a Dockerfile-based deployment contract; do not add container-specific storage assumptions without deciding whether App Hosting remains the target.
 
 The original goals that remain deliberately future-facing include the hauling output/view, richer offline plan recovery, Invention success cost calculator, Asset list appraisal tool, ship fittings builder a and broader automated coverage. Their absence from a current screen or test suite must not be interpreted as permission to remove the corresponding domain requirement.
 
 ## Future Direction
 
-- **Stock selection:** Full stock lists will always be fetched from server and cached locally, but in a future version the user will be able to select subsets of held stocks for submission to the planning engine. Those subsets should be easily configured but may be per-character, corp (or non-corp) only, location restrictions, per-container inclusion and/or exclusion. Refresh will always provide all available stock to the client but the client will provide tools to filter what stock is sent to planning.
+- **Asset selection:** Full asset lists will always be fetched from server and cached locally, but in a future version the user will be able to select subsets of held assets for submission to the planning engine. Those subsets should be easily configured but may be per-character, corp (or non-corp) only, location restrictions, per-container inclusion and/or exclusion. Refresh will always provide all available assets to the client but the client will provide tools to filter what assets are sent to planning.
 - **Corporation "Type":** The nature of the game causes some corporations to be created specifically to house industry activities. In these "solo" corps, one player will retain Director roles on most or all of their characters and they have full access and ownership of all assets. However, traditional corp structure is that our user will control a collection of characters that do not have Director roles but do have sufficient roles to view, access and control assets in a sub-set of corporation locations. This project aims to (eventually) solve the problem of planning industry jobs within a Typical Corp setup where access is restricted by role.
 - **Hauling workflow:** In a future version, hauling will be derived automatically from resolved stock origins and target facilities, at the time of writing stock is sent to the planning engine without location data. This contract shape will need to change and the engine will need to be location aware, preferring to draw stock that is already at the activity site and building a hauling plan noting the asset type, quantity, source and destination root locations when the stocks levels globally are sufficient but the stock levels at the activity site are not.
 - **Reference APIs:** Are unified blueprint, location, and settings-preset endpoints desired, or should the existing specialized systems/structures/rigs/settings workflows remain the permanent interface?
@@ -102,10 +102,10 @@ src/
       auth/corp/status/route.ts     # Corporation eligibility summary
       characters/route.ts           # Attached characters
       characters/[id]/route.ts      # Remove attached character
-      plan/route.ts                 # Stock-driven plan calculation
+      plan/route.ts                 # Asset-driven plan calculation
       state/refresh/route.ts        # Refresh active collection state
       state/status/route.ts         # Cache status
-      state/stock/route.ts          # Planner stock projection
+      state/assets/route.ts         # Planner asset projection
       state/jobs/route.ts           # Industry jobs projection
       state/marketOrders/route.ts   # Market-order projection
       state/ships/route.ts          # Ship projection
@@ -742,13 +742,13 @@ This is not currently implemented. Settings are persisted and loaded by the sett
 }
 ```
 
-### 8.4.3 Stock and production state
+### 8.4.3 Assets and production state
 
-The original standalone `/api/state/assets` contract has been replaced by `/api/state/stock` and related state endpoints for jobs, market orders, ships, and refresh/status. These endpoints validate session ownership, return no tokens, and combine cached ESI data into the stock representation used by the planner and stock page:
+The canonical `/api/state/assets` endpoint and related state endpoints for jobs, market orders, ships, and refresh/status validate session ownership, return no tokens, and combine cached ESI data into the asset representation used by the planner and Assets page:
 
 ```json
 {
-  "stock": [
+  "assets": [
     {
       "ownerType": "character",
       "ownerId": 123,
@@ -770,7 +770,7 @@ The original standalone `/api/state/assets` contract has been replaced by `/api/
 }
 ```
 
-The stock endpoint defaults to cached data. Refresh remains an explicit operation through `/api/state/refresh` and normal rate-limit controls. Stock must distinguish a container's immediate location from its effective hauling origin and expose unresolved records rather than guessing. A future dedicated asset-diagnostics endpoint may expose lower-level normalized asset records, but it is not a separate required API contract at present.
+The assets endpoint defaults to cached data. Refresh remains an explicit operation through `/api/state/refresh` and normal rate-limit controls. Assets must distinguish a container's immediate location from its effective hauling origin and expose unresolved records rather than guessing. A future dedicated asset-diagnostics endpoint may expose lower-level normalized asset records, but it is not a separate required API contract at present.
 
 ## 8.5 `/api/plan` endpoint
 
@@ -778,7 +778,7 @@ The stock endpoint defaults to cached data. Refresh remains an explicit operatio
 
 The current request has two supported forms:
 
-- The normal UI sends `language`, `toBuild`, `stock`, `locations`, and `settings`. `stock` is the working stock produced by `/api/state/stock` and client-side selections.
+- The normal UI sends `language`, `toBuild`, `assets`, `locations`, and `settings`. `assets` is the working asset list produced by `/api/state/assets` and client-side selections.
 - A lower-level compatibility form may send `toBuild` plus categorized `assets` (`items`, `blueprints`, `industry`, and `market`); the route normalizes these rows into working stock before calculation.
 
 The request does not contain `characterIds` or a `lists` selector. The route calculates the complete `PlanResult`; the client chooses which result view to display.
@@ -790,20 +790,22 @@ Implement in `planning/planEngine.ts`:
 1. **Validate the request**
 
 - `/api/plan` does not require an authenticated session.
-- The caller supplies `toBuild`, working `stock` (or categorized compatibility assets), `locations`, and `settings` in the request. The endpoint makes no secured ESI calls.
+- The caller supplies `toBuild`, working `assets` (or categorized compatibility assets), `locations`, and `settings` in the request. The endpoint makes no secured ESI calls.
 
 2. **Merge inventory**
-   - Combine the supplied working stock and manually supplied stock into a unified inventory map:
-     - `availableQuantity[typeId] = sum of all relevant assets`.
-     - Also retain `availableByLocation[typeId][effectiveLocationId]` and the owning character or corporation for hauling decisions.
-     - Exclude unresolved assets from location-specific hauling tasks, but include them in an explicit planning warning and do not count them as safely available for a location-constrained job.
-   - Treat compressed resources, Metal Scraps, and Reinforced Metal Scraps as bounded reprocessing candidates rather than eagerly converting all available stock:
-     - Discover the plan's remaining raw-material requirements before selecting reprocessing portions.
-     - Preserve reprocessable items required directly by manufacturing or reaction jobs.
-     - Treat build-input rows marked for reprocessing as committed purchases: retain their full quantities in the Plan and Buy lists and credit the future output of every complete reprocessing portion before allocating owned stock.
-     - Select only complete SDE reprocessing portions that contribute to those requirements, preferring stock already at the refinery and then lower hauling volume.
-     - After committed purchases are applied, select owned reprocessable assets only for any remaining material requirements.
-   - Calculate yields from the selected refinery, rig, character skills, and implant snapshot supplied with the plan request; aggregate fractional output across the selected portions before rounding down to whole material units, and use 50% when that snapshot is unavailable.
+
+- Combine the supplied working assets and manually supplied assets into a unified inventory map:
+  - `availableQuantity[typeId] = sum of all relevant assets`.
+  - Also retain `availableByLocation[typeId][effectiveLocationId]` and the owning character or corporation for hauling decisions.
+  - Exclude unresolved assets from location-specific hauling tasks, but include them in an explicit planning warning and do not count them as safely available for a location-constrained job.
+- Treat compressed resources, Metal Scraps, and Reinforced Metal Scraps as bounded reprocessing candidates rather than eagerly converting all available assets:
+  - Discover the plan's remaining raw-material requirements before selecting reprocessing portions.
+  - Preserve reprocessable items required directly by manufacturing or reaction jobs.
+  - Treat build-input rows marked for reprocessing as committed purchases: retain their full quantities in the Plan and Buy lists and credit the future output of every complete reprocessing portion before allocating owned stock.
+  - Select only complete SDE reprocessing portions that contribute to those requirements, preferring assets already at the refinery and then lower hauling volume.
+  - After committed purchases are applied, select owned reprocessable assets only for any remaining material requirements.
+- Calculate yields from the selected refinery, rig, character skills, and implant snapshot supplied with the plan request; aggregate fractional output across the selected portions before rounding down to whole material units, and use 50% when that snapshot is unavailable.
+
 3. **SDE-based expansion**
    - For each item in `items`:
      - Use SDE maps to:
@@ -854,7 +856,9 @@ Implement in `planning/planEngine.ts`:
       - Determine where required items currently sit from resolved asset records, using the effective location after nested-container resolution.
         - Compute tasks like:
           - “Move X units of typeId from system/station A to location B.”
-        - Never create hauling tasks for projected purchases, reprocessing output, or other future production.
+      - Create a separate completion haul for each bucket when its stock destination differs from the activity location:
+        - move current ready/delivered industry output from the activity location to the bucket stock destination;
+      - Keep input-delivery and completion hauls distinct, and never treat projected purchases, reprocessing output, or future production as haulable stock.
     - Represent tasks as:
 
 ```json
@@ -929,9 +933,9 @@ Never create a hauling task with a guessed origin. If assets are unresolved, ret
 
 ## 9.2 Planner and production-control UI
 
-The original generic planner has evolved into a broader production-control application. In addition to the planner, the product includes first-class stock, jobs, ships, compression, locations, characters, and settings workflows. The planner still owns the six required outputs, including hauling; the hauling view may be temporarily hidden while that workflow is being completed, but it remains a planned capability.
+The original generic planner has evolved into a broader production-control application. In addition to the planner, the product includes first-class assets, jobs, ships, compression, locations, characters, and settings workflows. The planner still owns the six required outputs, including hauling; the hauling view may be temporarily hidden while that workflow is being completed, but it remains a planned capability.
 
-The current planner does not perform character selection or refresh orchestration itself. Authentication, character attachment, collection management, and state refresh are handled by the characters/auth/state workflows. The planner loads working stock, build-list preferences, locations, and settings, then sends the unauthenticated stock-driven request to `/api/plan`.
+The current planner does not perform character selection or refresh orchestration itself. Authentication, character attachment, collection management, and state refresh are handled by the characters/auth/state workflows. The planner loads working assets, build-list preferences, locations, and settings, then sends the unauthenticated asset-driven request to `/api/plan`.
 
 Components:
 
@@ -987,9 +991,11 @@ Components:
    - Frontend sends `POST /api/state/refresh` for the active session collection.
    - Shows summary from response.
 8. User clicks **“Calculate plan”**:
-   - Frontend sends `POST /api/plan` with the build list, cached/working stock, locations, and settings.
-   - On response:
-   - Populates the planner output views with the seven operational lists.
+
+- Frontend sends `POST /api/plan` with the build list, cached/working assets, locations, and settings.
+- On response:
+- Populates the planner output views with the seven operational lists.
+
 9. User navigates between tabs to inspect each resulting list.
 
 Optional UX enhancements:
@@ -1017,7 +1023,7 @@ You mentioned offline would be a benefit but not mandatory. Given our design:
       - Last `/plan` result.
       - Current build list and locations/settings.
 
-Requires simple caching on the frontend and the ability to manually build stock lists, if the user requires stock to be considered. Any automatic stock calcluatons remains server-dependent due to ESI and SDE.
+Requires simple caching on the frontend and the ability to manually build asset lists, if the user requires assets to be considered. Any automatic asset calculations remain server-dependent due to ESI and SDE.
 
 ---
 
@@ -1060,7 +1066,7 @@ To guide implementation and testing:
 
 - The plan engine must:
   - Correctly interpret SDE data for blueprints, materials, and activities.
-  - Use stock assets, if provided in the request, before adding a build item to the plan.
+  - Use existing assets, if provided in the request, before adding a build item to the plan.
   - Respect build/buy blacklists.
   - Produce accurate counts for:
     - Required materials, after stocks.

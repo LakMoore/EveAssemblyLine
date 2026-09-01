@@ -154,7 +154,7 @@ export default function SettingsPage() {
           <FieldContent>
             <FieldLabel>Signals market locations</FieldLabel>
             <FieldDescription>
-              Check stock held at these exact stations or known structures, not their whole systems
+              Check assets held at these exact stations or known structures, not their whole systems
             </FieldDescription>
           </FieldContent>
           <div className="flex min-w-0 max-w-xl flex-wrap items-center justify-end gap-2">
@@ -217,14 +217,14 @@ export default function SettingsPage() {
         </Field>
         <Field className={styles.rule} orientation="horizontal">
           <FieldContent>
-            <FieldLabel id="personal-sell-orders-as-stock-label">
-              Personal Sell Orders count as Stock
+            <FieldLabel id="personal-sell-orders-as-assets-label">
+              Personal Sell Orders count as Assets
             </FieldLabel>
             <FieldDescription>Count open personal sell orders as available items</FieldDescription>
           </FieldContent>
           <Switch
-            id="personal-sell-orders-as-stock"
-            aria-labelledby="personal-sell-orders-as-stock-label"
+            id="personal-sell-orders-as-assets"
+            aria-labelledby="personal-sell-orders-as-assets-label"
             checked={settings.personalSellOrdersAsStock}
             onCheckedChange={(checked) =>
               setSettings({ ...settings, personalSellOrdersAsStock: checked })
@@ -233,16 +233,16 @@ export default function SettingsPage() {
         </Field>
         <Field className={styles.rule} orientation="horizontal">
           <FieldContent>
-            <FieldLabel id="all-corporation-sell-orders-as-stock-label">
-              All Corporation Sell Orders count as Stock
+            <FieldLabel id="all-corporation-sell-orders-as-assets-label">
+              All Corporation Sell Orders count as Assets
             </FieldLabel>
             <FieldDescription>
               Count all open sell orders from eligible corporations
             </FieldDescription>
           </FieldContent>
           <Switch
-            id="all-corporation-sell-orders-as-stock"
-            aria-labelledby="all-corporation-sell-orders-as-stock-label"
+            id="all-corporation-sell-orders-as-assets"
+            aria-labelledby="all-corporation-sell-orders-as-assets-label"
             checked={settings.allCorporationSellOrdersAsStock}
             onCheckedChange={(checked) =>
               setSettings({
@@ -257,16 +257,16 @@ export default function SettingsPage() {
         </Field>
         <Field className={styles.rule} orientation="horizontal">
           <FieldContent>
-            <FieldLabel id="my-corporation-sell-orders-as-stock-label">
-              My Corporation Sell Orders count as Stock
+            <FieldLabel id="my-corporation-sell-orders-as-assets-label">
+              My Corporation Sell Orders count as Assets
             </FieldLabel>
             <FieldDescription>
               Count open corporation orders issued by selected characters
             </FieldDescription>
           </FieldContent>
           <Switch
-            id="my-corporation-sell-orders-as-stock"
-            aria-labelledby="my-corporation-sell-orders-as-stock-label"
+            id="my-corporation-sell-orders-as-assets"
+            aria-labelledby="my-corporation-sell-orders-as-assets-label"
             checked={settings.myCorporationSellOrdersAsStock}
             onCheckedChange={(checked) =>
               setSettings({ ...settings, myCorporationSellOrdersAsStock: checked })
