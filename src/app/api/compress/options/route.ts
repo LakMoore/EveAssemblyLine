@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
-import { getCharacters } from "@/lib/auth/tokensStore";
+import { getCharacter } from "@/lib/auth/tokensStore";
 import { getCachedCorporationStructures } from "@/lib/esi/cache";
 import {
   getDogmaAttributes,
@@ -155,7 +155,9 @@ async function getOptions(
   const session = await getSessionFromRequest(request);
   const characterIds = session ? await getSessionCharacterIds(session) : [];
   const records = session
-    ? (await getCharacters()).filter((record) => characterIds.includes(record.characterId))
+    ? (await Promise.all(characterIds.map((id) => getCharacter(id)))).filter(
+        (record) => record !== null,
+      )
     : [];
   markPhase("session");
   const corporationStructures = await getCachedCorporationStructures(

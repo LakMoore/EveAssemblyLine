@@ -9,7 +9,7 @@ import {
   resolveStructureLocationForOwner,
 } from "@/lib/esi/cache";
 import type { StructureLocationSource } from "@/lib/esi/cache";
-import { getCharacters } from "@/lib/auth/tokensStore";
+import { getCharacter } from "@/lib/auth/tokensStore";
 import {
   getBlueprintById,
   getStations,
@@ -107,8 +107,8 @@ export async function GET(request: Request) {
   if (!session) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
 
   const characterIds = await getSessionCharacterIds(session);
-  const characters = (await getCharacters()).filter((character) =>
-    characterIds.includes(character.characterId),
+  const characters = (await Promise.all(characterIds.map((id) => getCharacter(id)))).filter(
+    (character) => character !== null,
   );
   const includeCorporationJobs = characters.some((character) => character.hasDirectorRole);
   const availableSlots = await getCharacterIndustrySlots(characterIds, session.sessionId);

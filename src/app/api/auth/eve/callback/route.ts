@@ -15,7 +15,7 @@ import {
   getSession,
   savePendingMerge,
   saveSession,
-  upsertCharacter,
+  saveCharacter,
 } from "@/lib/auth/tokensStore";
 
 function getPublicOrigin(request: Request, callbackUrl: string) {
@@ -116,7 +116,7 @@ export async function GET(request: Request) {
     const roles = tokenSet.scopes.includes("esi-characters.read_corporation_roles.v1")
       ? await fetchCharacterRoles(identity.characterId, tokenSet)
       : [];
-    await upsertCharacter({
+    await saveCharacter({
       ...existingCharacter,
       characterId: identity.characterId,
       characterName: identity.characterName ?? `Character ${identity.characterId}`,

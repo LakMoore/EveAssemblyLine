@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
-import { getCharacters } from "@/lib/auth/tokensStore";
+import { getCharacter } from "@/lib/auth/tokensStore";
 import { RefreshCoordinator, type RefreshUnit } from "@/lib/esi/refreshOrchestration";
 import {
   copyRefreshCache,
@@ -19,6 +19,8 @@ const responseOptions = {
   headers: { "Cache-Control": "no-store" },
 };
 
+const noAuthorizationCharacter = Symbol("no authorization character");
+
 const runtime = globalThis as typeof globalThis & {
   __assemblyLineRefreshCoordinator?: RefreshCoordinator;
 };
@@ -30,57 +32,41 @@ function json(body: unknown, status = 200) {
   return NextResponse.json(body, { ...responseOptions, status });
 }
 
-function firstRefreshError(status: Awaited<ReturnType<typeof getStateStatus>>, unit: RefreshUnit) {
-  for (const character of status.characters) {
-    if (unit.kind === "character" && character.characterId !== unit.ownerId) continue;
-    const endpoints =
-      unit.kind === "corporation"
-        ? character.corporations
-            .filter((corporation) => corporation.corporationId === unit.ownerId)
-            .flatMap((corporation) => [
-              corporation.assets,
-              corporation.blueprints,
-              corporation.jobs,
-              corporation.orders,
-              corporation.structures,
-            ])
-        : [
-            character.assets,
-            character.skills,
-            character.location,
-            character.ship,
-            character.blueprints,
-            character.jobs,
-            character.orders,
-          ];
-    const error = endpoints.find((endpoint) => endpoint.status === "error")?.error;
-    if (error) return error;
+async function findAuthorizationCharacter(characterIds: number[], corporationId: number) {
+  try {
+    return await Promise.any(
+      characterIds.map(async (characterId) => {
+        const character = await getCharacter(characterId);
+        if (!character || character.corporationId !== corporationId || !character.hasDirectorRole) {
+          throw noAuthorizationCharacter;
+        }
+        return character;
+      }),
+    );
   }
-  return undefined;
+  catch (error) {
+    if (error instanceof AggregateError) {
+      const readError = error.errors.find((reason) => reason !== noAuthorizationCharacter);
+      if (readError !== undefined) throw readError;
+      return null;
+    }
+    throw error;
+  }
 }
 
 async function refreshUnit(
   unit: RefreshUnit,
   sessionId: string,
-  characters: Awaited<ReturnType<typeof getCharacters>>,
+  authorizationCharacter: NonNullable<Awaited<ReturnType<typeof getCharacter>>>,
   profiler: RefreshProfiler,
 ) {
   const source = await refreshCoordinator.run(
     unit.key,
     async () => {
       if (unit.kind === "character") {
-        const character = characters.find((record) => record.characterId === unit.ownerId);
-        if (!character) throw new Error("Character is not attached to this session.");
-        await refreshCharacterState(character, sessionId, profiler);
+        await refreshCharacterState(authorizationCharacter, sessionId, profiler);
       }
       else {
-        const authorizationCharacter = characters.find(
-          (character) =>
-            character.characterId === unit.authorizationCharacterId
-            && character.corporationId === unit.ownerId
-            && character.hasDirectorRole,
-        );
-        if (!authorizationCharacter) throw new Error("Corporation authorization is incomplete");
         await refreshCorporationState(unit.ownerId, authorizationCharacter, sessionId, profiler);
       }
       return { sessionId };
@@ -128,38 +114,38 @@ async function handleRefreshRequestInternal(
   profiler.end("parseId");
   if (!parsedId.success) return json({ error: "Invalid refresh request." }, 400);
 
-  let characters;
-  profiler.start("loadCharacters");
+  const ownerId = parsedId.data;
+  let characterIds: number[];
+  profiler.start("loadCollectionCharacterIds");
   try {
-    characters = await getCharacters();
+    characterIds = await getSessionCharacterIds(session);
   }
   catch {
     return json({ error: "ESI is not connected." }, 401);
   }
   finally {
-    profiler.end("loadCharacters");
-  }
-  profiler.start("loadSessionCharacters");
-  let characterIds: number[];
-  try {
-    characterIds = await getSessionCharacterIds(session, characters);
-  }
-  finally {
-    profiler.end("loadSessionCharacters");
+    profiler.end("loadCollectionCharacterIds");
   }
   if (characterIds.length === 0) return json({ error: "ESI is not connected." }, 401);
-  const sessionCharacters = characters.filter((character) =>
-    characterIds.includes(character.characterId),
-  );
-  if (sessionCharacters.length === 0) {
-    return json({ error: "ESI is not connected." }, 401);
+
+  if (kind === "character" && !characterIds.includes(ownerId)) {
+    return json({ error: "Character is not attached to this session." }, 403);
   }
 
-  const ownerId = parsedId.data;
+  let authorizationCharacter;
   let unit: RefreshUnit;
   if (kind === "character") {
-    if (!sessionCharacters.some((character) => character.characterId === ownerId)) {
-      return json({ error: "Character is not attached to this session." }, 403);
+    profiler.start("loadCharacter");
+    try {
+      const character = await getCharacter(ownerId);
+      if (!character) return json({ error: "Character is not attached to this session." }, 403);
+      authorizationCharacter = character;
+    }
+    catch {
+      return json({ error: "ESI is not connected." }, 401);
+    }
+    finally {
+      profiler.end("loadCharacter");
     }
     unit = {
       key: `character:${ownerId}`,
@@ -168,9 +154,16 @@ async function handleRefreshRequestInternal(
     };
   }
   else {
-    const authorizationCharacter = sessionCharacters.find(
-      (character) => character.corporationId === ownerId && character.hasDirectorRole,
-    );
+    profiler.start("loadAuthorizationCharacter");
+    try {
+      authorizationCharacter = await findAuthorizationCharacter(characterIds, ownerId);
+    }
+    catch {
+      return json({ error: "ESI is not connected." }, 401);
+    }
+    finally {
+      profiler.end("loadAuthorizationCharacter");
+    }
     if (!authorizationCharacter) {
       return json({ error: "Corporation authorization is incomplete." }, 403);
     }
@@ -194,7 +187,7 @@ async function handleRefreshRequestInternal(
   let refreshError: unknown;
   profiler.start("refresh");
   try {
-    await refreshUnit(unit, session.sessionId, characters, profiler);
+    await refreshUnit(unit, session.sessionId, authorizationCharacter, profiler);
   }
   catch (error) {
     refreshError = error;
@@ -204,12 +197,9 @@ async function handleRefreshRequestInternal(
   }
   profiler.start("status");
   try {
-    const status = await getStateStatus(characterIds, session.sessionId, characters);
     const errors = refreshError
       ? [refreshError instanceof Error ? refreshError.message : "Refresh failed."]
       : [];
-    const statusError = firstRefreshError(status, unit);
-    if (statusError) errors.push(statusError);
     const uniqueErrors = [...new Set(errors)];
     return json({
       success: uniqueErrors.length === 0,

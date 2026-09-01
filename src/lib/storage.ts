@@ -1,5 +1,5 @@
 import { applicationDefault, cert, getApps, initializeApp } from "firebase-admin/app";
-import { getFirestore, type Firestore } from "firebase-admin/firestore";
+import { FieldPath, getFirestore, type Firestore } from "firebase-admin/firestore";
 
 const storageCollection = "assemblyLineStorage";
 let firestorePromise: Promise<Firestore> | undefined;
@@ -59,13 +59,15 @@ export async function initStorage() {
       return snapshot.exists ? (snapshot.data()?.value as T) : undefined;
     },
     async getItemsByPrefix<T>(prefix: string) {
-      const snapshots = await database.collection(storageCollection).get();
-      return snapshots.docs
-        .filter((snapshot) => snapshot.id.startsWith(prefix))
-        .map((snapshot) => ({
-          key: snapshot.id,
-          value: snapshot.data().value as T | undefined,
-        }));
+      const snapshots = await database
+        .collection(storageCollection)
+        .where(FieldPath.documentId(), ">=", prefix)
+        .where(FieldPath.documentId(), "<", `${prefix}\uf8ff`)
+        .get();
+      return snapshots.docs.map((snapshot) => ({
+        key: snapshot.id,
+        value: snapshot.data().value as T | undefined,
+      }));
     },
     async setItem<T>(key: string, value: T) {
       await database
@@ -87,13 +89,16 @@ export async function initStorage() {
             return snapshot.exists ? (snapshot.data()?.value as K) : undefined;
           },
           async getItemsByPrefix<K>(prefix: string) {
-            const snapshots = await transaction.get(database.collection(storageCollection));
-            return snapshots.docs
-              .filter((snapshot) => snapshot.id.startsWith(prefix))
-              .map((snapshot) => ({
-                key: snapshot.id,
-                value: snapshot.data().value as K | undefined,
-              }));
+            const snapshots = await transaction.get(
+              database
+                .collection(storageCollection)
+                .where(FieldPath.documentId(), ">=", prefix)
+                .where(FieldPath.documentId(), "<", `${prefix}\uf8ff`),
+            );
+            return snapshots.docs.map((snapshot) => ({
+              key: snapshot.id,
+              value: snapshot.data().value as K | undefined,
+            }));
           },
           setItem<K>(key: string, value: K) {
             transaction.set(

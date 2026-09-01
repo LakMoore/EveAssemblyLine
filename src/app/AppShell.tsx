@@ -67,6 +67,7 @@ import { ThemeSelect } from "@/components/ThemeSelect";
 import { toast } from "@/components/ui/toast";
 import { Progress, ProgressLabel } from "@/components/ui/progress";
 import { buildRefreshUnits, runRefreshUnits } from "@/lib/esi/refreshOrchestration";
+import { CharacterTokenRecord } from "@/lib/auth/model";
 
 const languageStorageKey = "assembly-line-language";
 const sidebarStorageKey = "assembly-line-sidebar-collapsed";
@@ -127,6 +128,34 @@ function showRefreshSuccess() {
     type: "success",
     timeout: 5000,
   });
+}
+
+function getStateStatusErrors(statuses: ClientCharacterStatus[], characters: CharacterSummary[]) {
+  const errors: string[] = [];
+  const addError = (owner: string, endpoint: { status?: string; error?: string } | undefined) => {
+    if (endpoint?.status !== "error") return;
+    errors.push(`${owner}: ${endpoint.error ?? "ESI request failed."}`);
+  };
+  for (const character of statuses) {
+    const characterInfo = characters.find((c) => c.characterId === character.characterId);
+    const characterName = characterInfo?.characterName ?? `Character ID ${character.characterId}`;
+    addError(`${characterName} assets`, character.assets);
+    addError(`${characterName} skills`, character.skills);
+    addError(`${characterName} location`, character.location);
+    addError(`${characterName} ship`, character.ship);
+    addError(`${characterName} clones`, character.clones);
+    addError(`${characterName} blueprints`, character.blueprints);
+    addError(`${characterName} jobs`, character.jobs);
+    addError(`${characterName} orders`, character.orders);
+    for (const corporation of character.corporations ?? []) {
+      addError(`Corporation ${corporation.corporationId} assets`, corporation.assets);
+      addError(`Corporation ${corporation.corporationId} blueprints`, corporation.blueprints);
+      addError(`Corporation ${corporation.corporationId} jobs`, corporation.jobs);
+      addError(`Corporation ${corporation.corporationId} orders`, corporation.orders);
+      addError(`Corporation ${corporation.corporationId} structures`, corporation.structures);
+    }
+  }
+  return [...new Set(errors)];
 }
 
 function hasExpiredEndpoint(statuses: ClientCharacterStatus[]) {
@@ -205,6 +234,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const mobileMetaCollapseTimer = useRef<number | null>(null);
   const mobileMetaCollapseAnimationTimer = useRef<number | null>(null);
   const pilotListSentinelRef = useRef<HTMLSpanElement | null>(null);
+  const shownStateErrorsRef = useRef(new Set<string>());
   const language = localLanguage;
   const activePage: ActivePage =
     pathname === "/" || pathname === "/welcome"
@@ -289,7 +319,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
       void loadClientStateStatus(reload)
         .then((data) => {
           if (cancelled) return;
-          setStateStatuses(data.characters ?? []);
+          const nextStatuses = data.characters ?? [];
+          setStateStatuses(nextStatuses);
+          const currentErrors = new Set(getStateStatusErrors(nextStatuses, characters));
+          const newErrors = [...currentErrors]
+            .filter((error) => !shownStateErrorsRef.current.has(error))
+            .slice(0, 3);
+          for (const error of currentErrors) shownStateErrorsRef.current.add(error);
+          for (const error of newErrors) {
+            showRefreshError(error);
+          }
+          for (const error of shownStateErrorsRef.current) {
+            if (!currentErrors.has(error)) shownStateErrorsRef.current.delete(error);
+          }
           setHasLoadedStateStatuses(true);
           setStatusCheckAt(Date.now());
         })
@@ -308,7 +350,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       window.clearInterval(statusTimer);
       window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
     };
-  }, [activePage, authenticated, characters.length]);
+  }, [activePage, authenticated, characters]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 900px)");

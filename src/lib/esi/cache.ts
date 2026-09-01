@@ -21,7 +21,7 @@ import {
   getHaulerShipTypeIds,
   getBlueprintById,
 } from "@/cache/services/sdeCache";
-import { getCharacter, getCharacters } from "@/lib/auth/tokensStore";
+import { getCharacter } from "@/lib/auth/tokensStore";
 import {
   fetchCharacterAssets,
   fetchAssetNames,
@@ -98,6 +98,12 @@ type OwnerCache = {
 
 const characterCaches = new Map<string, OwnerCache>();
 const corporationCaches = new Map<string, OwnerCache>();
+
+async function getCharactersByIds(characterIds: readonly number[]) {
+  return (await Promise.all(characterIds.map((characterId) => getCharacter(characterId)))).filter(
+    (character) => character !== null,
+  );
+}
 
 function hasUsableMarketOrders(cache: OwnerCache | undefined) {
   const marketOrders = cache?.marketOrders;
@@ -1512,7 +1518,7 @@ export async function getRunningIndustryJobs(
     return Array.isArray(body) ? (body as IndustryJobRecord[]) : [];
   });
   if (!includeCorporationJobs) return jobs.filter((job) => job.ownerType === "character");
-  const characters = await getCharacters();
+  const characters = await getCharactersByIds(characterIds);
   const corporationIds = new Set(
     characters
       .filter(
@@ -1543,7 +1549,7 @@ export async function getResolvedAssets(
   );
   if (!includeCorporationAssets) return [...assets];
 
-  const characters = await getCharacters();
+  const characters = await getCharactersByIds(characterIds);
   const corporations = new Set(
     characters
       .filter(
@@ -1583,7 +1589,7 @@ export async function getShipAssets(
   });
   if (!includeCorporationAssets) return assets;
 
-  const characters = await getCharacters();
+  const characters = await getCharactersByIds(characterIds);
   const corporationIds = new Set(
     characters
       .filter(
@@ -1612,7 +1618,7 @@ export async function getAllAssetsRaw(
     (id) => getCache(characterCaches, id, sessionId).allAssetsRaw?.lastBody ?? [],
   );
   if (!includeCorporationAssets) return assets;
-  const characters = await getCharacters();
+  const characters = await getCharactersByIds(characterIds);
   const corporationIds = new Set(
     characters
       .filter(
@@ -1637,7 +1643,7 @@ export async function getResolvedAssetIndex(
   sessionId = "default",
 ) {
   const index = new Map<number, AssetRecord>();
-  const characters = await getCharacters();
+  const characters = await getCharactersByIds(characterIds);
   const corporationIds = includeCorporationAssets
     ? new Set(
         characters
@@ -1672,7 +1678,7 @@ export async function getRootLocationsByItemId(
     ...getCache(characterCaches, id, sessionId).rootLocationsByItemId.entries(),
   ]);
   if (!includeCorporationAssets) return new Map(locations);
-  const characters = await getCharacters();
+  const characters = await getCharactersByIds(characterIds);
   const corporations = new Set(
     characters
       .filter(
@@ -1706,7 +1712,7 @@ async function getStructureResolverCharacter(
     return characterIds.includes(source.ownerId) ? getCharacter(source.ownerId) : undefined;
   }
 
-  const characters = await getCharacters();
+  const characters = await getCharactersByIds(characterIds);
   return characters.find(
     (character) =>
       characterIds.includes(character.characterId)
@@ -1788,7 +1794,7 @@ export async function getCachedCorporationStructures(
   characterIds: number[],
   sessionId = "default",
 ) {
-  const characters = await getCharacters();
+  const characters = await getCharactersByIds(characterIds);
   const corporationIds = new Set(
     characters
       .filter(
@@ -1811,7 +1817,7 @@ export async function getAssembledStructureRigAssets(
   sessionId = "default",
 ) {
   if (!includeCorporationAssets) return [];
-  const characters = await getCharacters();
+  const characters = await getCharactersByIds(characterIds);
   const corporationIds = new Set(
     characters
       .filter(
@@ -1836,7 +1842,7 @@ export async function getAssembledShipAssets(
     ...getCache(characterCaches, id, sessionId).assembledShipsByItemId.values(),
   ]);
   if (!includeCorporationAssets) return assets;
-  const characters = await getCharacters();
+  const characters = await getCharactersByIds(characterIds);
   const corporationIds = new Set(
     characters
       .filter(
@@ -1861,7 +1867,7 @@ export async function getAssetCacheMetadata(
   sessionId = "default",
 ) {
   const characterCachesForPlan = characterIds.map((id) => getCache(characterCaches, id, sessionId));
-  const characters = await getCharacters();
+  const characters = await getCharactersByIds(characterIds);
   const corporations = includeCorporationAssets
     ? [
         ...new Set(
@@ -1936,7 +1942,7 @@ export async function getMarketOrderStock(
   if (!options.allCorporationSellOrdersAsStock && !options.myCorporationSellOrdersAsStock) {
     return resolveNames();
   }
-  const characters = await getCharacters();
+  const characters = await getCharactersByIds(characterIds);
   const selectedCharacters = characters.filter((character) =>
     characterIds.includes(character.characterId),
   );
@@ -1988,7 +1994,7 @@ export async function getBlueprintInstances(
     effectiveBlueprints(getCache(characterCaches, characterId, sessionId)),
   );
   if (!includeCorporationBlueprints) return instances;
-  const characters = await getCharacters();
+  const characters = await getCharactersByIds(characterIds);
   const corporationIds = new Set(
     characters
       .filter(
@@ -2012,7 +2018,7 @@ export async function getStateStatus(
   sessionId: string,
   characters?: CharacterTokenRecord[],
 ) {
-  const records = characters ?? (await getCharacters());
+  const records = characters ?? (await getCharactersByIds(characterIds));
   const characterById = new Map(records.map((character) => [character.characterId, character]));
   const corporationsByCharacter = new Map<number, number[]>();
   for (const character of records) {

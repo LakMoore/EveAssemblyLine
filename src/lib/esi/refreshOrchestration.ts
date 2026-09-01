@@ -45,7 +45,8 @@ export function buildRefreshUnits(targets: readonly RefreshCharacterTarget[]): R
       },
     );
   }
-  return [...characterUnits.values(), ...corporationUnits.values()];
+  // Return corporation units first to prioritize refreshing corporations before characters.
+  return [...corporationUnits.values(), ...characterUnits.values()];
 }
 
 /** Runs refresh units with bounded concurrency and reports every settled unit. */

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { initStorage } from "../storage";
+import { initStorage, type StorageTransaction } from "../storage";
 import {
   mergeFacilitySettings,
   normalizeFacilitySettings,
@@ -12,6 +12,17 @@ import {
   SessionRecord,
   TokenSet,
 } from "./model";
+
+const characterTokenKeyPrefix = "character-token:";
+const characterRecordKeyPrefix = "character:";
+
+function characterTokenKey(characterId: number) {
+  return `${characterTokenKeyPrefix}${characterId}`;
+}
+
+function characterRecordKey(characterId: number) {
+  return `${characterRecordKeyPrefix}${characterId}`;
+}
 
 function normalizeTokenSet(value: Partial<TokenSet> | undefined): TokenSet | null {
   if (!value?.accessToken || !value.refreshToken || !value.accessTokenExpiresAt) return null;
@@ -61,17 +72,86 @@ function normalizeCharacter(value: unknown): CharacterTokenRecord | null {
   };
 }
 
-// Reads never persist their normalized snapshot: another session may have written newer tokens or
-// collection membership in between, and a write-back here would silently revert it.
-export async function getCharacters(): Promise<CharacterTokenRecord[]> {
-  const storage = await initStorage();
-  const raw = (await storage.getItem("characters")) as unknown[] | undefined;
-  return (raw ?? [])
-    .map(normalizeCharacter)
-    .filter((record): record is CharacterTokenRecord => record !== null);
+function withTokenSet(record: CharacterTokenRecord, tokenSet: TokenSet | null) {
+  return tokenSet ? { ...record, personalAuth: tokenSet } : record;
 }
-export async function saveCharacters(records: CharacterTokenRecord[]) {
-  await (await initStorage()).setItem("characters", records);
+
+async function getCharactersInTransaction(transaction: StorageTransaction) {
+  const [legacyRaw, characterEntries] = await Promise.all([
+    transaction.getItem<unknown[]>("characters"),
+    transaction.getItemsByPrefix<unknown>(characterRecordKeyPrefix),
+  ]);
+  const recordsById = new Map<number, CharacterTokenRecord>();
+  for (const entry of characterEntries) {
+    const record = normalizeCharacter(entry.value);
+    if (record) recordsById.set(record.characterId, record);
+  }
+  for (const value of legacyRaw ?? []) {
+    const record = normalizeCharacter(value);
+    if (record && !recordsById.has(record.characterId)) recordsById.set(record.characterId, record);
+  }
+  return {
+    legacyRaw,
+    records: [...recordsById.values()],
+  };
+}
+
+/** Loads every character record, including legacy records during migration. */
+export async function getAllCharacters(): Promise<CharacterTokenRecord[]> {
+  const storage = await initStorage();
+  const [legacyRaw, characterEntries, tokenEntries] = await Promise.all([
+    storage.getItem<unknown[]>("characters"),
+    storage.getItemsByPrefix<unknown>(characterRecordKeyPrefix),
+    storage.getItemsByPrefix<Partial<TokenSet>>(characterTokenKeyPrefix),
+  ]);
+  const tokenSetsByCharacterId = new Map<number, TokenSet>();
+  for (const entry of tokenEntries) {
+    const characterId = Number(entry.key.slice(characterTokenKeyPrefix.length));
+    const tokenSet = normalizeTokenSet(entry.value);
+    if (Number.isSafeInteger(characterId) && tokenSet) {
+      tokenSetsByCharacterId.set(characterId, tokenSet);
+    }
+  }
+  const recordsById = new Map<number, CharacterTokenRecord>();
+  for (const entry of characterEntries) {
+    const record = normalizeCharacter(entry.value);
+    if (record) recordsById.set(record.characterId, record);
+  }
+  for (const value of legacyRaw ?? []) {
+    const record = normalizeCharacter(value);
+    if (record && !recordsById.has(record.characterId)) recordsById.set(record.characterId, record);
+  }
+  return [...recordsById.values()].map((record) =>
+    withTokenSet(record, tokenSetsByCharacterId.get(record.characterId) ?? null),
+  );
+}
+
+/** Loads one character without scanning unrelated character records. */
+export async function getCharacter(characterId: number): Promise<CharacterTokenRecord | null> {
+  const storage = await initStorage();
+  const [stored, tokenValue] = await Promise.all([
+    storage.getItem<unknown>(characterRecordKey(characterId)),
+    storage.getItem<Partial<TokenSet>>(characterTokenKey(characterId)),
+  ]);
+  let record = normalizeCharacter(stored);
+  if (!record) {
+    const legacy = await storage.getItem<unknown[]>("characters");
+    record =
+      (legacy ?? [])
+        .map(normalizeCharacter)
+        .find((candidate) => candidate?.characterId === characterId) ?? null;
+  }
+  if (!record) return null;
+  return withTokenSet(record, normalizeTokenSet(tokenValue));
+}
+
+/** Persists one character record independently from every other character. */
+export async function saveCharacter(record: CharacterTokenRecord): Promise<void> {
+  const storage = await initStorage();
+  await storage.runTransaction(async (transaction) => {
+    transaction.setItem(characterRecordKey(record.characterId), record);
+    transaction.deleteItem(characterTokenKey(record.characterId));
+  });
 }
 
 export function normalizeSessions(
@@ -154,22 +234,37 @@ function normalizeCollections(
 
 export async function getCollections(): Promise<CharacterCollectionRecord[]> {
   const storage = await initStorage();
-  const characters = await getCharacters();
+  const characters = await getAllCharacters();
   const stored = (await storage.getItem("collections")) as CharacterCollectionRecord[] | undefined;
   const legacy = (await storage.getItem("accounts")) as LegacyAccountRecord[] | undefined;
   // Characters saved before collections existed are adopted into a new collection here.
   for (const character of characters) {
     if (character.collectionId) continue;
     character.collectionId = randomUUID();
-    await upsertCharacter(character);
+    await saveCharacter(character);
   }
   return normalizeCollections(stored, legacy, characters);
 }
 
 export async function getCollection(collectionId: string) {
-  return (
-    (await getCollections()).find((collection) => collection.collectionId === collectionId) ?? null
-  );
+  const storage = await initStorage();
+  const stored = (await storage.getItem("collections")) as CharacterCollectionRecord[] | undefined;
+  const collection = stored?.find((record) => record.collectionId === collectionId);
+  if (collection) return collection;
+
+  const legacy = (await storage.getItem("accounts")) as LegacyAccountRecord[] | undefined;
+  const legacyCollection = legacy?.find((record) => record.accountId === collectionId);
+  if (legacyCollection) {
+    return {
+      collectionId: legacyCollection.accountId,
+      characterIds: legacyCollection.characterIds,
+      createdAt: legacyCollection.createdAt,
+      lastSeenAt: legacyCollection.lastSeenAt,
+    };
+  }
+
+  // Older data may have no collection document; derive it only on this migration path.
+  return (await getCollections()).find((record) => record.collectionId === collectionId) ?? null;
 }
 
 export async function getCollectionForCharacter(characterId: number) {
@@ -210,10 +305,7 @@ export async function saveCollection(record: CharacterCollectionRecord) {
 export async function deleteCharacter(characterId: number, collectionId: string) {
   const storage = await initStorage();
   await storage.runTransaction(async (transaction) => {
-    const rawCharacters = (await transaction.getItem("characters")) as unknown[] | undefined;
-    const characters = (rawCharacters ?? [])
-      .map(normalizeCharacter)
-      .filter((record): record is CharacterTokenRecord => record !== null);
+    const { legacyRaw, records: characters } = await getCharactersInTransaction(transaction);
     const character = characters.find((record) => record.characterId === characterId);
     if (!character || character.collectionId !== collectionId) {
       throw new Error("Character is not attached to this collection.");
@@ -229,10 +321,14 @@ export async function deleteCharacter(characterId: number, collectionId: string)
     for (const collection of collections) {
       collection.characterIds = collection.characterIds.filter((id) => id !== characterId);
     }
-    transaction.setItem(
-      "characters",
-      characters.filter((record) => record.characterId !== characterId),
-    );
+    transaction.deleteItem(characterRecordKey(characterId));
+    transaction.deleteItem(characterTokenKey(characterId));
+    if (legacyRaw) {
+      transaction.setItem(
+        "characters",
+        legacyRaw.filter((value) => normalizeCharacter(value)?.characterId !== characterId),
+      );
+    }
     transaction.setItem("collections", collections);
   });
 }
@@ -241,10 +337,7 @@ export async function mergeCollections(targetId: string, sourceId: string) {
   if (targetId === sourceId) return;
   const storage = await initStorage();
   await storage.runTransaction(async (transaction) => {
-    const rawCharacters = (await transaction.getItem("characters")) as unknown[] | undefined;
-    const characters = (rawCharacters ?? [])
-      .map(normalizeCharacter)
-      .filter((record): record is CharacterTokenRecord => record !== null);
+    const { legacyRaw, records: characters } = await getCharactersInTransaction(transaction);
     const storedCollections = (await transaction.getItem("collections")) as
       | CharacterCollectionRecord[]
       | undefined;
@@ -276,17 +369,29 @@ export async function mergeCollections(targetId: string, sourceId: string) {
     for (const session of sessions) {
       if (session.collectionId === sourceId) session.collectionId = targetId;
     }
-    transaction.setItem("characters", characters);
+    const charactersById = new Map(
+      characters.map((character) => [character.characterId, character]),
+    );
+    for (const character of characters) {
+      if (character.collectionId === targetId) {
+        transaction.setItem(characterRecordKey(character.characterId), character);
+      }
+    }
+    if (legacyRaw) {
+      transaction.setItem(
+        "characters",
+        legacyRaw.map((value) => {
+          const characterId = normalizeCharacter(value)?.characterId;
+          return characterId === undefined ? value : (charactersById.get(characterId) ?? value);
+        }),
+      );
+    }
     transaction.setItem("sessions", sessions);
     transaction.setItem(
       "collections",
       collections.filter((collection) => collection.collectionId !== sourceId),
     );
   });
-}
-
-export async function getCharacter(characterId: number) {
-  return (await getCharacters()).find((record) => record.characterId === characterId) ?? null;
 }
 
 export async function getCollectionFacilities(
@@ -322,37 +427,24 @@ export async function saveCollectionFacilities(
   });
 }
 
-export async function upsertCharacter(record: CharacterTokenRecord) {
-  const storage = await initStorage();
-  await storage.runTransaction(async (transaction) => {
-    const raw = (await transaction.getItem("characters")) as unknown[] | undefined;
-    const records = (raw ?? [])
-      .map(normalizeCharacter)
-      .filter((existing): existing is CharacterTokenRecord => existing !== null);
-    const index = records.findIndex((existing) => existing.characterId === record.characterId);
-    if (index === -1) records.push(record);
-    else records[index] = record;
-    transaction.setItem("characters", records);
-  });
-}
-
 export async function setCharacterOnDeployment(
   characterId: number,
   collectionId: string,
   onDeployment: boolean,
 ) {
+  const existing = await getCharacter(characterId);
+  if (!existing || existing.collectionId !== collectionId) {
+    throw new Error("Character is not attached to this collection.");
+  }
   const storage = await initStorage();
   await storage.runTransaction(async (transaction) => {
-    const raw = (await transaction.getItem("characters")) as unknown[] | undefined;
-    const records = (raw ?? [])
-      .map(normalizeCharacter)
-      .filter((existing): existing is CharacterTokenRecord => existing !== null);
-    const record = records.find((existing) => existing.characterId === characterId);
-    if (!record || record.collectionId !== collectionId) {
+    const record =
+      normalizeCharacter(await transaction.getItem<unknown>(characterRecordKey(characterId)))
+      ?? existing;
+    if (record.collectionId !== collectionId) {
       throw new Error("Character is not attached to this collection.");
     }
-    record.onDeployment = onDeployment;
-    transaction.setItem("characters", records);
+    transaction.setItem(characterRecordKey(characterId), { ...record, onDeployment });
   });
 }
 
@@ -366,15 +458,14 @@ export async function saveCharacterTokens(
   previousAccessToken: string,
   tokenSet: TokenSet,
 ): Promise<TokenSet> {
+  const character = await getCharacter(characterId);
+  if (!character) return tokenSet;
   const storage = await initStorage();
   return storage.runTransaction(async (transaction) => {
-    const raw = (await transaction.getItem("characters")) as unknown[] | undefined;
-    const records = (raw ?? [])
-      .map(normalizeCharacter)
-      .filter((existing): existing is CharacterTokenRecord => existing !== null);
-    const index = records.findIndex((existing) => existing.characterId === characterId);
-    if (index === -1) return tokenSet;
-    const stored = records[index].personalAuth;
+    const stored =
+      normalizeTokenSet(
+        await transaction.getItem<Partial<TokenSet>>(characterTokenKey(characterId)),
+      ) ?? character.personalAuth;
     if (
       stored.accessToken !== previousAccessToken
       && stored.accessToken !== tokenSet.accessToken
@@ -382,8 +473,7 @@ export async function saveCharacterTokens(
     ) {
       return stored;
     }
-    records[index] = { ...records[index], personalAuth: tokenSet };
-    transaction.setItem("characters", records);
+    transaction.setItem(characterTokenKey(characterId), tokenSet);
     return tokenSet;
   });
 }

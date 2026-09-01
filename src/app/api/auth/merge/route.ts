@@ -3,12 +3,12 @@ import { getSessionFromRequest } from "@/lib/auth/session";
 import { fetchCharacterCorporationId, fetchCharacterRoles } from "@/lib/esi/client";
 import {
   deletePendingMerge,
-  getCharacters,
+  getCharacter,
   getCollection,
   getPendingMerge,
   getSession,
   mergeCollections,
-  upsertCharacter,
+  saveCharacter,
 } from "@/lib/auth/tokensStore";
 
 async function getPending(request: Request) {
@@ -29,12 +29,16 @@ async function getPending(request: Request) {
 export async function GET(request: Request) {
   const value = await getPending(request);
   if (!value) return NextResponse.json({ mergeRequired: false });
-  const [target, source, characters] = await Promise.all([
+  const [target, source] = await Promise.all([
     getCollection(value.pending.targetCollectionId),
     getCollection(value.pending.sourceCollectionId),
-    getCharacters(),
   ]);
   if (!target || !source) return NextResponse.json({ mergeRequired: false });
+  const characters = (
+    await Promise.all(
+      [...new Set([...target.characterIds, ...source.characterIds])].map((id) => getCharacter(id)),
+    )
+  ).filter((character) => character !== null);
   const names = new Map(
     characters.map((character) => [character.characterId, character.characterName]),
   );
@@ -67,10 +71,8 @@ export async function POST(request: Request) {
     const roles = pending.scopes.includes("esi-characters.read_corporation_roles.v1")
       ? await fetchCharacterRoles(pending.characterId, pending.tokenSet)
       : [];
-    const existing = (await getCharacters()).find(
-      (character) => character.characterId === pending.characterId,
-    );
-    await upsertCharacter({
+    const existing = await getCharacter(pending.characterId);
+    await saveCharacter({
       ...existing,
       characterId: pending.characterId,
       characterName: pending.characterName ?? `Character ${pending.characterId}`,

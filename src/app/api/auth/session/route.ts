@@ -1,15 +1,14 @@
 import { NextResponse } from "next/server";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
-import { getCharacters } from "@/lib/auth/tokensStore";
+import { getCharacter } from "@/lib/auth/tokensStore";
 
 export async function GET(request: Request) {
   try {
     const session = await getSessionFromRequest(request);
     if (!session) return NextResponse.json({ authenticated: false, characters: [] });
     const characterIds = await getSessionCharacterIds(session);
-    const records = await getCharacters();
-    const characters = records
-      .filter((record) => characterIds.includes(record.characterId))
+    const characters = (await Promise.all(characterIds.map((id) => getCharacter(id))))
+      .filter((record) => record !== null)
       .map(
         ({
           characterId,

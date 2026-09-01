@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
 import { getShipAssets } from "@/lib/esi/cache";
-import { getCharacters } from "@/lib/auth/tokensStore";
+import { getCharacter } from "@/lib/auth/tokensStore";
 import {
   getMarketGroups,
   getShipTypeIds,
@@ -36,11 +36,11 @@ export async function GET(request: Request) {
     getStations(),
     getSystems(),
     getMarketGroups(),
-    getCharacters(),
+    Promise.all(characterIds.map((id) => getCharacter(id))),
   ]);
   const characterNamesById = new Map(
     characters
-      .filter((character) => characterIds.includes(character.characterId))
+      .filter((character) => character !== null)
       .map((character) => [character.characterId, character.characterName]),
   );
   const types = await getTypesByIds([...new Set(assets.map((asset) => asset.typeId))]);

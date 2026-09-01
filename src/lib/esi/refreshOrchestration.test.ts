@@ -20,6 +20,12 @@ test("creates one personal unit per character and one corporation unit per eligi
     units,
     [
       {
+        key: "corporation:100",
+        kind: "corporation",
+        ownerId: 100,
+        authorizationCharacterId: 10,
+      },
+      {
         key: "character:10",
         kind: "character",
         ownerId: 10,
@@ -38,12 +44,6 @@ test("creates one personal unit per character and one corporation unit per eligi
         key: "character:13",
         kind: "character",
         ownerId: 13,
-      },
-      {
-        key: "corporation:100",
-        kind: "corporation",
-        ownerId: 100,
-        authorizationCharacterId: 10,
       },
     ],
   );

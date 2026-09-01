@@ -12,7 +12,7 @@ import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/sessio
 import {
   getCollectionFacilities,
   saveCollectionFacilities,
-  getCharacters,
+  getCharacter,
 } from "@/lib/auth/tokensStore";
 import { getCachedCorporationStructures, getRootLocationsByItemId } from "@/lib/esi/cache";
 import { fetchIndustrySystems, fetchStationMetadata } from "@/lib/esi/client";
@@ -127,7 +127,7 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
     groups,
     industrySystems,
   ] = await Promise.all([
-    getCharacters(),
+    Promise.all(characterIds.map((id) => getCharacter(id))),
     getRootLocationsByItemId(characterIds, true, session.sessionId),
     getStations(),
     getSystems(),
@@ -140,10 +140,11 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
   ]);
   markPhase("loadDependencies");
   const authorized = characters.filter(
-    (character) =>
-      characterIds.includes(character.characterId)
-      && character.corporationId
-      && (character.hasDirectorRole || character.hasStationManagerRole),
+    (character): character is NonNullable<typeof character> =>
+      character !== null
+      && characterIds.includes(character.characterId)
+      && character.corporationId !== undefined
+      && (character.hasDirectorRole === true || character.hasStationManagerRole === true),
   );
   const authorizedByCorporation = new Map<number, (typeof authorized)[number]>();
   for (const character of authorized) {
