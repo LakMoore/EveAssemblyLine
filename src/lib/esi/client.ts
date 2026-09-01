@@ -152,6 +152,7 @@ type EsiMarketOrder = {
   order_id: number;
   type_id: number;
   location_id: number;
+  issued: string;
   volume_remain: number;
   volume_total: number;
   is_buy_order: boolean;
@@ -833,6 +834,7 @@ function mapMarketOrder(
     orderId: order.order_id,
     typeId: order.type_id,
     locationId: order.location_id,
+    issuedAt: order.issued,
     volumeRemain: order.volume_remain,
     volumeTotal: order.volume_total,
     isBuyOrder: order.is_buy_order,

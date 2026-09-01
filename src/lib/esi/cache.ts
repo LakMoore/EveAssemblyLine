@@ -88,6 +88,7 @@ type OwnerCache = {
   assembledStructureRigs: AssetRecord[];
   jobAssetDeductions: Map<string, number>;
   jobBlueprintAdjustments: Map<number, { consumedRuns: number; inUse: boolean }>;
+  marketOrderAssetDeductions: Map<string, number>;
   jobs?: EndpointCache<IndustryJobRecord[]>;
   skills?: EndpointCache<CharacterSkillRecord[]>;
   marketOrders?: EndpointCache<MarketOrderRecord[]>;
@@ -206,6 +207,7 @@ function getCache(map: Map<string, OwnerCache>, id: number, sessionId: string): 
     assembledShipsByItemId: new Map(),
     jobAssetDeductions: new Map(),
     jobBlueprintAdjustments: new Map(),
+    marketOrderAssetDeductions: new Map(),
     unresolvedAssetCount: 0,
   };
   map.set(key, created);
@@ -504,6 +506,9 @@ async function refreshJobAdjustments(
 
 function effectiveAssets(cache: OwnerCache) {
   const deductions = new Map(cache.jobAssetDeductions);
+  for (const [key, quantity] of cache.marketOrderAssetDeductions) {
+    deductions.set(key, (deductions.get(key) ?? 0) + quantity);
+  }
   return [...(cache.stockAssetsByItemId?.values() ?? [])].flatMap((asset) => {
     const rootLocationId =
       asset.rootLocation && "kind" in asset.rootLocation
@@ -525,6 +530,39 @@ function effectiveAssets(cache: OwnerCache) {
       },
     ];
   });
+}
+
+function marketOrderIssuedAfter(order: MarketOrderRecord, lastModified: string | undefined) {
+  const orderIssuedAt = Date.parse(order.issuedAt);
+  const assetsModifiedAt = Date.parse(lastModified ?? "");
+  return (
+    Number.isFinite(orderIssuedAt)
+    && Number.isFinite(assetsModifiedAt)
+    && orderIssuedAt > assetsModifiedAt
+  );
+}
+
+export function getMarketOrderAssetDeductions(
+  orders: readonly MarketOrderRecord[],
+  assetsLastModified?: string,
+) {
+  const deductions = new Map<string, number>();
+  for (const order of orders) {
+    if (
+      order.isBuyOrder
+      || order.volumeTotal <= 0
+      || !marketOrderIssuedAfter(order, assetsLastModified)
+    ) continue;
+    const key = `${order.typeId}:${order.locationId}`;
+    deductions.set(key, (deductions.get(key) ?? 0) + order.volumeTotal);
+  }
+  return deductions;
+}
+
+function refreshMarketOrderAdjustments(cache: OwnerCache, assetsLastModified?: string) {
+  cache.marketOrderAssetDeductions = hasUsableMarketOrders(cache)
+    ? getMarketOrderAssetDeductions(cache.marketOrders!.lastBody, assetsLastModified)
+    : new Map();
 }
 
 function effectiveBlueprints(cache: OwnerCache) {
@@ -1251,6 +1289,7 @@ export async function refreshCharacterState(
         cache.marketOrders.nextRefreshAllowed,
       );
     }
+    refreshMarketOrderAdjustments(cache, cache.allAssetsRaw?.lastModified);
   }
   catch (error) {
     cache.marketOrders = {
@@ -1433,6 +1472,7 @@ async function refreshCorporationCache(
         corpCache.marketOrders.nextRefreshAllowed,
       );
     }
+    refreshMarketOrderAdjustments(corpCache, corpCache.allAssetsRaw?.lastModified);
     corpSummary.marketOrders = corpCache.marketOrders;
   }
   catch (error) {

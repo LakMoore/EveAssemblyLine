@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildCurrentShipAsset,
   endpointDataStatus,
+  getMarketOrderAssetDeductions,
   getKnownNonStructureItemIds,
   setFresh,
 } from "./cache";
@@ -81,6 +82,49 @@ test("preserves Last-Modified when a 304 response omits it", () => {
 
 test("expiry takes precedence when determining stale status", () => {
   assert.equal(endpointDataStatus("2026-08-26T16:59:59.000Z", "2020-01-01T00:00:00.000Z"), "stale");
+});
+
+test("deducts each newer sell order once using its original quantity", () => {
+  const orders = [
+    {
+      orderId: 1,
+      typeId: 34,
+      locationId: 600_000_001,
+      issuedAt: "2026-08-26T15:00:00.000Z",
+      volumeRemain: 100,
+      volumeTotal: 100,
+      isBuyOrder: false,
+      ownerType: "character" as const,
+      ownerId: 42,
+    },
+    {
+      orderId: 2,
+      typeId: 34,
+      locationId: 600_000_001,
+      issuedAt: "2026-08-26T17:00:00.000Z",
+      volumeRemain: 40,
+      volumeTotal: 100,
+      isBuyOrder: false,
+      ownerType: "character" as const,
+      ownerId: 42,
+    },
+    {
+      orderId: 3,
+      typeId: 34,
+      locationId: 600_000_001,
+      issuedAt: "2026-08-26T18:00:00.000Z",
+      volumeRemain: 100,
+      volumeTotal: 100,
+      isBuyOrder: true,
+      ownerType: "character" as const,
+      ownerId: 42,
+    },
+  ];
+  const first = getMarketOrderAssetDeductions(orders, "2026-08-26T16:00:00.000Z");
+  const second = getMarketOrderAssetDeductions(orders, "2026-08-26T16:00:00.000Z");
+
+  assert.equal(first.get("34:600000001"), 100);
+  assert.deepEqual([...second], [...first]);
 });
 
 test("builds an undocked current ship with a solar-system root", () => {

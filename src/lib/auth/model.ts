@@ -144,6 +144,7 @@ export interface MarketOrderRecord {
   orderId: number;
   typeId: number;
   locationId: number;
+  issuedAt: string;
   volumeRemain: number;
   volumeTotal: number;
   isBuyOrder: boolean;
