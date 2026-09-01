@@ -1,0 +1,32 @@
+# Eve AssemblyLine
+
+> An EVE Online industry planning and production control workspace.
+
+Eve AssemblyLine helps industrial operators plan large builds across New Eden. It focuses on
+materials, stock, locations, jobs, hauling, and the decisions needed to keep a production
+operation aligned. It does not provide ISK/hour or profitability calculations.
+
+## Public pages
+
+- [Welcome](/welcome): Overview of Eve AssemblyLine and its production-control tools.
+
+## Application tools
+
+- [Production planner](/planner): Create manufacturing plans from requested builds and available
+  stock.
+- [Compress](/compress): Evaluate reprocessing and compression decisions.
+- [Appraise](/appraise): Turn a pasted item list into ISK and volume totals.
+- [Stock](/stock): Inspect available stock and where it is located.
+- [Jobs](/jobs): Review industry jobs moving through configured facilities.
+- [Structures](/structures): Manage structure information used by planning.
+- [Characters](/characters): Connect EVE characters for authenticated state and corporation access.
+
+## Access and data
+
+The welcome page is public. Application tools may require an active session and connected EVE
+characters. Character, corporation, asset, job, location, and market data is private user state;
+it is not public documentation and should not be inferred or indexed. EVE SSO and ESI requests are
+handled server-side.
+
+The application uses CCP's EVE Online static data and ESI where applicable. Availability and
+freshness of connected character data depend on the user's session and refresh status.
