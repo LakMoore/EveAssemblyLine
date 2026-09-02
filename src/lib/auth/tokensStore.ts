@@ -77,30 +77,16 @@ function withTokenSet(record: CharacterTokenRecord, tokenSet: TokenSet | null) {
 }
 
 async function getCharactersInTransaction(transaction: StorageTransaction) {
-  const [legacyRaw, characterEntries] = await Promise.all([
-    transaction.getItem<unknown[]>("characters"),
-    transaction.getItemsByPrefix<unknown>(characterRecordKeyPrefix),
-  ]);
-  const recordsById = new Map<number, CharacterTokenRecord>();
-  for (const entry of characterEntries) {
-    const record = normalizeCharacter(entry.value);
-    if (record) recordsById.set(record.characterId, record);
-  }
-  for (const value of legacyRaw ?? []) {
-    const record = normalizeCharacter(value);
-    if (record && !recordsById.has(record.characterId)) recordsById.set(record.characterId, record);
-  }
-  return {
-    legacyRaw,
-    records: [...recordsById.values()],
-  };
+  const characterEntries = await transaction.getItemsByPrefix<unknown>(characterRecordKeyPrefix);
+  return characterEntries
+    .map((entry) => normalizeCharacter(entry.value))
+    .filter((record): record is CharacterTokenRecord => record !== null);
 }
 
-/** Loads every character record, including legacy records during migration. */
+/** Loads every current keyed character record and its separately stored token, when present. */
 export async function getAllCharacters(): Promise<CharacterTokenRecord[]> {
   const storage = await initStorage();
-  const [legacyRaw, characterEntries, tokenEntries] = await Promise.all([
-    storage.getItem<unknown[]>("characters"),
+  const [characterEntries, tokenEntries] = await Promise.all([
     storage.getItemsByPrefix<unknown>(characterRecordKeyPrefix),
     storage.getItemsByPrefix<Partial<TokenSet>>(characterTokenKeyPrefix),
   ]);
@@ -117,10 +103,6 @@ export async function getAllCharacters(): Promise<CharacterTokenRecord[]> {
     const record = normalizeCharacter(entry.value);
     if (record) recordsById.set(record.characterId, record);
   }
-  for (const value of legacyRaw ?? []) {
-    const record = normalizeCharacter(value);
-    if (record && !recordsById.has(record.characterId)) recordsById.set(record.characterId, record);
-  }
   return [...recordsById.values()].map((record) =>
     withTokenSet(record, tokenSetsByCharacterId.get(record.characterId) ?? null),
   );
@@ -133,14 +115,7 @@ export async function getCharacter(characterId: number): Promise<CharacterTokenR
     storage.getItem<unknown>(characterRecordKey(characterId)),
     storage.getItem<Partial<TokenSet>>(characterTokenKey(characterId)),
   ]);
-  let record = normalizeCharacter(stored);
-  if (!record) {
-    const legacy = await storage.getItem<unknown[]>("characters");
-    record =
-      (legacy ?? [])
-        .map(normalizeCharacter)
-        .find((candidate) => candidate?.characterId === characterId) ?? null;
-  }
+  const record = normalizeCharacter(stored);
   if (!record) return null;
   return withTokenSet(record, normalizeTokenSet(tokenValue));
 }
@@ -149,8 +124,33 @@ export async function getCharacter(characterId: number): Promise<CharacterTokenR
 export async function saveCharacter(record: CharacterTokenRecord): Promise<void> {
   const storage = await initStorage();
   await storage.runTransaction(async (transaction) => {
+    let collections: CharacterCollectionRecord[] | undefined;
+    if (record.collectionId) {
+      collections =
+        ((await transaction.getItem("collections")) as CharacterCollectionRecord[] | undefined)
+        ?? [];
+    }
     transaction.setItem(characterRecordKey(record.characterId), record);
     transaction.deleteItem(characterTokenKey(record.characterId));
+    if (!collections || !record.collectionId) return;
+    const collection = collections.find(
+      (candidate) => candidate.collectionId === record.collectionId,
+    );
+    if (collection) {
+      if (!collection.characterIds.includes(record.characterId)) {
+        collection.characterIds.push(record.characterId);
+      }
+    }
+    else {
+      const now = new Date().toISOString();
+      collections.push({
+        collectionId: record.collectionId,
+        characterIds: [record.characterId],
+        createdAt: now,
+        lastSeenAt: now,
+      });
+    }
+    transaction.setItem("collections", collections);
   });
 }
 
@@ -177,28 +177,12 @@ export async function saveSessions(records: SessionRecord[]) {
   await (await initStorage()).setItem("sessions", records);
 }
 
-type LegacyAccountRecord = {
-  accountId: string;
-  characterIds: number[];
-  createdAt: string;
-  lastSeenAt: string;
-};
-
-/** Rebuilds the collection list from stored/legacy records plus the membership implied by characters. */
+/** Rebuilds the current collection list from stored records and character membership. */
 function normalizeCollections(
   stored: CharacterCollectionRecord[] | undefined,
-  legacy: LegacyAccountRecord[] | undefined,
   characters: CharacterTokenRecord[],
 ): CharacterCollectionRecord[] {
-  const collections =
-    stored
-    ?? legacy?.map((account) => ({
-      collectionId: account.accountId,
-      characterIds: account.characterIds,
-      createdAt: account.createdAt,
-      lastSeenAt: account.lastSeenAt,
-    }))
-    ?? [];
+  const collections = stored ?? [];
   const collectionById = new Map(
     collections.map((collection) => [collection.collectionId, collection]),
   );
@@ -236,14 +220,13 @@ export async function getCollections(): Promise<CharacterCollectionRecord[]> {
   const storage = await initStorage();
   const characters = await getAllCharacters();
   const stored = (await storage.getItem("collections")) as CharacterCollectionRecord[] | undefined;
-  const legacy = (await storage.getItem("accounts")) as LegacyAccountRecord[] | undefined;
   // Characters saved before collections existed are adopted into a new collection here.
   for (const character of characters) {
     if (character.collectionId) continue;
     character.collectionId = randomUUID();
     await saveCharacter(character);
   }
-  return normalizeCollections(stored, legacy, characters);
+  return normalizeCollections(stored, characters);
 }
 
 export async function getCollection(collectionId: string) {
@@ -251,19 +234,6 @@ export async function getCollection(collectionId: string) {
   const stored = (await storage.getItem("collections")) as CharacterCollectionRecord[] | undefined;
   const collection = stored?.find((record) => record.collectionId === collectionId);
   if (collection) return collection;
-
-  const legacy = (await storage.getItem("accounts")) as LegacyAccountRecord[] | undefined;
-  const legacyCollection = legacy?.find((record) => record.accountId === collectionId);
-  if (legacyCollection) {
-    return {
-      collectionId: legacyCollection.accountId,
-      characterIds: legacyCollection.characterIds,
-      createdAt: legacyCollection.createdAt,
-      lastSeenAt: legacyCollection.lastSeenAt,
-    };
-  }
-
-  // Older data may have no collection document; derive it only on this migration path.
   return (await getCollections()).find((record) => record.collectionId === collectionId) ?? null;
 }
 
@@ -305,7 +275,7 @@ export async function saveCollection(record: CharacterCollectionRecord) {
 export async function deleteCharacter(characterId: number, collectionId: string) {
   const storage = await initStorage();
   await storage.runTransaction(async (transaction) => {
-    const { legacyRaw, records: characters } = await getCharactersInTransaction(transaction);
+    const characters = await getCharactersInTransaction(transaction);
     const character = characters.find((record) => record.characterId === characterId);
     if (!character || character.collectionId !== collectionId) {
       throw new Error("Character is not attached to this collection.");
@@ -314,21 +284,12 @@ export async function deleteCharacter(characterId: number, collectionId: string)
     const storedCollections = (await transaction.getItem("collections")) as
       | CharacterCollectionRecord[]
       | undefined;
-    const legacyAccounts = (await transaction.getItem("accounts")) as
-      | LegacyAccountRecord[]
-      | undefined;
-    const collections = normalizeCollections(storedCollections, legacyAccounts, characters);
+    const collections = normalizeCollections(storedCollections, characters);
     for (const collection of collections) {
       collection.characterIds = collection.characterIds.filter((id) => id !== characterId);
     }
     transaction.deleteItem(characterRecordKey(characterId));
     transaction.deleteItem(characterTokenKey(characterId));
-    if (legacyRaw) {
-      transaction.setItem(
-        "characters",
-        legacyRaw.filter((value) => normalizeCharacter(value)?.characterId !== characterId),
-      );
-    }
     transaction.setItem("collections", collections);
   });
 }
@@ -337,14 +298,11 @@ export async function mergeCollections(targetId: string, sourceId: string) {
   if (targetId === sourceId) return;
   const storage = await initStorage();
   await storage.runTransaction(async (transaction) => {
-    const { legacyRaw, records: characters } = await getCharactersInTransaction(transaction);
+    const characters = await getCharactersInTransaction(transaction);
     const storedCollections = (await transaction.getItem("collections")) as
       | CharacterCollectionRecord[]
       | undefined;
-    const legacyAccounts = (await transaction.getItem("accounts")) as
-      | LegacyAccountRecord[]
-      | undefined;
-    const collections = normalizeCollections(storedCollections, legacyAccounts, characters);
+    const collections = normalizeCollections(storedCollections, characters);
     const target = collections.find((collection) => collection.collectionId === targetId);
     const source = collections.find((collection) => collection.collectionId === sourceId);
     if (!target || !source) throw new Error("Collection not found");
@@ -369,22 +327,10 @@ export async function mergeCollections(targetId: string, sourceId: string) {
     for (const session of sessions) {
       if (session.collectionId === sourceId) session.collectionId = targetId;
     }
-    const charactersById = new Map(
-      characters.map((character) => [character.characterId, character]),
-    );
     for (const character of characters) {
       if (character.collectionId === targetId) {
         transaction.setItem(characterRecordKey(character.characterId), character);
       }
-    }
-    if (legacyRaw) {
-      transaction.setItem(
-        "characters",
-        legacyRaw.map((value) => {
-          const characterId = normalizeCharacter(value)?.characterId;
-          return characterId === undefined ? value : (charactersById.get(characterId) ?? value);
-        }),
-      );
     }
     transaction.setItem("sessions", sessions);
     transaction.setItem(
