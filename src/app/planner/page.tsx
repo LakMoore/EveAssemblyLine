@@ -126,7 +126,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import PasteListDialog from "@/components/PasteListDialog";
-import PlannerBucketEditor, {
+import {
+  PlannerBucketDetailsDialog,
+  PlannerBucketItemsDialog,
   type ActivityLocationOption,
   type StockLocationOption,
 } from "@/components/PlannerBucketEditor";
@@ -141,6 +143,7 @@ type PlannerTab =
   | "React"
   | "Manufacture"
   | "Skills";
+type BucketEditorMode = "details" | "items";
 const tabs: { value: PlannerTab; icon: LucideIcon }[] = [
   { value: "Plan", icon: ClipboardList },
   { value: "Haul", icon: Truck },
@@ -156,6 +159,7 @@ type PlanLocationOption = {
   id: string;
   locationId: number;
   name: string;
+  locationType: "station" | "structure";
   baseYield: number;
   baseManufacturingMe: number;
   baseReactionMe: number;
@@ -512,7 +516,7 @@ function Planner() {
   const [buckets, setBuckets] = useState<ClientPlanBucket[]>([]);
   const [areBucketsLoaded, setAreBucketsLoaded] = useState(false);
   const [editingBucket, setEditingBucket] = useState<ClientPlanBucket | null>(null);
-  const [isBucketEditorOpen, setIsBucketEditorOpen] = useState(false);
+  const [bucketEditorMode, setBucketEditorMode] = useState<BucketEditorMode | null>(null);
   const [knownStructures, setKnownStructures] = useState<
     Awaited<ReturnType<typeof loadStructures>>
   >([]);
@@ -626,6 +630,7 @@ function Planner() {
           id: String(facility.id),
           locationId: facility.id,
           name: facility.name,
+          locationType: facility.locationType,
           baseYield: (facility.activities.reprocessing.baseYield ?? 0) * 100,
           baseManufacturingMe: facility.activities.manufacturing.materialConsumption ?? 0,
           baseReactionMe: facility.activities.reactions.materialConsumption ?? 0,
@@ -880,6 +885,7 @@ function Planner() {
       return current.map((existing, index) => (index === existingIndex ? bucket : existing));
     });
     setEditingBucket(null);
+    setBucketEditorMode(null);
     return true;
   }
 
@@ -895,12 +901,22 @@ function Planner() {
         `Stock destination ${buckets.length + 1}`,
       ),
     );
-    setIsBucketEditorOpen(true);
+    setBucketEditorMode("details");
   }
 
-  function openBucket(bucket: ClientPlanBucket) {
+  function openBucketDetails(bucket: ClientPlanBucket) {
     setEditingBucket(bucket);
-    setIsBucketEditorOpen(true);
+    setBucketEditorMode("details");
+  }
+
+  function openBucketItems(bucket: ClientPlanBucket) {
+    setEditingBucket(bucket);
+    setBucketEditorMode("items");
+  }
+
+  function closeBucketEditor() {
+    setEditingBucket(null);
+    setBucketEditorMode(null);
   }
 
   function removeBucket(bucketId: string) {
@@ -1033,6 +1049,8 @@ function Planner() {
   const activityLocationOptions: ActivityLocationOption[] = locationOptions.map((location) => ({
     locationId: location.locationId,
     name: location.name,
+    kind: location.locationType,
+    baseYield: location.baseYield,
     baseManufacturingMe: location.baseManufacturingMe,
     baseReactionMe: location.baseReactionMe,
   }));
@@ -1040,11 +1058,24 @@ function Planner() {
     ...locationOptions.map((location) => ({
       locationId: location.locationId,
       name: location.name,
+      kind: location.locationType,
+      baseYield: location.baseYield,
+      baseManufacturingMe: location.baseManufacturingMe,
+      baseReactionMe: location.baseReactionMe,
     })),
     ...knownStructures.flatMap((structure) =>
       structure.esiStructureId === undefined
         ? []
-        : [{ locationId: structure.esiStructureId, name: structure.name }],
+        : [
+            {
+              locationId: structure.esiStructureId,
+              name: structure.name,
+              kind: "structure" as const,
+              baseYield: 0,
+              baseManufacturingMe: 0,
+              baseReactionMe: 0,
+            },
+          ],
     ),
   ].filter(
     (location, index, allLocations) =>
@@ -1126,7 +1157,8 @@ function Planner() {
                   key={bucket.id}
                   bucket={bucket}
                   locationNamesById={plannerLocationNames}
-                  onEdit={() => openBucket(bucket)}
+                  onEditDetails={() => openBucketDetails(bucket)}
+                  onEditItems={() => openBucketItems(bucket)}
                   onRemove={() => removeBucket(bucket.id)}
                 />
               ))
@@ -1162,18 +1194,22 @@ function Planner() {
           </div>
         </div>
       </section>
-      <PlannerBucketEditor
-        key={editingBucket?.id ?? "new-bucket"}
+      <PlannerBucketDetailsDialog
+        key={`details-${editingBucket?.id ?? "new-bucket"}`}
         bucket={editingBucket}
-        open={isBucketEditorOpen}
-        language={language}
+        open={bucketEditorMode === "details"}
         activityLocations={activityLocationOptions}
         stockLocations={stockLocationOptions}
         excludedStockLocationIds={buckets.map((bucket) => bucket.locations.stock)}
-        onOpenChange={(open) => {
-          setIsBucketEditorOpen(open);
-          if (!open) setEditingBucket(null);
-        }}
+        onOpenChange={(open) => !open && closeBucketEditor()}
+        onSave={saveBucket}
+      />
+      <PlannerBucketItemsDialog
+        key={`items-${editingBucket?.id ?? "new-bucket"}`}
+        bucket={editingBucket}
+        open={bucketEditorMode === "items"}
+        language={language}
+        onOpenChange={(open) => !open && closeBucketEditor()}
         onSave={saveBucket}
       />
       <form className="hidden" onSubmit={calculatePlan}>
@@ -1801,12 +1837,14 @@ export default Planner;
 function PlannerBucketSummary({
   bucket,
   locationNamesById,
-  onEdit,
+  onEditDetails,
+  onEditItems,
   onRemove,
 }: {
   bucket: ClientPlanBucket;
   locationNamesById: Map<number, string>;
-  onEdit: () => void;
+  onEditDetails: () => void;
+  onEditItems: () => void;
   onRemove: () => void;
 }) {
   const locationName = (locationId: number) =>
@@ -1823,9 +1861,13 @@ function PlannerBucketSummary({
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
-          <Button type="button" variant="outline" onClick={onEdit}>
+          <Button type="button" variant="outline" onClick={onEditDetails}>
             <Pencil data-icon="inline-start" aria-hidden="true" />
-            View / edit
+            Edit details
+          </Button>
+          <Button type="button" variant="outline" onClick={onEditItems}>
+            <ClipboardList data-icon="inline-start" aria-hidden="true" />
+            Edit items
           </Button>
           <Button
             type="button"
