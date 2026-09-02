@@ -161,6 +161,18 @@ function locationKey(location: CompressOption) {
     : location.id;
 }
 
+function mergeCompressItems(items: CompressItem[]) {
+  const merged = new Map<number, CompressItem>();
+  for (const item of items) {
+    const existing = merged.get(item.typeId);
+    merged.set(
+      item.typeId,
+      existing ? { ...existing, quantity: existing.quantity + item.quantity } : item,
+    );
+  }
+  return [...merged.values()];
+}
+
 export default function CompressPage() {
   return (
     <Suspense fallback={null}>
@@ -237,6 +249,9 @@ function CompressContent() {
           if (!optionsResponse.ok) throw new Error("Could not load compression options.");
           await saveEndpointResponse("compress/options", "/api/compress/options", loadedOptions);
         }
+        const normalizedItems = mergeCompressItems(
+          Array.isArray(loadedSettings.items) ? loadedSettings.items : [],
+        );
         const rawLocations: CompressOption[] = [
           ...loadedFacilities.map((facility) => ({
             id: String(facility.id),
@@ -264,7 +279,7 @@ function CompressContent() {
           );
         const normalizedSettings = {
           ...loadedSettings,
-          items: Array.isArray(loadedSettings.items) ? loadedSettings.items : [],
+          items: normalizedItems,
           locationId: loadedLocations.some((location) => location.id === loadedSettings.locationId)
             ? loadedSettings.locationId
             : (loadedLocations[0]?.id ?? loadedSettings.locationId),
@@ -312,7 +327,9 @@ function CompressContent() {
 
   function updateItems(nextItems: CompressItem[] | ((current: CompressItem[]) => CompressItem[])) {
     setItems((current) => {
-      const updated = typeof nextItems === "function" ? nextItems(current) : nextItems;
+      const updated = mergeCompressItems(
+        typeof nextItems === "function" ? nextItems(current) : nextItems,
+      );
       setSettings((currentSettings) => {
         const updatedSettings = { ...currentSettings, items: updated };
         void saveCompressSettings(updatedSettings);

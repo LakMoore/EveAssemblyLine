@@ -9,8 +9,6 @@ import {
 } from "@/cache/services/sdeCache";
 import type {
   BuildItem,
-  ClientBuildItem,
-  PlanBlueprintInput,
   PlanBuildItem,
   PlanIndustryInput,
   PlanItemInput,
@@ -205,7 +203,10 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    if (parsedBuckets?.success) input.buckets = parsedBuckets.data;
+    if (parsedBuckets?.success) {
+      const populatedBuckets = parsedBuckets.data.filter((bucket) => bucket.items.length > 0);
+      input.buckets = populatedBuckets.length > 0 ? populatedBuckets : undefined;
+    }
     const requestedItems = input.buckets?.flatMap((bucket) => bucket.items) ?? input.toBuild ?? [];
     if (requestedItems.length === 0) {
       return NextResponse.json({ error: "Add at least one build item." }, { status: 400 });

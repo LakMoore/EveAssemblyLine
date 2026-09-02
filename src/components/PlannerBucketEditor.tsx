@@ -163,21 +163,26 @@ function addItems(
 ): ClientBuildItem[] {
   const next = current.map((item) => ({ ...item }));
   for (const imported of importedItems) {
-    const existing = next.find((item) => item.typeId === imported.typeId && !item.fromCompression);
-    if (existing) {
-      existing.quantity += imported.quantity ?? 1;
-    }
-    else {
-      next.push({
-        name: imported.name,
-        categoryName: imported.category ?? "Unknown",
-        typeId: imported.typeId,
-        quantity: imported.quantity ?? 1,
-        me: 0,
-        te: 0,
-        fromCompression: false,
-      });
-    }
+    const existingIndex = next.findIndex(
+      (item) => item.typeId === imported.typeId && !item.fromCompression,
+    );
+    const item =
+      existingIndex >= 0
+        ? {
+            ...next[existingIndex],
+            quantity: next[existingIndex].quantity + (imported.quantity ?? 1),
+          }
+        : {
+            name: imported.name,
+            categoryName: imported.category ?? "Unknown",
+            typeId: imported.typeId,
+            quantity: imported.quantity ?? 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          };
+    next.splice(existingIndex >= 0 ? existingIndex : next.length, 1);
+    next.unshift(item);
   }
   return next;
 }
@@ -242,12 +247,12 @@ function BucketEditorContent({
     <div className="flex min-w-0 flex-col gap-5">
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <label className="flex min-w-0 flex-col gap-2">
-          <span className="text-xs font-medium uppercase">Bucket name</span>
+          <span className="text-xs font-medium uppercase">Stockpile name</span>
           <Input
             value={draft.name}
             onChange={(event) => onChange({ ...draft, name: event.target.value })}
             placeholder="e.g. Jita staging"
-            aria-label="Bucket name"
+            aria-label="Stockpile name"
           />
         </label>
         <div className="flex min-w-0 flex-col gap-2">
@@ -274,7 +279,7 @@ function BucketEditorContent({
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {activityLocationFields.map(({ key, label }) => {
           const selected = activityLocations.find(
             (location) => location.locationId === draft.locations[key],
@@ -328,12 +333,12 @@ function BucketEditorContent({
         <TypeSearch
           language={language}
           placeholder="Search items by name or type ID"
-          ariaLabel="Search bucket items by name or type ID"
+          ariaLabel="Search stockpile items by name or type ID"
           onSelect={submitTypeSearch}
         />
         {draft.items.length === 0 ? (
           <Empty>
-            <EmptyDescription>Search for an item above to start this bucket.</EmptyDescription>
+            <EmptyDescription>Search for an item above to start this stockpile.</EmptyDescription>
           </Empty>
         ) : (
           <div className="flex min-w-0 flex-col gap-2">
@@ -429,10 +434,6 @@ export default function PlannerBucketEditor({
       setError("Give this stock destination a name.");
       return;
     }
-    if (currentDraft.items.length === 0) {
-      setError("Add at least one item to this bucket.");
-      return;
-    }
     setError("");
     if (onSave(currentDraft) !== false) onOpenChange(false);
   }
@@ -458,9 +459,9 @@ export default function PlannerBucketEditor({
           style={{ marginInline: "0.5rem", width: "calc(100% - 1rem)" }}
         >
           <DrawerHeader>
-            <DrawerTitle>{bucket ? "Edit stock bucket" : "Add stock bucket"}</DrawerTitle>
+            <DrawerTitle>{bucket ? "Edit stockpile" : "Add stockpile"}</DrawerTitle>
             <DrawerDescription>
-              Set the destination and activity locations for this bucket.
+              Set the destination and activity locations for this stockpile.
             </DrawerDescription>
           </DrawerHeader>
           <ScrollArea className="h-0 min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -473,7 +474,7 @@ export default function PlannerBucketEditor({
             </Button>
             <Button type="button" onClick={saveDraft}>
               <Save data-icon="inline-start" aria-hidden="true" />
-              Save bucket
+              Save stockpile
             </Button>
           </DrawerFooter>
         </DrawerContent>
@@ -484,13 +485,13 @@ export default function PlannerBucketEditor({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="h-[min(90vh,36rem)] max-h-[90vh] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-3xl"
+        className="h-[min(90vh,48rem)] max-h-[90vh] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-5xl"
         style={{ width: "calc(100% - 2rem)" }}
       >
         <DialogHeader>
-          <DialogTitle>{bucket ? "Edit stock bucket" : "Add stock bucket"}</DialogTitle>
+          <DialogTitle>{bucket ? "Edit stockpile" : "Add stockpile"}</DialogTitle>
           <DialogDescription>
-            Set the destination and activity locations for this bucket.
+            Set the destination and activity locations for this stockpile.
           </DialogDescription>
         </DialogHeader>
         <ScrollArea className="min-h-0 min-w-0 overflow-hidden">{content}</ScrollArea>
@@ -501,7 +502,7 @@ export default function PlannerBucketEditor({
           </Button>
           <Button type="button" onClick={saveDraft}>
             <Save data-icon="inline-start" aria-hidden="true" />
-            Save bucket
+            Save stockpile
           </Button>
         </DialogFooter>
       </DialogContent>

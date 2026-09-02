@@ -227,6 +227,7 @@ export interface PlanResult {
     generatedAt: string;
     unresolvedAssetCount?: number;
     corporationAssetSources?: number[];
+    availableStockByTypeId?: Record<string, number>;
   };
   lists: {
     planItems: Array<

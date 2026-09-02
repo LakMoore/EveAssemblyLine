@@ -1,6 +1,9 @@
 import type { PlanResult, PlanSourceCounts, PlanSourceIcon } from "@/lib/planning/types";
 
 export type PlanItemEntry = PlanResult["lists"]["planItems"][number];
+export type PlanBuyEntry =
+  | PlanResult["lists"]["materialsToBuy"][number]
+  | PlanResult["lists"]["bpcsToBuy"][number];
 
 /**
  * Return haul quantity not already represented by in-production stock.
@@ -21,11 +24,13 @@ export function getNonProductionHaulingQuantity(
  *
  * @param entries Plan rows from one or more planner buckets.
  * @param buildLocationId Build location to retain on the merged rows.
+ * @param totalAvailableStockByTypeId Full eligible stock for the global view.
  * @returns One aggregated row per type ID and row kind.
  */
 export function mergePlanItemEntries(
   entries: PlanItemEntry[],
   buildLocationId?: number,
+  totalAvailableStockByTypeId?: Record<string, number>,
 ): PlanItemEntry[] {
   const merged = new Map<number, PlanItemEntry>();
   for (const entry of entries) {
@@ -91,6 +96,88 @@ export function mergePlanItemEntries(
           ...existing,
           runsNeeded: existing.runsNeeded + entry.runsNeeded,
           availableQuantity: existing.availableQuantity + entry.availableQuantity,
+          availableSourceCounts: mergeSourceCounts(
+            existing.availableSourceCounts,
+            entry.availableSourceCounts,
+          ),
+        },
+      );
+    }
+  }
+  const rows = [...merged.values()].map((entry) => {
+    if (
+      buildLocationId !== undefined
+      || totalAvailableStockByTypeId === undefined
+      || entry.kind !== "material"
+    ) {
+      return entry;
+    }
+    const availableStockQuantity = totalAvailableStockByTypeId[String(entry.typeId)] ?? 0;
+    return {
+      ...entry,
+      availableStockQuantity,
+      remainingStockQuantity: Math.max(0, availableStockQuantity - entry.stockQuantity),
+    };
+  });
+  return rows.sort(
+    (left, right) => left.name.localeCompare(right.name) || left.typeId - right.typeId,
+  );
+}
+
+/**
+ * Merge Buy rows that represent the same type across planner buckets.
+ *
+ * @param entries Material and BPC purchase rows from the planner.
+ * @returns One aggregated purchase row per type ID.
+ */
+export function mergeBuyEntries(entries: PlanBuyEntry[]): PlanBuyEntry[] {
+  const merged = new Map<number, PlanBuyEntry>();
+  for (const entry of entries) {
+    const existing = merged.get(entry.typeId);
+    if (!existing) {
+      merged.set(entry.typeId, { ...entry });
+      continue;
+    }
+
+    if ("bpoCount" in entry && "bpoCount" in existing) {
+      merged.set(
+        entry.typeId,
+        {
+          ...existing,
+          quantity: existing.quantity + entry.quantity,
+          neededQuantity: existing.neededQuantity + entry.neededQuantity,
+          stockQuantity: existing.stockQuantity + entry.stockQuantity,
+          stockRuns: existing.stockRuns + entry.stockRuns,
+          buyQuantity: Math.max(
+            0,
+            existing.neededQuantity + entry.neededQuantity - existing.stockRuns - entry.stockRuns,
+          ),
+          bpoCount: existing.bpoCount + entry.bpoCount,
+          availableSourceCounts: mergeSourceCounts(
+            existing.availableSourceCounts,
+            entry.availableSourceCounts,
+          ),
+        },
+      );
+      continue;
+    }
+
+    if (!("bpoCount" in entry) && !("bpoCount" in existing)) {
+      merged.set(
+        entry.typeId,
+        {
+          ...existing,
+          quantity: existing.quantity + entry.quantity,
+          requiredQuantity: existing.requiredQuantity + entry.requiredQuantity,
+          stockQuantity: existing.stockQuantity + entry.stockQuantity,
+          availableStockQuantity: existing.availableStockQuantity + entry.availableStockQuantity,
+          productionQuantity: existing.productionQuantity + entry.productionQuantity,
+          buildQuantity: existing.buildQuantity + entry.buildQuantity,
+          buyQuantity: existing.buyQuantity + entry.buyQuantity,
+          remainingStockQuantity: existing.remainingStockQuantity + entry.remainingStockQuantity,
+          remainingProductionQuantity:
+            existing.remainingProductionQuantity + entry.remainingProductionQuantity,
+          fromMarketOrder: existing.fromMarketOrder || entry.fromMarketOrder,
           availableSourceCounts: mergeSourceCounts(
             existing.availableSourceCounts,
             entry.availableSourceCounts,

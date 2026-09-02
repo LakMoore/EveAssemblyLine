@@ -248,6 +248,174 @@ test("counts active output toward availability in bucketed plans", async () => {
   assert.equal(tritanium.availableSourceCounts?.industry, 20);
 });
 
+test("ignores empty buckets when calculating a plan", async () => {
+  const stock = [industryOutputStock("active", manufacturingLocationId, "Manufacturing", 20)];
+  const populatedBucket = {
+    id: "populated-bucket",
+    name: "Populated bucket",
+    locations: {
+      stock: sourceLocationId,
+      manufacturing: manufacturingLocationId,
+      reactions: manufacturingLocationId,
+      reprocessing: reprocessingLocationId,
+      copying: manufacturingLocationId,
+      invention: manufacturingLocationId,
+    },
+    items: [
+      {
+        typeId: tritaniumTypeId,
+        name: "Tritanium",
+        quantity: 150,
+        me: 0,
+        te: 0,
+        fromCompression: false,
+      },
+    ],
+  };
+  const emptyBucket = {
+    id: "empty-bucket",
+    name: "Empty bucket",
+    locations: {
+      stock: 41,
+      manufacturing: 21,
+      reactions: 22,
+      reprocessing: 23,
+      copying: 24,
+      invention: 25,
+    },
+    items: [],
+  };
+  const withoutEmptyBucket = await calculatePlan(
+    request(0, stock, { items: [], buckets: [populatedBucket] }),
+  );
+  const withEmptyBucket = await calculatePlan(
+    request(0, stock, { items: [], buckets: [emptyBucket, populatedBucket] }),
+  );
+
+  assert.deepEqual(
+    { ...withEmptyBucket, metadata: { ...withEmptyBucket.metadata, generatedAt: "" } },
+    { ...withoutEmptyBucket, metadata: { ...withoutEmptyBucket.metadata, generatedAt: "" } },
+  );
+});
+
+test("falls back to top-level items when all buckets are empty", async () => {
+  const buildItem = {
+    typeId: tritaniumTypeId,
+    name: "Tritanium",
+    quantity: 10,
+    me: 0,
+    te: 0,
+    fromCompression: false,
+  };
+  const emptyBucket = {
+    id: "empty-bucket",
+    name: "Empty bucket",
+    locations: {
+      stock: sourceLocationId,
+      manufacturing: manufacturingLocationId,
+      reactions: manufacturingLocationId,
+      reprocessing: reprocessingLocationId,
+      copying: manufacturingLocationId,
+      invention: manufacturingLocationId,
+    },
+    items: [],
+  };
+  const withoutEmptyBucket = await calculatePlan(
+    request(0, [], { items: [buildItem], buckets: undefined }),
+  );
+  const withEmptyBucket = await calculatePlan(
+    request(0, [], { items: [buildItem], buckets: [emptyBucket] }),
+  );
+
+  assert.deepEqual(
+    { ...withEmptyBucket, metadata: { ...withEmptyBucket.metadata, generatedAt: "" } },
+    { ...withoutEmptyBucket, metadata: { ...withoutEmptyBucket.metadata, generatedAt: "" } },
+  );
+});
+
+test("reallocates shared stock after intermediate inventory reduces bucket demand", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: 16634,
+          name: "Atmospheric Gases",
+          quantity: 200000,
+          category: "item",
+          rootLocationId: reprocessingLocationId,
+        },
+        {
+          typeId: 57454,
+          name: "Oxy-Organic Solvents",
+          quantity: 100,
+          category: "item",
+          rootLocationId: reprocessingLocationId,
+        },
+      ],
+      {
+        items: [],
+        buckets: [
+          {
+            id: "intermediate-stock",
+            name: "Intermediate stock",
+            locations: {
+              stock: reprocessingLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: reprocessingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: 57454,
+                name: "Oxy-Organic Solvents",
+                quantity: 100,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "gas-demand",
+            name: "Gas demand",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: reprocessingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: 57454,
+                name: "Oxy-Organic Solvents",
+                quantity: 100,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const gasRows = result.lists.materialsToBuy.filter((item) => item.typeId === 16634);
+  const gasDemand = gasRows.find((item) => item.bucketId === "gas-demand");
+
+  assert(gasDemand);
+  assert.equal(gasDemand.buyQuantity, 0);
+  assert.equal(result.metadata.availableStockByTypeId?.["16634"], 200000);
+  assert.equal(
+    gasRows.reduce((total, item) => total + item.buyQuantity, 0),
+    0,
+  );
+});
+
 test("uses reaction formulas held at a bucket's reaction location", async () => {
   const result = await calculatePlan(
     request(

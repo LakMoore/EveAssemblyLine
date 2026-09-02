@@ -3,8 +3,8 @@
 import Image from "next/image";
 import { useState } from "react";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
-import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
+import CopyableText from "@/components/CopyableText";
 import styles from "./TypeIdentity.module.css";
 
 type TypeIdentityProps = {
@@ -32,16 +32,6 @@ export default function TypeIdentity({
   const blueprintVariation = blueprintType === "bpo" ? "bp" : "bpc";
   const activeVariation = useIconFallback ? "icon" : blueprintType ? blueprintVariation : variation;
 
-  async function copyValue(value: string, label: string) {
-    try {
-      await navigator.clipboard.writeText(value);
-      toast.add({ description: `${label} copied` });
-    }
-    catch {
-      toast.add({ description: `Could not copy ${label.toLowerCase()}`, type: "error" });
-    }
-  }
-
   return (
     <div className={cn(styles.identity, "items-center", className)}>
       <Image
@@ -54,24 +44,22 @@ export default function TypeIdentity({
         onError={() => variation === "render" && setUseIconFallback(true)}
       />
       <span className={styles.details}>
-        <button
-          type="button"
+        <CopyableText
           className={styles.name}
           title="Copy item name"
           tabIndex={-1}
-          onClick={() => void copyValue(name, "Item name")}
-        >
-          {name}
-        </button>
-        <button
-          type="button"
+          textToRender={name}
+          textToCopy={name}
+          copyLabel="Item name"
+        />
+        <CopyableText
           className={styles.typeId}
           title="Copy type ID"
           tabIndex={-1}
-          onClick={() => void copyValue(String(typeId), "Type ID")}
-        >
-          {typeName ? `${typeName} · ` : ""}Type ID {typeId}
-        </button>
+          textToRender={`${typeName ? `${typeName} · ` : ""}Type ID ${typeId}`}
+          textToCopy={String(typeId)}
+          copyLabel="Type ID"
+        />
         {subline && <small className={styles.subline}>{subline}</small>}
       </span>
     </div>

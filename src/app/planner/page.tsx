@@ -45,7 +45,9 @@ import { loadPlannerReprocessingEfficiencies } from "@/lib/planning/reprocessing
 import {
   getNonProductionHaulingQuantity,
   groupPlanItemEntriesByBuildLocation,
+  mergeBuyEntries,
   mergePlanItemEntries,
+  type PlanBuyEntry,
   type PlanItemEntry,
 } from "@/lib/planning/planView";
 import {
@@ -60,6 +62,7 @@ import type { SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import { useAppLanguage } from "../AppShell";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
+import CopyableText from "@/components/CopyableText";
 import JobInputsResponsive from "@/components/JobInputsResponsive";
 import CalculateButton from "@/components/CalculateButton";
 import TypeSearch from "@/components/TypeSearch";
@@ -694,7 +697,8 @@ function Planner() {
       }
       const compressSettings = await loadCompressSettings();
       const compressLocationId = Number(compressSettings.locationId);
-      const primaryBucketLocations = buckets[0]?.locations;
+      const populatedBuckets = buckets.filter((bucket) => bucket.items.length > 0);
+      const primaryBucketLocations = populatedBuckets[0]?.locations;
       const planningLocations = Number.isInteger(compressLocationId)
         ? { ...locations, ...primaryBucketLocations, reprocessing: compressLocationId }
         : { ...locations, ...primaryBucketLocations };
@@ -731,16 +735,19 @@ function Planner() {
               te,
               fromCompression,
             })),
-            buckets: buckets.map((bucket) => ({
-              ...bucket,
-              items: bucket.items.map(({ typeId, quantity, me, te, fromCompression }) => ({
-                typeId,
-                quantity,
-                me,
-                te,
-                fromCompression,
-              })),
-            })),
+            buckets:
+              populatedBuckets.length > 0
+                ? populatedBuckets.map((bucket) => ({
+                    ...bucket,
+                    items: bucket.items.map(({ typeId, quantity, me, te, fromCompression }) => ({
+                      typeId,
+                      quantity,
+                      me,
+                      te,
+                      fromCompression,
+                    })),
+                  }))
+                : undefined,
             reprocessingEfficiencies,
             assets: requestStock.map(
               ({ sourceLocationName: _sourceLocationName, ...item }) => item,
@@ -862,7 +869,7 @@ function Planner() {
     );
     if (duplicate) {
       toast.add({
-        description: "A bucket already uses this stock destination and build location.",
+        description: "A stockpile already uses this stock destination and build location.",
         type: "error",
       });
       return false;
@@ -898,7 +905,7 @@ function Planner() {
 
   function removeBucket(bucketId: string) {
     if (buckets.length <= 1) {
-      toast.add({ description: "Keep at least one stock bucket.", type: "error" });
+      toast.add({ description: "Keep at least one stockpile.", type: "error" });
       return;
     }
     setBuckets((current) => current.filter((bucket) => bucket.id !== bucketId));
@@ -930,7 +937,9 @@ function Planner() {
     if (!file) return;
     try {
       const parsed: unknown = JSON.parse(await file.text());
-      if (!isImportedPlan(parsed)) throw new Error("The file does not contain valid plan buckets.");
+      if (!isImportedPlan(parsed)) {
+        throw new Error("The file does not contain valid plan stockpiles.");
+      }
       const localizedBuckets = await Promise.all(
         parsed.buckets.map(async (bucket) => ({
           ...bucket,
@@ -1069,7 +1078,7 @@ function Planner() {
           <div className={styles.panelHeader}>
             <div className="min-w-0">
               <p className={styles.panelKicker}>01 / DESTINATIONS</p>
-              <h2>Stock buckets</h2>
+              <h2>Stockpiles</h2>
               <p className={styles.panelDescription}>
                 Define what you want to stock and where each independent build plan finishes.
               </p>
@@ -1999,9 +2008,15 @@ function PlanList({
                   ? plan.lists.manufacturingJobs
                   : plan.lists.haulingTasks;
   const list =
-    activeTab === "Plan" && planViewMode === "all"
-      ? mergePlanItemEntries(rawList as PlanItemEntry[])
-      : rawList;
+    activeTab === "Buy"
+      ? mergeBuyEntries(rawList as PlanBuyEntry[])
+      : activeTab === "Plan" && planViewMode === "all"
+        ? mergePlanItemEntries(
+            rawList as PlanItemEntry[],
+            undefined,
+            plan.metadata.availableStockByTypeId,
+          )
+        : rawList;
   const locationGroupedTab =
     activeTab === "Reprocess"
     || activeTab === "React"
@@ -2708,7 +2723,11 @@ function PlanList({
                       className={styles.planTypeIdentity}
                     />
                     <span className={styles.haulRowAmount}>
-                      {task.quantity.toLocaleString()} units
+                      <CopyableText
+                        textToRender={`${task.quantity.toLocaleString()} units`}
+                        textToCopy={String(task.quantity)}
+                        copyLabel="Quantity"
+                      />
                       <small>{Math.ceil(task.volume).toLocaleString()} m3</small>
                     </span>
                   </div>
@@ -2814,6 +2833,36 @@ function PlanList({
                                     ? `${suggestedInstallCount.toLocaleString()} x ${targetRuns.toLocaleString()} runs @ ${formatDuration(installTime)} | ${entry.runs.toLocaleString()} runs`
                                     : `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
                                   : "";
+                const amountToCopy =
+                  "volume" in entry
+                    ? String(entry.quantity)
+                    : isBpcPurchase
+                      ? String(entry.buyQuantity)
+                      : isPlanBpc
+                        ? String(entry.neededQuantity)
+                        : isPlanReaction
+                          ? String(entry.runsNeeded)
+                          : materialEntry
+                            ? String(materialEntry.buildQuantity || materialEntry.buyQuantity)
+                            : activeTab === "Copy" && "neededQuantity" in entry
+                              ? String(Math.max(0, entry.neededQuantity - entry.stockRuns))
+                              : "quantity" in entry
+                                ? String(entry.quantity)
+                                : "runs" in entry
+                                  ? String(entry.runs)
+                                  : null;
+                const amountCopyLabel =
+                  activeTab === "Invent"
+                    ? "Attempts"
+                    : "volume" in entry || materialEntry
+                      ? "Quantity"
+                      : isBpcPurchase
+                          || isPlanBpc
+                          || isPlanReaction
+                          || activeTab === "Copy"
+                          || "runs" in entry
+                        ? "Runs"
+                        : "Quantity";
                 const imageVariation =
                   planBlueprintVariation
                   ?? ("imageVariation" in entry && entry.imageVariation
@@ -2908,7 +2957,13 @@ function PlanList({
                         )
                       ) : activeTab === "Manufacture" ? (
                         <span className={styles.manufacturingRunCell}>
-                          <strong>{manufacturingDisplayedRuns.toLocaleString()} runs</strong>
+                          <strong>
+                            <CopyableText
+                              textToRender={`${manufacturingDisplayedRuns.toLocaleString()} runs`}
+                              textToCopy={String(manufacturingDisplayedRuns)}
+                              copyLabel="Runs"
+                            />
+                          </strong>
                           <small>{formatDuration(manufacturingDisplayedTime)}</small>
                         </span>
                       ) : (
@@ -2949,13 +3004,37 @@ function PlanList({
                                 <strong>{suggestedInstallCount.toLocaleString()}</strong>
                               </span>
                               <span className={styles.reactionValue} data-label="Suggested runs">
-                                <strong>{targetRuns?.toLocaleString() ?? "-"}</strong>
+                                <strong>
+                                  {targetRuns === null ? (
+                                    "-"
+                                  ) : targetRuns > 0 ? (
+                                    <CopyableText
+                                      textToRender={targetRuns.toLocaleString()}
+                                      textToCopy={String(targetRuns)}
+                                      copyLabel="Suggested runs"
+                                    />
+                                  ) : (
+                                    targetRuns.toLocaleString()
+                                  )}
+                                </strong>
                                 <small>
                                   {installTime !== null ? formatDuration(installTime) : "-"}
                                 </small>
                               </span>
                               <span className={styles.reactionValue} data-label="Total needed">
-                                <strong>{totalNeeded?.toLocaleString() ?? "-"}</strong>
+                                <strong>
+                                  {totalNeeded === null ? (
+                                    "-"
+                                  ) : totalNeeded > 0 ? (
+                                    <CopyableText
+                                      textToRender={totalNeeded.toLocaleString()}
+                                      textToCopy={String(totalNeeded)}
+                                      copyLabel="Total needed"
+                                    />
+                                  ) : (
+                                    totalNeeded.toLocaleString()
+                                  )}
+                                </strong>
                                 <small>
                                   {totalNeeded !== null && totalTime !== null && "runs" in entry
                                     ? formatDuration(
@@ -2968,7 +3047,13 @@ function PlanList({
                               </span>
                             </span>
                           ) : (
-                            <strong>{amount}</strong>
+                            <strong>
+                              <CopyableText
+                                textToRender={amount}
+                                textToCopy={amountToCopy ?? amount}
+                                copyLabel={amountCopyLabel}
+                              />
+                            </strong>
                           )}
                           {detail && activeTab !== "React" && <small>{detail}</small>}
                         </span>
