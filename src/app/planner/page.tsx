@@ -168,6 +168,10 @@ type ReactionSort = { key: ReactionSortKey; direction: "asc" | "desc" };
 type ManufacturingSort = { key: "type" | "runs"; direction: "asc" | "desc" };
 type PlanViewMode = "all" | "build-location";
 
+function reactionJobKey(job: { typeId: number; locationId?: number }) {
+  return `${job.locationId ?? "unlocated"}:${job.typeId}`;
+}
+
 const industrySkillIds = {
   industry: 3380,
   advancedIndustry: 3388,
@@ -193,38 +197,45 @@ function buildReactionSchedule(
   mode: ReactionScheduleMode,
   availableReactionSlots: number,
   maxJobHours: number,
-): Map<number, ReactionSchedule> {
+): Map<string, ReactionSchedule> {
   const rows = jobs.map((job) => {
     const blueprintCount = stock
       .filter(
-        (item) => item.category === "reactionformula" && item.typeId === job.typeId && !item.inUse,
+        (item) =>
+          item.category === "reactionformula"
+          && item.typeId === job.typeId
+          && !item.inUse
+          && getStockLocationId(item) === job.locationId,
       )
       .reduce((total, item) => total + item.quantity, 0);
     const runs = showTotalRunCounts ? job.runs : job.runsAvailable;
     return { job, blueprintCount, runs, maxInstalls: Math.min(blueprintCount, Math.max(0, runs)) };
   });
-  const installs = new Map<number, number>();
+  const installs = new Map<string, number>();
   if (mode === "available-slots") {
     let remainingSlots = Math.max(0, availableReactionSlots);
     for (const row of rows.slice().sort((left, right) => right.runs - left.runs)) {
       if (remainingSlots <= 0) break;
       const count = Math.min(1, row.maxInstalls);
-      installs.set(row.job.typeId, count);
+      installs.set(reactionJobKey(row.job), count);
       remainingSlots -= count;
     }
     while (remainingSlots > 0) {
       const candidates = rows
-        .filter((row) => (installs.get(row.job.typeId) ?? 0) < row.maxInstalls)
+        .filter((row) => (installs.get(reactionJobKey(row.job)) ?? 0) < row.maxInstalls)
         .sort((left, right) => {
-          const leftRuns = Math.ceil(left.runs / Math.max(1, installs.get(left.job.typeId) ?? 0));
+          const leftRuns = Math.ceil(
+            left.runs / Math.max(1, installs.get(reactionJobKey(left.job)) ?? 0),
+          );
           const rightRuns = Math.ceil(
-            right.runs / Math.max(1, installs.get(right.job.typeId) ?? 0),
+            right.runs / Math.max(1, installs.get(reactionJobKey(right.job)) ?? 0),
           );
           return rightRuns - leftRuns || right.runs - left.runs;
         });
       if (candidates.length === 0) break;
       const candidate = candidates[0];
-      installs.set(candidate.job.typeId, (installs.get(candidate.job.typeId) ?? 0) + 1);
+      const key = reactionJobKey(candidate.job);
+      installs.set(key, (installs.get(key) ?? 0) + 1);
       remainingSlots -= 1;
     }
   }
@@ -236,7 +247,7 @@ function buildReactionSchedule(
       const simpleInstalls = runs > 0 ? Math.min(blueprintCount, Math.ceil(runs / 10)) : 0;
       const installCount =
         mode === "available-slots"
-          ? (installs.get(job.typeId) ?? 0)
+          ? (installs.get(reactionJobKey(job)) ?? 0)
           : mode === "max-job-length"
             ? timeLimitedRuns > 0
               ? Math.min(blueprintCount, Math.ceil(runs / timeLimitedRuns))
@@ -249,7 +260,7 @@ function buildReactionSchedule(
             : Math.ceil(runs / installCount)
           : 0;
       return [
-        job.typeId,
+        reactionJobKey(job),
         {
           installs: Math.min(installCount, maxInstalls),
           runs: runsPerInstall,
@@ -2041,7 +2052,7 @@ function PlanList({
   );
   const reactionSummary = plan.lists.reactionJobs.reduce(
     (summary, job) => {
-      const schedule = reactionSchedule.get(job.typeId);
+      const schedule = reactionSchedule.get(reactionJobKey(job));
       return {
         installs: summary.installs + (schedule?.installs ?? 0),
         maxTime: Math.max(summary.maxTime, schedule?.time ?? 0),
@@ -2052,7 +2063,7 @@ function PlanList({
   const reactionCoverage = plan.lists.reactionJobs
     .map((job) => ({
       job,
-      schedule: reactionSchedule.get(job.typeId),
+      schedule: reactionSchedule.get(reactionJobKey(job)),
     }))
     .sort((left, right) => (right.schedule?.runs ?? 0) - (left.schedule?.runs ?? 0))
     .reduce<{ coverage: ReactionCoverage; remainingSlots: number }>(
@@ -2112,8 +2123,12 @@ function PlanList({
                   || leftTypeId - rightTypeId
                 );
               }
-              const leftSchedule = reactionSchedule.get(leftTypeId);
-              const rightSchedule = reactionSchedule.get(rightTypeId);
+              const leftSchedule = reactionSchedule.get(
+                reactionJobKey(left as PlanResult["lists"]["reactionJobs"][number]),
+              );
+              const rightSchedule = reactionSchedule.get(
+                reactionJobKey(right as PlanResult["lists"]["reactionJobs"][number]),
+              );
               const leftValue =
                 reactionSort.key === "type"
                   ? left.name
@@ -2740,17 +2755,23 @@ function PlanList({
                     ? entry.totalTime
                     : null;
                 const reactionFormulaCount =
-                  activeTab === "React"
+                  activeTab === "React" && "inputs" in entry && "locationId" in entry
                     ? stock
                         .filter(
                           (stockItem) =>
                             stockItem.category === "reactionformula"
                             && stockItem.typeId === typeId
-                            && !stockItem.inUse,
+                            && !stockItem.inUse
+                            && getStockLocationId(stockItem) === entry.locationId,
                         )
                         .reduce((total, stockItem) => total + stockItem.quantity, 0)
                     : 0;
-                const reactionPlan = activeTab === "React" ? reactionSchedule.get(typeId) : null;
+                const reactionPlan =
+                  activeTab === "React"
+                    ? reactionSchedule.get(
+                        reactionJobKey(entry as PlanResult["lists"]["reactionJobs"][number]),
+                      )
+                    : null;
                 const targetRuns = reactionPlan?.runs ?? null;
                 const suggestedInstallCount = reactionPlan?.installs ?? 0;
                 const installTime = reactionPlan?.time ?? totalTime;
@@ -2854,7 +2875,12 @@ function PlanList({
                         {(activeTab === "React" || activeTab === "Manufacture")
                           && "inputs" in entry && (
                             <span className={styles.jobInputsTrigger}>
-                              <JobInputsResponsive inputs={entry.inputs} />
+                              <JobInputsResponsive
+                                inputs={entry.inputs}
+                                reactionFormulaCount={
+                                  activeTab === "React" ? reactionFormulaCount : undefined
+                                }
+                              />
                             </span>
                           )}
                       </div>

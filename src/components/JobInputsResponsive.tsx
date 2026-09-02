@@ -18,6 +18,10 @@ function statusClassName(status: PlanJobInputStatus) {
       : "border-destructive/40 text-destructive";
 }
 
+function statusForCompletionPercent(completionPercent: number): PlanJobInputStatus {
+  return completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked";
+}
+
 function InputRow({ input }: { input: PlanJobInput }) {
   return (
     <div className="grid grid-cols-[37px_minmax(0,1fr)_auto] items-center gap-x-2 border-t border-border/60 py-2 first:border-t-0">
@@ -47,7 +51,29 @@ function InputRow({ input }: { input: PlanJobInput }) {
 }
 
 /** Renders the authoritative inputs and readiness state for an industry job. */
-export default function JobInputsResponsive({ inputs }: { inputs: PlanJobInputs }) {
+export default function JobInputsResponsive({
+  inputs,
+  reactionFormulaCount,
+}: {
+  inputs: PlanJobInputs;
+  reactionFormulaCount?: number;
+}) {
+  const isReactionFormula = reactionFormulaCount !== undefined;
+  const blueprint = isReactionFormula
+    ? {
+        ...inputs.blueprint,
+        availableQuantity: reactionFormulaCount,
+        completionPercent: reactionFormulaCount > 0 ? 100 : 0,
+        status: reactionFormulaCount > 0 ? ("ready" as const) : ("blocked" as const),
+      }
+    : inputs.blueprint;
+  const completionPercent = isReactionFormula
+    ? Math.min(
+        blueprint.completionPercent,
+        ...inputs.materials.map((input) => input.completionPercent),
+      )
+    : inputs.completionPercent;
+  const status = statusForCompletionPercent(completionPercent);
   return (
     <ResponsiveDialogDrawer
       trigger={
@@ -55,10 +81,10 @@ export default function JobInputsResponsive({ inputs }: { inputs: PlanJobInputs 
           type="button"
           className={cn(
             "inline-flex h-6 items-center gap-1 border px-2 text-[10px] font-semibold tracking-[0.08em] uppercase transition-colors hover:brightness-125",
-            statusClassName(inputs.status),
+            statusClassName(status),
           )}
         >
-          <span>{inputs.completionPercent}%</span>
+          <span>{completionPercent}%</span>
           Inputs
         </button>
       }
@@ -66,9 +92,9 @@ export default function JobInputsResponsive({ inputs }: { inputs: PlanJobInputs 
       description="Blueprint and material availability for this job."
       headerContent={
         <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
-          <p className="font-semibold">{inputs.completionPercent}% ready</p>
-          <Badge variant="outline" className={statusClassName(inputs.status)}>
-            {statusLabel(inputs.status)}
+          <p className="font-semibold">{completionPercent}% ready</p>
+          <Badge variant="outline" className={statusClassName(status)}>
+            {statusLabel(status)}
           </Badge>
         </div>
       }
@@ -79,20 +105,24 @@ export default function JobInputsResponsive({ inputs }: { inputs: PlanJobInputs 
           typeId={inputs.blueprint.typeId}
           imageSize={28}
           variation="bpc"
-          subline={`•	${inputs.blueprint.availableQuantity.toLocaleString()} / ${inputs.blueprint.requiredQuantity.toLocaleString()} available`}
+          subline={
+            isReactionFormula
+              ? `•\t${blueprint.availableQuantity.toLocaleString()} available`
+              : `•\t${blueprint.availableQuantity.toLocaleString()} / ${blueprint.requiredQuantity.toLocaleString()} available`
+          }
           className="col-span-2 min-w-0 [&>span]:min-w-0"
         />
         <div className="col-start-3 row-start-1 flex shrink-0 items-center gap-2 self-center">
-          <span className={cn("font-mono", statusClassName(inputs.blueprint.status))}>
-            {inputs.blueprint.completionPercent}%
+          <span className={cn("font-mono", statusClassName(blueprint.status))}>
+            {blueprint.completionPercent}%
           </span>
           <span
-            aria-label={`Blueprint: ${statusLabel(inputs.blueprint.status)}`}
+            aria-label={`Blueprint: ${statusLabel(blueprint.status)}`}
             className={cn(
               "size-1.5 rounded-full",
-              inputs.blueprint.status === "ready" && "bg-success",
-              inputs.blueprint.status === "partial" && "bg-warning",
-              inputs.blueprint.status === "blocked" && "bg-destructive",
+              blueprint.status === "ready" && "bg-success",
+              blueprint.status === "partial" && "bg-warning",
+              blueprint.status === "blocked" && "bg-destructive",
             )}
           />
         </div>

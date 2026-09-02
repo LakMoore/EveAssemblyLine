@@ -260,6 +260,13 @@ test("uses reaction formulas held at a bucket's reaction location", async () => 
           category: "reactionformula",
           rootLocationId: reprocessingLocationId,
         },
+        {
+          typeId: reactionFormulaTypeId,
+          name: "Reaction Formula",
+          quantity: 3,
+          category: "reactionformula",
+          rootLocationId: sourceLocationId,
+        },
       ],
       {
         items: [
@@ -305,6 +312,11 @@ test("uses reaction formulas held at a bucket's reaction location", async () => 
   assert.equal(reactionJob.inputs.blueprint.availableQuantity, 1);
   assert.equal(reactionJob.inputs.blueprint.requiredQuantity, 1);
   assert.equal(reactionJob.inputs.blueprint.status, "ready");
+  const reactionFormula = result.lists.planItems.find(
+    (entry) => entry.kind === "reaction" && entry.typeId === reactionFormulaTypeId,
+  );
+  assert(reactionFormula && reactionFormula.kind === "reaction");
+  assert.equal(reactionFormula.availableQuantity, 1);
   assert.equal(
     result.lists.materialsToBuy.some((item) => item.typeId === reactionFormulaTypeId),
     false,
@@ -1475,6 +1487,157 @@ test("reports reaction formula and material inputs", async () => {
     true,
   );
   assert.equal(job.inputs.status, "ready");
+});
+
+test("merges reaction jobs by reaction location and formula type", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [],
+      {
+        items: [],
+        buckets: [
+          {
+            id: "first-reaction-bucket",
+            name: "First reaction bucket",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: reactionProductTypeId,
+                name: "Reaction Product",
+                quantity: 20,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "second-reaction-bucket",
+            name: "Second reaction bucket",
+            locations: {
+              stock: alternateSourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: reactionProductTypeId,
+                name: "Reaction Product",
+                quantity: 20,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+
+  assert.equal(
+    result.lists.reactionJobs.filter(
+      (job) => job.typeId === reactionFormulaTypeId && job.locationId === manufacturingLocationId,
+    ).length,
+    1,
+  );
+  const reactionJob = result.lists.reactionJobs.find(
+    (job) => job.typeId === reactionFormulaTypeId && job.locationId === manufacturingLocationId,
+  );
+  assert(reactionJob);
+  assert.equal(reactionJob.inputs.blueprint.availableQuantity, 0);
+  assert.equal(reactionJob.inputs.blueprint.requiredQuantity, 1);
+  assert.equal(reactionJob.inputs.materials.length, 3);
+  assert.equal(reactionJob.bucketId, undefined);
+});
+
+test("allocates reaction formulas at the reaction location to bucket jobs", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: reactionFormulaTypeId,
+          name: "Reaction Formula",
+          quantity: 14,
+          category: "reactionformula",
+          rootLocationId: manufacturingLocationId,
+        },
+      ],
+      {
+        items: [],
+        buckets: [
+          {
+            id: "first-formula-bucket",
+            name: "First formula bucket",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: reactionProductTypeId,
+                name: "Reaction Product",
+                quantity: 20,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "second-formula-bucket",
+            name: "Second formula bucket",
+            locations: {
+              stock: alternateSourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: reactionProductTypeId,
+                name: "Reaction Product",
+                quantity: 20,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+
+  const reactionJob = result.lists.reactionJobs.find(
+    (job) => job.typeId === reactionFormulaTypeId && job.locationId === manufacturingLocationId,
+  );
+  assert(reactionJob);
+  assert.equal(reactionJob.inputs.blueprint.availableQuantity, 1);
+  assert.equal(reactionJob.inputs.blueprint.requiredQuantity, 1);
+  const reactionPlanItem = result.lists.planItems.find(
+    (entry) => entry.kind === "reaction" && entry.typeId === reactionFormulaTypeId,
+  );
+  assert(reactionPlanItem && reactionPlanItem.kind === "reaction");
+  assert.equal(reactionPlanItem.availableQuantity, 1);
 });
 
 test("does not reprocess or haul compressed stock when direct materials cover demand", async () => {

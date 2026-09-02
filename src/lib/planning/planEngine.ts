@@ -134,7 +134,6 @@ class PlanProfiler {
     );
   }
 }
-
 function clampEfficiency(value: number, maximum: number) {
   return Math.min(maximum, Math.max(0, Number.isFinite(value) ? value : 0));
 }
@@ -632,16 +631,9 @@ async function calculatePlanPass(
       },
     );
   }
-  const reactionFormulaCounts = new Map<number, number>();
   const availableReactionFormulas = request.stock.filter(
     (item) => item.category === "reactionformula",
   );
-  for (const item of availableReactionFormulas) {
-    reactionFormulaCounts.set(
-      item.typeId,
-      (reactionFormulaCounts.get(item.typeId) ?? 0) + item.quantity,
-    );
-  }
   const reactionFormulaStockByLocation = new Map<number, Map<number, number>>();
   for (const item of availableReactionFormulas) {
     const locationId = getStockRootLocationId(item);
@@ -716,7 +708,9 @@ async function calculatePlanPass(
     const copyStock = blueprintCopyStock.get(blueprint._key);
     const availableBlueprintQuantity =
       activity === "reaction"
-        ? getLocationQuantity(reactionFormulaStockByLocation, locationId, blueprint._key)
+        ? getLocationQuantity(reactionFormulaStockByLocation, locationId, blueprint._key) > 0
+          ? 1
+          : 0
         : bpoCount > 0
           ? bpoCount
           : (copyStock?.runs ?? 0);
@@ -1172,7 +1166,14 @@ async function calculatePlanPass(
           },
         );
         const existingFormula = reactionFormulas.get(blueprint._key);
-        const formulaCount = reactionFormulaCounts.get(blueprint._key) ?? 0;
+        const formulaCount =
+          getLocationQuantity(
+            reactionFormulaStockByLocation,
+            request.locations?.reactions,
+            blueprint._key,
+          ) > 0
+            ? 1
+            : 0;
         reactionFormulas.set(
           blueprint._key,
           {
@@ -1489,6 +1490,15 @@ async function allocateBucketStock(
           );
         }
       }
+      for (const job of result.lists.reactionJobs) {
+        demand.set(
+          job.inputs.blueprint.typeId,
+          Math.max(
+            demand.get(job.inputs.blueprint.typeId) ?? 0,
+            job.inputs.blueprint.requiredQuantity,
+          ),
+        );
+      }
       for (const blueprint of result.lists.bpcsToBuy) {
         demand.set(
           blueprint.typeId,
@@ -1538,7 +1548,15 @@ async function allocateBucketStock(
     for (const typeId of typeIdsToAllocate) {
       const stockIndexes = request.stock
         .map((item, index) => ({ item, index }))
-        .filter(({ item, index }) => item.typeId === typeId && remainingStock[index] > 0);
+        .filter(({ item, index }) => {
+          if (item.typeId !== typeId || remainingStock[index] <= 0) return false;
+          if (item.category !== "reactionformula") return true;
+          return buckets.some(
+            (bucket, bucketIndex) =>
+              (remainingDemand[bucketIndex].get(typeId) ?? 0) > 0
+              && getStockRootLocationId(item) === bucket.locations.reactions,
+          );
+        });
       for (const { bucket, bucketIndex } of buckets
         .map((bucket, bucketIndex) => ({ bucket, bucketIndex }))
         .sort(
@@ -1550,10 +1568,12 @@ async function allocateBucketStock(
         const remaining = remainingDemand[bucketIndex].get(typeId) ?? 0;
         if (remaining <= 0) continue;
         for (const { item, index } of stockIndexes) {
-          if (
-            remainingStock[index] <= 0
-            || getStockRootLocationId(item) !== bucket.locations.stock
-          ) {
+          const stockLocationId = getStockRootLocationId(item);
+          const matchingLocation =
+            item.category === "reactionformula"
+              ? stockLocationId === bucket.locations.reactions
+              : stockLocationId === bucket.locations.stock;
+          if (remainingStock[index] <= 0 || !matchingLocation) {
             continue;
           }
           allocate(index, bucketIndex, Math.min(remainingStock[index], remaining));
@@ -1567,7 +1587,9 @@ async function allocateBucketStock(
             ({ bucket, bucketIndex }) =>
               (remainingDemand[bucketIndex].get(typeId) ?? 0) > 0
               && stockLocationId !== undefined
-              && bucketActivityLocations(bucket).has(stockLocationId),
+              && (item.category === "reactionformula"
+                ? stockLocationId === bucket.locations.reactions
+                : bucketActivityLocations(bucket).has(stockLocationId)),
           )
           .sort(
             (left, right) =>
@@ -1592,6 +1614,13 @@ async function allocateBucketStock(
         if (remaining <= 0) continue;
         for (const { index } of stockIndexes) {
           if (remaining <= 0) break;
+          const item = request.stock[index];
+          if (
+            item.category === "reactionformula"
+            && getStockRootLocationId(item) !== buckets[bucketIndex].locations.reactions
+          ) {
+            continue;
+          }
           const quantity = Math.min(remainingStock[index], remaining);
           allocate(index, bucketIndex, quantity);
           remaining -= quantity;
@@ -1651,6 +1680,15 @@ async function allocateBucketStock(
         else if (entry.kind === "reaction" && entry.availableQuantity <= 0) {
           demand.set(entry.typeId, Math.max(demand.get(entry.typeId) ?? 0, 1));
         }
+      }
+      for (const job of result.lists.reactionJobs) {
+        demand.set(
+          job.inputs.blueprint.typeId,
+          Math.max(
+            demand.get(job.inputs.blueprint.typeId) ?? 0,
+            job.inputs.blueprint.requiredQuantity,
+          ),
+        );
       }
       return demand;
     }),
@@ -1771,6 +1809,102 @@ function mergeBpcBuyEntries(entries: PlanResult["lists"]["bpcsToBuy"]) {
   }));
 }
 
+function mergePlanJobInputEntries(entries: PlanJobInput[]): PlanJobInput {
+  const first = entries[0];
+  const availableQuantity = entries.reduce((total, entry) => total + entry.availableQuantity, 0);
+  const requiredQuantity = entries.reduce((total, entry) => total + entry.requiredQuantity, 0);
+  const completionPercent =
+    requiredQuantity <= 0
+      ? 100
+      : Math.min(100, Math.round((availableQuantity / requiredQuantity) * 100));
+  return {
+    ...first,
+    availableQuantity,
+    requiredQuantity,
+    completionPercent,
+    status:
+      requiredQuantity <= 0 || availableQuantity >= requiredQuantity
+        ? "ready"
+        : availableQuantity > 0
+          ? "partial"
+          : "blocked",
+  };
+}
+
+function mergePlanJobInputs(entries: PlanJobInputs[]): PlanJobInputs {
+  const blueprint = mergePlanJobInputEntries(entries.map((entry) => entry.blueprint));
+  const materialsByTypeId = new Map<number, PlanJobInput[]>();
+  for (const entry of entries) {
+    for (const material of entry.materials) {
+      const matchingMaterials = materialsByTypeId.get(material.typeId) ?? [];
+      matchingMaterials.push(material);
+      materialsByTypeId.set(material.typeId, matchingMaterials);
+    }
+  }
+  const materials = [...materialsByTypeId.values()].map(mergePlanJobInputEntries);
+  const allInputs = [blueprint, ...materials];
+  const completionPercent = Math.min(...allInputs.map((input) => input.completionPercent));
+  return {
+    blueprint,
+    materials,
+    completionPercent,
+    status: completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked",
+  };
+}
+
+function mergeReactionJobs(entries: PlanResult["lists"]["reactionJobs"]) {
+  const mergedByLocationAndType = new Map<string, PlanResult["lists"]["reactionJobs"][number]>();
+  for (const entry of entries) {
+    const key = `${entry.locationId ?? "unlocated"}:${entry.typeId}`;
+    const existing = mergedByLocationAndType.get(key);
+    if (!existing) {
+      mergedByLocationAndType.set(key, { ...entry });
+      continue;
+    }
+    const sameBucket = existing.bucketId === entry.bucketId;
+    mergedByLocationAndType.set(
+      key,
+      {
+        ...existing,
+        runs: existing.runs + entry.runs,
+        runsAvailable: existing.runsAvailable + entry.runsAvailable,
+        totalTime: existing.totalTime + entry.totalTime,
+        inputs: mergeReactionJobInputs([existing.inputs, entry.inputs]),
+        ...(sameBucket
+          ? {}
+          : {
+              bucketId: undefined,
+              bucketName: undefined,
+              buildLocationId: undefined,
+              stockLocationId: undefined,
+            }),
+      },
+    );
+  }
+  return [...mergedByLocationAndType.values()];
+}
+
+function mergeReactionJobInputs(entries: PlanJobInputs[]): PlanJobInputs {
+  const merged = mergePlanJobInputs(entries);
+  const blueprint = entries[0].blueprint;
+  const availableQuantity = entries.some((entry) => entry.blueprint.availableQuantity > 0) ? 1 : 0;
+  const mergedBlueprint: PlanJobInput = {
+    ...blueprint,
+    availableQuantity,
+    requiredQuantity: 1,
+    completionPercent: availableQuantity * 100,
+    status: availableQuantity > 0 ? "ready" : "blocked",
+  };
+  const allInputs = [mergedBlueprint, ...merged.materials];
+  const completionPercent = Math.min(...allInputs.map((input) => input.completionPercent));
+  return {
+    blueprint: mergedBlueprint,
+    materials: merged.materials,
+    completionPercent,
+    status: completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked",
+  };
+}
+
 function mergeBucketResults(results: PlanResult[], stock: PlanStockItem[]): PlanResult {
   const skillsById = new Map<number, PlanResult["lists"]["skillsRequired"][number]>();
   for (const result of results) {
@@ -1802,7 +1936,7 @@ function mergeBucketResults(results: PlanResult[], stock: PlanStockItem[]): Plan
         results.flatMap((result) => [...result.lists.bpcsToBuy, ...result.lists.bpcsNeeded]),
       ),
       inventionJobs: results.flatMap((result) => result.lists.inventionJobs),
-      reactionJobs: results.flatMap((result) => result.lists.reactionJobs),
+      reactionJobs: mergeReactionJobs(results.flatMap((result) => result.lists.reactionJobs)),
       manufacturingJobs: results.flatMap((result) => result.lists.manufacturingJobs),
       reprocessingJobs: results.flatMap((result) => result.lists.reprocessingJobs),
       skillsRequired: [...skillsById.values()],
