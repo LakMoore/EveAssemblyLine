@@ -19,13 +19,23 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@/components/ui/drawer";
+import { cn } from "@/lib/utils";
 import DialogBody from "./DialogBody";
 
 export type ResponsiveDialogDrawerProps = {
-  trigger: ReactElement;
+  trigger?: ReactElement;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   title: ReactNode;
   description?: ReactNode;
   headerContent?: ReactNode;
+  drawerClassName?: string;
+  drawerBodyClassName?: string;
+  drawerContentClassName?: string;
+  drawerFooterContent?: ReactNode;
+  dialogClassName?: string;
+  dialogBodyClassName?: string;
+  dialogFooterContent?: ReactNode;
   children: ReactNode;
 };
 
@@ -47,41 +57,57 @@ function useIsMobile() {
 /** Renders the same content as a desktop Dialog and a mobile bottom Drawer. */
 export default function ResponsiveDialogDrawer({
   trigger,
+  open,
+  onOpenChange,
   title,
   description,
   headerContent,
+  drawerClassName,
+  drawerBodyClassName,
+  drawerContentClassName,
+  drawerFooterContent,
+  dialogClassName,
+  dialogBodyClassName,
+  dialogFooterContent,
   children,
 }: ResponsiveDialogDrawerProps) {
   const isMobile = useIsMobile();
 
   if (isMobile) {
     return (
-      <Drawer>
-        <DrawerTrigger render={trigger} />
-        <DrawerContent className="data-[swipe-direction=down]:rounded-[min(var(--radius-4xl),24px)] border border-popover shadow-xl [--drawer-bleed-background:transparent] [--drawer-inset:--spacing(2)]">
+      <Drawer open={open} onOpenChange={onOpenChange}>
+        {trigger && <DrawerTrigger render={trigger} />}
+        <DrawerContent
+          className={cn(
+            "h-[70vh] border border-popover shadow-xl [--drawer-bleed-background:transparent] [--drawer-inset:--spacing(2)]",
+            drawerClassName,
+          )}
+        >
           <DrawerHeader>
             <DrawerTitle>{title}</DrawerTitle>
             {description && <DrawerDescription>{description}</DrawerDescription>}
             {headerContent}
           </DrawerHeader>
-          <ScrollArea className="min-h-0 min-w-0 max-h-[calc(100dvh-6rem)] flex-1 overflow-y-auto">
-            <div className="px-4">{children}</div>
+          <ScrollArea className={cn("flex-1 overflow-y-auto p-4", drawerBodyClassName)}>
+            <div className={cn("px-4", drawerContentClassName)}>{children}</div>
           </ScrollArea>
+          {drawerFooterContent}
         </DrawerContent>
       </Drawer>
     );
   }
 
   return (
-    <Dialog>
-      <DialogTrigger render={trigger} />
-      <DialogContent>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {trigger && <DialogTrigger render={trigger} />}
+      <DialogContent className={dialogClassName}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}
           {headerContent}
         </DialogHeader>
-        <DialogBody>{children}</DialogBody>
+        <DialogBody className={dialogBodyClassName}>{children}</DialogBody>
+        {dialogFooterContent}
       </DialogContent>
     </Dialog>
   );

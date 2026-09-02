@@ -2,9 +2,12 @@ import {
   getBlueprintsByInventionProductId,
   getBuildBlueprintByProductTypeId,
   getCompressibleTypes,
+  getGroups,
+  getIndustryTargetFilters,
   getTypeMaterials,
 } from "@/cache/services/sdeCache";
 import { getTypes } from "@/lib/sde/loader";
+import { getProductionGroupReferences, productionGroupForType } from "./productionGroups";
 import {
   PlanJobInput,
   PlanJobInputs,
@@ -337,11 +340,17 @@ async function calculatePlanPass(
     return fallback;
   }
   const language = request.language ?? "en";
-  const [typeRecords, compressibleTypes, typeMaterials] = await Promise.all([
+  const [typeRecords, compressibleTypes, typeMaterials, groups, targetFilters] = await Promise.all([
     profiler.measure("typeNameBatch", () => getTypes()),
     getCompressibleTypes(),
     getTypeMaterials(),
+    getGroups(),
+    getIndustryTargetFilters(),
   ]);
+  const productionGroups = getProductionGroupReferences(targetFilters, groups, language);
+  const facilityProfilesByLocationId = new Map(
+    (request.facilityProfiles ?? []).map((profile) => [profile.locationId, profile]),
+  );
   const marketOrderStock = request.stock
     .filter(
       (item) =>
@@ -723,6 +732,7 @@ async function calculatePlanPass(
     runs: number,
     efficiency: Efficiency,
     locationId: number | undefined,
+    materialMultiplier = 1,
   ): PlanJobInputs {
     const activityData = blueprint.activities[activity];
     const materials = (activityData?.materials ?? []).map((material) => {
@@ -730,6 +740,7 @@ async function calculatePlanPass(
         activity === "manufacturing"
           ? Math.ceil(material.quantity * runs * (1 - efficiency.me / 100))
           : material.quantity * runs;
+      const adjustedRequiredQuantity = Math.ceil(requiredQuantity * materialMultiplier);
       const availableQuantity =
         getLocationQuantity(inStockByLocationAndType, locationId, material.typeID)
         + getLocationQuantity(initialInBuildByLocationAndType, locationId, material.typeID);
@@ -738,7 +749,7 @@ async function calculatePlanPass(
         material.typeID,
         typeName(material.typeID, `Type ${material.typeID}`),
         availableQuantity,
-        requiredQuantity,
+        adjustedRequiredQuantity,
       );
     });
     const bpoCount = blueprintOriginalCounts.get(blueprint._key) ?? 0;
@@ -825,6 +836,30 @@ async function calculatePlanPass(
   const reactionTimeMultiplier = request.facilityTimeMultipliers?.reactions ?? 1;
   const manufacturingSkillTimeMultiplier = request.skillTimeMultipliers?.manufacturing ?? 1;
   const reactionSkillTimeMultiplier = request.skillTimeMultipliers?.reactions ?? 1;
+
+  function activityProfile(typeId: number, activity: "manufacturing" | "reaction") {
+    const group = productionGroupForType(typeRecords.get(typeId), groups, productionGroups);
+    const fallbackLocationId =
+      activity === "manufacturing"
+        ? request.locations?.manufacturing
+        : request.locations?.reactions;
+    const locationId =
+      (group ? request.groupAssignments?.[group.key] : undefined) ?? fallbackLocationId;
+    const facility =
+      locationId === undefined ? undefined : facilityProfilesByLocationId.get(locationId);
+    const bonus = group && facility ? facility.buildTypeGroups[group.key] : undefined;
+    return {
+      locationId,
+      materialMultiplier:
+        activity === "manufacturing"
+          ? (bonus?.manufacturingMaterialMultiplier ?? 1)
+          : (bonus?.reactionMaterialMultiplier ?? 1),
+      timeMultiplier:
+        activity === "manufacturing"
+          ? (bonus?.manufacturingTimeMultiplier ?? manufacturingTimeMultiplier)
+          : (bonus?.reactionTimeMultiplier ?? reactionTimeMultiplier),
+    };
+  }
 
   function addRequiredSkills(skills: Array<{ typeID: number; level: number }> | undefined) {
     for (const skill of skills ?? []) {
@@ -1054,6 +1089,8 @@ async function calculatePlanPass(
         );
 
         activity = candidate.activity;
+        const profile = activityProfile(typeId, candidate.activity);
+        const activityLocationId = profile.locationId;
         const productQuantity =
           candidate.activity === "manufacturing"
             ? candidate.blueprint.activities.manufacturing!.products!.find(
@@ -1092,7 +1129,8 @@ async function calculatePlanPass(
             blueprint,
             runsNeeded,
             efficiency,
-            request.locations?.manufacturing,
+            activityLocationId,
+            profile.materialMultiplier,
           );
           const mergedJobInputs = mergeJobInputs(
             existingInputs,
@@ -1108,18 +1146,18 @@ async function calculatePlanPass(
               runs: (existing?.runs ?? 0) + runsNeeded,
               runsAvailable: Math.min(
                 existing?.runsAvailable ?? Number.MAX_SAFE_INTEGER,
-                getRunsAvailable(blueprint, "manufacturing", request.locations?.manufacturing),
+                getRunsAvailable(blueprint, "manufacturing", activityLocationId),
                 runsNeeded,
               ),
               totalTime:
                 (existing?.totalTime ?? 0)
                 + blueprint.activities.manufacturing!.time
                   * (1 - efficiency.te / 100)
-                  * manufacturingTimeMultiplier
+                  * profile.timeMultiplier
                   * manufacturingSkillTimeMultiplier
                   * runsNeeded,
               inputs: mergedJobInputs,
-              ...(request.locations ? { locationId: request.locations.manufacturing } : {}),
+              ...(activityLocationId !== undefined ? { locationId: activityLocationId } : {}),
             },
           );
           phase = "manufacturing materials";
@@ -1128,7 +1166,10 @@ async function calculatePlanPass(
             async () => {
               for (const material of blueprint.activities.manufacturing?.materials ?? []) {
                 const materialQuantity = Math.ceil(
-                  material.quantity * runsNeeded * (1 - efficiency.me / 100),
+                  material.quantity
+                    * runsNeeded
+                    * (1 - efficiency.me / 100)
+                    * profile.materialMultiplier,
                 );
                 await expand(
                   material.typeID,
@@ -1137,7 +1178,7 @@ async function calculatePlanPass(
                   nextStack,
                   defaultEfficiency,
                   false,
-                  request.locations?.manufacturing,
+                  activityLocationId,
                 );
               }
             },
@@ -1176,7 +1217,8 @@ async function calculatePlanPass(
           blueprint,
           runsNeeded,
           efficiency,
-          request.locations?.reactions,
+          activityLocationId,
+          profile.materialMultiplier,
         );
         const mergedJobInputs = mergeJobInputs(existingInputs, jobInputs, false);
         jobInputsByBlueprint.set(blueprint._key, mergedJobInputs);
@@ -1188,27 +1230,24 @@ async function calculatePlanPass(
             runs: (existing?.runs ?? 0) + runsNeeded,
             runsAvailable: Math.min(
               existing?.runsAvailable ?? Number.MAX_SAFE_INTEGER,
-              getRunsAvailable(blueprint, "reaction", request.locations?.reactions),
+              getRunsAvailable(blueprint, "reaction", activityLocationId),
               runsNeeded,
             ),
             totalTime:
               (existing?.totalTime ?? 0)
               + blueprint.activities.reaction!.time
                 * (1 - efficiency.te / 100)
-                * reactionTimeMultiplier
+                * profile.timeMultiplier
                 * reactionSkillTimeMultiplier
                 * runsNeeded,
             inputs: mergedJobInputs,
-            ...(request.locations ? { locationId: request.locations.reactions } : {}),
+            ...(activityLocationId !== undefined ? { locationId: activityLocationId } : {}),
           },
         );
         const existingFormula = reactionFormulas.get(blueprint._key);
         const formulaCount =
-          getLocationQuantity(
-            reactionFormulaStockByLocation,
-            request.locations?.reactions,
-            blueprint._key,
-          ) > 0
+          getLocationQuantity(reactionFormulaStockByLocation, activityLocationId, blueprint._key)
+          > 0
             ? 1
             : 0;
         reactionFormulas.set(
@@ -1232,7 +1271,7 @@ async function calculatePlanPass(
             false,
             "bpc",
             true,
-            request.locations?.reactions,
+            activityLocationId,
           );
         }
         else if (runsNeeded > 0) {
@@ -1245,12 +1284,12 @@ async function calculatePlanPass(
             for (const material of blueprint.activities.reaction?.materials ?? []) {
               await expand(
                 material.typeID,
-                material.quantity * runsNeeded,
+                Math.ceil(material.quantity * runsNeeded * profile.materialMultiplier),
                 typeName(material.typeID, `Type ${material.typeID}`),
                 nextStack,
                 defaultEfficiency,
                 false,
-                request.locations?.reactions,
+                activityLocationId,
               );
             }
           },
@@ -1506,6 +1545,7 @@ async function allocateBucketStock(
           ...bucket.locations,
           market: request.locations?.market ?? bucket.locations.stock,
         },
+        groupAssignments: bucket.groupAssignments,
       });
       const demand = new Map<number, number>();
       const jobInputDemand = new Map<number, number>();
@@ -1724,6 +1764,7 @@ async function allocateBucketStock(
           ...bucket.locations,
           market: request.locations?.market ?? bucket.locations.stock,
         },
+        groupAssignments: bucket.groupAssignments,
       });
       return result;
     }),
@@ -1796,6 +1837,7 @@ async function allocateBucketStock(
           ...bucket.locations,
           market: request.locations?.market ?? bucket.locations.stock,
         },
+        groupAssignments: bucket.groupAssignments,
       });
       const demand = new Map<number, number>();
       for (const entry of result.lists.planItems) {
@@ -1851,6 +1893,7 @@ async function calculateBucketedPlan(request: PlannerRequest): Promise<PlanResul
         items: bucket.items,
         stock: bucketStock[bucketIndex],
         locations,
+        groupAssignments: bucket.groupAssignments,
       },
       { finalProductLocations },
     );

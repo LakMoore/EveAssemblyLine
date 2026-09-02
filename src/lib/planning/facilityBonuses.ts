@@ -1,4 +1,9 @@
-import type { DogmaEffectsRecord, TypeDogmaRecord } from "@/lib/sde/generated";
+import type {
+  DogmaEffectsRecord,
+  IndustryModifierSourcesRecord,
+  TypeDogmaRecord,
+} from "@/lib/sde/generated";
+import type { ProductionGroupReference } from "./productionGroups";
 
 export type FacilityBonusValue = {
   rawMultiplier: number;
@@ -17,6 +22,17 @@ export type FacilityBonusResult = {
     cost: FacilityBonusValue;
   };
   reprocessingYield: number;
+};
+
+export type FacilityGroupBonus = {
+  manufacturingMaterialMultiplier: number;
+  manufacturingMaterialPercentage: number;
+  manufacturingTimeMultiplier: number;
+  manufacturingTimePercentage: number;
+  reactionMaterialMultiplier: number;
+  reactionMaterialPercentage: number;
+  reactionTimeMultiplier: number;
+  reactionTimePercentage: number;
 };
 
 const structureMaterialAttribute = 2600;
@@ -64,6 +80,62 @@ function effectModifiers(
       (modifier) => modifier.modifyingAttributeID === modifyingAttributeId,
     ),
   );
+}
+
+function modifierValue(
+  rig: TypeDogmaRecord | undefined,
+  effects: Map<number, DogmaEffectsRecord>,
+  modifiedAttributeId: number,
+  modifyingAttributeId: number,
+) {
+  const rigAttributes = attributesFor(rig);
+  const modifier = effectModifiers(rig, effects, modifyingAttributeId).find(
+    (entry) => entry.modifiedAttributeID === modifiedAttributeId,
+  );
+  return modifier?.modifyingAttributeID === undefined
+    ? undefined
+    : rigAttributes.get(modifier.modifyingAttributeID);
+}
+
+function sourceEntries(
+  source: IndustryModifierSourcesRecord | undefined,
+  activity: "manufacturing" | "reaction",
+  kind: "material" | "time",
+) {
+  if (activity === "manufacturing") return source?.manufacturing?.[kind] ?? [];
+  return source?.reaction?.[kind] ?? [];
+}
+
+function groupRigModifier(
+  rig: TypeDogmaRecord | undefined,
+  effects: Map<number, DogmaEffectsRecord>,
+  source: IndustryModifierSourcesRecord | undefined,
+  activity: "manufacturing" | "reaction",
+  kind: "material" | "time",
+  targetFilterIds: readonly number[],
+  securityStatus: number | undefined,
+) {
+  const modifyingAttributeId =
+    activity === "manufacturing"
+      ? kind === "material"
+        ? rigMaterialAttribute
+        : rigTimeAttribute
+      : kind === "material"
+        ? reactionRigMaterialAttribute
+        : reactionRigTimeAttribute;
+  const securityMultiplier =
+    attributesFor(rig).get(securityModifierAttributes[securityClass(securityStatus)]) ?? 1;
+  const values = sourceEntries(source, activity, kind)
+    .filter((entry) => entry.filterID !== undefined && targetFilterIds.includes(entry.filterID))
+    .flatMap((entry) => {
+      const value = modifierValue(rig, effects, entry.dogmaAttributeID, modifyingAttributeId);
+      return value === undefined ? [] : [value * securityMultiplier];
+    });
+  return values.length === 0 ? undefined : Math.min(...values);
+}
+
+function applyModifier(value: number, modifier: number | undefined) {
+  return modifier === undefined ? value : addPercentageModifier(value, modifier);
 }
 
 function hasTarget(
@@ -165,4 +237,108 @@ export function calculateFacilityBonuses(
     },
     reprocessingYield,
   };
+}
+
+/** Calculates the facility material and time multipliers for every production group. */
+export function calculateFacilityGroupBonuses(
+  structure: TypeDogmaRecord | undefined,
+  rigTypeIds: readonly number[],
+  typeDogma: Map<number, TypeDogmaRecord>,
+  dogmaEffects: Map<number, DogmaEffectsRecord>,
+  modifierSources: Map<number, IndustryModifierSourcesRecord>,
+  productionGroups: readonly ProductionGroupReference[],
+  securityStatus?: number,
+): Record<string, FacilityGroupBonus> {
+  const structureAttributes = attributesFor(structure);
+  const structureTime = multiplier(structureAttributes.get(structureTimeAttribute));
+  const reactionTime = multiplier(
+    structureAttributes.get(reactionStructureTimeMultiplierAttribute),
+  );
+  const rigs = rigTypeIds
+    .filter((rigTypeId) => rigTypeId > 0)
+    .map((rigTypeId) => ({
+      dogma: typeDogma.get(rigTypeId),
+      source: modifierSources.get(rigTypeId),
+    }));
+  return Object.fromEntries(
+    productionGroups.map((group) => {
+      const modifierTargetFilterIds = group.modifierTargetFilterIds ?? [group.targetFilterId];
+      const manufacturingMaterialModifier = Math.min(
+        ...rigs.flatMap(({ dogma, source }) => {
+          const value = groupRigModifier(
+            dogma,
+            dogmaEffects,
+            source,
+            "manufacturing",
+            "material",
+            modifierTargetFilterIds,
+            securityStatus,
+          );
+          return value === undefined ? [] : [value];
+        }),
+        0,
+      );
+      const manufacturingTimeModifiers = rigs.flatMap(({ dogma, source }) => {
+        const value = groupRigModifier(
+          dogma,
+          dogmaEffects,
+          source,
+          "manufacturing",
+          "time",
+          modifierTargetFilterIds,
+          securityStatus,
+        );
+        return value === undefined ? [] : [value];
+      });
+      const reactionMaterialModifier = Math.min(
+        ...rigs.flatMap(({ dogma, source }) => {
+          const value = groupRigModifier(
+            dogma,
+            dogmaEffects,
+            source,
+            "reaction",
+            "material",
+            modifierTargetFilterIds,
+            securityStatus,
+          );
+          return value === undefined ? [] : [value];
+        }),
+        0,
+      );
+      const reactionTimeModifiers = rigs.flatMap(({ dogma, source }) => {
+        const value = groupRigModifier(
+          dogma,
+          dogmaEffects,
+          source,
+          "reaction",
+          "time",
+          modifierTargetFilterIds,
+          securityStatus,
+        );
+        return value === undefined ? [] : [value];
+      });
+      const manufacturingMaterialMultiplier = applyModifier(1, manufacturingMaterialModifier);
+      const manufacturingTimeMultiplier = manufacturingTimeModifiers.reduce(
+        applyModifier,
+        structureTime,
+      );
+      const reactionMaterialMultiplier = applyModifier(1, reactionMaterialModifier);
+      const reactionTimeMultiplier = reactionTimeModifiers.reduce(applyModifier, reactionTime);
+      return [
+        group.key,
+        {
+          manufacturingMaterialMultiplier,
+          manufacturingMaterialPercentage: percentageFromMultiplier(
+            manufacturingMaterialMultiplier,
+          ),
+          manufacturingTimeMultiplier,
+          manufacturingTimePercentage: percentageFromMultiplier(manufacturingTimeMultiplier),
+          reactionMaterialMultiplier,
+          reactionMaterialPercentage: percentageFromMultiplier(reactionMaterialMultiplier),
+          reactionTimeMultiplier,
+          reactionTimePercentage: percentageFromMultiplier(reactionTimeMultiplier),
+        },
+      ];
+    }),
+  );
 }

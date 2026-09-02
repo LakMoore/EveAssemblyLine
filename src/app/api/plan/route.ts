@@ -14,8 +14,10 @@ import type {
   PlanItemInput,
   PlanMarketInput,
   PlanRequest,
+  PlanFacilityProfile,
   PlanStockItem,
 } from "@/lib/planning/types";
+import { productionGroupDefinitions } from "@/lib/planning/productionGroups";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -40,6 +42,19 @@ const planBuildItemSchema = z.object({
   te: z.number().finite().min(0).max(20),
   fromCompression: z.boolean(),
 });
+const productionGroupKeys = new Set(productionGroupDefinitions.map((group) => group.key));
+const groupAssignmentsSchema = z
+  .record(z.string(), z.number().int().positive())
+  .superRefine((assignments, context) => {
+    for (const key of Object.keys(assignments)) {
+      if (!productionGroupKeys.has(key as (typeof productionGroupDefinitions)[number]["key"])) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Unknown production group: ${key}`,
+        });
+      }
+    }
+  });
 const planBucketSchema = z.object({
   id: z.string().trim().min(1).max(100),
   name: z.string().trim().min(1).max(100),
@@ -51,8 +66,28 @@ const planBucketSchema = z.object({
     copying: z.number().int().positive(),
     invention: z.number().int().positive(),
   }),
+  groupAssignments: groupAssignmentsSchema.optional(),
   items: z.array(planBuildItemSchema),
 });
+const facilityGroupBonusSchema = z.object({
+  manufacturingMaterialMultiplier: z.number().finite().min(0).max(2),
+  manufacturingMaterialPercentage: z.number().finite().min(-100).max(100),
+  manufacturingTimeMultiplier: z.number().finite().min(0).max(2),
+  manufacturingTimePercentage: z.number().finite().min(-100).max(100),
+  reactionMaterialMultiplier: z.number().finite().min(0).max(2),
+  reactionMaterialPercentage: z.number().finite().min(-100).max(100),
+  reactionTimeMultiplier: z.number().finite().min(0).max(2),
+  reactionTimePercentage: z.number().finite().min(-100).max(100),
+});
+const facilityProfilesSchema = z
+  .array(
+    z.object({
+      locationId: z.number().int().positive(),
+      sizeId: z.number().finite().min(0),
+      buildTypeGroups: z.record(z.string(), facilityGroupBonusSchema),
+    }),
+  )
+  .max(100);
 const planBucketsSchema = z
   .array(planBucketSchema)
   .min(1)
@@ -153,6 +188,7 @@ async function calculateWorkingAssetsPlan(input: PlanRequest, assets: PlanStockI
     stock: await hydrateStockCategories(assets),
     locations: input.locations,
     facilityTimeMultipliers: input.facilityTimeMultipliers,
+    facilityProfiles: input.facilityProfiles,
     skillTimeMultipliers: input.skillTimeMultipliers,
     settings: input.settings,
   });
@@ -194,6 +230,16 @@ export async function POST(request: Request) {
         );
       }
       input.skillTimeMultipliers = parsedMultipliers.data;
+    }
+    if (input.facilityProfiles !== undefined) {
+      const parsedProfiles = facilityProfilesSchema.safeParse(input.facilityProfiles);
+      if (!parsedProfiles.success) {
+        return NextResponse.json(
+          { error: "Facility group profiles are not valid." },
+          { status: 400 },
+        );
+      }
+      input.facilityProfiles = parsedProfiles.data as PlanFacilityProfile[];
     }
     const parsedBuckets =
       input.buckets === undefined ? undefined : planBucketsSchema.safeParse(input.buckets);
@@ -394,6 +440,7 @@ export async function POST(request: Request) {
       stock,
       locations: input.locations,
       facilityTimeMultipliers: input.facilityTimeMultipliers,
+      facilityProfiles: input.facilityProfiles,
       skillTimeMultipliers: input.skillTimeMultipliers,
       settings: input.settings,
     });

@@ -3,6 +3,8 @@ import {
   getDogmaAttributes,
   getDogmaEffects,
   getGroups,
+  getIndustryModifierSources,
+  getIndustryTargetFilters,
   getStations,
   getSystems,
   getTypeDogma,
@@ -25,7 +27,12 @@ import {
   type FacilitySettingsPayload,
 } from "@/lib/planning/facilities";
 import { calculateReprocessingEfficiency } from "@/lib/planning/reprocessingEfficiency";
-import { calculateFacilityBonuses } from "@/lib/planning/facilityBonuses";
+import {
+  calculateFacilityBonuses,
+  calculateFacilityGroupBonuses,
+} from "@/lib/planning/facilityBonuses";
+import { getProductionGroupReferences } from "@/lib/planning/productionGroups";
+import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 
 type FacilityCandidate = Omit<FacilitySettingsEntry, "locationId"> & {
   id: number | string;
@@ -113,6 +120,8 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
   };
   const session = await getSessionFromRequest(request);
   if (!session) throw new Error("Not authenticated.");
+  const requestedLanguage = new URL(request.url).searchParams.get("language");
+  const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
   const characterIds = await getSessionCharacterIds(session);
   markPhase("auth");
   const [
@@ -125,6 +134,8 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
     dogmaEffects,
     dogmaAttributes,
     groups,
+    modifierSources,
+    targetFilters,
     industrySystems,
   ] = await Promise.all([
     Promise.all(characterIds.map((id) => getCharacter(id))),
@@ -136,8 +147,11 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
     getDogmaEffects(),
     getDogmaAttributes(),
     getGroups(),
+    getIndustryModifierSources(),
+    getIndustryTargetFilters(),
     fetchIndustrySystems().catch(() => ({ data: [] })),
   ]);
+  const productionGroups = getProductionGroupReferences(targetFilters, groups, language);
   markPhase("loadDependencies");
   const authorized = characters.filter(
     (character): character is NonNullable<typeof character> =>
@@ -270,6 +284,15 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
       dogmaEffects,
       facility.securityStatus,
     );
+    const groupBonuses = calculateFacilityGroupBonuses(
+      typeDogma.get(facility.typeId ?? 0),
+      facility.rigTypeIds,
+      typeDogma,
+      dogmaEffects,
+      modifierSources,
+      productionGroups,
+      facility.securityStatus,
+    );
     const reactionSettingsAllowed = supportsReactionSettings(
       facility.typeId,
       facility.securityStatus,
@@ -367,10 +390,14 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
       locationType: facility.locationType,
       typeId: facility.typeId ?? 0,
       systemId: facility.systemId,
+      sizeId:
+        typeDogma
+          .get(facility.typeId ?? 0)
+          ?.dogmaAttributes.find((attribute) => attribute.attributeID === 1547)?.value ?? 0,
       securityStatus: facility.securityStatus,
       systemCostIndices: Object.fromEntries(systemIndices ?? []),
       activities,
-      buildTypeGroups: {},
+      buildTypeGroups: groupBonuses,
       services: services ?? [],
       rigTypeIds: facility.rigTypeIds,
       settingsLastModified: facility.settingsLastModified ?? settings.lastModified,
@@ -393,7 +420,7 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
       },
     );
   }
-  return { facilities, settings };
+  return { facilities, settings, productionGroups };
 }
 
 export async function GET(request: Request) {

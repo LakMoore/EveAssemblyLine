@@ -5,6 +5,10 @@ import {
   getDogmaAttributes as loadDogmaAttributes,
   getDogmaEffects as loadDogmaEffects,
   getGroups as loadGroups,
+  getIndustryAssemblyLines as loadIndustryAssemblyLines,
+  getIndustryInstallationTypes as loadIndustryInstallationTypes,
+  getIndustryModifierSources as loadIndustryModifierSources,
+  getIndustryTargetFilters as loadIndustryTargetFilters,
   getTypeBonuses as loadTypeBonuses,
   getBlueprints as loadBlueprints,
   getCompressibleTypes as loadCompressibleTypes,
@@ -93,6 +97,22 @@ export function getTypes() {
 
 export function getGroups() {
   return getMap(loadGroups);
+}
+
+export function getIndustryAssemblyLines() {
+  return getMap(loadIndustryAssemblyLines);
+}
+
+export function getIndustryInstallationTypes() {
+  return getMap(loadIndustryInstallationTypes);
+}
+
+export function getIndustryModifierSources() {
+  return getMap(loadIndustryModifierSources);
+}
+
+export function getIndustryTargetFilters() {
+  return getMap(loadIndustryTargetFilters);
 }
 
 export function getMarketGroups() {

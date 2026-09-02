@@ -9,6 +9,7 @@ import {
   type FacilitySettingsPayload,
 } from "./facilities";
 import type { KnownStructure } from "./preferences";
+import type { SdeLanguage } from "@/lib/reference/languages";
 import { loadEndpointRecord, saveEndpointResponse } from "@/lib/client/refreshCache";
 import { loadClientSession } from "@/lib/client/requestCache";
 
@@ -51,17 +52,26 @@ export async function fetchFacilities(): Promise<FacilitySettingsPayload> {
   }
 }
 
-export async function fetchFacilityResponse(reload = false): Promise<FacilityResponse | null> {
+export async function fetchFacilityResponse(
+  reload = false,
+  language: SdeLanguage = "en",
+): Promise<FacilityResponse | null> {
+  const cacheKey = `facilities:${language}`;
   if (!reload) {
-    const cached = await loadEndpointRecord<FacilityResponse>("facilities");
+    const cached = await loadEndpointRecord<FacilityResponse>(cacheKey);
     if (cached) return cached.data;
   }
   try {
     if (!(await loadClientSession()).authenticated) return null;
-    const response = await fetch("/api/facilities", { credentials: "same-origin" });
+    const response = await fetch(
+      `/api/facilities?language=${language}`,
+      {
+        credentials: "same-origin",
+      },
+    );
     if (!response.ok) return null;
     const data = (await response.json()) as FacilityResponse;
-    await saveEndpointResponse("facilities", "/api/facilities", data);
+    await saveEndpointResponse(cacheKey, `/api/facilities?language=${language}`, data);
     return data;
   }
   catch {

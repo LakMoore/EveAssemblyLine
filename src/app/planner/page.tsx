@@ -130,8 +130,11 @@ import {
   PlannerBucketDetailsDialog,
   PlannerBucketItemsDialog,
   type ActivityLocationOption,
+  type ProductionGroupOption,
   type StockLocationOption,
 } from "@/components/PlannerBucketEditor";
+import type { FacilityGroupBonus } from "@/lib/planning/facilityBonuses";
+import type { ProductionGroupKey, ProductionGroupReference } from "@/lib/planning/productionGroups";
 
 type PlannerTab =
   | "Plan"
@@ -146,8 +149,8 @@ type PlannerTab =
 type BucketEditorMode = "details" | "items";
 const tabs: { value: PlannerTab; icon: LucideIcon }[] = [
   { value: "Plan", icon: ClipboardList },
-  { value: "Haul", icon: Truck },
   { value: "Buy", icon: ShoppingCart },
+  { value: "Haul", icon: Truck },
   { value: "Reprocess", icon: Minimize2 },
   { value: "Copy", icon: TestTubes },
   { value: "Invent", icon: Microscope },
@@ -165,6 +168,12 @@ type PlanLocationOption = {
   baseReactionMe: number;
   manufacturingTimeMultiplier: number;
   reactionTimeMultiplier: number;
+  sizeId: number;
+  activities: {
+    manufacturing: boolean;
+    reactions: boolean;
+  };
+  buildTypeGroups: Partial<Record<ProductionGroupKey, FacilityGroupBonus>>;
 };
 
 type ReactionScheduleMode = "simple" | "available-slots" | "max-job-length";
@@ -523,6 +532,9 @@ function Planner() {
   const [planImportInputKey, setPlanImportInputKey] = useState(0);
   const [excludedLocationIds, setExcludedLocationIds] = useState<number[]>([]);
   const [locationOptions, setLocationOptions] = useState<PlanLocationOption[]>([]);
+  const [productionGroupReferences, setProductionGroupReferences] = useState<
+    ProductionGroupReference[]
+  >([]);
   const [includeStock, setIncludeStock] = useState(true);
   const [locations, setLocations] = useState<PlannerLocations>(defaultLocations);
   const [settings, setSettings] = useState<PlannerSettings>(() => {
@@ -617,7 +629,7 @@ function Planner() {
     let cancelled = false;
     async function loadLocationOptions(reload = false) {
       const [data, storedLocations] = await Promise.all([
-        fetchFacilityResponse(reload),
+        fetchFacilityResponse(reload, language),
         loadPlannerLocations(),
       ]);
       if (cancelled) return;
@@ -637,6 +649,12 @@ function Planner() {
           manufacturingTimeMultiplier:
             facility.activities.manufacturing.rawJobDurationMultiplier ?? 1,
           reactionTimeMultiplier: facility.activities.reactions.rawJobDurationMultiplier ?? 1,
+          sizeId: facility.sizeId,
+          activities: {
+            manufacturing: facility.activities.manufacturing.available,
+            reactions: facility.activities.reactions.available,
+          },
+          buildTypeGroups: facility.buildTypeGroups,
         }));
       const manufacturingOptions = options
         .slice()
@@ -666,6 +684,7 @@ function Planner() {
         ),
       };
       setLocationOptions(options);
+      setProductionGroupReferences(data?.productionGroups ?? []);
       setLocations(nextLocations);
       void savePlannerLocations(nextLocations);
     }
@@ -707,7 +726,7 @@ function Planner() {
       const planningLocations = Number.isInteger(compressLocationId)
         ? { ...locations, ...primaryBucketLocations, reprocessing: compressLocationId }
         : { ...locations, ...primaryBucketLocations };
-      const freshFacilities = await fetchFacilityResponse(true);
+      const freshFacilities = await fetchFacilityResponse(true, language);
       const freshFacilityById = new Map(
         (freshFacilities?.facilities ?? []).map((facility) => [facility.id, facility]),
       );
@@ -753,6 +772,11 @@ function Planner() {
                     })),
                   }))
                 : undefined,
+            facilityProfiles: locationOptions.map((location) => ({
+              locationId: location.locationId,
+              sizeId: location.sizeId,
+              buildTypeGroups: location.buildTypeGroups,
+            })),
             reprocessingEfficiencies,
             assets: requestStock.map(
               ({ sourceLocationName: _sourceLocationName, ...item }) => item,
@@ -1092,6 +1116,77 @@ function Planner() {
       bucket.stockLocationName ? [[bucket.locations.stock, bucket.stockLocationName] as const] : [],
     ),
   ]);
+  const productionGroupOptions: ProductionGroupOption[] = productionGroupReferences.map((group) => {
+    const facilities = locationOptions
+      .filter(
+        (location) =>
+          location.activities[group.activity === "reaction" ? "reactions" : "manufacturing"]
+          && location.buildTypeGroups[group.key] !== undefined,
+      )
+      .map((location) => {
+        const bonus = location.buildTypeGroups[group.key]!;
+        return {
+          locationId: location.locationId,
+          name: location.name,
+          kind: location.locationType,
+          baseYield: location.baseYield,
+          baseManufacturingMe: location.baseManufacturingMe,
+          baseReactionMe: location.baseReactionMe,
+          sizeId: location.sizeId,
+          materialPercentage:
+            group.activity === "manufacturing"
+              ? bonus.manufacturingMaterialPercentage
+              : bonus.reactionMaterialPercentage,
+          timePercentage:
+            group.activity === "manufacturing"
+              ? bonus.manufacturingTimePercentage
+              : bonus.reactionTimePercentage,
+        };
+      })
+      .sort(
+        (left, right) =>
+          left.materialPercentage - right.materialPercentage
+          || left.sizeId - right.sizeId
+          || left.name.localeCompare(right.name),
+      );
+    return { key: group.key, label: group.label, activity: group.activity, facilities };
+  });
+
+  function autoAssignGroupFacilities(bucket: ClientPlanBucket) {
+    const popularity = new Map<number, number>();
+    for (const existingBucket of buckets) {
+      for (const locationId of Object.values(existingBucket.groupAssignments ?? {})) {
+        popularity.set(locationId, (popularity.get(locationId) ?? 0) + 1);
+      }
+    }
+    return Object.fromEntries(
+      productionGroupOptions
+        .filter((group) => group.facilities.length > 0)
+        .map((group) => {
+          const bestFacility = group.facilities
+            .slice()
+            .sort(
+              (left, right) =>
+                left.materialPercentage - right.materialPercentage
+                || left.sizeId - right.sizeId
+                || (popularity.get(right.locationId) ?? 0) - (popularity.get(left.locationId) ?? 0)
+                || left.name.localeCompare(right.name),
+            )[0];
+          const defaultLocationId =
+            group.activity === "manufacturing"
+              ? bucket.locations.manufacturing
+              : bucket.locations.reactions;
+          const defaultFacility = group.facilities.find(
+            (facility) => facility.locationId === defaultLocationId,
+          );
+          const selected =
+            bestFacility.materialPercentage === 0 && defaultFacility !== undefined
+              ? defaultFacility
+              : bestFacility;
+          return [group.key, selected.locationId] as const;
+        }),
+    );
+  }
 
   return (
     <>
@@ -1099,7 +1194,7 @@ function Planner() {
         <div>
           <p className="eyebrow">PRODUCTION CONTROL</p>
           <h1>Build plan</h1>
-          <p className={styles.subtitle}>
+          <p className="mb-4 text-sm text-muted-foreground">
             Turn your project requirements into a clean, actionable production plan.
           </p>
         </div>
@@ -1114,7 +1209,7 @@ function Planner() {
                 Define what you want to stock and where each independent build plan finishes.
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 mb-2 justify-end">
               <input
                 key={planImportInputKey}
                 id="planner-plan-import"
@@ -1201,6 +1296,8 @@ function Planner() {
         activityLocations={activityLocationOptions}
         stockLocations={stockLocationOptions}
         excludedStockLocationIds={buckets.map((bucket) => bucket.locations.stock)}
+        productionGroups={productionGroupOptions}
+        onAutoAssign={autoAssignGroupFacilities}
         onOpenChange={(open) => !open && closeBucketEditor()}
         onSave={saveBucket}
       />
@@ -1401,7 +1498,7 @@ function Planner() {
                 <>
                   <label>
                     <div className={`${styles.planOptionHeader} text-xs`}>
-                      <span>BUILD LOCATION</span>
+                      <span>MANUFACTURING LOCATION</span>
                       <span className={styles.planOptionBonus}>
                         MANUFACTURING ME{" "}
                         {selectedManufacturingLocation

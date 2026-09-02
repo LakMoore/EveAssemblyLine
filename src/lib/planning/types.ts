@@ -1,4 +1,6 @@
 import type { SdeLanguage } from "@/lib/reference/languages";
+import type { FacilityGroupBonus } from "./facilityBonuses";
+import type { ProductionGroupKey } from "./productionGroups";
 
 // shape of build items passed between client and server
 export interface PlanBuildItem {
@@ -23,7 +25,14 @@ export interface PlanBucket {
   name: string;
   stockLocationName?: string;
   locations: PlanBucketLocations;
+  groupAssignments?: Partial<Record<ProductionGroupKey, number>>;
   items: PlanBuildItem[];
+}
+
+export interface PlanFacilityProfile {
+  locationId: number;
+  sizeId: number;
+  buildTypeGroups: Partial<Record<ProductionGroupKey, FacilityGroupBonus>>;
 }
 
 // shape of the build item used on the server
@@ -170,6 +179,7 @@ export interface PlanRequest {
     manufacturing: number;
     reactions: number;
   };
+  facilityProfiles?: PlanFacilityProfile[];
   skillTimeMultipliers?: {
     manufacturing: number;
     reactions: number;
@@ -192,6 +202,7 @@ export type PlannerRequest = Omit<PlanRequest, "toBuild" | "assets" | "stock" | 
   items: BuildItem[];
   stock: PlanStockItem[];
   buckets?: PlannerBucket[];
+  groupAssignments?: Partial<Record<ProductionGroupKey, number>>;
 };
 
 export type PlanSourceIcon = "market" | "industry" | "invention" | "copying";

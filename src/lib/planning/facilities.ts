@@ -1,3 +1,6 @@
+import type { FacilityGroupBonus } from "./facilityBonuses";
+import type { ProductionGroupKey, ProductionGroupReference } from "./productionGroups";
+
 export type FacilitySettingsEntry = {
   locationId?: number;
   systemId: number;
@@ -33,10 +36,11 @@ export type Facility = {
   locationType: "station" | "structure";
   typeId: number;
   systemId: number;
+  sizeId: number;
   securityStatus?: number;
   systemCostIndices: Record<string, number>;
   activities: ActivitiesResponse;
-  buildTypeGroups: Record<string, unknown>;
+  buildTypeGroups: Partial<Record<ProductionGroupKey, FacilityGroupBonus>>;
   services: Array<{ name: string; state: string }>;
   rigTypeIds: number[];
   settingsLastModified: string;
@@ -104,6 +108,7 @@ export interface ActivitiesResponse extends ActivitiesRequest {
 export type FacilityResponse = {
   facilities: Facility[];
   settings: FacilitySettingsPayload;
+  productionGroups: ProductionGroupReference[];
 };
 
 export const emptyActivitiesRequest: ActivitiesRequest = {

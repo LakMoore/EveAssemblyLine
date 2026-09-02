@@ -10,6 +10,10 @@ import {
   DogmaAttributesRecord,
   DogmaEffectsRecord,
   GroupsRecord,
+  IndustryAssemblyLinesRecord,
+  IndustryInstallationTypesRecord,
+  IndustryModifierSourcesRecord,
+  IndustryTargetFiltersRecord,
   MapSolarSystemsRecord,
   MarketGroupsRecord,
   NpcStationsRecord,
@@ -46,6 +50,10 @@ const compressibleTypeByTypeId = new Map<number, number>();
 const typeMaterialsByTypeId = new Map<number, TypeMaterialsRecord>();
 const dogmaEffectById = new Map<number, DogmaEffectsRecord>();
 const groupById = new Map<number, GroupsRecord>();
+const industryAssemblyLineById = new Map<number, IndustryAssemblyLinesRecord>();
+const industryInstallationTypeById = new Map<number, IndustryInstallationTypesRecord>();
+const industryModifierSourceByTypeId = new Map<number, IndustryModifierSourcesRecord>();
+const industryTargetFilterById = new Map<number, IndustryTargetFiltersRecord>();
 const typeBonusById = new Map<number, TypeBonusRecord>();
 const systemById = new Map<number, MapSolarSystemsRecord>();
 const stationById = new Map<number, NpcStationsRecord>();
@@ -342,6 +350,56 @@ export function getGroups() {
     () => {
       for (const record of records<GroupsRecord>("groups.json")) groupById.set(record._key, record);
       return groupById;
+    },
+  );
+}
+
+export function getIndustryAssemblyLines() {
+  return getOnce(
+    "industryAssemblyLines",
+    () => {
+      for (const record of records<IndustryAssemblyLinesRecord>("industryAssemblyLines.json")) {
+        industryAssemblyLineById.set(record._key, record);
+      }
+      return industryAssemblyLineById;
+    },
+  );
+}
+
+export function getIndustryInstallationTypes() {
+  return getOnce(
+    "industryInstallationTypes",
+    () => {
+      for (const record of records<IndustryInstallationTypesRecord>(
+        "industryInstallationTypes.json",
+      )) {
+        industryInstallationTypeById.set(record._key, record);
+      }
+      return industryInstallationTypeById;
+    },
+  );
+}
+
+export function getIndustryModifierSources() {
+  return getOnce(
+    "industryModifierSources",
+    () => {
+      for (const record of records<IndustryModifierSourcesRecord>("industryModifierSources.json")) {
+        industryModifierSourceByTypeId.set(record._key, record);
+      }
+      return industryModifierSourceByTypeId;
+    },
+  );
+}
+
+export function getIndustryTargetFilters() {
+  return getOnce(
+    "industryTargetFilters",
+    () => {
+      for (const record of records<IndustryTargetFiltersRecord>("industryTargetFilters.json")) {
+        industryTargetFilterById.set(record._key, record);
+      }
+      return industryTargetFilterById;
     },
   );
 }

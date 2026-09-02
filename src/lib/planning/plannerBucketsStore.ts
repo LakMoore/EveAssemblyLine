@@ -1,4 +1,5 @@
 import type { ClientBuildItem, ClientPlanBucket, PlanBucketLocations } from "./types";
+import { productionGroupDefinitions } from "./productionGroups";
 import { buildStoreName, getPlanningDatabase } from "./planningDatabase";
 
 const bucketsKey = "current-buckets";
@@ -31,6 +32,19 @@ function isClientBuildItem(value: unknown): value is ClientBuildItem {
   );
 }
 
+function isGroupAssignments(value: unknown): value is ClientPlanBucket["groupAssignments"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const validKeys = new Set(productionGroupDefinitions.map((group) => group.key));
+  return Object
+    .entries(value)
+    .every(
+      ([key, locationId]) =>
+        validKeys.has(key as (typeof productionGroupDefinitions)[number]["key"])
+        && Number.isSafeInteger(locationId)
+        && Number(locationId) > 0,
+    );
+}
+
 function isClientPlanBucket(value: unknown): value is ClientPlanBucket {
   if (!value || typeof value !== "object") return false;
   const bucket = value as Record<string, unknown>;
@@ -40,6 +54,7 @@ function isClientPlanBucket(value: unknown): value is ClientPlanBucket {
     && typeof bucket.name === "string"
     && bucket.name.trim().length > 0
     && isBucketLocations(bucket.locations)
+    && (bucket.groupAssignments === undefined || isGroupAssignments(bucket.groupAssignments))
     && Array.isArray(bucket.items)
     && bucket.items.every(isClientBuildItem)
   );

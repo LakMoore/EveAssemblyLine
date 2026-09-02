@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Clipboard, Copy, Save, Trash2, X } from "lucide-react";
+import { Clipboard, Copy, ListRestart, Save, Trash2, WandSparkles, X } from "lucide-react";
 import type { ClientBuildItem, ClientPlanBucket, PlanBucketLocations } from "@/lib/planning/types";
+import type { ProductionActivity, ProductionGroupKey } from "@/lib/planning/productionGroups";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,14 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
-} from "@/components/ui/drawer";
+import { DrawerFooter } from "@/components/ui/drawer";
 import {
   Combobox,
   ComboboxContent,
@@ -32,6 +26,15 @@ import {
   ComboboxList,
   useComboboxAnchor,
 } from "@/components/ui/combobox";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -39,7 +42,7 @@ import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import TypeSearch from "@/components/TypeSearch";
 import PasteListDialog from "@/components/PasteListDialog";
 import type { SdeLanguage } from "@/lib/reference/languages";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 
 type ActivityLocationOption = {
   locationId: number;
@@ -51,6 +54,19 @@ type ActivityLocationOption = {
 };
 
 type StockLocationOption = ActivityLocationOption;
+
+type GroupFacilityOption = ActivityLocationOption & {
+  sizeId: number;
+  materialPercentage: number;
+  timePercentage: number;
+};
+
+export type ProductionGroupOption = {
+  key: ProductionGroupKey;
+  label: string;
+  activity: ProductionActivity;
+  facilities: GroupFacilityOption[];
+};
 
 type LocationBonus = "manufacturing" | "reaction" | "reprocessing" | "none";
 
@@ -185,6 +201,8 @@ type PlannerBucketDetailsDialogProps = PlannerBucketDialogProps & {
   activityLocations: ActivityLocationOption[];
   stockLocations: StockLocationOption[];
   excludedStockLocationIds: number[];
+  productionGroups: ProductionGroupOption[];
+  onAutoAssign: (bucket: ClientPlanBucket) => Partial<Record<ProductionGroupKey, number>>;
 };
 
 type PlannerBucketItemsDialogProps = PlannerBucketDialogProps & {
@@ -196,26 +214,12 @@ const activityLocationFields: Array<{
   label: string;
   bonus: LocationBonus;
 }> = [
-  { key: "manufacturing", label: "Build location", bonus: "manufacturing" },
+  { key: "manufacturing", label: "Manufacturing location", bonus: "manufacturing" },
   { key: "reactions", label: "Reaction location", bonus: "reaction" },
   { key: "reprocessing", label: "Reprocessing location", bonus: "reprocessing" },
   { key: "copying", label: "Copying location", bonus: "manufacturing" },
   { key: "invention", label: "Invention location", bonus: "manufacturing" },
 ];
-
-function useIsMobile() {
-  const [isMobile, setIsMobile] = useState(false);
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia("(max-width: 640px)");
-    const update = () => setIsMobile(mediaQuery.matches);
-    update();
-    mediaQuery.addEventListener("change", update);
-    return () => mediaQuery.removeEventListener("change", update);
-  }, []);
-
-  return isMobile;
-}
 
 function addItems(
   current: ClientBuildItem[],
@@ -263,6 +267,7 @@ function BucketDetailsContent({
   activityLocations,
   stockLocations,
   excludedStockLocationIds,
+  productionGroups,
   error,
   onChange,
 }: {
@@ -270,6 +275,7 @@ function BucketDetailsContent({
   activityLocations: ActivityLocationOption[];
   stockLocations: StockLocationOption[];
   excludedStockLocationIds: number[];
+  productionGroups: ProductionGroupOption[];
   error: string;
   onChange: (bucket: ClientPlanBucket) => void;
 }) {
@@ -279,6 +285,16 @@ function BucketDetailsContent({
       ...draft,
       stockLocationName: location?.name ?? draft.stockLocationName,
       locations: { ...draft.locations, stock: locationId },
+    });
+  }
+
+  function selectGroupFacility(key: ProductionGroupKey, value: string | null) {
+    const assignments = { ...(draft.groupAssignments ?? {}) };
+    if (!value || value === "default") delete assignments[key];
+    else assignments[key] = Number(value);
+    onChange({
+      ...draft,
+      groupAssignments: Object.keys(assignments).length > 0 ? assignments : undefined,
     });
   }
 
@@ -295,9 +311,11 @@ function BucketDetailsContent({
           />
         </label>
         <div className="flex min-w-0 flex-col gap-2">
-          <span className="text-xs font-medium uppercase">Stock destination</span>
+          <span className="text-xs font-medium uppercase">
+            Stockpile location (end destination)
+          </span>
           <LocationCombobox
-            label="Stock destination"
+            label="Stockpile location (end destination)"
             options={stockLocations.filter(
               (location) =>
                 !excludedStockLocationIds.includes(location.locationId)
@@ -343,6 +361,97 @@ function BucketDetailsContent({
           );
         })}
       </div>
+
+      {productionGroups.length > 0 && (
+        <section className="flex min-w-0 flex-col gap-3 border-t pt-4">
+          <div>
+            <h3 className="text-sm font-medium">Production facilities</h3>
+            <p className="text-xs text-muted-foreground">
+              Optionally, assign specialized facilities by product group, or use the activity
+              default. The buttons in the footer are a great place to start.
+            </p>
+          </div>
+          <div className="grid min-w-0 gap-x-3 gap-y-8 sm:grid-cols-2">
+            {productionGroups.map((group) => {
+              const selectedId = draft.groupAssignments?.[group.key];
+              const selected = group.facilities.find(
+                (facility) => facility.locationId === selectedId,
+              );
+              const defaultFacility = activityLocations.find(
+                (facility) =>
+                  facility.locationId
+                  === draft.locations[
+                    group.activity === "manufacturing" ? "manufacturing" : "reactions"
+                  ],
+              );
+              const materialPercentage =
+                selected?.materialPercentage
+                ?? (group.activity === "manufacturing"
+                  ? defaultFacility?.baseManufacturingMe
+                  : defaultFacility?.baseReactionMe)
+                ?? 0;
+              const sortedFacilities = [...group.facilities].sort(
+                (left, right) =>
+                  left.materialPercentage - right.materialPercentage
+                  || left.name.localeCompare(right.name),
+              );
+              const groupedFacilities = [
+                { kind: "structure" as const, label: "Structures" },
+                { kind: "station" as const, label: "Stations" },
+              ].map((facilityGroup) => ({
+                ...facilityGroup,
+                facilities: sortedFacilities.filter(
+                  (facility) => facility.kind === facilityGroup.kind,
+                ),
+              }));
+              return (
+                <div className="flex min-w-0 flex-col gap-2" key={group.key}>
+                  <span className="flex items-center justify-between gap-2 text-xs font-medium uppercase">
+                    <span>{group.label}</span>
+                    <span className="shrink-0 text-muted-foreground">
+                      ME {materialPercentage > 0 ? "+" : ""}
+                      {materialPercentage.toFixed(1)}%
+                    </span>
+                  </span>
+                  <Select
+                    value={selectedId === undefined ? "default" : String(selectedId)}
+                    onValueChange={(value) => selectGroupFacility(group.key, value)}
+                    disabled={group.facilities.length === 0}
+                    items={[
+                      { value: "default", label: "Use manufacturing default" },
+                      ...sortedFacilities.map((facility) => ({
+                        value: String(facility.locationId),
+                        label: `${facility.name} (ME ${facility.materialPercentage > 0 ? "+" : ""}${facility.materialPercentage.toFixed(1)}%)`,
+                      })),
+                    ]}
+                  >
+                    <SelectTrigger className="w-full" aria-label={`${group.label} facility`}>
+                      <SelectValue placeholder="Use manufacturing default" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">Use manufacturing default</SelectItem>
+                      {groupedFacilities.map((facilityGroup) => (
+                        <SelectGroup key={facilityGroup.kind}>
+                          <SelectLabel>{facilityGroup.label}</SelectLabel>
+                          {facilityGroup.facilities.map((facility) => (
+                            <SelectItem
+                              value={String(facility.locationId)}
+                              key={`${group.key}-${facility.locationId}`}
+                            >
+                              {facility.name} (ME {facility.materialPercentage > 0 ? "+" : ""}
+                              {facility.materialPercentage.toFixed(1)}%)
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {error && (
         <Alert variant="destructive">
@@ -434,7 +543,7 @@ function BucketItemsContent({
           <div className="flex min-w-0 flex-col gap-2">
             {draft.items.map((item, index) => (
               <div
-                className="grid min-w-0 grid-cols-[minmax(0,1fr)_5rem_2rem] items-center gap-2"
+                className="grid min-w-0 grid-cols-[minmax(0,1fr)_8rem_2rem] items-center gap-2"
                 key={`${item.typeId}-${item.fromCompression}`}
               >
                 <TypeIdentity
@@ -508,6 +617,8 @@ function PlannerBucketDialogLayout({
   title,
   description,
   content,
+  onAuto,
+  onDefaultAll,
   onSave,
 }: {
   open: boolean;
@@ -515,64 +626,107 @@ function PlannerBucketDialogLayout({
   title: string;
   description: string;
   content: React.ReactNode;
+  onAuto?: () => void;
+  onDefaultAll?: () => void;
   onSave: () => void;
 }) {
-  const isMobile = useIsMobile();
+  const [pendingAction, setPendingAction] = useState<"auto" | "defaultAll" | null>(null);
+
+  function confirmAction() {
+    if (pendingAction === "auto") onAuto?.();
+    if (pendingAction === "defaultAll") onDefaultAll?.();
+    setPendingAction(null);
+  }
 
   if (!open) return null;
 
-  if (isMobile) {
-    return (
-      <Drawer open={open} onOpenChange={onOpenChange}>
-        <DrawerContent
-          className="h-[calc(100dvh-2rem)] max-h-[calc(100dvh-2rem)]"
-          style={{ marginInline: "0.5rem", width: "calc(100% - 1rem)" }}
-        >
-          <DrawerHeader>
-            <DrawerTitle>{title}</DrawerTitle>
-            <DrawerDescription>{description}</DrawerDescription>
-          </DrawerHeader>
-          <ScrollArea className="h-0 min-h-0 min-w-0 flex-1 overflow-hidden">
-            <div className="p-4">{content}</div>
-          </ScrollArea>
-          <DrawerFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              <X data-icon="inline-start" aria-hidden="true" />
-              Cancel
-            </Button>
-            <Button type="button" onClick={onSave}>
-              <Save data-icon="inline-start" aria-hidden="true" />
-              Save changes
-            </Button>
-          </DrawerFooter>
-        </DrawerContent>
-      </Drawer>
-    );
-  }
+  const actionButtons = (
+    <div className="flex gap-2">
+      {onAuto && (
+        <Button type="button" variant="outline" onClick={() => setPendingAction("auto")}>
+          <WandSparkles data-icon="inline-start" aria-hidden="true" />
+          Auto Assign
+        </Button>
+      )}
+      {onDefaultAll && (
+        <Button type="button" variant="outline" onClick={() => setPendingAction("defaultAll")}>
+          <ListRestart data-icon="inline-start" aria-hidden="true" />
+          Default All
+        </Button>
+      )}
+    </div>
+  );
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="h-[min(90vh,48rem)] max-h-[90vh] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-5xl"
-        style={{ width: "calc(100% - 2rem)" }}
-      >
+  const standardFooterActions = (
+    <div className="flex gap-2">
+      <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+        <X data-icon="inline-start" aria-hidden="true" />
+        Cancel
+      </Button>
+      <Button type="button" onClick={onSave}>
+        <Save data-icon="inline-start" aria-hidden="true" />
+        Save changes
+      </Button>
+    </div>
+  );
+
+  const confirmationDialog = (
+    <Dialog
+      open={pendingAction !== null}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) setPendingAction(null);
+      }}
+    >
+      <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+          <DialogTitle>Are you sure?</DialogTitle>
+          <DialogDescription>
+            {pendingAction === "auto"
+              ? "Auto assignment will replace the current production facility overrides."
+              : "Default All will clear every production facility override and use the activity defaults."}
+          </DialogDescription>
         </DialogHeader>
-        <ScrollArea className="min-h-0 min-w-0 overflow-hidden">{content}</ScrollArea>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            <X data-icon="inline-start" aria-hidden="true" />
+          <Button type="button" variant="outline" onClick={() => setPendingAction(null)}>
             Cancel
           </Button>
-          <Button type="button" onClick={onSave}>
-            <Save data-icon="inline-start" aria-hidden="true" />
-            Save changes
+          <Button type="button" onClick={confirmAction}>
+            Continue
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+
+  return (
+    <>
+      <ResponsiveDialogDrawer
+        open={open}
+        onOpenChange={onOpenChange}
+        title={title}
+        description={description}
+        drawerClassName="h-[80vh]"
+        drawerBodyClassName="pr-5"
+        drawerContentClassName="py-4"
+        drawerFooterContent={
+          <DrawerFooter className="flex-row justify-between sm:!justify-between">
+            {actionButtons}
+            {standardFooterActions}
+          </DrawerFooter>
+        }
+        dialogClassName="max-h-[90vh] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-4xl"
+        dialogBodyClassName=""
+        dialogFooterContent={
+          <DialogFooter className="flex-row justify-between sm:!justify-between">
+            {actionButtons}
+            {standardFooterActions}
+          </DialogFooter>
+        }
+      >
+        {content}
+      </ResponsiveDialogDrawer>
+      {confirmationDialog}
+    </>
   );
 }
 
@@ -582,6 +736,8 @@ export function PlannerBucketDetailsDialog({
   activityLocations,
   stockLocations,
   excludedStockLocationIds,
+  productionGroups,
+  onAutoAssign,
   onOpenChange,
   onSave,
 }: PlannerBucketDetailsDialogProps) {
@@ -606,6 +762,7 @@ export function PlannerBucketDetailsDialog({
       activityLocations={activityLocations}
       stockLocations={stockLocations}
       excludedStockLocationIds={excludedStockLocationIds}
+      productionGroups={productionGroups}
       error={error}
       onChange={setDraft}
     />
@@ -618,6 +775,14 @@ export function PlannerBucketDetailsDialog({
       title={bucket ? "Edit stockpile details" : "Add stockpile details"}
       description="Set the name and stations for this stockpile."
       content={content}
+      onAuto={() =>
+        setDraft((current) =>
+          current ? { ...current, groupAssignments: onAutoAssign(current) } : current,
+        )
+      }
+      onDefaultAll={() =>
+        setDraft((current) => (current ? { ...current, groupAssignments: undefined } : current))
+      }
       onSave={saveDraft}
     />
   );
