@@ -22,6 +22,22 @@ function statusForCompletionPercent(completionPercent: number): PlanJobInputStat
   return completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked";
 }
 
+/** Calculates the readiness percentage shown for an industry's inputs trigger. */
+export function getJobInputsCompletionPercent(
+  inputs: PlanJobInputs,
+  reactionFormulaCount?: number,
+): number {
+  if (reactionFormulaCount === undefined) {
+    return inputs.completionPercent;
+  }
+
+  const blueprintCompletionPercent = reactionFormulaCount > 0 ? 100 : 0;
+  return Math.min(
+    blueprintCompletionPercent,
+    ...inputs.materials.map((input) => input.completionPercent),
+  );
+}
+
 function InputRow({ input }: { input: PlanJobInput }) {
   return (
     <div className="grid grid-cols-[37px_minmax(0,1fr)_auto] items-center gap-x-2 border-t border-border/60 py-2 first:border-t-0">
@@ -67,12 +83,7 @@ export default function JobInputsResponsive({
         status: reactionFormulaCount > 0 ? ("ready" as const) : ("blocked" as const),
       }
     : inputs.blueprint;
-  const completionPercent = isReactionFormula
-    ? Math.min(
-        blueprint.completionPercent,
-        ...inputs.materials.map((input) => input.completionPercent),
-      )
-    : inputs.completionPercent;
+  const completionPercent = getJobInputsCompletionPercent(inputs, reactionFormulaCount);
   const status = statusForCompletionPercent(completionPercent);
   return (
     <ResponsiveDialogDrawer

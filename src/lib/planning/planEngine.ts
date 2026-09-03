@@ -430,6 +430,12 @@ async function calculatePlanPass(
       );
     }
   }
+  const jobAvailableByLocationAndType = new Map(
+    [...stockByLocationAndType].map(([locationId, quantities]) => [
+      locationId,
+      new Map(quantities),
+    ]),
+  );
   const haulingByKey = new Map<string, PlanResult["lists"]["haulingTasks"][number]>();
   const reprocessingLocationId =
     request.locations?.reprocessing ?? request.locations?.manufacturing;
@@ -503,6 +509,43 @@ async function calculatePlanPass(
     if (locationId === undefined) return 0;
     return industryOutputByLocationAndType.get(locationId)?.get(typeId) ?? 0;
   }
+  function getInstallableRuns(inputs: PlanJobInputs, requestedRuns: number) {
+    if (requestedRuns <= 0) return 0;
+    const requiredInputs = [inputs.blueprint, ...inputs.materials].filter(
+      (input) => input.requiredQuantity > 0,
+    );
+    if (requiredInputs.length === 0) return requestedRuns;
+    return Math.min(
+      requestedRuns,
+      ...requiredInputs.map((input) =>
+        Math.floor((input.availableQuantity * requestedRuns) / input.requiredQuantity),
+      ),
+    );
+  }
+  function reserveJobInputAvailability(
+    inputs: PlanJobInputs,
+    requestedRuns: number,
+    locationId: number | undefined,
+  ) {
+    const installableRuns = getInstallableRuns(inputs, requestedRuns);
+    if (installableRuns <= 0 || locationId === undefined) return;
+    for (const material of inputs.materials) {
+      const available = getLocationQuantity(
+        jobAvailableByLocationAndType,
+        locationId,
+        material.typeId,
+      );
+      if (available <= 0) continue;
+      const reserved = Math.min(
+        available,
+        Math.ceil((material.requiredQuantity * installableRuns) / requestedRuns),
+      );
+      const remaining = available - reserved;
+      const quantities = jobAvailableByLocationAndType.get(locationId);
+      if (remaining > 0) quantities?.set(material.typeId, remaining);
+      else quantities?.delete(material.typeId);
+    }
+  }
   function consumeAvailableStock(
     typeId: number,
     quantity: number,
@@ -558,23 +601,6 @@ async function calculatePlanPass(
       else industryOutputByType.delete(typeId);
     }
     return consumed;
-  }
-  function getRunsAvailable(
-    blueprint: NonNullable<
-      Awaited<ReturnType<typeof getBuildBlueprintByProductTypeId>>
-    >["blueprint"],
-    activity: "manufacturing" | "reaction",
-    locationId: number | undefined,
-  ) {
-    if (locationId === undefined) return 0;
-    const materials = blueprint.activities[activity]?.materials ?? [];
-    if (materials.length === 0) return 0;
-    const locationStock = stockByLocationAndType.get(locationId) ?? new Map();
-    return Math.min(
-      ...materials.map((material) =>
-        Math.floor((locationStock.get(material.typeID) ?? 0) / material.quantity),
-      ),
-    );
   }
   if (reprocessing) {
     for (const [typeId, quantity] of reprocessing.consumedOwned) {
@@ -741,9 +767,11 @@ async function calculatePlanPass(
           ? Math.ceil(material.quantity * runs * (1 - efficiency.me / 100))
           : material.quantity * runs;
       const adjustedRequiredQuantity = Math.ceil(requiredQuantity * materialMultiplier);
-      const availableQuantity =
-        getLocationQuantity(inStockByLocationAndType, locationId, material.typeID)
-        + getLocationQuantity(initialInBuildByLocationAndType, locationId, material.typeID);
+      const availableQuantity = getLocationQuantity(
+        jobAvailableByLocationAndType,
+        locationId,
+        material.typeID,
+      );
       return inputItem(
         "material",
         material.typeID,
@@ -796,7 +824,7 @@ async function calculatePlanPass(
           "material",
           material.typeId,
           material.name,
-          material.availableQuantity,
+          previous?.availableQuantity ?? material.availableQuantity,
           (previous?.requiredQuantity ?? 0) + material.requiredQuantity,
         ),
       );
@@ -1132,6 +1160,8 @@ async function calculatePlanPass(
             activityLocationId,
             profile.materialMultiplier,
           );
+          const installableRuns = getInstallableRuns(jobInputs, runsNeeded);
+          reserveJobInputAvailability(jobInputs, runsNeeded, activityLocationId);
           const mergedJobInputs = mergeJobInputs(
             existingInputs,
             jobInputs,
@@ -1146,8 +1176,7 @@ async function calculatePlanPass(
               runs: (existing?.runs ?? 0) + runsNeeded,
               runsAvailable: Math.min(
                 existing?.runsAvailable ?? Number.MAX_SAFE_INTEGER,
-                getRunsAvailable(blueprint, "manufacturing", activityLocationId),
-                runsNeeded,
+                installableRuns,
               ),
               totalTime:
                 (existing?.totalTime ?? 0)
@@ -1220,6 +1249,8 @@ async function calculatePlanPass(
           activityLocationId,
           profile.materialMultiplier,
         );
+        const installableRuns = getInstallableRuns(jobInputs, runsNeeded);
+        reserveJobInputAvailability(jobInputs, runsNeeded, activityLocationId);
         const mergedJobInputs = mergeJobInputs(existingInputs, jobInputs, false);
         jobInputsByBlueprint.set(blueprint._key, mergedJobInputs);
         reactionJobs.set(
@@ -1230,8 +1261,7 @@ async function calculatePlanPass(
             runs: (existing?.runs ?? 0) + runsNeeded,
             runsAvailable: Math.min(
               existing?.runsAvailable ?? Number.MAX_SAFE_INTEGER,
-              getRunsAvailable(blueprint, "reaction", activityLocationId),
-              runsNeeded,
+              installableRuns,
             ),
             totalTime:
               (existing?.totalTime ?? 0)

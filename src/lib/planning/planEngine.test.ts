@@ -10,6 +10,10 @@ const amberMykoserocinTypeId = 28694;
 const compressedAmberMykoserocinTypeId = 62377;
 const rifterTypeId = 587;
 const rifterBlueprintTypeId = 691;
+const amarrShuttleTypeId = 31462;
+const amarrShuttleBlueprintTypeId = 31463;
+const sharedTritaniumProductTypeId = 586;
+const sharedTritaniumBlueprintTypeId = 690;
 const reactionProductTypeId = 16672;
 const reactionFormulaTypeId = 46207;
 const fuelReactionProductTypeId = 16659;
@@ -1553,6 +1557,211 @@ test("reports manufacturing blueprint and material inputs", async () => {
   assert.equal(tritanium.availableQuantity, 32_000);
   assert.equal(tritanium.requiredQuantity, 32_000);
   assert.equal(tritanium.completionPercent, 100);
+});
+
+test("reports installable runs for 10 Rifters and 10 Amarr Shuttles", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: rifterBlueprintTypeId,
+          name: "Rifter Blueprint",
+          quantity: 1,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [{ itemId: 9010, type: "bpo", runs: -1 }],
+        },
+        {
+          typeId: amarrShuttleBlueprintTypeId,
+          name: "Amarr Shuttle Blueprint",
+          quantity: 1,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [{ itemId: 9011, type: "bpo", runs: -1 }],
+        },
+        {
+          typeId: tritaniumTypeId,
+          name: "Tritanium",
+          quantity: 160_000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 35,
+          name: "Pyerite",
+          quantity: 60_000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 36,
+          name: "Mexallon",
+          quantity: 25_000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 37,
+          name: "Isogen",
+          quantity: 5_000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 25618,
+          name: "Amarr Shuttle Material 1",
+          quantity: 50,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 25611,
+          name: "Amarr Shuttle Material 2",
+          quantity: 60,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 25620,
+          name: "Amarr Shuttle Material 3",
+          quantity: 80,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 11486,
+          name: "Amarr Shuttle Material 4",
+          quantity: 10,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 10,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+          {
+            typeId: amarrShuttleTypeId,
+            name: "Amarr Shuttle",
+            quantity: 10,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const rifterJob = result.lists.manufacturingJobs.find(
+    (entry) => entry.typeId === rifterBlueprintTypeId,
+  );
+  const shuttleJob = result.lists.manufacturingJobs.find(
+    (entry) => entry.typeId === amarrShuttleBlueprintTypeId,
+  );
+
+  assert(rifterJob);
+  assert(shuttleJob);
+  assert.equal(rifterJob.runs, 10);
+  assert.equal(rifterJob.runsAvailable, 5);
+  const tritanium = rifterJob.inputs.materials.find((input) => input.typeId === tritaniumTypeId);
+  assert(tritanium);
+  assert.equal(tritanium.requiredQuantity, 320_000);
+  assert.equal(tritanium.availableQuantity, 160_000);
+  assert.equal(tritanium.completionPercent, 50);
+  assert.equal(rifterJob.inputs.status, "partial");
+  assert.equal(shuttleJob.inputs.status, "ready");
+});
+
+test("reserves only installable runs before the next manufacturing step", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: rifterBlueprintTypeId,
+          name: "Rifter Blueprint",
+          quantity: 1,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [{ itemId: 9012, type: "bpo", runs: -1 }],
+        },
+        {
+          typeId: sharedTritaniumBlueprintTypeId,
+          name: "Shared Tritanium Product Blueprint",
+          quantity: 1,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [{ itemId: 9013, type: "bpo", runs: -1 }],
+        },
+        {
+          typeId: tritaniumTypeId,
+          name: "Tritanium",
+          quantity: 160_000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 35,
+          name: "Pyerite",
+          quantity: 126_000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 36,
+          name: "Mexallon",
+          quantity: 52_500,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 37,
+          name: "Isogen",
+          quantity: 10_500,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 10,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+          {
+            typeId: sharedTritaniumProductTypeId,
+            name: "Shared Tritanium Product",
+            quantity: 10,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const sharedMaterialJob = result.lists.manufacturingJobs.find(
+    (entry) => entry.typeId === sharedTritaniumBlueprintTypeId,
+  );
+
+  assert(sharedMaterialJob);
+  assert.equal(sharedMaterialJob.runsAvailable, 0);
+  const tritanium = sharedMaterialJob.inputs.materials.find(
+    (input) => input.typeId === tritaniumTypeId,
+  );
+  assert(tritanium);
+  assert.equal(tritanium.availableQuantity, 0);
 });
 
 test("reports total available BPC runs for manufacturing inputs", async () => {

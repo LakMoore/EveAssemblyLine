@@ -63,7 +63,9 @@ import { fetchTypeMetadata } from "@/lib/reference/types";
 import { useAppLanguage } from "../AppShell";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import CopyableText from "@/components/CopyableText";
-import JobInputsResponsive from "@/components/JobInputsResponsive";
+import JobInputsResponsive, {
+  getJobInputsCompletionPercent,
+} from "@/components/JobInputsResponsive";
 import CalculateButton from "@/components/CalculateButton";
 import TypeSearch from "@/components/TypeSearch";
 import { toast } from "@/components/ui/toast";
@@ -179,13 +181,40 @@ type PlanLocationOption = {
 type ReactionScheduleMode = "simple" | "available-slots" | "max-job-length";
 type ReactionSchedule = { installs: number; runs: number; time: number };
 type ReactionCoverage = { installable: number; total: number };
-type ReactionSortKey = "type" | "suggestedRuns" | "totalNeeded";
+type ReactionSortKey = "type" | "inputs" | "suggestedRuns" | "totalNeeded";
 type ReactionSort = { key: ReactionSortKey; direction: "asc" | "desc" };
 type ManufacturingSort = { key: "type" | "runs"; direction: "asc" | "desc" };
 type PlanViewMode = "all" | "build-location";
 
 function reactionJobKey(job: { typeId: number; locationId?: number }) {
   return `${job.locationId ?? "unlocated"}:${job.typeId}`;
+}
+
+/** Counts unused reaction formulas available at the job's reaction location. */
+function getReactionFormulaCount(
+  entry: PlanResult["lists"]["reactionJobs"][number],
+  stock: PlanStockItem[],
+): number {
+  if (entry.locationId === undefined) {
+    return 0;
+  }
+  return stock
+    .filter(
+      (stockItem) =>
+        stockItem.category === "reactionformula"
+        && stockItem.typeId === entry.typeId
+        && !stockItem.inUse
+        && getStockLocationId(stockItem) === entry.locationId,
+    )
+    .reduce((total, stockItem) => total + stockItem.quantity, 0);
+}
+
+/** Calculates the readiness percentage used to sort a reaction job. */
+function getReactionInputsCompletionPercent(
+  entry: PlanResult["lists"]["reactionJobs"][number],
+  stock: PlanStockItem[],
+): number {
+  return getJobInputsCompletionPercent(entry.inputs, getReactionFormulaCount(entry, stock));
 }
 
 const industrySkillIds = {
@@ -2326,27 +2355,37 @@ function PlanList({
               const leftValue =
                 reactionSort.key === "type"
                   ? left.name
-                  : reactionSort.key === "suggestedRuns"
-                    ? (leftSchedule?.runs ?? 0)
-                    : "runs" in left
-                      ? showTotalRunCounts
-                        ? left.runs
-                        : "runsAvailable" in left
-                          ? left.runsAvailable
-                          : left.runs
-                      : 0;
+                  : reactionSort.key === "inputs"
+                    ? getReactionInputsCompletionPercent(
+                        left as PlanResult["lists"]["reactionJobs"][number],
+                        stock,
+                      )
+                    : reactionSort.key === "suggestedRuns"
+                      ? (leftSchedule?.runs ?? 0)
+                      : "runs" in left
+                        ? showTotalRunCounts
+                          ? left.runs
+                          : "runsAvailable" in left
+                            ? left.runsAvailable
+                            : left.runs
+                        : 0;
               const rightValue =
                 reactionSort.key === "type"
                   ? right.name
-                  : reactionSort.key === "suggestedRuns"
-                    ? (rightSchedule?.runs ?? 0)
-                    : "runs" in right
-                      ? showTotalRunCounts
-                        ? right.runs
-                        : "runsAvailable" in right
-                          ? right.runsAvailable
-                          : right.runs
-                      : 0;
+                  : reactionSort.key === "inputs"
+                    ? getReactionInputsCompletionPercent(
+                        right as PlanResult["lists"]["reactionJobs"][number],
+                        stock,
+                      )
+                    : reactionSort.key === "suggestedRuns"
+                      ? (rightSchedule?.runs ?? 0)
+                      : "runs" in right
+                        ? showTotalRunCounts
+                          ? right.runs
+                          : "runsAvailable" in right
+                            ? right.runsAvailable
+                            : right.runs
+                        : 0;
               const comparison =
                 typeof leftValue === "string" && typeof rightValue === "string"
                   ? leftValue.localeCompare(rightValue)
@@ -2759,6 +2798,25 @@ function PlanList({
                 <ArrowDown aria-hidden="true" />
               ))}
           </button>
+          <button
+            type="button"
+            className={styles.reactionSortButton}
+            aria-label={`Sort reactions by Inputs${reactionSort.key === "inputs" ? `, currently ${reactionSort.direction}ending` : ""}`}
+            onClick={() =>
+              setReactionSort((current) => ({
+                key: "inputs",
+                direction: current.key === "inputs" && current.direction === "asc" ? "desc" : "asc",
+              }))
+            }
+          >
+            % inputs
+            {reactionSort.key === "inputs"
+              && (reactionSort.direction === "asc" ? (
+                <ArrowUp aria-hidden="true" />
+              ) : (
+                <ArrowDown aria-hidden="true" />
+              ))}
+          </button>
           <span>BPs available</span>
           <span>Suggested installs</span>
           <button
@@ -2960,15 +3018,10 @@ function PlanList({
                     : null;
                 const reactionFormulaCount =
                   activeTab === "React" && "inputs" in entry && "locationId" in entry
-                    ? stock
-                        .filter(
-                          (stockItem) =>
-                            stockItem.category === "reactionformula"
-                            && stockItem.typeId === typeId
-                            && !stockItem.inUse
-                            && getStockLocationId(stockItem) === entry.locationId,
-                        )
-                        .reduce((total, stockItem) => total + stockItem.quantity, 0)
+                    ? getReactionFormulaCount(
+                        entry as PlanResult["lists"]["reactionJobs"][number],
+                        stock,
+                      )
                     : 0;
                 const reactionPlan =
                   activeTab === "React"
@@ -3106,18 +3159,20 @@ function PlanList({
                           variation={imageVariation}
                           className={styles.planTypeIdentity}
                         />
-                        {(activeTab === "React" || activeTab === "Manufacture")
-                          && "inputs" in entry && (
-                            <span className={styles.jobInputsTrigger}>
-                              <JobInputsResponsive
-                                inputs={entry.inputs}
-                                reactionFormulaCount={
-                                  activeTab === "React" ? reactionFormulaCount : undefined
-                                }
-                              />
-                            </span>
-                          )}
+                        {activeTab === "Manufacture" && "inputs" in entry && (
+                          <span className={styles.jobInputsTrigger}>
+                            <JobInputsResponsive inputs={entry.inputs} />
+                          </span>
+                        )}
                       </div>
+                      {activeTab === "React" && "inputs" in entry && (
+                        <span className={styles.jobInputsTrigger}>
+                          <JobInputsResponsive
+                            inputs={entry.inputs}
+                            reactionFormulaCount={reactionFormulaCount}
+                          />
+                        </span>
+                      )}
                       {activeTab === "Plan" ? (
                         planColumns.map((column) =>
                           planCells?.[column] ? (

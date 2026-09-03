@@ -2444,7 +2444,7 @@
 .reactionTableHeader,
 .reactionRow {
   display: grid;
-  grid-template-columns: minmax(190px, 1.9fr) repeat(4, minmax(0, 0.78fr));
+  grid-template-columns: minmax(190px, 1.9fr) repeat(5, minmax(0, 0.78fr));
   gap: 13px;
   align-items: center;
 }
@@ -2935,6 +2935,11 @@
   .jobInputsTrigger {
     flex-basis: 100%;
     padding-left: 48px;
+  }
+
+  .reactionRow .jobInputsTrigger {
+    grid-column: 1;
+    width: 100%;
   }
 
   .manufacturingRow {
