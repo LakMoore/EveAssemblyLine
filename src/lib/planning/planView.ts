@@ -192,6 +192,36 @@ export function mergeBuyEntries(entries: PlanBuyEntry[]): PlanBuyEntry[] {
 }
 
 /**
+ * Group Buy rows by the localized market category used by the assets view.
+ *
+ * @param entries Aggregated planner purchase rows.
+ * @param marketCategoryByTypeId Market category metadata keyed by type ID.
+ * @returns Sorted market-category buckets containing sorted purchase rows.
+ */
+export function groupBuyEntriesByMarketCategory(
+  entries: PlanBuyEntry[],
+  marketCategoryByTypeId: Map<number, string>,
+): Map<string, PlanBuyEntry[]> {
+  const grouped = new Map<string, PlanBuyEntry[]>();
+  for (const entry of entries) {
+    const marketCategory = marketCategoryByTypeId.get(entry.typeId) ?? "Other";
+    const categoryEntries = grouped.get(marketCategory) ?? [];
+    categoryEntries.push(entry);
+    grouped.set(marketCategory, categoryEntries);
+  }
+  return new Map(
+    [...grouped.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([category, categoryEntries]) => [
+        category,
+        categoryEntries.sort(
+          (left, right) => left.name.localeCompare(right.name) || left.typeId - right.typeId,
+        ),
+      ]),
+  );
+}
+
+/**
  * Group plan rows by build location and aggregate duplicate types within each group.
  *
  * @param entries Plan rows from all planner buckets.

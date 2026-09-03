@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   getNonProductionHaulingQuantity,
+  groupBuyEntriesByMarketCategory,
   groupPlanItemEntriesByBuildLocation,
   mergeBuyEntries,
   mergePlanItemEntries,
@@ -130,6 +131,37 @@ test("merges duplicate Buy material rows by type ID", () => {
   assert.equal(rows.length, 1);
   assert.equal((rows[0] as BuyMaterialEntry).requiredQuantity, 15);
   assert.equal(rows[0].buyQuantity, 15);
+});
+
+test("groups Buy rows by market category", () => {
+  const rows = groupBuyEntriesByMarketCategory(
+    [
+      material({ typeId: 35, name: "Pyerite" }),
+      material({ typeId: 34, name: "Tritanium" }),
+      {
+        typeId: 12345,
+        name: "Example Blueprint",
+        quantity: 1,
+        neededQuantity: 1,
+        stockQuantity: 0,
+        stockRuns: 0,
+        buyQuantity: 1,
+        bpoCount: 0,
+        buildTime: 1,
+      },
+    ],
+    new Map([
+      [35, "Minerals"],
+      [34, "Minerals"],
+      [12345, "Blueprints"],
+    ]),
+  );
+
+  assert.deepEqual([...rows.keys()], ["Blueprints", "Minerals"]);
+  assert.deepEqual(
+    rows.get("Minerals")?.map((row) => row.name),
+    ["Pyerite", "Tritanium"],
+  );
 });
 
 test("merges duplicate Buy BPC rows by type ID", () => {

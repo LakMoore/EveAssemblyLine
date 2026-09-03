@@ -4,7 +4,6 @@ import {
   type ChangeEvent,
   Fragment,
   FormEvent,
-  KeyboardEvent,
   type RefObject,
   useEffect,
   useRef,
@@ -21,7 +20,7 @@ import type {
   PlanSourceIcon,
   PlanStockItem,
 } from "@/lib/planning/types";
-import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
+import { loadBuildList } from "@/lib/planning/buildListStore";
 import { loadPlannerBuckets, savePlannerBuckets } from "@/lib/planning/plannerBucketsStore";
 import { loadStructures } from "@/lib/planning/structureStore";
 import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
@@ -44,6 +43,7 @@ import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
 import { loadPlannerReprocessingEfficiencies } from "@/lib/planning/reprocessingClient";
 import {
   getNonProductionHaulingQuantity,
+  groupBuyEntriesByMarketCategory,
   groupPlanItemEntriesByBuildLocation,
   mergeBuyEntries,
   mergePlanItemEntries,
@@ -1857,6 +1857,7 @@ function Planner() {
             {plan ? (
               <PlanList
                 activeTab={activeTab}
+                language={language}
                 plan={plan}
                 characterStatuses={characterStatuses}
                 characterNamesById={characterNamesById}
@@ -2055,6 +2056,7 @@ function ExcludedLocationsModal({
 
 function PlanList({
   activeTab,
+  language,
   plan,
   characterStatuses,
   characterNamesById,
@@ -2068,6 +2070,7 @@ function PlanList({
   resultsHeaderRef,
 }: {
   activeTab: PlannerTab;
+  language: SdeLanguage;
   plan: PlanResult;
   characterStatuses: ClientCharacterStatus[];
   characterNamesById: Map<number, string>;
@@ -2156,6 +2159,35 @@ function PlanList({
             plan.metadata.availableStockByTypeId,
           )
         : rawList;
+  const buyTypeKey =
+    activeTab === "Buy"
+      ? [...new Set((list as PlanBuyEntry[]).map((entry) => entry.typeId))].join(",")
+      : "";
+  const [buyMarketCategories, setBuyMarketCategories] = useState<Map<number, string>>(
+    () => new Map(),
+  );
+  useEffect(() => {
+    if (activeTab !== "Buy" || buyTypeKey === "") return;
+    let cancelled = false;
+    const buyTypeIds = buyTypeKey.split(",").map(Number);
+    void fetchTypeMetadata(buyTypeIds, language)
+      .then((metadata) => {
+        if (cancelled) return;
+        setBuyMarketCategories(
+          new Map(
+            metadata.flatMap((item) =>
+              item.marketCategory ? [[item.typeId, item.marketCategory] as const] : [],
+            ),
+          ),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setBuyMarketCategories(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, buyTypeKey, language]);
   const locationGroupedTab =
     activeTab === "Reprocess"
     || activeTab === "React"
@@ -2193,9 +2225,17 @@ function PlanList({
     const rightName = locationNamesById.get(right ?? 0) ?? String(right ?? "Location unavailable");
     return leftName.localeCompare(rightName);
   });
+  const categoryGroupedTab = activeTab === "Buy";
+  const categoryBuckets = categoryGroupedTab
+    ? groupBuyEntriesByMarketCategory(list as PlanBuyEntry[], buyMarketCategories)
+    : undefined;
   const displayBuckets = (
-    locationGroupedTab ? sortedLocationBuckets : [[undefined, list as PlanListEntry[]]]
-  ) as Array<[number | undefined, PlanListEntry[]]>;
+    categoryGroupedTab
+      ? [...(categoryBuckets ?? new Map())]
+      : locationGroupedTab
+        ? sortedLocationBuckets
+        : [[undefined, list as PlanListEntry[]]]
+  ) as Array<[number | string | undefined, PlanListEntry[]]>;
   const reactionSchedule = buildReactionSchedule(
     plan.lists.reactionJobs,
     stock,
@@ -2879,9 +2919,15 @@ function PlanList({
         <div className={activeTab === "Plan" ? styles.planTable : styles.planList}>
           {sortedDisplayBuckets.map(([locationId, entries]) => (
             <Fragment key={locationId ?? "unlocated"}>
-              {locationGroupedTab && (
+              {(locationGroupedTab || categoryGroupedTab) && (
                 <h3 className={styles.locationGroupHeader}>
-                  {locationNamesById.get(locationId ?? 0) ?? locationId ?? "Location unavailable"}
+                  {categoryGroupedTab
+                    ? locationId
+                    : (
+                        locationNamesById.get(Number(locationId ?? 0))
+                        ?? locationId
+                        ?? "Location unavailable"
+                      )}
                 </h3>
               )}
               {entries.map((entry, index) => {
