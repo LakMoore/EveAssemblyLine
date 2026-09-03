@@ -21,7 +21,11 @@ import {
   getHaulerShipTypeIds,
   getBlueprintById,
 } from "@/cache/services/sdeCache";
-import { getCharacter } from "@/lib/auth/tokensStore";
+import {
+  clearCharacterCorporationAuthorization,
+  getCharacter,
+  updateCharacterCorporationAuthorization,
+} from "@/lib/auth/tokensStore";
 import {
   fetchCharacterAssets,
   fetchAssetNames,
@@ -35,6 +39,7 @@ import {
   fetchCharacterMarketOrders,
   fetchCharacterClones,
   fetchCharacterSkills,
+  fetchCharacterCorporationAuthorization,
   fetchCorporationMarketOrders,
   fetchCorporationStructures,
   fetchSolarSystemMetadata,
@@ -1084,6 +1089,11 @@ export function copyRefreshCache(
   cacheMap.set(`${targetSessionId}:${ownerId}`, structuredClone(sourceCache));
 }
 
+/** Removes corporation data retained for a session after its authorization is revoked. */
+export function invalidateCorporationCache(corporationId: number, sessionId: string) {
+  corporationCaches.delete(`${sessionId}:${corporationId}`);
+}
+
 export async function refreshCharacterState(
   character: CharacterTokenRecord,
   sessionId: string,
@@ -1502,10 +1512,46 @@ export async function refreshCorporationState(
   profiler: RefreshProfiler,
 ): Promise<void> {
   profiler.start("authorization");
-  const authorized = character.hasDirectorRole && character.corporationId === corporationId;
-  profiler.end("authorization");
-  if (!authorized) throw new Error("Corporation authorization is incomplete");
-  await refreshCorporationCache(character, corporationId, sessionId, profiler);
+  try {
+    const verification = await fetchCharacterCorporationAuthorization(
+      character.characterId,
+      character.personalAuth,
+      corporationId,
+    );
+    if (!verification.authorized || !verification.roles) {
+      invalidateCorporationCache(corporationId, sessionId);
+      await clearCharacterCorporationAuthorization(character.characterId);
+      throw new Error("Corporation authorization is incomplete");
+    }
+    const updatedCharacter = await updateCharacterCorporationAuthorization(
+      character.characterId,
+      {
+        corporationId: verification.corporationId,
+        allianceId: verification.characterInfo.alliance_id,
+        corporationRoles: verification.roles.roles,
+        rolesAtBase: verification.roles.rolesAtBase,
+        rolesAtHq: verification.roles.rolesAtHq,
+        rolesAtOther: verification.roles.rolesAtOther,
+        hasDirectorRole: verification.roles.roles.includes("Director"),
+        hasAccountantRole: verification.roles.roles.includes("Accountant"),
+        hasTraderRole: verification.roles.roles.includes("Trader"),
+        hasStationManagerRole: verification.roles.roles.includes("Station_Manager"),
+      },
+    );
+    if (!updatedCharacter) {
+      invalidateCorporationCache(corporationId, sessionId);
+      throw new Error("Character authorization record is missing");
+    }
+    await refreshCorporationCache(
+      { ...updatedCharacter, personalAuth: verification.token },
+      corporationId,
+      sessionId,
+      profiler,
+    );
+  }
+  finally {
+    profiler.end("authorization");
+  }
 }
 
 export async function getRunningIndustryJobs(

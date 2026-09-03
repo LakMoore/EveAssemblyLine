@@ -2114,6 +2114,10 @@ function PlanList({
 }) {
   const router = useRouter();
   const [copyStatus, setCopyStatus] = useState("");
+  const [groupCopyStatus, setGroupCopyStatus] = useState<{
+    category: string;
+    label: string;
+  } | null>(null);
   const [excludingHaulFromLocationId, setExcludingHaulFromLocationId] = useState<number | null>(
     null,
   );
@@ -2525,6 +2529,24 @@ function PlanList({
     }
     catch {
       setCopyStatus("Copy failed");
+    }
+  }
+
+  async function copyGroupMultibuy(category: string, entries: PlanBuyEntry[]) {
+    try {
+      await navigator.clipboard.writeText(
+        entries.map((entry) => `${entry.name}\t${getListAmount(entry)}`).join("\n"),
+      );
+      setGroupCopyStatus({ category, label: "Copied" });
+      window.setTimeout(
+        () => {
+          setGroupCopyStatus((current) => (current?.category === category ? null : current));
+        },
+        1600,
+      );
+    }
+    catch {
+      setGroupCopyStatus({ category, label: "Copy failed" });
     }
   }
 
@@ -2979,13 +3001,29 @@ function PlanList({
             <Fragment key={locationId ?? "unlocated"}>
               {(locationGroupedTab || categoryGroupedTab) && (
                 <h3 className={styles.locationGroupHeader}>
-                  {categoryGroupedTab
-                    ? locationId
-                    : (
-                        locationNamesById.get(Number(locationId ?? 0))
-                        ?? locationId
-                        ?? "Location unavailable"
-                      )}
+                  <span>
+                    {categoryGroupedTab
+                      ? locationId
+                      : (
+                          locationNamesById.get(Number(locationId ?? 0))
+                          ?? locationId
+                          ?? "Location unavailable"
+                        )}
+                  </span>
+                  {categoryGroupedTab && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() =>
+                        void copyGroupMultibuy(String(locationId), entries as PlanBuyEntry[])
+                      }
+                    >
+                      <CopyIcon aria-hidden="true" />
+                      {groupCopyStatus?.category === String(locationId)
+                        ? groupCopyStatus.label
+                        : "Copy Group Multibuy"}
+                    </Button>
+                  )}
                 </h3>
               )}
               {entries.map((entry, index) => {

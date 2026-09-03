@@ -15,7 +15,11 @@ export interface CharacterTokenRecord {
   collectionId?: string;
   personalAuth: TokenSet;
   corporationId?: number;
+  allianceId?: number;
   corporationRoles?: string[];
+  rolesAtBase?: string[];
+  rolesAtHq?: string[];
+  rolesAtOther?: string[];
   hasDirectorRole?: boolean;
   hasAccountantRole?: boolean;
   hasTraderRole?: boolean;

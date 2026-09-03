@@ -101,6 +101,30 @@ export type EsiCharacterClones = {
   clones?: EsiCharacterClone[];
 };
 
+/** The complete public character body returned by ESI. */
+export type EsiCharacterPublicInfo = {
+  alliance_id?: number;
+  ancestry_id?: number;
+  bloodline_id?: number;
+  birthday: string;
+  character_id?: number;
+  corporation_id: number;
+  description: string;
+  faction_id?: number;
+  gender: string;
+  name: string;
+  race_id: number;
+  security_status: number;
+  title?: string;
+};
+
+export type EsiCharacterRoles = {
+  roles: string[];
+  rolesAtBase: string[];
+  rolesAtHq: string[];
+  rolesAtOther: string[];
+};
+
 export type EsiAsset = {
   item_id: number;
   type_id: number;
@@ -199,7 +223,7 @@ type LocationMetadataResponse = {
   fromCache: boolean;
 };
 
-async function getUsableToken(record: CharacterTokenRecord) {
+async function getUsableToken(record: Pick<CharacterTokenRecord, "characterId" | "personalAuth">) {
   const tokenSet = record.personalAuth;
   tokenContexts.set(tokenSet, { characterId: record.characterId });
   if (Date.parse(tokenSet.accessTokenExpiresAt) > Date.now() + 5 * 60 * 1000) return tokenSet;
@@ -322,11 +346,7 @@ async function requestEsiAttempt<T>(
     return { data: null, headers: response.headers, status: response.status, fromCache: false };
   }
   if (!response.ok) {
-    if (
-      (response.status === 401 || response.status === 403)
-      && tokenSet
-      && options.retryAuthorization !== false
-    ) {
+    if (response.status === 401 && tokenSet && options.retryAuthorization !== false) {
       const context = tokenContexts.get(tokenSet);
       const current = context ? await getCharacter(context.characterId) : null;
       const currentTokenSet = context ? current?.personalAuth : undefined;
@@ -347,7 +367,7 @@ async function requestEsiAttempt<T>(
           },
         );
       }
-      if (response.status === 401 && context) {
+      if (context) {
         try {
           const refreshedTokenSet = await refreshTokenAfterAuthorizationFailure(
             context.characterId,
@@ -414,12 +434,17 @@ export async function requestCachedEsi<T>(
   path: string,
   tokenSet?: TokenSet,
   init?: RequestInit,
-  options: { skipCacheWrite?: boolean; retryAuthorization?: boolean } = {},
+  options: {
+    skipCacheWrite?: boolean;
+    retryAuthorization?: boolean;
+    cacheKey?: string;
+  } = {},
 ): Promise<{ data: T | null; headers: Headers; status: number; fromCache: boolean }> {
   const body = typeof init?.body === "string" ? init.body : "";
-  const cachePath = body
+  const requestCachePath = body
     ? `${path}&body_hash=${createHash("sha256").update(body).digest("hex")}`
     : path;
+  const cachePath = options.cacheKey ?? requestCachePath;
   const cached = await getCachedEsiResponse<T>(cachePath);
   if (cached) {
     const cachedHeaders = new Headers(cached.headers);
@@ -941,10 +966,17 @@ export async function fetchAssetLocations(
   return locations;
 }
 
+export async function fetchCharacterPublicInfo(characterId: number) {
+  const result = await requestCachedEsi<EsiCharacterPublicInfo>(`/characters/${characterId}/`);
+  if (!result.data || !Number.isInteger(result.data.corporation_id)) {
+    throw new Error("Missing character verification response");
+  }
+  return result.data;
+}
+
 export async function fetchCharacterCorporationId(characterId: number) {
-  const result = await requestCachedEsi<{ corporation_id: number }>(`/characters/${characterId}/`);
-  if (!result.data) throw new Error("Missing corporation verification response");
-  return result.data.corporation_id;
+  const characterInfo = await fetchCharacterPublicInfo(characterId);
+  return characterInfo.corporation_id;
 }
 
 export async function fetchUniverseNames(ids: number[]) {
@@ -971,12 +1003,101 @@ export async function fetchUniverseNames(ids: number[]) {
 }
 
 export async function fetchCharacterRoles(characterId: number, token: TokenSet) {
-  const result = await requestCachedEsi<{ roles?: string[] }>(
-    `/characters/${characterId}/roles/`,
-    token,
-  );
+  const result = await requestCachedEsi<{
+    roles?: string[];
+    roles_at_base?: string[];
+    roles_at_hq?: string[];
+    roles_at_other?: string[];
+  }>(`/characters/${characterId}/roles/`, token);
   if (!result.data) throw new Error("Missing roles verification response");
-  return result.data.roles ?? [];
+  return {
+    roles: result.data.roles ?? [],
+    rolesAtBase: result.data.roles_at_base ?? [],
+    rolesAtHq: result.data.roles_at_hq ?? [],
+    rolesAtOther: result.data.roles_at_other ?? [],
+  };
+}
+
+/** Fetches the corporation member list with a cache entry scoped to this character's token. */
+export async function fetchCorporationMembers(
+  characterId: number,
+  corporationId: number,
+  token: TokenSet,
+) {
+  const membershipScope = "esi-corporations.read_corporation_membership.v1";
+  if (!token.scopes.includes(membershipScope)) {
+    const error = new Error(`Missing required ESI scope: ${membershipScope}`);
+    (error as Error & { reauthorizeRequired?: boolean }).reauthorizeRequired = true;
+    throw error;
+  }
+  const usableToken = await getUsableToken({
+    characterId,
+    personalAuth: token,
+  });
+  const result = await requestCachedEsi<number[]>(
+    `/corporations/${corporationId}/members/`,
+    usableToken,
+    undefined,
+    { cacheKey: `/corporations/${corporationId}/members/?character_id=${characterId}` },
+  );
+  if (!Array.isArray(result.data) || !result.data.every((memberId) => Number.isInteger(memberId))) {
+    throw new Error("Missing corporation membership response");
+  }
+  return { members: result.data, token: usableToken };
+}
+
+export type CharacterCorporationAuthorization = {
+  authorized: boolean;
+  characterInfo: EsiCharacterPublicInfo;
+  corporationId: number;
+  roles: EsiCharacterRoles | null;
+  token: TokenSet;
+};
+
+/** Revalidates current corporation membership before allowing corporation data access. */
+export async function fetchCharacterCorporationAuthorization(
+  characterId: number,
+  token: TokenSet,
+  expectedCorporationId?: number,
+): Promise<CharacterCorporationAuthorization> {
+  const characterInfo = await fetchCharacterPublicInfo(characterId);
+  const corporationId = characterInfo.corporation_id;
+  if (!token.scopes.includes("esi-corporations.read_corporation_membership.v1")) {
+    return { authorized: false, characterInfo, corporationId, roles: null, token };
+  }
+
+  let membership: Awaited<ReturnType<typeof fetchCorporationMembers>>;
+  try {
+    membership = await fetchCorporationMembers(characterId, corporationId, token);
+  }
+  catch (error) {
+    const status = (error as { status?: number }).status;
+    if (status === 401 || status === 403) {
+      return { authorized: false, characterInfo, corporationId, roles: null, token };
+    }
+    throw error;
+  }
+  if (
+    !membership.members.includes(characterId)
+    || (expectedCorporationId !== undefined && expectedCorporationId !== corporationId)
+    || !token.scopes.includes("esi-characters.read_corporation_roles.v1")
+  ) {
+    return {
+      authorized: false,
+      characterInfo,
+      corporationId,
+      roles: null,
+      token: membership.token,
+    };
+  }
+  const roles = await fetchCharacterRoles(characterId, membership.token);
+  return {
+    authorized: true,
+    characterInfo,
+    corporationId,
+    roles,
+    token: membership.token,
+  };
 }
 
 function fetchPublicLocationMetadata(path: string, token?: TokenSet) {

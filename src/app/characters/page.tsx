@@ -812,6 +812,24 @@ export default function CharactersPage() {
                         ? selectedCharacter.corporationRoles.join(", ")
                         : "No corporation roles reported"}
                     </div>
+                    <div>
+                      <strong>Base:</strong>{" "}
+                      {selectedCharacter.rolesAtBase.length > 0
+                        ? selectedCharacter.rolesAtBase.join(", ")
+                        : "No roles reported"}
+                    </div>
+                    <div>
+                      <strong>HQ:</strong>{" "}
+                      {selectedCharacter.rolesAtHq.length > 0
+                        ? selectedCharacter.rolesAtHq.join(", ")
+                        : "No roles reported"}
+                    </div>
+                    <div>
+                      <strong>Other:</strong>{" "}
+                      {selectedCharacter.rolesAtOther.length > 0
+                        ? selectedCharacter.rolesAtOther.join(", ")
+                        : "No roles reported"}
+                    </div>
                   </div>
                 </DialogBody>
               </DialogContent>

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { getEsiTtlMs } from "@/cache/esiTtl";
 import {
   buildCurrentShipAsset,
   endpointDataStatus,
@@ -7,6 +8,14 @@ import {
   getKnownNonStructureItemIds,
   setFresh,
 } from "./cache";
+
+test("uses a slow cache for public character data and a shorter member-list cache", () => {
+  assert.equal(getEsiTtlMs("/characters/42/", null, null), 24 * 60 * 60 * 1000);
+  assert.equal(
+    getEsiTtlMs("/corporations/777/members/?character_id=42", null, null),
+    5 * 60 * 1000,
+  );
+});
 
 test("uses only response Last-Modified and Expires metadata", () => {
   const previous = setFresh(

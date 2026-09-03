@@ -64,7 +64,11 @@ function normalizeCharacter(value: unknown): CharacterTokenRecord | null {
     collectionId: record.collectionId ?? record.accountId,
     personalAuth,
     corporationId: record.corporationId,
+    allianceId: record.allianceId,
     corporationRoles: Array.isArray(record.corporationRoles) ? record.corporationRoles : [],
+    rolesAtBase: Array.isArray(record.rolesAtBase) ? record.rolesAtBase : [],
+    rolesAtHq: Array.isArray(record.rolesAtHq) ? record.rolesAtHq : [],
+    rolesAtOther: Array.isArray(record.rolesAtOther) ? record.rolesAtOther : [],
     hasDirectorRole: record.hasDirectorRole,
     hasAccountantRole: record.hasAccountantRole,
     hasTraderRole: record.hasTraderRole,
@@ -152,6 +156,51 @@ export async function saveCharacter(record: CharacterTokenRecord): Promise<void>
     }
     transaction.setItem("collections", collections);
   });
+}
+
+/** Updates corporation authorization fields without overwriting a separately rotated token. */
+export async function updateCharacterCorporationAuthorization(
+  characterId: number,
+  authorization: Pick<
+    CharacterTokenRecord,
+    | "corporationId"
+    | "allianceId"
+    | "corporationRoles"
+    | "rolesAtBase"
+    | "rolesAtHq"
+    | "rolesAtOther"
+    | "hasDirectorRole"
+    | "hasAccountantRole"
+    | "hasTraderRole"
+    | "hasStationManagerRole"
+  >,
+): Promise<CharacterTokenRecord | null> {
+  const storage = await initStorage();
+  await storage.runTransaction(async (transaction) => {
+    const stored = await transaction.getItem<unknown>(characterRecordKey(characterId));
+    if (!stored || typeof stored !== "object") return;
+    transaction.setItem(characterRecordKey(characterId), { ...stored, ...authorization });
+  });
+  return getCharacter(characterId);
+}
+
+/** Removes corporation identity, roles, and authorization flags from a character record. */
+export async function clearCharacterCorporationAuthorization(characterId: number) {
+  return updateCharacterCorporationAuthorization(
+    characterId,
+    {
+      corporationId: undefined,
+      allianceId: undefined,
+      corporationRoles: [],
+      rolesAtBase: [],
+      rolesAtHq: [],
+      rolesAtOther: [],
+      hasDirectorRole: false,
+      hasAccountantRole: false,
+      hasTraderRole: false,
+      hasStationManagerRole: false,
+    },
+  );
 }
 
 export function normalizeSessions(

@@ -7,7 +7,8 @@ import {
   sameState,
   validateToken,
 } from "@/lib/auth/eveSso";
-import { fetchCharacterCorporationId, fetchCharacterRoles } from "@/lib/esi/client";
+import { fetchCharacterCorporationAuthorization } from "@/lib/esi/client";
+import { invalidateCorporationCache } from "@/lib/esi/cache";
 import {
   createCollection,
   getCollectionForCharacter,
@@ -112,23 +113,40 @@ export async function GET(request: Request) {
       ?? characterCollection?.collectionId
       ?? (await createCollection()).collectionId;
     const session = existingSession ?? (await createSession(resolvedCollectionId));
-    const corporationId = await fetchCharacterCorporationId(identity.characterId);
-    const roles = tokenSet.scopes.includes("esi-characters.read_corporation_roles.v1")
-      ? await fetchCharacterRoles(identity.characterId, tokenSet)
-      : [];
+    const corporationAuthorization = await fetchCharacterCorporationAuthorization(
+      identity.characterId,
+      tokenSet,
+    );
+    const roles = corporationAuthorization.roles ?? {
+      roles: [],
+      rolesAtBase: [],
+      rolesAtHq: [],
+      rolesAtOther: [],
+    };
+    if (!corporationAuthorization.authorized && existingCharacter?.corporationId !== undefined) {
+      invalidateCorporationCache(existingCharacter.corporationId, session.sessionId);
+    }
     await saveCharacter({
       ...existingCharacter,
       characterId: identity.characterId,
       characterName: identity.characterName ?? `Character ${identity.characterId}`,
       onDeployment: existingCharacter?.onDeployment ?? false,
       collectionId: resolvedCollectionId,
-      personalAuth: tokenSet,
-      corporationId,
-      corporationRoles: roles,
-      hasDirectorRole: roles.includes("Director"),
-      hasAccountantRole: roles.includes("Accountant"),
-      hasTraderRole: roles.includes("Trader"),
-      hasStationManagerRole: roles.includes("Station_Manager"),
+      personalAuth: corporationAuthorization.token,
+      corporationId: corporationAuthorization.authorized
+        ? corporationAuthorization.corporationId
+        : undefined,
+      allianceId: corporationAuthorization.authorized
+        ? corporationAuthorization.characterInfo.alliance_id
+        : undefined,
+      corporationRoles: roles.roles,
+      rolesAtBase: roles.rolesAtBase,
+      rolesAtHq: roles.rolesAtHq,
+      rolesAtOther: roles.rolesAtOther,
+      hasDirectorRole: roles.roles.includes("Director"),
+      hasAccountantRole: roles.roles.includes("Accountant"),
+      hasTraderRole: roles.roles.includes("Trader"),
+      hasStationManagerRole: roles.roles.includes("Station_Manager"),
     });
     if (!session.collectionId) session.collectionId = resolvedCollectionId;
     await saveSession(session);

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth/session";
-import { fetchCharacterCorporationId, fetchCharacterRoles } from "@/lib/esi/client";
+import { fetchCharacterCorporationAuthorization } from "@/lib/esi/client";
+import { invalidateCorporationCache } from "@/lib/esi/cache";
 import {
   deletePendingMerge,
   getCharacter,
@@ -67,23 +68,40 @@ export async function POST(request: Request) {
   if (!session) return NextResponse.json({ error: "Session not found." }, { status: 404 });
   try {
     await mergeCollections(pending.targetCollectionId, pending.sourceCollectionId);
-    const corporationId = await fetchCharacterCorporationId(pending.characterId);
-    const roles = pending.scopes.includes("esi-characters.read_corporation_roles.v1")
-      ? await fetchCharacterRoles(pending.characterId, pending.tokenSet)
-      : [];
+    const corporationAuthorization = await fetchCharacterCorporationAuthorization(
+      pending.characterId,
+      pending.tokenSet,
+    );
+    const roles = corporationAuthorization.roles ?? {
+      roles: [],
+      rolesAtBase: [],
+      rolesAtHq: [],
+      rolesAtOther: [],
+    };
     const existing = await getCharacter(pending.characterId);
+    if (!corporationAuthorization.authorized && existing?.corporationId !== undefined) {
+      invalidateCorporationCache(existing.corporationId, session.sessionId);
+    }
     await saveCharacter({
       ...existing,
       characterId: pending.characterId,
       characterName: pending.characterName ?? `Character ${pending.characterId}`,
       collectionId: pending.targetCollectionId,
-      personalAuth: pending.tokenSet,
-      corporationId,
-      corporationRoles: roles,
-      hasDirectorRole: roles.includes("Director"),
-      hasAccountantRole: roles.includes("Accountant"),
-      hasTraderRole: roles.includes("Trader"),
-      hasStationManagerRole: roles.includes("Station_Manager"),
+      personalAuth: corporationAuthorization.token,
+      corporationId: corporationAuthorization.authorized
+        ? corporationAuthorization.corporationId
+        : undefined,
+      allianceId: corporationAuthorization.authorized
+        ? corporationAuthorization.characterInfo.alliance_id
+        : undefined,
+      corporationRoles: roles.roles,
+      rolesAtBase: roles.rolesAtBase,
+      rolesAtHq: roles.rolesAtHq,
+      rolesAtOther: roles.rolesAtOther,
+      hasDirectorRole: roles.roles.includes("Director"),
+      hasAccountantRole: roles.roles.includes("Accountant"),
+      hasTraderRole: roles.roles.includes("Trader"),
+      hasStationManagerRole: roles.roles.includes("Station_Manager"),
     });
     await deletePendingMerge(value.mergeId);
     const response = NextResponse.json({ success: true });

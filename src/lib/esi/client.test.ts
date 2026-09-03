@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { CharacterTokenRecord, TokenSet } from "@/lib/auth/model";
 import {
+  fetchCharacterCorporationAuthorization,
   fetchCharacterIndustryJobs,
   fetchCharacterLocation,
+  fetchCharacterRoles,
   fetchCharacterShip,
   fetchEsiEndpoint,
 } from "./client";
@@ -21,6 +23,119 @@ const character: CharacterTokenRecord = {
   characterName: "Test Pilot",
   personalAuth: token,
 };
+
+test("maps character role locations from the ESI response", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = async () =>
+    Response.json({
+      roles: ["Factory_Manager"],
+      roles_at_base: ["Container_Take_2"],
+      roles_at_hq: ["Hangar_Query_6"],
+      roles_at_other: ["Hangar_Take_2"],
+    });
+
+  const result = await fetchCharacterRoles(42, token);
+
+  assert.deepEqual(
+    result,
+    {
+      roles: ["Factory_Manager"],
+      rolesAtBase: ["Container_Take_2"],
+      rolesAtHq: ["Hangar_Query_6"],
+      rolesAtOther: ["Hangar_Take_2"],
+    },
+  );
+});
+
+test("checks corporation membership before fetching roles and reuses cached responses", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const scopedToken = {
+    ...token,
+    scopes: [
+      "esi-corporations.read_corporation_membership.v1",
+      "esi-characters.read_corporation_roles.v1",
+    ],
+  };
+  const requests: string[] = [];
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.endsWith("/characters/4201/")) {
+      return Response.json({
+        alliance_id: 9901,
+        birthday: "2020-01-01T00:00:00Z",
+        corporation_id: 777,
+        description: "",
+        gender: "male",
+        name: "Test Pilot",
+        race_id: 1,
+        security_status: 0,
+      });
+    }
+    if (url.endsWith("/corporations/777/members/")) return Response.json([4201]);
+    if (url.endsWith("/characters/4201/roles/")) {
+      return Response.json({
+        roles: ["Factory_Manager"],
+        roles_at_base: ["Container_Take_2"],
+        roles_at_hq: [],
+        roles_at_other: [],
+      });
+    }
+    throw new Error(`Unexpected ESI request: ${url}`);
+  };
+
+  const first = await fetchCharacterCorporationAuthorization(4201, scopedToken, 777);
+  const second = await fetchCharacterCorporationAuthorization(4201, scopedToken, 777);
+
+  assert.equal(first.authorized, true);
+  assert.equal(first.characterInfo.alliance_id, 9901);
+  assert.deepEqual(first.roles?.rolesAtBase, ["Container_Take_2"]);
+  assert.equal(second.authorized, true);
+  assert.equal(requests.length, 3);
+  assert.match(requests[1], /\/corporations\/777\/members\/$/);
+  assert.match(requests[2], /\/characters\/4201\/roles\/$/);
+});
+
+test("treats a corporation member-list authorization failure as no access", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const scopedToken = {
+    ...token,
+    scopes: ["esi-corporations.read_corporation_membership.v1"],
+  };
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("/characters/4202/")) {
+      return Response.json({
+        birthday: "2020-01-01T00:00:00Z",
+        corporation_id: 778,
+        description: "",
+        gender: "male",
+        name: "Test Pilot",
+        race_id: 1,
+        security_status: 0,
+      });
+    }
+    if (url.endsWith("/corporations/778/members/")) return new Response(null, { status: 403 });
+    throw new Error(`Unexpected ESI request: ${url}`);
+  };
+
+  const result = await fetchCharacterCorporationAuthorization(4202, scopedToken, 778);
+
+  assert.equal(result.authorized, false);
+  assert.equal(result.roles, null);
+});
 
 test("sends the cached ETag for a non-paginated endpoint", async (t) => {
   const originalFetch = globalThis.fetch;

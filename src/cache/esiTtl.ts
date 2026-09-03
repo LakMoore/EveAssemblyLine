@@ -14,6 +14,8 @@ export function getEsiTtlMs(
   const maxAge = parseCacheControlMaxAge(cacheControlHeader);
   if (maxAge != null && maxAge > 0) return maxAge * 1000;
   if (path.includes("/assets/names")) return 30 * 60 * 1000;
+  if (/^\/characters\/\d+\/$/.test(path)) return 24 * 60 * 60 * 1000;
+  if (path.includes("/corporations/") && path.includes("/members/")) return 5 * 60 * 1000;
   if (path.includes("/corporations/") && path.includes("/assets/")) return 60 * 60 * 1000;
   if (path.includes("/corporations/") && path.includes("/industry/jobs")) return 5 * 60 * 1000;
   if (path.includes("/corporations/") && path.includes("/orders")) return 20 * 60 * 1000;

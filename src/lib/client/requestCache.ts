@@ -109,8 +109,12 @@ export type ClientCharacter = {
   characterName: string;
   onDeployment: boolean;
   corporationId?: number;
+  allianceId?: number;
   corporationName?: string;
   corporationRoles: string[];
+  rolesAtBase: string[];
+  rolesAtHq: string[];
+  rolesAtOther: string[];
   hasDirectorRole: boolean;
   hasAccountantRole: boolean;
   hasTraderRole: boolean;
