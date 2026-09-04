@@ -29,6 +29,45 @@ export type ClientAssetsResponse = {
   corporationSources?: ClientCorporationSource[];
 };
 
+/** Applies the current corporation hangar and container selections to state assets on the client. */
+export function filterClientAssets(data: ClientAssetsResponse): ClientAssetsResponse {
+  const selectedSources = new Set(
+    (data.corporationSources ?? [])
+      .filter((source) => source.selected)
+      .map((source) => `${source.corporationId}:${source.rootLocationId}:${source.locationFlag}`),
+  );
+  const selectedContainers = new Set(
+    (data.corporationSources ?? []).flatMap((source) =>
+      source.containers
+        .filter((container) => container.selected)
+        .map((container) => container.itemId),
+    ),
+  );
+  const selectedSourceLocations = new Set(
+    (data.corporationSources ?? [])
+      .filter((source) => source.selected)
+      .map((source) => `${source.corporationId}:${source.rootLocationId}`),
+  );
+  return {
+    ...data,
+    assets: (data.assets ?? []).filter((item) => {
+      if (item.ownerType !== "corporation") return true;
+      const source = item.corporationSource;
+      if (!source) return false;
+      const sourceKey = `${item.ownerId}:${source.rootLocationId}:${source.locationFlag}`;
+      return (
+        source.containerItemIds.some((itemId) => selectedContainers.has(itemId))
+        || (
+          (source.locationFlag === ""
+            ? selectedSourceLocations.has(`${item.ownerId}:${source.rootLocationId}`)
+            : selectedSources.has(sourceKey))
+          && source.containerItemIds.length === 0
+        )
+      );
+    }),
+  };
+}
+
 export type ClientCorporationSource = {
   corporationId: number;
   rootLocationId: number;
@@ -254,7 +293,7 @@ export function loadClientAssets(language: SdeLanguage, reload = false) {
   const pending = assetsRequests.get(key);
   if (pending) return pending;
   const cached = assetsResponses.get(key);
-  if (!reload && cached) return Promise.resolve(cached);
+  if (!reload && cached) return Promise.resolve(filterClientAssets(cached));
 
   const query = new URLSearchParams({ language });
   const loadCachedStock = !reload
@@ -275,7 +314,7 @@ export function loadClientAssets(language: SdeLanguage, reload = false) {
     : Promise.resolve(null);
   const request = loadCachedStock
     .then((cachedStock) => {
-      if (cachedStock) return cachedStock;
+      if (cachedStock) return filterClientAssets(cachedStock);
       return fetch(
         `/api/state/assets?${query.toString()}`,
         {
@@ -286,7 +325,7 @@ export function loadClientAssets(language: SdeLanguage, reload = false) {
         if (!response.ok) throw new Error("Could not load assets.");
         await saveEndpointResponse("state/assets", `/api/state/assets?${query.toString()}`, data);
         assetsResponses.set(key, data);
-        return data;
+        return filterClientAssets(data);
       });
     })
     .finally(() => assetsRequests.delete(key));

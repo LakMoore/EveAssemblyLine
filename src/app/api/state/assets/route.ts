@@ -13,6 +13,8 @@ import {
   resolveStructureLocationForOwner,
   getRunningIndustryJobs,
   getMarketOrderStock,
+  getCorporationAssetSource,
+  getCorporationLocationSource,
 } from "@/lib/esi/cache";
 import type { StructureLocationSource } from "@/lib/esi/cache";
 import {
@@ -251,6 +253,7 @@ function addStockContribution(
     locationId: contribution.locationId ?? location.locationId,
     rootLocationId: contribution.rootLocationId ?? location.locationId,
     sourceLocationName: location.name,
+    corporationSource: contribution.corporationSource,
     ownerType: contribution.ownerType,
     ...(contribution.ownerId !== undefined ? { ownerId: contribution.ownerId } : {}),
     isPackaged: contribution.isPackaged,
@@ -462,6 +465,7 @@ export async function GET(request: NextRequest) {
       true,
       session.sessionId,
       corporationPolicies,
+      false,
     );
     if (parsedDiagnostic.data.rawAsset !== undefined) {
       const itemId = parsedDiagnostic.data.rawAsset;
@@ -491,10 +495,12 @@ export async function GET(request: NextRequest) {
     },
     session.sessionId,
     corporationPolicies,
+    false,
   );
   markPhase("session");
   const [
     assets,
+    rawAssets,
     jobs,
     blueprintInstances,
     shipTypeIds,
@@ -505,16 +511,17 @@ export async function GET(request: NextRequest) {
     systems,
     rootLocationsByItemId,
   ] = await Promise.all([
-    getResolvedAssets(characterIds, true, session.sessionId, corporationPolicies),
-    getRunningIndustryJobs(characterIds, true, session.sessionId, corporationPolicies),
-    getBlueprintInstances(characterIds, true, session.sessionId, corporationPolicies),
+    getResolvedAssets(characterIds, true, session.sessionId, corporationPolicies, false),
+    getAllAssetsRaw(characterIds, true, session.sessionId, corporationPolicies, false),
+    getRunningIndustryJobs(characterIds, true, session.sessionId, corporationPolicies, false),
+    getBlueprintInstances(characterIds, true, session.sessionId, corporationPolicies, false),
     getShipTypeIds(),
     getStructureTypeIds(),
     getGroups(),
     getMarketGroups(),
     getStations(),
     getSystems(),
-    getRootLocationsByItemId(characterIds, true, session.sessionId, corporationPolicies),
+    getRootLocationsByItemId(characterIds, true, session.sessionId, corporationPolicies, false),
   ]);
   markPhase("data");
   const types = await getTypesByIds([
@@ -615,6 +622,7 @@ export async function GET(request: NextRequest) {
     true,
     session.sessionId,
     corporationPolicies,
+    false,
   );
   markPhase("indexes");
   const blueprintInstancesByOwnerAndItemId = new Map(
@@ -623,6 +631,14 @@ export async function GET(request: NextRequest) {
       blueprint,
     ]),
   );
+  const rawAssetsByCorporationId = new Map<number, Map<number, AssetRecord>>();
+  for (const asset of rawAssets) {
+    if (asset.ownerType !== "corporation") continue;
+    const assetsByItemId =
+      rawAssetsByCorporationId.get(asset.ownerId) ?? new Map<number, AssetRecord>();
+    assetsByItemId.set(asset.itemId, asset);
+    rawAssetsByCorporationId.set(asset.ownerId, assetsByItemId);
+  }
 
   // Add ordinary assets first. Job contributions are added afterwards with a job-specific key,
   // so an installed blueprint and its output remain visible alongside physical stock.
@@ -638,6 +654,13 @@ export async function GET(request: NextRequest) {
         ? "bpo"
         : "bpc"
       : undefined;
+    const corporationSource =
+      asset.ownerType === "corporation"
+        ? getCorporationAssetSource(
+            asset,
+            rawAssetsByCorporationId.get(asset.ownerId) ?? new Map<number, AssetRecord>(),
+          )
+        : undefined;
     addStockContribution(
       buckets,
       {
@@ -651,6 +674,7 @@ export async function GET(request: NextRequest) {
         ownerId: asset.ownerId,
         blueprintType,
         ...(asset.inUse || blueprintInstance?.inUse ? { inUse: true } : {}),
+        ...(corporationSource ? { corporationSource } : {}),
         me: blueprintInstance?.me,
         te: blueprintInstance?.te,
         ...(blueprintInstance
@@ -734,6 +758,14 @@ export async function GET(request: NextRequest) {
           ...contribution,
           locationId: job.outputLocationId,
           rootLocationId: job.facilityId,
+          ...(job.ownerType === "corporation"
+            ? {
+                corporationSource: getCorporationLocationSource(
+                  job.outputLocationId,
+                  rawAssetsByCorporationId.get(job.ownerId) ?? new Map<number, AssetRecord>(),
+                ),
+              }
+            : {}),
         },
         location,
         types,

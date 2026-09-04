@@ -118,6 +118,11 @@ export interface StockItemBase {
   jobRuns?: number;
   me?: number;
   te?: number;
+  corporationSource?: {
+    rootLocationId: number;
+    locationFlag: string;
+    containerItemIds: number[];
+  };
 }
 
 export interface PlanStockItem extends StockItemBase {
