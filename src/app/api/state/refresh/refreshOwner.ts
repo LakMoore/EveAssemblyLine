@@ -39,22 +39,15 @@ async function refreshUnit(
   sessionId: string,
   authorizationCharacter: NonNullable<Awaited<ReturnType<typeof getCharacter>>>,
   profiler: RefreshProfiler,
-  force: boolean,
 ) {
   const source = await refreshCoordinator.run(
     unit.key,
     async () => {
       if (unit.kind === "character") {
-        await refreshCharacterState(authorizationCharacter, sessionId, profiler, force);
+        await refreshCharacterState(authorizationCharacter, sessionId, profiler);
       }
       else {
-        await refreshCorporationState(
-          unit.ownerId,
-          authorizationCharacter,
-          sessionId,
-          profiler,
-          force,
-        );
+        await refreshCorporationState(unit.ownerId, authorizationCharacter, sessionId, profiler);
       }
       return { sessionId };
     },
@@ -102,8 +95,6 @@ async function handleRefreshRequestInternal(
   if (!parsedId.success) return json({ error: "Invalid refresh request." }, 400);
 
   const ownerId = parsedId.data;
-  const requestUrl = new URL(request.url);
-  const force = requestUrl.searchParams.get("force") === "true";
   let characterIds: number[];
   profiler.start("loadCollectionCharacterIds");
   try {
@@ -198,7 +189,7 @@ async function handleRefreshRequestInternal(
   let refreshError: unknown;
   profiler.start("refresh");
   try {
-    await refreshUnit(unit, session.sessionId, authorizationCharacter, profiler, force);
+    await refreshUnit(unit, session.sessionId, authorizationCharacter, profiler);
   }
   catch (error) {
     refreshError = error;

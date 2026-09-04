@@ -18,7 +18,7 @@ import { logEsiRequest } from "@/lib/esi/logger";
 const esiBaseUrl = process.env.ESI_BASE_URL ?? "https://esi.evetech.net/latest";
 const refreshLocks = new Map<string, Promise<TokenSet>>();
 type CorporationStructureRuntime = {
-  requests: Map<number, Promise<EsiCorporationStructure[]>>;
+  requests: Map<number, Promise<CorporationStructureResult>>;
 };
 const runtime = globalThis as typeof globalThis & {
   __assemblyLineCorporationStructures?: CorporationStructureRuntime;
@@ -926,7 +926,16 @@ export async function fetchCorporationMarketOrders(record: CharacterTokenRecord,
   };
 }
 
-export async function fetchCorporationStructures(record: CharacterTokenRecord) {
+type CorporationStructureResult = {
+  structures: EsiCorporationStructure[];
+  headers: Headers;
+  notModified: boolean;
+};
+
+export async function fetchCorporationStructures(
+  record: CharacterTokenRecord,
+  etag?: string,
+): Promise<CorporationStructureResult> {
   if (!record.corporationId || (!record.hasStationManagerRole && !record.hasDirectorRole)) {
     throw new Error("Corporation structure authorization is incomplete");
   }
@@ -937,8 +946,17 @@ export async function fetchCorporationStructures(record: CharacterTokenRecord) {
     .then(async () => {
       const path = `/corporations/${corporationId}/structures/`;
       const token = await getUsableToken(record);
-      const result = await requestEsi<EsiCorporationStructure[]>(path, token);
-      return result.data ?? [];
+      const result = await fetchEsiEndpoint<EsiCorporationStructure[]>(
+        path,
+        token,
+        etag,
+        { paginated: false },
+      );
+      return {
+        structures: result.data ?? [],
+        headers: result.headers,
+        notModified: result.notModified,
+      };
     })
     .finally(() => corporationStructureRequests.delete(corporationId));
   corporationStructureRequests.set(corporationId, request);

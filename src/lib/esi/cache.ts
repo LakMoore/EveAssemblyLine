@@ -619,11 +619,9 @@ async function refreshBlueprintInstances(
   cache: OwnerCache,
   character: CharacterTokenRecord,
   fetchBlueprints: typeof fetchCharacterBlueprints,
-  force = false,
 ) {
   if (
-    !force
-    && cache.blueprintInstances
+    cache.blueprintInstances
     && cache.blueprintInstances.nextRefreshAllowed
     && Date.parse(cache.blueprintInstances.nextRefreshAllowed) > Date.now()
   ) {
@@ -1534,11 +1532,11 @@ async function rebuildResolvedAssets(
   cache: OwnerCache,
   record: Awaited<ReturnType<typeof getCharacter>>,
   purpose: "personal" | "corp",
-  force = false,
+  rebuildEvenIfComplete = false,
 ) {
   if (
     !record
-    || (!force && !needsCompleteAssetGraph(cache))
+    || (!rebuildEvenIfComplete && !needsCompleteAssetGraph(cache))
     || !Array.isArray(cache.allAssetsRaw?.lastBody)
   ) {
     return;
@@ -1586,7 +1584,6 @@ export async function refreshCharacterState(
   character: CharacterTokenRecord,
   sessionId: string,
   profiler: RefreshProfiler,
-  force = false,
 ): Promise<void> {
   const cache = getCache(characterCaches, character.characterId, sessionId);
   let currentShipStateChanged = false;
@@ -1675,7 +1672,7 @@ export async function refreshCharacterState(
   profiler.start("blueprints");
   let assetsRebuilt = false;
   try {
-    await refreshBlueprintInstances(cache, character, fetchCharacterBlueprints, force);
+    await refreshBlueprintInstances(cache, character, fetchCharacterBlueprints);
   }
   catch (error) {
     cache.blueprintInstances = {
@@ -1689,8 +1686,7 @@ export async function refreshCharacterState(
   profiler.start("assets");
   try {
     if (
-      force
-      || !cache.allAssetsRaw?.nextRefreshAllowed
+      !cache.allAssetsRaw?.nextRefreshAllowed
       || Date.parse(cache.allAssetsRaw.nextRefreshAllowed) <= Date.now()
     ) {
       const result = await fetchCharacterAssets(character, cache.allAssetsRaw?.etag);
@@ -1814,7 +1810,6 @@ async function refreshCorporationCache(
   corporationId: number,
   sessionId: string,
   profiler: RefreshProfiler,
-  force = false,
 ): Promise<void> {
   const corpCache = getCache(corporationCaches, corporationId, sessionId);
   const corpSummary: {
@@ -1896,8 +1891,11 @@ async function refreshCorporationCache(
       || !corpCache.structures.nextRefreshAllowed
       || Date.parse(corpCache.structures.nextRefreshAllowed) <= Date.now()
     ) {
-      const structures = await fetchCorporationStructures(character);
-      corpCache.structures = setFresh(structures, undefined, corpCache.structures);
+      const structures = await fetchCorporationStructures(character, corpCache.structures?.etag);
+      corpCache.structures =
+        structures.notModified && corpCache.structures
+          ? setFresh(corpCache.structures.lastBody, structures.headers, corpCache.structures, true)
+          : setFresh(structures.structures, structures.headers, corpCache.structures);
     }
     else {
       corpCache.structures.status = endpointDataStatus(
@@ -1920,8 +1918,7 @@ async function refreshCorporationCache(
   profiler.start("assets");
   try {
     if (
-      force
-      || !corpCache.allAssetsRaw?.nextRefreshAllowed
+      !corpCache.allAssetsRaw?.nextRefreshAllowed
       || Date.parse(corpCache.allAssetsRaw.nextRefreshAllowed) <= Date.now()
     ) {
       const result = await fetchCorporationAssets(character, corpCache.allAssetsRaw?.etag);
@@ -1972,7 +1969,6 @@ async function refreshCorporationCache(
       corpCache,
       character,
       fetchCorporationBlueprints,
-      force,
     );
   }
   catch (error) {
@@ -2067,7 +2063,6 @@ export async function refreshCorporationState(
   character: CharacterTokenRecord,
   sessionId: string,
   profiler: RefreshProfiler,
-  force = false,
 ): Promise<void> {
   profiler.start("authorization");
   try {
@@ -2109,7 +2104,6 @@ export async function refreshCorporationState(
       corporationId,
       sessionId,
       profiler,
-      force,
     );
   }
   finally {

@@ -7,6 +7,7 @@ import {
   fetchCharacterLocation,
   fetchCharacterRoles,
   fetchCharacterShip,
+  fetchCorporationStructures,
   fetchEsiEndpoint,
 } from "./client";
 
@@ -175,6 +176,40 @@ test("sends the cached ETag for a non-paginated endpoint", async (t) => {
   assert.deepEqual(result.data, { skills: [] });
   assert.equal(result.notModified, false);
   assert.equal(result.headers.get("expires"), "Wed, 26 Aug 2026 17:00:00 GMT");
+});
+
+test("sends the cached ETag for corporation structures", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  let request = { headers: new Headers() };
+  globalThis.fetch = async (_input, init) => {
+    request = { headers: new Headers(init?.headers) };
+    return Response.json(
+      [],
+      {
+        headers: {
+          etag: "new-etag",
+          expires: "Wed, 26 Aug 2026 17:00:00 GMT",
+        },
+      },
+    );
+  };
+
+  const result = await fetchCorporationStructures(
+    {
+      ...character,
+      corporationId: 777,
+      hasDirectorRole: true,
+    },
+    "old-etag",
+  );
+
+  assert.deepEqual(result.structures, []);
+  assert.equal(result.notModified, false);
+  assert.equal(request.headers.get("if-none-match"), "old-etag");
 });
 
 test("fetches completed industry jobs and excludes unusable terminal jobs", async (t) => {

@@ -446,9 +446,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       const results = await runRefreshUnits(
         units,
         async (unit) => {
-          const response = await fetch(
-            `/api/state/refresh/${unit.kind}/${unit.ownerId}?force=true`,
-          );
+          const response = await fetch(`/api/state/refresh/${unit.kind}/${unit.ownerId}`);
           const data = (await response.json()) as {
             success?: boolean;
             rateLimitedUntil?: string | null;
