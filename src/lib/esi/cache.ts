@@ -2419,21 +2419,23 @@ export async function resolveStructureLocationForOwner(
   };
 }
 
+/** Returns the corporations represented by the supplied attached characters. */
+export function getCorporationIdsForCharacters(
+  characters: readonly Pick<CharacterTokenRecord, "corporationId">[],
+) {
+  return new Set(
+    characters
+      .map((character) => character.corporationId)
+      .filter((corporationId): corporationId is number => corporationId !== undefined),
+  );
+}
+
 export async function getCachedCorporationStructures(
   characterIds: number[],
   sessionId = "default",
 ) {
   const characters = await getCharactersByIds(characterIds);
-  const corporationIds = new Set(
-    characters
-      .filter(
-        (character) =>
-          characterIds.includes(character.characterId)
-          && character.hasDirectorRole
-          && character.corporationId,
-      )
-      .map((character) => character.corporationId!),
-  );
+  const corporationIds = getCorporationIdsForCharacters(characters);
   return [...corporationIds].flatMap(
     (corporationId) =>
       getCache(corporationCaches, corporationId, sessionId).structures?.lastBody ?? [],

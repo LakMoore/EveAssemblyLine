@@ -4,6 +4,7 @@ import { getEsiTtlMs } from "@/cache/esiTtl";
 import {
   buildCurrentShipAsset,
   endpointDataStatus,
+  getCorporationIdsForCharacters,
   getStateStatus,
   getMarketOrderAssetDeductions,
   getKnownNonStructureItemIds,
@@ -111,6 +112,17 @@ test("includes direct hangar contents without including nested container content
   assert.equal(
     isCorporationRecordAllowed(corporationRecord(200), policy, corporationRoles, new Set(), assets),
     false,
+  );
+});
+
+test("includes corporations represented by non-director attached characters", () => {
+  assert.deepEqual(
+    getCorporationIdsForCharacters([
+      { corporationId: 900 },
+      { corporationId: 901 },
+      { corporationId: undefined },
+    ]),
+    new Set([900, 901]),
   );
 });
 

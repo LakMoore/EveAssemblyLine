@@ -14,9 +14,14 @@ import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/sessio
 import {
   getCollectionFacilities,
   saveCollectionFacilities,
-  getCharacter,
+  getCollectionCorporationSettings,
 } from "@/lib/auth/tokensStore";
-import { getCachedCorporationStructures, getRootLocationsByItemId } from "@/lib/esi/cache";
+import {
+  getCachedCorporationStructures,
+  getCorporationSourceCatalog,
+  getCorporationSourcePolicies,
+  getRootLocationsByItemId,
+} from "@/lib/esi/cache";
 import { fetchIndustrySystems, fetchStationMetadata } from "@/lib/esi/client";
 import {
   emptyActivitiesRequest,
@@ -123,10 +128,18 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
   const requestedLanguage = new URL(request.url).searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
   const characterIds = await getSessionCharacterIds(session);
+  const corporationSettings = session.collectionId
+    ? await getCollectionCorporationSettings(session.collectionId)
+    : [];
+  const corporationPolicies = await getCorporationSourcePolicies(
+    characterIds,
+    corporationSettings,
+    session.sessionId,
+  );
   markPhase("auth");
   const [
-    characters,
     roots,
+    corporationSources,
     stations,
     systems,
     types,
@@ -138,8 +151,8 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
     targetFilters,
     industrySystems,
   ] = await Promise.all([
-    Promise.all(characterIds.map((id) => getCharacter(id))),
-    getRootLocationsByItemId(characterIds, true, session.sessionId),
+    getRootLocationsByItemId(characterIds, true, session.sessionId, corporationPolicies),
+    getCorporationSourceCatalog(characterIds, corporationPolicies, session.sessionId),
     getStations(),
     getSystems(),
     getTypes(),
@@ -153,19 +166,6 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
   ]);
   const productionGroups = getProductionGroupReferences(targetFilters, groups, language);
   markPhase("loadDependencies");
-  const authorized = characters.filter(
-    (character): character is NonNullable<typeof character> =>
-      character !== null
-      && characterIds.includes(character.characterId)
-      && character.corporationId !== undefined
-      && (character.hasDirectorRole === true || character.hasStationManagerRole === true),
-  );
-  const authorizedByCorporation = new Map<number, (typeof authorized)[number]>();
-  for (const character of authorized) {
-    if (character.corporationId !== undefined) {
-      authorizedByCorporation.set(character.corporationId, character);
-    }
-  }
   const corporationStructuresPromise = getCachedCorporationStructures(
     characterIds,
     session.sessionId,
@@ -184,6 +184,33 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
       root.systemId
       ?? (root.kind === "station" ? stations.get(root.locationId)?.solarSystemID : undefined);
     if (!systemId) continue;
+    candidates.set(
+      root.locationId,
+      {
+        id: root.locationId,
+        locationId: root.locationId,
+        systemId,
+        name: root.name ?? `Location ${root.locationId}`,
+        typeId: root.typeId,
+        rigTypeIds: saved?.rigTypeIds ?? [],
+        ...(saved?.services ? { services: saved.services } : {}),
+        activities: saved?.activities ?? emptyActivitiesRequest,
+        ...(saved?.settingsLastModified === undefined
+          ? {}
+          : { settingsLastModified: saved.settingsLastModified }),
+        locationType: root.kind,
+        securityStatus: systems.get(systemId)?.securityStatus,
+      },
+    );
+  }
+  for (const source of corporationSources) {
+    const root = source.rootLocation;
+    if (!root || (root.kind !== "station" && root.kind !== "structure")) continue;
+    const systemId =
+      root.systemId
+      ?? (root.kind === "station" ? stations.get(root.locationId)?.solarSystemID : undefined);
+    if (!systemId || candidates.has(root.locationId)) continue;
+    const saved = savedByLocationId.get(root.locationId);
     candidates.set(
       root.locationId,
       {
@@ -413,7 +440,8 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
         characters: characterIds.length,
         roots: roots.size,
         corporationStructures: corpStructures.length,
-        corporationsRequested: authorizedByCorporation.size,
+        corporationsRequested: corporationPolicies.length,
+        corporationSources: corporationSources.length,
         candidates: candidates.size,
         stationsWithMetadata: stationMetadata.length,
         facilities: facilities.length,
