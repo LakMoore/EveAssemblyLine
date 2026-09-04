@@ -3127,10 +3127,12 @@
   display: grid;
   --sidebar-width: 230px;
   grid-template-columns: var(--sidebar-width) 1fr;
+  grid-template-rows: auto auto;
   min-height: calc(100vh - 72px);
 }
 
 .sidebar {
+  grid-row: 1 / -1;
   position: relative;
   background: var(--card);
   border-right: 1px solid var(--line);
@@ -3485,6 +3487,43 @@
   margin: 0 auto;
 }
 
+.siteFooter {
+  grid-column: 2;
+  border-top: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted-foreground);
+  font: 11px "DM Mono";
+  letter-spacing: 0.2px;
+}
+
+.siteFooterInner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  max-width: 1380px;
+  margin: 0 auto;
+  padding: 18px 6.5% 22px;
+}
+
+.siteFooterLinks {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 16px;
+}
+
+.siteFooter a {
+  color: inherit;
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.siteFooter a:hover,
+.siteFooter a:focus-visible {
+  color: var(--cyan);
+}
+
 .pageIntro,
 .stats,
 .panelHeader,
@@ -3521,9 +3560,78 @@
 }
 
 .welcomePage,
-.appraisePage {
+.appraisePage,
+.infoPage {
   display: grid;
   gap: 30px;
+}
+
+.infoPage {
+  max-width: 980px;
+}
+
+.infoPage .pageIntro {
+  display: block;
+  max-width: 760px;
+}
+
+.infoPage .pageIntro p {
+  max-width: 700px;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 1.7;
+  margin-top: 12px;
+}
+
+.infoSection {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.7fr) minmax(0, 1.3fr);
+  gap: 34px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  padding: 24px;
+}
+
+.infoSection h2 {
+  max-width: 320px;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.infoCopy {
+  display: grid;
+  gap: 14px;
+  max-width: 760px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.infoCopy p,
+.infoCopy ul {
+  margin: 0;
+}
+
+.infoCopy ul {
+  display: grid;
+  gap: 10px;
+  padding-left: 18px;
+}
+
+.infoCopy li::marker {
+  color: var(--cyan);
+}
+
+.infoCopy a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--link-border);
+  text-underline-offset: 3px;
+}
+
+.infoCopy a:hover,
+.infoCopy a:focus-visible {
+  color: var(--cyan);
 }
 
 .welcomePage .pageIntro {
@@ -3731,13 +3839,25 @@
 
   .welcomePanel,
   .aboutPanel,
-  .roadmapPanel {
+  .roadmapPanel,
+  .infoSection {
     padding: 18px;
   }
 
   .aboutPanel,
-  .roadmapGrid {
+  .roadmapGrid,
+  .infoSection {
     grid-template-columns: 1fr;
+  }
+
+  .siteFooterInner {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .siteFooterLinks {
+    justify-content: flex-start;
   }
 }
 
@@ -5184,5 +5304,11 @@
     min-height: 48px;
     height: 48px;
     padding: 0 16px;
+  }
+}
+
+@media (max-width: 410px) {
+  .siteFooterCollapsed {
+    --footer-sidebar-width: 52px;
   }
 }

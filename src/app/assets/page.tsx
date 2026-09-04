@@ -210,6 +210,7 @@ export default function StockPage() {
     async function loadPageData(
       refreshedLocations?: EsiStockResponse["locations"],
       loadEsiStock = true,
+      reloadEsiStock = false,
     ) {
       setIsHydratingVolumes(true);
       try {
@@ -217,9 +218,17 @@ export default function StockPage() {
           loadStockRecords().catch(() => []),
           loadStructures().catch(() => []),
           refreshedLocations
-            ? Promise.resolve({ ok: true, json: async () => ({ locations: refreshedLocations }) })
+            ? Promise.resolve({
+                ok: true,
+                json: async () => ({
+                  locations: refreshedLocations,
+                }),
+              })
             : loadEsiStock
-              ? loadClientAssets(language).then((data) => ({ ok: true, json: async () => data }))
+              ? loadClientAssets(language, reloadEsiStock).then((data) => ({
+                  ok: true,
+                  json: async () => data,
+                }))
               : Promise.resolve({ ok: false, json: async () => ({}) }),
         ]);
         const esiData = (await esiResponse.json()) as EsiStockResponse;
@@ -351,10 +360,23 @@ export default function StockPage() {
         void loadPageData();
         return;
       }
-      void loadPageData(detail.assetLocations);
+      void loadPageData(detail.assetLocations, true, false);
+    };
+    const handleCorporationSettingsChanged = () => {
+      void loadPageData(undefined, true, true);
     };
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
-    return () => window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
+    window.addEventListener(
+      "assembly-line-corporation-settings-changed",
+      handleCorporationSettingsChanged,
+    );
+    return () => {
+      window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
+      window.removeEventListener(
+        "assembly-line-corporation-settings-changed",
+        handleCorporationSettingsChanged,
+      );
+    };
   }, [language]);
 
   useEffect(() => {

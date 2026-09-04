@@ -11,10 +11,11 @@ import {
 } from "react";
 import Link from "next/link";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
+import EveAuthorizationWarning from "@/components/EveAuthorizationWarning";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { isSdeLanguage, sdeLanguages, type SdeLanguage } from "@/lib/reference/languages";
-import { loadStockSnapshotTime, replaceEsiStock } from "@/lib/planning/stockStore";
+import { replaceEsiStock } from "@/lib/planning/stockStore";
 import {
   groupClientAssetsByLocation,
   loadClientJobs,
@@ -25,6 +26,7 @@ import {
   loadClientStateStatus,
   loadClientAssets,
   type ClientCharacterStatus,
+  type ClientCorporationSource,
 } from "@/lib/client/requestCache";
 import {
   endpointNeedsRefresh,
@@ -50,6 +52,7 @@ import {
   Settings2,
   UserRoundPlus,
   UsersRound,
+  Warehouse,
 } from "lucide-react";
 import { FaDiscord, FaGithub } from "react-icons/fa6";
 import {
@@ -63,6 +66,7 @@ import {
 import styles from "./page.module.css";
 import { PlanStockItem } from "@/lib/planning/types";
 import { Avatar, AvatarBadge, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import { ThemeSelect } from "@/components/ThemeSelect";
 import { toast } from "@/components/ui/toast";
 import { Progress, ProgressLabel } from "@/components/ui/progress";
@@ -74,6 +78,7 @@ const sidebarStorageKey = "assembly-line-sidebar-collapsed";
 type ActivePage =
   | "planner"
   | "welcome"
+  | "public"
   | "compress"
   | "appraise"
   | "signals"
@@ -81,6 +86,7 @@ type ActivePage =
   | "jobs"
   | "ships"
   | "structures"
+  | "corpHangars"
   | "settings"
   | "imagechecker"
   | "characters";
@@ -92,6 +98,7 @@ type CharacterSummary = {
   characterName: string;
   corporationId?: number;
   hasDirectorRole: boolean;
+  corporationSupportEnabled?: boolean;
 };
 
 type EsiStockResponse = {
@@ -102,6 +109,7 @@ type EsiStockResponse = {
     systemName?: string;
     items: PlanStockItem[];
   }>;
+  corporationSources?: ClientCorporationSource[];
 };
 type StateEndpoint = keyof Pick<
   ClientCharacterStatus,
@@ -230,7 +238,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [showSidebarScrollTop, setShowSidebarScrollTop] = useState(false);
   const [statusCheckAt, setStatusCheckAt] = useState(() => Date.now());
   const isRefreshingDataRef = useRef(false);
-  const refreshAfterCharacterAdd = useRef(false);
   const mobileMetaCollapseTimer = useRef<number | null>(null);
   const mobileMetaCollapseAnimationTimer = useRef<number | null>(null);
   const pilotListSentinelRef = useRef<HTMLSpanElement | null>(null);
@@ -255,13 +262,24 @@ export default function AppShell({ children }: { children: ReactNode }) {
                     ? "ships"
                     : pathname === "/structures"
                       ? "structures"
-                      : pathname === "/settings"
-                        ? "settings"
-                        : pathname === "/imagechecker"
-                          ? "imagechecker"
-                          : pathname === "/characters"
-                            ? "characters"
-                            : "planner";
+                      : pathname === "/corp-hangars"
+                        ? "corpHangars"
+                        : pathname === "/settings"
+                          ? "settings"
+                          : pathname === "/imagechecker"
+                            ? "imagechecker"
+                            : pathname === "/characters"
+                              ? "characters"
+                              : [
+                                    "/guides",
+                                    "/about",
+                                    "/contact",
+                                    "/privacy",
+                                    "/terms",
+                                    "/cookies",
+                                  ].includes(pathname)
+                                ? "public"
+                                : "planner";
   const hasExpiredState =
     authenticated
     && characters.length > 0
@@ -308,6 +326,23 @@ export default function AppShell({ children }: { children: ReactNode }) {
         setAuthenticated(false);
         setCharacters([]);
       });
+    const handleCorporationSettingsChanged = () => {
+      void loadClientSession()
+        .then((data: { authenticated?: boolean; characters?: CharacterSummary[] }) => {
+          setAuthenticated(Boolean(data.authenticated));
+          setCharacters(data.characters ?? []);
+        })
+        .catch(() => undefined);
+    };
+    window.addEventListener(
+      "assembly-line-corporation-settings-changed",
+      handleCorporationSettingsChanged,
+    );
+    return () =>
+      window.removeEventListener(
+        "assembly-line-corporation-settings-changed",
+        handleCorporationSettingsChanged,
+      );
   }, []);
 
   useEffect(() => {
@@ -398,17 +433,21 @@ export default function AppShell({ children }: { children: ReactNode }) {
         characterId: character.characterId,
         corporationId: character.corporationId,
         hasDirectorRole: character.hasDirectorRole,
+        corporationSupportEnabled: character.corporationSupportEnabled,
       })),
     );
     setRefreshProgress({ completed: 0, total: units.length });
     window.dispatchEvent(new CustomEvent("assembly-line-esi-refresh-started"));
     let assetLocations: EsiStockResponse["locations"] | undefined;
+    let corporationSources: ClientCorporationSource[] | undefined;
     let refreshSucceeded = false;
     try {
       const results = await runRefreshUnits(
         units,
         async (unit) => {
-          const response = await fetch(`/api/state/refresh/${unit.kind}/${unit.ownerId}`);
+          const response = await fetch(
+            `/api/state/refresh/${unit.kind}/${unit.ownerId}?force=true`,
+          );
           const data = (await response.json()) as {
             success?: boolean;
             rateLimitedUntil?: string | null;
@@ -462,6 +501,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       if (requiredEndpoints.has("state/assets")) {
         try {
           const assetsData = await loadClientAssets(language, true);
+          corporationSources = assetsData.corporationSources;
           assetLocations = groupClientAssetsByLocation(assetsData);
           await replaceEsiStock(
             assetLocations.map((location) => ({
@@ -491,6 +531,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
               refreshedAt,
               rateLimitedUntil: null,
               assetLocations,
+              corporationSources,
               ships: shipsResponse ?? null,
               jobs: jobsResponse ?? null,
             },
@@ -551,23 +592,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
     };
   }, [activePage, authenticated, characters.length, language]);
 
-  useEffect(() => {
-    if (!authenticated || characters.length === 0) return;
-    let cancelled = false;
-    void loadStockSnapshotTime()
-      .then(async (snapshotTime) => {
-        if (cancelled) return;
-        const isRecent = snapshotTime !== null && Date.now() - snapshotTime < 5 * 60 * 1000;
-        if (!isRecent) await refreshData();
-      })
-      .catch(() => {
-        if (!cancelled) void refreshData();
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activePage, authenticated, characters.length, language, refreshData]);
-
   const scheduleMobileMetaCollapse = useCallback(() => {
     if (mobileMetaCollapseTimer.current !== null) {
       window.clearTimeout(mobileMetaCollapseTimer.current);
@@ -612,16 +636,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
     },
     [],
   );
-
-  useEffect(() => {
-    if (!authenticated || characters.length === 0 || refreshAfterCharacterAdd.current) return;
-    const url = new URL(window.location.href);
-    if (url.searchParams.get("refresh") !== "1") return;
-    refreshAfterCharacterAdd.current = true;
-    url.searchParams.delete("refresh");
-    window.history.replaceState({}, "", url);
-    window.setTimeout(() => void refreshData(), 0);
-  }, [authenticated, characters.length, refreshData]);
 
   return (
     <LanguageContext.Provider
@@ -879,6 +893,16 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 <span className={styles.navText}>Structures</span>
               </Link>
               <Link
+                className={`${styles.navItem} ${activePage === "corpHangars" ? styles.navActive : ""}`}
+                href="/corp-hangars"
+                onClick={closeSidebarOnNavigation}
+              >
+                <span>
+                  <Warehouse size={17} strokeWidth={1.8} aria-hidden="true" />
+                </span>
+                <span className={styles.navText}>Corp Hangers</span>
+              </Link>
+              <Link
                 className={`${styles.navItem} ${activePage === "settings" ? styles.navActive : ""}`}
                 href="/settings"
                 onClick={closeSidebarOnNavigation}
@@ -993,17 +1017,37 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   >
                     {characters.length}
                   </span>
-                  <a
-                    className={`${styles.addButton} ${styles.navText} ${!authenticated ? styles.addButtonDisconnected : ""}`}
-                    href="/api/auth/eve/start"
-                  >
-                    <UserRoundPlus size={16} strokeWidth={1.8} aria-hidden="true" />
-                    <span>Add character</span>
-                  </a>
+                  <EveAuthorizationWarning href="/api/auth/eve/start">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className={`${styles.addButton} ${styles.navText} ${!authenticated ? styles.addButtonDisconnected : ""}`}
+                    >
+                      <UserRoundPlus
+                        data-icon="inline-start"
+                        strokeWidth={1.8}
+                        aria-hidden="true"
+                      />
+                      <span>Add character</span>
+                    </Button>
+                  </EveAuthorizationWarning>
                 </div>
               </div>
             </aside>
             <section className={styles.content}>{children}</section>
+            <footer className={styles.siteFooter}>
+              <div className={styles.siteFooterInner}>
+                <span>Independent industry planning for EVE Online.</span>
+                <nav className={styles.siteFooterLinks} aria-label="Site information">
+                  <Link href="/guides">Guides</Link>
+                  <Link href="/about">About</Link>
+                  <Link href="/contact">Contact</Link>
+                  <Link href="/privacy">Privacy</Link>
+                  <Link href="/terms">Terms</Link>
+                  <Link href="/cookies">Cookies</Link>
+                </nav>
+              </div>
+            </footer>
           </div>
         </main>
       </RefreshContext.Provider>

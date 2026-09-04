@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
+import { getCollectionCorporationSettings } from "@/lib/auth/tokensStore";
 import {
   getCharacterIndustrySlots,
+  getCorporationSourcePolicies,
   getBlueprintInstances,
   getResolvedAssetIndex,
   getRootLocationsByItemId,
@@ -110,17 +112,30 @@ export async function GET(request: Request) {
   const characters = (await Promise.all(characterIds.map((id) => getCharacter(id)))).filter(
     (character) => character !== null,
   );
-  const includeCorporationJobs = characters.some((character) => character.hasDirectorRole);
+  const corporationSettings = session.collectionId
+    ? await getCollectionCorporationSettings(session.collectionId)
+    : [];
+  const corporationPolicies = await getCorporationSourcePolicies(
+    characterIds,
+    corporationSettings,
+    session.sessionId,
+  );
+  const includeCorporationJobs = corporationPolicies.length > 0;
   const availableSlots = await getCharacterIndustrySlots(characterIds, session.sessionId);
   const jobs = (
-    await getRunningIndustryJobs(characterIds, includeCorporationJobs, session.sessionId)
+    await getRunningIndustryJobs(
+      characterIds,
+      includeCorporationJobs,
+      session.sessionId,
+      corporationPolicies,
+    )
   ).filter((job) => isActiveJob(job.status));
   const [stations, systems, rootLocations, blueprintInstances, assets] = await Promise.all([
     getStations(),
     getSystems(),
-    getRootLocationsByItemId(characterIds, true, session.sessionId),
-    getBlueprintInstances(characterIds, true, session.sessionId),
-    getResolvedAssetIndex(characterIds, true, session.sessionId),
+    getRootLocationsByItemId(characterIds, true, session.sessionId, corporationPolicies),
+    getBlueprintInstances(characterIds, true, session.sessionId, corporationPolicies),
+    getResolvedAssetIndex(characterIds, true, session.sessionId, corporationPolicies),
   ]);
   const types = await getTypesByIds(
     [

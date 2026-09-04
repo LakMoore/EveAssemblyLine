@@ -16,6 +16,8 @@
     "generate-types": "tsx scripts/generate-types.ts",
     "upload-sde-cache": "tsx scripts/upload-sde-cache.ts",
     "migrate-legacy-auth": "tsx --env-file=.env.local scripts/migrate-legacy-auth-storage.ts",
+    "migrate-corporation-settings": "tsx --env-file-if-exists=.env.local scripts/migrate-corporation-settings.ts",
+    "migrate-corp-refresh-opt-in": "tsx --env-file-if-exists=.env.local scripts/migrate-corp-refresh-opt-in.ts",
     "sde:prepare": "npm run fetch-sde && npm run parse-sde && npm run generate-types && if [ \"${CACHE_PROVIDER:-inmemory}\" = \"inmemory\" ]; then echo 'Skipping SDE cache upload for in-memory cache provider.'; else npm run upload-sde-cache; fi",
     "cache:cleanup-old-sde": "tsx scripts/cleanup-old-sde-cache.ts",
     "shadcn:diff": "npx shadcn@latest diff",

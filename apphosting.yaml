@@ -17,4 +17,4 @@ runConfig:
 # - variable: MY_SECRET
 #   secret: mySecretRef
 scripts:
-  buildCommand: npm run sde:prepare && npm run build
+  buildCommand: npm run sde:prepare && npm run migrate-corporation-settings -- --apply && npm run migrate-corp-refresh-opt-in -- --apply && npm run build

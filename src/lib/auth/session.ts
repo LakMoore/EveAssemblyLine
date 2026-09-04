@@ -14,11 +14,15 @@ export function getRequestCookie(request: Request, name: string) {
     ?.slice(name.length + 1);
 }
 
-export async function createSession(collectionId?: string): Promise<SessionRecord> {
+export async function createSession(
+  collectionId?: string,
+  authenticatedCharacterId?: number,
+): Promise<SessionRecord> {
   const now = new Date().toISOString();
   const record: SessionRecord = {
     sessionId: randomUUID(),
     collectionId,
+    authenticatedCharacterId,
     createdAt: now,
     lastSeenAt: now,
   };

@@ -2,13 +2,13 @@ export type RefreshCharacterTarget = {
   characterId: number;
   corporationId?: number;
   hasDirectorRole: boolean;
+  corporationSupportEnabled?: boolean;
 };
 
 export type RefreshUnit = {
   key: string;
   kind: "character" | "corporation";
   ownerId: number;
-  authorizationCharacterId?: number;
 };
 
 export type RefreshUnitResult = {
@@ -33,7 +33,7 @@ export function buildRefreshUnits(targets: readonly RefreshCharacterTarget[]): R
   }
   const corporationUnits = new Map<number, RefreshUnit>();
   for (const target of targets) {
-    if (!target.hasDirectorRole || target.corporationId === undefined) continue;
+    if (!target.corporationSupportEnabled || target.corporationId === undefined) continue;
     if (corporationUnits.has(target.corporationId)) continue;
     corporationUnits.set(
       target.corporationId,
@@ -41,7 +41,6 @@ export function buildRefreshUnits(targets: readonly RefreshCharacterTarget[]): R
         key: `corporation:${target.corporationId}`,
         kind: "corporation",
         ownerId: target.corporationId,
-        authorizationCharacterId: target.characterId,
       },
     );
   }

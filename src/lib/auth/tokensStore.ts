@@ -6,15 +6,28 @@ import {
   type FacilitySettingsPayload,
 } from "../planning/facilities";
 import {
+  corporationHangarFlags,
   CharacterCollectionRecord,
+  CorporationCollectionSettings,
   CharacterTokenRecord,
   PendingMergeRecord,
   SessionRecord,
   TokenSet,
 } from "./model";
+import { hasCorporationRefreshScopes } from "../esi/corporationAccess";
+import { isCorpRefreshOptInEnabled } from "./corpRefreshOptIn";
 
 const characterTokenKeyPrefix = "character-token:";
 const characterRecordKeyPrefix = "character:";
+
+const corporationHangarFlagSet = new Set<string>(corporationHangarFlags);
+
+type RawCorporationSettingsRecord = {
+  corporationId?: unknown;
+  supportEnabled?: unknown;
+  directHangars?: unknown;
+  containerItemIds?: unknown;
+};
 
 function characterTokenKey(characterId: number) {
   return `${characterTokenKeyPrefix}${characterId}`;
@@ -70,6 +83,7 @@ function normalizeCharacter(value: unknown): CharacterTokenRecord | null {
     rolesAtHq: Array.isArray(record.rolesAtHq) ? record.rolesAtHq : [],
     rolesAtOther: Array.isArray(record.rolesAtOther) ? record.rolesAtOther : [],
     hasDirectorRole: record.hasDirectorRole,
+    allowCorpRefreshOptIn: record.allowCorpRefreshOptIn === true,
     hasAccountantRole: record.hasAccountantRole,
     hasTraderRole: record.hasTraderRole,
     hasStationManagerRole: record.hasStationManagerRole,
@@ -78,6 +92,101 @@ function normalizeCharacter(value: unknown): CharacterTokenRecord | null {
 
 function withTokenSet(record: CharacterTokenRecord, tokenSet: TokenSet | null) {
   return tokenSet ? { ...record, personalAuth: tokenSet } : record;
+}
+
+/** Normalizes collection corporation settings without changing legacy records on read. */
+export function normalizeCorporationSettings(value: unknown): CorporationCollectionSettings[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object") return [];
+    const record = candidate as RawCorporationSettingsRecord;
+    if (
+      typeof record.corporationId !== "number"
+      || !Number.isSafeInteger(record.corporationId)
+      || record.corporationId <= 0
+    ) return [];
+    const corporationId = record.corporationId;
+    const directHangars = Array.isArray(record.directHangars)
+      ? record.directHangars.flatMap((source) => {
+          if (!source || typeof source !== "object") return [];
+          const candidateSource = source as Partial<
+            CorporationCollectionSettings["directHangars"][number]
+          >;
+          const rootLocationId = candidateSource.rootLocationId;
+          return typeof rootLocationId === "number"
+            && Number.isSafeInteger(rootLocationId)
+            && rootLocationId > 0
+            && typeof candidateSource.locationFlag === "string"
+            && corporationHangarFlagSet.has(candidateSource.locationFlag)
+            ? [
+                {
+                  rootLocationId,
+                  locationFlag:
+                    candidateSource.locationFlag as CorporationCollectionSettings["directHangars"][number]["locationFlag"],
+                },
+              ]
+            : [];
+        })
+      : [];
+    const containerItemIds = Array.isArray(record.containerItemIds)
+      ? record.containerItemIds.filter(
+          (itemId): itemId is number => Number.isSafeInteger(itemId) && itemId > 0,
+        )
+      : [];
+    return [
+      {
+        corporationId,
+        supportEnabled: record.supportEnabled === true,
+        directHangars: [
+          ...new Map(
+            directHangars.map((source) => [
+              `${source.rootLocationId}:${source.locationFlag}`,
+              source,
+            ]),
+          ).values(),
+        ],
+        containerItemIds: [...new Set(containerItemIds)],
+      },
+    ];
+  });
+}
+
+/** Merges collection corporation settings while preserving opt-ins and source selections. */
+export function mergeCorporationSettings(
+  target: CorporationCollectionSettings[] | undefined,
+  source: CorporationCollectionSettings[] | undefined,
+) {
+  const merged = new Map<number, CorporationCollectionSettings>();
+  for (const settings of [
+    ...normalizeCorporationSettings(target),
+    ...normalizeCorporationSettings(source),
+  ]) {
+    const current = merged.get(settings.corporationId);
+    if (!current) {
+      merged.set(
+        settings.corporationId,
+        {
+          ...settings,
+          directHangars: [...settings.directHangars],
+          containerItemIds: [...settings.containerItemIds],
+        },
+      );
+      continue;
+    }
+    current.supportEnabled ||= settings.supportEnabled;
+    current.directHangars = [
+      ...new Map(
+        [...current.directHangars, ...settings.directHangars].map((source) => [
+          `${source.rootLocationId}:${source.locationFlag}`,
+          source,
+        ]),
+      ).values(),
+    ];
+    current.containerItemIds = [
+      ...new Set([...current.containerItemIds, ...settings.containerItemIds]),
+    ];
+  }
+  return [...merged.values()];
 }
 
 async function getCharactersInTransaction(transaction: StorageTransaction) {
@@ -110,6 +219,47 @@ export async function getAllCharacters(): Promise<CharacterTokenRecord[]> {
   return [...recordsById.values()].map((record) =>
     withTokenSet(record, tokenSetsByCharacterId.get(record.characterId) ?? null),
   );
+}
+
+/** Selects a Director for a corporation refresh from already loaded character records. */
+export function selectCorporationDirector(
+  characters: readonly CharacterTokenRecord[],
+  corporationId: number,
+  requesterCharacterId?: number,
+  optInEnabled = isCorpRefreshOptInEnabled(),
+): CharacterTokenRecord | null {
+  const eligibleDirectors = characters.filter(
+    (character) =>
+      character.corporationId === corporationId
+      && character.hasDirectorRole === true
+      && hasCorporationRefreshScopes(character.personalAuth.scopes),
+  );
+  const requester =
+    requesterCharacterId === undefined
+      ? undefined
+      : characters.find((character) => character.characterId === requesterCharacterId);
+  if (requester?.corporationId === corporationId && requester.hasDirectorRole === true) {
+    return (
+      eligibleDirectors.find((character) => character.characterId === requester.characterId) ?? null
+    );
+  }
+  if (!optInEnabled) {
+    return eligibleDirectors.sort((left, right) => left.characterId - right.characterId)[0] ?? null;
+  }
+  return (
+    eligibleDirectors
+      .filter((character) => character.allowCorpRefreshOptIn === true)
+      .sort((left, right) => left.characterId - right.characterId)[0] ?? null
+  );
+}
+
+/** Finds the deterministic durable Director used for a corporation refresh. */
+export async function findCorporationDirector(
+  corporationId: number,
+  requesterCharacterId?: number,
+): Promise<CharacterTokenRecord | null> {
+  const characters = await getAllCharacters();
+  return selectCorporationDirector(characters, corporationId, requesterCharacterId);
 }
 
 /** Loads one character without scanning unrelated character records. */
@@ -170,6 +320,7 @@ export async function updateCharacterCorporationAuthorization(
     | "rolesAtHq"
     | "rolesAtOther"
     | "hasDirectorRole"
+    | "allowCorpRefreshOptIn"
     | "hasAccountantRole"
     | "hasTraderRole"
     | "hasStationManagerRole"
@@ -196,6 +347,7 @@ export async function clearCharacterCorporationAuthorization(characterId: number
       rolesAtHq: [],
       rolesAtOther: [],
       hasDirectorRole: false,
+      allowCorpRefreshOptIn: false,
       hasAccountantRole: false,
       hasTraderRole: false,
       hasStationManagerRole: false,
@@ -209,6 +361,8 @@ export function normalizeSessions(
   return (raw ?? []).map((session) => ({
     sessionId: session.sessionId,
     collectionId: session.collectionId ?? session.accountId,
+    authenticatedCharacterId: session.authenticatedCharacterId,
+    authorizationWarningAcknowledgedAt: session.authorizationWarningAcknowledgedAt,
     createdAt: session.createdAt,
     lastSeenAt: session.lastSeenAt,
   }));
@@ -232,6 +386,9 @@ function normalizeCollections(
   characters: CharacterTokenRecord[],
 ): CharacterCollectionRecord[] {
   const collections = stored ?? [];
+  for (const collection of collections) {
+    collection.corporationSettings = normalizeCorporationSettings(collection.corporationSettings);
+  }
   const collectionById = new Map(
     collections.map((collection) => [collection.collectionId, collection]),
   );
@@ -302,6 +459,7 @@ export async function createCollection(): Promise<CharacterCollectionRecord> {
     characterIds: [],
     createdAt: now,
     lastSeenAt: now,
+    corporationSettings: [],
   };
   await saveCollection(collection);
   return collection;
@@ -315,8 +473,12 @@ export async function saveCollection(record: CharacterCollectionRecord) {
     const index = collections.findIndex(
       (collection) => collection.collectionId === record.collectionId,
     );
-    if (index === -1) collections.push(record);
-    else collections[index] = record;
+    const normalized = {
+      ...record,
+      corporationSettings: normalizeCorporationSettings(record.corporationSettings),
+    };
+    if (index === -1) collections.push(normalized);
+    else collections[index] = normalized;
     transaction.setItem("collections", collections);
   });
 }
@@ -361,6 +523,10 @@ export async function mergeCollections(targetId: string, sourceId: string) {
       normalizeFacilitySettings(target.facilities),
       normalizeFacilitySettings(source.facilities),
     );
+    target.corporationSettings = mergeCorporationSettings(
+      target.corporationSettings,
+      source.corporationSettings,
+    );
     for (const character of characters) {
       if (character.collectionId === sourceId) character.collectionId = targetId;
     }
@@ -370,6 +536,7 @@ export async function mergeCollections(targetId: string, sourceId: string) {
     const sessions = (rawSessions ?? []).map((session) => ({
       sessionId: session.sessionId,
       collectionId: session.collectionId ?? session.accountId,
+      authenticatedCharacterId: session.authenticatedCharacterId,
       createdAt: session.createdAt,
       lastSeenAt: session.lastSeenAt,
     }));
@@ -393,6 +560,36 @@ export async function getCollectionFacilities(
   collectionId: string,
 ): Promise<FacilitySettingsPayload> {
   return normalizeFacilitySettings((await getCollection(collectionId))?.facilities);
+}
+
+/** Returns normalized corporation support and planning-source settings for a collection. */
+export async function getCollectionCorporationSettings(collectionId: string) {
+  return normalizeCorporationSettings((await getCollection(collectionId))?.corporationSettings);
+}
+
+/** Saves one corporation's support and planning-source settings for a collection. */
+export async function saveCollectionCorporationSettings(
+  collectionId: string,
+  settings: CorporationCollectionSettings,
+) {
+  const normalizedSettings = normalizeCorporationSettings([settings]).find(
+    (candidate) => candidate.corporationId === settings.corporationId,
+  );
+  if (!normalizedSettings) throw new Error("Invalid corporation settings.");
+  const storage = await initStorage();
+  return storage.runTransaction(async (transaction) => {
+    const collections =
+      ((await transaction.getItem("collections")) as CharacterCollectionRecord[] | undefined) ?? [];
+    const collection = collections.find((record) => record.collectionId === collectionId);
+    if (!collection) throw new Error("Collection not found");
+    const existing = normalizeCorporationSettings(collection.corporationSettings);
+    collection.corporationSettings = [
+      ...existing.filter((candidate) => candidate.corporationId !== settings.corporationId),
+      normalizedSettings,
+    ];
+    transaction.setItem("collections", collections);
+    return normalizedSettings;
+  });
 }
 
 /** Merges facility settings into the collection, keeping the newer edit. */
@@ -440,6 +637,36 @@ export async function setCharacterOnDeployment(
       throw new Error("Character is not attached to this collection.");
     }
     transaction.setItem(characterRecordKey(characterId), { ...record, onDeployment });
+  });
+}
+
+/** Persists a Director's consent for non-Director corporation refreshes. */
+export async function setCharacterCorpRefreshOptIn(
+  characterId: number,
+  collectionId: string,
+  enabled: boolean,
+): Promise<void> {
+  const existing = await getCharacter(characterId);
+  if (!existing || existing.collectionId !== collectionId) {
+    throw new Error("Character is not attached to this collection.");
+  }
+  const storage = await initStorage();
+  await storage.runTransaction(async (transaction) => {
+    const stored = await transaction.getItem<unknown>(characterRecordKey(characterId));
+    const record = normalizeCharacter(stored) ?? existing;
+    if (record.collectionId !== collectionId) {
+      throw new Error("Character is not attached to this collection.");
+    }
+    if (record.hasDirectorRole !== true) {
+      throw new Error("Only a Director can change corporation refresh opt-in.");
+    }
+    transaction.setItem(
+      characterRecordKey(characterId),
+      {
+        ...record,
+        allowCorpRefreshOptIn: enabled,
+      },
+    );
   });
 }
 

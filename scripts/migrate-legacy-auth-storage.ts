@@ -107,6 +107,8 @@ function readLegacyCharacter(
   ] as const) {
     if (typeof value[field] === "boolean") record[field] = value[field];
   }
+  record.allowCorpRefreshOptIn =
+    value.allowCorpRefreshOptIn === true || value.allowCorporationRefreshSharing === true;
   return record;
 }
 

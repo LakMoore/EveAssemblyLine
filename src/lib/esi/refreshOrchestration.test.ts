@@ -9,9 +9,24 @@ import {
 
 test("creates one personal unit per character and one corporation unit per eligible corporation", () => {
   const units = buildRefreshUnits([
-    { characterId: 10, corporationId: 100, hasDirectorRole: true },
-    { characterId: 10, corporationId: 100, hasDirectorRole: true },
-    { characterId: 11, corporationId: 100, hasDirectorRole: true },
+    {
+      characterId: 10,
+      corporationId: 100,
+      hasDirectorRole: true,
+      corporationSupportEnabled: true,
+    },
+    {
+      characterId: 10,
+      corporationId: 100,
+      hasDirectorRole: true,
+      corporationSupportEnabled: true,
+    },
+    {
+      characterId: 11,
+      corporationId: 100,
+      hasDirectorRole: true,
+      corporationSupportEnabled: true,
+    },
     { characterId: 12, corporationId: 200, hasDirectorRole: false },
     { characterId: 13, hasDirectorRole: false },
   ]);
@@ -23,7 +38,6 @@ test("creates one personal unit per character and one corporation unit per eligi
         key: "corporation:100",
         kind: "corporation",
         ownerId: 100,
-        authorizationCharacterId: 10,
       },
       {
         key: "character:10",
@@ -49,12 +63,28 @@ test("creates one personal unit per character and one corporation unit per eligi
   );
 });
 
+test("creates a corporation unit for an opted-in non-director collection", () => {
+  const units = buildRefreshUnits([
+    {
+      characterId: 20,
+      corporationId: 100,
+      hasDirectorRole: false,
+      corporationSupportEnabled: true,
+    },
+  ]);
+
+  assert.deepEqual(
+    units.map((unit) => unit.key),
+    ["corporation:100", "character:20"],
+  );
+});
+
 test("runs each unit once, limits concurrency, and reports partial failures", async () => {
   const units: RefreshUnit[] = [
     { key: "character:1", kind: "character", ownerId: 1 },
     { key: "character:1", kind: "character", ownerId: 1 },
     { key: "character:2", kind: "character", ownerId: 2 },
-    { key: "corporation:3", kind: "corporation", ownerId: 3, authorizationCharacterId: 1 },
+    { key: "corporation:3", kind: "corporation", ownerId: 3 },
   ];
   const started: string[] = [];
   const settled: string[] = [];

@@ -9,7 +9,9 @@ export type ClientSession = {
     characterName: string;
     corporationId?: number;
     hasDirectorRole: boolean;
+    allowCorpRefreshOptIn: boolean;
     onDeployment: boolean;
+    corporationSupportEnabled?: boolean;
   }>;
 };
 
@@ -24,6 +26,34 @@ export type ClientAssetsResponse = {
     typeId?: number;
   }>;
   filteredLocationIds?: number[];
+  corporationSources?: ClientCorporationSource[];
+};
+
+export type ClientCorporationSource = {
+  corporationId: number;
+  rootLocationId: number;
+  locationFlag: string;
+  label: string;
+  rootLocation?: {
+    locationId: number;
+    kind: "station" | "structure" | "solar_system";
+    name?: string;
+    systemName?: string;
+    typeId?: number;
+    systemId?: number;
+    regionId?: number;
+    resolved: boolean;
+  };
+  canTake: boolean;
+  canQuery: boolean;
+  selected: boolean;
+  containers: Array<{
+    itemId: number;
+    name?: string;
+    locationId: number;
+    rootLocationId: number;
+    selected: boolean;
+  }>;
 };
 
 export function groupClientAssetsByLocation(data: ClientAssetsResponse) {
@@ -116,8 +146,22 @@ export type ClientCharacter = {
   rolesAtHq: string[];
   rolesAtOther: string[];
   hasDirectorRole: boolean;
+  allowCorpRefreshOptIn: boolean;
+  canManageCorpRefreshOptIn?: boolean;
+  corpRefreshOptInEnabled?: boolean;
   hasAccountantRole: boolean;
   hasTraderRole: boolean;
+  corporationSupportEnabled?: boolean;
+};
+
+export type ClientCorporationSettings = {
+  corporationId: number;
+  supportEnabled: boolean;
+  directHangars: Array<{
+    rootLocationId: number;
+    locationFlag: string;
+  }>;
+  containerItemIds: number[];
 };
 
 export type ClientCharacterStatus = {
@@ -165,6 +209,8 @@ let charactersRequest: Promise<ClientCharacter[]> | undefined;
 let charactersResponse: ClientCharacter[] | undefined;
 let corpStatusRequest: Promise<ClientCharacter[]> | undefined;
 let corpStatusResponse: ClientCharacter[] | undefined;
+let corporationSettingsRequest: Promise<ClientCorporationSettings[]> | undefined;
+let corporationSettingsResponse: ClientCorporationSettings[] | undefined;
 let stateStatusRequest: Promise<{ characters?: ClientCharacterStatus[] }> | undefined;
 let stateStatusResponse: { characters?: ClientCharacterStatus[] } | undefined;
 let stateStatusGeneration = 0;
@@ -249,9 +295,7 @@ export function loadClientAssets(language: SdeLanguage, reload = false) {
 }
 
 export function clearClientAssetsCache(language: SdeLanguage) {
-  for (const key of assetsResponses.keys()) {
-    if (key.startsWith(`${language}:`)) assetsResponses.set(key, { locations: [] });
-  }
+  assetsResponses.delete(language);
 }
 
 export function loadClientShips(reload = false) {
@@ -328,6 +372,51 @@ export function loadClientCorpStatus(reload = false) {
   return corpStatusRequest;
 }
 
+export function loadClientCorporationSettings(reload = false) {
+  if (reload) {
+    corporationSettingsRequest = undefined;
+    corporationSettingsResponse = undefined;
+  }
+  if (corporationSettingsResponse) return Promise.resolve(corporationSettingsResponse);
+  corporationSettingsRequest
+    ??= fetch("/api/auth/corp/settings", { cache: "no-store" })
+      .then(async (response) => {
+        const data = (await response.json()) as { settings?: ClientCorporationSettings[] };
+        if (!response.ok) throw new Error("Could not load corporation settings.");
+        corporationSettingsResponse = data.settings ?? [];
+        return corporationSettingsResponse;
+      })
+      .finally(() => {
+        corporationSettingsRequest = undefined;
+      });
+  return corporationSettingsRequest;
+}
+
+export async function saveClientCorporationSettings(settings: ClientCorporationSettings) {
+  const response = await fetch(
+    "/api/auth/corp/settings",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(settings),
+    },
+  );
+  const data = (await response.json()) as {
+    settings?: ClientCorporationSettings;
+    error?: string;
+  };
+  if (!response.ok || !data.settings) {
+    throw new Error(data.error ?? "Could not save corporation settings.");
+  }
+  corporationSettingsResponse = [
+    ...(corporationSettingsResponse ?? []).filter(
+      (entry) => entry.corporationId !== data.settings!.corporationId,
+    ),
+    data.settings,
+  ];
+  return data.settings;
+}
+
 export function loadClientStateStatus(reload = false) {
   if (reload) {
     stateStatusGeneration += 1;
@@ -355,6 +444,8 @@ export function invalidateClientCharacterData() {
   sessionRequest = undefined;
   charactersResponse = undefined;
   corpStatusResponse = undefined;
+  corporationSettingsResponse = undefined;
+  corporationSettingsRequest = undefined;
   stateStatusResponse = undefined;
   stateStatusRequest = undefined;
   stateStatusGeneration += 1;

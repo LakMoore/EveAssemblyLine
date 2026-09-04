@@ -35,6 +35,21 @@ Use a dedicated service account with access limited to the required Firestore da
 
 The Firestore database must be created in the Firebase project before the first authenticated request. Existing `data/` files are intentionally not migrated; they contain disposable pre-Firestore state and will be abandoned on deployment.
 
+### Corporation refresh opt-in
+
+Explicit Director consent for shared corporation refreshes is disabled by default. Set the
+server-only environment variable below to require each Director to opt in from the Characters
+page:
+
+```env
+CORP_REFRESH_OPT_IN=true
+```
+
+When the variable is omitted or has any value other than `true`, every eligible Director token can
+be used for a non-Director corporation refresh and the opt-in switch is hidden. When enabled, only
+Directors with consent can be selected for non-Director refreshes. A Director's own authenticated
+session can always refresh that Director's corporation when the required scopes are available.
+
 ### Create the Firestore database
 
 1. Open the [Firebase console](https://console.firebase.google.com/) and select the project used by the App Hosting backend.
@@ -45,6 +60,21 @@ The Firestore database must be created in the Firebase project before the first 
 6. Roll out the App Hosting backend. The first successful authenticated request creates the `assemblyLineStorage` collection and its documents automatically; no manual collection creation is needed.
 
 For local ADC setup, install the Google Cloud CLI, run `gcloud auth application-default login`, set `FIREBASE_PROJECT_ID` in `.env.local`, and run the app from the application root. Do not use production credentials for local experiments; use a separate Firebase project or the Firestore emulator.
+
+### Migrate corporation settings
+
+Collection corporation support and planning-source settings are stored in the collection record. The
+App Hosting build runs the idempotent migration before compiling the application. For a local
+deployment or a database change, run a dry run first, then apply it with credentials for the target
+Firestore project:
+
+```bash
+npm run migrate-corporation-settings
+npm run migrate-corporation-settings -- --apply
+```
+
+Malformed collection records and corporation settings are retained and reported by the migration;
+they are not silently discarded.
 
 ## Cache configuration
 

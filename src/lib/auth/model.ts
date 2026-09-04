@@ -1,5 +1,30 @@
 import type { FacilitySettingsPayload } from "../planning/facilities";
 
+export const corporationHangarFlags = [
+  "CorpDeliveries",
+  "CorpSAG1",
+  "CorpSAG2",
+  "CorpSAG3",
+  "CorpSAG4",
+  "CorpSAG5",
+  "CorpSAG6",
+  "CorpSAG7",
+] as const;
+
+export type CorporationHangarFlag = (typeof corporationHangarFlags)[number];
+
+export interface CorporationPlanningSource {
+  rootLocationId: number;
+  locationFlag: CorporationHangarFlag;
+}
+
+export interface CorporationCollectionSettings {
+  corporationId: number;
+  supportEnabled: boolean;
+  directHangars: CorporationPlanningSource[];
+  containerItemIds: number[];
+}
+
 export interface TokenSet {
   refreshToken: string;
   accessToken: string;
@@ -21,6 +46,7 @@ export interface CharacterTokenRecord {
   rolesAtHq?: string[];
   rolesAtOther?: string[];
   hasDirectorRole?: boolean;
+  allowCorpRefreshOptIn?: boolean;
   hasAccountantRole?: boolean;
   hasTraderRole?: boolean;
   hasStationManagerRole?: boolean;
@@ -33,6 +59,7 @@ export interface CharacterCollectionRecord {
   lastSeenAt: string;
   // Facility configuration shared by every session attached to this collection.
   facilities?: FacilitySettingsPayload;
+  corporationSettings?: CorporationCollectionSettings[];
 }
 
 export interface AssetRecord {
@@ -161,6 +188,8 @@ export interface MarketOrderRecord {
 export interface SessionRecord {
   sessionId: string;
   collectionId?: string;
+  authenticatedCharacterId?: number;
+  authorizationWarningAcknowledgedAt?: string;
   createdAt: string;
   lastSeenAt: string;
 }

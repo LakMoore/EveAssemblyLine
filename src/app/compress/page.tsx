@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useAppLanguage } from "../AppShell";
 import CalculateButton from "@/components/CalculateButton";
 import DialogBody from "@/components/DialogBody";
+import EveAuthorizationWarning from "@/components/EveAuthorizationWarning";
 import PasteListDialog from "@/components/PasteListDialog";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import TypeSearch from "@/components/TypeSearch";
@@ -555,8 +556,18 @@ function CompressContent() {
                 <AlertTitle>No reprocessing locations found.</AlertTitle>
                 <AlertDescription>
                   Add a reprocessing location on the <Link href="/structures">Structures</Link> page
-                  or <Link href="/api/auth/eve/start">authenticate a character</Link> to find the
-                  best location automatically.
+                  or{" "}
+                  <EveAuthorizationWarning href="/api/auth/eve/start">
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="xs"
+                      className="inline h-auto p-0 align-baseline font-normal"
+                    >
+                      authenticate a character
+                    </Button>
+                  </EveAuthorizationWarning>{" "}
+                  to find the best location automatically.
                 </AlertDescription>
               </Alert>
             )}

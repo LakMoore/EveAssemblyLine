@@ -21,6 +21,7 @@ import type {
   PlanStockItem,
 } from "@/lib/planning/types";
 import { loadBuildList } from "@/lib/planning/buildListStore";
+import EveAuthorizationWarning from "@/components/EveAuthorizationWarning";
 import { loadPlannerBuckets, savePlannerBuckets } from "@/lib/planning/plannerBucketsStore";
 import { loadStructures } from "@/lib/planning/structureStore";
 import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
@@ -37,6 +38,7 @@ import {
   loadClientStateStatus,
   loadClientAssets,
   type ClientCharacterStatus,
+  type ClientCorporationSource,
   type ClientJobsResponse,
 } from "@/lib/client/requestCache";
 import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
@@ -115,6 +117,7 @@ import {
   Microscope,
   Repeat,
   ShoppingCart,
+  Settings2,
   SquareX,
   TestTubes,
   Trash2,
@@ -565,6 +568,7 @@ function Planner() {
     ProductionGroupReference[]
   >([]);
   const [includeStock, setIncludeStock] = useState(true);
+  const [corporationSources, setCorporationSources] = useState<ClientCorporationSource[]>([]);
   const [locations, setLocations] = useState<PlannerLocations>(defaultLocations);
   const [settings, setSettings] = useState<PlannerSettings>(() => {
     if (typeof window === "undefined") return defaultSettings;
@@ -582,6 +586,8 @@ function Planner() {
     void loadClientSession()
       .then(async (session) => {
         if (cancelled || !session.authenticated) return;
+        const assets = await loadClientAssets(language);
+        setCorporationSources(assets.corporationSources ?? []);
         const activeCharacters = (session.characters ?? []).filter(
           (character) => !character.onDeployment,
         );
@@ -604,7 +610,7 @@ function Planner() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [language]);
 
   function updateLocations(next: Partial<Pick<PlannerLocations, "manufacturing" | "reactions">>) {
     const updatedLocations = { ...locations, ...next };
@@ -746,6 +752,7 @@ function Planner() {
       let workingAssets: PlanStockItem[] = [];
       if (includeStock && (await loadClientSession()).authenticated) {
         const assetsData = await loadClientAssets(language, true);
+        setCorporationSources(assetsData.corporationSources ?? []);
         workingAssets = assetsData.assets ?? [];
       }
       const compressSettings = await loadCompressSettings();
@@ -1217,6 +1224,17 @@ function Planner() {
     );
   }
 
+  const selectedDirectSourceCount = corporationSources.filter((source) => source.selected).length;
+  const selectedContainerCount = corporationSources.reduce(
+    (total, source) => total + source.containers.filter((container) => container.selected).length,
+    0,
+  );
+  const selectedSourceCount = selectedDirectSourceCount + selectedContainerCount;
+  const selectedSourceLabel =
+    selectedSourceCount === 0
+      ? "No corporation sources selected"
+      : `${selectedSourceCount} corporation source${selectedSourceCount === 1 ? "" : "s"} selected`;
+
   return (
     <>
       <div className={styles.pageIntro}>
@@ -1295,8 +1313,18 @@ function Planner() {
                 checked={includeStock}
                 onCheckedChange={setIncludeStock}
               />
-              Include shared assets
+              Include selected assets
             </label>
+            <span className="text-sm text-muted-foreground">{selectedSourceLabel}</span>
+            <Button
+              type="button"
+              variant="outline"
+              nativeButton={false}
+              render={<Link href="/assets" />}
+            >
+              <Settings2 data-icon="inline-start" aria-hidden="true" />
+              Edit sources
+            </Button>
             <Button
               type="button"
               variant="outline"
@@ -1653,8 +1681,18 @@ function Planner() {
                     <AlertTitle>No build or reaction locations available.</AlertTitle>
                     <AlertDescription>
                       Optionally add structures on the <Link href="/structures">Structures</Link>{" "}
-                      page or <Link href="/api/auth/eve/start">add character(s) via ESI</Link> to
-                      improve plan results.
+                      page or{" "}
+                      <EveAuthorizationWarning href="/api/auth/eve/start">
+                        <Button
+                          type="button"
+                          variant="link"
+                          size="xs"
+                          className="inline h-auto p-0 align-baseline font-normal"
+                        >
+                          add character(s) via ESI
+                        </Button>
+                      </EveAuthorizationWarning>{" "}
+                      to improve plan results.
                     </AlertDescription>
                   </div>
                 </Alert>
@@ -1701,7 +1739,7 @@ function Planner() {
               )}
               <label className={styles.checkboxOption}>
                 <div className={`${styles.planOptionHeader} text-xs`}>
-                  <span>INCLUDE ASSETS</span>
+                  <span>INCLUDE SELECTED ASSETS</span>
                 </div>
                 <Switch
                   aria-label="Include assets"
@@ -1709,6 +1747,15 @@ function Planner() {
                   onCheckedChange={setIncludeStock}
                 />
               </label>
+              <div className={styles.checkboxOption}>
+                <div className={`${styles.planOptionHeader} text-xs`}>
+                  <span>PLANNING SOURCES</span>
+                  <Link href="/assets" className="text-primary">
+                    Edit
+                  </Link>
+                </div>
+                <span className="text-sm text-muted-foreground">{selectedSourceLabel}</span>
+              </div>
               <div className={styles.excludedLocationsControl}>
                 <div className={`${styles.planOptionHeader} text-xs`}>
                   <span>EXCLUDED LOCATIONS</span>

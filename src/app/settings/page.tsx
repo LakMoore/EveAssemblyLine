@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import PasteListDialog from "@/components/PasteListDialog";
+import { setEveAuthorizationAcknowledgement } from "@/components/EveAuthorizationWarning";
 import StationSearch, { type StationSearchResult } from "@/components/StationSearch";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -32,6 +33,7 @@ import TypeSearch, { type TypeSearchResult } from "@/components/TypeSearch";
 import { useAppLanguage } from "../AppShell";
 import { toast } from "@/components/ui/toast";
 import {
+  defaultSettings,
   readPlannerSettings,
   settingsStorageKey,
   type PlannerSettings,
@@ -79,16 +81,42 @@ function BuildBlacklistSummary({ items }: { items: TypeMetadata[] }) {
 
 export default function SettingsPage() {
   const { language } = useAppLanguage();
-  const [settings, setSettings] = useState<PlannerSettings>(readPlannerSettings);
+  const [settings, setSettings] = useState<PlannerSettings>(defaultSettings);
   const [saved, setSaved] = useState(false);
   const [isBlacklistOpen, setIsBlacklistOpen] = useState(false);
   const [isMarketStationsOpen, setIsMarketStationsOpen] = useState(false);
+  const [isAuthorizationWarningAcknowledged, setIsAuthorizationWarningAcknowledged] =
+    useState(false);
+  const [isAuthorizationWarningLoading, setIsAuthorizationWarningLoading] = useState(true);
 
   useEffect(() => {
+    void Promise.resolve().then(() => setSettings(readPlannerSettings()));
     void loadBuildBlacklist().then((buildBlacklist) => {
       if (buildBlacklist) setSettings((current) => ({ ...current, buildBlacklist }));
     });
   }, []);
+
+  useEffect(() => {
+    void fetch("/api/auth/session/authorization-warning")
+      .then(async (response) => {
+        if (!response.ok) return;
+        const data = (await response.json()) as { acknowledgedAt?: string | null };
+        setIsAuthorizationWarningAcknowledged(Boolean(data.acknowledgedAt));
+      })
+      .catch(() => undefined)
+      .finally(() => setIsAuthorizationWarningLoading(false));
+  }, []);
+
+  function updateAuthorizationWarningAcknowledgement(acknowledged: boolean) {
+    setEveAuthorizationAcknowledgement(acknowledged);
+    setIsAuthorizationWarningAcknowledged(acknowledged);
+    void fetch(
+      "/api/auth/session/authorization-warning",
+      {
+        method: acknowledged ? "POST" : "DELETE",
+      },
+    );
+  }
 
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -133,6 +161,21 @@ export default function SettingsPage() {
             <FieldDescription>Choose the application color palette</FieldDescription>
           </FieldContent>
           <ThemeSelect id="theme" className="w-40" />
+        </Field>
+        <Field className={styles.rule} orientation="horizontal">
+          <FieldContent>
+            <FieldLabel id="authorization-warning-label">EVE SSO acknowledgement</FieldLabel>
+            <FieldDescription>
+              Do not show the corporation data warning before starting EVE SSO
+            </FieldDescription>
+          </FieldContent>
+          <Switch
+            id="authorization-warning"
+            aria-labelledby="authorization-warning-label"
+            checked={isAuthorizationWarningAcknowledged}
+            disabled={isAuthorizationWarningLoading}
+            onCheckedChange={updateAuthorizationWarningAcknowledgement}
+          />
         </Field>
         <Field className={styles.rule} orientation="horizontal">
           <FieldContent>

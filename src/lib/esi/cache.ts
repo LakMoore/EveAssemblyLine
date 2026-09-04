@@ -6,11 +6,18 @@ import type {
   CharacterShipRecord,
   CharacterSkillRecord,
   CharacterTokenRecord,
+  CorporationCollectionSettings,
+  CorporationHangarFlag,
   IndustryJobRecord,
   MarketOrderRecord,
   TokenSet,
 } from "@/lib/auth/model";
-import type { EsiCharacterClones, EsiCorporationStructure } from "./client";
+import type {
+  EsiCharacterClones,
+  EsiCorporationDivision,
+  EsiCorporationPublicInfo,
+  EsiCorporationStructure,
+} from "./client";
 import type { PlanStockItem } from "@/lib/planning/types";
 import {
   getGroups,
@@ -20,6 +27,7 @@ import {
   getShipTypeIds,
   getHaulerShipTypeIds,
   getBlueprintById,
+  getSystems,
 } from "@/cache/services/sdeCache";
 import {
   clearCharacterCorporationAuthorization,
@@ -42,12 +50,20 @@ import {
   fetchCharacterCorporationAuthorization,
   fetchCorporationMarketOrders,
   fetchCorporationStructures,
+  fetchCorporationPublicInfo,
+  fetchCorporationDivisions,
   fetchSolarSystemMetadata,
   fetchStationMetadata,
   fetchStructureMetadataPerCharacter,
   getUsableToken,
 } from "./client";
 import { getStation } from "@/cache/services/sdeCache";
+import {
+  corporationHangarFlagForDivision,
+  corporationHangarNumber,
+  getCorporationHangarPermissions,
+  isCorporationHangarFlag,
+} from "./corporationAccess";
 
 export type EndpointStatus = "fresh" | "cached" | "stale" | "rate_limited" | "error";
 export type EndpointCache<T> = {
@@ -98,8 +114,43 @@ type OwnerCache = {
   skills?: EndpointCache<CharacterSkillRecord[]>;
   marketOrders?: EndpointCache<MarketOrderRecord[]>;
   structures?: EndpointCache<EsiCorporationStructure[]>;
+  publicInfo?: EndpointCache<EsiCorporationPublicInfo | null>;
+  divisions?: EndpointCache<EsiCorporationDivision[] | null>;
   unresolvedAssetCount: number;
 };
+
+export type CorporationSourcePolicy = CorporationCollectionSettings & {
+  headquartersId?: number;
+};
+
+export type CorporationSourceContainer = {
+  itemId: number;
+  name?: string;
+  locationId: number;
+  rootLocationId: number;
+  selected: boolean;
+};
+
+export type CorporationSourceLocation = AssetLocation & {
+  systemName?: string;
+};
+
+export type CorporationSourceCatalogEntry = {
+  corporationId: number;
+  rootLocationId: number;
+  locationFlag: CorporationHangarFlag;
+  label: string;
+  rootLocation?: CorporationSourceLocation;
+  canTake: boolean;
+  canQuery: boolean;
+  selected: boolean;
+  containers: CorporationSourceContainer[];
+};
+
+type CorporationPolicyCharacter = Pick<
+  CharacterTokenRecord,
+  "corporationId" | "corporationRoles" | "rolesAtHq" | "rolesAtOther" | "hasDirectorRole"
+>;
 
 const characterCaches = new Map<string, OwnerCache>();
 const corporationCaches = new Map<string, OwnerCache>();
@@ -107,6 +158,373 @@ const corporationCaches = new Map<string, OwnerCache>();
 async function getCharactersByIds(characterIds: readonly number[]) {
   return (await Promise.all(characterIds.map((characterId) => getCharacter(characterId)))).filter(
     (character) => character !== null,
+  );
+}
+
+/** Resolves the opted-in corporations that are attached to the current collection. */
+export async function getCorporationSourcePolicies(
+  characterIds: readonly number[],
+  settings: readonly CorporationCollectionSettings[],
+  sessionId = "default",
+): Promise<CorporationSourcePolicy[]> {
+  const characters = await getCharactersByIds(characterIds);
+  const attachedCorporations = new Set(
+    characters
+      .filter((character) => character.corporationId !== undefined)
+      .map((character) => character.corporationId!),
+  );
+  return settings
+    .filter((entry) => entry.supportEnabled && attachedCorporations.has(entry.corporationId))
+    .map((entry) => ({
+      ...entry,
+      directHangars: [...entry.directHangars],
+      containerItemIds: [...entry.containerItemIds],
+      headquartersId: getCache(corporationCaches, entry.corporationId, sessionId).publicInfo
+        ?.lastBody?.home_station_id,
+    }));
+}
+
+function corporationSourceRoot(
+  locationId: number,
+  locationFlag: string,
+  rawAssetsByItemId: ReadonlyMap<number, AssetRecord>,
+) {
+  const visited = new Set<number>();
+  let sourceLocationFlag = isCorporationHangarFlag(locationFlag) ? locationFlag : undefined;
+  let current = rawAssetsByItemId.get(locationId);
+  while (current && !visited.has(current.itemId)) {
+    visited.add(current.itemId);
+    if (isCorporationHangarFlag(current.locationFlag)) {
+      sourceLocationFlag = current.locationFlag;
+    }
+    if (!rawAssetsByItemId.has(current.locationId)) {
+      return {
+        rootLocationId: current.locationId,
+        locationFlag: sourceLocationFlag,
+      };
+    }
+    current = rawAssetsByItemId.get(current.locationId);
+  }
+  return isCorporationHangarFlag(locationFlag)
+    ? { rootLocationId: locationId, locationFlag: sourceLocationFlag }
+    : undefined;
+}
+
+function isDescendantOfContainer(
+  asset: Pick<AssetRecord, "itemId" | "locationId">,
+  containerItemId: number,
+  rawAssetsByItemId: ReadonlyMap<number, AssetRecord>,
+) {
+  const visited = new Set<number>();
+  let locationId = asset.itemId === containerItemId ? containerItemId : asset.locationId;
+  while (!visited.has(locationId)) {
+    if (locationId === containerItemId) return true;
+    visited.add(locationId);
+    const parent = rawAssetsByItemId.get(locationId);
+    if (!parent) return false;
+    locationId = parent.locationId;
+  }
+  return false;
+}
+
+function sourceIsSelected(
+  source: { rootLocationId: number; locationFlag: CorporationHangarFlag },
+  locationId: number,
+  locationFlag: string,
+  itemId: number | undefined,
+  policy: CorporationSourcePolicy,
+  rawAssetsByItemId: ReadonlyMap<number, AssetRecord>,
+) {
+  const directSelected = policy.directHangars.some(
+    (entry) =>
+      entry.rootLocationId === source.rootLocationId && entry.locationFlag === source.locationFlag,
+  );
+  const parent = rawAssetsByItemId.get(locationId);
+  if (
+    directSelected
+    && (
+      locationId === source.rootLocationId
+      || (locationFlag === source.locationFlag && parent?.locationFlag === "OfficeFolder")
+    )
+  ) return true;
+  return (
+    itemId !== undefined
+    && policy.containerItemIds.some((containerItemId) =>
+      isDescendantOfContainer({ itemId, locationId }, containerItemId, rawAssetsByItemId),
+    )
+  );
+}
+
+function selectedContainerSource(
+  record: { itemId?: number; locationId: number },
+  policy: CorporationSourcePolicy,
+  rawAssetsByItemId: ReadonlyMap<number, AssetRecord>,
+) {
+  for (const containerItemId of policy.containerItemIds) {
+    if (
+      record.itemId === undefined
+      || !isDescendantOfContainer(
+        { itemId: record.itemId, locationId: record.locationId },
+        containerItemId,
+        rawAssetsByItemId,
+      )
+    ) continue;
+    const container = rawAssetsByItemId.get(containerItemId);
+    if (!container) continue;
+    const source = corporationSourceRoot(
+      container.locationId,
+      container.locationFlag,
+      rawAssetsByItemId,
+    );
+    if (source?.locationFlag) return source;
+  }
+  return undefined;
+}
+
+function isAssetLocation(value: AssetRecord | AssetLocation | undefined): value is AssetLocation {
+  return value !== undefined && "kind" in value;
+}
+
+/** Returns whether a corporation-owned record is visible under a collection source policy. */
+export function isCorporationRecordAllowed(
+  record: {
+    itemId?: number;
+    locationId: number;
+    locationFlag: string;
+    typeId?: number;
+  },
+  policy: CorporationSourcePolicy,
+  characters: readonly CorporationPolicyCharacter[],
+  blueprintItemIds: ReadonlySet<number>,
+  rawAssetsByItemId: ReadonlyMap<number, AssetRecord>,
+) {
+  const source =
+    selectedContainerSource(record, policy, rawAssetsByItemId)
+    ?? corporationSourceRoot(record.locationId, record.locationFlag, rawAssetsByItemId);
+  if (!source?.locationFlag) return false;
+  const permission = getCorporationHangarPermissions(
+    characters,
+    policy.corporationId,
+    source.rootLocationId,
+    policy.headquartersId ?? -1,
+  ).get(source.locationFlag);
+  if (!permission?.canQuery) return false;
+  if (
+    !sourceIsSelected(
+      { rootLocationId: source.rootLocationId, locationFlag: source.locationFlag },
+      record.locationId,
+      record.locationFlag,
+      record.itemId,
+      policy,
+      rawAssetsByItemId,
+    )
+  ) return false;
+  return permission.canTake || (record.itemId !== undefined && blueprintItemIds.has(record.itemId));
+}
+
+function isCorporationLocationSelected(
+  locationId: number,
+  policy: CorporationSourcePolicy,
+  characters: readonly CorporationPolicyCharacter[],
+  rawAssetsByItemId: ReadonlyMap<number, AssetRecord>,
+) {
+  return policy.directHangars.some((selectedSource) => {
+    const source = corporationSourceRoot(
+      locationId,
+      selectedSource.locationFlag,
+      rawAssetsByItemId,
+    );
+    const sourceFlag = source?.locationFlag;
+    if (
+      !source
+      || !sourceFlag
+      || source.rootLocationId !== selectedSource.rootLocationId
+      || sourceFlag !== selectedSource.locationFlag
+    ) return false;
+    if (
+      !sourceIsSelected(
+        { rootLocationId: source.rootLocationId, locationFlag: sourceFlag },
+        locationId,
+        sourceFlag,
+        locationId,
+        policy,
+        rawAssetsByItemId,
+      )
+    ) return false;
+    return (
+      getCorporationHangarPermissions(
+        characters,
+        policy.corporationId,
+        source.rootLocationId,
+        policy.headquartersId ?? -1,
+      ).get(sourceFlag)?.canTake === true
+    );
+  });
+}
+
+function corporationSourceLabel(
+  locationFlag: CorporationHangarFlag,
+  divisions: readonly EsiCorporationDivision[] | null | undefined,
+) {
+  const divisionNumber =
+    locationFlag === "CorpDeliveries" ? 0 : Number(locationFlag.slice("CorpSAG".length));
+  const division = corporationHangarFlagForDivision(divisionNumber);
+  const divisionName = divisions?.find((entry) => entry.division === divisionNumber)?.name;
+  return (
+    divisionName
+    ?? (division === "CorpDeliveries"
+      ? "Deliveries"
+      : `Hangar ${locationFlag.slice("CorpSAG".length)}`)
+  );
+}
+
+/** Lists accessible corporation hangars and named containers for the source editor. */
+export async function getCorporationSourceCatalog(
+  characterIds: readonly number[],
+  policies: readonly CorporationSourcePolicy[],
+  sessionId = "default",
+): Promise<CorporationSourceCatalogEntry[]> {
+  const characters = await getCharactersByIds(characterIds);
+  const [types, groups, marketGroups, systems] = await Promise.all([
+    getTypes(),
+    getGroups(),
+    getMarketGroups(),
+    getSystems(),
+  ]);
+  return policies.flatMap((policy) => {
+    const cache = getCache(corporationCaches, policy.corporationId, sessionId);
+    const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
+    const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+    const sourceEntries = new Map<string, CorporationSourceCatalogEntry>();
+    for (const asset of rawAssets) {
+      if (asset.ownerType !== "corporation") continue;
+      const source = corporationSourceRoot(asset.locationId, asset.locationFlag, rawAssetsByItemId);
+      if (!source?.locationFlag) continue;
+      const permission = getCorporationHangarPermissions(
+        characters,
+        policy.corporationId,
+        source.rootLocationId,
+        policy.headquartersId ?? -1,
+      ).get(source.locationFlag);
+      if (!permission?.canQuery) continue;
+      const key = `${source.rootLocationId}:${source.locationFlag}`;
+      if (!sourceEntries.has(key)) {
+        const rootLocationCandidate =
+          cache.rootLocationsByItemId.get(asset.itemId)
+          ?? cache.stockAssetsByItemId?.get(asset.itemId)?.rootLocation;
+        const rootLocation = isAssetLocation(rootLocationCandidate)
+          ? rootLocationCandidate
+          : undefined;
+        const systemName =
+          rootLocation?.systemId === undefined
+            ? undefined
+            : systems.get(rootLocation.systemId)?.name.en;
+        sourceEntries.set(
+          key,
+          {
+            corporationId: policy.corporationId,
+            rootLocationId: source.rootLocationId,
+            locationFlag: source.locationFlag,
+            label: corporationSourceLabel(source.locationFlag, cache.divisions?.lastBody),
+            ...(rootLocation
+              ? {
+                  rootLocation: {
+                    ...rootLocation,
+                    ...(systemName ? { systemName } : {}),
+                  },
+                }
+              : {}),
+            canTake: permission.canTake,
+            canQuery: permission.canQuery,
+            selected: policy.directHangars.some(
+              (entry) =>
+                entry.rootLocationId === source.rootLocationId
+                && entry.locationFlag === source.locationFlag,
+            ),
+            containers: [],
+          },
+        );
+      }
+      const entry = sourceEntries.get(key)!;
+      if (
+        asset.isSingleton
+        && isCargoContainerType(asset.typeId, types, groups, marketGroups)
+        && !entry.containers.some((container) => container.itemId === asset.itemId)
+      ) {
+        entry.containers.push({
+          itemId: asset.itemId,
+          ...(asset.name ? { name: asset.name } : {}),
+          locationId: asset.locationId,
+          rootLocationId: source.rootLocationId,
+          selected: policy.containerItemIds.includes(asset.itemId),
+        });
+      }
+    }
+    return [...sourceEntries.values()]
+      .sort(
+        (left, right) =>
+          corporationHangarNumber(left.locationFlag) - corporationHangarNumber(right.locationFlag),
+      )
+      .map((entry) => ({
+        ...entry,
+        containers: entry.containers.sort((left, right) =>
+          (left.name ?? `Container ${left.itemId}`).localeCompare(
+            right.name ?? `Container ${right.itemId}`,
+          ),
+        ),
+      }));
+  });
+}
+
+type CorporationProjection = {
+  characters: CharacterTokenRecord[];
+  corporationIds: number[];
+  policiesByCorporationId: Map<number, CorporationSourcePolicy>;
+};
+
+async function getCorporationProjection(
+  characterIds: readonly number[],
+  includeCorporationData: boolean,
+  sessionId: string,
+  policies?: readonly CorporationSourcePolicy[],
+): Promise<CorporationProjection> {
+  const characters = await getCharactersByIds(characterIds);
+  if (!includeCorporationData) {
+    return { characters, corporationIds: [], policiesByCorporationId: new Map() };
+  }
+  if (policies !== undefined) {
+    const policiesByCorporationId = new Map(
+      policies.map((policy) => [policy.corporationId, policy]),
+    );
+    return {
+      characters,
+      corporationIds: [...policiesByCorporationId.keys()],
+      policiesByCorporationId,
+    };
+  }
+  const corporationIds = [
+    ...new Set(
+      characters
+        .filter((character) => character.hasDirectorRole && character.corporationId)
+        .map((character) => character.corporationId!),
+    ),
+  ];
+  return { characters, corporationIds, policiesByCorporationId: new Map() };
+}
+
+function getProjectedCorporationAssets(
+  cache: OwnerCache,
+  policy: CorporationSourcePolicy | undefined,
+  characters: readonly CharacterTokenRecord[],
+) {
+  if (!policy) return effectiveAssets(cache);
+  const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
+  const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+  const blueprintItemIds = new Set(
+    (cache.blueprintInstances?.lastBody ?? []).map((blueprint) => blueprint.itemId),
+  );
+  return effectiveAssets(cache).filter((asset) =>
+    isCorporationRecordAllowed(asset, policy, characters, blueprintItemIds, rawAssetsByItemId),
   );
 }
 
@@ -134,9 +552,11 @@ async function refreshBlueprintInstances(
   cache: OwnerCache,
   character: CharacterTokenRecord,
   fetchBlueprints: typeof fetchCharacterBlueprints,
+  force = false,
 ) {
   if (
-    cache.blueprintInstances
+    !force
+    && cache.blueprintInstances
     && cache.blueprintInstances.nextRefreshAllowed
     && Date.parse(cache.blueprintInstances.nextRefreshAllowed) > Date.now()
   ) {
@@ -207,7 +627,7 @@ async function refreshCurrentShip(cache: OwnerCache, character: CharacterTokenRe
 }
 
 function getCache(map: Map<string, OwnerCache>, id: number, sessionId: string): OwnerCache {
-  const key = `${sessionId}:${id}`;
+  const key = map === corporationCaches ? `${id}` : `${sessionId}:${id}`;
   const existing = map.get(key);
   if (existing) return existing;
   const created: OwnerCache = {
@@ -884,7 +1304,7 @@ function needsCompleteAssetGraph(cache: OwnerCache) {
   );
 }
 
-function isCargoContainerType(
+export function isCargoContainerType(
   typeId: number,
   types: Awaited<ReturnType<typeof getTypesByIds>>,
   groups: Awaited<ReturnType<typeof getGroups>>,
@@ -893,6 +1313,7 @@ function isCargoContainerType(
   const type = types.get(typeId);
   const group = groups.get(type?.groupID ?? -1);
   if (group?.categoryID === 2) return true;
+  if (group?.categoryID === 9) return false;
   let marketGroup =
     type?.marketGroupID === undefined ? undefined : marketGroups.get(type.marketGroupID);
   while (marketGroup) {
@@ -1082,22 +1503,24 @@ export function copyRefreshCache(
   sourceSessionId: string,
   targetSessionId: string,
 ) {
+  if (kind === "corporation") return;
   if (sourceSessionId === targetSessionId) return;
-  const cacheMap = kind === "character" ? characterCaches : corporationCaches;
-  const sourceCache = cacheMap.get(`${sourceSessionId}:${ownerId}`);
+  const sourceCache = characterCaches.get(`${sourceSessionId}:${ownerId}`);
   if (!sourceCache) return;
-  cacheMap.set(`${targetSessionId}:${ownerId}`, structuredClone(sourceCache));
+  characterCaches.set(`${targetSessionId}:${ownerId}`, structuredClone(sourceCache));
 }
 
-/** Removes corporation data retained for a session after its authorization is revoked. */
+/** Removes corporation data after its authorization is revoked. */
 export function invalidateCorporationCache(corporationId: number, sessionId: string) {
-  corporationCaches.delete(`${sessionId}:${corporationId}`);
+  void sessionId;
+  corporationCaches.delete(`${corporationId}`);
 }
 
 export async function refreshCharacterState(
   character: CharacterTokenRecord,
   sessionId: string,
   profiler: RefreshProfiler,
+  force = false,
 ): Promise<void> {
   const cache = getCache(characterCaches, character.characterId, sessionId);
   let currentShipStateChanged = false;
@@ -1186,7 +1609,7 @@ export async function refreshCharacterState(
   profiler.start("blueprints");
   let assetsRebuilt = false;
   try {
-    await refreshBlueprintInstances(cache, character, fetchCharacterBlueprints);
+    await refreshBlueprintInstances(cache, character, fetchCharacterBlueprints, force);
   }
   catch (error) {
     cache.blueprintInstances = {
@@ -1200,7 +1623,8 @@ export async function refreshCharacterState(
   profiler.start("assets");
   try {
     if (
-      !cache.allAssetsRaw?.nextRefreshAllowed
+      force
+      || !cache.allAssetsRaw?.nextRefreshAllowed
       || Date.parse(cache.allAssetsRaw.nextRefreshAllowed) <= Date.now()
     ) {
       const result = await fetchCharacterAssets(character, cache.allAssetsRaw?.etag);
@@ -1324,16 +1748,81 @@ async function refreshCorporationCache(
   corporationId: number,
   sessionId: string,
   profiler: RefreshProfiler,
+  force = false,
 ): Promise<void> {
   const corpCache = getCache(corporationCaches, corporationId, sessionId);
   const corpSummary: {
     corporationId: number;
+    publicInfo?: EndpointCache<EsiCorporationPublicInfo | null>;
+    divisions?: EndpointCache<EsiCorporationDivision[] | null>;
     assets?: EndpointCache<AssetRecord[] | null>;
     blueprints?: EndpointCache<BlueprintInstanceRecord[] | null>;
     structures?: EndpointCache<EsiCorporationStructure[] | null>;
     jobs?: EndpointCache<IndustryJobRecord[] | null>;
     marketOrders?: EndpointCache<MarketOrderRecord[] | null>;
   } = { corporationId };
+  profiler.start("corporation");
+  try {
+    if (
+      !corpCache.publicInfo
+      || !corpCache.publicInfo.nextRefreshAllowed
+      || Date.parse(corpCache.publicInfo.nextRefreshAllowed) <= Date.now()
+    ) {
+      const publicInfo = await fetchCorporationPublicInfo(character, corpCache.publicInfo?.etag);
+      corpCache.publicInfo =
+        publicInfo.notModified && corpCache.publicInfo
+          ? setFresh(corpCache.publicInfo.lastBody, publicInfo.headers, corpCache.publicInfo, true)
+          : setFresh(publicInfo.corporation ?? null, publicInfo.headers, corpCache.publicInfo);
+    }
+    else {
+      corpCache.publicInfo.status = endpointDataStatus(
+        corpCache.publicInfo.lastModified,
+        corpCache.publicInfo.nextRefreshAllowed,
+      );
+    }
+    corpSummary.publicInfo = corpCache.publicInfo;
+  }
+  catch (error) {
+    corpCache.publicInfo = {
+      ...(corpCache.publicInfo ?? { lastBody: null }),
+      ...endpointStatus(error),
+    };
+    corpSummary.publicInfo = { ...corpCache.publicInfo };
+  }
+  finally {
+    profiler.end("corporation");
+  }
+  profiler.start("divisions");
+  try {
+    if (
+      !corpCache.divisions
+      || !corpCache.divisions.nextRefreshAllowed
+      || Date.parse(corpCache.divisions.nextRefreshAllowed) <= Date.now()
+    ) {
+      const divisions = await fetchCorporationDivisions(character, corpCache.divisions?.etag);
+      corpCache.divisions =
+        divisions.notModified && corpCache.divisions
+          ? setFresh(corpCache.divisions.lastBody, divisions.headers, corpCache.divisions, true)
+          : setFresh(divisions.divisions ?? null, divisions.headers, corpCache.divisions);
+    }
+    else {
+      corpCache.divisions.status = endpointDataStatus(
+        corpCache.divisions.lastModified,
+        corpCache.divisions.nextRefreshAllowed,
+      );
+    }
+    corpSummary.divisions = corpCache.divisions;
+  }
+  catch (error) {
+    corpCache.divisions = {
+      ...(corpCache.divisions ?? { lastBody: null }),
+      ...endpointStatus(error),
+    };
+    corpSummary.divisions = { ...corpCache.divisions };
+  }
+  finally {
+    profiler.end("divisions");
+  }
   profiler.start("structures");
   try {
     if (
@@ -1365,7 +1854,8 @@ async function refreshCorporationCache(
   profiler.start("assets");
   try {
     if (
-      !corpCache.allAssetsRaw?.nextRefreshAllowed
+      force
+      || !corpCache.allAssetsRaw?.nextRefreshAllowed
       || Date.parse(corpCache.allAssetsRaw.nextRefreshAllowed) <= Date.now()
     ) {
       const result = await fetchCorporationAssets(character, corpCache.allAssetsRaw?.etag);
@@ -1416,6 +1906,7 @@ async function refreshCorporationCache(
       corpCache,
       character,
       fetchCorporationBlueprints,
+      force,
     );
   }
   catch (error) {
@@ -1510,6 +2001,7 @@ export async function refreshCorporationState(
   character: CharacterTokenRecord,
   sessionId: string,
   profiler: RefreshProfiler,
+  force = false,
 ): Promise<void> {
   profiler.start("authorization");
   try {
@@ -1518,7 +2010,11 @@ export async function refreshCorporationState(
       character.personalAuth,
       corporationId,
     );
-    if (!verification.authorized || !verification.roles) {
+    if (
+      !verification.authorized
+      || !verification.roles
+      || !verification.roles.roles.includes("Director")
+    ) {
       invalidateCorporationCache(corporationId, sessionId);
       await clearCharacterCorporationAuthorization(character.characterId);
       throw new Error("Corporation authorization is incomplete");
@@ -1547,6 +2043,7 @@ export async function refreshCorporationState(
       corporationId,
       sessionId,
       profiler,
+      force,
     );
   }
   finally {
@@ -1558,28 +2055,32 @@ export async function getRunningIndustryJobs(
   characterIds: number[],
   includeCorporationJobs: boolean,
   sessionId = "default",
+  policies?: readonly CorporationSourcePolicy[],
 ) {
   const jobs = characterIds.flatMap((id) => {
     const body = getCache(characterCaches, id, sessionId).jobs?.lastBody;
     return Array.isArray(body) ? (body as IndustryJobRecord[]) : [];
   });
   if (!includeCorporationJobs) return jobs.filter((job) => job.ownerType === "character");
-  const characters = await getCharactersByIds(characterIds);
-  const corporationIds = new Set(
-    characters
-      .filter(
-        (character) =>
-          characterIds.includes(character.characterId)
-          && character.hasDirectorRole
-          && character.corporationId,
-      )
-      .map((character) => character.corporationId!),
-  );
+  const projection = await getCorporationProjection(characterIds, true, sessionId, policies);
   return [
     ...jobs,
-    ...[...corporationIds].flatMap((id) => {
-      const body = getCache(corporationCaches, id, sessionId).jobs?.lastBody;
-      return Array.isArray(body) ? (body as IndustryJobRecord[]) : [];
+    ...projection.corporationIds.flatMap((corporationId) => {
+      const body = getCache(corporationCaches, corporationId, sessionId).jobs?.lastBody;
+      const corporationJobs = Array.isArray(body) ? (body as IndustryJobRecord[]) : [];
+      const policy = projection.policiesByCorporationId.get(corporationId);
+      if (!policy) return corporationJobs;
+      const rawAssets =
+        getCache(corporationCaches, corporationId, sessionId).allAssetsRaw?.lastBody ?? [];
+      const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+      return corporationJobs.filter((job) =>
+        isCorporationLocationSelected(
+          job.outputLocationId,
+          policy,
+          projection.characters,
+          rawAssetsByItemId,
+        ),
+      );
     }),
   ];
 }
@@ -1589,27 +2090,21 @@ export async function getResolvedAssets(
   characterIds: number[],
   includeCorporationAssets: boolean,
   sessionId = "default",
+  policies?: readonly CorporationSourcePolicy[],
 ): Promise<AssetRecord[]> {
   const assets = characterIds.flatMap((id) =>
     effectiveAssets(getCache(characterCaches, id, sessionId)),
   );
   if (!includeCorporationAssets) return [...assets];
-
-  const characters = await getCharactersByIds(characterIds);
-  const corporations = new Set(
-    characters
-      .filter(
-        (character) =>
-          characterIds.includes(character.characterId)
-          && character.hasDirectorRole
-          && character.corporationId,
-      )
-      .map((character) => character.corporationId!),
-  );
+  const projection = await getCorporationProjection(characterIds, true, sessionId, policies);
   return [
     ...assets,
-    ...[...corporations].flatMap((id) =>
-      effectiveAssets(getCache(corporationCaches, id, sessionId)),
+    ...projection.corporationIds.flatMap((corporationId) =>
+      getProjectedCorporationAssets(
+        getCache(corporationCaches, corporationId, sessionId),
+        projection.policiesByCorporationId.get(corporationId),
+        projection.characters,
+      ),
     ),
   ];
 }
@@ -1619,6 +2114,7 @@ export async function getShipAssets(
   characterIds: number[],
   includeCorporationAssets: boolean,
   sessionId = "default",
+  policies?: readonly CorporationSourcePolicy[],
 ): Promise<AssetRecord[]> {
   const assets = characterIds.flatMap((id) => {
     const cache = getCache(characterCaches, id, sessionId);
@@ -1634,23 +2130,16 @@ export async function getShipAssets(
     return [...assetsByItemId.values()];
   });
   if (!includeCorporationAssets) return assets;
-
-  const characters = await getCharactersByIds(characterIds);
-  const corporationIds = new Set(
-    characters
-      .filter(
-        (character) =>
-          characterIds.includes(character.characterId)
-          && character.hasDirectorRole
-          && character.corporationId,
-      )
-      .map((character) => character.corporationId!),
-  );
+  const projection = await getCorporationProjection(characterIds, true, sessionId, policies);
   return [
     ...assets,
-    ...[...corporationIds].flatMap((id) => [
-      ...getCache(corporationCaches, id, sessionId).shipAssetsByItemId.values(),
-    ]),
+    ...projection.corporationIds.flatMap((corporationId) => {
+      const cache = getCache(corporationCaches, corporationId, sessionId);
+      const policy = projection.policiesByCorporationId.get(corporationId);
+      if (!policy) return [...cache.shipAssetsByItemId.values()];
+      const selectedAssets = getProjectedCorporationAssets(cache, policy, projection.characters);
+      return selectedAssets.filter((asset) => cache.shipAssetsByItemId.has(asset.itemId));
+    }),
   ];
 }
 
@@ -1659,27 +2148,34 @@ export async function getAllAssetsRaw(
   characterIds: number[],
   includeCorporationAssets: boolean,
   sessionId = "default",
+  policies?: readonly CorporationSourcePolicy[],
 ) {
   const assets = characterIds.flatMap(
     (id) => getCache(characterCaches, id, sessionId).allAssetsRaw?.lastBody ?? [],
   );
   if (!includeCorporationAssets) return assets;
-  const characters = await getCharactersByIds(characterIds);
-  const corporationIds = new Set(
-    characters
-      .filter(
-        (character) =>
-          characterIds.includes(character.characterId)
-          && character.hasDirectorRole
-          && character.corporationId,
-      )
-      .map((character) => character.corporationId!),
-  );
+  const projection = await getCorporationProjection(characterIds, true, sessionId, policies);
   return [
     ...assets,
-    ...[...corporationIds].flatMap(
-      (id) => getCache(corporationCaches, id, sessionId).allAssetsRaw?.lastBody ?? [],
-    ),
+    ...projection.corporationIds.flatMap((corporationId) => {
+      const cache = getCache(corporationCaches, corporationId, sessionId);
+      const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
+      const policy = projection.policiesByCorporationId.get(corporationId);
+      if (!policy) return rawAssets;
+      const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+      const blueprintItemIds = new Set(
+        (cache.blueprintInstances?.lastBody ?? []).map((blueprint) => blueprint.itemId),
+      );
+      return rawAssets.filter((asset) =>
+        isCorporationRecordAllowed(
+          asset,
+          policy,
+          projection.characters,
+          blueprintItemIds,
+          rawAssetsByItemId,
+        ),
+      );
+    }),
   ];
 }
 
@@ -1687,59 +2183,80 @@ export async function getResolvedAssetIndex(
   characterIds: number[],
   includeCorporationAssets: boolean,
   sessionId = "default",
+  policies?: readonly CorporationSourcePolicy[],
 ) {
   const index = new Map<number, AssetRecord>();
-  const characters = await getCharactersByIds(characterIds);
-  const corporationIds = includeCorporationAssets
-    ? new Set(
-        characters
-          .filter(
-            (character) =>
-              characterIds.includes(character.characterId)
-              && character.hasDirectorRole
-              && character.corporationId,
-          )
-          .map((character) => character.corporationId!),
-      )
-    : new Set<number>();
+  const projection = await getCorporationProjection(
+    characterIds,
+    includeCorporationAssets,
+    sessionId,
+    policies,
+  );
   for (const characterId of characterIds) {
     for (const asset of effectiveAssets(getCache(characterCaches, characterId, sessionId))) {
       index.set(asset.itemId, asset);
     }
   }
-  for (const corporationId of corporationIds) {
-    for (const asset of effectiveAssets(getCache(corporationCaches, corporationId, sessionId))) {
+  for (const corporationId of projection.corporationIds) {
+    const cache = getCache(corporationCaches, corporationId, sessionId);
+    for (const asset of getProjectedCorporationAssets(
+      cache,
+      projection.policiesByCorporationId.get(corporationId),
+      projection.characters,
+    )) {
       index.set(asset.itemId, asset);
     }
   }
   return index;
 }
 
+function getProjectedCorporationRootLocations(
+  cache: OwnerCache,
+  policy: CorporationSourcePolicy | undefined,
+  characters: readonly CharacterTokenRecord[],
+) {
+  if (!policy) return new Map(cache.rootLocationsByItemId);
+  const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
+  const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+  const blueprintItemIds = new Set(
+    (cache.blueprintInstances?.lastBody ?? []).map((blueprint) => blueprint.itemId),
+  );
+  const allowedLocationIds = new Set<number>();
+  for (const asset of rawAssets) {
+    if (
+      !isCorporationRecordAllowed(asset, policy, characters, blueprintItemIds, rawAssetsByItemId)
+    ) continue;
+    allowedLocationIds.add(asset.itemId);
+    allowedLocationIds.add(asset.locationId);
+  }
+  return new Map(
+    [...cache.rootLocationsByItemId].filter(([itemId]) => allowedLocationIds.has(itemId)),
+  );
+}
+
 export async function getRootLocationsByItemId(
   characterIds: number[],
   includeCorporationAssets: boolean,
   sessionId = "default",
+  policies?: readonly CorporationSourcePolicy[],
 ): Promise<Map<number, AssetLocation>> {
   const locations = characterIds.flatMap((id) => [
     ...getCache(characterCaches, id, sessionId).rootLocationsByItemId.entries(),
   ]);
   if (!includeCorporationAssets) return new Map(locations);
-  const characters = await getCharactersByIds(characterIds);
-  const corporations = new Set(
-    characters
-      .filter(
-        (character) =>
-          characterIds.includes(character.characterId)
-          && character.hasDirectorRole
-          && character.corporationId,
-      )
-      .map((character) => character.corporationId!),
-  );
+  const projection = await getCorporationProjection(characterIds, true, sessionId, policies);
   return [
     ...locations,
-    ...[...corporations].flatMap((id) => [
-      ...getCache(corporationCaches, id, sessionId).rootLocationsByItemId.entries(),
-    ]),
+    ...projection.corporationIds.flatMap((id) => {
+      const cache = getCache(corporationCaches, id, sessionId);
+      return [
+        ...getProjectedCorporationRootLocations(
+          cache,
+          projection.policiesByCorporationId.get(id),
+          projection.characters,
+        ).entries(),
+      ];
+    }),
   ].reduce(
     (map, [locationId, location]) => {
       map.set(locationId, location);
@@ -1861,49 +2378,49 @@ export async function getAssembledStructureRigAssets(
   characterIds: number[],
   includeCorporationAssets: boolean,
   sessionId = "default",
+  policies?: readonly CorporationSourcePolicy[],
 ) {
   if (!includeCorporationAssets) return [];
-  const characters = await getCharactersByIds(characterIds);
-  const corporationIds = new Set(
-    characters
-      .filter(
-        (character) =>
-          characterIds.includes(character.characterId)
-          && character.hasDirectorRole
-          && character.corporationId,
-      )
-      .map((character) => character.corporationId!),
-  );
-  return [...corporationIds].flatMap((id) => [
-    ...getCache(corporationCaches, id, sessionId).assembledStructureRigs.values(),
-  ]);
+  const projection = await getCorporationProjection(characterIds, true, sessionId, policies);
+  return projection.corporationIds.flatMap((corporationId) => {
+    const cache = getCache(corporationCaches, corporationId, sessionId);
+    const policy = projection.policiesByCorporationId.get(corporationId);
+    if (!policy) return [...cache.assembledStructureRigs.values()];
+    const selectedAssets = new Set(
+      getProjectedCorporationAssets(cache, policy, projection.characters).map(
+        (asset) => asset.itemId,
+      ),
+    );
+    return cache.assembledStructureRigs.filter((asset) => selectedAssets.has(asset.itemId));
+  });
 }
 
 export async function getAssembledShipAssets(
   characterIds: number[],
   includeCorporationAssets: boolean,
   sessionId = "default",
+  policies?: readonly CorporationSourcePolicy[],
 ) {
   const assets = characterIds.flatMap((id) => [
     ...getCache(characterCaches, id, sessionId).assembledShipsByItemId.values(),
   ]);
   if (!includeCorporationAssets) return assets;
-  const characters = await getCharactersByIds(characterIds);
-  const corporationIds = new Set(
-    characters
-      .filter(
-        (character) =>
-          characterIds.includes(character.characterId)
-          && character.hasDirectorRole
-          && character.corporationId,
-      )
-      .map((character) => character.corporationId!),
-  );
+  const projection = await getCorporationProjection(characterIds, true, sessionId, policies);
   return [
     ...assets,
-    ...[...corporationIds].flatMap((id) => [
-      ...getCache(corporationCaches, id, sessionId).assembledShipsByItemId.values(),
-    ]),
+    ...projection.corporationIds.flatMap((corporationId) => {
+      const cache = getCache(corporationCaches, corporationId, sessionId);
+      const policy = projection.policiesByCorporationId.get(corporationId);
+      if (!policy) return [...cache.assembledShipsByItemId.values()];
+      const selectedAssets = new Set(
+        getProjectedCorporationAssets(cache, policy, projection.characters).map(
+          (asset) => asset.itemId,
+        ),
+      );
+      return [...cache.assembledShipsByItemId.values()].filter((asset) =>
+        selectedAssets.has(asset.itemId),
+      );
+    }),
   ];
 }
 
@@ -1911,23 +2428,16 @@ export async function getAssetCacheMetadata(
   characterIds: number[],
   includeCorporationAssets: boolean,
   sessionId = "default",
+  policies?: readonly CorporationSourcePolicy[],
 ) {
   const characterCachesForPlan = characterIds.map((id) => getCache(characterCaches, id, sessionId));
-  const characters = await getCharactersByIds(characterIds);
-  const corporations = includeCorporationAssets
-    ? [
-        ...new Set(
-          characters
-            .filter(
-              (character) =>
-                characterIds.includes(character.characterId)
-                && character.hasDirectorRole
-                && character.corporationId,
-            )
-            .map((character) => character.corporationId!),
-        ),
-      ]
-    : [];
+  const projection = await getCorporationProjection(
+    characterIds,
+    includeCorporationAssets,
+    sessionId,
+    policies,
+  );
+  const corporations = projection.corporationIds;
   const corporationCachesForPlan = corporations.map((id) =>
     getCache(corporationCaches, id, sessionId),
   );
@@ -1946,6 +2456,7 @@ export async function getMarketOrderStock(
     myCorporationSellOrdersAsStock: boolean;
   },
   sessionId = "default",
+  policies?: readonly CorporationSourcePolicy[],
 ): Promise<PlanStockItem[] | null> {
   const stock: PlanStockItem[] = [];
   const typeIds = new Set<number>();
@@ -1988,16 +2499,8 @@ export async function getMarketOrderStock(
   if (!options.allCorporationSellOrdersAsStock && !options.myCorporationSellOrdersAsStock) {
     return resolveNames();
   }
-  const characters = await getCharactersByIds(characterIds);
-  const selectedCharacters = characters.filter((character) =>
-    characterIds.includes(character.characterId),
-  );
-  const corporationIds = new Set(
-    selectedCharacters
-      .filter((character) => character.hasDirectorRole && character.corporationId)
-      .map((character) => character.corporationId!),
-  );
-  for (const corporationId of corporationIds) {
+  const projection = await getCorporationProjection(characterIds, true, sessionId, policies);
+  for (const corporationId of projection.corporationIds) {
     const cache = getCache(corporationCaches, corporationId, sessionId);
     if (!hasUsableMarketOrders(cache)) {
       hasUnavailableSource = true;
@@ -2005,11 +2508,23 @@ export async function getMarketOrderStock(
     }
     hasUsableSource = true;
     const orders = cache.marketOrders!.lastBody;
+    const policy = projection.policiesByCorporationId.get(corporationId);
+    const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
+    const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
     for (const order of orders as MarketOrderRecord[]) {
       if (order.isBuyOrder || order.volumeRemain <= 0) continue;
+      if (
+        policy
+        && !isCorporationLocationSelected(
+          order.locationId,
+          policy,
+          projection.characters,
+          rawAssetsByItemId,
+        )
+      ) continue;
       const isMyCorporationOrder =
         order.issuedBy !== undefined
-        && selectedCharacters.some(
+        && projection.characters.some(
           (character) =>
             character.characterId === order.issuedBy && character.corporationId === corporationId,
         );
@@ -2035,27 +2550,33 @@ export async function getBlueprintInstances(
   characterIds: number[],
   includeCorporationBlueprints: boolean,
   sessionId = "default",
+  policies?: readonly CorporationSourcePolicy[],
 ) {
   const instances = characterIds.flatMap((characterId) =>
     effectiveBlueprints(getCache(characterCaches, characterId, sessionId)),
   );
   if (!includeCorporationBlueprints) return instances;
-  const characters = await getCharactersByIds(characterIds);
-  const corporationIds = new Set(
-    characters
-      .filter(
-        (character) =>
-          characterIds.includes(character.characterId)
-          && character.hasDirectorRole
-          && character.corporationId,
-      )
-      .map((character) => character.corporationId!),
-  );
+  const projection = await getCorporationProjection(characterIds, true, sessionId, policies);
   return [
     ...instances,
-    ...[...corporationIds].flatMap((corporationId) =>
-      effectiveBlueprints(getCache(corporationCaches, corporationId, sessionId)),
-    ),
+    ...projection.corporationIds.flatMap((corporationId) => {
+      const cache = getCache(corporationCaches, corporationId, sessionId);
+      const corporationBlueprints = effectiveBlueprints(cache);
+      const policy = projection.policiesByCorporationId.get(corporationId);
+      if (!policy) return corporationBlueprints;
+      const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
+      const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+      const blueprintItemIds = new Set(corporationBlueprints.map((blueprint) => blueprint.itemId));
+      return corporationBlueprints.filter((blueprint) =>
+        isCorporationRecordAllowed(
+          blueprint,
+          policy,
+          projection.characters,
+          blueprintItemIds,
+          rawAssetsByItemId,
+        ),
+      );
+    }),
   ];
 }
 
@@ -2068,11 +2589,7 @@ export async function getStateStatus(
   const characterById = new Map(records.map((character) => [character.characterId, character]));
   const corporationsByCharacter = new Map<number, number[]>();
   for (const character of records) {
-    if (
-      !characterIds.includes(character.characterId)
-      || !character.corporationId
-      || !character.hasDirectorRole
-    ) continue;
+    if (!characterIds.includes(character.characterId) || !character.corporationId) continue;
     const corporationIds = corporationsByCharacter.get(character.characterId) ?? [];
     corporationIds.push(character.corporationId);
     corporationsByCharacter.set(character.characterId, corporationIds);

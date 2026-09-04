@@ -43,6 +43,7 @@ This section is authoritative where the older design below differs from the runn
 - Authentication uses the custom EVE SSO PKCE flow in `src/lib/auth/eveSso.ts` and the `/api/auth/eve/start` and `/api/auth/eve/callback` routes. There is no NextAuth integration and no separate corporation-auth callback. The callback records corporation identity and roles from the authenticated character's token scopes and corporation roles.
 - A durable character belongs to a `CharacterCollectionRecord`. A session points to one collection through `collectionId`; it is not itself the account or the authoritative character list. Attaching a character that belongs to another collection enters an explicit merge flow.
 - ESI refresh is session-scoped in the in-process cache. It refreshes the selected collection's character data and eligible corporation data, including assets, blueprints, industry jobs, skills, market orders, and structure/location data. The refresh endpoint deduplicates concurrent refreshes and exposes endpoint status without exposing tokens.
+- Corporation support is opted in per corporation and stored on the collection. Corporation source selections are shared by that collection: direct hangar contents and named containers are selected independently, selected containers include nested contents, new sources default to excluded, and inaccessible roots are hidden. Query-only access contributes blueprints only; Take access contributes materials and blueprints. The Director used for a corporation refresh may be found across collections and is never returned as an attached character.
 - `/api/state/assets` is the boundary between ESI state and planning. It resolves and groups assets by root location, includes blueprint/job/market-order context, filters special ship and structure records as appropriate, and carries personal/corporation ownership into the planner input.
 - `/api/plan` is intentionally unauthenticated and makes no ESI calls. It accepts a build list plus client-supplied assets, locations, and settings. Do not reintroduce `characterIds` ownership checks or server-side refreshes into this endpoint; authenticated state preparation belongs in the state routes.
 - The planner is asset-aware and supports compressed/reprocessable material handling, blueprint print/run accounting, industry-in-progress output, market orders, localized SDE names, ME/TE settings, and source metadata. Its request model is not the original minimal `typeId + quantity` plus raw assets model.
@@ -265,6 +266,7 @@ export interface CharacterTokenRecord {
   rolesAtHq?: string[];
   rolesAtOther?: string[];
   hasDirectorRole?: boolean;
+  allowCorpRefreshOptIn?: boolean;
   hasAccountantRole?: boolean;
   hasTraderRole?: boolean;
   hasStationManagerRole?: boolean;
@@ -316,6 +318,7 @@ export interface ResolvedAssetRecord extends AssetRecord {
 export interface SessionRecord {
   sessionId: string;
   collectionId?: string;
+  authenticatedCharacterId?: number;
   createdAt: string;
   lastSeenAt: string;
 }
@@ -335,13 +338,13 @@ The application uses a custom SSO implementation based on EVE's authorization-co
 
 The implemented session model is collection-based:
 
-- `createSession(collectionId?): SessionRecord`
+- `createSession(collectionId?, authenticatedCharacterId?): SessionRecord`
 - Attach characters by assigning their durable `collectionId`; collection membership, not a session-local character list, is authoritative.
 - `getSessionFromRequest(req)` (read cookie).
 - `setSessionCookie(res, sessionId)`
 - `clearSessionCookie(res)`
 
-Sessions store a `collectionId`, and `getSessionCharacterIds()` derives the attached characters from that collection. Cookie management uses the HttpOnly `assembly_line_session` cookie. Character attachment and removal must update the durable character and collection records transactionally; do not add a session-local `characterIds` field.
+Sessions store a `collectionId`, and `getSessionCharacterIds()` derives the attached characters from that collection. A session created by EVE SSO also stores the authenticated character ID. Corporation refresh uses that server-owned identity for the Director self-refresh exception. When `CORP_REFRESH_OPT_IN=true`, requests without an eligible Director identity use only Directors who explicitly enabled `allowCorpRefreshOptIn`; when the variable is omitted or not `true`, every eligible Director token is available. Cookie management uses the HttpOnly `assembly_line_session` cookie. Character attachment and removal must update the durable character and collection records transactionally; do not add a session-local `characterIds` field.
 
 ## 5.2 EVE SSO flow (`eveSso.ts`)
 
@@ -356,7 +359,7 @@ Every character connection uses one authorization request with these scopes:
 - `esi-characters.read_corporation_roles.v1` to verify the required corporation role.
 - `esi-universe.read_structures.v1` when private structure names or metadata are needed.
 
-There is no separate corp-auth flow or second callback URL. A Director-capable authenticated character makes their corporation a build candidate. A corporation without an authenticated Director is not eligible for corporation asset planning.
+There is no separate corp-auth flow or second callback URL. A Director-capable authenticated character supplies the server-side authorization for a corporation refresh. When `CORP_REFRESH_OPT_IN=true`, a Director must explicitly enable the corporation refresh opt-in before their token can be selected for a non-Director refresh; when the variable is omitted or not `true`, all eligible Director tokens are available. A refresh made by a session authenticated as that Director may always use their token when the required scopes are present. Collection members' merged location roles determine which corporation sources can be queried or taken for planner input; a collection must explicitly opt in to each corporation. A corporation without an available Director with the required scopes cannot be refreshed.
 
 Preserve the granted scope list returned by SSO and fail with a clear, non-sensitive error if a required scope was not granted.
 
@@ -404,6 +407,7 @@ The callback validates the token subject, fetches the character corporation and 
     "characterId": 123,
     "characterName": "Pilot One",
     "hasDirectorRole": true,
+    "allowCorpRefreshOptIn": false,
     "corporationId": 999999999
   },
   {
@@ -717,6 +721,12 @@ This is not currently implemented. Settings are persisted and loaded by the sett
 
 - Validate session.
 - Return detailed per-character, per-endpoint cache status:
+- Include the shared corporation endpoint status for every attached character in that corporation,
+  regardless of Director access. Director access remains required to refresh corporation data.
+- A corporation refresh uses the authenticated character identity stored on the current session.
+  A valid Director requester can use that Director's token without sharing consent. Requests without
+  an eligible Director requester use only Directors whose `allowCorpRefreshOptIn` setting
+  is enabled; cache-status visibility does not grant refresh authorization.
 
 ```json
 {
@@ -961,7 +971,7 @@ Components:
   - Structure configuration:
     - Inputs for `structureId`, `structure typeId`, and installed rigs.
 - **SettingsPanel**:
-  - Checkbox: “Include corporation assets”.
+  - Collection-scoped corporation settings are edited in the Assets and Characters workflows. The planner uses only the selected corporation sources returned by `/api/state/assets`; compression and appraisal keep their independent asset behavior.
   - Simple build blacklist editor:
     - Item search (using `/api/reference/types`) to add typeIds to `buildBlacklist`.
   - Simple buy blacklist editor:
@@ -988,9 +998,11 @@ Components:
 5. User selects locations:
    - Manufacturing, reactions, market.
    - Optional structures and rigs.
-6. User sets settings:
-   - Include corp assets.
-   - Build/buy blacklists.
+6. User configures collection-scoped corporation sources, when needed, and sets planning settings:
+
+- Select direct corporation hangars or named containers in the Assets workflow.
+- Build/buy blacklists.
+
 7. User clicks **“Refresh data”**:
    - Frontend sends `POST /api/state/refresh` for the active session collection.
    - Shows summary from response.

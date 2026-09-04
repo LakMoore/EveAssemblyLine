@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
+import { getCollectionCorporationSettings } from "@/lib/auth/tokensStore";
 import {
   getAllAssetsRaw,
+  getCorporationSourceCatalog,
+  getCorporationSourcePolicies,
   getResolvedAssetIndex,
   getResolvedAssets,
   getBlueprintInstances,
@@ -239,7 +242,8 @@ function addStockContribution(
   if (contribution.ownerType === "corporation") bucket.corporationAssetCount += 1;
   else bucket.personalAssetCount += 1;
   const jobKey = contribution.inBuild && contribution.jobId ? `:job:${contribution.jobId}` : "";
-  const itemKey = `${contribution.typeId}:${category}:${blueprintType ?? "item"}:${contribution.locationId ?? location.locationId}:${contribution.rootLocationId ?? location.locationId}${jobKey}`;
+  const ownerKey = `${contribution.ownerType}:${contribution.ownerId ?? ""}`;
+  const itemKey = `${ownerKey}:${contribution.typeId}:${category}:${blueprintType ?? "item"}:${contribution.locationId ?? location.locationId}:${contribution.rootLocationId ?? location.locationId}${jobKey}`;
   const item: StockItem = bucket.items.get(itemKey) ?? {
     typeId: contribution.typeId,
     name: type?.name[language] ?? type?.name.en ?? `Type ${contribution.typeId}`,
@@ -247,6 +251,8 @@ function addStockContribution(
     locationId: contribution.locationId ?? location.locationId,
     rootLocationId: contribution.rootLocationId ?? location.locationId,
     sourceLocationName: location.name,
+    ownerType: contribution.ownerType,
+    ...(contribution.ownerId !== undefined ? { ownerId: contribution.ownerId } : {}),
     isPackaged: contribution.isPackaged,
     assembledVolume: type?.volume ?? 0,
     packagedVolume: type?.packagedVolume,
@@ -340,6 +346,7 @@ function installedJobContributions(
       quantity: 1,
       isPackaged: true,
       ownerType: job.ownerType,
+      ownerId: job.ownerId,
       blueprintType: installedBlueprintIsOriginal ? "bpo" : "bpc",
       inBuild: true,
       inUse: true,
@@ -376,6 +383,7 @@ function installedJobContributions(
           quantity: 1,
           isPackaged: false,
           ownerType: job.ownerType,
+          ownerId: job.ownerId,
           blueprintPrint: {
             itemId: -(job.jobId * 1_000_000 + index + 1),
             runs: job.licensedRuns,
@@ -398,6 +406,7 @@ function installedJobContributions(
         quantity: outputQuantity,
         isPackaged: false,
         ownerType: job.ownerType,
+        ownerId: job.ownerId,
         inBuild: true,
         jobId: job.jobId,
         industryJobStatus,
@@ -426,6 +435,19 @@ export async function GET(request: NextRequest) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   const characterIds = await getSessionCharacterIds(session);
+  const corporationSettings = session.collectionId
+    ? await getCollectionCorporationSettings(session.collectionId)
+    : [];
+  const corporationPolicies = await getCorporationSourcePolicies(
+    characterIds,
+    corporationSettings,
+    session.sessionId,
+  );
+  const corporationSources = await getCorporationSourceCatalog(
+    characterIds,
+    corporationPolicies,
+    session.sessionId,
+  );
   const url = new URL(request.url);
   if (url.searchParams.has("rawAsset") || url.searchParams.has("rawAssetsAtLocation")) {
     const parsedDiagnostic = rawAssetDiagnosticSchema.safeParse({
@@ -435,7 +457,12 @@ export async function GET(request: NextRequest) {
     if (!parsedDiagnostic.success) {
       return NextResponse.json({ error: "Invalid raw asset diagnostic query." }, { status: 400 });
     }
-    const rawAssets = await getAllAssetsRaw(characterIds, true, session.sessionId);
+    const rawAssets = await getAllAssetsRaw(
+      characterIds,
+      true,
+      session.sessionId,
+      corporationPolicies,
+    );
     if (parsedDiagnostic.data.rawAsset !== undefined) {
       const itemId = parsedDiagnostic.data.rawAsset;
       return NextResponse.json({
@@ -463,6 +490,7 @@ export async function GET(request: NextRequest) {
       myCorporationSellOrdersAsStock: true,
     },
     session.sessionId,
+    corporationPolicies,
   );
   markPhase("session");
   const [
@@ -477,16 +505,16 @@ export async function GET(request: NextRequest) {
     systems,
     rootLocationsByItemId,
   ] = await Promise.all([
-    getResolvedAssets(characterIds, true, session.sessionId),
-    getRunningIndustryJobs(characterIds, true, session.sessionId),
-    getBlueprintInstances(characterIds, true, session.sessionId),
+    getResolvedAssets(characterIds, true, session.sessionId, corporationPolicies),
+    getRunningIndustryJobs(characterIds, true, session.sessionId, corporationPolicies),
+    getBlueprintInstances(characterIds, true, session.sessionId, corporationPolicies),
     getShipTypeIds(),
     getStructureTypeIds(),
     getGroups(),
     getMarketGroups(),
     getStations(),
     getSystems(),
-    getRootLocationsByItemId(characterIds, true, session.sessionId),
+    getRootLocationsByItemId(characterIds, true, session.sessionId, corporationPolicies),
   ]);
   markPhase("data");
   const types = await getTypesByIds([
@@ -582,7 +610,12 @@ export async function GET(request: NextRequest) {
       }
     }),
   );
-  const allAssetIndex = await getResolvedAssetIndex(characterIds, true, session.sessionId);
+  const allAssetIndex = await getResolvedAssetIndex(
+    characterIds,
+    true,
+    session.sessionId,
+    corporationPolicies,
+  );
   markPhase("indexes");
   const blueprintInstancesByOwnerAndItemId = new Map(
     blueprintInstances.map((blueprint) => [
@@ -615,6 +648,7 @@ export async function GET(request: NextRequest) {
         rootLocationId: asset.rootLocation.locationId,
         isPackaged: !asset.isSingleton,
         ownerType: asset.ownerType,
+        ownerId: asset.ownerId,
         blueprintType,
         ...(asset.inUse || blueprintInstance?.inUse ? { inUse: true } : {}),
         me: blueprintInstance?.me,
@@ -724,6 +758,7 @@ export async function GET(request: NextRequest) {
       ),
       ...(marketStock ?? []),
     ] as PlanStockItem[],
+    corporationSources,
   };
   const totalMs = Math.round(performance.now() - startedAt);
   const profilingEnabled = process.env.NODE_ENV === "development";

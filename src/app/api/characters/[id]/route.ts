@@ -1,11 +1,20 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
-import { deleteCharacter, getSession, setCharacterOnDeployment } from "@/lib/auth/tokensStore";
+import {
+  deleteCharacter,
+  getSession,
+  setCharacterCorpRefreshOptIn,
+  setCharacterOnDeployment,
+} from "@/lib/auth/tokensStore";
+import { isCorpRefreshOptInEnabled } from "@/lib/auth/corpRefreshOptIn";
 
-const deploymentSchema = z.object({
-  onDeployment: z.boolean(),
-});
+const characterUpdateSchema = z
+  .object({
+    onDeployment: z.boolean().optional(),
+    allowCorpRefreshOptIn: z.boolean().optional(),
+  })
+  .refine((value) => value.onDeployment !== undefined || value.allowCorpRefreshOptIn !== undefined);
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await getSessionFromRequest(request);
@@ -54,12 +63,24 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (!current?.collectionId) {
     return NextResponse.json({ error: "Collection not found." }, { status: 404 });
   }
-  const parsed = deploymentSchema.safeParse(await request.json());
+  const parsed = characterUpdateSchema.safeParse(await request.json().catch(() => undefined));
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid deployment status." }, { status: 400 });
+    return NextResponse.json({ error: "Invalid character settings." }, { status: 400 });
+  }
+  if (parsed.data.allowCorpRefreshOptIn !== undefined && !isCorpRefreshOptInEnabled()) {
+    return NextResponse.json({ error: "Corporation refresh opt-in is disabled." }, { status: 403 });
   }
   try {
-    await setCharacterOnDeployment(characterId, current.collectionId, parsed.data.onDeployment);
+    if (parsed.data.onDeployment !== undefined) {
+      await setCharacterOnDeployment(characterId, current.collectionId, parsed.data.onDeployment);
+    }
+    if (parsed.data.allowCorpRefreshOptIn !== undefined) {
+      await setCharacterCorpRefreshOptIn(
+        characterId,
+        current.collectionId,
+        parsed.data.allowCorpRefreshOptIn,
+      );
+    }
   }
   catch (error) {
     if (
@@ -68,7 +89,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     ) {
       return NextResponse.json({ error: error.message }, { status: 404 });
     }
+    if (
+      error instanceof Error
+      && error.message === "Only a Director can change corporation refresh opt-in."
+    ) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
     throw error;
   }
-  return NextResponse.json({ success: true, onDeployment: parsed.data.onDeployment });
+  return NextResponse.json({ success: true, ...parsed.data });
 }

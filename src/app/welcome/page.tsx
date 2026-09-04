@@ -54,6 +54,44 @@ export default function WelcomePage() {
       </div>
       <section className={styles.aboutPanel}>
         <div className={styles.sectionHeading}>
+          <span className="eyebrow">ACCESS &amp; DATA</span>
+          <h2>Use it freely, authenticate deliberately</h2>
+        </div>
+        <div className={styles.aboutCopy}>
+          <p>
+            Anyone can use Eve AssemblyLine without ESI authentication. You can create plans from
+            local data and use the planning and evaluation tools without connecting an EVE
+            character. ESI authentication adds live stock tracking, including personal and
+            corporation assets, blueprints, jobs, and market orders.
+          </p>
+          <p>
+            AssemblyLine uses a Director-authorized ESI token for the corporation Assets and
+            Blueprints endpoints. These are broad corporation-wide feeds, not a fine-grained sharing
+            system for one member, hangar, or item. A Director who authenticates with AssemblyLine
+            gives it permission to download and cache all corporation asset data whenever needed,
+            including during unattended refreshes when that Director is not using the application.
+          </p>
+          <p>
+            Cached corporation asset data may be served to other members of your corporation through
+            AssemblyLine, but the in-game role-based permissions are enforced. If a player cannot
+            see an asset in EVE, that player cannot see it in AssemblyLine. EVE authorization can be
+            revoked at any time. If you do not consent to this pattern of downloading, caching, and
+            role-filtered serving of corporation data, do not authenticate with AssemblyLine.
+          </p>
+          <p>
+            If you are not a Director and keep assets in corporation hangars, petition a corporation
+            Director to authenticate with AssemblyLine. Their authorization can make the live
+            corporation data available for your industry planning while preserving the same in-game
+            visibility rules.
+          </p>
+          <p>
+            Read the full details on the <Link href="/privacy">privacy page</Link> before connecting
+            a character.
+          </p>
+        </div>
+      </section>
+      <section className={styles.aboutPanel}>
+        <div className={styles.sectionHeading}>
           <span className="eyebrow">WHY ASSEMBLYLINE</span>
           <h2>Planning for the work between the clicks</h2>
         </div>

@@ -224,6 +224,8 @@ EVE SSO state and PKCE values must be unpredictable, bound to the initiating ses
 
 All ESI calls are server-side. Centralize token refresh and ESI request behavior in the ESI client. Respect access-token expiry, `304`, `429`, `Retry-After`, cache-control, and ESI rate-limit/error-limit headers.  ETag may be used in-memory only and should not be committed to the shared cache with tokens. `/api/plan` must use cached state only and must never call ESI synchronously.
 
+When testing ESI features in a browser, never start a new browser session because it will not have the authenticated session access. Always use an existing authenticated browser session, or ask the human pilot to provide one if no suitable session can be found.
+
 Cache entries must make freshness and rate limiting observable. A refresh response should distinguish `fresh`, `cached`, and `rate_limited` per character and endpoint. Avoid concurrent duplicate refreshes for the same character/endpoint where practical.
 
 ### SDE

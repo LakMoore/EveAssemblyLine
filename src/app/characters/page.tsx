@@ -6,6 +6,7 @@ import Image from "next/image";
 import { GitMerge, LogOut, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { languageStorageKey, useAppRefreshStatus } from "../AppShell";
 import DialogBody from "@/components/DialogBody";
+import EveAuthorizationWarning from "@/components/EveAuthorizationWarning";
 import { replaceEsiStock } from "@/lib/planning/stockStore";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageServer";
@@ -34,7 +35,10 @@ import {
   loadClientCorpStatus,
   loadClientStateStatus,
   loadClientAssets,
+  loadClientCorporationSettings,
+  saveClientCorporationSettings,
   type ClientCharacter,
+  type ClientCorporationSettings,
   type ClientCharacterStatus,
 } from "@/lib/client/requestCache";
 import styles from "../page.module.css";
@@ -226,7 +230,12 @@ async function reloadStockAfterCharacterRemoval() {
     })),
   );
   window.dispatchEvent(
-    new CustomEvent("assembly-line-esi-refreshed", { detail: { assetLocations } }),
+    new CustomEvent(
+      "assembly-line-esi-refreshed",
+      {
+        detail: { assetLocations, corporationSources: assetsData.corporationSources },
+      },
+    ),
   );
 }
 
@@ -239,8 +248,11 @@ export default function CharactersPage() {
   const [removingId, setRemovingId] = useState<number | null>(null);
   const [characterPendingRemoval, setCharacterPendingRemoval] = useState<Character | null>(null);
   const [updatingDeploymentId, setUpdatingDeploymentId] = useState<number | null>(null);
+  const [updatingDirectorOptInId, setUpdatingDirectorOptInId] = useState<number | null>(null);
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
   const [selectedCorporationId, setSelectedCorporationId] = useState<number | null>(null);
+  const [corporationSettings, setCorporationSettings] = useState<ClientCorporationSettings[]>([]);
+  const [updatingCorporationId, setUpdatingCorporationId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mergeDetails, setMergeDetails] = useState<MergeDetails | null>(null);
   const [isMerging, setIsMerging] = useState(false);
@@ -248,10 +260,12 @@ export default function CharactersPage() {
   const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false);
 
   async function loadCharacters() {
-    const [loaded, corpStatus] = await Promise.all([
+    const [loaded, corpStatus, settings] = await Promise.all([
       loadClientCharacters(),
       loadClientCorpStatus(),
+      loadClientCorporationSettings(),
     ]);
+    setCorporationSettings(settings);
     const corpById = new Map(corpStatus.map((character) => [character.characterId, character]));
     setCharacters(
       loaded.map((character) => ({
@@ -441,6 +455,101 @@ export default function CharactersPage() {
     }
   }
 
+  async function updateDirectorCorpRefreshOptIn(character: Character, enabled: boolean) {
+    const previousValue = character.allowCorpRefreshOptIn;
+    setCharacters((current) =>
+      current.map((entry) =>
+        entry.characterId === character.characterId
+          ? { ...entry, allowCorpRefreshOptIn: enabled }
+          : entry,
+      ),
+    );
+    setUpdatingDirectorOptInId(character.characterId);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/characters/${character.characterId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ allowCorpRefreshOptIn: enabled }),
+        },
+      );
+      if (!response.ok) {
+        const data = (await response.json()) as { error?: string };
+        throw new Error(data.error ?? "Could not update corporation refresh opt-in.");
+      }
+      invalidateClientCharacterData();
+    }
+    catch (optInError) {
+      setCharacters((current) =>
+        current.map((entry) =>
+          entry.characterId === character.characterId
+            ? { ...entry, allowCorpRefreshOptIn: previousValue }
+            : entry,
+        ),
+      );
+      setError(
+        optInError instanceof Error
+          ? optInError.message
+          : "Could not update corporation refresh opt-in.",
+      );
+    }
+    finally {
+      setUpdatingDirectorOptInId(null);
+    }
+  }
+
+  async function updateCorporationSupport(corporationId: number, supportEnabled: boolean) {
+    const previous = corporationSettings.find((entry) => entry.corporationId === corporationId);
+    const nextSettings: ClientCorporationSettings = {
+      corporationId,
+      supportEnabled,
+      directHangars: previous?.directHangars ?? [],
+      containerItemIds: previous?.containerItemIds ?? [],
+    };
+    setCorporationSettings((current) => [
+      ...current.filter((entry) => entry.corporationId !== corporationId),
+      nextSettings,
+    ]);
+    setCharacters((current) =>
+      current.map((character) =>
+        character.corporationId === corporationId
+          ? { ...character, corporationSupportEnabled: supportEnabled }
+          : character,
+      ),
+    );
+    setUpdatingCorporationId(corporationId);
+    setError(null);
+    try {
+      await saveClientCorporationSettings(nextSettings);
+      invalidateClientCharacterData();
+      window.dispatchEvent(new CustomEvent("assembly-line-corporation-settings-changed"));
+    }
+    catch (supportError) {
+      setCorporationSettings((current) =>
+        previous
+          ? [...current.filter((entry) => entry.corporationId !== corporationId), previous]
+          : current.filter((entry) => entry.corporationId !== corporationId),
+      );
+      setCharacters((current) =>
+        current.map((character) =>
+          character.corporationId === corporationId
+            ? { ...character, corporationSupportEnabled: previous?.supportEnabled === true }
+            : character,
+        ),
+      );
+      setError(
+        supportError instanceof Error
+          ? supportError.message
+          : "Could not update corporation support.",
+      );
+    }
+    finally {
+      setUpdatingCorporationId(null);
+    }
+  }
+
   const corporations = [
     ...new Set(characters.map((character) => character.corporationId).filter(Boolean)),
   ].map((corporationId) => {
@@ -486,15 +595,12 @@ export default function CharactersPage() {
           </p>
         </div>
         <div className={styles.pageIntroActions}>
-          <Button
-            variant="link"
-            className={styles.characterAction}
-            nativeButton={false}
-            render={<Link href="/api/auth/eve/start" />}
-          >
-            <Plus aria-hidden="true" />
-            <span>Add character</span>
-          </Button>
+          <EveAuthorizationWarning href="/api/auth/eve/start">
+            <Button variant="link" className={styles.characterAction} type="button">
+              <Plus data-icon="inline-start" aria-hidden="true" />
+              <span>Add character</span>
+            </Button>
+          </EveAuthorizationWarning>
           <Tooltip>
             <TooltipTrigger
               render={
@@ -549,15 +655,12 @@ export default function CharactersPage() {
             <EmptyDescription>
               Connect an EVE character to make assets, jobs, and corporation access available.
             </EmptyDescription>
-            <Button
-              variant="link"
-              className={styles.characterAction}
-              nativeButton={false}
-              render={<Link href="/api/auth/eve/start" />}
-            >
-              <Plus aria-hidden="true" />
-              <span>Connect with EVE SSO</span>
-            </Button>
+            <EveAuthorizationWarning href="/api/auth/eve/start">
+              <Button variant="link" className={styles.characterAction} type="button">
+                <Plus data-icon="inline-start" aria-hidden="true" />
+                <span>Connect with EVE SSO</span>
+              </Button>
+            </EveAuthorizationWarning>
           </Empty>
         ) : (
           <>
@@ -615,22 +718,36 @@ export default function CharactersPage() {
                           aria-label={`On Deployment for ${character.characterName}`}
                         />
                       </label>
+                      {character.corpRefreshOptInEnabled
+                        && character.hasDirectorRole
+                        && character.canManageCorpRefreshOptIn && (
+                          <label className="flex items-center gap-2 text-xs">
+                            <span>Corp refresh opt-in</span>
+                            <Switch
+                              checked={character.allowCorpRefreshOptIn}
+                              disabled={updatingDirectorOptInId === character.characterId}
+                              onCheckedChange={(checked) => {
+                                void updateDirectorCorpRefreshOptIn(character, checked);
+                              }}
+                              aria-label={`Allow ${character.characterName} corporation refresh opt-in`}
+                            />
+                          </label>
+                        )}
                       <span className={styles.characterActions}>
                         {hasAuthorizationError && !isRefreshing && (
-                          <button
-                            type="button"
-                            className={`actionButton ${styles.characterReauthorize}`}
-                            onClick={() => {
-                              window.location.assign(
-                                `/api/auth/eve/start?characterId=${character.characterId}`,
-                              );
-                            }}
-                            aria-label={`Re-authorise ${character.characterName}`}
-                            title="Re-authorise character"
+                          <EveAuthorizationWarning
+                            href={`/api/auth/eve/start?characterId=${character.characterId}`}
                           >
-                            <RotateCcw aria-hidden="true" strokeWidth={1.8} />
-                            <span>Re-authorise</span>
-                          </button>
+                            <button
+                              type="button"
+                              className={`actionButton ${styles.characterReauthorize}`}
+                              aria-label={`Re-authorise ${character.characterName}`}
+                              title="Re-authorise character"
+                            >
+                              <RotateCcw aria-hidden="true" strokeWidth={1.8} />
+                              <span>Re-authorise</span>
+                            </button>
+                          </EveAuthorizationWarning>
                         )}
                         <button
                           type="button"
@@ -925,8 +1042,9 @@ export default function CharactersPage() {
           </div>
         </div>
         <p className={styles.panelDescription}>
-          Corporation assets are available when at least one connected pilot has a verified Director
-          role and the required corporation scopes.
+          Turn this on to include the corporation when Refresh data updates its cached assets,
+          blueprints, jobs, and orders. Then choose which refreshed hangars and containers the
+          planner can use on the Assets page. A connected pilot still needs the required EVE access.
         </p>
         {corporations.length === 0 ? (
           <Empty className={styles.emptyBuildList}>
@@ -943,27 +1061,45 @@ export default function CharactersPage() {
                   className={`${styles.eligibilityRow} flex flex-col items-stretch gap-4`}
                   key={corporation.corporationId}
                 >
-                  <button
-                    type="button"
-                    className="flex w-full flex-col items-start gap-1 text-left"
-                    onClick={() => setSelectedCorporationId(corporation.corporationId)}
-                  >
-                    <span className="flex items-center gap-2">
-                      <Image
-                        className={styles.eligibilityCorporationLogo}
-                        src={eveCorporationLogoUrl(corporation.corporationId)}
-                        alt=""
-                        width={32}
-                        height={32}
+                  <div className="flex items-start justify-between gap-4">
+                    <button
+                      type="button"
+                      className="flex min-w-0 flex-1 flex-col items-start gap-1 text-left"
+                      onClick={() => setSelectedCorporationId(corporation.corporationId)}
+                    >
+                      <span className="flex items-center gap-2">
+                        <Image
+                          className={styles.eligibilityCorporationLogo}
+                          src={eveCorporationLogoUrl(corporation.corporationId)}
+                          alt=""
+                          width={32}
+                          height={32}
+                        />
+                        <strong>
+                          {corporation.corporationName
+                            ?? `Corporation ${corporation.corporationId}`}
+                        </strong>
+                      </span>
+                      <small>
+                        {corporation.pilots.map((pilot) => pilot.characterName).join(" · ")}
+                      </small>
+                    </button>
+                    <label className="flex shrink-0 items-center gap-2 text-xs">
+                      <span>Include in Refresh</span>
+                      <Switch
+                        checked={
+                          corporationSettings.find(
+                            (entry) => entry.corporationId === corporation.corporationId,
+                          )?.supportEnabled === true
+                        }
+                        disabled={updatingCorporationId === corporation.corporationId}
+                        onCheckedChange={(checked) => {
+                          void updateCorporationSupport(corporation.corporationId, checked);
+                        }}
+                        aria-label={`Include ${corporation.corporationName ?? `corporation ${corporation.corporationId}`} in refresh`}
                       />
-                      <strong>
-                        {corporation.corporationName ?? `Corporation ${corporation.corporationId}`}
-                      </strong>
-                    </span>
-                    <small>
-                      {corporation.pilots.map((pilot) => pilot.characterName).join(" · ")}
-                    </small>
-                  </button>
+                    </label>
+                  </div>
                   <ItemGroup className="grid w-full grid-cols-[repeat(auto-fit,minmax(6rem,1fr))] gap-3">
                     {(["assets", "blueprints", "structures", "jobs", "orders"] as const).map(
                       (endpoint) => {

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
-import { getCharacter } from "@/lib/auth/tokensStore";
+import { getCharacter, getCollectionCorporationSettings } from "@/lib/auth/tokensStore";
 import { fetchUniverseNames } from "@/lib/esi/client";
+import { isCorpRefreshOptInEnabled } from "@/lib/auth/corpRefreshOptIn";
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
@@ -10,6 +11,11 @@ export async function GET(request: Request) {
   const sessionRecords = (await Promise.all(characterIds.map((id) => getCharacter(id)))).filter(
     (record) => record !== null,
   );
+  const corporationSettings = await getCollectionCorporationSettings(session.collectionId!);
+  const corporationSupport = new Map(
+    corporationSettings.map((settings) => [settings.corporationId, settings.supportEnabled]),
+  );
+  const corpRefreshOptInEnabled = isCorpRefreshOptInEnabled();
   let corporationNames = new Map<number, string>();
   try {
     corporationNames = await fetchUniverseNames(
@@ -30,6 +36,7 @@ export async function GET(request: Request) {
         rolesAtHq,
         rolesAtOther,
         hasDirectorRole,
+        allowCorpRefreshOptIn,
         hasAccountantRole,
         hasTraderRole,
       }) => ({
@@ -44,8 +51,14 @@ export async function GET(request: Request) {
         rolesAtHq: rolesAtHq ?? [],
         rolesAtOther: rolesAtOther ?? [],
         hasDirectorRole: Boolean(hasDirectorRole),
+        allowCorpRefreshOptIn: Boolean(allowCorpRefreshOptIn),
+        canManageCorpRefreshOptIn: corpRefreshOptInEnabled && Boolean(hasDirectorRole),
+        corpRefreshOptInEnabled,
         hasAccountantRole: Boolean(hasAccountantRole),
         hasTraderRole: Boolean(hasTraderRole),
+        corporationSupportEnabled: corporationId
+          ? corporationSupport.get(corporationId) === true
+          : false,
       }),
     ),
   );

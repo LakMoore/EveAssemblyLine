@@ -10,6 +10,7 @@ import {
   getSession,
   mergeCollections,
   saveCharacter,
+  saveSession,
 } from "@/lib/auth/tokensStore";
 
 async function getPending(request: Request) {
@@ -99,10 +100,14 @@ export async function POST(request: Request) {
       rolesAtHq: roles.rolesAtHq,
       rolesAtOther: roles.rolesAtOther,
       hasDirectorRole: roles.roles.includes("Director"),
+      allowCorpRefreshOptIn:
+        existing?.allowCorpRefreshOptIn === true && roles.roles.includes("Director"),
       hasAccountantRole: roles.roles.includes("Accountant"),
       hasTraderRole: roles.roles.includes("Trader"),
       hasStationManagerRole: roles.roles.includes("Station_Manager"),
     });
+    session.authenticatedCharacterId = pending.characterId;
+    await saveSession(session);
     await deletePendingMerge(value.mergeId);
     const response = NextResponse.json({ success: true });
     response.cookies.set("assembly_line_merge", "", { httpOnly: true, path: "/", maxAge: 0 });

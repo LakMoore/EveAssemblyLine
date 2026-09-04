@@ -30,9 +30,7 @@ function getPublicOrigin(request: Request, callbackUrl: string) {
 }
 
 function getReturnUrl(request: Request, pendingReturnPath: string | undefined) {
-  const returnUrl = new URL(pendingReturnPath ?? "/", getPublicOrigin(request, ""));
-  returnUrl.searchParams.set("refresh", "1");
-  return returnUrl.toString();
+  return new URL(pendingReturnPath ?? "/", getPublicOrigin(request, "")).toString();
 }
 
 export async function GET(request: Request) {
@@ -112,7 +110,9 @@ export async function GET(request: Request) {
       currentCollectionId
       ?? characterCollection?.collectionId
       ?? (await createCollection()).collectionId;
-    const session = existingSession ?? (await createSession(resolvedCollectionId));
+    const session =
+      existingSession ?? (await createSession(resolvedCollectionId, identity.characterId));
+    session.authenticatedCharacterId = identity.characterId;
     const corporationAuthorization = await fetchCharacterCorporationAuthorization(
       identity.characterId,
       tokenSet,
@@ -144,6 +144,8 @@ export async function GET(request: Request) {
       rolesAtHq: roles.rolesAtHq,
       rolesAtOther: roles.rolesAtOther,
       hasDirectorRole: roles.roles.includes("Director"),
+      allowCorpRefreshOptIn:
+        existingCharacter?.allowCorpRefreshOptIn === true && roles.roles.includes("Director"),
       hasAccountantRole: roles.roles.includes("Accountant"),
       hasTraderRole: roles.roles.includes("Trader"),
       hasStationManagerRole: roles.roles.includes("Station_Manager"),

@@ -200,6 +200,24 @@ export type EsiCorporationStructure = {
   services?: Array<{ name: string; state: "online" | "offline" | "cleanup" }>;
 };
 
+export type EsiCorporationPublicInfo = {
+  corporation_id: number;
+  alliance_id?: number;
+  ceo_id?: number;
+  date_founded?: string;
+  description?: string;
+  home_station_id?: number;
+  member_count?: number;
+  name: string;
+  ticker: string;
+  url?: string;
+};
+
+export type EsiCorporationDivision = {
+  division: number;
+  name?: string;
+};
+
 type EsiUniverseName = {
   id: number;
   name: string;
@@ -925,6 +943,43 @@ export async function fetchCorporationStructures(record: CharacterTokenRecord) {
     .finally(() => corporationStructureRequests.delete(corporationId));
   corporationStructureRequests.set(corporationId, request);
   return request;
+}
+
+/** Fetches public corporation identity and headquarters data through an eligible Director. */
+export async function fetchCorporationPublicInfo(record: CharacterTokenRecord, etag?: string) {
+  if (!record.corporationId || !record.hasDirectorRole) {
+    throw new Error("Corporation authorization is incomplete");
+  }
+  const token = await getUsableToken(record);
+  const result = await fetchEsiEndpoint<EsiCorporationPublicInfo>(
+    `/corporations/${record.corporationId}/`,
+    token,
+    etag,
+    { paginated: false },
+  );
+  return {
+    corporation: result.data,
+    headers: result.headers,
+    notModified: result.notModified,
+  };
+}
+
+/** Fetches corporation division names used to label corporation hangar sources. */
+export async function fetchCorporationDivisions(record: CharacterTokenRecord, etag?: string) {
+  if (!record.corporationId || !record.hasDirectorRole) {
+    throw new Error("Corporation authorization is incomplete");
+  }
+  requireCharacterScope(record, "esi-corporations.read_divisions.v1");
+  const token = await getUsableToken(record);
+  const result = await fetchEsiEndpoint<{
+    hangar?: EsiCorporationDivision[];
+    wallet?: Array<{ division: number; name?: string }>;
+  }>(`/corporations/${record.corporationId}/divisions/`, token, etag, { paginated: false });
+  return {
+    divisions: result.data?.hangar ?? null,
+    headers: result.headers,
+    notModified: result.notModified,
+  };
 }
 
 export async function fetchAssetLocations(
