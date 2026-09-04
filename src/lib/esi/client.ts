@@ -807,7 +807,7 @@ function mapIndustryJob(
 export async function fetchCharacterIndustryJobs(record: CharacterTokenRecord, etag?: string) {
   const token = await getUsableToken(record);
   const result = await fetchEsiEndpoint<EsiIndustryJob[]>(
-    `/characters/${record.characterId}/industry/jobs/?include_completed=true`,
+    `/characters/${record.characterId}/industry/jobs/`,
     token,
     etag,
     { paginated: false },
@@ -851,7 +851,7 @@ export async function fetchCorporationIndustryJobs(record: CharacterTokenRecord,
   }
   const token = await getUsableToken(record);
   const result = await fetchEsiEndpoint<EsiIndustryJob[]>(
-    `/corporations/${record.corporationId}/industry/jobs/?include_completed=true`,
+    `/corporations/${record.corporationId}/industry/jobs/`,
     token,
     etag,
     { paginated: false },

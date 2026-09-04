@@ -212,7 +212,7 @@ test("sends the cached ETag for corporation structures", async (t) => {
   assert.equal(request.headers.get("if-none-match"), "old-etag");
 });
 
-test("fetches completed industry jobs and excludes unusable terminal jobs", async (t) => {
+test("fetches active industry jobs and excludes unusable terminal jobs", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -235,7 +235,7 @@ test("fetches completed industry jobs and excludes unusable terminal jobs", asyn
         runs: 10,
         successful_runs: 10,
         product_type_id: 4,
-        status: "delivered",
+        status: "active",
         start_date: "2026-08-31T00:00:00Z",
         end_date: "2026-09-01T00:00:00Z",
       },
@@ -259,13 +259,10 @@ test("fetches completed industry jobs and excludes unusable terminal jobs", asyn
 
   const result = await fetchCharacterIndustryJobs(character);
 
-  assert.equal(
-    requestUrl,
-    "https://esi.evetech.net/latest/characters/42/industry/jobs/?include_completed=true",
-  );
+  assert.equal(requestUrl, "https://esi.evetech.net/latest/characters/42/industry/jobs/");
   assert.deepEqual(
     result.jobs?.map((job) => ({ jobId: job.jobId, status: job.status })),
-    [{ jobId: 1, status: "delivered" }],
+    [{ jobId: 1, status: "active" }],
   );
 });
 
