@@ -42,6 +42,7 @@ import {
   type ClientJobsResponse,
 } from "@/lib/client/requestCache";
 import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
+import { loadPlanResult, savePlanResult } from "@/lib/planning/planResultStore";
 import { loadPlannerReprocessingEfficiencies } from "@/lib/planning/reprocessingClient";
 import {
   getNonProductionHaulingQuantity,
@@ -582,6 +583,15 @@ function Planner() {
   });
 
   useEffect(() => {
+    void loadPlanResult().then((savedPlan) => {
+      if (savedPlan) {
+        setPlan(savedPlan);
+        setPlanStatus("Plan loaded from this browser");
+      }
+    });
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     void loadClientSession()
       .then(async (session) => {
@@ -859,7 +869,9 @@ function Planner() {
         setPlanStatus("error" in data && data.error ? data.error : "Could not calculate plan");
         return;
       }
-      setPlan(data as PlanResult);
+      const calculatedPlan = data as PlanResult;
+      await savePlanResult(calculatedPlan);
+      setPlan(calculatedPlan);
       try {
         const session = await loadClientSession();
         const status = session.authenticated ? await loadClientStateStatus() : { characters: [] };

@@ -52,6 +52,7 @@ import {
   fetchCorporationStructures,
   fetchCorporationPublicInfo,
   fetchCorporationDivisions,
+  fetchUniverseNames,
   fetchSolarSystemMetadata,
   fetchStationMetadata,
   fetchStructureMetadataPerCharacter,
@@ -391,89 +392,155 @@ export async function getCorporationSourceCatalog(
     getMarketGroups(),
     getSystems(),
   ]);
-  return policies.flatMap((policy) => {
-    const cache = getCache(corporationCaches, policy.corporationId, sessionId);
-    const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
-    const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
-    const sourceEntries = new Map<string, CorporationSourceCatalogEntry>();
-    for (const asset of rawAssets) {
-      if (asset.ownerType !== "corporation") continue;
-      const source = corporationSourceRoot(asset.locationId, asset.locationFlag, rawAssetsByItemId);
-      if (!source?.locationFlag) continue;
-      const permission = getCorporationHangarPermissions(
-        characters,
-        policy.corporationId,
-        source.rootLocationId,
-        policy.headquartersId ?? -1,
-      ).get(source.locationFlag);
-      if (!permission?.canQuery) continue;
-      const key = `${source.rootLocationId}:${source.locationFlag}`;
-      if (!sourceEntries.has(key)) {
-        const rootLocationCandidate =
-          cache.rootLocationsByItemId.get(asset.itemId)
-          ?? cache.stockAssetsByItemId?.get(asset.itemId)?.rootLocation;
-        const rootLocation = isAssetLocation(rootLocationCandidate)
-          ? rootLocationCandidate
-          : undefined;
-        const systemName =
-          rootLocation?.systemId === undefined
-            ? undefined
-            : systems.get(rootLocation.systemId)?.name.en;
-        sourceEntries.set(
-          key,
-          {
-            corporationId: policy.corporationId,
-            rootLocationId: source.rootLocationId,
-            locationFlag: source.locationFlag,
-            label: corporationSourceLabel(source.locationFlag, cache.divisions?.lastBody),
-            ...(rootLocation
-              ? {
-                  rootLocation: {
-                    ...rootLocation,
-                    ...(systemName ? { systemName } : {}),
-                  },
-                }
-              : {}),
-            canTake: permission.canTake,
-            canQuery: permission.canQuery,
-            selected: policy.directHangars.some(
-              (entry) =>
-                entry.rootLocationId === source.rootLocationId
-                && entry.locationFlag === source.locationFlag,
-            ),
-            containers: [],
-          },
+  const catalogs = await Promise.all(
+    policies.map(async (policy) => {
+      const cache = getCache(corporationCaches, policy.corporationId, sessionId);
+      const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
+      const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+      const sourceEntries = new Map<string, CorporationSourceCatalogEntry>();
+      for (const asset of rawAssets) {
+        if (asset.ownerType !== "corporation") continue;
+        const source = corporationSourceRoot(
+          asset.locationId,
+          asset.locationFlag,
+          rawAssetsByItemId,
         );
+        if (!source?.locationFlag) continue;
+        const permission = getCorporationHangarPermissions(
+          characters,
+          policy.corporationId,
+          source.rootLocationId,
+          policy.headquartersId ?? -1,
+        ).get(source.locationFlag);
+        if (!permission?.canQuery) continue;
+        const key = `${source.rootLocationId}:${source.locationFlag}`;
+        if (!sourceEntries.has(key)) {
+          const rootLocationCandidate =
+            cache.rootLocationsByItemId.get(asset.itemId)
+            ?? cache.stockAssetsByItemId?.get(asset.itemId)?.rootLocation;
+          let rootLocation = isAssetLocation(rootLocationCandidate)
+            ? rootLocationCandidate
+            : undefined;
+          const station = await getStation(source.rootLocationId);
+          if (station) {
+            const names = await fetchUniverseNames([source.rootLocationId]).catch(() => new Map());
+            rootLocation = {
+              locationId: source.rootLocationId,
+              kind: "station",
+              ...(names.get(source.rootLocationId)
+                ? { name: names.get(source.rootLocationId) }
+                : {}),
+              typeId: station.typeID,
+              systemId: station.solarSystemID,
+              resolved: true,
+            };
+          }
+          else if (rootLocation?.kind === "station" && !rootLocation.name) {
+            const names = await fetchUniverseNames([rootLocation.locationId]).catch(
+              () => new Map(),
+            );
+            const name = names.get(rootLocation.locationId);
+            if (name) rootLocation = { ...rootLocation, name };
+          }
+          const systemName =
+            rootLocation?.systemId === undefined
+              ? undefined
+              : systems.get(rootLocation.systemId)?.name.en;
+          sourceEntries.set(
+            key,
+            {
+              corporationId: policy.corporationId,
+              rootLocationId: source.rootLocationId,
+              locationFlag: source.locationFlag,
+              label: corporationSourceLabel(source.locationFlag, cache.divisions?.lastBody),
+              ...(rootLocation
+                ? {
+                    rootLocation: {
+                      ...rootLocation,
+                      ...(systemName ? { systemName } : {}),
+                    },
+                  }
+                : {}),
+              canTake: permission.canTake,
+              canQuery: permission.canQuery,
+              selected: policy.directHangars.some(
+                (entry) =>
+                  entry.rootLocationId === source.rootLocationId
+                  && entry.locationFlag === source.locationFlag,
+              ),
+              containers: [],
+            },
+          );
+        }
+        const entry = sourceEntries.get(key)!;
+        if (
+          asset.isSingleton
+          && isCargoContainerType(asset.typeId, types, groups, marketGroups)
+          && !entry.containers.some((container) => container.itemId === asset.itemId)
+        ) {
+          const cachedAsset = cache.stockAssetsByItemId?.get(asset.itemId);
+          const name = asset.name ?? cachedAsset?.name;
+          entry.containers.push({
+            itemId: asset.itemId,
+            ...(name ? { name } : {}),
+            locationId: asset.locationId,
+            rootLocationId: source.rootLocationId,
+            selected: policy.containerItemIds.includes(asset.itemId),
+          });
+        }
       }
-      const entry = sourceEntries.get(key)!;
-      if (
-        asset.isSingleton
-        && isCargoContainerType(asset.typeId, types, groups, marketGroups)
-        && !entry.containers.some((container) => container.itemId === asset.itemId)
-      ) {
-        entry.containers.push({
-          itemId: asset.itemId,
-          ...(asset.name ? { name: asset.name } : {}),
-          locationId: asset.locationId,
-          rootLocationId: source.rootLocationId,
-          selected: policy.containerItemIds.includes(asset.itemId),
-        });
-      }
-    }
-    return [...sourceEntries.values()]
-      .sort(
-        (left, right) =>
-          corporationHangarNumber(left.locationFlag) - corporationHangarNumber(right.locationFlag),
-      )
-      .map((entry) => ({
-        ...entry,
-        containers: entry.containers.sort((left, right) =>
-          (left.name ?? `Container ${left.itemId}`).localeCompare(
-            right.name ?? `Container ${right.itemId}`,
+      const unnamedContainerIds = [
+        ...new Set(
+          [...sourceEntries.values()].flatMap((entry) =>
+            entry.containers
+              .filter((container) => container.name === undefined)
+              .map((container) => container.itemId),
           ),
         ),
-      }));
-  });
+      ];
+      const nameResolver = characters.find(
+        (character) =>
+          character.corporationId === policy.corporationId
+          && (
+            character.hasDirectorRole === true
+            || character.corporationRoles?.includes("Director") === true
+          ),
+      );
+      if (unnamedContainerIds.length > 0 && nameResolver) {
+        try {
+          const names = await fetchAssetNames(
+            `/corporations/${policy.corporationId}/assets/names`,
+            await getUsableToken(nameResolver),
+            unnamedContainerIds,
+          );
+          for (const entry of sourceEntries.values()) {
+            entry.containers = entry.containers.map((container) => {
+              const name = names.get(container.itemId);
+              return name === undefined ? container : { ...container, name };
+            });
+          }
+        }
+        catch {
+          // Cached container IDs remain usable when ESI name resolution is unavailable.
+        }
+      }
+      return [...sourceEntries.values()]
+        .sort(
+          (left, right) =>
+            corporationHangarNumber(left.locationFlag)
+            - corporationHangarNumber(right.locationFlag),
+        )
+        .map((entry) => ({
+          ...entry,
+          containers: entry.containers.sort((left, right) =>
+            (left.name ?? `Container ${left.itemId}`).localeCompare(
+              right.name ?? `Container ${right.itemId}`,
+            ),
+          ),
+        }));
+    }),
+  );
+  return catalogs.flat();
 }
 
 type CorporationProjection = {
@@ -1275,9 +1342,8 @@ async function mergeAssetNames(
     .filter(
       (asset) =>
         asset.isSingleton
-        && !excludedItemIds.has(asset.itemId)
         && (
-          shipTypeIds.has(asset.typeId)
+          (shipTypeIds.has(asset.typeId) && !excludedItemIds.has(asset.itemId))
           || isCargoContainerType(asset.typeId, types, groups, marketGroups)
         )
         && !asset.name,
