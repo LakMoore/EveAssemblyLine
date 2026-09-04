@@ -30,7 +30,9 @@ function getPublicOrigin(request: Request, callbackUrl: string) {
 }
 
 function getReturnUrl(request: Request, pendingReturnPath: string | undefined) {
-  return new URL(pendingReturnPath ?? "/", getPublicOrigin(request, "")).toString();
+  const returnUrl = new URL(pendingReturnPath ?? "/", getPublicOrigin(request, ""));
+  returnUrl.searchParams.set("refresh", "1");
+  return returnUrl.toString();
 }
 
 export async function GET(request: Request) {

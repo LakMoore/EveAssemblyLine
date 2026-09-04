@@ -238,6 +238,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [showSidebarScrollTop, setShowSidebarScrollTop] = useState(false);
   const [statusCheckAt, setStatusCheckAt] = useState(() => Date.now());
   const isRefreshingDataRef = useRef(false);
+  const authChangeRefreshRequested = useRef(false);
   const mobileMetaCollapseTimer = useRef<number | null>(null);
   const mobileMetaCollapseAnimationTimer = useRef<number | null>(null);
   const pilotListSentinelRef = useRef<HTMLSpanElement | null>(null);
@@ -636,6 +637,16 @@ export default function AppShell({ children }: { children: ReactNode }) {
     },
     [],
   );
+
+  useEffect(() => {
+    if (!authenticated || characters.length === 0 || authChangeRefreshRequested.current) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("refresh") !== "1") return;
+    authChangeRefreshRequested.current = true;
+    url.searchParams.delete("refresh");
+    window.history.replaceState({}, "", url);
+    window.setTimeout(() => void refreshData(), 0);
+  }, [authenticated, characters.length, refreshData]);
 
   return (
     <LanguageContext.Provider

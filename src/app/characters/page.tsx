@@ -380,6 +380,7 @@ export default function CharactersPage() {
       catch {
         setError("Character removed, but stock could not be refreshed.");
       }
+      window.location.assign("/characters?refresh=1");
     }
     catch (removeError) {
       setError(removeError instanceof Error ? removeError.message : "Could not remove character.");
