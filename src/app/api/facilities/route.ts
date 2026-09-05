@@ -38,7 +38,7 @@ import {
 } from "@/lib/planning/facilityBonuses";
 import { getProductionGroupReferences } from "@/lib/planning/productionGroups";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
-import { normalizeLocationName } from "@/lib/reference/locationName";
+import { formatLocationName, normalizeLocationName } from "@/lib/reference/locationName";
 
 type FacilityCandidate = Omit<FacilitySettingsEntry, "locationId"> & {
   id: number | string;
@@ -192,7 +192,9 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
         locationId: root.locationId,
         systemId,
         name: root.name
-          ? normalizeLocationName(systems.get(systemId)?.name.en, root.name)
+          ? root.kind === "structure"
+            ? formatLocationName(systems.get(systemId)?.name.en, root.name)
+            : normalizeLocationName(systems.get(systemId)?.name.en, root.name)
           : root.kind === "structure"
             ? "Structure details unavailable"
             : "Station details unavailable",
@@ -223,7 +225,9 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
         locationId: root.locationId,
         systemId,
         name: root.name
-          ? normalizeLocationName(systems.get(systemId)?.name.en, root.name)
+          ? root.kind === "structure"
+            ? formatLocationName(systems.get(systemId)?.name.en, root.name)
+            : normalizeLocationName(systems.get(systemId)?.name.en, root.name)
           : root.kind === "structure"
             ? "Structure details unavailable"
             : "Station details unavailable",
@@ -268,7 +272,7 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
         locationId: structure.structure_id,
         systemId: structure.system_id,
         name: structure.name
-          ? normalizeLocationName(systems.get(structure.system_id)?.name.en, structure.name)
+          ? formatLocationName(systems.get(structure.system_id)?.name.en, structure.name)
           : "Structure details unavailable",
         typeId: structure.type_id,
         rigTypeIds: saved?.rigTypeIds ?? [],
@@ -421,14 +425,20 @@ async function calculateFacilities(request: Request, settings: FacilitySettingsP
     activities.teResearch.taxRate = requestActivities.teResearch.taxRate;
     return {
       id: facility.id,
-      name: normalizeLocationName(
-        systems.get(facility.systemId)?.name.en,
-        facility.name
-          || types.get(facility.typeId ?? 0)?.name.en
-          || (facility.locationType === "structure"
-            ? "Structure details unavailable"
-            : "Station details unavailable"),
-      ),
+      name:
+        facility.locationType === "structure"
+          ? formatLocationName(
+              systems.get(facility.systemId)?.name.en,
+              facility.name
+                || types.get(facility.typeId ?? 0)?.name.en
+                || "Structure details unavailable",
+            )
+          : normalizeLocationName(
+              systems.get(facility.systemId)?.name.en,
+              facility.name
+                || types.get(facility.typeId ?? 0)?.name.en
+                || "Station details unavailable",
+            ),
       locationType: facility.locationType,
       typeId: facility.typeId ?? 0,
       systemId: facility.systemId,

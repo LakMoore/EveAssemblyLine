@@ -29,7 +29,7 @@ import {
 } from "@/cache/services/sdeCache";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { categorizeType } from "@/lib/reference/category";
-import { normalizeLocationName } from "@/lib/reference/locationName";
+import { formatLocationName, normalizeLocationName } from "@/lib/reference/locationName";
 import type {
   AssetLocation,
   AssetRecord,
@@ -216,7 +216,9 @@ function addStockContribution(
   const category = categorized.category;
   const systemName = location.systemId ? systems.get(location.systemId)?.name.en : undefined;
   const displayName = location.name
-    ? normalizeLocationName(systemName, location.name)
+    ? location.kind === "structure"
+      ? formatLocationName(systemName, location.name)
+      : normalizeLocationName(systemName, location.name)
     : location.kind === "anchored"
       ? "Anchored"
       : location.kind === "structure"

@@ -1,6 +1,6 @@
 import type { PlanStockItem } from "@/lib/planning/types";
 import type { SdeLanguage } from "@/lib/reference/languages";
-import { normalizeLocationName } from "@/lib/reference/locationName";
+import { formatLocationName, normalizeLocationName } from "@/lib/reference/locationName";
 import { loadEndpointRecord, saveEndpointResponse } from "./refreshCache";
 
 export type ClientSession = {
@@ -42,7 +42,9 @@ function normalizeClientLocationName(
         ? "Station details unavailable"
         : "Anchored";
   }
-  return normalizeLocationName(systemName, name);
+  return kind === "structure"
+    ? formatLocationName(systemName, name)
+    : normalizeLocationName(systemName, name);
 }
 
 export function normalizeClientAssetsResponse(data: ClientAssetsResponse): ClientAssetsResponse {

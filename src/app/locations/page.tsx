@@ -50,6 +50,7 @@ import {
   type FacilitySettingsEntry,
   type FacilitySettingsPayload,
 } from "@/lib/planning/facilities";
+import { formatLocationName } from "@/lib/reference/locationName";
 import {
   fetchFacilityResponse,
   publishFacilities,
@@ -607,10 +608,7 @@ export default function LocationsPage() {
                   key={knownStructure?.id ?? structure?.structureId}
                 >
                   <span>
-                    <strong>
-                      {item.systemName ? `${item.systemName} - ` : ""}
-                      {item.name}
-                    </strong>
+                    <strong>{formatLocationName(item.systemName, item.name)}</strong>
                     <span className={styles.knownStructureMeta}>
                       <small>
                         {item.type ?? "Structure"}

@@ -63,7 +63,7 @@ import {
   type PlannerSettings,
 } from "@/lib/planning/preferences";
 import type { SdeLanguage } from "@/lib/reference/languages";
-import { normalizeLocationName } from "@/lib/reference/locationName";
+import { formatLocationName } from "@/lib/reference/locationName";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import { useAppLanguage } from "../AppShell";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
@@ -695,7 +695,10 @@ function Planner() {
             )
             .map((location) => ({
               locationId: location.locationId,
-              name: normalizeLocationName(location.systemName, location.name),
+              name:
+                location.locationType === "structure"
+                  ? formatLocationName(location.systemName, location.name)
+                  : location.name,
               kind: location.locationType,
               baseYield: 0,
               baseManufacturingMe: 0,

@@ -48,6 +48,6 @@ test("normalizes structure names and hides legacy raw location labels", () => {
 
   assert.deepEqual(
     normalized.locations?.map((location) => location.name),
-    ["Rocky Balboa", "Structure details unavailable"],
+    ["J130330 - Rocky Balboa", "Structure details unavailable"],
   );
 });

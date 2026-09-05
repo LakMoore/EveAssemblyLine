@@ -65,7 +65,7 @@ import {
   getCorporationHangarPermissions,
   isCorporationHangarFlag,
 } from "./corporationAccess";
-import { normalizeLocationName } from "@/lib/reference/locationName";
+import { formatLocationName, normalizeLocationName } from "@/lib/reference/locationName";
 
 export type EndpointStatus = "fresh" | "cached" | "stale" | "rate_limited" | "error";
 export type EndpointCache<T> = {
@@ -500,7 +500,7 @@ export async function getCorporationSourceCatalog(
                 locationId: structure.structure_id,
                 kind: "structure",
                 name: structure.name
-                  ? normalizeLocationName(systemName, structure.name)
+                  ? formatLocationName(systemName, structure.name)
                   : "Structure details unavailable",
                 typeId: structure.type_id,
                 systemId: structure.system_id,
@@ -539,7 +539,9 @@ export async function getCorporationSourceCatalog(
               ? undefined
               : systems.get(rootLocation.systemId)?.name.en;
           const rootName = rootLocation.name
-            ? normalizeLocationName(systemName, rootLocation.name)
+            ? rootLocation.kind === "structure"
+              ? formatLocationName(systemName, rootLocation.name)
+              : normalizeLocationName(systemName, rootLocation.name)
             : undefined;
           sourceEntries.set(
             key,
@@ -2424,7 +2426,7 @@ export async function getRootLocationsByItemId(
           {
             ...location,
             kind: "structure",
-            ...(structure.name ? { name: normalizeLocationName(systemName, structure.name) } : {}),
+            ...(structure.name ? { name: formatLocationName(systemName, structure.name) } : {}),
             typeId: structure.type_id,
             systemId: structure.system_id,
             resolved: true,
