@@ -17,7 +17,12 @@ import {
 } from "@/lib/planning/plannerPreferencesStore";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
-import { groupClientAssetsByLocation, loadClientAssets } from "@/lib/client/requestCache";
+import {
+  filterClientAssetsForPlanning,
+  groupClientAssetsByLocation,
+  loadClientAssets,
+  type ClientCorporationSource,
+} from "@/lib/client/requestCache";
 import { type KnownStructure } from "@/lib/planning/preferences";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import DialogBody from "@/components/DialogBody";
@@ -84,6 +89,7 @@ type EsiStockResponse = {
   locations?: Array<EsiStockLocation & { locationId: number }>;
   assets?: StockItem[];
   filteredLocationIds?: number[];
+  corporationSources?: ClientCorporationSource[];
 };
 type PasteResult = {
   name: string;
@@ -209,6 +215,7 @@ export default function StockPage() {
   useEffect(() => {
     async function loadPageData(
       refreshedLocations?: EsiStockResponse["locations"],
+      refreshedCorporationSources?: ClientCorporationSource[],
       loadEsiStock = true,
       reloadEsiStock = false,
     ) {
@@ -232,18 +239,23 @@ export default function StockPage() {
               : Promise.resolve({ ok: false, json: async () => ({}) }),
         ]);
         const esiData = (await esiResponse.json()) as EsiStockResponse;
+        const filteredEsiData = filterClientAssetsForPlanning(
+          refreshedLocations
+            ? {
+                ...esiData,
+                locations: refreshedLocations,
+                assets: refreshedLocations.flatMap((location) => location.items ?? []),
+                corporationSources: refreshedCorporationSources,
+              }
+            : esiData,
+        );
         const esiLocations = esiResponse.ok
-          ? (
-              refreshedLocations?.map((location) => ({
-                ...location,
-                structureId: location.structureId ?? location.locationId,
-                items: location.items ?? [],
-              }))
-              ?? groupClientAssetsByLocation(esiData).map((location) => ({
+          ? groupClientAssetsByLocation(filteredEsiData)
+              .filter((location) => location.items.length > 0)
+              .map((location) => ({
                 ...location,
                 structureId: location.locationId,
               }))
-            )
           : [];
         setKnownStructures(structures);
         const correctedRecords = records.map((record) => {
@@ -347,12 +359,13 @@ export default function StockPage() {
         setIsHydratingVolumes(false);
       }
     }
-    void loadPageData(undefined, true);
+    void loadPageData(undefined, undefined, true);
     const handleRefresh = (event: Event) => {
       const detail = (
         event as CustomEvent<{
           rateLimitedUntil?: string | null;
           assetLocations?: EsiStockResponse["locations"];
+          corporationSources?: ClientCorporationSource[];
         }>
       ).detail;
       if (detail.rateLimitedUntil) return;
@@ -360,10 +373,10 @@ export default function StockPage() {
         void loadPageData();
         return;
       }
-      void loadPageData(detail.assetLocations, true, false);
+      void loadPageData(detail.assetLocations, detail.corporationSources, true, false);
     };
     const handleCorporationSettingsChanged = () => {
-      void loadPageData(undefined, true, true);
+      void loadPageData(undefined, undefined, true, true);
     };
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
     window.addEventListener(

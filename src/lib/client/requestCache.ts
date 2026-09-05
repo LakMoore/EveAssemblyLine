@@ -106,12 +106,23 @@ export function filterClientAssetsForPlanning(data: ClientAssetsResponse): Clien
         );
       }
       const sourceKey = `${item.ownerId}:${source.rootLocationId}:${source.locationFlag}`;
+      const itemRootSourceKey =
+        item.rootLocationId === undefined
+          ? undefined
+          : `${item.ownerId}:${item.rootLocationId}:${source.locationFlag}`;
+      const directSourceSelected =
+        selectedSources.has(sourceKey)
+        || (itemRootSourceKey !== undefined && selectedSources.has(itemRootSourceKey));
+      const directSourceLocationSelected =
+        selectedSourceLocations.has(`${item.ownerId}:${source.rootLocationId}`)
+        || (
+          item.rootLocationId !== undefined
+          && selectedSourceLocations.has(`${item.ownerId}:${item.rootLocationId}`)
+        );
       return (
         source.containerItemIds.some((itemId) => selectedContainers.has(itemId))
         || (
-          (source.locationFlag === ""
-            ? selectedSourceLocations.has(`${item.ownerId}:${source.rootLocationId}`)
-            : selectedSources.has(sourceKey))
+          (source.locationFlag === "" ? directSourceLocationSelected : directSourceSelected)
           && source.containerItemIds.length === 0
         )
       );
