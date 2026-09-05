@@ -1197,15 +1197,10 @@ function Planner() {
   const activityLocationOptions = sharedLocationOptions;
   const stockLocationOptions: StockLocationOption[] = sharedLocationOptions;
   const plannerLocationNames = new Map<number, string>([
-    ...locationOptions.map((location) => [location.locationId, location.name] as const),
-    ...knownStructures.flatMap((structure) =>
-      structure.esiStructureId === undefined
-        ? []
-        : [[structure.esiStructureId, structure.name] as const],
-    ),
     ...buckets.flatMap((bucket) =>
       bucket.stockLocationName ? [[bucket.locations.stock, bucket.stockLocationName] as const] : [],
     ),
+    ...sharedLocationOptions.map((location) => [location.locationId, location.name] as const),
   ]);
   const productionGroupOptions: ProductionGroupOption[] = productionGroupReferences.map((group) => {
     const facilities = locationOptions
@@ -2135,7 +2130,9 @@ function PlannerBucketSummary({
         <div className="min-w-0">
           <span className="block text-xs uppercase text-muted-foreground">Stock destination</span>
           <span className="block truncate">
-            {bucket.stockLocationName ?? locationName(bucket.locations.stock)}
+            {locationNamesById.get(bucket.locations.stock)
+              ?? bucket.stockLocationName
+              ?? String(bucket.locations.stock)}
           </span>
         </div>
         <div className="min-w-0">
