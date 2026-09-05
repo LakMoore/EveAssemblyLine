@@ -23,7 +23,7 @@ const defaults: CompressSettings = {
   characterId: "all-zero",
   implantId: "none",
   marketId: "jita",
-  orderType: "buy-1-day",
+  orderType: "sell",
   items: [],
 };
 

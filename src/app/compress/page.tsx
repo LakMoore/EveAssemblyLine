@@ -12,6 +12,7 @@ import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import TypeSearch from "@/components/TypeSearch";
 import { toast } from "@/components/ui/toast";
 import type { SdeLanguage } from "@/lib/reference/languages";
+import { formatLocationName } from "@/lib/reference/locationName";
 import {
   Clipboard,
   ClipboardList,
@@ -34,8 +35,14 @@ import {
   type CompressSettings,
 } from "@/lib/planning/compressSettingsStore";
 import type { KnownStructure } from "@/lib/planning/preferences";
-import { loadClientSession, loadClientStateStatus } from "@/lib/client/requestCache";
-import { loadBuildList, saveBuildList } from "@/lib/planning/buildListStore";
+import {
+  loadClientAssets,
+  loadClientSession,
+  loadClientStateStatus,
+} from "@/lib/client/requestCache";
+import { loadStructures } from "@/lib/planning/structureStore";
+import { loadPlannerBuckets, savePlannerBuckets } from "@/lib/planning/plannerBucketsStore";
+import type { ClientBuildItem, ClientPlanBucket } from "@/lib/planning/types";
 import { loadEndpointRecord, saveEndpointResponse } from "@/lib/client/refreshCache";
 import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
 import {
@@ -57,6 +64,7 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -99,6 +107,7 @@ type CompressResult = {
 type CompressOption = {
   id: string;
   name?: string;
+  locationType: "station" | "structure";
   structureTypeId?: number;
   securityStatus?: number;
   rigs?: string[];
@@ -202,7 +211,7 @@ function CompressContent() {
     characterId: "all-zero",
     implantId: "none",
     marketId: "jita",
-    orderType: "buy-1-day",
+    orderType: "sell",
     items: [],
   });
   const [optionsRefreshVersion, setOptionsRefreshVersion] = useState(0);
@@ -229,80 +238,128 @@ function CompressContent() {
         fetchFacilityResponse(),
         loadClientSession(),
         loadEndpointRecord<CompressOptions>("compress/options"),
+        loadClientAssets(language).catch(() => null),
+        loadStructures().catch(() => []),
       ])
-      .then(async ([loadedSettings, facilityResponse, session, cachedOptions]) => {
-        const stateStatus = session.authenticated ? await loadClientStateStatus() : null;
-        const loadedFacilities = facilityResponse?.facilities ?? [];
-        let loadedOptions = cachedOptions?.data;
-        if (isRefreshLoad || !loadedOptions) {
-          const optionsResponse = await fetch(
-            "/api/compress/options",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              cache: "no-store",
-              body: JSON.stringify({
-                language,
-              }),
-            },
+      .then(
+        async ([
+          loadedSettings,
+          facilityResponse,
+          session,
+          cachedOptions,
+          cachedAssets,
+          knownStructures,
+        ]) => {
+          const stateStatus = session.authenticated ? await loadClientStateStatus() : null;
+          const loadedFacilities = facilityResponse?.facilities ?? [];
+          let loadedOptions = cachedOptions?.data;
+          if (isRefreshLoad || !loadedOptions) {
+            const optionsResponse = await fetch(
+              "/api/compress/options",
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                cache: "no-store",
+                body: JSON.stringify({
+                  language,
+                }),
+              },
+            );
+            loadedOptions = (await optionsResponse.json()) as CompressOptions;
+            if (!optionsResponse.ok) throw new Error("Could not load compression options.");
+            await saveEndpointResponse("compress/options", "/api/compress/options", loadedOptions);
+          }
+          const normalizedItems = mergeCompressItems(
+            Array.isArray(loadedSettings.items) ? loadedSettings.items : [],
           );
-          loadedOptions = (await optionsResponse.json()) as CompressOptions;
-          if (!optionsResponse.ok) throw new Error("Could not load compression options.");
-          await saveEndpointResponse("compress/options", "/api/compress/options", loadedOptions);
-        }
-        const normalizedItems = mergeCompressItems(
-          Array.isArray(loadedSettings.items) ? loadedSettings.items : [],
-        );
-        const rawLocations: CompressOption[] = [
-          ...loadedFacilities.map((facility) => ({
-            id: String(facility.id),
-            name: facility.name,
-            structureTypeId: facility.typeId,
-            securityStatus: facility.securityStatus,
-            rigs: facility.rigTypeIds.map((typeId) => String(typeId)),
-            baseYield: (facility.activities.reprocessing.baseYield ?? 0) * 100,
-            canReprocess: facility.activities.reprocessing.available,
-          })),
-        ].filter(
-          (location, index, all) =>
-            all.findIndex((candidate) => locationKey(candidate) === locationKey(location))
-            === index,
-        );
-        const loadedLocations = rawLocations
-          .map((location) => {
-            const baseYield = location.baseYield ?? 50;
-            return { ...location, rankBonus: baseYield - 50 };
-          })
-          .sort(
-            (left, right) =>
-              right.rankBonus - left.rankBonus
-              || (left.name ?? left.id).localeCompare(right.name ?? right.id),
+          const rawLocations: CompressOption[] = [
+            ...loadedFacilities.map((facility) => ({
+              id: String(facility.id),
+              name: facility.name,
+              locationType: facility.locationType,
+              structureTypeId: facility.typeId,
+              securityStatus: facility.securityStatus,
+              rigs: facility.rigTypeIds.map((typeId) => String(typeId)),
+              baseYield: (facility.activities.reprocessing.baseYield ?? 0) * 100,
+              canReprocess: facility.activities.reprocessing.available,
+            })),
+            ...(cachedAssets?.locations ?? [])
+              .filter(
+                (
+                  location,
+                ): location is typeof location & {
+                  locationType: "station" | "structure";
+                } => location.locationType === "station" || location.locationType === "structure",
+              )
+              .map((location) => ({
+                id: String(location.locationId),
+                name:
+                  location.locationType === "structure"
+                    ? formatLocationName(location.systemName, location.name)
+                    : location.name,
+                locationType: location.locationType,
+                structureTypeId: location.typeId ?? 0,
+                baseYield: location.locationType === "station" ? 50 : 0,
+              })),
+            ...knownStructures.flatMap((structure) =>
+              structure.esiStructureId === undefined
+                ? []
+                : [
+                    {
+                      id: String(structure.esiStructureId),
+                      name: structureDisplayName(structure),
+                      locationType: "structure" as const,
+                      structureTypeId: structure.typeId,
+                      rigs: structure.rigs,
+                      securityStatus: structure.securityStatus,
+                      baseYield: 0,
+                      canReprocess: structure.allowReprocessing !== false,
+                    },
+                  ],
+            ),
+          ].filter(
+            (location, index, all) =>
+              all.findIndex((candidate) => locationKey(candidate) === locationKey(location))
+              === index,
           );
-        const normalizedSettings = {
-          ...loadedSettings,
-          items: normalizedItems,
-          locationId: loadedLocations.some((location) => location.id === loadedSettings.locationId)
-            ? loadedSettings.locationId
-            : (loadedLocations[0]?.id ?? loadedSettings.locationId),
-          marketId: marketHubs.some((market) => market.id === loadedSettings.marketId)
-            ? loadedSettings.marketId
-            : "jita",
-        };
-        const characters = loadedOptions.characters.map((character) => ({
-          ...character,
-          skills: Object.fromEntries(
-            (
-              stateStatus?.characters?.find(
-                (status) => status.characterId === character.characterId,
-              )?.skills?.body ?? []
-            ).map((skill) => [String(skill.skillId), skill.activeSkillLevel]),
-          ),
-        }));
-        setOptions({ ...loadedOptions, characters, locations: loadedLocations });
-        setSettings(normalizedSettings);
-        setItems(normalizedSettings.items);
-        void saveCompressSettings(normalizedSettings);
-      })
+          const loadedLocations = rawLocations
+            .map((location) => {
+              const baseYield = location.baseYield ?? 50;
+              return { ...location, rankBonus: baseYield - 50 };
+            })
+            .sort(
+              (left, right) =>
+                right.rankBonus - left.rankBonus
+                || (left.name ?? left.id).localeCompare(right.name ?? right.id),
+            );
+          const normalizedSettings = {
+            ...loadedSettings,
+            items: normalizedItems,
+            locationId: loadedLocations.some(
+              (location) => location.id === loadedSettings.locationId,
+            )
+              ? loadedSettings.locationId
+              : (loadedLocations[0]?.id ?? loadedSettings.locationId),
+            marketId: marketHubs.some((market) => market.id === loadedSettings.marketId)
+              ? loadedSettings.marketId
+              : "jita",
+          };
+          const characters = loadedOptions.characters.map((character) => ({
+            ...character,
+            skills: Object.fromEntries(
+              (
+                stateStatus?.characters?.find(
+                  (status) => status.characterId === character.characterId,
+                )?.skills?.body ?? []
+              ).map((skill) => [String(skill.skillId), skill.activeSkillLevel]),
+            ),
+          }));
+          setOptions({ ...loadedOptions, characters, locations: loadedLocations });
+          setSettings(normalizedSettings);
+          setItems(normalizedSettings.items);
+          void saveCompressSettings(normalizedSettings);
+        },
+      )
       .catch(() => {
         optionsLoadKeyRef.current = "";
         setError("Could not load compression options.");
@@ -341,6 +398,20 @@ function CompressContent() {
   }
 
   const locationOptions = options.locations;
+  const groupedLocationOptions = [
+    { kind: "structure" as const, label: "Structures" },
+    { kind: "station" as const, label: "Stations" },
+  ].map((group) => ({
+    ...group,
+    locations: locationOptions
+      .filter((location) => location.locationType === group.kind)
+      .sort(
+        (left, right) =>
+          (right.baseYield ?? 50) - (left.baseYield ?? 50)
+          || (left.name ?? left.id).localeCompare(right.name ?? right.id),
+      ),
+  }));
+  const sortedLocationOptions = groupedLocationOptions.flatMap((group) => group.locations);
   const selectedLocation = locationOptions.find((location) => location.id === settings.locationId);
   const selectedCharacter = options.characters.find(
     (character) => character.id === settings.characterId,
@@ -516,7 +587,7 @@ function CompressContent() {
                 <Select
                   value={settings.locationId}
                   onValueChange={(value) => value && updateSettings({ locationId: value })}
-                  items={locationOptions.map((location) => ({
+                  items={sortedLocationOptions.map((location) => ({
                     value: location.id,
                     label: `${location.name ?? `Location ${location.id}`}${location.canReprocess === false ? " [No Reprocessing]" : ""} · ${Math.round(location.baseYield ?? 50)}%`,
                     disabled: location.canReprocess === false,
@@ -533,20 +604,23 @@ function CompressContent() {
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent className={styles.locationSelectContent}>
-                    <SelectGroup>
-                      {locationOptions.map((location) => (
-                        <SelectItem
-                          value={location.id}
-                          key={location.id}
-                          className={styles.locationSelectItem}
-                          disabled={location.canReprocess === false}
-                        >
-                          {location.name ?? `Location ${location.id}`}
-                          {location.canReprocess === false ? " [No Reprocessing]" : ""} ·{" "}
-                          {Math.round(location.baseYield ?? 50)}%
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
+                    {groupedLocationOptions.map((group) => (
+                      <SelectGroup key={group.kind}>
+                        <SelectLabel>{group.label}</SelectLabel>
+                        {group.locations.map((location) => (
+                          <SelectItem
+                            value={location.id}
+                            key={location.id}
+                            className={styles.locationSelectItem}
+                            disabled={location.canReprocess === false}
+                          >
+                            {location.name ?? `Location ${location.id}`}
+                            {location.canReprocess === false ? " [No Reprocessing]" : ""} ·{" "}
+                            {Math.round(location.baseYield ?? 50)}%
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
                   </SelectContent>
                 </Select>
               </Label>
@@ -756,7 +830,7 @@ function CompressContent() {
         </section>
       </form>
 
-      {result && <Results result={result} />}
+      {result && <Results result={result} selectedLocation={selectedLocation} />}
       {isPasteOpen && (
         <PasteListDialog
           language={language}
@@ -785,7 +859,13 @@ Pyerite 60000`}
   );
 }
 
-function Results({ result }: { result: CompressResult }) {
+function Results({
+  result,
+  selectedLocation,
+}: {
+  result: CompressResult;
+  selectedLocation: CompressOption | undefined;
+}) {
   const router = useRouter();
   const [isAddingToPlan, setIsAddingToPlan] = useState(false);
   const tabs = [
@@ -848,24 +928,51 @@ function Results({ result }: { result: CompressResult }) {
         (item): item is ResultItem & { typeId: number } =>
           item.typeId !== undefined && !item.ignored,
       );
-      const existing = await loadBuildList();
-      const next = [...existing];
-      for (const item of additions) {
-        const match = next.find((entry) => entry.typeId === item.typeId && entry.fromCompression);
-        if (match) match.quantity += item.quantity;
-        else {
-          next.push({
-            name: item.name,
-            categoryName: "Unknown",
-            typeId: item.typeId,
-            quantity: item.quantity,
-            me: 0,
-            te: 0,
-            fromCompression: true,
-          });
-        }
+      const locationId = Number(selectedLocation?.id);
+      if (!Number.isSafeInteger(locationId) || locationId <= 0 || !selectedLocation) {
+        throw new Error("Select a reprocessing location before adding the results to a plan.");
       }
-      await saveBuildList(next);
+      const existingBuckets = (await loadPlannerBuckets()) ?? [];
+      const autoBucket = existingBuckets.find(
+        (bucket) =>
+          bucket.kind === "special"
+          && bucket.name === "Compressed inputs (auto)"
+          && bucket.locations.stock === locationId
+          && bucket.locations.reprocessing === locationId,
+      );
+      const compressedItems: ClientBuildItem[] = additions.map((item) => ({
+        name: item.name,
+        categoryName: "Unknown",
+        typeId: item.typeId,
+        quantity: item.quantity,
+        me: 0,
+        te: 0,
+        fromCompression: true,
+      }));
+      const nextBucket: ClientPlanBucket = autoBucket
+        ? {
+            ...autoBucket,
+            items: mergeCompressedPlanItems(autoBucket.items, compressedItems),
+          }
+        : {
+            id: `bucket-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name: "Compressed inputs (auto)",
+            kind: "special",
+            stockLocationName: selectedLocation.name,
+            locations: {
+              stock: locationId,
+              manufacturing: locationId,
+              reactions: locationId,
+              reprocessing: locationId,
+              copying: locationId,
+              invention: locationId,
+            },
+            items: compressedItems,
+          };
+      const nextBuckets = autoBucket
+        ? existingBuckets.map((bucket) => (bucket.id === autoBucket.id ? nextBucket : bucket))
+        : [...existingBuckets, nextBucket];
+      await savePlannerBuckets(nextBuckets);
       router.push("/planner");
     }
     catch {
@@ -1025,6 +1132,19 @@ function Results({ result }: { result: CompressResult }) {
       </Tabs>
     </section>
   );
+}
+
+function mergeCompressedPlanItems(
+  existingItems: ClientBuildItem[],
+  additions: ClientBuildItem[],
+): ClientBuildItem[] {
+  const merged = existingItems.map((item) => ({ ...item }));
+  for (const addition of additions) {
+    const existing = merged.find((item) => item.typeId === addition.typeId && item.fromCompression);
+    if (existing) existing.quantity += addition.quantity;
+    else merged.push(addition);
+  }
+  return merged;
 }
 
 function EfficiencyTable({ efficiency }: { efficiency?: EfficiencyResult }) {

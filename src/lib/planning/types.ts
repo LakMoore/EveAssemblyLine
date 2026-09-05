@@ -20,9 +20,12 @@ export interface PlanBucketLocations {
   invention: number;
 }
 
+export type PlanBucketKind = "standard" | "special";
+
 export interface PlanBucket {
   id: string;
   name: string;
+  kind?: PlanBucketKind;
   stockLocationName?: string;
   locations: PlanBucketLocations;
   groupAssignments?: Partial<Record<ProductionGroupKey, number>>;

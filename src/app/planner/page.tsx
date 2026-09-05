@@ -307,8 +307,8 @@ function buildReactionSchedule(
       const runsPerInstall =
         installCount > 0
           ? mode === "max-job-length"
-            ? Math.min(timeLimitedRuns, Math.ceil(runs / installCount))
-            : Math.ceil(runs / installCount)
+            ? Math.min(timeLimitedRuns, Math.floor(runs / installCount))
+            : Math.floor(runs / installCount)
           : 0;
       return [
         reactionJobKey(job),
@@ -1370,7 +1370,7 @@ function Planner() {
               type="button"
               variant="outline"
               nativeButton={false}
-              render={<Link href="/assets" />}
+              render={<Link href="/corp-hangars" />}
             >
               <Settings2 data-icon="inline-start" aria-hidden="true" />
               Edit sources
@@ -2100,7 +2100,10 @@ function PlannerBucketSummary({
     <article className="grid min-w-0 gap-3 border p-4">
       <div className="flex min-w-0 flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-base font-medium">{bucket.name}</h3>
+          <div className="flex min-w-0 items-center gap-2">
+            <h3 className="truncate text-base font-medium">{bucket.name}</h3>
+            {bucket.kind === "special" && <Badge variant="outline">Special</Badge>}
+          </div>
           <p className="text-sm text-muted-foreground">
             {bucket.items.length.toLocaleString()} item types,{" "}
             {bucket.items.reduce((total, item) => total + item.quantity, 0).toLocaleString()} units
@@ -3200,7 +3203,11 @@ function PlanList({
                 const suggestedCapacity = suggestedInstallCount * (targetRuns ?? 0);
                 const additionalInstallCount =
                   totalNeeded !== null && targetRuns !== null && targetRuns > 0
-                    ? Math.max(0, Math.ceil((totalNeeded - suggestedCapacity) / targetRuns))
+                    ? Math.max(
+                        0,
+                        Math.ceil(Math.max(0, totalNeeded - suggestedCapacity) / targetRuns)
+                          - Math.max(0, reactionFormulaCount - suggestedInstallCount),
+                      )
                     : 0;
                 const materialEntry =
                   (activeTab === "Buy" && !isBpcPurchase && "quantity" in entry)

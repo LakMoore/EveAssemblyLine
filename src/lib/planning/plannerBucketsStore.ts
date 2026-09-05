@@ -53,6 +53,7 @@ function isClientPlanBucket(value: unknown): value is ClientPlanBucket {
     && bucket.id.length > 0
     && typeof bucket.name === "string"
     && bucket.name.trim().length > 0
+    && (bucket.kind === undefined || bucket.kind === "standard" || bucket.kind === "special")
     && isBucketLocations(bucket.locations)
     && (bucket.groupAssignments === undefined || isGroupAssignments(bucket.groupAssignments))
     && Array.isArray(bucket.items)

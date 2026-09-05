@@ -16,6 +16,11 @@ const sharedTritaniumProductTypeId = 586;
 const sharedTritaniumBlueprintTypeId = 690;
 const reactionProductTypeId = 16672;
 const reactionFormulaTypeId = 46207;
+const oxyOrganicSolventsTypeId = 57454;
+const oxyOrganicSolventsFormulaTypeId = 57491;
+const hydrocarbonsTypeId = 16633;
+const atmosphericGasesTypeId = 16634;
+const oxygenFuelBlockTypeId = 4312;
 const fuelReactionProductTypeId = 16659;
 const fuelReactionFormulaTypeId = 46167;
 const reprocessingLocationId = 10;
@@ -1948,6 +1953,71 @@ test("reports reaction formula and material inputs", async () => {
   assert.equal(job.inputs.status, "ready");
 });
 
+test("accumulates installable reaction runs across repeated expansions", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: oxyOrganicSolventsFormulaTypeId,
+          name: "Oxy-Organic Solvents Reaction Formula",
+          quantity: 4,
+          category: "reactionformula",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: hydrocarbonsTypeId,
+          name: "Hydrocarbons",
+          quantity: 5_000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: atmosphericGasesTypeId,
+          name: "Atmospheric Gases",
+          quantity: 5_000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: oxygenFuelBlockTypeId,
+          name: "Oxygen Fuel Block",
+          quantity: 10,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: oxyOrganicSolventsTypeId,
+            name: "Oxy-Organic Solvents",
+            quantity: 20,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+          {
+            typeId: oxyOrganicSolventsTypeId,
+            name: "Oxy-Organic Solvents",
+            quantity: 20,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const job = result.lists.reactionJobs.find(
+    (entry) => entry.typeId === oxyOrganicSolventsFormulaTypeId,
+  );
+
+  assert(job);
+  assert.equal(job.runs, 4);
+  assert.equal(job.runsAvailable, 2);
+});
+
 test("merges reaction jobs by reaction location and formula type", async () => {
   const result = await calculatePlan(
     request(
@@ -2214,6 +2284,89 @@ test("credits committed compressed purchases before considering owned stock", as
   assert.equal(
     result.lists.haulingTasks.some((task) => task.itemTypeId === compressedVeldsparTypeId),
     false,
+  );
+});
+
+test("shares future materials from compressed purchases across buckets", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [],
+      {
+        items: [],
+        reprocessingEfficiencies: { [compressedVeldsparTypeId]: 100 },
+        buckets: [
+          {
+            id: "compressed-inputs",
+            name: "Compressed inputs",
+            kind: "special",
+            locations: {
+              stock: reprocessingLocationId,
+              manufacturing: reprocessingLocationId,
+              reactions: reprocessingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: reprocessingLocationId,
+              invention: reprocessingLocationId,
+            },
+            items: [
+              {
+                typeId: compressedVeldsparTypeId,
+                name: "Compressed Veldspar",
+                quantity: 100,
+                me: 0,
+                te: 0,
+                fromCompression: true,
+              },
+            ],
+          },
+          {
+            id: "manufacturing",
+            name: "Manufacturing",
+            locations: {
+              stock: manufacturingLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: tritaniumTypeId,
+                name: "Tritanium",
+                quantity: 400,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const tritanium = result.lists.materialsToBuy.find(
+    (material) => material.typeId === tritaniumTypeId && material.bucketId === "manufacturing",
+  );
+  const compressed = result.lists.materialsToBuy.find(
+    (material) =>
+      material.typeId === compressedVeldsparTypeId && material.bucketId === "compressed-inputs",
+  );
+
+  assert(tritanium);
+  assert(compressed);
+  assert.equal(tritanium.stockQuantity, 400);
+  assert.equal(tritanium.buyQuantity, 0);
+  assert.equal(compressed.buyQuantity, 100);
+  assert.equal(
+    result.lists.haulingTasks.some(
+      (task) =>
+        task.bucketId === "manufacturing"
+        && task.itemTypeId === tritaniumTypeId
+        && task.fromLocationId === reprocessingLocationId
+        && task.toLocationId === manufacturingLocationId,
+    ),
+    true,
   );
 });
 

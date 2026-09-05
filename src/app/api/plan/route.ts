@@ -58,6 +58,7 @@ const groupAssignmentsSchema = z
 const planBucketSchema = z.object({
   id: z.string().trim().min(1).max(100),
   name: z.string().trim().min(1).max(100),
+  kind: z.enum(["standard", "special"]).optional(),
   locations: z.object({
     stock: z.number().int().positive(),
     manufacturing: z.number().int().positive(),

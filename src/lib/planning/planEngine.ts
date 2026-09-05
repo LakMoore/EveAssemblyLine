@@ -292,6 +292,61 @@ async function allocatePlanReprocessing(
   };
 }
 
+/** Converts committed compressed purchases in special buckets into future available stock. */
+async function getFutureCompressedMaterialStock(
+  request: PlannerRequest,
+  buckets: NonNullable<PlannerRequest["buckets"]>,
+): Promise<PlanStockItem[]> {
+  const [types, typeMaterials] = await Promise.all([getTypes(), getTypeMaterials()]);
+  const futureStock: PlanStockItem[] = [];
+  for (const bucket of buckets) {
+    if (bucket.kind !== "special") continue;
+    const purchaseQuantities = new Map<number, number>();
+    for (const item of bucket.items) {
+      if (!item.fromCompression) continue;
+      purchaseQuantities.set(
+        item.typeId,
+        (purchaseQuantities.get(item.typeId) ?? 0) + item.quantity,
+      );
+    }
+    const candidates = [...purchaseQuantities].flatMap(([typeId, quantity]) => {
+      const type = types.get(typeId);
+      const materialRecord = typeMaterials.get(typeId);
+      const portionSize = type?.portionSize ?? 1;
+      if (!type || !materialRecord?.materials?.length || portionSize <= 0) return [];
+      return [
+        {
+          typeId,
+          availableQuantity: quantity,
+          portionSize,
+          efficiency: request.reprocessingEfficiencies?.[String(typeId)] ?? 50,
+          yields: new Map(
+            materialRecord.materials.map((material) => [
+              material.materialTypeID,
+              material.quantity,
+            ]),
+          ),
+          source: "purchase" as const,
+          volumePerUnit: type.packagedVolume ?? type.volume ?? 0,
+        },
+      ];
+    });
+    const producedMaterials = reprocessCommittedPurchases(candidates).producedMaterials;
+    for (const [typeId, quantity] of producedMaterials) {
+      if (quantity <= 0) continue;
+      futureStock.push({
+        typeId,
+        name: types.get(typeId)?.name.en ?? `Type ${typeId}`,
+        quantity,
+        category: "item",
+        rootLocationId: bucket.locations.reprocessing,
+        locationId: bucket.locations.reprocessing,
+      });
+    }
+  }
+  return futureStock;
+}
+
 /** Calculates a plan after selecting only reprocessing portions that satisfy real shortages. */
 export async function calculatePlan(request: PlannerRequest): Promise<PlanResult> {
   const populatedBuckets = request.buckets?.filter((bucket) => bucket.items.length > 0);
@@ -1288,10 +1343,7 @@ async function calculatePlanPass(
             typeId: blueprint._key,
             name: typeName(blueprint._key, `${fallbackName} Reaction Formula`),
             runs: (existing?.runs ?? 0) + runsNeeded,
-            runsAvailable: Math.min(
-              existing?.runsAvailable ?? Number.MAX_SAFE_INTEGER,
-              installableRuns,
-            ),
+            runsAvailable: (existing?.runsAvailable ?? 0) + installableRuns,
             totalTime:
               (existing?.totalTime ?? 0)
               + blueprint.activities.reaction!.time
@@ -1591,6 +1643,7 @@ function isBlueprintOrReactionFormula(item: PlanStockItem) {
 async function allocateBucketStock(
   request: PlannerRequest,
   buckets: NonNullable<PlannerRequest["buckets"]>,
+  futureStockIndexes = new Set<number>(),
 ): Promise<PlanStockItem[][]> {
   const bucketDemandResults = await Promise.all(
     buckets.map(async (bucket) => {
@@ -1668,6 +1721,8 @@ async function allocateBucketStock(
       : 0,
   );
   const allocations = buckets.map(() => new Map<number, number>());
+  const canUseFutureStock = (stockIndex: number, bucketIndex: number) =>
+    buckets[bucketIndex].kind !== "special" || !futureStockIndexes.has(stockIndex);
   const allocate = (stockIndex: number, bucketIndex: number, quantity: number) => {
     if (quantity <= 0) return;
     const current = allocations[bucketIndex].get(stockIndex) ?? 0;
@@ -1710,7 +1765,11 @@ async function allocateBucketStock(
             item.category === "reactionformula"
               ? stockLocationId === bucket.locations.reactions
               : stockLocationId === bucket.locations.stock;
-          if (remainingStock[index] <= 0 || !matchingLocation) {
+          if (
+            remainingStock[index] <= 0
+            || !matchingLocation
+            || !canUseFutureStock(index, bucketIndex)
+          ) {
             continue;
           }
           allocate(index, bucketIndex, Math.min(remainingStock[index], remaining));
@@ -1736,6 +1795,7 @@ async function allocateBucketStock(
           );
         for (const { bucketIndex } of localBuckets) {
           if (remainingStock[index] <= 0) break;
+          if (!canUseFutureStock(index, bucketIndex)) continue;
           allocate(
             index,
             bucketIndex,
@@ -1752,6 +1812,7 @@ async function allocateBucketStock(
         for (const { index } of stockIndexes) {
           if (remaining <= 0) break;
           const item = request.stock[index];
+          if (!canUseFutureStock(index, bucketIndex)) continue;
           if (
             item.category === "reactionformula"
             && getStockRootLocationId(item) !== buckets[bucketIndex].locations.reactions
@@ -1964,7 +2025,15 @@ async function allocateBucketStock(
 /** Calculates buckets using a globally reserved, location-aware asset pool. */
 async function calculateBucketedPlan(request: PlannerRequest): Promise<PlanResult> {
   const buckets = request.buckets ?? [];
-  const bucketStock = await allocateBucketStock(request, buckets);
+  const futureCompressedMaterialStock = await getFutureCompressedMaterialStock(request, buckets);
+  const planningRequest =
+    futureCompressedMaterialStock.length > 0
+      ? { ...request, stock: [...request.stock, ...futureCompressedMaterialStock] }
+      : request;
+  const futureStockIndexes = new Set(
+    futureCompressedMaterialStock.map((_, index) => request.stock.length + index),
+  );
+  const bucketStock = await allocateBucketStock(planningRequest, buckets, futureStockIndexes);
   const bucketResults: PlanResult[] = [];
   for (const [bucketIndex, bucket] of buckets.entries()) {
     const locations = {
@@ -1977,7 +2046,7 @@ async function calculateBucketedPlan(request: PlannerRequest): Promise<PlanResul
     );
     const result = await calculatePlanWithoutBuckets(
       {
-        ...request,
+        ...planningRequest,
         buckets: undefined,
         items: bucket.items,
         stock: bucketStock[bucketIndex],
