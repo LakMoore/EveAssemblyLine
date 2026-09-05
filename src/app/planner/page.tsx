@@ -806,6 +806,12 @@ function Planner() {
       );
       const manufacturingFacility = freshFacilityById.get(planningLocations.manufacturing);
       const reactionFacility = freshFacilityById.get(planningLocations.reactions);
+      const selectedManufacturingFacility = locationOptions.find(
+        (location) => location.locationId === planningLocations.manufacturing,
+      );
+      const selectedReactionFacility = locationOptions.find(
+        (location) => location.locationId === planningLocations.reactions,
+      );
       const reprocessingEfficiencies = await loadPlannerReprocessingEfficiencies(
         language,
         planningLocations.reprocessing,
@@ -859,11 +865,11 @@ function Planner() {
             facilityTimeMultipliers: {
               manufacturing:
                 manufacturingFacility?.activities.manufacturing.rawJobDurationMultiplier
-                ?? selectedManufacturingLocation?.manufacturingTimeMultiplier
+                ?? selectedManufacturingFacility?.manufacturingTimeMultiplier
                 ?? 1,
               reactions:
                 reactionFacility?.activities.reactions.rawJobDurationMultiplier
-                ?? selectedReactionLocation?.reactionTimeMultiplier
+                ?? selectedReactionFacility?.reactionTimeMultiplier
                 ?? 1,
             },
             skillTimeMultipliers: {
@@ -1154,21 +1160,7 @@ function Planner() {
     setIsDeleteAllDialogOpen(false);
   }
 
-  const selectedManufacturingLocation = locationOptions.find(
-    (location) => location.locationId === locations.manufacturing,
-  );
-  const selectedReactionLocation = locationOptions.find(
-    (location) => location.locationId === locations.reactions,
-  );
-  const activityLocationOptions: ActivityLocationOption[] = locationOptions.map((location) => ({
-    locationId: location.locationId,
-    name: location.name,
-    kind: location.locationType,
-    baseYield: location.baseYield,
-    baseManufacturingMe: location.baseManufacturingMe,
-    baseReactionMe: location.baseReactionMe,
-  }));
-  const stockLocationOptions: StockLocationOption[] = [
+  const sharedLocationOptions: ActivityLocationOption[] = [
     ...locationOptions.map((location) => ({
       locationId: location.locationId,
       name: location.name,
@@ -1196,6 +1188,14 @@ function Planner() {
     (location, index, allLocations) =>
       allLocations.findIndex((candidate) => candidate.locationId === location.locationId) === index,
   );
+  const selectedManufacturingLocation = sharedLocationOptions.find(
+    (location) => location.locationId === locations.manufacturing,
+  );
+  const selectedReactionLocation = sharedLocationOptions.find(
+    (location) => location.locationId === locations.reactions,
+  );
+  const activityLocationOptions = sharedLocationOptions;
+  const stockLocationOptions: StockLocationOption[] = sharedLocationOptions;
   const plannerLocationNames = new Map<number, string>([
     ...locationOptions.map((location) => [location.locationId, location.name] as const),
     ...knownStructures.flatMap((structure) =>
@@ -1606,7 +1606,7 @@ function Planner() {
               ))
             )}
             <div className={styles.planOptions}>
-              {locationOptions.length > 0 ? (
+              {sharedLocationOptions.length > 0 ? (
                 <>
                   <label>
                     <div className={`${styles.planOptionHeader} text-xs`}>
@@ -1623,7 +1623,7 @@ function Planner() {
                       onValueChange={(value) =>
                         value && updateLocations({ manufacturing: Number(value) })
                       }
-                      items={locationOptions.map((location) => ({
+                      items={sharedLocationOptions.map((location) => ({
                         value: String(location.locationId),
                         label: `${location.name} (${location.baseManufacturingMe.toFixed(1)}%)`,
                       }))}
@@ -1645,7 +1645,7 @@ function Planner() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
-                          {locationOptions
+                          {sharedLocationOptions
                             .slice()
                             .sort(
                               (left, right) =>
@@ -1655,7 +1655,7 @@ function Planner() {
                             .map((location) => (
                               <SelectItem
                                 value={String(location.locationId)}
-                                key={`manufacturing-${location.id}`}
+                                key={`manufacturing-${location.locationId}`}
                                 className={styles.locationSelectItem}
                               >
                                 <span className={styles.locationOptionName}>{location.name}</span>
@@ -1683,7 +1683,7 @@ function Planner() {
                       onValueChange={(value) =>
                         value && updateLocations({ reactions: Number(value) })
                       }
-                      items={locationOptions.map((location) => ({
+                      items={sharedLocationOptions.map((location) => ({
                         value: String(location.locationId),
                         label: `${location.name} (${location.baseReactionMe.toFixed(1)}%)`,
                       }))}
@@ -1705,7 +1705,7 @@ function Planner() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
-                          {locationOptions
+                          {sharedLocationOptions
                             .slice()
                             .sort(
                               (left, right) =>
@@ -1715,7 +1715,7 @@ function Planner() {
                             .map((location) => (
                               <SelectItem
                                 value={String(location.locationId)}
-                                key={`reaction-${location.id}`}
+                                key={`reaction-${location.locationId}`}
                                 className={styles.locationSelectItem}
                               >
                                 <span className={styles.locationOptionName}>{location.name}</span>
