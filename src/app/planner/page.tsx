@@ -37,6 +37,7 @@ import {
   loadClientJobs,
   loadClientStateStatus,
   loadClientAssets,
+  filterClientAssetsForPlanning,
   type ClientCharacterStatus,
   type ClientCorporationSource,
   type ClientJobsResponse,
@@ -550,6 +551,7 @@ function Planner() {
   const [isDeleteAllDialogOpen, setIsDeleteAllDialogOpen] = useState(false);
   const [isClearExcludedLocationsDialogOpen, setIsClearExcludedLocationsDialogOpen] =
     useState(false);
+  const [bucketPendingRemoval, setBucketPendingRemoval] = useState<ClientPlanBucket | null>(null);
   const [characterStatuses, setCharacterStatuses] = useState<ClientCharacterStatus[]>([]);
   const [jobs, setJobs] = useState<ClientJobsResponse | null>(null);
   const [characterNamesById, setCharacterNamesById] = useState<Map<number, string>>(new Map());
@@ -763,7 +765,7 @@ function Planner() {
       if (includeStock && (await loadClientSession()).authenticated) {
         const assetsData = await loadClientAssets(language, true);
         setCorporationSources(assetsData.corporationSources ?? []);
-        workingAssets = assetsData.assets ?? [];
+        workingAssets = filterClientAssetsForPlanning(assetsData).assets ?? [];
       }
       const compressSettings = await loadCompressSettings();
       const compressLocationId = Number(compressSettings.locationId);
@@ -998,6 +1000,20 @@ function Planner() {
     }
     setBuckets((current) => current.filter((bucket) => bucket.id !== bucketId));
     setPlan(null);
+  }
+
+  function requestBucketRemoval(bucket: ClientPlanBucket) {
+    if (buckets.length <= 1) {
+      removeBucket(bucket.id);
+      return;
+    }
+    setBucketPendingRemoval(bucket);
+  }
+
+  function confirmBucketRemoval() {
+    if (!bucketPendingRemoval) return;
+    removeBucket(bucketPendingRemoval.id);
+    setBucketPendingRemoval(null);
   }
 
   function exportPlan() {
@@ -1313,7 +1329,7 @@ function Planner() {
                   locationNamesById={plannerLocationNames}
                   onEditDetails={() => openBucketDetails(bucket)}
                   onEditItems={() => openBucketItems(bucket)}
-                  onRemove={() => removeBucket(bucket.id)}
+                  onRemove={() => requestBucketRemoval(bucket)}
                 />
               ))
             )}
@@ -1884,6 +1900,28 @@ function Planner() {
               }}
             >
               Clear all
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
+        open={bucketPendingRemoval !== null}
+        onOpenChange={(open) => {
+          if (!open) setBucketPendingRemoval(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove stockpile?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove {bucketPendingRemoval?.name ?? "this stockpile"} and its item list.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmBucketRemoval}>
+              Remove stockpile
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

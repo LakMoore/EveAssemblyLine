@@ -465,7 +465,6 @@ export async function GET(request: NextRequest) {
       true,
       session.sessionId,
       corporationPolicies,
-      false,
     );
     if (parsedDiagnostic.data.rawAsset !== undefined) {
       const itemId = parsedDiagnostic.data.rawAsset;
@@ -495,7 +494,6 @@ export async function GET(request: NextRequest) {
     },
     session.sessionId,
     corporationPolicies,
-    false,
   );
   markPhase("session");
   const [
@@ -511,17 +509,17 @@ export async function GET(request: NextRequest) {
     systems,
     rootLocationsByItemId,
   ] = await Promise.all([
-    getResolvedAssets(characterIds, true, session.sessionId, corporationPolicies, false),
-    getAllAssetsRaw(characterIds, true, session.sessionId, corporationPolicies, false),
-    getRunningIndustryJobs(characterIds, true, session.sessionId, corporationPolicies, false),
-    getBlueprintInstances(characterIds, true, session.sessionId, corporationPolicies, false),
+    getResolvedAssets(characterIds, true, session.sessionId, corporationPolicies),
+    getAllAssetsRaw(characterIds, true, session.sessionId, corporationPolicies),
+    getRunningIndustryJobs(characterIds, true, session.sessionId, corporationPolicies),
+    getBlueprintInstances(characterIds, true, session.sessionId, corporationPolicies),
     getShipTypeIds(),
     getStructureTypeIds(),
     getGroups(),
     getMarketGroups(),
     getStations(),
     getSystems(),
-    getRootLocationsByItemId(characterIds, true, session.sessionId, corporationPolicies, false),
+    getRootLocationsByItemId(characterIds, true, session.sessionId, corporationPolicies),
   ]);
   markPhase("data");
   const types = await getTypesByIds([
@@ -622,7 +620,6 @@ export async function GET(request: NextRequest) {
     true,
     session.sessionId,
     corporationPolicies,
-    false,
   );
   markPhase("indexes");
   const blueprintInstancesByOwnerAndItemId = new Map(
@@ -760,10 +757,19 @@ export async function GET(request: NextRequest) {
           rootLocationId: job.facilityId,
           ...(job.ownerType === "corporation"
             ? {
-                corporationSource: getCorporationLocationSource(
-                  job.outputLocationId,
-                  rawAssetsByCorporationId.get(job.ownerId) ?? new Map<number, AssetRecord>(),
-                ),
+                corporationSource:
+                  getCorporationAssetSource(
+                    {
+                      itemId: job.outputLocationId,
+                      locationId: job.outputLocationId,
+                      locationFlag: "OfficeFolder",
+                    },
+                    rawAssetsByCorporationId.get(job.ownerId) ?? new Map<number, AssetRecord>(),
+                  )
+                  ?? getCorporationLocationSource(
+                    job.facilityId,
+                    rawAssetsByCorporationId.get(job.ownerId) ?? new Map<number, AssetRecord>(),
+                  ),
               }
             : {}),
         },

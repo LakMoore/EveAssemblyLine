@@ -87,7 +87,7 @@ const facilityProfilesSchema = z
       buildTypeGroups: z.record(z.string(), facilityGroupBonusSchema),
     }),
   )
-  .max(100);
+  .max(500);
 const planBucketsSchema = z
   .array(planBucketSchema)
   .min(1)

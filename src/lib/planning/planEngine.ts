@@ -60,7 +60,7 @@ function isUsableIndustryProductionOutput(item: PlannerRequest["stock"][number])
 
 function isAvailableIndustryProductionOutput(item: PlannerRequest["stock"][number]) {
   if (!isIndustryProductionOutput(item)) return true;
-  return ["active", "delivered", "paused", "ready"].includes(item.industryJobStatus ?? "");
+  return item.industryJobStatus !== "cancelled" && item.industryJobStatus !== "reverted";
 }
 
 /** Returns the stock eligible for the global view before bucket allocation. */
@@ -367,7 +367,7 @@ async function calculatePlanPass(
     );
   const initialMarketOrderStock = new Map(marketOrderStock);
   const standardStock = request.stock
-    .filter(isAvailableIndustryProductionOutput)
+    .filter(isUsableIndustryProductionOutput)
     .filter((item) => item.category !== "blueprint" && item.category !== "reactionformula")
     .filter((item) => item.source !== "marketOrder")
     .reduce(
@@ -375,7 +375,7 @@ async function calculatePlanPass(
       new Map<number, number>(),
     );
   const stockLots: StockLot[] = request.stock
-    .filter(isAvailableIndustryProductionOutput)
+    .filter(isUsableIndustryProductionOutput)
     .filter((item) => item.category !== "blueprint" && item.category !== "reactionformula")
     .filter((item) => item.source !== "marketOrder")
     .filter((item): item is typeof item & { rootLocationId: number } =>
@@ -602,6 +602,27 @@ async function calculatePlanPass(
     }
     return consumed;
   }
+  const demandOnlyOutputByType = request.stock
+    .filter(
+      (item) =>
+        isIndustryProductionOutput(item)
+        && isAvailableIndustryProductionOutput(item)
+        && !isUsableIndustryProductionOutput(item),
+    )
+    .reduce(
+      (map, item) => map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity),
+      new Map<number, number>(),
+    );
+  function consumeDemandOnlyOutput(typeId: number, quantity: number) {
+    const available = demandOnlyOutputByType.get(typeId) ?? 0;
+    const consumed = Math.min(quantity, available);
+    if (consumed > 0) {
+      const remaining = available - consumed;
+      if (remaining > 0) demandOnlyOutputByType.set(typeId, remaining);
+      else demandOnlyOutputByType.delete(typeId);
+    }
+    return consumed;
+  }
   if (reprocessing) {
     for (const [typeId, quantity] of reprocessing.consumedOwned) {
       const marketAvailable = marketOrderStock.get(typeId) ?? 0;
@@ -669,7 +690,14 @@ async function calculatePlanPass(
       counts: Object.fromEntries(counts) as PlanSourceCounts,
     };
   }
-  const totalStock = new Map(standardStock);
+  const totalStock = request.stock
+    .filter(isAvailableIndustryProductionOutput)
+    .filter((item) => item.category !== "blueprint" && item.category !== "reactionformula")
+    .filter((item) => item.source !== "marketOrder")
+    .reduce(
+      (map, item) => map.set(item.typeId, (map.get(item.typeId) ?? 0) + item.quantity),
+      new Map<number, number>(),
+    );
   const initialBuildTypeIds = new Set(request.items.map((item) => item.typeId));
   for (const [typeId, quantity] of marketOrderStock) {
     if (!initialBuildTypeIds.has(typeId)) continue;
@@ -1012,10 +1040,11 @@ async function calculatePlanPass(
       async () => {
         if (quantity <= 0) return;
 
+        quantity -= consumeDemandOnlyOutput(typeId, quantity);
         const finalProductStockConsumed =
           finalProductLocationId === undefined
             ? 0
-            : consumeAvailableStock(typeId, quantity, finalProductLocationId);
+            : consumeAvailableStock(typeId, quantity, finalProductLocationId, true);
         const standardConsumed =
           finalProductStockConsumed
           + consumeAvailableStock(
@@ -1634,7 +1663,7 @@ async function allocateBucketStock(
     !isBlueprintOrReactionFormula(item)
     && item.category === "item"
     && item.source !== "marketOrder"
-    && isAvailableIndustryProductionOutput(item)
+    && isUsableIndustryProductionOutput(item)
       ? item.quantity
       : 0,
   );
@@ -1756,7 +1785,7 @@ async function allocateBucketStock(
       !isBlueprintOrReactionFormula(item)
       && item.category === "item"
       && item.source !== "marketOrder"
-      && isAvailableIndustryProductionOutput(item)
+      && isUsableIndustryProductionOutput(item)
         ? item.quantity
         : 0,
     );
@@ -1778,6 +1807,36 @@ async function allocateBucketStock(
       new Set(standingDemandByBucket.flatMap((demand) => [...demand.keys()])),
       standingDemandByBucket,
     );
+    const remainingDemandOnlyOutput = request.stock.map((item) =>
+      !isBlueprintOrReactionFormula(item)
+      && item.category === "item"
+      && item.source !== "marketOrder"
+      && isAvailableIndustryProductionOutput(item)
+      && !isUsableIndustryProductionOutput(item)
+        ? item.quantity
+        : 0,
+    );
+    for (const [stockIndex, item] of request.stock.entries()) {
+      if (remainingDemandOnlyOutput[stockIndex] <= 0) continue;
+      const bucketIndexes = buckets
+        .map((bucket, bucketIndex) => ({ bucket, bucketIndex }))
+        .filter(({ bucketIndex }) => (demandByBucket[bucketIndex].get(item.typeId) ?? 0) > 0)
+        .sort(
+          (left, right) =>
+            (demandByBucket[right.bucketIndex].get(item.typeId) ?? 0)
+              - (demandByBucket[left.bucketIndex].get(item.typeId) ?? 0)
+            || left.bucketIndex - right.bucketIndex,
+        );
+      for (const { bucketIndex } of bucketIndexes) {
+        const demand = demandByBucket[bucketIndex].get(item.typeId) ?? 0;
+        if (demand <= 0 || remainingDemandOnlyOutput[stockIndex] <= 0) continue;
+        const quantity = Math.min(remainingDemandOnlyOutput[stockIndex], demand);
+        const current = allocations[bucketIndex].get(stockIndex) ?? 0;
+        allocations[bucketIndex].set(stockIndex, current + quantity);
+        remainingDemandOnlyOutput[stockIndex] -= quantity;
+        demandByBucket[bucketIndex].set(item.typeId, demand - quantity);
+      }
+    }
     return allocatedBucketStock();
   };
 

@@ -102,7 +102,8 @@ test("uses output from an active industry job as committed availability", async 
   );
 
   assert(tritanium);
-  assert.equal(tritanium.stockQuantity, 100);
+  assert.equal(tritanium.stockQuantity, 0);
+  assert.equal(tritanium.availableStockQuantity, 100);
   assert.equal(tritanium.buyQuantity, 0);
   assert.equal(tritanium.availableSourceCounts?.industry, 100);
   assert.deepEqual(result.lists.haulingTasks, []);
@@ -130,7 +131,7 @@ test("counts physical stock and active output toward plan availability", async (
 
   assert(tritanium);
   assert.equal(tritanium.availableStockQuantity, 150);
-  assert.equal(tritanium.stockQuantity, 150);
+  assert.equal(tritanium.stockQuantity, 130);
   assert.equal(tritanium.productionQuantity, 0);
   assert.equal(tritanium.buyQuantity, 0);
   assert.equal(tritanium.availableSourceCounts?.industry, 20);
@@ -141,7 +142,7 @@ test("tracks production-origin haul quantity separately from stock haul quantity
     request(
       110,
       [
-        industryOutputStock("active", manufacturingLocationId, "Manufacturing", 100),
+        industryOutputStock("ready", manufacturingLocationId, "Manufacturing", 100),
         {
           typeId: tritaniumTypeId,
           name: "Tritanium",
@@ -250,6 +251,51 @@ test("counts active output toward availability in bucketed plans", async () => {
   assert.equal(tritanium.productionQuantity, 0);
   assert.equal(tritanium.buyQuantity, 0);
   assert.equal(tritanium.availableSourceCounts?.industry, 20);
+});
+
+test("uses remote active output for a bucket final product", async () => {
+  const result = await calculatePlan(
+    request(
+      150,
+      [industryOutputStock("active", alternateSourceLocationId, "Manufacturing", 20)],
+      {
+        items: [],
+        buckets: [
+          {
+            id: "remote-output-bucket",
+            name: "Remote output bucket",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: tritaniumTypeId,
+                name: "Tritanium",
+                quantity: 150,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const tritanium = result.lists.planItems
+    .filter((entry) => entry.kind === "material")
+    .find((material) => material.typeId === tritaniumTypeId);
+
+  assert(tritanium);
+  assert.equal(tritanium.stockQuantity, 0);
+  assert.equal(tritanium.availableStockQuantity, 20);
+  assert.equal(tritanium.availableSourceCounts?.industry, 20);
+  assert.deepEqual(result.lists.haulingTasks, []);
 });
 
 test("ignores empty buckets when calculating a plan", async () => {
@@ -1508,6 +1554,42 @@ test("does not use industry output at another location as a future job input", a
   assert(tritanium);
   assert.equal(tritanium.stockQuantity, 0);
   assert.equal(tritanium.buyQuantity, 100);
+  assert.deepEqual(result.lists.haulingTasks, []);
+});
+
+test("does not use remote active output as a future job input", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [industryOutputStock("active", sourceLocationId)],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const tritanium = result.lists.materialsToBuy.find(
+    (material) => material.typeId === tritaniumTypeId,
+  );
+
+  assert(tritanium);
+  assert.equal(tritanium.stockQuantity, 0);
+  assert.equal(tritanium.availableStockQuantity, 100);
+  assert.equal(tritanium.buyQuantity, 31900);
+  assert.equal(
+    result.lists.manufacturingJobs[0]?.inputs.materials.find(
+      (material) => material.typeId === tritaniumTypeId,
+    )?.availableQuantity,
+    0,
+  );
   assert.deepEqual(result.lists.haulingTasks, []);
 });
 

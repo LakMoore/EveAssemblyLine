@@ -36,6 +36,50 @@ function formatRemaining(value: string) {
   return hours > 0 ? `${hours}h ${minutes % 60}m remaining` : `${minutes}m remaining`;
 }
 
+type ClientJob = NonNullable<ClientJobsResponse["jobs"]>[number];
+
+function JobRow({ job }: { job: ClientJob }) {
+  return (
+    <article className={styles.jobRow} key={`${job.ownerType}-${job.jobId}`}>
+      <div>
+        <TypeIdentity
+          name={job.productTypeName ?? job.blueprintTypeName ?? "Unknown product"}
+          typeName={job.activity}
+          typeId={job.productTypeId ?? job.blueprintTypeId}
+          imageSize={38}
+          className={styles.jobTypeIdentity}
+          variation={isScienceJob(job.activity) ? (job.usesBpo ? "bp" : "bpc") : "icon"}
+        />
+        <small>
+          {job.activity} · {job.characterName}
+          {job.ownerType === "corporation" ? " · CORPORATION" : ""}
+        </small>
+        {job.usesBpo && <Badge className={styles.jobBpoFlag}>From BPO</Badge>}
+        <small>{job.outputLocationName}</small>
+      </div>
+      <span>
+        <b>{job.runs.toLocaleString()}</b>
+        <small>runs</small>
+      </span>
+      <span>
+        <b>
+          {job.outputQuantity.toLocaleString()}
+          {job.activity === "Copying" ? " BPCs" : ""}
+        </b>
+        <small>
+          {job.activity === "Copying" && job.outputRunsPerCopy !== undefined
+            ? `${job.outputRunsPerCopy.toLocaleString()} runs each`
+            : "output"}
+        </small>
+      </span>
+      <span>
+        <b>{formatRemaining(job.endDate)}</b>
+        <small>{formatDate(job.endDate)}</small>
+      </span>
+    </article>
+  );
+}
+
 export default function JobsPage() {
   const [data, setData] = useState<ClientJobsResponse | null>(null);
   const [error, setError] = useState(false);
@@ -73,6 +117,43 @@ export default function JobsPage() {
   }, []);
 
   const jobs = data?.jobs ?? [];
+  const collectionJobCount = useMemo(() => {
+    const characterIds = new Set(
+      (data?.characters ?? []).map((character) => character.characterId),
+    );
+    return (data?.jobs ?? []).filter((job) => characterIds.has(job.characterId)).length;
+  }, [data]);
+  const jobGroups = useMemo(() => {
+    const allJobs = data?.jobs ?? [];
+    const jobsByInstaller = new Map<number, ClientJob[]>();
+    for (const job of allJobs) {
+      const installerJobs = jobsByInstaller.get(job.characterId) ?? [];
+      installerJobs.push(job);
+      jobsByInstaller.set(job.characterId, installerJobs);
+    }
+
+    const collectionCharacterIds = new Set(
+      (data?.characters ?? []).map((character) => character.characterId),
+    );
+    const collectionGroups = (data?.characters ?? []).flatMap((character) => {
+      const installerJobs = jobsByInstaller.get(character.characterId) ?? [];
+      return installerJobs.length > 0
+        ? [
+            {
+              key: `character-${character.characterId}`,
+              name: character.characterName,
+              jobs: installerJobs,
+            },
+          ]
+        : [];
+    });
+    const otherJobs = allJobs.filter((job) => !collectionCharacterIds.has(job.characterId));
+    if (otherJobs.length === 0) return collectionGroups;
+    return [
+      ...collectionGroups,
+      { key: "other-installers", name: "Other Installers", jobs: otherJobs },
+    ];
+  }, [data]);
   const slotTypes = useMemo(() => {
     const types = new Set(slotOrder);
     for (const character of data?.characters ?? []) {
@@ -133,7 +214,7 @@ export default function JobsPage() {
             <small>SLOTS AVAILABLE</small>
           </div>
           <div className={styles.jobsActiveMetric}>
-            <strong>{jobs.length}</strong>
+            <strong>{collectionJobCount}</strong>
             <span>active jobs</span>
           </div>
         </div>
@@ -197,45 +278,19 @@ export default function JobsPage() {
             <h2>Running industry jobs</h2>
           </div>
         </div>
-        <div className={styles.jobsList}>
-          {jobs.map((job) => (
-            <article className={styles.jobRow} key={`${job.ownerType}-${job.jobId}`}>
-              <div>
-                <TypeIdentity
-                  name={job.productTypeName ?? job.blueprintTypeName ?? "Unknown product"}
-                  typeName={job.activity}
-                  typeId={job.productTypeId ?? job.blueprintTypeId}
-                  imageSize={38}
-                  className={styles.jobTypeIdentity}
-                  variation={isScienceJob(job.activity) ? (job.usesBpo ? "bp" : "bpc") : "icon"}
-                />
-                <small>
-                  {job.activity} · {job.characterName}
-                  {job.ownerType === "corporation" ? " · CORPORATION" : ""}
-                </small>
-                {job.usesBpo && <Badge className={styles.jobBpoFlag}>From BPO</Badge>}
-                <small>{job.outputLocationName}</small>
+        <div>
+          {jobGroups.map((group) => (
+            <div className={styles.jobsInstallerGroup} key={group.key}>
+              <div className={styles.jobsInstallerHeader}>
+                <p className={styles.panelKicker}>INSTALLER</p>
+                <h3>{group.name}</h3>
               </div>
-              <span>
-                <b>{job.runs.toLocaleString()}</b>
-                <small>runs</small>
-              </span>
-              <span>
-                <b>
-                  {job.outputQuantity.toLocaleString()}
-                  {job.activity === "Copying" ? " BPCs" : ""}
-                </b>
-                <small>
-                  {job.activity === "Copying" && job.outputRunsPerCopy !== undefined
-                    ? `${job.outputRunsPerCopy.toLocaleString()} runs each`
-                    : "output"}
-                </small>
-              </span>
-              <span>
-                <b>{formatRemaining(job.endDate)}</b>
-                <small>{formatDate(job.endDate)}</small>
-              </span>
-            </article>
+              <div className={styles.jobsList}>
+                {group.jobs.map((job) => (
+                  <JobRow job={job} key={`${job.ownerType}-${job.jobId}`} />
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       </section>

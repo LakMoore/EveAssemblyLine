@@ -725,11 +725,9 @@
   }
 
   .planTableValue {
-    display: flex;
+    display: block;
     min-width: 0;
-    align-items: baseline;
-    justify-content: flex-end;
-    gap: 0;
+    text-align: right;
   }
 
   .planTableCellEmpty {
@@ -1128,6 +1126,27 @@
 
 .jobsList {
   border-top: 1px solid var(--border);
+}
+
+.jobsInstallerGroup {
+  display: grid;
+  gap: 8px;
+}
+
+.jobsInstallerGroup + .jobsInstallerGroup {
+  margin-top: 18px;
+}
+
+.jobsInstallerHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 2px;
+}
+
+.jobsInstallerHeader h3 {
+  color: var(--foreground);
+  font-size: 16px;
 }
 
 .jobRow {
@@ -2730,11 +2749,24 @@
 }
 
 .availableSourceIcons {
-  display: inline-flex;
-  gap: 4px;
-  margin-right: 7px;
+  position: static;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 auto;
   color: var(--muted-foreground);
-  vertical-align: -2px;
+}
+
+.planTableValue {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  width: 100%;
+  min-height: 30px;
+  line-height: 30px;
+  text-align: right;
 }
 
 .availableSourceIcon {

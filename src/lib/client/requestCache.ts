@@ -29,8 +29,8 @@ export type ClientAssetsResponse = {
   corporationSources?: ClientCorporationSource[];
 };
 
-/** Applies the current corporation hangar and container selections to state assets on the client. */
-export function filterClientAssets(data: ClientAssetsResponse): ClientAssetsResponse {
+/** Applies corporation source selections before stock is sent to the planning service. */
+export function filterClientAssetsForPlanning(data: ClientAssetsResponse): ClientAssetsResponse {
   const selectedSources = new Set(
     (data.corporationSources ?? [])
       .filter((source) => source.selected)
@@ -53,7 +53,15 @@ export function filterClientAssets(data: ClientAssetsResponse): ClientAssetsResp
     assets: (data.assets ?? []).filter((item) => {
       if (item.ownerType !== "corporation") return true;
       const source = item.corporationSource;
-      if (!source) return false;
+      if (!source) {
+        return Boolean(
+          item.inBuild
+            && item.jobId !== undefined
+            && item.ownerId !== undefined
+            && item.rootLocationId !== undefined
+            && selectedSourceLocations.has(`${item.ownerId}:${item.rootLocationId}`),
+        );
+      }
       const sourceKey = `${item.ownerId}:${source.rootLocationId}:${source.locationFlag}`;
       return (
         source.containerItemIds.some((itemId) => selectedContainers.has(itemId))
@@ -153,6 +161,7 @@ export type ClientJobsResponse = {
   jobs?: Array<{
     jobId: number;
     characterId: number;
+    ownerId: number;
     characterName: string;
     ownerType: "character" | "corporation";
     activity: string;
@@ -293,7 +302,7 @@ export function loadClientAssets(language: SdeLanguage, reload = false) {
   const pending = assetsRequests.get(key);
   if (pending) return pending;
   const cached = assetsResponses.get(key);
-  if (!reload && cached) return Promise.resolve(filterClientAssets(cached));
+  if (!reload && cached) return Promise.resolve(cached);
 
   const query = new URLSearchParams({ language });
   const loadCachedStock = !reload
@@ -314,7 +323,7 @@ export function loadClientAssets(language: SdeLanguage, reload = false) {
     : Promise.resolve(null);
   const request = loadCachedStock
     .then((cachedStock) => {
-      if (cachedStock) return filterClientAssets(cachedStock);
+      if (cachedStock) return cachedStock;
       return fetch(
         `/api/state/assets?${query.toString()}`,
         {
@@ -325,7 +334,7 @@ export function loadClientAssets(language: SdeLanguage, reload = false) {
         if (!response.ok) throw new Error("Could not load assets.");
         await saveEndpointResponse("state/assets", `/api/state/assets?${query.toString()}`, data);
         assetsResponses.set(key, data);
-        return filterClientAssets(data);
+        return data;
       });
     })
     .finally(() => assetsRequests.delete(key));

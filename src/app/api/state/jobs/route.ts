@@ -218,6 +218,7 @@ export async function GET(request: Request) {
         jobId: job.jobId,
         characterId: job.installerId,
         characterName: characterNames.get(job.installerId) ?? `Character ${job.installerId}`,
+        ownerId: job.ownerId,
         ownerType: job.ownerType,
         activity: activityNames[job.activityId] ?? "Industry job",
         status: job.status,
