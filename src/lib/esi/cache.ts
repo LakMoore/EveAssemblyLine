@@ -65,6 +65,7 @@ import {
   getCorporationHangarPermissions,
   isCorporationHangarFlag,
 } from "./corporationAccess";
+import { normalizeLocationName } from "@/lib/reference/locationName";
 
 export type EndpointStatus = "fresh" | "cached" | "stale" | "rate_limited" | "error";
 export type EndpointCache<T> = {
@@ -450,6 +451,9 @@ export async function getCorporationSourceCatalog(
       const cache = getCache(corporationCaches, policy.corporationId, sessionId);
       const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
       const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+      const structuresById = new Map(
+        (cache.structures?.lastBody ?? []).map((structure) => [structure.structure_id, structure]),
+      );
       const sourceEntries = new Map<string, CorporationSourceCatalogEntry>();
       for (const asset of rawAssets) {
         if (asset.ownerType !== "corporation") continue;
@@ -488,17 +492,55 @@ export async function getCorporationSourceCatalog(
               resolved: true,
             };
           }
-          else if (rootLocation?.kind === "station" && !rootLocation.name) {
+          else {
+            const structure = structuresById.get(source.rootLocationId);
+            if (structure) {
+              const systemName = systems.get(structure.system_id)?.name.en;
+              rootLocation = {
+                locationId: structure.structure_id,
+                kind: "structure",
+                name: structure.name
+                  ? normalizeLocationName(systemName, structure.name)
+                  : "Structure details unavailable",
+                typeId: structure.type_id,
+                systemId: structure.system_id,
+                resolved: true,
+              };
+            }
+          }
+          if (!rootLocation) {
+            rootLocation = {
+              locationId: source.rootLocationId,
+              kind: "structure",
+              name: "Structure details unavailable",
+              resolved: false,
+            };
+          }
+          if (rootLocation.kind === "station" && !rootLocation.name) {
             const names = await fetchUniverseNames([rootLocation.locationId]).catch(
               () => new Map(),
             );
             const name = names.get(rootLocation.locationId);
             if (name) rootLocation = { ...rootLocation, name };
           }
+          if (!rootLocation.name) {
+            rootLocation = {
+              ...rootLocation,
+              name:
+                rootLocation.kind === "station"
+                  ? "Station details unavailable"
+                  : rootLocation.kind === "structure"
+                    ? "Structure details unavailable"
+                    : "Location details unavailable",
+            };
+          }
           const systemName =
-            rootLocation?.systemId === undefined
+            rootLocation.systemId === undefined
               ? undefined
               : systems.get(rootLocation.systemId)?.name.en;
+          const rootName = rootLocation.name
+            ? normalizeLocationName(systemName, rootLocation.name)
+            : undefined;
           sourceEntries.set(
             key,
             {
@@ -506,14 +548,11 @@ export async function getCorporationSourceCatalog(
               rootLocationId: source.rootLocationId,
               locationFlag: source.locationFlag,
               label: corporationSourceLabel(source.locationFlag, cache.divisions?.lastBody),
-              ...(rootLocation
-                ? {
-                    rootLocation: {
-                      ...rootLocation,
-                      ...(systemName ? { systemName } : {}),
-                    },
-                  }
-                : {}),
+              rootLocation: {
+                ...rootLocation,
+                ...(rootName ? { name: rootName } : {}),
+                ...(systemName ? { systemName } : {}),
+              },
               canTake: permission.canTake,
               canQuery: permission.canQuery,
               selected: policy.directHangars.some(
@@ -2363,17 +2402,35 @@ export async function getRootLocationsByItemId(
   ]);
   if (!includeCorporationAssets) return new Map(locations);
   const projection = await getCorporationProjection(characterIds, true, sessionId, policies);
+  const systems = await getSystems();
   return [
     ...locations,
     ...projection.corporationIds.flatMap((id) => {
       const cache = getCache(corporationCaches, id, sessionId);
-      return [
-        ...getProjectedCorporationRootLocations(
-          cache,
-          projection.policiesByCorporationId.get(id),
-          projection.characters,
-        ).entries(),
-      ];
+      const projectedRoots = getProjectedCorporationRootLocations(
+        cache,
+        projection.policiesByCorporationId.get(id),
+        projection.characters,
+      );
+      const structuresById = new Map(
+        (cache.structures?.lastBody ?? []).map((structure) => [structure.structure_id, structure]),
+      );
+      return [...projectedRoots.entries()].map(([itemId, location]) => {
+        const structure = structuresById.get(location.locationId);
+        if (!structure) return [itemId, location] as const;
+        const systemName = systems.get(structure.system_id)?.name.en;
+        return [
+          itemId,
+          {
+            ...location,
+            kind: "structure",
+            ...(structure.name ? { name: normalizeLocationName(systemName, structure.name) } : {}),
+            typeId: structure.type_id,
+            systemId: structure.system_id,
+            resolved: true,
+          },
+        ] as const;
+      });
     }),
   ].reduce(
     (map, [locationId, location]) => {
@@ -2446,7 +2503,7 @@ export async function resolveStructureLocationForOwner(
     sessionId,
   );
   const cachedRoot = rootLocations.get(locationId);
-  if (cachedRoot?.name) return cachedRoot;
+  if (cachedRoot?.resolved && cachedRoot.name) return cachedRoot;
 
   if (
     isKnownShipItemId(locationId, source, sessionId)

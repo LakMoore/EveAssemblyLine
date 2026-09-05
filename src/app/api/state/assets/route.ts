@@ -29,6 +29,7 @@ import {
 } from "@/cache/services/sdeCache";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { categorizeType } from "@/lib/reference/category";
+import { normalizeLocationName } from "@/lib/reference/locationName";
 import type {
   AssetLocation,
   AssetRecord,
@@ -213,16 +214,21 @@ function addStockContribution(
     groups,
   );
   const category = categorized.category;
+  const systemName = location.systemId ? systems.get(location.systemId)?.name.en : undefined;
+  const displayName = location.name
+    ? normalizeLocationName(systemName, location.name)
+    : location.kind === "anchored"
+      ? "Anchored"
+      : location.kind === "structure"
+        ? "Structure details unavailable"
+        : "Station details unavailable";
   const blueprintType: BlueprintType | undefined =
     category === "blueprint" ? (contribution.blueprintType ?? "bpc") : undefined;
   const bucket =
     buckets.get(location.locationId)
     ?? ({
       locationId: location.locationId,
-      name:
-        location.kind === "anchored"
-          ? "Anchored"
-          : (location.name ?? `Location ID ${location.locationId}`),
+      name: displayName,
       locationType: location.kind,
       typeId: location.typeId,
       systemId: location.systemId,
@@ -252,7 +258,7 @@ function addStockContribution(
     quantity: 0,
     locationId: contribution.locationId ?? location.locationId,
     rootLocationId: contribution.rootLocationId ?? location.locationId,
-    sourceLocationName: location.name,
+    sourceLocationName: displayName,
     corporationSource: contribution.corporationSource,
     ownerType: contribution.ownerType,
     ...(contribution.ownerId !== undefined ? { ownerId: contribution.ownerId } : {}),

@@ -57,26 +57,39 @@ export async function fetchFacilityResponse(
   language: SdeLanguage = "en",
 ): Promise<FacilityResponse | null> {
   const cacheKey = `facilities:${language}`;
-  if (!reload) {
-    const cached = await loadEndpointRecord<FacilityResponse>(cacheKey);
-    if (cached) return cached.data;
-  }
+  const cached = await loadCachedFacilityResponse(language);
+  if (!reload && cached) return cached;
   try {
-    if (!(await loadClientSession()).authenticated) return null;
+    if (!(await loadClientSession()).authenticated) return cached;
     const response = await fetch(
       `/api/facilities?language=${language}`,
       {
         credentials: "same-origin",
       },
     );
-    if (!response.ok) return null;
+    if (!response.ok) return cached;
     const data = (await response.json()) as FacilityResponse;
     await saveEndpointResponse(cacheKey, `/api/facilities?language=${language}`, data);
     return data;
   }
   catch {
-    return null;
+    return cached;
   }
+}
+
+async function loadCachedFacilityResponse(language: SdeLanguage) {
+  for (const key of [
+    `facilities:${language}`,
+    "facilities",
+    ...(language === "en" ? [] : ["facilities:en"]),
+  ]) {
+    try {
+      const cached = await loadEndpointRecord<FacilityResponse>(key);
+      if (cached) return cached.data;
+    }
+    catch {}
+  }
+  return null;
 }
 
 export function facilitySettingsFromStructures(

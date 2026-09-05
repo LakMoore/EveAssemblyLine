@@ -1,5 +1,6 @@
 import type { FacilityGroupBonus } from "./facilityBonuses";
 import type { ProductionGroupKey, ProductionGroupReference } from "./productionGroups";
+import { normalizeLocationName } from "@/lib/reference/locationName";
 
 export type FacilitySettingsEntry = {
   locationId?: number;
@@ -151,10 +152,7 @@ export function facilitySettingsKey(systemId: number, name: string) {
 
 /** ESI reports structures as "System - Name" while local structures store the bare name. */
 export function facilitySettingsName(systemName: string | undefined, name: string) {
-  const prefix = systemName ? `${systemName} - ` : "";
-  return prefix && name.toLocaleLowerCase().startsWith(prefix.toLocaleLowerCase())
-    ? name.slice(prefix.length).trim()
-    : name.trim();
+  return normalizeLocationName(systemName, name);
 }
 
 function normalizeActivity(value: unknown): ActivityRequest | null {

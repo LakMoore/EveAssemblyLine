@@ -1,5 +1,6 @@
 import type { PlanStockItem } from "@/lib/planning/types";
 import type { SdeLanguage } from "@/lib/reference/languages";
+import { normalizeLocationName } from "@/lib/reference/locationName";
 import { loadEndpointRecord, saveEndpointResponse } from "./refreshCache";
 
 export type ClientSession = {
@@ -28,6 +29,46 @@ export type ClientAssetsResponse = {
   filteredLocationIds?: number[];
   corporationSources?: ClientCorporationSource[];
 };
+
+function normalizeClientLocationName(
+  name: string,
+  kind: "station" | "structure" | "anchored",
+  systemName?: string,
+) {
+  if (/^Location ID \d+$/i.test(name.trim())) {
+    return kind === "structure"
+      ? "Structure details unavailable"
+      : kind === "station"
+        ? "Station details unavailable"
+        : "Anchored";
+  }
+  return normalizeLocationName(systemName, name);
+}
+
+export function normalizeClientAssetsResponse(data: ClientAssetsResponse): ClientAssetsResponse {
+  return {
+    ...data,
+    locations: data.locations?.map((location) => ({
+      ...location,
+      name: normalizeClientLocationName(location.name, location.locationType, location.systemName),
+    })),
+    corporationSources: data.corporationSources?.map((source) => ({
+      ...source,
+      ...(source.rootLocation?.name
+        ? {
+            rootLocation: {
+              ...source.rootLocation,
+              name: normalizeClientLocationName(
+                source.rootLocation.name,
+                source.rootLocation.kind === "solar_system" ? "anchored" : source.rootLocation.kind,
+                source.rootLocation.systemName,
+              ),
+            },
+          }
+        : {}),
+    })),
+  };
+}
 
 /** Applies corporation source selections before stock is sent to the planning service. */
 export function filterClientAssetsForPlanning(data: ClientAssetsResponse): ClientAssetsResponse {
@@ -317,8 +358,9 @@ export function loadClientAssets(language: SdeLanguage, reload = false) {
         catch {
           return null;
         }
-        assetsResponses.set(key, record.data);
-        return record.data;
+        const data = normalizeClientAssetsResponse(record.data);
+        assetsResponses.set(key, data);
+        return data;
       })
     : Promise.resolve(null);
   const request = loadCachedStock
@@ -330,7 +372,7 @@ export function loadClientAssets(language: SdeLanguage, reload = false) {
           cache: "no-store",
         },
       ).then(async (response) => {
-        const data = (await response.json()) as ClientAssetsResponse;
+        const data = normalizeClientAssetsResponse((await response.json()) as ClientAssetsResponse);
         if (!response.ok) throw new Error("Could not load assets.");
         await saveEndpointResponse("state/assets", `/api/state/assets?${query.toString()}`, data);
         assetsResponses.set(key, data);

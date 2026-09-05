@@ -63,6 +63,7 @@ import {
   type PlannerSettings,
 } from "@/lib/planning/preferences";
 import type { SdeLanguage } from "@/lib/reference/languages";
+import { normalizeLocationName } from "@/lib/reference/locationName";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import { useAppLanguage } from "../AppShell";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
@@ -567,6 +568,7 @@ function Planner() {
   const [planImportInputKey, setPlanImportInputKey] = useState(0);
   const [excludedLocationIds, setExcludedLocationIds] = useState<number[]>([]);
   const [locationOptions, setLocationOptions] = useState<PlanLocationOption[]>([]);
+  const [cachedAssetLocations, setCachedAssetLocations] = useState<StockLocationOption[]>([]);
   const [productionGroupReferences, setProductionGroupReferences] = useState<
     ProductionGroupReference[]
   >([]);
@@ -675,11 +677,32 @@ function Planner() {
   useEffect(() => {
     let cancelled = false;
     async function loadLocationOptions(reload = false) {
-      const [data, storedLocations] = await Promise.all([
+      const [data, storedLocations, assetsData] = await Promise.all([
         fetchFacilityResponse(reload, language),
         loadPlannerLocations(),
+        loadClientAssets(language).catch(() => null),
       ]);
       if (cancelled) return;
+      if (assetsData?.locations) {
+        setCachedAssetLocations(
+          assetsData.locations
+            .filter(
+              (
+                location,
+              ): location is typeof location & {
+                locationType: "station" | "structure";
+              } => location.locationType === "station" || location.locationType === "structure",
+            )
+            .map((location) => ({
+              locationId: location.locationId,
+              name: normalizeLocationName(location.systemName, location.name),
+              kind: location.locationType,
+              baseYield: 0,
+              baseManufacturingMe: 0,
+              baseReactionMe: 0,
+            })),
+        );
+      }
       const options = (data?.facilities ?? [])
         .filter(
           (facility): facility is typeof facility & { id: number } =>
@@ -1151,6 +1174,7 @@ function Planner() {
       baseManufacturingMe: location.baseManufacturingMe,
       baseReactionMe: location.baseReactionMe,
     })),
+    ...cachedAssetLocations,
     ...knownStructures.flatMap((structure) =>
       structure.esiStructureId === undefined
         ? []

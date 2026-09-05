@@ -113,9 +113,18 @@ type EsiStockResponse = {
 };
 type StateEndpoint = keyof Pick<
   ClientCharacterStatus,
-  "assets" | "skills" | "location" | "ship" | "jobs" | "orders"
+  "assets" | "skills" | "location" | "ship" | "clones" | "blueprints" | "jobs" | "orders"
 >;
-const stateEndpoints: StateEndpoint[] = ["assets", "skills", "location", "ship", "jobs", "orders"];
+const stateEndpoints: StateEndpoint[] = [
+  "assets",
+  "skills",
+  "location",
+  "ship",
+  "clones",
+  "blueprints",
+  "jobs",
+  "orders",
+];
 const corporationStateEndpoints: Array<"assets" | "jobs" | "orders"> = ["assets", "jobs", "orders"];
 
 function showRefreshError(details: string) {
@@ -175,7 +184,7 @@ function hasExpiredEndpoint(statuses: ClientCharacterStatus[]) {
       ),
     ];
     return endpoints.some((endpoint) => {
-      if (!endpoint) return true;
+      if (!endpoint || !endpoint.hasBody) return true;
       if (endpoint.status === "error") return true;
       const now = Date.now();
       if (
