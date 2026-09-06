@@ -162,8 +162,8 @@ type PlannerTab =
 type StockpileEditorMode = "details" | "items";
 const tabs: { value: PlannerTab; icon: LucideIcon }[] = [
   { value: "Plan", icon: ClipboardList },
-  { value: "Buy", icon: ShoppingCart },
   { value: "Haul", icon: Truck },
+  { value: "Buy", icon: ShoppingCart },
   { value: "Reprocess", icon: Minimize2 },
   { value: "Copy", icon: TestTubes },
   { value: "Invent", icon: Microscope },
