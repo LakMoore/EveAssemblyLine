@@ -61,7 +61,10 @@ export function normalizeClientAssetsResponse(data: ClientAssetsResponse): Clien
   };
   return {
     ...response,
-    corporationSources: response.corporationSources?.map((source) => ({
+    assets: response.assets ?? [],
+    facilities: response.facilities ?? [],
+    productionGroups: response.productionGroups ?? [],
+    corporationSources: (response.corporationSources ?? []).map((source) => ({
       ...source,
       ...(source.rootLocation?.name
         ? {
@@ -77,6 +80,18 @@ export function normalizeClientAssetsResponse(data: ClientAssetsResponse): Clien
         : {}),
     })),
   };
+}
+
+export function isCompleteClientAssetsResponse(value: unknown): value is ClientAssetsResponse {
+  if (!value || typeof value !== "object") return false;
+  const response = value as ClientAssetsResponse;
+  return (
+    Array.isArray(response.assets)
+    && Array.isArray(response.facilities)
+    && Array.isArray(response.productionGroups)
+    && Array.isArray(response.corporationSources)
+    && response.settings !== undefined
+  );
 }
 
 /** Applies corporation source selections before stock is sent to the planning service. */
@@ -382,7 +397,7 @@ export function loadClientAssets(language: SdeLanguage, reload = false) {
   const pending = assetsRequests.get(key);
   if (pending) return pending;
   const cached = assetsResponses.get(key);
-  if (!reload && cached?.facilities) return Promise.resolve(cached);
+  if (!reload && cached && isCompleteClientAssetsResponse(cached)) return Promise.resolve(cached);
 
   const query = new URLSearchParams({ language });
   const loadCachedStock = !reload
@@ -397,8 +412,8 @@ export function loadClientAssets(language: SdeLanguage, reload = false) {
         catch {
           return null;
         }
+        if (!isCompleteClientAssetsResponse(record.data)) return null;
         const data = normalizeClientAssetsResponse(record.data);
-        if (!data.facilities) return null;
         assetsResponses.set(key, data);
         return data;
       })

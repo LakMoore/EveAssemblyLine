@@ -3,15 +3,29 @@ import { getPlanningDatabase, plannerPreferencesStoreName } from "./planningData
 
 const planResultKey = "latest-plan-result";
 
-function isPlanResult(value: unknown): value is PlanResult {
+export function isPlanResult(value: unknown): value is PlanResult {
   if (!value || typeof value !== "object") return false;
   const result = value as Record<string, unknown>;
-  return (
-    typeof result.metadata === "object"
-    && result.metadata !== null
-    && typeof result.lists === "object"
-    && result.lists !== null
-  );
+  if (
+    typeof result.metadata !== "object"
+    || result.metadata === null
+    || typeof (result.metadata as Record<string, unknown>).generatedAt !== "string"
+    || typeof result.lists !== "object"
+    || result.lists === null
+  ) return false;
+  const lists = result.lists as Record<string, unknown>;
+  return [
+    "planItems",
+    "materialsToBuy",
+    "bpcsNeeded",
+    "bpcsToBuy",
+    "inventionJobs",
+    "reactionJobs",
+    "manufacturingJobs",
+    "reprocessingJobs",
+    "skillsRequired",
+    "haulingTasks",
+  ].every((key) => Array.isArray(lists[key]));
 }
 
 /** Loads the latest calculated planner result from IndexedDB. */

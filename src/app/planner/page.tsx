@@ -336,6 +336,18 @@ function getStockLocationId(item: PlanStockItem) {
   return item.rootLocationId ?? item.sourceLocationId ?? item.locationId;
 }
 
+function getPlannerStock(
+  assets: ClientAssetsResponse | null,
+  includeStock: boolean,
+  excludedLocationIds: ReadonlySet<number>,
+): PlanStockItem[] {
+  if (!includeStock || !assets) return [];
+  return (filterClientAssetsForPlanning(assets).assets ?? []).filter((item) => {
+    const locationId = getStockLocationId(item);
+    return locationId === undefined || !excludedLocationIds.has(locationId);
+  });
+}
+
 function formatCoverage(coveredRuns: number, totalRuns: number) {
   return totalRuns > 0 ? `${((coveredRuns / totalRuns) * 100).toFixed(1)}%` : "0.0%";
 }
@@ -574,7 +586,6 @@ function Planner() {
   const [clientAssets, setClientAssets] = useState<ClientAssetsResponse | null>(null);
   const [characterNamesById, setCharacterNamesById] = useState<Map<number, string>>(new Map());
   const [planningCharacterId, setPlanningCharacterId] = useState<number | undefined>();
-  const [stock, setStock] = useState<PlanStockItem[]>([]);
   const [stockpiles, setStockpiles] = useState<ClientPlanStockpile[]>([]);
   const [areStockpilesLoaded, setAreStockpilesLoaded] = useState(false);
   const [editingStockpile, setEditingStockpile] = useState<ClientPlanStockpile | null>(null);
@@ -671,6 +682,8 @@ function Planner() {
       window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
     };
   }, [language]);
+
+  const stock = getPlannerStock(clientAssets, includeStock, new Set(excludedLocationIds));
 
   function updateLocations(next: Partial<Pick<PlannerLocations, "manufacturing" | "reactions">>) {
     const updatedLocations = { ...locations, ...next };
@@ -846,9 +859,7 @@ function Planner() {
         setPlanStatus("Account assets are still loading");
         return;
       }
-      if (includeStock && clientAssets) {
-        workingAssets = filterClientAssetsForPlanning(clientAssets).assets ?? [];
-      }
+      workingAssets = getPlannerStock(clientAssets, includeStock, exclusions);
       const primaryStockpileLocations = populatedStockpiles[0].locations;
       const selectedManufacturingFacility = locationOptions.find(
         (location) => location.locationId === primaryStockpileLocations.manufacturing,
@@ -856,11 +867,7 @@ function Planner() {
       const selectedReactionFacility = locationOptions.find(
         (location) => location.locationId === primaryStockpileLocations.reactions,
       );
-      const requestStock = workingAssets.filter((item) => {
-        const locationId = getStockLocationId(item);
-        return locationId === undefined || !exclusions.has(locationId);
-      });
-      setStock(requestStock);
+      const requestStock = workingAssets;
       const planningCharacter = characterStatuses.find(
         (character) => character.characterId === planningCharacterId,
       );

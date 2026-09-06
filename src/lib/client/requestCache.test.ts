@@ -3,8 +3,26 @@ import test from "node:test";
 import {
   filterClientAssetsForPlanning,
   groupClientAssetsByLocation,
+  isCompleteClientAssetsResponse,
   normalizeClientAssetsResponse,
 } from "./requestCache";
+
+test("requires the complete asset snapshot before using the local cache", () => {
+  assert.equal(
+    isCompleteClientAssetsResponse({
+      assets: [],
+      facilities: [],
+      settings: { lastModified: "", facilities: {} },
+      productionGroups: [],
+      corporationSources: [],
+    }),
+    true,
+  );
+  assert.equal(
+    isCompleteClientAssetsResponse({ assets: [], facilities: [], productionGroups: [] }),
+    false,
+  );
+});
 
 test("groups each market order at its source location once", () => {
   const locations = groupClientAssetsByLocation({

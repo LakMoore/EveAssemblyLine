@@ -11,7 +11,7 @@ import {
 import type { KnownStructure } from "./preferences";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import { loadEndpointRecord, saveEndpointResponse } from "@/lib/client/refreshCache";
-import { loadClientSession } from "@/lib/client/requestCache";
+import { loadClientAssets, loadClientSession } from "@/lib/client/requestCache";
 
 const localStorageKey = "assembly-line-facilities";
 
@@ -38,12 +38,8 @@ export async function fetchFacilities(): Promise<FacilitySettingsPayload> {
   const cached = loadCachedFacilities();
   try {
     if (!(await loadClientSession()).authenticated) return cached;
-    const response = await fetch("/api/facilities", { credentials: "same-origin" });
-    if (!response.ok) return cached;
-    const serverResponse = (await response.json()) as FacilityResponse | FacilitySettingsPayload;
-    const serverPayload = normalizeFacilitySettings(
-      "settings" in serverResponse ? serverResponse.settings : serverResponse,
-    );
+    const serverPayload = (await fetchFacilityResponse())?.settings;
+    if (!serverPayload) return cached;
     cacheFacilities(serverPayload);
     return serverPayload;
   }
@@ -57,9 +53,19 @@ export async function fetchFacilityResponse(
   language: SdeLanguage = "en",
 ): Promise<FacilityResponse | null> {
   const cacheKey = `facilities:${language}`;
-  const cached = await loadCachedFacilityResponse(language);
-  if (!reload && cached) return cached;
   try {
+    const assets = await loadClientAssets(language, reload);
+    if (assets.facilities && assets.settings && assets.productionGroups) {
+      const response: FacilityResponse = {
+        facilities: assets.facilities,
+        settings: normalizeFacilitySettings(assets.settings),
+        productionGroups: assets.productionGroups,
+      };
+      await saveEndpointResponse(cacheKey, `/api/facilities?language=${language}`, response);
+      return response;
+    }
+    const cached = await loadCachedFacilityResponse(language);
+    if (!reload && cached) return cached;
     if (!(await loadClientSession()).authenticated) return cached;
     const response = await fetch(
       `/api/facilities?language=${language}`,
@@ -73,7 +79,7 @@ export async function fetchFacilityResponse(
     return data;
   }
   catch {
-    return cached;
+    return loadCachedFacilityResponse(language);
   }
 }
 
