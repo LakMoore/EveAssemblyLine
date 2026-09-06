@@ -2216,6 +2216,82 @@ test("reports manufacturing blueprint and material inputs", async () => {
   assert.equal(tritanium.completionPercent, 100);
 });
 
+test("requires buying copies when the owned BPO is in use", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: rifterBlueprintTypeId,
+          name: "Rifter Blueprint",
+          quantity: 1,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          inUse: true,
+          blueprintPrints: [{ itemId: 9002, type: "bpo", runs: -1 }],
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const entry = result.lists.bpcsToBuy.find((item) => item.typeId === rifterBlueprintTypeId);
+  assert(entry);
+  assert.equal(entry.bpoCount, 0);
+  assert.equal(entry.bposInUse, 1);
+  assert.equal(entry.buyQuantity, 1);
+});
+
+test("routes all runs to copying when an available BPO has no print metadata", async () => {
+  const requiredRuns = 11;
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: rifterBlueprintTypeId,
+          name: "Rifter Blueprint",
+          quantity: 1,
+          category: "blueprint",
+          blueprintType: "bpo",
+          rootLocationId: manufacturingLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: requiredRuns,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const copyEntry = result.lists.bpcsNeeded.find((entry) => entry.typeId === rifterBlueprintTypeId);
+  assert(copyEntry);
+  assert.equal(copyEntry.bpoCount, 1);
+  assert.equal(copyEntry.neededQuantity, requiredRuns);
+  assert.equal(copyEntry.stockRuns, 0);
+  assert.equal(
+    result.lists.bpcsToBuy.some((entry) => entry.typeId === rifterBlueprintTypeId),
+    false,
+  );
+});
+
 test("reports installable runs for 10 Rifters and 10 Amarr Shuttles", async () => {
   const result = await calculatePlan(
     request(

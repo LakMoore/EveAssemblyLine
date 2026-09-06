@@ -257,6 +257,7 @@ export interface PlanResult {
           stockRuns: number;
           buyQuantity: number;
           bpoCount: number;
+          bposInUse?: number;
           availableSourceCounts?: PlanSourceCounts;
         })
       | (PlanOutputContext & {
@@ -297,6 +298,7 @@ export interface PlanResult {
         stockRuns: number;
         buyQuantity: number;
         bpoCount: number;
+        bposInUse?: number;
         buildTime: number;
         availableSourceCounts?: PlanSourceCounts;
       }
@@ -311,6 +313,7 @@ export interface PlanResult {
         stockRuns: number;
         buyQuantity: number;
         bpoCount: number;
+        bposInUse?: number;
         buildTime: number;
         availableSourceCounts?: PlanSourceCounts;
       }

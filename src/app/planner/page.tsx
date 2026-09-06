@@ -348,6 +348,24 @@ function getPlannerStock(
   });
 }
 
+function getBposInUseCount(typeId: number, stock: PlanStockItem[]) {
+  return stock
+    .filter((item) => item.typeId === typeId && item.category === "blueprint" && item.inUse)
+    .reduce(
+      (total, item) =>
+        total
+        + (
+          item.blueprintPrints?.filter((print) => print.type === "bpo").length
+          ?? (item.blueprintType === "bpo" ? item.quantity : 0)
+        ),
+      0,
+    );
+}
+
+function formatBposInUse(count: number) {
+  return `${count} BPO${count === 1 ? "" : "s"} In Use`;
+}
+
 function formatCoverage(coveredRuns: number, totalRuns: number) {
   return totalRuns > 0 ? `${((coveredRuns / totalRuns) * 100).toFixed(1)}%` : "0.0%";
 }
@@ -3216,6 +3234,12 @@ function PlanList({
                 const isBpcPurchase = activeTab === "Buy" && "bpoCount" in entry;
                 const isCopyOfBpo =
                   activeTab === "Copy" && "bpoCount" in entry && entry.bpoCount > 0;
+                const bposInUse =
+                  activeTab === "Buy" && "bpoCount" in entry
+                    ? "bposInUse" in entry && typeof entry.bposInUse === "number"
+                      ? entry.bposInUse
+                      : getBposInUseCount(typeId, stock)
+                    : 0;
                 const isBlueprintName = / blueprint$/i.test(name);
                 const isReactionFormulaName = / formula$/i.test(name);
                 const isPlanReaction = "kind" in entry && entry.kind === "reaction";
@@ -3384,6 +3408,9 @@ function PlanList({
                           variation={imageVariation}
                           className={styles.planTypeIdentity}
                         />
+                        {bposInUse > 0 && (
+                          <Badge variant="outline">{formatBposInUse(bposInUse)}</Badge>
+                        )}
                         {activeTab === "Manufacture" && "inputs" in entry && (
                           <span className={styles.jobInputsTrigger}>
                             <JobInputsResponsive inputs={entry.inputs} />

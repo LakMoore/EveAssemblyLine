@@ -784,12 +784,26 @@ async function calculatePlanPass(
   const blueprintCopyStock = new Map<number, { copies: number; runs: number }>();
   const seenBlueprintPrints = new Set<number>();
   const blueprintOriginalCounts = new Map<number, number>();
+  const blueprintInUseCounts = new Map<number, number>();
   for (const bpStockItem of allBlueprintStockItems) {
     const existing = blueprintCopyStock.get(bpStockItem.typeId) ?? { copies: 0, runs: 0 };
     const prints = bpStockItem.blueprintPrints ?? [];
-    const bpoCount = prints.filter((print) => print.type === "bpo").length;
-    if (bpoCount > 0) {
-      blueprintOriginalCounts.set(bpStockItem.typeId, bpoCount);
+    const bpoPrints = prints.filter((print) => print.type === "bpo");
+    const totalBpoCount =
+      bpStockItem.blueprintType === "bpo" ? bpStockItem.quantity : bpoPrints.length;
+    const bposInUse = bpStockItem.inUse ? totalBpoCount : 0;
+    const availableBpoCount = totalBpoCount - bposInUse;
+    if (availableBpoCount > 0) {
+      blueprintOriginalCounts.set(
+        bpStockItem.typeId,
+        (blueprintOriginalCounts.get(bpStockItem.typeId) ?? 0) + availableBpoCount,
+      );
+    }
+    if (bposInUse > 0) {
+      blueprintInUseCounts.set(
+        bpStockItem.typeId,
+        (blueprintInUseCounts.get(bpStockItem.typeId) ?? 0) + bposInUse,
+      );
     }
     const uniquePrints = prints.filter((print) => {
       if (seenBlueprintPrints.has(print.itemId)) return false;
@@ -1351,6 +1365,7 @@ async function calculatePlanPass(
               stockRuns: copyStock?.runs ?? 0,
               availableSourceCounts: sourceMetadata(blueprint._key)?.counts,
               bpoCount,
+              bposInUse: blueprintInUseCounts.get(blueprint._key) ?? 0,
               buildTime: blueprint.activities.copying?.time ?? 0,
               buyQuantity: (bpcs.get(blueprint._key)?.buyQuantity ?? 0) + bpcBuyQuantity,
             },
@@ -1523,6 +1538,7 @@ async function calculatePlanPass(
             stockRuns: sourceBpc?.stockRuns ?? 0,
             availableSourceCounts: sourceMetadata(inventingBlueprint._key)?.counts,
             bpoCount: sourceBpoCount,
+            bposInUse: blueprintInUseCounts.get(inventingBlueprint._key) ?? 0,
             buildTime: inventingBlueprint.activities.copying?.time ?? 0,
             buyQuantity:
               sourceBpoCount > 0
@@ -2238,6 +2254,7 @@ function mergeBpcBuyEntries(entries: PlanResult["lists"]["bpcsToBuy"]) {
         stockRuns: existing.stockRuns + entry.stockRuns,
         buyQuantity: existing.buyQuantity + entry.buyQuantity,
         bpoCount: existing.bpoCount + entry.bpoCount,
+        bposInUse: (existing.bposInUse ?? 0) + (entry.bposInUse ?? 0),
       },
     );
   }
@@ -2379,6 +2396,9 @@ function mergeStockpileResults(
   stock: PlanStockItem[],
   request: PlannerRequest,
 ): PlanResult {
+  const mergedBpcRequirements = mergeBpcBuyEntries(
+    results.flatMap((result) => [...result.lists.bpcsToBuy, ...result.lists.bpcsNeeded]),
+  );
   const skillsById = new Map<number, PlanResult["lists"]["skillsRequired"][number]>();
   for (const result of results) {
     for (const skill of result.lists.skillsRequired) {
@@ -2405,10 +2425,8 @@ function mergeStockpileResults(
     lists: {
       planItems: results.flatMap((result) => result.lists.planItems),
       materialsToBuy: results.flatMap((result) => result.lists.materialsToBuy),
-      bpcsNeeded: results.flatMap((result) => result.lists.bpcsNeeded),
-      bpcsToBuy: mergeBpcBuyEntries(
-        results.flatMap((result) => [...result.lists.bpcsToBuy, ...result.lists.bpcsNeeded]),
-      ),
+      bpcsNeeded: mergedBpcRequirements.filter((entry) => entry.bpoCount > 0),
+      bpcsToBuy: mergedBpcRequirements.filter((entry) => entry.bpoCount === 0),
       inventionJobs: results.flatMap((result) => result.lists.inventionJobs),
       reactionJobs: mergeReactionJobs(results.flatMap((result) => result.lists.reactionJobs)),
       manufacturingJobs: mergeManufacturingJobs(
