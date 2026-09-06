@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/u
 import { DialogDescription, DialogHeader } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
+import { parsePasteList } from "@/lib/reference/pasteList";
 import { cn } from "@/lib/utils";
 import { CircleAlert, FileUp, X } from "lucide-react";
 
@@ -57,14 +58,7 @@ export default function PasteListDialog({
 
   async function resolveItems(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const lines = text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    const parsed = lines.map((line) => {
-      const match = line.match(/^(.*?)\s+(\d+)$/);
-      return match ? { name: match[1].trim(), quantity: Number(match[2]) } : { name: line };
-    });
+    const parsed = parsePasteList(text);
     if (parsed.length === 0) {
       setError("Paste at least one item and quantity.");
       setResults([]);

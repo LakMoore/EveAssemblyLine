@@ -159,6 +159,11 @@ type PlannerTab =
   | "React"
   | "Manufacture"
   | "Skills";
+
+function isMultibuyMaterial(entry: PlanBuyEntry): boolean {
+  return !("bpoCount" in entry) && !/ formula$/i.test(entry.name);
+}
+
 type StockpileEditorMode = "details" | "items";
 const tabs: { value: PlannerTab; icon: LucideIcon }[] = [
   { value: "Plan", icon: ClipboardList },
@@ -2337,6 +2342,8 @@ function PlanList({
             plan.metadata.availableStockByTypeId,
           )
         : rawList;
+  const materialBuyEntries =
+    activeTab === "Buy" ? (list as PlanBuyEntry[]).filter(isMultibuyMaterial) : [];
   const buyTypeKey =
     activeTab === "Buy"
       ? [...new Set((list as PlanBuyEntry[]).map((entry) => entry.typeId))].join(",")
@@ -2634,9 +2641,9 @@ function PlanList({
     const settings = await loadCompressSettings();
     await saveCompressSettings({
       ...settings,
-      items: list.map((entry) => ({
+      items: materialBuyEntries.map((entry) => ({
         name: entry.name,
-        typeId: "typeId" in entry ? entry.typeId : entry.itemTypeId,
+        typeId: entry.typeId,
         quantity: getListAmount(entry),
         category: "item" as const,
         imageVariation:
@@ -2664,25 +2671,31 @@ function PlanList({
                 return [entry.name, ...planColumns.map((column) => cells[column] || "")].join("\t");
               }),
           ]
-        : list.map((entry) => {
+        : (activeTab === "Buy" ? materialBuyEntries : list).map((entry) => {
             return `${entry.name}\t${getListAmount(entry)}`;
           });
     try {
       await navigator.clipboard.writeText(lines.join("\n"));
       setCopyStatus("Copied");
+      toast.add({ description: "All materials copied to clipboard" });
       window.setTimeout(() => setCopyStatus(""), 1600);
     }
     catch {
       setCopyStatus("Copy failed");
+      toast.add({ description: "Could not copy to clipboard", type: "error" });
     }
   }
 
   async function copyGroupMultibuy(category: string, entries: PlanBuyEntry[]) {
     try {
       await navigator.clipboard.writeText(
-        entries.map((entry) => `${entry.name}\t${getListAmount(entry)}`).join("\n"),
+        entries
+          .filter(isMultibuyMaterial)
+          .map((entry) => `${entry.name}\t${getListAmount(entry)}`)
+          .join("\n"),
       );
       setGroupCopyStatus({ category, label: "Copied" });
+      toast.add({ description: `All ${category} copied to clipboard` });
       window.setTimeout(
         () => {
           setGroupCopyStatus((current) => (current?.category === category ? null : current));
@@ -2692,6 +2705,7 @@ function PlanList({
     }
     catch {
       setGroupCopyStatus({ category, label: "Copy failed" });
+      toast.add({ description: "Could not copy multibuy group", type: "error" });
     }
   }
 
@@ -2781,7 +2795,11 @@ function PlanList({
           className={`${styles.planActions} ${activeTab === "React" ? styles.reactionPlanActions : ""}`}
         >
           {activeTab === "Buy" && (
-            <Button variant="outline" onClick={() => void sendToCompress()}>
+            <Button
+              variant="outline"
+              onClick={() => void sendToCompress()}
+              disabled={materialBuyEntries.length === 0}
+            >
               <Minimize2 aria-hidden="true" />
               <span>Send to Compress</span>
             </Button>
@@ -2929,9 +2947,19 @@ function PlanList({
             </div>
           )}
           {activeTab !== "React" && (
-            <Button type="button" variant="outline" onClick={copyList}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={copyList}
+              disabled={activeTab === "Buy" && materialBuyEntries.length === 0}
+            >
               <CopyIcon aria-hidden="true" />
-              {copyStatus || (activeTab === "Plan" ? "Copy table" : "Copy list")}
+              {copyStatus
+                || (activeTab === "Plan"
+                  ? "Copy table"
+                  : activeTab === "Buy"
+                    ? "Multibuy Materials"
+                    : "Copy list")}
             </Button>
           )}
         </div>
