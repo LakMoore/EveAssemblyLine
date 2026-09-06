@@ -1427,6 +1427,136 @@ test("reserves a stockpile's local assets before remote stockpiles can use them"
   );
 });
 
+test("uses activity-location stock before stockpile stock-location stock", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: 39,
+          name: "Zydrine",
+          quantity: 1150,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+        {
+          typeId: 39,
+          name: "Zydrine",
+          quantity: 1150,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: 205,
+            name: "Nova Cruise Missile",
+            quantity: 575,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        stockpiles: [
+          {
+            id: "local-materials",
+            name: "Local materials",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: 205,
+                name: "Nova Cruise Missile",
+                quantity: 575,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const zydrine = result.lists.materialsToBuy.find((material) => material.typeId === 39);
+
+  assert(zydrine);
+  assert(zydrine.stockQuantity > 0);
+  assert.equal(zydrine.buyQuantity, 0);
+  assert.equal(
+    result.lists.haulingTasks.some(
+      (task) =>
+        task.itemTypeId === 39
+        && task.fromLocationId === sourceLocationId
+        && task.toLocationId === manufacturingLocationId,
+    ),
+    false,
+  );
+});
+
+test("keeps activity stock for another demand before hauling it away", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: 39,
+          name: "Zydrine",
+          quantity: 1150,
+          category: "item",
+          rootLocationId: 40,
+        },
+        {
+          typeId: 39,
+          name: "Zydrine",
+          quantity: 244079,
+          category: "item",
+          rootLocationId: 20,
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "multi-activity",
+            name: "Multi-activity",
+            locations: {
+              stock: 20,
+              manufacturing: 20,
+              reactions: 40,
+              reprocessing: 20,
+              copying: 20,
+              invention: 20,
+            },
+            items: [
+              {
+                typeId: 37605,
+                name: "Keepstar",
+                quantity: 3,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+
+  assert.deepEqual(
+    result.lists.haulingTasks.filter((task) => task.itemTypeId === 39),
+    [],
+  );
+});
+
 test("reserves stock for manufacturing inputs before direct stockpile demand", async () => {
   const result = await calculatePlan(
     request(

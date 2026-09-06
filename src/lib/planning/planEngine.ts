@@ -1550,6 +1550,51 @@ async function calculatePlanPass(
           locationId: reprocessingLocationId,
         }));
 
+  const localDemandByLocationAndType = new Map<string, number>();
+  for (const job of [...manufacturingJobs.values(), ...reactionJobs.values()]) {
+    if (job.locationId === undefined) continue;
+    for (const input of job.inputs.materials) {
+      const key = `${job.locationId}:${input.typeId}`;
+      localDemandByLocationAndType.set(
+        key,
+        (localDemandByLocationAndType.get(key) ?? 0) + input.requiredQuantity,
+      );
+    }
+  }
+  const localStockByLocationAndType = new Map<string, number>();
+  for (const lot of stockLots) {
+    const key = `${lot.rootLocationId}:${lot.typeId}`;
+    localStockByLocationAndType.set(
+      key,
+      (localStockByLocationAndType.get(key) ?? 0) + lot.sourceItem.quantity,
+    );
+  }
+  const outboundCapacityByLocationAndType = new Map<string, number>();
+  for (const [key, quantity] of localStockByLocationAndType) {
+    outboundCapacityByLocationAndType.set(
+      key,
+      Math.max(0, quantity - (localDemandByLocationAndType.get(key) ?? 0)),
+    );
+  }
+  const haulingTasks = [...haulingByKey.values()]
+    .map((task) => {
+      const key = `${task.fromLocationId}:${task.itemTypeId}`;
+      const outboundCapacity = outboundCapacityByLocationAndType.get(key);
+      if (outboundCapacity === undefined || task.quantity <= outboundCapacity) return task;
+      const retainedQuantity = Math.max(0, outboundCapacity);
+      const removedQuantity = task.quantity - retainedQuantity;
+      const volumePerUnit = task.volume / task.quantity;
+      task.quantity = retainedQuantity;
+      task.volume = retainedQuantity * volumePerUnit;
+      if (task.productionQuantity !== undefined) {
+        task.productionQuantity = Math.max(0, task.productionQuantity - removedQuantity);
+        if (task.productionQuantity === 0) delete task.productionQuantity;
+      }
+      outboundCapacityByLocationAndType.set(key, 0);
+      return task;
+    })
+    .filter((task) => task.quantity > 0);
+
   const materialsToBuy = [...materials.values()];
   const bpcRequirements = [...bpcs.values()];
   const bpcsNeeded = bpcRequirements.filter(
@@ -1563,7 +1608,6 @@ async function calculatePlanPass(
     ...[...bpcs.values()].map((bpc) => ({ kind: "bpc" as const, ...bpc })),
     ...reactionFormulas.values(),
   ];
-  const haulingTasks = [...haulingByKey.values()];
   for (const task of haulingTasks) task.name = resolvedName(task.itemTypeId);
   const result = {
     metadata: {
@@ -1739,7 +1783,11 @@ async function allocateStockpileStock(
     );
   };
 
-  const allocateTypes = (typeIdsToAllocate: Set<number>, demandByPriority: StockpileDemand[]) => {
+  const allocateTypes = (
+    typeIdsToAllocate: Set<number>,
+    demandByPriority: StockpileDemand[],
+    preferActivityLocations = false,
+  ) => {
     remainingDemand = demandByPriority.map((demand) => new Map(demand));
     for (const typeId of typeIdsToAllocate) {
       const stockIndexes = request.stock
@@ -1772,6 +1820,12 @@ async function allocateStockpileStock(
           if (
             remainingStock[index] <= 0
             || !matchingLocation
+            || (
+              preferActivityLocations
+              && item.category !== "reactionformula"
+              && stockLocationId !== undefined
+              && !stockpileActivityLocations(stockpile).has(stockLocationId)
+            )
             || !canUseFutureStock(index, stockpileIndex)
           ) {
             continue;
@@ -1867,6 +1921,7 @@ async function allocateStockpileStock(
     allocateTypes(
       new Set(jobInputDemandByStockpile.flatMap((demand) => [...demand.keys()])),
       jobInputDemandByStockpile,
+      true,
     );
     allocateTypes(
       new Set(standingDemandByStockpile.flatMap((demand) => [...demand.keys()])),
