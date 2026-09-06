@@ -237,6 +237,106 @@ test("plans invention attempts and materials for a missing T2 BPC", async () => 
   assert.equal(requiredSkills.get(3426), 5);
 });
 
+test("merges invention jobs by location and blueprint type", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "first",
+            name: "First destination",
+            locations: {
+              stock: 10,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: manufacturingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: capRechargerTypeId,
+                name: "Cap Recharger II",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "second",
+            name: "Second destination",
+            locations: {
+              stock: 11,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: manufacturingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: capRechargerTypeId,
+                name: "Cap Recharger II",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "third",
+            name: "Third destination",
+            locations: {
+              stock: 12,
+              manufacturing: alternateSourceLocationId,
+              reactions: alternateSourceLocationId,
+              reprocessing: alternateSourceLocationId,
+              copying: alternateSourceLocationId,
+              invention: alternateSourceLocationId,
+            },
+            items: [
+              {
+                typeId: capRechargerTypeId,
+                name: "Cap Recharger II",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+
+  assert.deepEqual(
+    result.lists.inventionJobs.map(({ locationId, typeId, runs }) => ({
+      locationId,
+      typeId,
+      runs,
+    })),
+    [
+      {
+        locationId: manufacturingLocationId,
+        typeId: capRechargerInventionBlueprintTypeId,
+        runs: 6,
+      },
+      {
+        locationId: alternateSourceLocationId,
+        typeId: capRechargerInventionBlueprintTypeId,
+        runs: 3,
+      },
+    ],
+  );
+});
+
 test("uses an available T2 BPC without scheduling invention", async () => {
   const result = await calculatePlan(
     request(

@@ -2400,6 +2400,7 @@ function PlanList({
   }, [activeTab, buyTypeKey, language]);
   const locationGroupedTab =
     activeTab === "Reprocess"
+    || activeTab === "Invent"
     || activeTab === "React"
     || activeTab === "Manufacture"
     || (activeTab === "Plan" && planViewMode === "build-location");
@@ -3254,9 +3255,7 @@ function PlanList({
                     ? `${entry.efficiency.toFixed(1)}% yield`
                     : "fromLocationId" in entry && activeTab !== "Buy"
                       ? `From ${locationNamesById.get(entry.fromLocationId) ?? entry.fromLocationId} to ${locationNamesById.get(entry.toLocationId) ?? entry.toLocationId}`
-                      : "locationId" in entry && activeTab !== "Buy" && activeTab !== "Manufacture"
-                        ? `Location ${entry.locationId}`
-                        : "";
+                      : "";
                 const totalTime =
                   "totalTime" in entry && typeof entry.totalTime === "number"
                     ? entry.totalTime
