@@ -17,6 +17,7 @@ import {
   getMarketGroups as loadMarketGroups,
   getRigDogma as loadRigDogma,
   getTypeDogma as loadTypeDogma,
+  getSkillPrerequisites as loadSkillPrerequisites,
   getSdeBuildNumber as loadSdeBuildNumber,
   getStations as loadStations,
   getSystems as loadSystems,
@@ -352,6 +353,10 @@ export function getRigDogma() {
 
 export function getTypeDogma() {
   return getMap<TypeDogmaRecord>(loadTypeDogma);
+}
+
+export function getSkillPrerequisites() {
+  return getMap(loadSkillPrerequisites);
 }
 
 export function getRigDogmaByTypeId(typeId: number): Promise<TypeDogmaRecord | null> {

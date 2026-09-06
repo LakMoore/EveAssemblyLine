@@ -227,6 +227,14 @@ test("plans invention attempts and materials for a missing T2 BPC", async () => 
     result.lists.skillsRequired.some((skill) => skill.skillId === 23087),
     true,
   );
+  const requiredSkills = new Map(
+    result.lists.skillsRequired.map((skill) => [skill.skillId, skill.requiredLevel]),
+  );
+  assert.equal(requiredSkills.get(3402), 5);
+  assert.equal(requiredSkills.get(3413), 5);
+  assert.equal(requiredSkills.get(21718), 2);
+  assert.equal(requiredSkills.get(3432), 3);
+  assert.equal(requiredSkills.get(3426), 5);
 });
 
 test("uses an available T2 BPC without scheduling invention", async () => {
@@ -394,6 +402,14 @@ test("applies assigned reaction group facility modifiers", async () => {
       [16657, 50],
       [16661, 50],
     ],
+  );
+  assert.deepEqual(
+    result.lists.skillsRequired.find((skill) => skill.skillId === 45746),
+    {
+      skillId: 45746,
+      name: "Reactions",
+      requiredLevel: 3,
+    },
   );
 });
 

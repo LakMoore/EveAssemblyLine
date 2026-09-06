@@ -26,6 +26,7 @@ import {
 const processedDir = resolve("sde/processed");
 const rigSizeAttribute = 1547;
 export type LoadedType = TypesRecord & { packagedVolume?: number };
+export type SkillPrerequisite = { skillId: number; level: number };
 let sdeBuildNumber = "unknown";
 const typeById = new Map<number, LoadedType>();
 const marketGroupById = new Map<number, MarketGroupsRecord>();
@@ -59,6 +60,7 @@ const systemById = new Map<number, MapSolarSystemsRecord>();
 const stationById = new Map<number, NpcStationsRecord>();
 const rigDogmaByTypeId = new Map<number, TypeDogmaRecord>();
 const typeDogmaByTypeId = new Map<number, TypeDogmaRecord>();
+const skillPrerequisitesByTypeId = new Map<number, SkillPrerequisite[]>();
 const bonusDogmaAttributesById = new Map<number, DogmaAttributesRecord>();
 const dogmaAttributeById = new Map<number, DogmaAttributesRecord>();
 const loadPromises = new Map<string, Promise<unknown>>();
@@ -305,6 +307,36 @@ export function getTypeDogma() {
       return typeDogmaByTypeId;
     },
   ).then((typeDogma) => typeDogma);
+}
+
+/** Loads the skill prerequisites encoded in the SDE skill dogma attributes. */
+export async function getSkillPrerequisites() {
+  return getOnce(
+    "skillPrerequisites",
+    async () => {
+      const typeDogma = await getTypeDogma();
+      for (const [skillId, record] of typeDogma) {
+        const prerequisites = [182, 183, 184].flatMap((attributeId, index) => {
+          const skillAttribute = record.dogmaAttributes.find(
+            (attribute) => attribute.attributeID === attributeId,
+          );
+          const levelAttribute = record.dogmaAttributes.find(
+            (attribute) => attribute.attributeID === 277 + index,
+          );
+          return skillAttribute
+            && levelAttribute
+            && Number.isSafeInteger(skillAttribute.value)
+            && skillAttribute.value > 0
+            && Number.isSafeInteger(levelAttribute.value)
+            && levelAttribute.value > 0
+            ? [{ skillId: skillAttribute.value, level: levelAttribute.value }]
+            : [];
+        });
+        if (prerequisites.length > 0) skillPrerequisitesByTypeId.set(skillId, prerequisites);
+      }
+      return skillPrerequisitesByTypeId;
+    },
+  );
 }
 
 export async function getBonusDogmaAttributes() {

@@ -4,6 +4,7 @@ import {
   getCompressibleTypes,
   getGroups,
   getIndustryTargetFilters,
+  getSkillPrerequisites,
   getTypeMaterials,
 } from "@/cache/services/sdeCache";
 import { getTypes } from "@/lib/sde/loader";
@@ -418,13 +419,15 @@ async function calculatePlanPass(
     return fallback;
   }
   const language = request.language ?? "en";
-  const [typeRecords, compressibleTypes, typeMaterials, groups, targetFilters] = await Promise.all([
-    profiler.measure("typeNameBatch", () => getTypes()),
-    getCompressibleTypes(),
-    getTypeMaterials(),
-    getGroups(),
-    getIndustryTargetFilters(),
-  ]);
+  const [typeRecords, compressibleTypes, typeMaterials, groups, targetFilters, skillPrerequisites] =
+    await Promise.all([
+      profiler.measure("typeNameBatch", () => getTypes()),
+      getCompressibleTypes(),
+      getTypeMaterials(),
+      getGroups(),
+      getIndustryTargetFilters(),
+      getSkillPrerequisites(),
+    ]);
   const productionGroups = getProductionGroupReferences(targetFilters, groups, language);
   const facilityProfilesByLocationId = new Map(
     (request.facilityProfiles ?? []).map((profile) => [profile.locationId, profile]),
@@ -997,6 +1000,23 @@ async function calculatePlanPass(
     }
   }
 
+  function addSkillPrerequisites() {
+    const pending = [...requiredSkillLevels.keys()];
+    const expanded = new Set<number>();
+    while (pending.length > 0) {
+      const skillId = pending.pop()!;
+      if (expanded.has(skillId)) continue;
+      expanded.add(skillId);
+      for (const prerequisite of skillPrerequisites.get(skillId) ?? []) {
+        requiredSkillLevels.set(
+          prerequisite.skillId,
+          Math.max(requiredSkillLevels.get(prerequisite.skillId) ?? 0, prerequisite.level),
+        );
+        if (!expanded.has(prerequisite.skillId)) pending.push(prerequisite.skillId);
+      }
+    }
+  }
+
   function updateMaterial(typeId: number, fallbackName: string, update: Partial<Material>) {
     const existing = materials.get(typeId);
     materials.set(
@@ -1524,6 +1544,8 @@ async function calculatePlanPass(
       }
     },
   );
+
+  addSkillPrerequisites();
 
   for (const material of materials.values()) {
     material.remainingProductionQuantity = producedParts.get(material.typeId) ?? 0;

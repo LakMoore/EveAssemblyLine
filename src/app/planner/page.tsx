@@ -2748,6 +2748,9 @@ function PlanList({
                       <span className={styles.skillsInsufficient}>
                         {character.skills.length} MISSING SKILL
                         {character.skills.length === 1 ? "" : "S"}
+                        {character.skills.some((skill) => skill.currentLevel > 0)
+                          ? ` (${character.skills.filter((skill) => skill.currentLevel > 0).length} PARTIAL)`
+                          : ""}
                         <X aria-hidden="true" />
                       </span>
                     )
