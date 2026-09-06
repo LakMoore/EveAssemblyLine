@@ -11,20 +11,18 @@ import {
   getResolvedAssets,
   getBlueprintInstances,
   getRootLocationsByItemId,
-  resolveStructureLocationForOwner,
   getRunningIndustryJobs,
   getMarketOrderStock,
   getCorporationAssetSource,
   getCorporationLocationSource,
 } from "@/lib/esi/cache";
-import type { StructureLocationSource } from "@/lib/esi/cache";
+import type { Facility } from "@/lib/planning/facilities";
 import {
   getGroups,
   getMarketGroups,
   getBlueprintById,
   getShipTypeIds,
   getStations,
-  getStructureTypeIds,
   getSystems,
   getTypesByIds,
 } from "@/cache/services/sdeCache";
@@ -44,7 +42,11 @@ import type {
   StockContribution,
   StockItem,
 } from "@/lib/planning/types";
-import { calculateFacilities } from "@/lib/planning/facilitiesServer";
+import {
+  calculateFacilities,
+  type FacilityCalculationContext,
+} from "@/lib/planning/facilitiesServer";
+import { createTimingScope, flattenTimingPhases, logTiming } from "@/lib/server/timing";
 
 type RootLocation = {
   locationId: number;
@@ -139,63 +141,17 @@ function rootLocationFromAssetLocation(root: AssetLocation): RootLocation {
   };
 }
 
-async function resolveLocation(
-  locationId: number,
-  source: StructureLocationSource,
-  rootLocationsByItemId: Map<number, AssetLocation>,
-  structureTypeIds: Set<number>,
-  stations: Awaited<ReturnType<typeof getStations>>,
-  types: Awaited<ReturnType<typeof getTypesByIds>>,
-  characterIds: number[],
-  sessionId: string,
-): Promise<RootLocation | undefined> {
-  const cachedRoot = rootLocationsByItemId.get(locationId);
-  if (cachedRoot) return rootLocationFromAssetLocation(cachedRoot);
-
-  const station = stations.get(locationId);
-  if (station) {
-    return {
-      locationId,
-      kind: "station",
-      typeId: station.typeID,
-      name: types.get(station.typeID)?.name.en,
-      systemId: station.solarSystemID,
-      resolved: true,
-    };
-  }
-
-  try {
-    const structure = await resolveStructureLocationForOwner(
-      locationId,
-      source,
-      characterIds,
-      sessionId,
-    );
-    if (structure) {
-      const resolved = rootLocationFromAssetLocation(structure);
-      if (!resolved.typeId || !structureTypeIds.has(resolved.typeId)) {
-        console.warn(
-          "[stock] Could not resolve root location",
-          {
-            locationId,
-            locationType: resolved.kind,
-            typeId: resolved.typeId,
-            typeName: resolved.typeId ? types.get(resolved.typeId)?.name.en : undefined,
-          },
-        );
-      }
-      return resolved;
-    }
-  }
-  catch {}
-  console.warn(
-    "[stock] Could not resolve root location",
-    {
-      locationId,
-      locationType: "structure",
-    },
-  );
-  return undefined;
+function rootLocationFromFacility(facility: Facility): RootLocation | undefined {
+  const locationId = typeof facility.id === "number" ? facility.id : Number(facility.id);
+  if (!Number.isInteger(locationId)) return undefined;
+  return {
+    locationId,
+    kind: facility.locationType,
+    typeId: facility.typeId,
+    name: facility.name,
+    systemId: facility.systemId,
+    resolved: true,
+  };
 }
 
 function addStockContribution(
@@ -439,28 +395,19 @@ function getInstalledJobRuns(job: IndustryJobRecord) {
 }
 
 export async function GET(request: NextRequest) {
-  const startedAt = performance.now();
-  let lastPhaseAt = startedAt;
-  const phaseDurations: Record<string, number> = {};
-  const markPhase = (name: string) => {
-    const now = performance.now();
-    phaseDurations[name] = Math.round(now - lastPhaseAt);
-    lastPhaseAt = now;
-  };
+  const timing = createTimingScope();
+  const markPhase = (name: string) => timing.mark(name);
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
-  const characterIds = await getSessionCharacterIds(session);
-  const corporationSettings = session.collectionId
-    ? await getCollectionCorporationSettings(session.collectionId)
-    : [];
+  const [characterIds, corporationSettings] = await Promise.all([
+    getSessionCharacterIds(session),
+    session.collectionId
+      ? getCollectionCorporationSettings(session.collectionId)
+      : Promise.resolve([]),
+  ]);
   const corporationPolicies = await getCorporationSourcePolicies(
     characterIds,
     corporationSettings,
-    session.sessionId,
-  );
-  const corporationSources = await getCorporationSourceCatalog(
-    characterIds,
-    corporationPolicies,
     session.sessionId,
   );
   const url = new URL(request.url);
@@ -497,7 +444,12 @@ export async function GET(request: NextRequest) {
   }
   const requestedLanguage = url.searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
-  const marketStock = await getMarketOrderStock(
+  const corporationSourcesPromise = getCorporationSourceCatalog(
+    characterIds,
+    corporationPolicies,
+    session.sessionId,
+  );
+  const marketStockPromise = getMarketOrderStock(
     characterIds,
     {
       personalSellOrdersAsStock: true,
@@ -507,6 +459,7 @@ export async function GET(request: NextRequest) {
     session.sessionId,
     corporationPolicies,
   );
+  const facilitySettingsPromise = getCollectionFacilities(session.collectionId!);
   markPhase("session");
   const [
     assets,
@@ -514,26 +467,51 @@ export async function GET(request: NextRequest) {
     jobs,
     blueprintInstances,
     shipTypeIds,
-    structureTypeIds,
     groups,
     marketGroups,
     stations,
     systems,
     rootLocationsByItemId,
+    corporationSources,
+    marketStock,
+    facilitySettings,
   ] = await Promise.all([
     getResolvedAssets(characterIds, true, session.sessionId, corporationPolicies),
     getAllAssetsRaw(characterIds, true, session.sessionId, corporationPolicies),
     getRunningIndustryJobs(characterIds, true, session.sessionId, corporationPolicies),
     getBlueprintInstances(characterIds, true, session.sessionId, corporationPolicies),
     getShipTypeIds(),
-    getStructureTypeIds(),
     getGroups(),
     getMarketGroups(),
     getStations(),
     getSystems(),
     getRootLocationsByItemId(characterIds, true, session.sessionId, corporationPolicies),
+    corporationSourcesPromise,
+    marketStockPromise,
+    facilitySettingsPromise,
   ]);
   markPhase("data");
+  const facilityResponse = await calculateFacilities(
+    request,
+    facilitySettings,
+    timing.child("facilities"),
+    {
+      session,
+      characterIds,
+      corporationPolicies,
+      roots: rootLocationsByItemId,
+      corporationSources,
+      stations,
+      systems,
+      groups,
+    } satisfies FacilityCalculationContext,
+  );
+  const facilitiesById = new Map(
+    facilityResponse.facilities.flatMap((facility) => {
+      const location = rootLocationFromFacility(facility);
+      return location ? [[location.locationId, location] as const] : [];
+    }),
+  );
   const types = await getTypesByIds([
     ...new Set([
       ...assets.map((asset) => asset.typeId),
@@ -543,67 +521,6 @@ export async function GET(request: NextRequest) {
     ]),
   ]);
   markPhase("types");
-  const locationSources = new Map<number, StructureLocationSource>();
-  for (const job of jobs) {
-    const source = {
-      ownerType: job.ownerType,
-      ownerId: job.ownerId,
-      recordType: "job",
-    } as const;
-    for (const locationId of [job.blueprintLocationId, job.locationId, job.outputLocationId]) {
-      if (!locationSources.has(locationId)) locationSources.set(locationId, source);
-    }
-  }
-  for (const blueprint of blueprintInstances) {
-    if (locationSources.has(blueprint.locationId)) continue;
-    locationSources.set(
-      blueprint.locationId,
-      {
-        ownerType: blueprint.ownerType,
-        ownerId: blueprint.ownerId,
-        recordType: "blueprint",
-      },
-    );
-  }
-  for (const order of marketStock ?? []) {
-    if (
-      order.sourceLocationId === undefined
-      || order.ownerType === undefined
-      || order.ownerId === undefined
-      || locationSources.has(order.sourceLocationId)
-    ) {
-      continue;
-    }
-    locationSources.set(
-      order.sourceLocationId,
-      {
-        ownerType: order.ownerType,
-        ownerId: order.ownerId,
-        recordType: "order",
-      },
-    );
-  }
-  const jobLocations = new Map(
-    await Promise.all(
-      [...locationSources.entries()].map(async ([locationId, source]) => {
-        const cachedRoot = rootLocationsByItemId.get(locationId);
-        const location = cachedRoot
-          ? rootLocationFromAssetLocation(cachedRoot)
-          : await resolveLocation(
-              locationId,
-              source,
-              rootLocationsByItemId,
-              structureTypeIds,
-              stations,
-              types,
-              characterIds,
-              session.sessionId,
-            );
-        return [locationId, location] as const;
-      }),
-    ),
-  );
-  markPhase("locations");
   const buckets = new Map<number, StockBucket>();
   const productQuantities = new Map<number, number>();
   await Promise.all(
@@ -733,12 +650,19 @@ export async function GET(request: NextRequest) {
             runs: blueprintInstance.runsBeforeJobAdjustments,
           };
     const preferredBlueprintLocation =
-      (blueprintInstance && jobLocations.get(blueprintInstance.locationId))
+      facilitiesById.get(job.facilityId)
+      ?? (blueprintInstance && rootLocationsByItemId.has(blueprintInstance.locationId)
+        ? rootLocationFromAssetLocation(rootLocationsByItemId.get(blueprintInstance.locationId)!)
+        : undefined)
       ?? (blueprint && isDirectLocation(blueprint)
         ? rootLocationFromAssetLocation(blueprint.rootLocation)
-        : (jobLocations.get(job.blueprintLocationId) ?? jobLocations.get(job.locationId)));
+        : rootLocationsByItemId.has(job.blueprintLocationId)
+          ? rootLocationFromAssetLocation(rootLocationsByItemId.get(job.blueprintLocationId)!)
+          : rootLocationsByItemId.has(job.locationId)
+            ? rootLocationFromAssetLocation(rootLocationsByItemId.get(job.locationId)!)
+            : undefined);
     const blueprintLocation = preferredBlueprintLocation
-      ?? jobLocations.get(job.locationId) ?? {
+      ?? facilitiesById.get(job.facilityId) ?? {
         locationId: job.blueprintLocationId,
         kind: "anchored" as const,
         resolved: false,
@@ -755,8 +679,12 @@ export async function GET(request: NextRequest) {
       industryJobStatus !== "delivered",
       industryJobStatus,
     )) {
-      const location = jobLocations.get(job.outputLocationId)
-        ?? jobLocations.get(job.locationId) ?? {
+      const location = facilitiesById.get(job.facilityId)
+        ?? (rootLocationsByItemId.has(job.outputLocationId)
+          ? rootLocationFromAssetLocation(rootLocationsByItemId.get(job.outputLocationId)!)
+          : rootLocationsByItemId.has(job.locationId)
+            ? rootLocationFromAssetLocation(rootLocationsByItemId.get(job.locationId)!)
+            : undefined) ?? {
           locationId: job.outputLocationId,
           kind: "anchored" as const,
           resolved: false,
@@ -795,10 +723,6 @@ export async function GET(request: NextRequest) {
     }
   }
   markPhase("aggregate");
-  const facilityResponse = await calculateFacilities(
-    request,
-    await getCollectionFacilities(session.collectionId!),
-  );
   const payload = {
     assets: [
       ...[...buckets.values()].flatMap((bucket) =>
@@ -814,27 +738,28 @@ export async function GET(request: NextRequest) {
     productionGroups: facilityResponse.productionGroups,
     corporationSources,
   };
-  const totalMs = Math.round(performance.now() - startedAt);
+  const timingProfile = timing.complete();
   const profilingEnabled = process.env.NODE_ENV === "development";
   if (profilingEnabled) {
-    console.info(
+    logTiming(
       "[state/assets] timing",
       {
-        totalMs,
-        phasesMs: phaseDurations,
-        characters: characterIds.length,
-        assets: assets.length,
-        jobs: jobs.length,
-        jobLocations: jobLocations.size,
-        facilities: payload.facilities.length,
+        ...timingProfile,
+        charactersCount: characterIds.length,
+        assetsCount: assets.length,
+        jobsCount: jobs.length,
+        facilitiesCount: facilityResponse.facilities.length,
+        jobLocationFallbackCount: jobs.filter((job) => !facilitiesById.has(job.facilityId)).length,
       },
     );
   }
   const response = NextResponse.json(payload);
   if (profilingEnabled) {
     const timingHeader = [
-      `total;dur=${totalMs}`,
-      ...Object.entries(phaseDurations).map(([name, duration]) => `${name};dur=${duration}`),
+      `total;dur=${timingProfile.totalMs}`,
+      ...flattenTimingPhases(timingProfile.phasesMs).map(
+        ([name, duration]) => `${name};dur=${duration}`,
+      ),
     ].join(", ");
     response.headers.set("Server-Timing", timingHeader);
   }

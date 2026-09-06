@@ -497,48 +497,40 @@ export default function AppShell({ children }: { children: ReactNode }) {
       }
       const refreshedAt = new Date().toISOString();
       const requiredEndpoints = new Set<string>(refreshDependentEndpoints[activePage]);
-      let shipsResponse;
-      if (requiredEndpoints.has("state/ships")) {
-        try {
-          shipsResponse = await loadClientShips(true);
-        }
-        catch {}
-      }
       let jobsResponse;
-      if (requiredEndpoints.has("state/jobs")) {
-        try {
-          jobsResponse = await loadClientJobs(true);
-        }
-        catch {}
-      }
-      if (requiredEndpoints.has("state/assets")) {
-        try {
-          const assetsData = await loadClientAssets(language, true);
-          assetsResponse = assetsData;
-          corporationSources = assetsData.corporationSources;
-          assetLocations = groupClientAssetsByLocation(assetsData);
-          await replaceEsiStock(
-            assetLocations.map((location) => ({
-              systemId: location.systemId ?? 0,
-              systemName: location.systemName ?? "Unknown system",
-              structureId: String(location.locationId),
-              structureName: location.name,
-              source: "esi" as const,
-              items: location.items,
-            })),
-          );
-        }
-        catch {}
-      }
-      try {
-        stateResponse = await loadClientCharacterState(true);
-      }
-      catch {}
-      if (requiredEndpoints.has("compress/options")) {
-        try {
-          await loadCompressOptions(language, true);
-        }
-        catch {}
+      let shipsResponse;
+      const [loadedJobs, loadedShips, loadedAssets, loadedState] = await Promise.all([
+        requiredEndpoints.has("state/jobs")
+          ? loadClientJobs(true).catch(() => undefined)
+          : Promise.resolve(undefined),
+        requiredEndpoints.has("state/ships")
+          ? loadClientShips(true).catch(() => undefined)
+          : Promise.resolve(undefined),
+        requiredEndpoints.has("state/assets")
+          ? loadClientAssets(language, true).catch(() => undefined)
+          : Promise.resolve(undefined),
+        loadClientCharacterState(true).catch(() => undefined),
+        requiredEndpoints.has("compress/options")
+          ? loadCompressOptions(language, true).catch(() => undefined)
+          : Promise.resolve(undefined),
+      ]);
+      jobsResponse = loadedJobs;
+      shipsResponse = loadedShips;
+      stateResponse = loadedState;
+      if (loadedAssets) {
+        assetsResponse = loadedAssets;
+        corporationSources = loadedAssets.corporationSources;
+        assetLocations = groupClientAssetsByLocation(loadedAssets);
+        await replaceEsiStock(
+          assetLocations.map((location) => ({
+            systemId: location.systemId ?? 0,
+            systemName: location.systemName ?? "Unknown system",
+            structureId: String(location.locationId),
+            structureName: location.name,
+            source: "esi" as const,
+            items: location.items,
+          })),
+        );
       }
       if (refreshSucceeded) await saveLastRefreshAt(refreshedAt);
       window.dispatchEvent(
@@ -598,10 +590,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
         const staleEndpoints = new Set(
           stale.filter((entry) => entry.stale).map((entry) => entry.endpoint),
         );
-        if (staleEndpoints.has("state/assets")) await loadClientAssets(language, true);
-        if (staleEndpoints.has("state/jobs")) await loadClientJobs(true);
-        if (staleEndpoints.has("state/ships")) await loadClientShips(true);
-        if (staleEndpoints.has("compress/options")) await loadCompressOptions(language, true);
+        await Promise.all([
+          staleEndpoints.has("state/assets") ? loadClientAssets(language, true) : Promise.resolve(),
+          staleEndpoints.has("state/jobs") ? loadClientJobs(true) : Promise.resolve(),
+          staleEndpoints.has("state/ships") ? loadClientShips(true) : Promise.resolve(),
+          staleEndpoints.has("compress/options")
+            ? loadCompressOptions(language, true)
+            : Promise.resolve(),
+        ]);
       })
       .catch(() => undefined);
     return () => {

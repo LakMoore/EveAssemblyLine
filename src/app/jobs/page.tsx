@@ -2,7 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { loadClientJobs, type ClientJobsResponse } from "@/lib/client/requestCache";
+import {
+  loadClientJobs,
+  loadClientSession,
+  type ClientCharacter,
+  type ClientJobsResponse,
+} from "@/lib/client/requestCache";
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import styles from "../page.module.css";
@@ -38,7 +43,7 @@ function formatRemaining(value: string) {
 
 type ClientJob = NonNullable<ClientJobsResponse["jobs"]>[number];
 
-function JobRow({ job }: { job: ClientJob }) {
+function JobRow({ job, characterName }: { job: ClientJob; characterName: string }) {
   return (
     <article className={styles.jobRow} key={`${job.ownerType}-${job.jobId}`}>
       <div>
@@ -51,7 +56,7 @@ function JobRow({ job }: { job: ClientJob }) {
           variation={isScienceJob(job.activity) ? (job.usesBpo ? "bp" : "bpc") : "icon"}
         />
         <small>
-          {job.activity} · {job.characterName}
+          {job.activity} · {characterName}
           {job.ownerType === "corporation" ? " · CORPORATION" : ""}
         </small>
         {job.usesBpo && <Badge className={styles.jobBpoFlag}>From BPO</Badge>}
@@ -82,6 +87,7 @@ function JobRow({ job }: { job: ClientJob }) {
 
 export default function JobsPage() {
   const [data, setData] = useState<ClientJobsResponse | null>(null);
+  const [characters, setCharacters] = useState<ClientCharacter[]>([]);
   const [error, setError] = useState(false);
 
   useEffect(() => {
@@ -91,9 +97,12 @@ export default function JobsPage() {
         setData(refreshedJobs);
         return;
       }
-      void loadClientJobs()
-        .then((response) => {
-          if (!cancelled) setData(response);
+      void Promise
+        .all([loadClientSession(), loadClientJobs()])
+        .then(([session, response]) => {
+          if (cancelled) return;
+          setCharacters(session.characters ?? []);
+          setData(response);
         })
         .catch(() => {
           if (!cancelled) setError(true);
@@ -116,13 +125,16 @@ export default function JobsPage() {
     return () => window.clearInterval(timer);
   }, []);
 
-  const jobs = data?.jobs ?? [];
+  const jobs = useMemo(() => data?.jobs ?? [], [data?.jobs]);
+  const characterNames = useMemo(
+    () => new Map(characters.map((character) => [character.characterId, character.characterName])),
+    [characters],
+  );
+  const slotUsage = useMemo(() => data?.slotUsage ?? {}, [data?.slotUsage]);
   const collectionJobCount = useMemo(() => {
-    const characterIds = new Set(
-      (data?.characters ?? []).map((character) => character.characterId),
-    );
-    return (data?.jobs ?? []).filter((job) => characterIds.has(job.characterId)).length;
-  }, [data]);
+    const characterIds = new Set(characters.map((character) => character.characterId));
+    return jobs.filter((job) => characterIds.has(job.characterId)).length;
+  }, [characters, jobs]);
   const jobGroups = useMemo(() => {
     const allJobs = data?.jobs ?? [];
     const jobsByInstaller = new Map<number, ClientJob[]>();
@@ -132,10 +144,8 @@ export default function JobsPage() {
       jobsByInstaller.set(job.characterId, installerJobs);
     }
 
-    const collectionCharacterIds = new Set(
-      (data?.characters ?? []).map((character) => character.characterId),
-    );
-    const collectionGroups = (data?.characters ?? []).flatMap((character) => {
+    const collectionCharacterIds = new Set(characters.map((character) => character.characterId));
+    const collectionGroups = characters.flatMap((character) => {
       const installerJobs = jobsByInstaller.get(character.characterId) ?? [];
       return installerJobs.length > 0
         ? [
@@ -153,19 +163,23 @@ export default function JobsPage() {
       ...collectionGroups,
       { key: "other-installers", name: "Other Installers", jobs: otherJobs },
     ];
-  }, [data]);
+  }, [characters, data]);
   const slotTypes = useMemo(() => {
     const types = new Set(slotOrder);
-    for (const character of data?.characters ?? []) {
-      for (const type of Object.keys(character.slots)) types.add(type);
+    for (const usage of Object.values(slotUsage)) {
+      for (const type of Object.keys(usage.slots)) types.add(type);
     }
     return [...types];
-  }, [data]);
+  }, [slotUsage]);
   const availableSlotTotals = slotOrder.map((type) => {
-    const totals = (data?.characters ?? []).reduce(
+    const totals = characters.reduce(
       (summary, character) => {
-        const totalSlots = character.availableSlots[type] ?? 0;
-        const inUseSlots = character.slots[type] ?? 0;
+        const usage = slotUsage[String(character.characterId)] ?? {
+          slots: {},
+          availableSlots: {},
+        };
+        const totalSlots = usage.availableSlots[type] ?? 0;
+        const inUseSlots = usage.slots[type] ?? 0;
         return {
           totalSlots: summary.totalSlots + totalSlots,
           inUseSlots: summary.inUseSlots + inUseSlots,
@@ -237,38 +251,44 @@ export default function JobsPage() {
           </div>
         </div>
         <div className={styles.jobsCharacters}>
-          {(data?.characters ?? []).map((character) => (
-            <div className={styles.jobsCharacter} key={character.characterId}>
-              <div className={styles.jobsCharacterIdentity}>
-                <Image
-                  src={eveCharacterPortraitUrl(character.characterId, 64)}
-                  alt=""
-                  width={32}
-                  height={32}
-                />
-                <strong>{character.characterName}</strong>
+          {characters.map((character) => {
+            const usage = slotUsage[String(character.characterId)] ?? {
+              slots: {},
+              availableSlots: {},
+            };
+            return (
+              <div className={styles.jobsCharacter} key={character.characterId}>
+                <div className={styles.jobsCharacterIdentity}>
+                  <Image
+                    src={eveCharacterPortraitUrl(character.characterId, 64)}
+                    alt=""
+                    width={32}
+                    height={32}
+                  />
+                  <strong>{character.characterName}</strong>
+                </div>
+                <div className={styles.jobsSlotGrid}>
+                  {slotTypes.map((type) => (
+                    <span key={type}>
+                      <small>
+                        {type === "Manufacturing" ? (
+                          <Factory aria-hidden="true" />
+                        ) : type === "Reactions" ? (
+                          <Atom aria-hidden="true" />
+                        ) : type === "Science" ? (
+                          <FlaskConical aria-hidden="true" />
+                        ) : null}
+                        {type}
+                      </small>
+                      <b>
+                        {usage.slots[type] ?? 0} / {usage.availableSlots[type] ?? 0}
+                      </b>
+                    </span>
+                  ))}
+                </div>
               </div>
-              <div className={styles.jobsSlotGrid}>
-                {slotTypes.map((type) => (
-                  <span key={type}>
-                    <small>
-                      {type === "Manufacturing" ? (
-                        <Factory aria-hidden="true" />
-                      ) : type === "Reactions" ? (
-                        <Atom aria-hidden="true" />
-                      ) : type === "Science" ? (
-                        <FlaskConical aria-hidden="true" />
-                      ) : null}
-                      {type}
-                    </small>
-                    <b>
-                      {character.slots[type] ?? 0} / {character.availableSlots[type] ?? 0}
-                    </b>
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
       <section className={styles.jobsSection}>
@@ -287,7 +307,13 @@ export default function JobsPage() {
               </div>
               <div className={styles.jobsList}>
                 {group.jobs.map((job) => (
-                  <JobRow job={job} key={`${job.ownerType}-${job.jobId}`} />
+                  <JobRow
+                    job={job}
+                    characterName={
+                      characterNames.get(job.characterId) ?? `Character ${job.characterId}`
+                    }
+                    key={`${job.ownerType}-${job.jobId}`}
+                  />
                 ))}
               </div>
             </div>

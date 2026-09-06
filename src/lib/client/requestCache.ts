@@ -236,17 +236,17 @@ export type ClientShipsResponse = {
 };
 
 export type ClientJobsResponse = {
-  characters?: Array<{
-    characterId: number;
-    characterName: string;
-    slots: Record<string, number>;
-    availableSlots: Record<string, number>;
-  }>;
+  slotUsage?: Record<
+    string,
+    {
+      slots: Record<string, number>;
+      availableSlots: Record<string, number>;
+    }
+  >;
   jobs?: Array<{
     jobId: number;
     characterId: number;
     ownerId: number;
-    characterName: string;
     ownerType: "character" | "corporation";
     activity: string;
     status: string;
@@ -339,6 +339,8 @@ let jobsRequest: Promise<ClientJobsResponse> | undefined;
 let jobsResponse: ClientJobsResponse | undefined;
 let corporationSettingsRequest: Promise<ClientCorporationSettings[]> | undefined;
 let corporationSettingsResponse: ClientCorporationSettings[] | undefined;
+
+const emptyJobsResponse: ClientJobsResponse = { slotUsage: {}, jobs: [] };
 
 function loadJson<T>(
   url: string,
@@ -445,18 +447,26 @@ export function loadClientShips(reload = false) {
 
 export function loadClientJobs(reload = false) {
   if (!reload && jobsResponse) return Promise.resolve(jobsResponse);
-  jobsRequest
-    ??= fetch("/api/state/jobs", { cache: "no-store" })
-      .then(async (response) => {
-        const data = (await response.json()) as ClientJobsResponse;
-        if (!response.ok) throw new Error("Could not load industry jobs.");
-        await saveEndpointResponse("state/jobs", "/api/state/jobs", data);
-        jobsResponse = data;
-        return data;
-      })
-      .finally(() => {
-        jobsRequest = undefined;
-      });
+  if (jobsRequest) return jobsRequest;
+  jobsRequest = (async () => {
+    if (!reload) {
+      const cached = await loadEndpointRecord<ClientJobsResponse>("state/jobs");
+      if (cached) {
+        jobsResponse = cached.data;
+        return cached.data;
+      }
+      jobsResponse = emptyJobsResponse;
+      return emptyJobsResponse;
+    }
+    const response = await fetch("/api/state/jobs", { cache: "no-store" });
+    const data = (await response.json()) as ClientJobsResponse;
+    if (!response.ok) throw new Error("Could not load industry jobs.");
+    await saveEndpointResponse("state/jobs", "/api/state/jobs", data);
+    jobsResponse = data;
+    return data;
+  })().finally(() => {
+    jobsRequest = undefined;
+  });
   return jobsRequest;
 }
 

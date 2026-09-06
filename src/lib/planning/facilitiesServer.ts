@@ -35,6 +35,7 @@ import {
 import { getProductionGroupReferences } from "@/lib/planning/productionGroups";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { formatLocationName, normalizeLocationName } from "@/lib/reference/locationName";
+import { createTimingScope, type TimingScope } from "@/lib/server/timing";
 
 type FacilityCandidate = Omit<FacilitySettingsEntry, "locationId"> & {
   id: number | string;
@@ -42,6 +43,17 @@ type FacilityCandidate = Omit<FacilitySettingsEntry, "locationId"> & {
   locationType: "station" | "structure";
   securityStatus?: number;
   services?: Array<{ name: string; state: string }>;
+};
+
+export type FacilityCalculationContext = {
+  session: NonNullable<Awaited<ReturnType<typeof getSessionFromRequest>>>;
+  characterIds: number[];
+  corporationPolicies: Awaited<ReturnType<typeof getCorporationSourcePolicies>>;
+  roots: Awaited<ReturnType<typeof getRootLocationsByItemId>>;
+  corporationSources: Awaited<ReturnType<typeof getCorporationSourceCatalog>>;
+  stations: Awaited<ReturnType<typeof getStations>>;
+  systems: Awaited<ReturnType<typeof getSystems>>;
+  groups: Awaited<ReturnType<typeof getGroups>>;
 };
 
 function serviceIsOnline(services: FacilityCandidate["services"], name: string) {
@@ -115,52 +127,38 @@ function reprocessingRigTypeId(
 export async function calculateFacilities(
   request: Request,
   settings: FacilitySettingsPayload,
+  timing?: TimingScope,
+  context?: FacilityCalculationContext,
 ): Promise<FacilityResponse> {
-  const startedAt = performance.now();
-  let phaseStartedAt = startedAt;
-  const phaseTimings: Record<string, number> = {};
-  const markPhase = (name: string) => {
-    const now = performance.now();
-    phaseTimings[name] = Number((now - phaseStartedAt).toFixed(1));
-    phaseStartedAt = now;
-  };
-  const session = await getSessionFromRequest(request);
-  if (!session) throw new Error("Not authenticated.");
+  const timingScope = timing ?? createTimingScope();
+  const markPhase = (name: string) => timingScope.mark(name);
   const requestedLanguage = new URL(request.url).searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
-  const characterIds = await getSessionCharacterIds(session);
-  const corporationSettings = session.collectionId
-    ? await getCollectionCorporationSettings(session.collectionId)
-    : [];
-  const corporationPolicies = await getCorporationSourcePolicies(
+  const resolvedContext = context ?? (await loadFacilityCalculationContext(request));
+  const {
+    session,
     characterIds,
-    corporationSettings,
-    session.sessionId,
-  );
-  markPhase("auth");
-  const [
+    corporationPolicies,
     roots,
     corporationSources,
     stations,
     systems,
+    groups,
+  } = resolvedContext;
+  markPhase("auth");
+  const [
     types,
     typeDogma,
     dogmaEffects,
     dogmaAttributes,
-    groups,
     modifierSources,
     targetFilters,
     industrySystems,
   ] = await Promise.all([
-    getRootLocationsByItemId(characterIds, true, session.sessionId, corporationPolicies),
-    getCorporationSourceCatalog(characterIds, corporationPolicies, session.sessionId),
-    getStations(),
-    getSystems(),
     getTypes(),
     getTypeDogma(),
     getDogmaEffects(),
     getDogmaAttributes(),
-    getGroups(),
     getIndustryModifierSources(),
     getIndustryTargetFilters(),
     fetchIndustrySystems().catch(() => ({ data: [] })),
@@ -458,22 +456,39 @@ export async function calculateFacilities(
     };
   });
   markPhase("calculateFacilities");
-  if (process.env.NODE_ENV === "development") {
-    console.info(
-      "[facilities] timing",
-      {
-        totalMs: Number((performance.now() - startedAt).toFixed(1)),
-        phases: phaseTimings,
-        characters: characterIds.length,
-        roots: roots.size,
-        corporationStructures: corpStructures.length,
-        corporationsRequested: corporationPolicies.length,
-        corporationSources: corporationSources.length,
-        candidates: candidates.size,
-        stationsWithMetadata: stationMetadata.length,
-        facilities: facilities.length,
-      },
-    );
-  }
+  timingScope.complete();
   return { facilities, settings: normalizeFacilitySettings(settings), productionGroups };
+}
+
+async function loadFacilityCalculationContext(
+  request: Request,
+): Promise<FacilityCalculationContext> {
+  const session = await getSessionFromRequest(request);
+  if (!session) throw new Error("Not authenticated.");
+  const characterIds = await getSessionCharacterIds(session);
+  const corporationSettings = session.collectionId
+    ? await getCollectionCorporationSettings(session.collectionId)
+    : [];
+  const corporationPolicies = await getCorporationSourcePolicies(
+    characterIds,
+    corporationSettings,
+    session.sessionId,
+  );
+  const [roots, corporationSources, stations, systems, groups] = await Promise.all([
+    getRootLocationsByItemId(characterIds, true, session.sessionId, corporationPolicies),
+    getCorporationSourceCatalog(characterIds, corporationPolicies, session.sessionId),
+    getStations(),
+    getSystems(),
+    getGroups(),
+  ]);
+  return {
+    session,
+    characterIds,
+    corporationPolicies,
+    roots,
+    corporationSources,
+    stations,
+    systems,
+    groups,
+  };
 }

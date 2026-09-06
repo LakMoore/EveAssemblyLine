@@ -3,18 +3,39 @@ import { getSessionFromRequest } from "@/lib/auth/session";
 import { getCollectionFacilities, saveCollectionFacilities } from "@/lib/auth/tokensStore";
 import { normalizeFacilitySettings } from "@/lib/planning/facilities";
 import { calculateFacilities } from "@/lib/planning/facilitiesServer";
+import { createTimingScope, logTiming, type TimingScope } from "@/lib/server/timing";
 
-async function loadFacilities(request: Request) {
+async function loadFacilities(request: Request, timing: TimingScope) {
   const session = await getSessionFromRequest(request);
   if (!session?.collectionId) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
   }
-  return calculateFacilities(request, await getCollectionFacilities(session.collectionId));
+  return calculateFacilities(
+    request,
+    await getCollectionFacilities(session.collectionId),
+    timing.child("calculateFacilities"),
+  );
+}
+
+async function withTiming<T>(label: string, operation: (timing: TimingScope) => Promise<T>) {
+  const timing = createTimingScope();
+  try {
+    const result = await operation(timing);
+    if (process.env.NODE_ENV === "development") logTiming(label, timing.complete());
+    return result;
+  }
+  catch (error) {
+    if (process.env.NODE_ENV === "development") logTiming(label, timing.complete());
+    throw error;
+  }
 }
 
 export async function GET(request: Request) {
   try {
-    return NextResponse.json(await loadFacilities(request));
+    return await withTiming(
+      "[facilities] timing",
+      async (timing) => NextResponse.json(await loadFacilities(request, timing)),
+    );
   }
   catch (error) {
     return NextResponse.json(
@@ -24,7 +45,7 @@ export async function GET(request: Request) {
   }
 }
 
-async function saveFacilities(request: Request) {
+async function saveFacilities(request: Request, timing: TimingScope) {
   const session = await getSessionFromRequest(request);
   if (!session?.collectionId) {
     return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
@@ -33,7 +54,11 @@ async function saveFacilities(request: Request) {
     const payload = normalizeFacilitySettings(await request.json());
     await saveCollectionFacilities(session.collectionId, payload);
     return NextResponse.json(
-      await calculateFacilities(request, await getCollectionFacilities(session.collectionId)),
+      await calculateFacilities(
+        request,
+        await getCollectionFacilities(session.collectionId),
+        timing.child("calculateFacilities"),
+      ),
     );
   }
   catch (error) {
@@ -45,9 +70,9 @@ async function saveFacilities(request: Request) {
 }
 
 export async function POST(request: Request) {
-  return saveFacilities(request);
+  return withTiming("[facilities] timing", (timing) => saveFacilities(request, timing));
 }
 
 export async function PUT(request: Request) {
-  return saveFacilities(request);
+  return withTiming("[facilities] timing", (timing) => saveFacilities(request, timing));
 }

@@ -2026,17 +2026,16 @@ function Planner() {
                 plan={plan}
                 characterStatuses={characterStatuses}
                 characterNamesById={characterNamesById}
-                availableReactionSlots={(jobs?.characters ?? []).reduce(
-                  (total, character) =>
-                    characterNamesById.has(character.characterId)
-                      ? total
-                        + Math.max(
-                          0,
-                          character.availableSlots.Reactions - character.slots.Reactions,
-                        )
-                      : total,
-                  0,
-                )}
+                availableReactionSlots={Object
+                  .entries(jobs?.slotUsage ?? {})
+                  .reduce(
+                    (total, [characterId, usage]) =>
+                      characterNamesById.has(Number(characterId))
+                        ? total
+                          + Math.max(0, usage.availableSlots.Reactions - usage.slots.Reactions)
+                        : total,
+                    0,
+                  )}
                 stock={stock}
                 activityLocationIds={[
                   ...new Set(

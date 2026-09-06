@@ -176,9 +176,6 @@ export async function GET(request: Request) {
       ),
     ),
   );
-  const characterNames = new Map(
-    characters.map((character) => [character.characterId, character.characterName]),
-  );
   const slots = new Map<number, Record<"Manufacturing" | "Reactions" | "Science", number>>();
   for (const character of characters) {
     slots.set(
@@ -198,26 +195,28 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json({
-    characters: characters.map((character) => ({
-      characterId: character.characterId,
-      characterName: character.characterName,
-      slots: slots.get(character.characterId) ?? {},
-      availableSlots: character.onDeployment
-        ? { Manufacturing: 0, Reactions: 0, Science: 0 }
-        : (
-            availableSlots.get(character.characterId) ?? {
-              Manufacturing: 1,
-              Reactions: 1,
-              Science: 1,
-            }
-          ),
-    })),
+    slotUsage: Object.fromEntries(
+      characters.map((character) => [
+        String(character.characterId),
+        {
+          slots: slots.get(character.characterId) ?? {},
+          availableSlots: character.onDeployment
+            ? { Manufacturing: 0, Reactions: 0, Science: 0 }
+            : (
+                availableSlots.get(character.characterId) ?? {
+                  Manufacturing: 1,
+                  Reactions: 1,
+                  Science: 1,
+                }
+              ),
+        },
+      ]),
+    ),
     jobs: jobs
       .sort((left, right) => Date.parse(left.endDate) - Date.parse(right.endDate))
       .map((job) => ({
         jobId: job.jobId,
         characterId: job.installerId,
-        characterName: characterNames.get(job.installerId) ?? `Character ${job.installerId}`,
         ownerId: job.ownerId,
         ownerType: job.ownerType,
         activity: activityNames[job.activityId] ?? "Industry job",
