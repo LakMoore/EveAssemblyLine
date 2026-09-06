@@ -13,8 +13,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type {
   ClientBuildItem,
-  ClientPlanBucket,
-  PlanBucketLocations,
+  ClientPlanStockpile,
+  PlanStockpileLocations,
   PlanResult,
   PlanSourceCounts,
   PlanSourceIcon,
@@ -22,7 +22,10 @@ import type {
 } from "@/lib/planning/types";
 import { loadBuildList } from "@/lib/planning/buildListStore";
 import EveAuthorizationWarning from "@/components/EveAuthorizationWarning";
-import { loadPlannerBuckets, savePlannerBuckets } from "@/lib/planning/plannerBucketsStore";
+import {
+  loadPlannerStockpiles,
+  savePlannerStockpiles,
+} from "@/lib/planning/plannerStockpilesStore";
 import { loadStructures } from "@/lib/planning/structureStore";
 import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
 import {
@@ -33,11 +36,12 @@ import {
   savePlannerLocations,
 } from "@/lib/planning/plannerPreferencesStore";
 import {
+  loadClientCharacterState,
   loadClientSession,
   loadClientJobs,
-  loadClientStateStatus,
   loadClientAssets,
   filterClientAssetsForPlanning,
+  type ClientAssetsResponse,
   type ClientCharacterStatus,
   type ClientCorporationSource,
   type ClientJobsResponse,
@@ -135,12 +139,12 @@ import {
 } from "lucide-react";
 import PasteListDialog from "@/components/PasteListDialog";
 import {
-  PlannerBucketDetailsDialog,
-  PlannerBucketItemsDialog,
+  PlannerStockpileDetailsDialog,
+  PlannerStockpileItemsDialog,
   type ActivityLocationOption,
   type ProductionGroupOption,
   type StockLocationOption,
-} from "@/components/PlannerBucketEditor";
+} from "@/components/PlannerStockpileEditor";
 import type { FacilityGroupBonus } from "@/lib/planning/facilityBonuses";
 import type { ProductionGroupKey, ProductionGroupReference } from "@/lib/planning/productionGroups";
 
@@ -154,7 +158,7 @@ type PlannerTab =
   | "React"
   | "Manufacture"
   | "Skills";
-type BucketEditorMode = "details" | "items";
+type StockpileEditorMode = "details" | "items";
 const tabs: { value: PlannerTab; icon: LucideIcon }[] = [
   { value: "Plan", icon: ClipboardList },
   { value: "Buy", icon: ShoppingCart },
@@ -479,7 +483,9 @@ async function localizeItems(
   }
 }
 
-function bucketLocationsFromPlannerLocations(locations: PlannerLocations): PlanBucketLocations {
+function stockpileLocationsFromPlannerLocations(
+  locations: PlannerLocations,
+): PlanStockpileLocations {
   return {
     stock: locations.manufacturing,
     manufacturing: locations.manufacturing,
@@ -490,31 +496,33 @@ function bucketLocationsFromPlannerLocations(locations: PlannerLocations): PlanB
   };
 }
 
-function createPlannerBucket(
+function createPlannerStockpile(
   locations: PlannerLocations,
   items: ClientBuildItem[] = [],
   name = "New stock destination",
-): ClientPlanBucket {
+): ClientPlanStockpile {
   return {
-    id: `bucket-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: `stockpile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name,
-    locations: bucketLocationsFromPlannerLocations(locations),
+    locations: stockpileLocationsFromPlannerLocations(locations),
     items,
   };
 }
 
 function isImportedPlan(value: unknown): value is {
-  buckets: ClientPlanBucket[];
+  stockpiles?: ClientPlanStockpile[];
+  buckets?: ClientPlanStockpile[];
   settings?: unknown;
   includeAssets?: unknown;
   excludedLocationIds?: unknown;
 } {
   if (!value || typeof value !== "object") return false;
-  const buckets = (value as { buckets?: unknown }).buckets;
-  if (!Array.isArray(buckets) || buckets.length === 0) return false;
-  return buckets.every((bucket) => {
-    if (!bucket || typeof bucket !== "object") return false;
-    const candidate = bucket as Partial<ClientPlanBucket>;
+  const importedValue = value as { stockpiles?: unknown; buckets?: unknown };
+  const stockpiles = importedValue.stockpiles ?? importedValue.buckets;
+  if (!Array.isArray(stockpiles) || stockpiles.length === 0) return false;
+  return stockpiles.every((stockpile) => {
+    if (!stockpile || typeof stockpile !== "object") return false;
+    const candidate = stockpile as Partial<ClientPlanStockpile>;
     return (
       typeof candidate.id === "string"
       && typeof candidate.name === "string"
@@ -546,22 +554,25 @@ function Planner() {
   const ActiveTabIcon = activeTabDefinition.icon;
   const [planStatus, setPlanStatus] = useState("Ready to calculate");
   const [isPlanLoading, setIsPlanLoading] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
   const [isExcludedLocationsModalOpen, setIsExcludedLocationsModalOpen] = useState(false);
   const [plan, setPlan] = useState<PlanResult | null>(null);
   const [isDeleteAllDialogOpen, setIsDeleteAllDialogOpen] = useState(false);
   const [isClearExcludedLocationsDialogOpen, setIsClearExcludedLocationsDialogOpen] =
     useState(false);
-  const [bucketPendingRemoval, setBucketPendingRemoval] = useState<ClientPlanBucket | null>(null);
+  const [stockpilePendingRemoval, setStockpilePendingRemoval] =
+    useState<ClientPlanStockpile | null>(null);
   const [characterStatuses, setCharacterStatuses] = useState<ClientCharacterStatus[]>([]);
   const [jobs, setJobs] = useState<ClientJobsResponse | null>(null);
+  const [clientAssets, setClientAssets] = useState<ClientAssetsResponse | null>(null);
   const [characterNamesById, setCharacterNamesById] = useState<Map<number, string>>(new Map());
   const [planningCharacterId, setPlanningCharacterId] = useState<number | undefined>();
   const [stock, setStock] = useState<PlanStockItem[]>([]);
-  const [buckets, setBuckets] = useState<ClientPlanBucket[]>([]);
-  const [areBucketsLoaded, setAreBucketsLoaded] = useState(false);
-  const [editingBucket, setEditingBucket] = useState<ClientPlanBucket | null>(null);
-  const [bucketEditorMode, setBucketEditorMode] = useState<BucketEditorMode | null>(null);
+  const [stockpiles, setStockpiles] = useState<ClientPlanStockpile[]>([]);
+  const [areStockpilesLoaded, setAreStockpilesLoaded] = useState(false);
+  const [editingStockpile, setEditingStockpile] = useState<ClientPlanStockpile | null>(null);
+  const [stockpileEditorMode, setStockpileEditorMode] = useState<StockpileEditorMode | null>(null);
   const [knownStructures, setKnownStructures] = useState<
     Awaited<ReturnType<typeof loadStructures>>
   >([]);
@@ -572,6 +583,13 @@ function Planner() {
   const [productionGroupReferences, setProductionGroupReferences] = useState<
     ProductionGroupReference[]
   >([]);
+  const [reprocessingEfficiencies, setReprocessingEfficiencies] = useState<Record<string, number>>(
+    {},
+  );
+  const [reprocessingEfficienciesKey, setReprocessingEfficienciesKey] = useState("");
+  const [reprocessingEfficienciesError, setReprocessingEfficienciesError] = useState<string | null>(
+    null,
+  );
   const [includeStock, setIncludeStock] = useState(true);
   const [corporationSources, setCorporationSources] = useState<ClientCorporationSource[]>([]);
   const [locations, setLocations] = useState<PlannerLocations>(defaultLocations);
@@ -597,32 +615,59 @@ function Planner() {
 
   useEffect(() => {
     let cancelled = false;
+    let activeCharacterIds = new Set<number>();
     void loadClientSession()
       .then(async (session) => {
-        if (cancelled || !session.authenticated) return;
-        const assets = await loadClientAssets(language);
+        if (cancelled) return;
+        setIsAuthenticated(Boolean(session.authenticated));
+        if (!session.authenticated) return;
+        const [assets, loadedJobs] = await Promise.all([
+          loadClientAssets(language),
+          loadClientJobs(),
+        ]);
+        setClientAssets(assets);
+        setJobs(loadedJobs);
         setCorporationSources(assets.corporationSources ?? []);
         const activeCharacters = (session.characters ?? []).filter(
           (character) => !character.onDeployment,
         );
+        activeCharacterIds = new Set(activeCharacters.map((character) => character.characterId));
         setCharacterNamesById(
           new Map(
             activeCharacters.map((character) => [character.characterId, character.characterName]),
           ),
         );
-        const state = await loadClientStateStatus();
-        const activeCharacterIds = new Set(
-          activeCharacters.map((character) => character.characterId),
-        );
+        const state = await loadClientCharacterState();
         const activeStatuses = (state.characters ?? []).filter((character) =>
           activeCharacterIds.has(character.characterId),
         );
         setCharacterStatuses(activeStatuses);
         setPlanningCharacterId((current) => current ?? activeStatuses[0]?.characterId);
       })
-      .catch(() => undefined);
+      .catch(() => setIsAuthenticated(false));
+    const handleRefresh = () => {
+      void loadClientCharacterState(true)
+        .then(async (state) => {
+          if (cancelled) return;
+          const [assets, loadedJobs] = await Promise.all([
+            loadClientAssets(language, true),
+            loadClientJobs(true),
+          ]);
+          setClientAssets(assets);
+          setJobs(loadedJobs);
+          setCorporationSources(assets.corporationSources ?? []);
+          setCharacterStatuses(
+            (state.characters ?? []).filter((character) =>
+              activeCharacterIds.has(character.characterId),
+            ),
+          );
+        })
+        .catch(() => undefined);
+    };
+    window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
     return () => {
       cancelled = true;
+      window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
     };
   }, [language]);
 
@@ -645,29 +690,31 @@ function Planner() {
       if (buildBlacklist) setSettings((current) => ({ ...current, buildBlacklist }));
     });
     void loadExcludedLocationIds().then(setExcludedLocationIds);
-    loadPlannerBuckets()
-      .then(async (savedBuckets) => {
-        if (savedBuckets !== null) {
-          const localizedBuckets = await Promise.all(
-            savedBuckets.map(async (bucket) => ({
-              ...bucket,
-              items: await localizeItems(bucket.items, language),
+    loadPlannerStockpiles()
+      .then(async (savedStockpiles) => {
+        if (savedStockpiles !== null) {
+          const localizedStockpiles = await Promise.all(
+            savedStockpiles.map(async (stockpile) => ({
+              ...stockpile,
+              items: await localizeItems(stockpile.items, language),
             })),
           );
-          setBuckets(localizedBuckets);
-          setItems(localizedBuckets[0]?.items ?? []);
+          setStockpiles(localizedStockpiles);
+          setItems(localizedStockpiles[0]?.items ?? []);
           return;
         }
         const savedItems = await loadBuildList();
         const localizedItems = await localizeItems(savedItems, language);
         setItems(localizedItems);
-        setBuckets([createPlannerBucket(defaultLocations, localizedItems, "Primary destination")]);
+        setStockpiles([
+          createPlannerStockpile(defaultLocations, localizedItems, "Primary destination"),
+        ]);
       })
       .catch(() => {
         setItems([]);
-        setBuckets([]);
+        setStockpiles([]);
       })
-      .finally(() => setAreBucketsLoaded(true));
+      .finally(() => setAreStockpilesLoaded(true));
   }, [language]);
 
   useEffect(() => {
@@ -778,43 +825,64 @@ function Planner() {
   }, [language]);
 
   useEffect(() => {
-    if (areBucketsLoaded) void savePlannerBuckets(buckets);
-  }, [areBucketsLoaded, buckets]);
+    if (areStockpilesLoaded) void savePlannerStockpiles(stockpiles);
+  }, [areStockpilesLoaded, stockpiles]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadPlannerReprocessingEfficiencies(language, locations.reprocessing)
+      .then((efficiencies) => {
+        if (cancelled) return;
+        setReprocessingEfficiencies(efficiencies);
+        setReprocessingEfficienciesKey(`${language}:${locations.reprocessing}`);
+        setReprocessingEfficienciesError(null);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setReprocessingEfficiencies({});
+        setReprocessingEfficienciesError(
+          error instanceof Error ? error.message : "Could not load compression efficiencies.",
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [language, locations.reprocessing]);
 
   async function submitPlan(exclusions: Set<number>) {
-    const plannerItems = buckets.flatMap((bucket) => bucket.items);
+    const plannerItems = stockpiles.flatMap((stockpile) => stockpile.items);
     if (plannerItems.length === 0 || isPlanLoading) return;
     setIsPlanLoading(true);
     setPlanStatus("Calculating...");
     try {
+      if (reprocessingEfficienciesKey !== `${language}:${locations.reprocessing}`) {
+        setPlanStatus(
+          reprocessingEfficienciesError
+            ? `Compression efficiencies unavailable: ${reprocessingEfficienciesError}`
+            : "Compression efficiencies are still loading",
+        );
+        return;
+      }
       let workingAssets: PlanStockItem[] = [];
-      if (includeStock && (await loadClientSession()).authenticated) {
-        const assetsData = await loadClientAssets(language, true);
-        setCorporationSources(assetsData.corporationSources ?? []);
-        workingAssets = filterClientAssetsForPlanning(assetsData).assets ?? [];
+      if (includeStock && isAuthenticated && !clientAssets) {
+        setPlanStatus("Account assets are still loading");
+        return;
+      }
+      if (includeStock && clientAssets) {
+        workingAssets = filterClientAssetsForPlanning(clientAssets).assets ?? [];
       }
       const compressSettings = await loadCompressSettings();
       const compressLocationId = Number(compressSettings.locationId);
-      const populatedBuckets = buckets.filter((bucket) => bucket.items.length > 0);
-      const primaryBucketLocations = populatedBuckets[0]?.locations;
+      const populatedStockpiles = stockpiles.filter((stockpile) => stockpile.items.length > 0);
+      const primaryStockpileLocations = populatedStockpiles[0]?.locations;
       const planningLocations = Number.isInteger(compressLocationId)
-        ? { ...locations, ...primaryBucketLocations, reprocessing: compressLocationId }
-        : { ...locations, ...primaryBucketLocations };
-      const freshFacilities = await fetchFacilityResponse(true, language);
-      const freshFacilityById = new Map(
-        (freshFacilities?.facilities ?? []).map((facility) => [facility.id, facility]),
-      );
-      const manufacturingFacility = freshFacilityById.get(planningLocations.manufacturing);
-      const reactionFacility = freshFacilityById.get(planningLocations.reactions);
+        ? { ...locations, ...primaryStockpileLocations, reprocessing: compressLocationId }
+        : { ...locations, ...primaryStockpileLocations };
       const selectedManufacturingFacility = locationOptions.find(
         (location) => location.locationId === planningLocations.manufacturing,
       );
       const selectedReactionFacility = locationOptions.find(
         (location) => location.locationId === planningLocations.reactions,
-      );
-      const reprocessingEfficiencies = await loadPlannerReprocessingEfficiencies(
-        language,
-        planningLocations.reprocessing,
       );
       const requestStock = workingAssets.filter((item) => {
         const locationId = getStockLocationId(item);
@@ -832,18 +900,11 @@ function Planner() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             language,
-            toBuild: plannerItems.map(({ typeId, quantity, me, te, fromCompression }) => ({
-              typeId,
-              quantity,
-              me,
-              te,
-              fromCompression,
-            })),
-            buckets:
-              populatedBuckets.length > 0
-                ? populatedBuckets.map((bucket) => ({
-                    ...bucket,
-                    items: bucket.items.map(({ typeId, quantity, me, te, fromCompression }) => ({
+            stockpiles:
+              populatedStockpiles.length > 0
+                ? populatedStockpiles.map((stockpile) => ({
+                    ...stockpile,
+                    items: stockpile.items.map(({ typeId, quantity, me, te, fromCompression }) => ({
                       typeId,
                       quantity,
                       me,
@@ -863,14 +924,8 @@ function Planner() {
             ),
             locations: planningLocations,
             facilityTimeMultipliers: {
-              manufacturing:
-                manufacturingFacility?.activities.manufacturing.rawJobDurationMultiplier
-                ?? selectedManufacturingFacility?.manufacturingTimeMultiplier
-                ?? 1,
-              reactions:
-                reactionFacility?.activities.reactions.rawJobDurationMultiplier
-                ?? selectedReactionFacility?.reactionTimeMultiplier
-                ?? 1,
+              manufacturing: selectedManufacturingFacility?.manufacturingTimeMultiplier ?? 1,
+              reactions: selectedReactionFacility?.reactionTimeMultiplier ?? 1,
             },
             skillTimeMultipliers: {
               manufacturing: skillTimeMultiplier(
@@ -906,32 +961,6 @@ function Planner() {
       const calculatedPlan = data as PlanResult;
       await savePlanResult(calculatedPlan);
       setPlan(calculatedPlan);
-      try {
-        const session = await loadClientSession();
-        const status = session.authenticated ? await loadClientStateStatus() : { characters: [] };
-        const jobsData = session.authenticated ? await loadClientJobs() : null;
-        setJobs(jobsData);
-        const activeCharacters = (session.characters ?? []).filter(
-          (character) => !character.onDeployment,
-        );
-        setCharacterNamesById(
-          new Map(
-            activeCharacters.map((character) => [character.characterId, character.characterName]),
-          ),
-        );
-        const activeCharacterIds = new Set(
-          activeCharacters.map((character) => character.characterId),
-        );
-        setCharacterStatuses(
-          (status.characters ?? []).filter((character) =>
-            activeCharacterIds.has(character.characterId),
-          ),
-        );
-      }
-      catch {
-        setCharacterNamesById(new Map());
-        setCharacterStatuses([]);
-      }
       await savePlannerLocations(locations);
       setPlanStatus("Plan updated just now");
     }
@@ -948,7 +977,7 @@ function Planner() {
     await submitPlan(new Set(excludedLocationIds));
   }
 
-  async function excludeHaulBucket(fromLocationId: number) {
+  async function excludeHaulStockpile(fromLocationId: number) {
     const nextExcludedLocationIds = new Set(excludedLocationIds);
     nextExcludedLocationIds.add(fromLocationId);
     const nextIds = [...nextExcludedLocationIds];
@@ -971,12 +1000,12 @@ function Planner() {
     await submitPlan(new Set());
   }
 
-  function saveBucket(bucket: ClientPlanBucket): boolean {
-    const duplicate = buckets.some(
+  function saveStockpile(stockpile: ClientPlanStockpile): boolean {
+    const duplicate = stockpiles.some(
       (existing) =>
-        existing.id !== bucket.id
-        && existing.locations.stock === bucket.locations.stock
-        && existing.locations.manufacturing === bucket.locations.manufacturing,
+        existing.id !== stockpile.id
+        && existing.locations.stock === stockpile.locations.stock
+        && existing.locations.manufacturing === stockpile.locations.manufacturing,
     );
     if (duplicate) {
       toast.add({
@@ -985,67 +1014,67 @@ function Planner() {
       });
       return false;
     }
-    setBuckets((current) => {
-      const existingIndex = current.findIndex((existing) => existing.id === bucket.id);
-      if (existingIndex < 0) return [...current, bucket];
-      return current.map((existing, index) => (index === existingIndex ? bucket : existing));
+    setStockpiles((current) => {
+      const existingIndex = current.findIndex((existing) => existing.id === stockpile.id);
+      if (existingIndex < 0) return [...current, stockpile];
+      return current.map((existing, index) => (index === existingIndex ? stockpile : existing));
     });
-    setEditingBucket(null);
-    setBucketEditorMode(null);
+    setEditingStockpile(null);
+    setStockpileEditorMode(null);
     return true;
   }
 
-  function openNewBucket() {
-    setEditingBucket(
-      createPlannerBucket(
+  function openNewStockpile() {
+    setEditingStockpile(
+      createPlannerStockpile(
         {
           ...locations,
-          manufacturing: buckets[0]?.locations.manufacturing ?? locations.manufacturing,
-          reactions: buckets[0]?.locations.reactions ?? locations.reactions,
+          manufacturing: stockpiles[0]?.locations.manufacturing ?? locations.manufacturing,
+          reactions: stockpiles[0]?.locations.reactions ?? locations.reactions,
         },
         [],
-        `Stock destination ${buckets.length + 1}`,
+        `Stock destination ${stockpiles.length + 1}`,
       ),
     );
-    setBucketEditorMode("details");
+    setStockpileEditorMode("details");
   }
 
-  function openBucketDetails(bucket: ClientPlanBucket) {
-    setEditingBucket(bucket);
-    setBucketEditorMode("details");
+  function openStockpileDetails(stockpile: ClientPlanStockpile) {
+    setEditingStockpile(stockpile);
+    setStockpileEditorMode("details");
   }
 
-  function openBucketItems(bucket: ClientPlanBucket) {
-    setEditingBucket(bucket);
-    setBucketEditorMode("items");
+  function openStockpileItems(stockpile: ClientPlanStockpile) {
+    setEditingStockpile(stockpile);
+    setStockpileEditorMode("items");
   }
 
-  function closeBucketEditor() {
-    setEditingBucket(null);
-    setBucketEditorMode(null);
+  function closeStockpileEditor() {
+    setEditingStockpile(null);
+    setStockpileEditorMode(null);
   }
 
-  function removeBucket(bucketId: string) {
-    if (buckets.length <= 1) {
+  function removeStockpile(stockpileId: string) {
+    if (stockpiles.length <= 1) {
       toast.add({ description: "Keep at least one stockpile.", type: "error" });
       return;
     }
-    setBuckets((current) => current.filter((bucket) => bucket.id !== bucketId));
+    setStockpiles((current) => current.filter((stockpile) => stockpile.id !== stockpileId));
     setPlan(null);
   }
 
-  function requestBucketRemoval(bucket: ClientPlanBucket) {
-    if (buckets.length <= 1) {
-      removeBucket(bucket.id);
+  function requestStockpileRemoval(stockpile: ClientPlanStockpile) {
+    if (stockpiles.length <= 1) {
+      removeStockpile(stockpile.id);
       return;
     }
-    setBucketPendingRemoval(bucket);
+    setStockpilePendingRemoval(stockpile);
   }
 
-  function confirmBucketRemoval() {
-    if (!bucketPendingRemoval) return;
-    removeBucket(bucketPendingRemoval.id);
-    setBucketPendingRemoval(null);
+  function confirmStockpileRemoval() {
+    if (!stockpilePendingRemoval) return;
+    removeStockpile(stockpilePendingRemoval.id);
+    setStockpilePendingRemoval(null);
   }
 
   function exportPlan() {
@@ -1053,7 +1082,7 @@ function Planner() {
       format: "assembly-line-plan",
       version: 1,
       exportedAt: new Date().toISOString(),
-      buckets,
+      stockpiles,
       settings,
       includeAssets: includeStock,
       excludedLocationIds,
@@ -1076,13 +1105,15 @@ function Planner() {
       if (!isImportedPlan(parsed)) {
         throw new Error("The file does not contain valid plan stockpiles.");
       }
-      const localizedBuckets = await Promise.all(
-        parsed.buckets.map(async (bucket) => ({
-          ...bucket,
-          items: await localizeItems(bucket.items, language),
+      const importedStockpiles = parsed.stockpiles ?? parsed.buckets;
+      if (!importedStockpiles) throw new Error("The file does not contain valid plan stockpiles.");
+      const localizedStockpiles = await Promise.all(
+        importedStockpiles.map(async (stockpile) => ({
+          ...stockpile,
+          items: await localizeItems(stockpile.items, language),
         })),
       );
-      setBuckets(localizedBuckets);
+      setStockpiles(localizedStockpiles);
       if (typeof parsed.settings === "object" && parsed.settings !== null) {
         setSettings(parsePlannerSettings(parsed.settings));
       }
@@ -1197,8 +1228,10 @@ function Planner() {
   const activityLocationOptions = sharedLocationOptions;
   const stockLocationOptions: StockLocationOption[] = sharedLocationOptions;
   const plannerLocationNames = new Map<number, string>([
-    ...buckets.flatMap((bucket) =>
-      bucket.stockLocationName ? [[bucket.locations.stock, bucket.stockLocationName] as const] : [],
+    ...stockpiles.flatMap((stockpile) =>
+      stockpile.stockLocationName
+        ? [[stockpile.locations.stock, stockpile.stockLocationName] as const]
+        : [],
     ),
     ...sharedLocationOptions.map((location) => [location.locationId, location.name] as const),
   ]);
@@ -1238,10 +1271,10 @@ function Planner() {
     return { key: group.key, label: group.label, activity: group.activity, facilities };
   });
 
-  function autoAssignGroupFacilities(bucket: ClientPlanBucket) {
+  function autoAssignGroupFacilities(stockpile: ClientPlanStockpile) {
     const popularity = new Map<number, number>();
-    for (const existingBucket of buckets) {
-      for (const locationId of Object.values(existingBucket.groupAssignments ?? {})) {
+    for (const existingStockpile of stockpiles) {
+      for (const locationId of Object.values(existingStockpile.groupAssignments ?? {})) {
         popularity.set(locationId, (popularity.get(locationId) ?? 0) + 1);
       }
     }
@@ -1260,8 +1293,8 @@ function Planner() {
             )[0];
           const defaultLocationId =
             group.activity === "manufacturing"
-              ? bucket.locations.manufacturing
-              : bucket.locations.reactions;
+              ? stockpile.locations.manufacturing
+              : stockpile.locations.reactions;
           const defaultFacility = group.facilities.find(
             (facility) => facility.locationId === defaultLocationId,
           );
@@ -1319,7 +1352,7 @@ function Planner() {
                 type="button"
                 variant="outline"
                 onClick={exportPlan}
-                disabled={buckets.length === 0}
+                disabled={stockpiles.length === 0}
               >
                 <Download data-icon="inline-start" aria-hidden="true" />
                 Export plan
@@ -1332,26 +1365,26 @@ function Planner() {
                 <Upload data-icon="inline-start" aria-hidden="true" />
                 Import plan
               </Button>
-              <Button type="button" onClick={openNewBucket}>
+              <Button type="button" onClick={openNewStockpile}>
                 <Plus data-icon="inline-start" aria-hidden="true" />
                 Add new Stock location
               </Button>
             </div>
           </div>
           <div className="grid min-w-0 gap-3">
-            {buckets.length === 0 ? (
+            {stockpiles.length === 0 ? (
               <Empty>
                 <EmptyDescription>Add a stock location to begin your plan.</EmptyDescription>
               </Empty>
             ) : (
-              buckets.map((bucket) => (
-                <PlannerBucketSummary
-                  key={bucket.id}
-                  bucket={bucket}
+              stockpiles.map((stockpile) => (
+                <PlannerStockpileSummary
+                  key={stockpile.id}
+                  stockpile={stockpile}
                   locationNamesById={plannerLocationNames}
-                  onEditDetails={() => openBucketDetails(bucket)}
-                  onEditItems={() => openBucketItems(bucket)}
-                  onRemove={() => requestBucketRemoval(bucket)}
+                  onEditDetails={() => openStockpileDetails(stockpile)}
+                  onEditItems={() => openStockpileItems(stockpile)}
+                  onRemove={() => requestStockpileRemoval(stockpile)}
                 />
               ))
             )}
@@ -1386,7 +1419,9 @@ function Planner() {
             <CalculateButton
               type="button"
               className="ml-auto"
-              disabled={isPlanLoading || buckets.every((bucket) => bucket.items.length === 0)}
+              disabled={
+                isPlanLoading || stockpiles.every((stockpile) => stockpile.items.length === 0)
+              }
               icon={ClipboardList}
               isLoading={isPlanLoading}
               label="Calculate production plan"
@@ -1396,25 +1431,25 @@ function Planner() {
           </div>
         </div>
       </section>
-      <PlannerBucketDetailsDialog
-        key={`details-${editingBucket?.id ?? "new-bucket"}`}
-        bucket={editingBucket}
-        open={bucketEditorMode === "details"}
+      <PlannerStockpileDetailsDialog
+        key={`details-${editingStockpile?.id ?? "new-stockpile"}`}
+        stockpile={editingStockpile}
+        open={stockpileEditorMode === "details"}
         activityLocations={activityLocationOptions}
         stockLocations={stockLocationOptions}
-        excludedStockLocationIds={buckets.map((bucket) => bucket.locations.stock)}
+        excludedStockLocationIds={stockpiles.map((stockpile) => stockpile.locations.stock)}
         productionGroups={productionGroupOptions}
         onAutoAssign={autoAssignGroupFacilities}
-        onOpenChange={(open) => !open && closeBucketEditor()}
-        onSave={saveBucket}
+        onOpenChange={(open) => !open && closeStockpileEditor()}
+        onSave={saveStockpile}
       />
-      <PlannerBucketItemsDialog
-        key={`items-${editingBucket?.id ?? "new-bucket"}`}
-        bucket={editingBucket}
-        open={bucketEditorMode === "items"}
+      <PlannerStockpileItemsDialog
+        key={`items-${editingStockpile?.id ?? "new-stockpile"}`}
+        stockpile={editingStockpile}
+        open={stockpileEditorMode === "items"}
         language={language}
-        onOpenChange={(open) => !open && closeBucketEditor()}
-        onSave={saveBucket}
+        onOpenChange={(open) => !open && closeStockpileEditor()}
+        onSave={saveStockpile}
       />
       <form className="hidden" onSubmit={calculatePlan}>
         <div className={styles.workspaceGrid}>
@@ -1927,22 +1962,22 @@ function Planner() {
         </AlertDialogContent>
       </AlertDialog>
       <AlertDialog
-        open={bucketPendingRemoval !== null}
+        open={stockpilePendingRemoval !== null}
         onOpenChange={(open) => {
-          if (!open) setBucketPendingRemoval(null);
+          if (!open) setStockpilePendingRemoval(null);
         }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Remove stockpile?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will remove {bucketPendingRemoval?.name ?? "this stockpile"} and its item list.
-              This action cannot be undone.
+              This will remove {stockpilePendingRemoval?.name ?? "this stockpile"} and its item
+              list. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={confirmBucketRemoval}>
+            <AlertDialogAction variant="destructive" onClick={confirmStockpileRemoval}>
               Remove stockpile
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -2029,12 +2064,12 @@ function Planner() {
                       locations.reprocessing,
                       locations.copying,
                       locations.invention,
-                      ...buckets.flatMap((bucket) => [
-                        bucket.locations.manufacturing,
-                        bucket.locations.reactions,
-                        bucket.locations.reprocessing,
-                        bucket.locations.copying,
-                        bucket.locations.invention,
+                      ...stockpiles.flatMap((stockpile) => [
+                        stockpile.locations.manufacturing,
+                        stockpile.locations.reactions,
+                        stockpile.locations.reprocessing,
+                        stockpile.locations.copying,
+                        stockpile.locations.invention,
                       ]),
                     ].filter((locationId): locationId is number => locationId !== undefined),
                   ),
@@ -2059,7 +2094,7 @@ function Planner() {
                     },
                   ])
                 }
-                onExcludeHaulBucket={excludeHaulBucket}
+                onExcludeHaulStockpile={excludeHaulStockpile}
                 resultsHeaderRef={resultsHeaderRef}
               />
             ) : (
@@ -2080,14 +2115,14 @@ function Planner() {
 
 export default Planner;
 
-function PlannerBucketSummary({
-  bucket,
+function PlannerStockpileSummary({
+  stockpile,
   locationNamesById,
   onEditDetails,
   onEditItems,
   onRemove,
 }: {
-  bucket: ClientPlanBucket;
+  stockpile: ClientPlanStockpile;
   locationNamesById: Map<number, string>;
   onEditDetails: () => void;
   onEditItems: () => void;
@@ -2101,12 +2136,13 @@ function PlannerBucketSummary({
       <div className="flex min-w-0 flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <h3 className="truncate text-base font-medium">{bucket.name}</h3>
-            {bucket.kind === "special" && <Badge variant="outline">Special</Badge>}
+            <h3 className="truncate text-base font-medium">{stockpile.name}</h3>
+            {stockpile.kind === "special" && <Badge variant="outline">Special</Badge>}
           </div>
           <p className="text-sm text-muted-foreground">
-            {bucket.items.length.toLocaleString()} item types,{" "}
-            {bucket.items.reduce((total, item) => total + item.quantity, 0).toLocaleString()} units
+            {stockpile.items.length.toLocaleString()} item types,{" "}
+            {stockpile.items.reduce((total, item) => total + item.quantity, 0).toLocaleString()}{" "}
+            units
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
@@ -2123,7 +2159,7 @@ function PlannerBucketSummary({
             variant="destructive"
             size="icon"
             onClick={onRemove}
-            aria-label={`Remove ${bucket.name}`}
+            aria-label={`Remove ${stockpile.name}`}
           >
             <Trash2 aria-hidden="true" />
           </Button>
@@ -2133,18 +2169,18 @@ function PlannerBucketSummary({
         <div className="min-w-0">
           <span className="block text-xs uppercase text-muted-foreground">Stock destination</span>
           <span className="block truncate">
-            {locationNamesById.get(bucket.locations.stock)
-              ?? bucket.stockLocationName
-              ?? String(bucket.locations.stock)}
+            {locationNamesById.get(stockpile.locations.stock)
+              ?? stockpile.stockLocationName
+              ?? String(stockpile.locations.stock)}
           </span>
         </div>
         <div className="min-w-0">
           <span className="block text-xs uppercase text-muted-foreground">Build location</span>
-          <span className="block truncate">{locationName(bucket.locations.manufacturing)}</span>
+          <span className="block truncate">{locationName(stockpile.locations.manufacturing)}</span>
         </div>
         <div className="min-w-0">
           <span className="block text-xs uppercase text-muted-foreground">Reaction location</span>
-          <span className="block truncate">{locationName(bucket.locations.reactions)}</span>
+          <span className="block truncate">{locationName(stockpile.locations.reactions)}</span>
         </div>
       </div>
     </article>
@@ -2219,7 +2255,7 @@ function PlanList({
   locationNamesById,
   onPlanChange,
   onAddBuildItem,
-  onExcludeHaulBucket,
+  onExcludeHaulStockpile,
   resultsHeaderRef,
 }: {
   activeTab: PlannerTab;
@@ -2233,7 +2269,7 @@ function PlanList({
   locationNamesById: Map<number, string>;
   onPlanChange: (plan: PlanResult) => void;
   onAddBuildItem: (item: { name: string; typeId: number; quantity: number }) => void;
-  onExcludeHaulBucket: (fromLocationId: number) => Promise<void>;
+  onExcludeHaulStockpile: (fromLocationId: number) => Promise<void>;
   resultsHeaderRef: RefObject<HTMLElement | null>;
 }) {
   const router = useRouter();
@@ -2359,38 +2395,38 @@ function PlanList({
     | PlanResult["lists"]["reactionJobs"][number]
     | PlanResult["lists"]["manufacturingJobs"][number]
     | PlanResult["lists"]["haulingTasks"][number];
-  const locationBuckets = new Map<number | undefined, PlanListEntry[]>();
+  const locationGroups = new Map<number | undefined, PlanListEntry[]>();
   if (locationGroupedTab) {
     if (activeTab === "Plan") {
       for (const [locationId, entries] of groupPlanItemEntriesByBuildLocation(
         rawList as PlanItemEntry[],
       )) {
-        locationBuckets.set(locationId, entries);
+        locationGroups.set(locationId, entries);
       }
     }
     else {
       for (const entry of list) {
         const locationId = "locationId" in entry ? entry.locationId : undefined;
-        const bucket = locationBuckets.get(locationId) ?? [];
-        bucket.push(entry as PlanListEntry);
-        locationBuckets.set(locationId, bucket);
+        const group = locationGroups.get(locationId) ?? [];
+        group.push(entry as PlanListEntry);
+        locationGroups.set(locationId, group);
       }
     }
   }
-  const sortedLocationBuckets = [...locationBuckets.entries()].sort(([left], [right]) => {
+  const sortedLocationGroups = [...locationGroups.entries()].sort(([left], [right]) => {
     const leftName = locationNamesById.get(left ?? 0) ?? String(left ?? "Location unavailable");
     const rightName = locationNamesById.get(right ?? 0) ?? String(right ?? "Location unavailable");
     return leftName.localeCompare(rightName);
   });
   const categoryGroupedTab = activeTab === "Buy";
-  const categoryBuckets = categoryGroupedTab
+  const categoryGroups = categoryGroupedTab
     ? groupBuyEntriesByMarketCategory(list as PlanBuyEntry[], buyMarketCategories)
     : undefined;
-  const displayBuckets = (
+  const displayGroups = (
     categoryGroupedTab
-      ? [...(categoryBuckets ?? new Map())]
+      ? [...(categoryGroups ?? new Map())]
       : locationGroupedTab
-        ? sortedLocationBuckets
+        ? sortedLocationGroups
         : [[undefined, list as PlanListEntry[]]]
   ) as Array<[number | string | undefined, PlanListEntry[]]>;
   const reactionSchedule = buildReactionSchedule(
@@ -2440,9 +2476,9 @@ function PlanList({
     0,
   );
   const totalReactionRuns = plan.lists.reactionJobs.reduce((total, job) => total + job.runs, 0);
-  const sortedDisplayBuckets =
+  const sortedDisplayGroups =
     activeTab === "React" || activeTab === "Manufacture"
-      ? (displayBuckets.map(([locationId, entries]) => [
+      ? (displayGroups.map(([locationId, entries]) => [
           locationId,
           entries
             .slice()
@@ -2524,9 +2560,9 @@ function PlanList({
               );
             }),
         ]) as Array<[number | undefined, PlanListEntry[]]>)
-      : displayBuckets;
+      : displayGroups;
   const maxCopyBuildTime = Math.max(...plan.lists.bpcsNeeded.map((entry) => entry.buildTime), 0);
-  const haulBuckets = new Map<
+  const haulGroups = new Map<
     string,
     {
       fromLocationId: number;
@@ -2537,13 +2573,13 @@ function PlanList({
   if (activeTab === "Haul") {
     for (const task of plan.lists.haulingTasks) {
       const key = `${task.fromLocationId}:${task.toLocationId}`;
-      const bucket = haulBuckets.get(key) ?? {
+      const group = haulGroups.get(key) ?? {
         fromLocationId: task.fromLocationId,
         toLocationId: task.toLocationId,
         tasks: [],
       };
-      bucket.tasks.push(task);
-      haulBuckets.set(key, bucket);
+      group.tasks.push(task);
+      haulGroups.set(key, group);
     }
   }
   const planColumns = ["Required", "Available", "Buy/Build", "Surplus"] as const;
@@ -2578,7 +2614,7 @@ function PlanList({
   }
 
   function getPlanHaulingQuantity(entry: PlanResult["lists"]["planItems"][number]) {
-    const bucketId = "bucketId" in entry ? entry.bucketId : undefined;
+    const stockpileId = "stockpileId" in entry ? entry.stockpileId : undefined;
     const buildLocationId = "buildLocationId" in entry ? entry.buildLocationId : undefined;
     const haulActivityLocationIds = new Set(activityLocationIds);
     if (buildLocationId !== undefined) haulActivityLocationIds.add(buildLocationId);
@@ -2588,7 +2624,7 @@ function PlanList({
         (task) =>
           task.itemTypeId === entry.typeId
           && haulActivityLocationIds.has(task.toLocationId)
-          && (bucketId === undefined || task.bucketId === bucketId),
+          && (stockpileId === undefined || task.stockpileId === stockpileId),
       )
       .reduce(
         (total, task) =>
@@ -2636,7 +2672,7 @@ function PlanList({
       activeTab === "Plan"
         ? [
             ["Type", ...planColumns].join("\t"),
-            ...displayBuckets
+            ...displayGroups
               .flatMap(([, entries]) => entries)
               .map((entry) => {
                 const cells = getPlanCells(entry as PlanItemEntry);
@@ -3057,36 +3093,36 @@ function PlanList({
       )}
       {activeTab === "Haul" ? (
         <div className={styles.haulGroups}>
-          {[...haulBuckets.values()].map((bucket) => (
+          {[...haulGroups.values()].map((group) => (
             <section
               className={styles.haulGroup}
-              key={`${bucket.fromLocationId}:${bucket.toLocationId}`}
+              key={`${group.fromLocationId}:${group.toLocationId}`}
             >
               <header className={styles.haulGroupHeader}>
                 <span>From</span>
                 <strong>
-                  {locationNamesById.get(bucket.fromLocationId) ?? bucket.fromLocationId}
+                  {locationNamesById.get(group.fromLocationId) ?? group.fromLocationId}
                 </strong>
                 <span>To</span>
-                <strong>{locationNamesById.get(bucket.toLocationId) ?? bucket.toLocationId}</strong>
+                <strong>{locationNamesById.get(group.toLocationId) ?? group.toLocationId}</strong>
                 <div className={styles.haulHeaderActions}>
                   <Button
                     variant="outline"
                     disabled={excludingHaulFromLocationId !== null}
                     onClick={() => {
-                      setExcludingHaulFromLocationId(bucket.fromLocationId);
-                      void onExcludeHaulBucket(bucket.fromLocationId).finally(() => {
+                      setExcludingHaulFromLocationId(group.fromLocationId);
+                      void onExcludeHaulStockpile(group.fromLocationId).finally(() => {
                         setExcludingHaulFromLocationId(null);
                       });
                     }}
                   >
-                    {excludingHaulFromLocationId === bucket.fromLocationId ? (
+                    {excludingHaulFromLocationId === group.fromLocationId ? (
                       <Spinner aria-hidden="true" />
                     ) : (
                       <SquareX aria-hidden="true" />
                     )}
                     <span>
-                      {excludingHaulFromLocationId === bucket.fromLocationId
+                      {excludingHaulFromLocationId === group.fromLocationId
                         ? "Recalculating..."
                         : "Exclude and Recalculate"}
                     </span>
@@ -3094,10 +3130,10 @@ function PlanList({
                 </div>
               </header>
               <div className={styles.haulGroupRows}>
-                {bucket.tasks.map((task) => (
+                {group.tasks.map((task) => (
                   <div
                     className={styles.haulRow}
-                    key={`${task.itemTypeId}:${task.bucketId ?? "unbucketed"}`}
+                    key={`${task.itemTypeId}:${task.stockpileId ?? "unstockpiled"}`}
                   >
                     <TypeIdentity
                       name={task.name}
@@ -3121,7 +3157,7 @@ function PlanList({
         </div>
       ) : (
         <div className={activeTab === "Plan" ? styles.planTable : styles.planList}>
-          {sortedDisplayBuckets.map(([locationId, entries]) => (
+          {sortedDisplayGroups.map(([locationId, entries]) => (
             <Fragment key={locationId ?? "unlocated"}>
               {(locationGroupedTab || categoryGroupedTab) && (
                 <h3 className={styles.locationGroupHeader}>

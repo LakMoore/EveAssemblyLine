@@ -11,7 +11,7 @@ export interface PlanBuildItem {
   fromCompression: boolean;
 }
 
-export interface PlanBucketLocations {
+export interface PlanStockpileLocations {
   stock: number;
   manufacturing: number;
   reactions: number;
@@ -20,14 +20,14 @@ export interface PlanBucketLocations {
   invention: number;
 }
 
-export type PlanBucketKind = "standard" | "special";
+export type PlanStockpileKind = "standard" | "special";
 
-export interface PlanBucket {
+export interface PlanStockpile {
   id: string;
   name: string;
-  kind?: PlanBucketKind;
+  kind?: PlanStockpileKind;
   stockLocationName?: string;
-  locations: PlanBucketLocations;
+  locations: PlanStockpileLocations;
   groupAssignments?: Partial<Record<ProductionGroupKey, number>>;
   items: PlanBuildItem[];
 }
@@ -49,7 +49,7 @@ export interface ClientBuildItem extends BuildItem {
   categoryName: string;
 }
 
-export interface ClientPlanBucket extends Omit<PlanBucket, "items"> {
+export interface ClientPlanStockpile extends Omit<PlanStockpile, "items"> {
   items: ClientBuildItem[];
 }
 
@@ -163,7 +163,7 @@ export interface BlueprintPrint {
 export interface PlanRequest {
   language?: SdeLanguage;
   toBuild?: PlanBuildItem[];
-  buckets?: PlanBucket[];
+  stockpiles?: PlanStockpile[];
   reprocessingEfficiencies?: Record<string, number>;
   assets?:
     | PlanStockItem[]
@@ -204,12 +204,12 @@ export interface PlanRequest {
   };
 }
 
-export type PlannerBucket = Omit<PlanBucket, "items"> & { items: BuildItem[] };
+export type PlannerStockpile = Omit<PlanStockpile, "items"> & { items: BuildItem[] };
 
-export type PlannerRequest = Omit<PlanRequest, "toBuild" | "assets" | "stock" | "buckets"> & {
+export type PlannerRequest = Omit<PlanRequest, "toBuild" | "assets" | "stock" | "stockpiles"> & {
   items: BuildItem[];
   stock: PlanStockItem[];
-  buckets?: PlannerBucket[];
+  stockpiles?: PlannerStockpile[];
   groupAssignments?: Partial<Record<ProductionGroupKey, number>>;
 };
 
@@ -370,8 +370,8 @@ export interface PlanResult {
 }
 
 export interface PlanOutputContext {
-  bucketId?: string;
-  bucketName?: string;
+  stockpileId?: string;
+  stockpileName?: string;
   buildLocationId?: number;
   stockLocationId?: number;
 }

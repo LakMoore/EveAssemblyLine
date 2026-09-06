@@ -55,7 +55,7 @@ const groupAssignmentsSchema = z
       }
     }
   });
-const planBucketSchema = z.object({
+const planStockpileSchema = z.object({
   id: z.string().trim().min(1).max(100),
   name: z.string().trim().min(1).max(100),
   kind: z.enum(["standard", "special"]).optional(),
@@ -89,19 +89,19 @@ const facilityProfilesSchema = z
     }),
   )
   .max(500);
-const planBucketsSchema = z
-  .array(planBucketSchema)
+const planStockpilesSchema = z
+  .array(planStockpileSchema)
   .min(1)
   .max(100)
-  .superRefine((buckets, context) => {
+  .superRefine((stockpiles, context) => {
     const seen = new Set<string>();
-    for (const [index, bucket] of buckets.entries()) {
-      const key = `${bucket.locations.stock}:${bucket.locations.manufacturing}`;
+    for (const [index, stockpile] of stockpiles.entries()) {
+      const key = `${stockpile.locations.stock}:${stockpile.locations.manufacturing}`;
       if (seen.has(key)) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: [index, "locations"],
-          message: "Stock and build locations must be unique across buckets",
+          message: "Stock and build locations must be unique across stockpiles",
         });
       }
       seen.add(key);
@@ -161,7 +161,8 @@ function industryProduct(
 }
 
 async function calculateWorkingAssetsPlan(input: PlanRequest, assets: PlanStockItem[]) {
-  const requestedItems = input.buckets?.flatMap((bucket) => bucket.items) ?? input.toBuild ?? [];
+  const requestedItems =
+    input.stockpiles?.flatMap((stockpile) => stockpile.items) ?? input.toBuild ?? [];
   const types = await getTypesByIds([
     ...new Set([
       ...requestedItems.map((item) => item.typeId),
@@ -177,14 +178,14 @@ async function calculateWorkingAssetsPlan(input: PlanRequest, assets: PlanStockI
       ?? `Type ${item.typeId}`,
   });
   const buildItems = requestedItems.map(resolveBuildItem);
-  const buckets = input.buckets?.map((bucket) => ({
-    ...bucket,
-    items: bucket.items.map(resolveBuildItem),
+  const stockpiles = input.stockpiles?.map((stockpile) => ({
+    ...stockpile,
+    items: stockpile.items.map(resolveBuildItem),
   }));
   const result = await calculatePlan({
     language: input.language,
     items: buildItems,
-    buckets,
+    stockpiles,
     reprocessingEfficiencies: input.reprocessingEfficiencies,
     stock: await hydrateStockCategories(assets),
     locations: input.locations,
@@ -242,19 +243,22 @@ export async function POST(request: Request) {
       }
       input.facilityProfiles = parsedProfiles.data as PlanFacilityProfile[];
     }
-    const parsedBuckets =
-      input.buckets === undefined ? undefined : planBucketsSchema.safeParse(input.buckets);
-    if (parsedBuckets && !parsedBuckets.success) {
+    const parsedStockpiles =
+      input.stockpiles === undefined ? undefined : planStockpilesSchema.safeParse(input.stockpiles);
+    if (parsedStockpiles && !parsedStockpiles.success) {
       return NextResponse.json(
-        { error: "Every bucket needs a name, six valid locations, and valid build items." },
+        { error: "Every stockpile needs a name, six valid locations, and valid build items." },
         { status: 400 },
       );
     }
-    if (parsedBuckets?.success) {
-      const populatedBuckets = parsedBuckets.data.filter((bucket) => bucket.items.length > 0);
-      input.buckets = populatedBuckets.length > 0 ? populatedBuckets : undefined;
+    if (parsedStockpiles?.success) {
+      const populatedStockpiles = parsedStockpiles.data.filter(
+        (stockpile) => stockpile.items.length > 0,
+      );
+      input.stockpiles = populatedStockpiles.length > 0 ? populatedStockpiles : undefined;
     }
-    const requestedItems = input.buckets?.flatMap((bucket) => bucket.items) ?? input.toBuild ?? [];
+    const requestedItems =
+      input.stockpiles?.flatMap((stockpile) => stockpile.items) ?? input.toBuild ?? [];
     if (requestedItems.length === 0) {
       return NextResponse.json({ error: "Add at least one build item." }, { status: 400 });
     }
@@ -317,9 +321,9 @@ export async function POST(request: Request) {
         ?? `Type ${item.typeId}`,
     });
     const buildItems = requestedItems.map(resolveBuildItem);
-    const buckets = input.buckets?.map((bucket) => ({
-      ...bucket,
-      items: bucket.items.map(resolveBuildItem),
+    const stockpiles = input.stockpiles?.map((stockpile) => ({
+      ...stockpile,
+      items: stockpile.items.map(resolveBuildItem),
     }));
     const normalizedBlueprints = assets.blueprints.map((blueprint) => ({ ...blueprint }));
     const industryStock: PlanStockItem[] = [];
@@ -436,7 +440,7 @@ export async function POST(request: Request) {
     const result = await calculatePlan({
       language: input.language,
       items: buildItems,
-      buckets,
+      stockpiles,
       reprocessingEfficiencies: input.reprocessingEfficiencies,
       stock,
       locations: input.locations,

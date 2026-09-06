@@ -100,12 +100,9 @@ src/
       auth/eve/callback/route.ts    # Custom single SSO callback
       auth/session/route.ts         # Session/collection summary
       auth/logout/route.ts          # Clear session cookie
-      auth/corp/status/route.ts     # Corporation eligibility summary
-      characters/route.ts           # Attached characters
       characters/[id]/route.ts      # Remove attached character
       plan/route.ts                 # Asset-driven plan calculation
       state/refresh/route.ts        # Refresh active collection state
-      state/status/route.ts         # Cache status
       state/assets/route.ts         # Planner asset projection
       state/jobs/route.ts           # Industry jobs projection
       state/marketOrders/route.ts   # Market-order projection
@@ -391,37 +388,14 @@ The first successfully authenticated character creates a `CharacterCollectionRec
 
 The callback validates the token subject, fetches the character corporation and available roles, stores the granted scopes, and records Director eligibility. A collection is the durable ownership boundary; a session is only the active browser context.
 
-## 6.2 `GET /api/auth/corp/status`
+## 6.2 Character corporation eligibility
 
-**Purpose:** Allow the frontend to display which characters have the roles and granted scopes required for corporation asset retrieval.
+The `GET /api/auth/session` response is the canonical source for attached character identity,
+roles, granted scopes, and corporation eligibility. There is no separate character identity
+endpoint.
 
-**Behavior:**
-
-- Get the current session.
-- Fetch attached characters from `tokensStore`.
-- Return:
-
-```json
-[
-  {
-    "characterId": 123,
-    "characterName": "Pilot One",
-    "hasDirectorRole": true,
-    "allowCorpRefreshOptIn": false,
-    "corporationId": 999999999
-  },
-  {
-    "characterId": 456,
-    "characterName": "Pilot Two",
-    "hasDirectorRole": false
-  }
-]
-```
-
-The frontend can use this to:
-
-- Show which characters can contribute corp assets.
-- Identify which account characters make their corporations eligible for corporation asset retrieval.
+The frontend uses those fields to show which characters can contribute corporation assets and
+which attached corporations are eligible for corporation asset retrieval.
 
 ---
 
@@ -601,36 +575,18 @@ The refresh summary must identify the owner of every cache entry. Cache keys inc
 - Optionally remove `SessionRecord` from storage.
 - Return `{ "success": true }`.
 
-## 8.2 Character endpoints
+## 8.2 Character management endpoints
 
-### 8.2.1 `GET /api/characters`
+Character identity and corporation eligibility are returned by `GET /api/auth/session`.
+The endpoints below manage attached characters rather than providing a second identity read.
 
-- Validate session.
-- Return list of characters attached to session:
-
-```json
-[
-  {
-    "characterId": 123,
-    "name": "Pilot One",
-    "hasDirectorRole": true,
-    "corporationId": 999999999
-  },
-  {
-    "characterId": 456,
-    "name": "Pilot Two",
-    "hasDirectorRole": false
-  }
-]
-```
-
-### 8.2.2 `POST /api/characters/connect`
+### 8.2.1 `POST /api/characters/connect`
 
 - Start the same SSO flow to add a character.
 - Restore or create the collection associated with the authenticated character.
 - If the authenticated character belongs to another collection, persist a pending merge and require an explicit merge workflow rather than silently combining collections.
 
-### 8.2.3 `DELETE /api/characters/[id]`
+### 8.2.2 `DELETE /api/characters/[id]`
 
 - Validate session.
 - Remove the character from its durable collection membership and update related collection records transactionally.
@@ -717,10 +673,11 @@ This is not currently implemented. Settings are persisted and loaded by the sett
 - Deduplicate an identical active refresh for the same session and character set.
 - Call `refreshCharacterState(characterIds, session.sessionId)` and return endpoint summaries suitable for display near the refresh button.
 
-### 8.4.2 `GET /api/state/status`
+### 8.4.2 Session state snapshot
 
-- Validate session.
-- Return detailed per-character, per-endpoint cache status:
+`GET /api/auth/session` includes a `state` property containing detailed per-character,
+per-endpoint cache status:
+
 - Include the shared corporation endpoint status for every attached character in that corporation,
   regardless of Director access. Director access remains required to refresh corporation data.
 - A corporation refresh uses the authenticated character identity stored on the current session.

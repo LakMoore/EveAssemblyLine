@@ -3,7 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Clipboard, Copy, ListRestart, Save, Trash2, WandSparkles, X } from "lucide-react";
-import type { ClientBuildItem, ClientPlanBucket, PlanBucketLocations } from "@/lib/planning/types";
+import type {
+  ClientBuildItem,
+  ClientPlanStockpile,
+  PlanStockpileLocations,
+} from "@/lib/planning/types";
 import type { ProductionActivity, ProductionGroupKey } from "@/lib/planning/productionGroups";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,6 +52,7 @@ type ActivityLocationOption = {
   locationId: number;
   name: string;
   kind: "station" | "structure";
+  disabled?: boolean;
   baseYield: number;
   baseManufacturingMe: number;
   baseReactionMe: number;
@@ -170,7 +175,11 @@ function LocationCombobox({
               <ComboboxGroup key={group.kind}>
                 <ComboboxLabel>{group.label}</ComboboxLabel>
                 {group.options.map((location) => (
-                  <ComboboxItem key={location.locationId} value={location}>
+                  <ComboboxItem
+                    key={location.locationId}
+                    value={location}
+                    disabled={location.disabled}
+                  >
                     <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
                       <span className="truncate">{location.name}</span>
                       {formatLocationBonus(location, bonus) && (
@@ -190,27 +199,27 @@ function LocationCombobox({
   );
 }
 
-type PlannerBucketDialogProps = {
-  bucket: ClientPlanBucket | null;
+type PlannerStockpileDialogProps = {
+  stockpile: ClientPlanStockpile | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSave: (bucket: ClientPlanBucket) => boolean | void;
+  onSave: (stockpile: ClientPlanStockpile) => boolean | void;
 };
 
-type PlannerBucketDetailsDialogProps = PlannerBucketDialogProps & {
+type PlannerStockpileDetailsDialogProps = PlannerStockpileDialogProps & {
   activityLocations: ActivityLocationOption[];
   stockLocations: StockLocationOption[];
   excludedStockLocationIds: number[];
   productionGroups: ProductionGroupOption[];
-  onAutoAssign: (bucket: ClientPlanBucket) => Partial<Record<ProductionGroupKey, number>>;
+  onAutoAssign: (stockpile: ClientPlanStockpile) => Partial<Record<ProductionGroupKey, number>>;
 };
 
-type PlannerBucketItemsDialogProps = PlannerBucketDialogProps & {
+type PlannerStockpileItemsDialogProps = PlannerStockpileDialogProps & {
   language: SdeLanguage;
 };
 
 const activityLocationFields: Array<{
-  key: keyof Omit<PlanBucketLocations, "stock">;
+  key: keyof Omit<PlanStockpileLocations, "stock">;
   label: string;
   bonus: LocationBonus;
 }> = [
@@ -256,13 +265,13 @@ function addItems(
   return next;
 }
 
-function useBucketDraft(bucket: ClientPlanBucket | null) {
-  const [draft, setDraft] = useState<ClientPlanBucket | null>(() => bucket);
+function useStockpileDraft(stockpile: ClientPlanStockpile | null) {
+  const [draft, setDraft] = useState<ClientPlanStockpile | null>(() => stockpile);
 
   return [draft, setDraft] as const;
 }
 
-function BucketDetailsContent({
+function StockpileDetailsContent({
   draft,
   activityLocations,
   stockLocations,
@@ -271,13 +280,13 @@ function BucketDetailsContent({
   error,
   onChange,
 }: {
-  draft: ClientPlanBucket;
+  draft: ClientPlanStockpile;
   activityLocations: ActivityLocationOption[];
   stockLocations: StockLocationOption[];
   excludedStockLocationIds: number[];
   productionGroups: ProductionGroupOption[];
   error: string;
-  onChange: (bucket: ClientPlanBucket) => void;
+  onChange: (stockpile: ClientPlanStockpile) => void;
 }) {
   function selectStockLocation(locationId: number) {
     const location = stockLocations.find((candidate) => candidate.locationId === locationId);
@@ -316,11 +325,12 @@ function BucketDetailsContent({
           </span>
           <LocationCombobox
             label="Stockpile location (end destination)"
-            options={stockLocations.filter(
-              (location) =>
-                !excludedStockLocationIds.includes(location.locationId)
-                || location.locationId === draft.locations.stock,
-            )}
+            options={stockLocations.map((location) => ({
+              ...location,
+              disabled:
+                excludedStockLocationIds.includes(location.locationId)
+                && location.locationId !== draft.locations.stock,
+            }))}
             selected={stockLocations.find(
               (location) => location.locationId === draft.locations.stock,
             )}
@@ -462,18 +472,18 @@ function BucketDetailsContent({
   );
 }
 
-function BucketItemsContent({
+function StockpileItemsContent({
   draft,
   language,
   error,
   onError,
   onChange,
 }: {
-  draft: ClientPlanBucket;
+  draft: ClientPlanStockpile;
   language: SdeLanguage;
   error: string;
   onError: (message: string) => void;
-  onChange: (bucket: ClientPlanBucket) => void;
+  onChange: (stockpile: ClientPlanStockpile) => void;
 }) {
   const [isPasteOpen, setIsPasteOpen] = useState(false);
 
@@ -611,7 +621,7 @@ function BucketItemsContent({
   );
 }
 
-function PlannerBucketDialogLayout({
+function PlannerStockpileDialogLayout({
   open,
   onOpenChange,
   title,
@@ -730,8 +740,8 @@ function PlannerBucketDialogLayout({
   );
 }
 
-export function PlannerBucketDetailsDialog({
-  bucket,
+export function PlannerStockpileDetailsDialog({
+  stockpile,
   open,
   activityLocations,
   stockLocations,
@@ -740,8 +750,8 @@ export function PlannerBucketDetailsDialog({
   onAutoAssign,
   onOpenChange,
   onSave,
-}: PlannerBucketDetailsDialogProps) {
-  const [draft, setDraft] = useBucketDraft(bucket);
+}: PlannerStockpileDetailsDialogProps) {
+  const [draft, setDraft] = useStockpileDraft(stockpile);
   const [error, setError] = useState("");
 
   if (!open || !draft) return null;
@@ -757,7 +767,7 @@ export function PlannerBucketDetailsDialog({
   }
 
   const content = (
-    <BucketDetailsContent
+    <StockpileDetailsContent
       draft={draft}
       activityLocations={activityLocations}
       stockLocations={stockLocations}
@@ -769,10 +779,10 @@ export function PlannerBucketDetailsDialog({
   );
 
   return (
-    <PlannerBucketDialogLayout
+    <PlannerStockpileDialogLayout
       open={open}
       onOpenChange={onOpenChange}
-      title={bucket ? "Edit stockpile details" : "Add stockpile details"}
+      title={stockpile ? "Edit stockpile details" : "Add stockpile details"}
       description="Set the name and stations for this stockpile."
       content={content}
       onAuto={() =>
@@ -788,14 +798,14 @@ export function PlannerBucketDetailsDialog({
   );
 }
 
-export function PlannerBucketItemsDialog({
-  bucket,
+export function PlannerStockpileItemsDialog({
+  stockpile,
   open,
   language,
   onOpenChange,
   onSave,
-}: PlannerBucketItemsDialogProps) {
-  const [draft, setDraft] = useBucketDraft(bucket);
+}: PlannerStockpileItemsDialogProps) {
+  const [draft, setDraft] = useStockpileDraft(stockpile);
   const [error, setError] = useState("");
 
   if (!open || !draft) return null;
@@ -807,13 +817,13 @@ export function PlannerBucketItemsDialog({
   }
 
   return (
-    <PlannerBucketDialogLayout
+    <PlannerStockpileDialogLayout
       open={open}
       onOpenChange={onOpenChange}
       title="Edit stockpile items"
       description="Set the items and quantities for this stockpile."
       content={
-        <BucketItemsContent
+        <StockpileItemsContent
           draft={draft}
           language={language}
           error={error}
@@ -828,7 +838,7 @@ export function PlannerBucketItemsDialog({
 
 export type {
   ActivityLocationOption,
-  PlannerBucketDetailsDialogProps,
-  PlannerBucketItemsDialogProps,
+  PlannerStockpileDetailsDialogProps,
+  PlannerStockpileItemsDialogProps,
   StockLocationOption,
 };

@@ -31,9 +31,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import {
   groupClientAssetsByLocation,
   invalidateClientCharacterData,
+  loadClientCharacterState,
   loadClientCharacters,
-  loadClientCorpStatus,
-  loadClientStateStatus,
   loadClientAssets,
   loadClientCorporationSettings,
   saveClientCorporationSettings,
@@ -260,24 +259,21 @@ export default function CharactersPage() {
   const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false);
 
   async function loadCharacters() {
-    const [loaded, corpStatus, settings] = await Promise.all([
+    const [loaded, settings] = await Promise.all([
       loadClientCharacters(),
-      loadClientCorpStatus(),
       loadClientCorporationSettings(),
     ]);
     setCorporationSettings(settings);
-    const corpById = new Map(corpStatus.map((character) => [character.characterId, character]));
     setCharacters(
       loaded.map((character) => ({
         ...character,
-        ...corpById.get(character.characterId),
         onDeployment: Boolean(character.onDeployment),
       })),
     );
   }
 
   async function loadStatuses(reload = false) {
-    const data = await loadClientStateStatus(reload);
+    const data = await loadClientCharacterState(reload);
     setStatuses(data.characters ?? []);
     setFreshnessTick((tick) => tick + 1);
   }

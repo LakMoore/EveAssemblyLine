@@ -379,8 +379,10 @@ function installedJobContributions(
   }
   const productionRuns = job.installedRuns ?? getInstalledJobRuns(job);
   const isProduction = job.activityId === 1 || job.activityId === 9;
+  const createsOutput = [1, 5, 8, 9].includes(job.activityId);
   if (
     includeOutput
+    && createsOutput
     && job.productTypeId
     && productionRuns > 0
     && (!isProduction || productQuantityPerRun !== undefined)

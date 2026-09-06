@@ -110,6 +110,7 @@ type OwnerCache = {
   assembledShipsByItemId: Map<number, AssetRecord>;
   assembledStructureRigs: AssetRecord[];
   jobAssetDeductions: Map<string, number>;
+  jobAssetAdditions: Map<string, AssetRecord>;
   jobBlueprintAdjustments: Map<number, { consumedRuns: number; inUse: boolean }>;
   marketOrderAssetDeductions: Map<string, number>;
   jobs?: EndpointCache<IndustryJobRecord[]>;
@@ -796,6 +797,7 @@ function getCache(map: Map<string, OwnerCache>, id: number, sessionId: string): 
     shipAssetsByItemId: new Map(),
     assembledShipsByItemId: new Map(),
     jobAssetDeductions: new Map(),
+    jobAssetAdditions: new Map(),
     jobBlueprintAdjustments: new Map(),
     marketOrderAssetDeductions: new Map(),
     unresolvedAssetCount: 0,
@@ -1016,6 +1018,17 @@ function jobStartedAfter(job: IndustryJobRecord, lastModified: string | undefine
   );
 }
 
+function jobDeliveredAfter(job: IndustryJobRecord, lastModified: string | undefined) {
+  const jobDeliveredAt = Date.parse(job.endDate);
+  const endpointModifiedAt = Date.parse(lastModified ?? "");
+  return (
+    job.status.toLowerCase() === "delivered"
+    && Number.isFinite(jobDeliveredAt)
+    && Number.isFinite(endpointModifiedAt)
+    && jobDeliveredAt > endpointModifiedAt
+  );
+}
+
 function getJobMaterials(
   job: IndustryJobRecord,
   blueprint: Awaited<ReturnType<typeof getBlueprintById>>,
@@ -1039,6 +1052,26 @@ function getJobMaterials(
   }
 }
 
+function getJobOutputQuantity(
+  job: IndustryJobRecord,
+  blueprint: Awaited<ReturnType<typeof getBlueprintById>>,
+) {
+  if (job.productTypeId === undefined) return 0;
+  const installedRuns = job.installedRuns ?? Math.floor(job.runs * (job.probability ?? 1));
+  if (job.activityId === 5) return installedRuns;
+  if (!blueprint) return 0;
+  const activity =
+    job.activityId === 1
+      ? blueprint.activities.manufacturing
+      : job.activityId === 8
+        ? blueprint.activities.invention
+        : job.activityId === 9
+          ? blueprint.activities.reaction
+          : undefined;
+  const product = activity?.products?.find((candidate) => candidate.typeID === job.productTypeId);
+  return (product?.quantity ?? 0) * installedRuns;
+}
+
 async function refreshJobAdjustments(
   cache: OwnerCache,
   jobs: IndustryJobRecord[],
@@ -1046,6 +1079,7 @@ async function refreshJobAdjustments(
   blueprintsLastModified: string | undefined,
 ) {
   cache.jobAssetDeductions = new Map();
+  cache.jobAssetAdditions = new Map();
   cache.jobBlueprintAdjustments = new Map();
   if (!assetsLastModified && !blueprintsLastModified) return;
 
@@ -1055,7 +1089,8 @@ async function refreshJobAdjustments(
         .filter(
           (job) =>
             jobStartedAfter(job, assetsLastModified)
-            || jobStartedAfter(job, blueprintsLastModified),
+            || jobStartedAfter(job, blueprintsLastModified)
+            || jobDeliveredAfter(job, assetsLastModified),
         )
         .map((job) => job.blueprintTypeId),
     ),
@@ -1081,7 +1116,40 @@ async function refreshJobAdjustments(
       }
     }
 
-    if (!jobStartedAfter(job, blueprintsLastModified) || job.activityId === 9) continue;
+    if (jobDeliveredAfter(job, assetsLastModified)) {
+      const outputQuantity = getJobOutputQuantity(job, blueprint);
+      if (outputQuantity > 0 && job.productTypeId !== undefined) {
+        const rootLocation =
+          cache.rootLocationsByItemId.get(job.outputLocationId)
+          ?? cache.rootLocationsByItemId.get(job.facilityId);
+        const key = `${job.productTypeId}:${job.facilityId}`;
+        const existing = cache.jobAssetAdditions.get(key);
+        cache.jobAssetAdditions.set(
+          key,
+          existing
+            ? { ...existing, quantity: existing.quantity + outputQuantity }
+            : {
+                itemId: -job.jobId,
+                typeId: job.productTypeId,
+                quantity: outputQuantity,
+                locationId: job.outputLocationId,
+                locationType: "item",
+                locationFlag: "Deliveries",
+                isSingleton: false,
+                ownerType: job.ownerType,
+                ownerId: job.ownerId,
+                ...(rootLocation ? { rootLocation } : {}),
+              },
+        );
+      }
+    }
+
+    // Delivered jobs returned their blueprint; undelivered jobs still hold it or consume BPC runs.
+    if (
+      job.status.toLowerCase() === "delivered"
+      || !jobStartedAfter(job, blueprintsLastModified)
+      || job.activityId === 9
+    ) continue;
     const blueprintInstance = blueprintInstances.get(job.blueprintId);
     if (!blueprintInstance) continue;
     const adjustment = cache.jobBlueprintAdjustments.get(job.blueprintId) ?? {
@@ -1096,30 +1164,34 @@ async function refreshJobAdjustments(
 
 function effectiveAssets(cache: OwnerCache) {
   const deductions = new Map(cache.jobAssetDeductions);
+  const additions = new Map(cache.jobAssetAdditions);
   for (const [key, quantity] of cache.marketOrderAssetDeductions) {
     deductions.set(key, (deductions.get(key) ?? 0) + quantity);
   }
-  return [...(cache.stockAssetsByItemId?.values() ?? [])].flatMap((asset) => {
-    const rootLocationId =
-      asset.rootLocation && "kind" in asset.rootLocation
-        ? asset.rootLocation.locationId
-        : asset.locationId;
-    const key = `${asset.typeId}:${rootLocationId}`;
-    const deduction = deductions.get(key) ?? 0;
-    const blueprintAdjustment = cache.jobBlueprintAdjustments.get(asset.itemId);
-    if (deduction <= 0) return blueprintAdjustment?.inUse ? [{ ...asset, inUse: true }] : [asset];
-    const deductedQuantity = Math.min(asset.quantity, deduction);
-    const quantity = asset.quantity - deductedQuantity;
-    deductions.set(key, deduction - deductedQuantity);
-    if (quantity <= 0) return [];
-    return [
-      {
-        ...asset,
-        quantity,
-        ...(blueprintAdjustment?.inUse ? { inUse: true } : {}),
-      },
-    ];
-  });
+  return [...(cache.stockAssetsByItemId?.values() ?? [])]
+    .flatMap((asset) => {
+      const rootLocationId =
+        asset.rootLocation && "kind" in asset.rootLocation
+          ? asset.rootLocation.locationId
+          : asset.locationId;
+      const key = `${asset.typeId}:${rootLocationId}`;
+      const deduction = deductions.get(key) ?? 0;
+      const blueprintAdjustment = cache.jobBlueprintAdjustments.get(asset.itemId);
+      const deductedQuantity = Math.min(asset.quantity, deduction);
+      const remainingQuantity = asset.quantity - deductedQuantity;
+      if (deduction > 0) deductions.set(key, deduction - deductedQuantity);
+      if (remainingQuantity <= 0) return [];
+      const addition = additions.get(key);
+      if (addition) additions.delete(key);
+      return [
+        {
+          ...asset,
+          quantity: remainingQuantity + (addition?.quantity ?? 0),
+          ...(blueprintAdjustment?.inUse ? { inUse: true } : {}),
+        },
+      ];
+    })
+    .concat([...additions.values()]);
 }
 
 function marketOrderIssuedAfter(order: MarketOrderRecord, lastModified: string | undefined) {

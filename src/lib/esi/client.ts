@@ -807,7 +807,8 @@ function mapIndustryJob(
 export async function fetchCharacterIndustryJobs(record: CharacterTokenRecord, etag?: string) {
   const token = await getUsableToken(record);
   const result = await fetchEsiEndpoint<EsiIndustryJob[]>(
-    `/characters/${record.characterId}/industry/jobs/`,
+    // Completed jobs are required to reconcile assets and blueprints after installation.
+    `/characters/${record.characterId}/industry/jobs/?include_completed=true`,
     token,
     etag,
     { paginated: false },
@@ -851,7 +852,8 @@ export async function fetchCorporationIndustryJobs(record: CharacterTokenRecord,
   }
   const token = await getUsableToken(record);
   const result = await fetchEsiEndpoint<EsiIndustryJob[]>(
-    `/corporations/${record.corporationId}/industry/jobs/`,
+    // Completed jobs are required to reconcile assets and blueprints after installation.
+    `/corporations/${record.corporationId}/industry/jobs/?include_completed=true`,
     token,
     etag,
     { paginated: false },

@@ -42,10 +42,10 @@ test("gives in-production stock precedence over overlapping haul quantity", () =
 
 test("merges duplicate plan types in the global view", () => {
   const rows = mergePlanItemEntries([
-    material({ bucketId: "jita", bucketName: "Jita", buildLocationId: 60003760 }),
+    material({ stockpileId: "jita", stockpileName: "Jita", buildLocationId: 60003760 }),
     material({
-      bucketId: "auner",
-      bucketName: "Auner",
+      stockpileId: "auner",
+      stockpileName: "Auner",
       buildLocationId: 60008494,
       requiredQuantity: 5,
       quantity: 5,

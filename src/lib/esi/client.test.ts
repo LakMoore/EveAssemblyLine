@@ -7,6 +7,7 @@ import {
   fetchCharacterLocation,
   fetchCharacterRoles,
   fetchCharacterShip,
+  fetchCorporationIndustryJobs,
   fetchCorporationStructures,
   fetchEsiEndpoint,
 } from "./client";
@@ -259,10 +260,37 @@ test("fetches active industry jobs and excludes unusable terminal jobs", async (
 
   const result = await fetchCharacterIndustryJobs(character);
 
-  assert.equal(requestUrl, "https://esi.evetech.net/latest/characters/42/industry/jobs/");
+  assert.equal(
+    requestUrl,
+    "https://esi.evetech.net/latest/characters/42/industry/jobs/?include_completed=true",
+  );
   assert.deepEqual(
     result.jobs?.map((job) => ({ jobId: job.jobId, status: job.status })),
     [{ jobId: 1, status: "active" }],
+  );
+});
+
+test("fetches completed corporation industry jobs", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  let requestUrl = "";
+  globalThis.fetch = async (input) => {
+    requestUrl = String(input);
+    return Response.json([]);
+  };
+
+  await fetchCorporationIndustryJobs({
+    ...character,
+    corporationId: 777,
+    hasDirectorRole: true,
+  });
+
+  assert.equal(
+    requestUrl,
+    "https://esi.evetech.net/latest/corporations/777/industry/jobs/?include_completed=true",
   );
 });
 

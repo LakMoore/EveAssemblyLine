@@ -18,12 +18,10 @@ import { isSdeLanguage, sdeLanguages, type SdeLanguage } from "@/lib/reference/l
 import { replaceEsiStock } from "@/lib/planning/stockStore";
 import {
   groupClientAssetsByLocation,
+  loadClientCharacterState,
   loadClientJobs,
-  loadClientCharacters,
-  loadClientCorpStatus,
   loadClientSession,
   loadClientShips,
-  loadClientStateStatus,
   loadClientAssets,
   type ClientCharacterStatus,
   type ClientCorporationSource,
@@ -35,6 +33,7 @@ import {
   saveLastRefreshAt,
 } from "@/lib/client/refreshCache";
 import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
+import { loadCompressOptions } from "@/lib/planning/reprocessingClient";
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import {
   ArrowUp,
@@ -337,7 +336,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         setCharacters([]);
       });
     const handleCorporationSettingsChanged = () => {
-      void loadClientSession()
+      void loadClientSession(true)
         .then((data: { authenticated?: boolean; characters?: CharacterSummary[] }) => {
           setAuthenticated(Boolean(data.authenticated));
           setCharacters(data.characters ?? []);
@@ -361,7 +360,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     }
     let cancelled = false;
     const loadStatuses = (reload = false) => {
-      void loadClientStateStatus(reload)
+      void loadClientCharacterState(reload)
         .then((data) => {
           if (cancelled) return;
           const nextStatuses = data.characters ?? [];
@@ -589,10 +588,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
         if (staleEndpoints.has("state/assets")) await loadClientAssets(language, true);
         if (staleEndpoints.has("state/jobs")) await loadClientJobs(true);
         if (staleEndpoints.has("state/ships")) await loadClientShips(true);
-        if (staleEndpoints.has("state/status")) await loadClientStateStatus(true);
-        if (staleEndpoints.has("characters")) await loadClientCharacters(true);
-        if (staleEndpoints.has("auth/corp/status")) await loadClientCorpStatus(true);
         if (staleEndpoints.has("facilities")) await fetchFacilityResponse(true);
+        if (staleEndpoints.has("compress/options")) await loadCompressOptions(language, true);
       })
       .catch(() => undefined);
     return () => {

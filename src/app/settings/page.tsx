@@ -2,7 +2,10 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import PasteListDialog from "@/components/PasteListDialog";
-import { setEveAuthorizationAcknowledgement } from "@/components/EveAuthorizationWarning";
+import {
+  setEveAuthorizationAcknowledgement,
+  useEveAuthorizationAcknowledgement,
+} from "@/components/EveAuthorizationWarning";
 import StationSearch, { type StationSearchResult } from "@/components/StationSearch";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -85,9 +88,7 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
   const [isBlacklistOpen, setIsBlacklistOpen] = useState(false);
   const [isMarketStationsOpen, setIsMarketStationsOpen] = useState(false);
-  const [isAuthorizationWarningAcknowledged, setIsAuthorizationWarningAcknowledged] =
-    useState(false);
-  const [isAuthorizationWarningLoading, setIsAuthorizationWarningLoading] = useState(true);
+  const isAuthorizationWarningAcknowledged = useEveAuthorizationAcknowledgement();
 
   useEffect(() => {
     void Promise.resolve().then(() => setSettings(readPlannerSettings()));
@@ -96,20 +97,8 @@ export default function SettingsPage() {
     });
   }, []);
 
-  useEffect(() => {
-    void fetch("/api/auth/session/authorization-warning")
-      .then(async (response) => {
-        if (!response.ok) return;
-        const data = (await response.json()) as { acknowledgedAt?: string | null };
-        setIsAuthorizationWarningAcknowledged(Boolean(data.acknowledgedAt));
-      })
-      .catch(() => undefined)
-      .finally(() => setIsAuthorizationWarningLoading(false));
-  }, []);
-
   function updateAuthorizationWarningAcknowledgement(acknowledged: boolean) {
     setEveAuthorizationAcknowledgement(acknowledged);
-    setIsAuthorizationWarningAcknowledged(acknowledged);
     void fetch(
       "/api/auth/session/authorization-warning",
       {
@@ -173,7 +162,6 @@ export default function SettingsPage() {
             id="authorization-warning"
             aria-labelledby="authorization-warning-label"
             checked={isAuthorizationWarningAcknowledged}
-            disabled={isAuthorizationWarningLoading}
             onCheckedChange={updateAuthorizationWarningAcknowledgement}
           />
         </Field>

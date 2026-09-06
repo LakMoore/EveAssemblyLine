@@ -29,13 +29,12 @@ type EveAuthorizationWarningProps = {
 export const acknowledgementStorageKey = "assembly-line-eve-authorization-warning-acknowledged";
 const acknowledgementChangedEvent = "assembly-line-eve-authorization-warning-changed";
 
-function subscribeToAcknowledgement() {
-  const notify = () => undefined;
-  window.addEventListener("storage", notify);
-  window.addEventListener(acknowledgementChangedEvent, notify);
+function subscribeToAcknowledgement(onStoreChange: () => void) {
+  window.addEventListener("storage", onStoreChange);
+  window.addEventListener(acknowledgementChangedEvent, onStoreChange);
   return () => {
-    window.removeEventListener("storage", notify);
-    window.removeEventListener(acknowledgementChangedEvent, notify);
+    window.removeEventListener("storage", onStoreChange);
+    window.removeEventListener(acknowledgementChangedEvent, onStoreChange);
   };
 }
 
@@ -57,6 +56,15 @@ export function setEveAuthorizationAcknowledgement(acknowledged: boolean) {
   window.dispatchEvent(new CustomEvent(acknowledgementChangedEvent, { detail: acknowledged }));
 }
 
+/** Reads the EVE authorization warning acknowledgement from local browser state. */
+export function useEveAuthorizationAcknowledgement() {
+  return useSyncExternalStore(
+    subscribeToAcknowledgement,
+    getAcknowledgementSnapshot,
+    getServerAcknowledgementSnapshot,
+  );
+}
+
 /**
  * Requires confirmation before starting the EVE SSO authorization flow.
  *
@@ -64,40 +72,13 @@ export function setEveAuthorizationAcknowledgement(acknowledged: boolean) {
  * @returns The warning trigger and its confirmation dialog.
  */
 export default function EveAuthorizationWarning({ href, children }: EveAuthorizationWarningProps) {
-  const localAcknowledgement = useSyncExternalStore(
-    subscribeToAcknowledgement,
-    getAcknowledgementSnapshot,
-    getServerAcknowledgementSnapshot,
-  );
-  const [hasServerAcknowledgement, setHasServerAcknowledgement] = useState(false);
+  const localAcknowledgement = useEveAuthorizationAcknowledgement();
   const [isOpen, setIsOpen] = useState(false);
   const [isSavingAcknowledgement, setIsSavingAcknowledgement] = useState(false);
-  const isAcknowledged = localAcknowledgement || hasServerAcknowledgement;
-
-  useEffect(() => {
-    void fetch("/api/auth/session/authorization-warning")
-      .then(async (response) => {
-        if (!response.ok) return;
-        const data = (await response.json()) as { acknowledgedAt?: string | null };
-        if (!data.acknowledgedAt) return;
-        setEveAuthorizationAcknowledgement(true);
-        setHasServerAcknowledgement(true);
-      })
-      .catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    function handleAcknowledgementChange(event: Event) {
-      setHasServerAcknowledgement((event as CustomEvent<boolean>).detail);
-    }
-    window.addEventListener(acknowledgementChangedEvent, handleAcknowledgementChange);
-    return () =>
-      window.removeEventListener(acknowledgementChangedEvent, handleAcknowledgementChange);
-  }, []);
+  const isAcknowledged = localAcknowledgement;
 
   function acknowledgeWarning() {
     setEveAuthorizationAcknowledgement(true);
-    setHasServerAcknowledgement(true);
     setIsSavingAcknowledgement(true);
     void fetch("/api/auth/session/authorization-warning", { method: "POST" })
       .catch(() => undefined)

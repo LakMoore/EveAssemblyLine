@@ -36,13 +36,16 @@ import {
 } from "@/lib/planning/compressSettingsStore";
 import type { KnownStructure } from "@/lib/planning/preferences";
 import {
+  loadClientCharacterState,
   loadClientAssets,
   loadClientSession,
-  loadClientStateStatus,
 } from "@/lib/client/requestCache";
 import { loadStructures } from "@/lib/planning/structureStore";
-import { loadPlannerBuckets, savePlannerBuckets } from "@/lib/planning/plannerBucketsStore";
-import type { ClientBuildItem, ClientPlanBucket } from "@/lib/planning/types";
+import {
+  loadPlannerStockpiles,
+  savePlannerStockpiles,
+} from "@/lib/planning/plannerStockpilesStore";
+import type { ClientBuildItem, ClientPlanStockpile } from "@/lib/planning/types";
 import { loadEndpointRecord, saveEndpointResponse } from "@/lib/client/refreshCache";
 import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
 import {
@@ -236,7 +239,7 @@ function CompressContent() {
       .all([
         loadCompressSettings(),
         fetchFacilityResponse(),
-        loadClientSession(),
+        loadClientSession(isRefreshLoad),
         loadEndpointRecord<CompressOptions>("compress/options"),
         loadClientAssets(language).catch(() => null),
         loadStructures().catch(() => []),
@@ -250,7 +253,7 @@ function CompressContent() {
           cachedAssets,
           knownStructures,
         ]) => {
-          const stateStatus = session.authenticated ? await loadClientStateStatus() : null;
+          const characterState = session.authenticated ? await loadClientCharacterState() : null;
           const loadedFacilities = facilityResponse?.facilities ?? [];
           let loadedOptions = cachedOptions?.data;
           if (isRefreshLoad || !loadedOptions) {
@@ -348,7 +351,7 @@ function CompressContent() {
             ...character,
             skills: Object.fromEntries(
               (
-                stateStatus?.characters?.find(
+                characterState?.characters?.find(
                   (status) => status.characterId === character.characterId,
                 )?.skills?.body ?? []
               ).map((skill) => [String(skill.skillId), skill.activeSkillLevel]),
@@ -744,7 +747,7 @@ function CompressContent() {
                   value && updateSettings({ orderType: value as CompressSettings["orderType"] })
                 }
                 items={[
-                  { value: "buy-1-day", label: "Buy (1 Day)" },
+                  { value: "buy-1-day", label: "1 Day)" },
                   { value: "buy-5-day", label: "Buy (5 Day)" },
                   { value: "sell", label: "Sell" },
                 ]}
@@ -932,13 +935,13 @@ function Results({
       if (!Number.isSafeInteger(locationId) || locationId <= 0 || !selectedLocation) {
         throw new Error("Select a reprocessing location before adding the results to a plan.");
       }
-      const existingBuckets = (await loadPlannerBuckets()) ?? [];
-      const autoBucket = existingBuckets.find(
-        (bucket) =>
-          bucket.kind === "special"
-          && bucket.name === "Compressed inputs (auto)"
-          && bucket.locations.stock === locationId
-          && bucket.locations.reprocessing === locationId,
+      const existingStockpiles = (await loadPlannerStockpiles()) ?? [];
+      const autoStockpile = existingStockpiles.find(
+        (stockpile) =>
+          stockpile.kind === "special"
+          && stockpile.name === "Compressed inputs (auto)"
+          && stockpile.locations.stock === locationId
+          && stockpile.locations.reprocessing === locationId,
       );
       const compressedItems: ClientBuildItem[] = additions.map((item) => ({
         name: item.name,
@@ -949,13 +952,13 @@ function Results({
         te: 0,
         fromCompression: true,
       }));
-      const nextBucket: ClientPlanBucket = autoBucket
+      const nextStockpile: ClientPlanStockpile = autoStockpile
         ? {
-            ...autoBucket,
-            items: mergeCompressedPlanItems(autoBucket.items, compressedItems),
+            ...autoStockpile,
+            items: mergeCompressedPlanItems(autoStockpile.items, compressedItems),
           }
         : {
-            id: `bucket-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            id: `stockpile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             name: "Compressed inputs (auto)",
             kind: "special",
             stockLocationName: selectedLocation.name,
@@ -969,10 +972,12 @@ function Results({
             },
             items: compressedItems,
           };
-      const nextBuckets = autoBucket
-        ? existingBuckets.map((bucket) => (bucket.id === autoBucket.id ? nextBucket : bucket))
-        : [...existingBuckets, nextBucket];
-      await savePlannerBuckets(nextBuckets);
+      const nextStockpiles = autoStockpile
+        ? existingStockpiles.map((stockpile) =>
+            stockpile.id === autoStockpile.id ? nextStockpile : stockpile,
+          )
+        : [...existingStockpiles, nextStockpile];
+      await savePlannerStockpiles(nextStockpiles);
       router.push("/planner");
     }
     catch {

@@ -22,7 +22,7 @@ export function getNonProductionHaulingQuantity(
 /**
  * Merge plan rows that represent the same type within one view scope.
  *
- * @param entries Plan rows from one or more planner buckets.
+ * @param entries Plan rows from one or more planner stockpiles.
  * @param buildLocationId Build location to retain on the merged rows.
  * @param totalAvailableStockByTypeId Full eligible stock for the global view.
  * @returns One aggregated row per type ID and row kind.
@@ -40,8 +40,8 @@ export function mergePlanItemEntries(
         entry.typeId,
         {
           ...entry,
-          bucketId: undefined,
-          bucketName: undefined,
+          stockpileId: undefined,
+          stockpileName: undefined,
           buildLocationId,
           stockLocationId: undefined,
         },
@@ -125,7 +125,7 @@ export function mergePlanItemEntries(
 }
 
 /**
- * Merge Buy rows that represent the same type across planner buckets.
+ * Merge Buy rows that represent the same type across planner stockpiles.
  *
  * @param entries Material and BPC purchase rows from the planner.
  * @returns One aggregated purchase row per type ID.
@@ -196,7 +196,7 @@ export function mergeBuyEntries(entries: PlanBuyEntry[]): PlanBuyEntry[] {
  *
  * @param entries Aggregated planner purchase rows.
  * @param marketCategoryByTypeId Market category metadata keyed by type ID.
- * @returns Sorted market-category buckets containing sorted purchase rows.
+ * @returns Sorted market-category groups containing sorted purchase rows.
  */
 export function groupBuyEntriesByMarketCategory(
   entries: PlanBuyEntry[],
@@ -224,7 +224,7 @@ export function groupBuyEntriesByMarketCategory(
 /**
  * Group plan rows by build location and aggregate duplicate types within each group.
  *
- * @param entries Plan rows from all planner buckets.
+ * @param entries Plan rows from all planner stockpiles.
  * @returns Aggregated plan rows keyed by build location ID.
  */
 export function groupPlanItemEntriesByBuildLocation(

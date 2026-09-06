@@ -158,10 +158,10 @@ test("tracks production-origin haul quantity separately from stock haul quantity
       ],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
-            id: "haul-provenance-bucket",
-            name: "Haul provenance bucket",
+            id: "haul-provenance-stockpile",
+            name: "Haul provenance stockpile",
             locations: {
               stock: sourceLocationId,
               manufacturing: manufacturingLocationId,
@@ -204,7 +204,7 @@ test("tracks production-origin haul quantity separately from stock haul quantity
   assert.equal(stockHaul.productionQuantity, undefined);
 });
 
-test("counts active output toward availability in bucketed plans", async () => {
+test("counts active output toward availability in stockpiled plans", async () => {
   const result = await calculatePlan(
     request(
       150,
@@ -220,10 +220,10 @@ test("counts active output toward availability in bucketed plans", async () => {
       ],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
-            id: "bucket-1",
-            name: "Bucket 1",
+            id: "stockpile-1",
+            name: "Stockpile 1",
             locations: {
               stock: sourceLocationId,
               manufacturing: manufacturingLocationId,
@@ -258,17 +258,17 @@ test("counts active output toward availability in bucketed plans", async () => {
   assert.equal(tritanium.availableSourceCounts?.industry, 20);
 });
 
-test("uses remote active output for a bucket final product", async () => {
+test("uses remote active output for a stockpile final product", async () => {
   const result = await calculatePlan(
     request(
       150,
       [industryOutputStock("active", alternateSourceLocationId, "Manufacturing", 20)],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
-            id: "remote-output-bucket",
-            name: "Remote output bucket",
+            id: "remote-output-stockpile",
+            name: "Remote output stockpile",
             locations: {
               stock: sourceLocationId,
               manufacturing: manufacturingLocationId,
@@ -303,11 +303,11 @@ test("uses remote active output for a bucket final product", async () => {
   assert.deepEqual(result.lists.haulingTasks, []);
 });
 
-test("ignores empty buckets when calculating a plan", async () => {
+test("ignores empty stockpiles when calculating a plan", async () => {
   const stock = [industryOutputStock("active", manufacturingLocationId, "Manufacturing", 20)];
-  const populatedBucket = {
-    id: "populated-bucket",
-    name: "Populated bucket",
+  const populatedStockpile = {
+    id: "populated-stockpile",
+    name: "Populated stockpile",
     locations: {
       stock: sourceLocationId,
       manufacturing: manufacturingLocationId,
@@ -327,9 +327,9 @@ test("ignores empty buckets when calculating a plan", async () => {
       },
     ],
   };
-  const emptyBucket = {
-    id: "empty-bucket",
-    name: "Empty bucket",
+  const emptyStockpile = {
+    id: "empty-stockpile",
+    name: "Empty stockpile",
     locations: {
       stock: 41,
       manufacturing: 21,
@@ -340,20 +340,20 @@ test("ignores empty buckets when calculating a plan", async () => {
     },
     items: [],
   };
-  const withoutEmptyBucket = await calculatePlan(
-    request(0, stock, { items: [], buckets: [populatedBucket] }),
+  const withoutEmptyStockpile = await calculatePlan(
+    request(0, stock, { items: [], stockpiles: [populatedStockpile] }),
   );
-  const withEmptyBucket = await calculatePlan(
-    request(0, stock, { items: [], buckets: [emptyBucket, populatedBucket] }),
+  const withEmptyStockpile = await calculatePlan(
+    request(0, stock, { items: [], stockpiles: [emptyStockpile, populatedStockpile] }),
   );
 
   assert.deepEqual(
-    { ...withEmptyBucket, metadata: { ...withEmptyBucket.metadata, generatedAt: "" } },
-    { ...withoutEmptyBucket, metadata: { ...withoutEmptyBucket.metadata, generatedAt: "" } },
+    { ...withEmptyStockpile, metadata: { ...withEmptyStockpile.metadata, generatedAt: "" } },
+    { ...withoutEmptyStockpile, metadata: { ...withoutEmptyStockpile.metadata, generatedAt: "" } },
   );
 });
 
-test("falls back to top-level items when all buckets are empty", async () => {
+test("falls back to top-level items when all stockpiles are empty", async () => {
   const buildItem = {
     typeId: tritaniumTypeId,
     name: "Tritanium",
@@ -362,9 +362,9 @@ test("falls back to top-level items when all buckets are empty", async () => {
     te: 0,
     fromCompression: false,
   };
-  const emptyBucket = {
-    id: "empty-bucket",
-    name: "Empty bucket",
+  const emptyStockpile = {
+    id: "empty-stockpile",
+    name: "Empty stockpile",
     locations: {
       stock: sourceLocationId,
       manufacturing: manufacturingLocationId,
@@ -375,20 +375,20 @@ test("falls back to top-level items when all buckets are empty", async () => {
     },
     items: [],
   };
-  const withoutEmptyBucket = await calculatePlan(
-    request(0, [], { items: [buildItem], buckets: undefined }),
+  const withoutEmptyStockpile = await calculatePlan(
+    request(0, [], { items: [buildItem], stockpiles: undefined }),
   );
-  const withEmptyBucket = await calculatePlan(
-    request(0, [], { items: [buildItem], buckets: [emptyBucket] }),
+  const withEmptyStockpile = await calculatePlan(
+    request(0, [], { items: [buildItem], stockpiles: [emptyStockpile] }),
   );
 
   assert.deepEqual(
-    { ...withEmptyBucket, metadata: { ...withEmptyBucket.metadata, generatedAt: "" } },
-    { ...withoutEmptyBucket, metadata: { ...withoutEmptyBucket.metadata, generatedAt: "" } },
+    { ...withEmptyStockpile, metadata: { ...withEmptyStockpile.metadata, generatedAt: "" } },
+    { ...withoutEmptyStockpile, metadata: { ...withoutEmptyStockpile.metadata, generatedAt: "" } },
   );
 });
 
-test("reallocates shared stock after intermediate inventory reduces bucket demand", async () => {
+test("reallocates shared stock after intermediate inventory reduces stockpile demand", async () => {
   const result = await calculatePlan(
     request(
       0,
@@ -410,7 +410,7 @@ test("reallocates shared stock after intermediate inventory reduces bucket deman
       ],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
             id: "intermediate-stock",
             name: "Intermediate stock",
@@ -460,7 +460,7 @@ test("reallocates shared stock after intermediate inventory reduces bucket deman
     ),
   );
   const gasRows = result.lists.materialsToBuy.filter((item) => item.typeId === 16634);
-  const gasDemand = gasRows.find((item) => item.bucketId === "gas-demand");
+  const gasDemand = gasRows.find((item) => item.stockpileId === "gas-demand");
 
   assert(gasDemand);
   assert.equal(gasDemand.buyQuantity, 0);
@@ -471,7 +471,7 @@ test("reallocates shared stock after intermediate inventory reduces bucket deman
   );
 });
 
-test("uses reaction formulas held at a bucket's reaction location", async () => {
+test("uses reaction formulas held at a stockpile's reaction location", async () => {
   const result = await calculatePlan(
     request(
       20,
@@ -502,10 +502,10 @@ test("uses reaction formulas held at a bucket's reaction location", async () => 
             fromCompression: false,
           },
         ],
-        buckets: [
+        stockpiles: [
           {
-            id: "reaction-bucket",
-            name: "Reaction bucket",
+            id: "reaction-stockpile",
+            name: "Reaction stockpile",
             locations: {
               stock: sourceLocationId,
               manufacturing: manufacturingLocationId,
@@ -546,7 +546,7 @@ test("uses reaction formulas held at a bucket's reaction location", async () => 
   );
 });
 
-test("uses BPC runs held at a bucket's manufacturing location", async () => {
+test("uses BPC runs held at a stockpile's manufacturing location", async () => {
   const result = await calculatePlan(
     request(
       1,
@@ -571,10 +571,10 @@ test("uses BPC runs held at a bucket's manufacturing location", async () => {
             fromCompression: false,
           },
         ],
-        buckets: [
+        stockpiles: [
           {
-            id: "manufacturing-bucket",
-            name: "Manufacturing bucket",
+            id: "manufacturing-stockpile",
+            name: "Manufacturing stockpile",
             locations: {
               stock: sourceLocationId,
               manufacturing: manufacturingLocationId,
@@ -607,7 +607,7 @@ test("uses BPC runs held at a bucket's manufacturing location", async () => {
   assert.equal(blueprint.buyQuantity, 0);
 });
 
-test("does not strand shared BPC stock in a bucket covered by item stock", async () => {
+test("does not strand shared BPC stock in a stockpile covered by item stock", async () => {
   const result = await calculatePlan(
     request(
       0,
@@ -630,10 +630,10 @@ test("does not strand shared BPC stock in a bucket covered by item stock", async
       ],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
-            id: "stocked-bucket",
-            name: "Stocked bucket",
+            id: "stocked-stockpile",
+            name: "Stocked stockpile",
             locations: {
               stock: 10,
               manufacturing: manufacturingLocationId,
@@ -654,8 +654,8 @@ test("does not strand shared BPC stock in a bucket covered by item stock", async
             ],
           },
           {
-            id: "build-bucket",
-            name: "Build bucket",
+            id: "build-stockpile",
+            name: "Build stockpile",
             locations: {
               stock: 11,
               manufacturing: 21,
@@ -681,7 +681,7 @@ test("does not strand shared BPC stock in a bucket covered by item stock", async
   );
   const blueprint = result.lists.planItems
     .filter((entry) => entry.kind === "bpc")
-    .find((entry) => entry.bucketId === "build-bucket");
+    .find((entry) => entry.stockpileId === "build-stockpile");
 
   assert(blueprint);
   assert.equal(blueprint.typeId, rifterBlueprintTypeId);
@@ -689,7 +689,7 @@ test("does not strand shared BPC stock in a bucket covered by item stock", async
   assert.equal(blueprint.buyQuantity, 0);
 });
 
-test("shares BPC runs across buckets when aggregate stock covers demand", async () => {
+test("shares BPC runs across stockpiles when aggregate stock covers demand", async () => {
   const result = await calculatePlan(
     request(
       0,
@@ -705,10 +705,10 @@ test("shares BPC runs across buckets when aggregate stock covers demand", async 
       ],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
-            id: "first-bpc-bucket",
-            name: "First BPC bucket",
+            id: "first-bpc-stockpile",
+            name: "First BPC stockpile",
             locations: {
               stock: 10,
               manufacturing: manufacturingLocationId,
@@ -729,8 +729,8 @@ test("shares BPC runs across buckets when aggregate stock covers demand", async 
             ],
           },
           {
-            id: "second-bpc-bucket",
-            name: "Second BPC bucket",
+            id: "second-bpc-stockpile",
+            name: "Second BPC stockpile",
             locations: {
               stock: 11,
               manufacturing: 21,
@@ -768,7 +768,7 @@ test("shares BPC runs across buckets when aggregate stock covers demand", async 
   );
 });
 
-test("uses BPO-backed BPC runs to cover another bucket's purchase requirement", async () => {
+test("uses BPO-backed BPC runs to cover another stockpile's purchase requirement", async () => {
   const result = await calculatePlan(
     request(
       0,
@@ -787,10 +787,10 @@ test("uses BPO-backed BPC runs to cover another bucket's purchase requirement", 
       ],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
-            id: "bpo-backed-bucket",
-            name: "BPO-backed bucket",
+            id: "bpo-backed-stockpile",
+            name: "BPO-backed stockpile",
             locations: {
               stock: sourceLocationId,
               manufacturing: manufacturingLocationId,
@@ -811,8 +811,8 @@ test("uses BPO-backed BPC runs to cover another bucket's purchase requirement", 
             ],
           },
           {
-            id: "bpc-purchase-bucket",
-            name: "BPC purchase bucket",
+            id: "bpc-purchase-stockpile",
+            name: "BPC purchase stockpile",
             locations: {
               stock: 11,
               manufacturing: 21,
@@ -845,7 +845,7 @@ test("uses BPO-backed BPC runs to cover another bucket's purchase requirement", 
   );
 });
 
-test("shares assets across buckets without merging identical destination plans", async () => {
+test("shares assets across stockpiles without merging identical destination plans", async () => {
   const firstBuildLocationId = manufacturingLocationId;
   const secondBuildLocationId = 21;
   const result = await calculatePlan(
@@ -869,7 +869,7 @@ test("shares assets across buckets without merging identical destination plans",
       ],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
             id: "first",
             name: "First destination",
@@ -918,8 +918,8 @@ test("shares assets across buckets without merging identical destination plans",
       },
     ),
   );
-  const firstPlan = result.lists.materialsToBuy.find((item) => item.bucketId === "first");
-  const secondPlan = result.lists.materialsToBuy.find((item) => item.bucketId === "second");
+  const firstPlan = result.lists.materialsToBuy.find((item) => item.stockpileId === "first");
+  const secondPlan = result.lists.materialsToBuy.find((item) => item.stockpileId === "second");
 
   assert.ok(firstPlan);
   assert.ok(secondPlan);
@@ -930,13 +930,13 @@ test("shares assets across buckets without merging identical destination plans",
   assert.equal(secondPlan.stockLocationId, 11);
   assert.equal(
     result.lists.haulingTasks.find(
-      (task) => task.bucketId === "second" && task.itemTypeId === tritaniumTypeId,
+      (task) => task.stockpileId === "second" && task.itemTypeId === tritaniumTypeId,
     )?.fromLocationId,
     sourceLocationId,
   );
 });
 
-test("reserves a bucket's local assets before remote buckets can use them", async () => {
+test("reserves a stockpile's local assets before remote stockpiles can use them", async () => {
   const result = await calculatePlan(
     request(
       0,
@@ -951,7 +951,7 @@ test("reserves a bucket's local assets before remote buckets can use them", asyn
       ],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
             id: "remote",
             name: "Remote destination",
@@ -1000,8 +1000,8 @@ test("reserves a bucket's local assets before remote buckets can use them", asyn
       },
     ),
   );
-  const remote = result.lists.materialsToBuy.find((item) => item.bucketId === "remote");
-  const local = result.lists.materialsToBuy.find((item) => item.bucketId === "local");
+  const remote = result.lists.materialsToBuy.find((item) => item.stockpileId === "remote");
+  const local = result.lists.materialsToBuy.find((item) => item.stockpileId === "local");
 
   assert.ok(remote);
   assert.ok(local);
@@ -1011,13 +1011,14 @@ test("reserves a bucket's local assets before remote buckets can use them", asyn
   assert.equal(local.buyQuantity, 0);
   assert.equal(
     result.lists.haulingTasks.some(
-      (task) => task.bucketId === "local" && task.fromLocationId === 21 && task.toLocationId === 11,
+      (task) =>
+        task.stockpileId === "local" && task.fromLocationId === 21 && task.toLocationId === 11,
     ),
     true,
   );
 });
 
-test("reserves stock for manufacturing inputs before direct bucket demand", async () => {
+test("reserves stock for manufacturing inputs before direct stockpile demand", async () => {
   const result = await calculatePlan(
     request(
       0,
@@ -1032,7 +1033,7 @@ test("reserves stock for manufacturing inputs before direct bucket demand", asyn
       ],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
             id: "standing-stock",
             name: "Standing stock",
@@ -1082,13 +1083,13 @@ test("reserves stock for manufacturing inputs before direct bucket demand", asyn
     ),
   );
   const standingStock = result.lists.materialsToBuy.find(
-    (item) => item.bucketId === "standing-stock" && item.typeId === tritaniumTypeId,
+    (item) => item.stockpileId === "standing-stock" && item.typeId === tritaniumTypeId,
   );
   const manufacturingStock = result.lists.materialsToBuy.find(
-    (item) => item.bucketId === "manufacturing" && item.typeId === tritaniumTypeId,
+    (item) => item.stockpileId === "manufacturing" && item.typeId === tritaniumTypeId,
   );
   const manufacturingJob = result.lists.manufacturingJobs.find(
-    (job) => job.bucketId === "manufacturing" && job.typeId === rifterBlueprintTypeId,
+    (job) => job.stockpileId === "manufacturing" && job.typeId === rifterBlueprintTypeId,
   );
 
   assert(standingStock);
@@ -1106,7 +1107,7 @@ test("reserves stock for manufacturing inputs before direct bucket demand", asyn
   assert.equal(tritaniumInput.status, "ready");
 });
 
-test("reserves fuel blocks for reaction inputs before direct bucket demand", async () => {
+test("reserves fuel blocks for reaction inputs before direct stockpile demand", async () => {
   const result = await calculatePlan(
     request(
       0,
@@ -1142,7 +1143,7 @@ test("reserves fuel blocks for reaction inputs before direct bucket demand", asy
       ],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
             id: "fuel-stock",
             name: "Fuel stock",
@@ -1192,10 +1193,10 @@ test("reserves fuel blocks for reaction inputs before direct bucket demand", asy
     ),
   );
   const directFuel = result.lists.materialsToBuy.find(
-    (item) => item.bucketId === "fuel-stock" && item.typeId === heliumFuelBlockTypeId,
+    (item) => item.stockpileId === "fuel-stock" && item.typeId === heliumFuelBlockTypeId,
   );
   const reactionJob = result.lists.reactionJobs.find(
-    (job) => job.bucketId === "fuel-reaction" && job.typeId === fuelReactionFormulaTypeId,
+    (job) => job.stockpileId === "fuel-reaction" && job.typeId === fuelReactionFormulaTypeId,
   );
 
   assert(directFuel);
@@ -1227,7 +1228,7 @@ test("combines haul tasks with the same type and route", async () => {
       ],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
             id: "first-route",
             name: "First destination",
@@ -1287,14 +1288,14 @@ test("combines haul tasks with the same type and route", async () => {
   assert.equal(matchingHauls[0]?.quantity, 64000);
 });
 
-test("hauls ready manufactured stock to the bucket stock location", async () => {
+test("hauls ready manufactured stock to the stockpile stock location", async () => {
   const result = await calculatePlan(
     request(
       0,
       [industryOutputStock("ready", manufacturingLocationId)],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
             id: "finished",
             name: "Finished stock",
@@ -1329,7 +1330,7 @@ test("hauls ready manufactured stock to the bucket stock location", async () => 
   assert.equal(outputHaul.quantity, 100);
 });
 
-test("reserves final-location stock before build-location output for a bucket", async () => {
+test("reserves final-location stock before build-location output for a stockpile", async () => {
   const result = await calculatePlan(
     request(
       0,
@@ -1345,7 +1346,7 @@ test("reserves final-location stock before build-location output for a bucket", 
       ],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
             id: "final-stock-priority",
             name: "Final stock priority",
@@ -1398,7 +1399,7 @@ test("does not move final-destination stock to the manufacturing location", asyn
       ],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
             id: "fuel-stock",
             name: "Fuel stock",
@@ -1456,7 +1457,7 @@ test("plans input delivery and ready output delivery as separate hauls", async (
       ],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
             id: "two-leg",
             name: "Two leg plan",
@@ -2025,10 +2026,10 @@ test("merges reaction jobs by reaction location and formula type", async () => {
       [],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
-            id: "first-reaction-bucket",
-            name: "First reaction bucket",
+            id: "first-reaction-stockpile",
+            name: "First reaction stockpile",
             locations: {
               stock: sourceLocationId,
               manufacturing: manufacturingLocationId,
@@ -2049,8 +2050,8 @@ test("merges reaction jobs by reaction location and formula type", async () => {
             ],
           },
           {
-            id: "second-reaction-bucket",
-            name: "Second reaction bucket",
+            id: "second-reaction-stockpile",
+            name: "Second reaction stockpile",
             locations: {
               stock: alternateSourceLocationId,
               manufacturing: manufacturingLocationId,
@@ -2088,10 +2089,78 @@ test("merges reaction jobs by reaction location and formula type", async () => {
   assert.equal(reactionJob.inputs.blueprint.availableQuantity, 0);
   assert.equal(reactionJob.inputs.blueprint.requiredQuantity, 1);
   assert.equal(reactionJob.inputs.materials.length, 3);
-  assert.equal(reactionJob.bucketId, undefined);
+  assert.equal(reactionJob.stockpileId, undefined);
 });
 
-test("allocates reaction formulas at the reaction location to bucket jobs", async () => {
+test("merges manufacturing jobs by blueprint type across stockpiles", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "first-manufacturing-stockpile",
+            name: "First manufacturing stockpile",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: rifterTypeId,
+                name: "Rifter",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "second-manufacturing-stockpile",
+            name: "Second manufacturing stockpile",
+            locations: {
+              stock: alternateSourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: rifterTypeId,
+                name: "Rifter",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+
+  const manufacturingJobs = result.lists.manufacturingJobs.filter(
+    (job) => job.typeId === rifterBlueprintTypeId,
+  );
+  assert.equal(manufacturingJobs.length, 1);
+  const manufacturingJob = manufacturingJobs[0];
+  assert(manufacturingJob);
+  assert.equal(manufacturingJob.runs, 2);
+  assert.equal(manufacturingJob.stockpileId, undefined);
+  assert.equal(manufacturingJob.buildLocationId, undefined);
+});
+
+test("allocates reaction formulas at the reaction location to stockpile jobs", async () => {
   const result = await calculatePlan(
     request(
       0,
@@ -2106,10 +2175,10 @@ test("allocates reaction formulas at the reaction location to bucket jobs", asyn
       ],
       {
         items: [],
-        buckets: [
+        stockpiles: [
           {
-            id: "first-formula-bucket",
-            name: "First formula bucket",
+            id: "first-formula-stockpile",
+            name: "First formula stockpile",
             locations: {
               stock: sourceLocationId,
               manufacturing: manufacturingLocationId,
@@ -2130,8 +2199,8 @@ test("allocates reaction formulas at the reaction location to bucket jobs", asyn
             ],
           },
           {
-            id: "second-formula-bucket",
-            name: "Second formula bucket",
+            id: "second-formula-stockpile",
+            name: "Second formula stockpile",
             locations: {
               stock: alternateSourceLocationId,
               manufacturing: manufacturingLocationId,
@@ -2287,7 +2356,7 @@ test("credits committed compressed purchases before considering owned stock", as
   );
 });
 
-test("shares future materials from compressed purchases across buckets", async () => {
+test("shares future materials from compressed purchases across stockpiles", async () => {
   const result = await calculatePlan(
     request(
       0,
@@ -2295,7 +2364,7 @@ test("shares future materials from compressed purchases across buckets", async (
       {
         items: [],
         reprocessingEfficiencies: { [compressedVeldsparTypeId]: 100 },
-        buckets: [
+        stockpiles: [
           {
             id: "compressed-inputs",
             name: "Compressed inputs",
@@ -2346,11 +2415,11 @@ test("shares future materials from compressed purchases across buckets", async (
     ),
   );
   const tritanium = result.lists.materialsToBuy.find(
-    (material) => material.typeId === tritaniumTypeId && material.bucketId === "manufacturing",
+    (material) => material.typeId === tritaniumTypeId && material.stockpileId === "manufacturing",
   );
   const compressed = result.lists.materialsToBuy.find(
     (material) =>
-      material.typeId === compressedVeldsparTypeId && material.bucketId === "compressed-inputs",
+      material.typeId === compressedVeldsparTypeId && material.stockpileId === "compressed-inputs",
   );
 
   assert(tritanium);
@@ -2361,7 +2430,7 @@ test("shares future materials from compressed purchases across buckets", async (
   assert.equal(
     result.lists.haulingTasks.some(
       (task) =>
-        task.bucketId === "manufacturing"
+        task.stockpileId === "manufacturing"
         && task.itemTypeId === tritaniumTypeId
         && task.fromLocationId === reprocessingLocationId
         && task.toLocationId === manufacturingLocationId,

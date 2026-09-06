@@ -30,7 +30,7 @@ export default function CookiesPage() {
             <>
               <p>
                 AssemblyLine stores a larger working set in the browser&apos;s IndexedDB database.
-                This can include your current build list, saved planner buckets, production
+                This can include your current build list, saved planner stockpiles, production
                 locations, build and buy exclusions, and compression calculator settings.
               </p>
               <p>

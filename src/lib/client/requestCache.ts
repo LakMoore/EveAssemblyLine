@@ -5,15 +5,8 @@ import { loadEndpointRecord, saveEndpointResponse } from "./refreshCache";
 
 export type ClientSession = {
   authenticated?: boolean;
-  characters?: Array<{
-    characterId: number;
-    characterName: string;
-    corporationId?: number;
-    hasDirectorRole: boolean;
-    allowCorpRefreshOptIn: boolean;
-    onDeployment: boolean;
-    corporationSupportEnabled?: boolean;
-  }>;
+  characters?: ClientCharacter[];
+  state?: { characters?: ClientCharacterStatus[] };
 };
 
 export type ClientAssetsResponse = {
@@ -307,15 +300,8 @@ let shipsRequest: Promise<ClientShipsResponse> | undefined;
 let shipsResponse: ClientShipsResponse | undefined;
 let jobsRequest: Promise<ClientJobsResponse> | undefined;
 let jobsResponse: ClientJobsResponse | undefined;
-let charactersRequest: Promise<ClientCharacter[]> | undefined;
-let charactersResponse: ClientCharacter[] | undefined;
-let corpStatusRequest: Promise<ClientCharacter[]> | undefined;
-let corpStatusResponse: ClientCharacter[] | undefined;
 let corporationSettingsRequest: Promise<ClientCorporationSettings[]> | undefined;
 let corporationSettingsResponse: ClientCorporationSettings[] | undefined;
-let stateStatusRequest: Promise<{ characters?: ClientCharacterStatus[] }> | undefined;
-let stateStatusResponse: { characters?: ClientCharacterStatus[] } | undefined;
-let stateStatusGeneration = 0;
 
 function loadJson<T>(
   url: string,
@@ -340,7 +326,8 @@ function loadJson<T>(
   return request;
 }
 
-export function loadClientSession() {
+export function loadClientSession(reload = false) {
+  if (reload) sessionRequest = undefined;
   sessionRequest
     ??= fetch("/api/auth/session")
       .then((response) => response.json() as Promise<ClientSession>)
@@ -436,43 +423,7 @@ export function loadClientJobs(reload = false) {
 }
 
 export function loadClientCharacters(reload = false) {
-  if (reload) {
-    charactersRequest = undefined;
-    charactersResponse = undefined;
-  }
-  if (charactersResponse) return Promise.resolve(charactersResponse);
-  charactersRequest = loadJson(
-    "/api/characters",
-    "characters",
-    charactersRequest,
-    (value) => {
-      charactersRequest = value;
-    },
-  ).then((data) => {
-    charactersResponse = data;
-    return data;
-  });
-  return charactersRequest;
-}
-
-export function loadClientCorpStatus(reload = false) {
-  if (reload) {
-    corpStatusRequest = undefined;
-    corpStatusResponse = undefined;
-  }
-  if (corpStatusResponse) return Promise.resolve(corpStatusResponse);
-  corpStatusRequest = loadJson(
-    "/api/auth/corp/status",
-    "auth/corp/status",
-    corpStatusRequest,
-    (value) => {
-      corpStatusRequest = value;
-    },
-  ).then((data) => {
-    corpStatusResponse = data;
-    return data;
-  });
-  return corpStatusRequest;
+  return loadClientSession(reload).then((session) => session.characters ?? []);
 }
 
 export function loadClientCorporationSettings(reload = false) {
@@ -520,38 +471,14 @@ export async function saveClientCorporationSettings(settings: ClientCorporationS
   return data.settings;
 }
 
-export function loadClientStateStatus(reload = false) {
-  if (reload) {
-    stateStatusGeneration += 1;
-    stateStatusRequest = undefined;
-    stateStatusResponse = undefined;
-  }
-  if (!reload && stateStatusResponse) return Promise.resolve(stateStatusResponse);
-  const requestGeneration = stateStatusGeneration;
-  stateStatusRequest = loadJson(
-    "/api/state/status",
-    "state/status",
-    stateStatusRequest,
-    (value) => {
-      if (requestGeneration === stateStatusGeneration) stateStatusRequest = value;
-    },
-    () => requestGeneration === stateStatusGeneration,
-  ).then((data) => {
-    if (requestGeneration === stateStatusGeneration) stateStatusResponse = data;
-    return data;
-  });
-  return stateStatusRequest;
+export function loadClientCharacterState(reload = false) {
+  return loadClientSession(reload).then((session) => session.state ?? { characters: [] });
 }
 
 export function invalidateClientCharacterData() {
   sessionRequest = undefined;
-  charactersResponse = undefined;
-  corpStatusResponse = undefined;
   corporationSettingsResponse = undefined;
   corporationSettingsRequest = undefined;
-  stateStatusResponse = undefined;
-  stateStatusRequest = undefined;
-  stateStatusGeneration += 1;
   jobsRequest = undefined;
   jobsResponse = undefined;
 }
