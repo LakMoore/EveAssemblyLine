@@ -10,6 +10,11 @@ const amberMykoserocinTypeId = 28694;
 const compressedAmberMykoserocinTypeId = 62377;
 const rifterTypeId = 587;
 const rifterBlueprintTypeId = 691;
+const capRechargerTypeId = 2032;
+const capRechargerBlueprintTypeId = 2033;
+const capRechargerInventionBlueprintTypeId = 1196;
+const highEnergyPhysicsDatacoreTypeId = 20411;
+const quantumPhysicsDatacoreTypeId = 20414;
 const amarrShuttleTypeId = 31462;
 const amarrShuttleBlueprintTypeId = 31463;
 const sharedTritaniumProductTypeId = 586;
@@ -98,6 +103,314 @@ function industryOutputStock(
   };
 }
 
+test("build blacklist forces a buildable item to be purchased", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        settings: {
+          ...request(0, []).settings,
+          buildBlacklist: [rifterTypeId],
+        },
+      },
+    ),
+  );
+
+  const rifter = result.lists.materialsToBuy.find((item) => item.typeId === rifterTypeId);
+  assert(rifter);
+  assert.equal(rifter.buyQuantity, 1);
+  assert.equal(rifter.buildQuantity, 0);
+  assert.equal(
+    result.lists.manufacturingJobs.some((job) => job.typeId === rifterBlueprintTypeId),
+    false,
+  );
+});
+
+test("buy blacklist keeps a buildable item on the manufacturing path", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        settings: {
+          ...request(0, []).settings,
+          buyBlacklist: [rifterTypeId],
+        },
+      },
+    ),
+  );
+
+  const job = result.lists.manufacturingJobs.find(
+    (entry) => entry.typeId === rifterBlueprintTypeId,
+  );
+  assert(job);
+  assert.equal(job.runs, 1);
+  const rifter = result.lists.materialsToBuy.find((item) => item.typeId === rifterTypeId);
+  assert(rifter);
+  assert.equal(rifter.buyQuantity, 0);
+  assert.equal(rifter.buildQuantity, 1);
+});
+
+test("plans invention attempts and materials for a missing T2 BPC", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [],
+      {
+        items: [
+          {
+            typeId: capRechargerTypeId,
+            name: "Cap Recharger II",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+
+  const inventionJob = result.lists.inventionJobs.find(
+    (job) => job.typeId === capRechargerInventionBlueprintTypeId,
+  );
+  assert(inventionJob);
+  assert.equal(inventionJob.runs, 3);
+  assert.equal(inventionJob.locationId, manufacturingLocationId);
+
+  for (const typeId of [highEnergyPhysicsDatacoreTypeId, quantumPhysicsDatacoreTypeId]) {
+    const datacore = result.lists.materialsToBuy.find((item) => item.typeId === typeId);
+    assert(datacore);
+    assert.equal(datacore.requiredQuantity, 6);
+    assert.equal(datacore.buyQuantity, 6);
+  }
+  assert.equal(
+    result.lists.bpcsToBuy.some((blueprint) => blueprint.typeId === capRechargerBlueprintTypeId),
+    false,
+  );
+  assert.equal(
+    result.lists.skillsRequired.some((skill) => skill.skillId === 23087),
+    true,
+  );
+});
+
+test("uses an available T2 BPC without scheduling invention", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: capRechargerBlueprintTypeId,
+          name: "Cap Recharger II Blueprint",
+          quantity: 1,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [{ itemId: 9100, type: "bpc", runs: 1 }],
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: capRechargerTypeId,
+            name: "Cap Recharger II",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+
+  assert.deepEqual(result.lists.inventionJobs, []);
+  const blueprint = result.lists.planItems.find(
+    (item) => item.kind === "bpc" && item.typeId === capRechargerBlueprintTypeId,
+  );
+  assert(blueprint && blueprint.kind === "bpc");
+  assert.equal(blueprint.stockRuns, 1);
+  assert.equal(blueprint.buyQuantity, 0);
+});
+
+test("applies assigned manufacturing group facility modifiers", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        groupAssignments: { smallShips: alternateSourceLocationId },
+        facilityProfiles: [
+          {
+            locationId: alternateSourceLocationId,
+            sizeId: 1,
+            buildTypeGroups: {
+              smallShips: {
+                manufacturingMaterialMultiplier: 0.9,
+                manufacturingMaterialPercentage: 10,
+                manufacturingTimeMultiplier: 0.8,
+                manufacturingTimePercentage: 20,
+                reactionMaterialMultiplier: 1,
+                reactionMaterialPercentage: 0,
+                reactionTimeMultiplier: 1,
+                reactionTimePercentage: 0,
+              },
+            },
+          },
+        ],
+      },
+    ),
+  );
+  const job = result.lists.manufacturingJobs.find(
+    (entry) => entry.typeId === rifterBlueprintTypeId,
+  );
+  assert(job);
+  assert.equal(job.locationId, alternateSourceLocationId);
+  assert.equal(job.totalTime, 4_800);
+  const tritanium = job.inputs.materials.find((input) => input.typeId === tritaniumTypeId);
+  assert(tritanium);
+  assert.equal(tritanium.requiredQuantity, 28_800);
+});
+
+test("applies assigned reaction group facility modifiers", async () => {
+  const result = await calculatePlan(
+    request(
+      20,
+      [
+        {
+          typeId: reactionFormulaTypeId,
+          name: "Reaction Formula",
+          quantity: 1,
+          category: "reactionformula",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: 16657,
+          name: "Reaction Material A",
+          quantity: 100,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: 16661,
+          name: "Reaction Material B",
+          quantity: 100,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: 4051,
+          name: "Reaction Material C",
+          quantity: 5,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: reactionProductTypeId,
+            name: "Reaction Product",
+            quantity: 20,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        groupAssignments: { compositeReactions: alternateSourceLocationId },
+        facilityProfiles: [
+          {
+            locationId: alternateSourceLocationId,
+            sizeId: 1,
+            buildTypeGroups: {
+              compositeReactions: {
+                manufacturingMaterialMultiplier: 1,
+                manufacturingMaterialPercentage: 0,
+                manufacturingTimeMultiplier: 1,
+                manufacturingTimePercentage: 0,
+                reactionMaterialMultiplier: 0.5,
+                reactionMaterialPercentage: 50,
+                reactionTimeMultiplier: 0.75,
+                reactionTimePercentage: 25,
+              },
+            },
+          },
+        ],
+      },
+    ),
+  );
+  const job = result.lists.reactionJobs.find((entry) => entry.typeId === reactionFormulaTypeId);
+  assert(job);
+  assert.equal(job.locationId, alternateSourceLocationId);
+  assert.equal(job.totalTime, 8_100);
+  assert.deepEqual(
+    job.inputs.materials.map((input) => [input.typeId, input.requiredQuantity]),
+    [
+      [4051, 3],
+      [16657, 50],
+      [16661, 50],
+    ],
+  );
+});
+
+test("combines global facility and skill time multipliers", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        facilityTimeMultipliers: { manufacturing: 0.8, reactions: 1 },
+        skillTimeMultipliers: { manufacturing: 0.5, reactions: 1 },
+      },
+    ),
+  );
+  const job = result.lists.manufacturingJobs.find(
+    (entry) => entry.typeId === rifterBlueprintTypeId,
+  );
+  assert(job);
+  assert.equal(job.totalTime, 2_400);
+});
+
 test("uses output from an active industry job as committed availability", async () => {
   const result = await calculatePlan(
     request(100, [industryOutputStock("active", manufacturingLocationId)]),
@@ -112,6 +425,102 @@ test("uses output from an active industry job as committed availability", async 
   assert.equal(tritanium.buyQuantity, 0);
   assert.equal(tritanium.availableSourceCounts?.industry, 100);
   assert.deepEqual(result.lists.haulingTasks, []);
+});
+
+test("does not count cancelled or reverted industry output as available stock", async () => {
+  for (const status of ["cancelled", "reverted"] as const) {
+    const result = await calculatePlan(
+      request(100, [industryOutputStock(status, manufacturingLocationId)]),
+    );
+    const tritanium = result.lists.materialsToBuy.find(
+      (material) => material.typeId === tritaniumTypeId,
+    );
+
+    assert(tritanium);
+    assert.equal(tritanium.availableStockQuantity, 0);
+    assert.equal(tritanium.buyQuantity, 100);
+  }
+});
+
+test("uses paused industry output for demand but not installable job inputs", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [industryOutputStock("paused", manufacturingLocationId, "Manufacturing", 32_000)],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+
+  const tritanium = result.lists.materialsToBuy.find(
+    (material) => material.typeId === tritaniumTypeId,
+  );
+  assert(tritanium);
+  assert.equal(tritanium.availableStockQuantity, 32_000);
+  assert.equal(tritanium.buyQuantity, 0);
+  const job = result.lists.manufacturingJobs.find(
+    (entry) => entry.typeId === rifterBlueprintTypeId,
+  );
+  assert(job);
+  const tritaniumInput = job.inputs.materials.find((input) => input.typeId === tritaniumTypeId);
+  assert(tritaniumInput);
+  assert.equal(tritaniumInput.availableQuantity, 0);
+  assert.equal(tritaniumInput.status, "blocked");
+});
+
+test("deduplicates repeated blueprint print IDs when counting BPC runs", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: rifterBlueprintTypeId,
+          name: "Rifter Blueprint",
+          quantity: 2,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [{ itemId: 9000, type: "bpc", runs: 1 }],
+        },
+        {
+          typeId: rifterBlueprintTypeId,
+          name: "Rifter Blueprint",
+          quantity: 2,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [{ itemId: 9000, type: "bpc", runs: 1 }],
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 2,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+
+  const blueprint = result.lists.planItems.find(
+    (item) => item.kind === "bpc" && item.typeId === rifterBlueprintTypeId,
+  );
+  assert(blueprint && blueprint.kind === "bpc");
+  assert.equal(blueprint.stockRuns, 1);
+  assert.equal(blueprint.buyQuantity, 1);
 });
 
 test("counts physical stock and active output toward plan availability", async () => {
@@ -2363,12 +2772,13 @@ test("shares future materials from compressed purchases across stockpiles", asyn
       [],
       {
         items: [],
-        reprocessingEfficiencies: { [compressedVeldsparTypeId]: 100 },
+        reprocessingEfficiencies: { [compressedVeldsparTypeId]: 50 },
         stockpiles: [
           {
             id: "compressed-inputs",
             name: "Compressed inputs",
             kind: "special",
+            reprocessingEfficiencies: { [compressedVeldsparTypeId]: 100 },
             locations: {
               stock: reprocessingLocationId,
               manufacturing: reprocessingLocationId,

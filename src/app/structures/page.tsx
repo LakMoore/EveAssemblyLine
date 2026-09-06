@@ -34,7 +34,11 @@ import {
   type PlannerLocations,
 } from "@/lib/planning/preferences";
 import type { SdeLanguage } from "@/lib/reference/languages";
-import { loadClientAssets, loadClientSession } from "@/lib/client/requestCache";
+import {
+  groupClientAssetsByLocation,
+  loadClientAssets,
+  loadClientSession,
+} from "@/lib/client/requestCache";
 import { fetchRigs } from "@/lib/reference/rigs";
 import {
   fetchStructureTypes,
@@ -51,11 +55,8 @@ import {
   type FacilitySettingsPayload,
 } from "@/lib/planning/facilities";
 import { formatLocationName } from "@/lib/reference/locationName";
-import {
-  fetchFacilityResponse,
-  publishFacilities,
-  facilitySettingsFromStructures,
-} from "@/lib/planning/facilitiesStore";
+import { publishFacilities, facilitySettingsFromStructures } from "@/lib/planning/facilitiesStore";
+import { refreshAllPlannerStockpileEfficiencies } from "@/lib/planning/reprocessingClient";
 import {
   Select,
   SelectContent,
@@ -259,30 +260,13 @@ export default function LocationsPage() {
 
     async function loadEsiStructures() {
       try {
-        const data = await (loadClientAssets(language) as Promise<{
-          locations?: Array<{
-            locationId: number;
-            name: string;
-            locationType: "structure" | "station" | "anchored";
-            systemId?: number;
-            systemName?: string;
-            securityStatus?: number;
-            typeId?: number;
-            totalCount: number;
-            totalVolume: number;
-            assetCount: number;
-            personalAssetCount: number;
-            corporationAssetCount: number;
-            resolved: boolean;
-          }>;
-        }>);
-        const facilityResponse = await fetchFacilityResponse();
-        if (!facilityResponse) throw new Error("Facilities unavailable");
-        setFacilities(facilityResponse.settings);
+        const data = await loadClientAssets(language);
+        const facilities = data.facilities ?? [];
+        setFacilities(data.settings ?? emptyFacilitySettings);
         const facilitiesByLocationId = new Map(
-          facilityResponse.facilities.map((facility) => [facility.id, facility]),
+          facilities.map((facility) => [facility.id, facility]),
         );
-        const locations = (data.locations ?? [])
+        const locations = groupClientAssetsByLocation(data)
           .filter(
             (
               location,
@@ -682,6 +666,10 @@ export default function LocationsPage() {
           onCancel={() => setIsDialogOpen(false)}
           onSave={(structure) => {
             const previous = knownStructures.find((current) => current.id === structure.id);
+            const rigConfigurationChanged =
+              previous === undefined
+                ? (structure.rigTypeIds?.length ?? 0) > 0
+                : !sameRigTypeIds(previous.rigTypeIds, structure.rigTypeIds);
             const structures =
               previous !== undefined
                 ? knownStructures.map((current) =>
@@ -693,7 +681,14 @@ export default function LocationsPage() {
               structures,
             }));
             void saveStructures(structures);
-            void publishFacilities(facilitySettingsFromStructures(structures)).then(setFacilities);
+            void publishFacilities(facilitySettingsFromStructures(structures)).then(
+              async (nextFacilities) => {
+                setFacilities(nextFacilities);
+                if (rigConfigurationChanged) {
+                  await refreshAllPlannerStockpileEfficiencies(language);
+                }
+              },
+            );
             setIsDialogOpen(false);
             setEditingStructure(null);
           }}

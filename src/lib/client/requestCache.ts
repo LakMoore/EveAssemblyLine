@@ -1,4 +1,6 @@
-import type { PlanStockItem } from "@/lib/planning/types";
+import type { PlanStockItem, StockItem } from "@/lib/planning/types";
+import type { Facility, FacilitySettingsPayload } from "@/lib/planning/facilities";
+import type { ProductionGroupReference } from "@/lib/planning/productionGroups";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import { formatLocationName, normalizeLocationName } from "@/lib/reference/locationName";
 import { loadEndpointRecord, saveEndpointResponse } from "./refreshCache";
@@ -6,19 +8,32 @@ import { loadEndpointRecord, saveEndpointResponse } from "./refreshCache";
 export type ClientSession = {
   authenticated?: boolean;
   characters?: ClientCharacter[];
-  state?: { characters?: ClientCharacterStatus[] };
+  state?: ClientCharacterState;
+};
+
+export type ClientCharacterState = { characters?: ClientCharacterStatus[] };
+
+export type ClientRefreshEventDetail = {
+  refreshedAt: string;
+  state?: ClientCharacterState;
+  assets?: ClientAssetsResponse;
+  jobs?: ClientJobsResponse;
+  assetLocations?: Array<{
+    locationId: number;
+    name: string;
+    systemId?: number;
+    systemName?: string;
+    items: PlanStockItem[];
+  }>;
+  corporationSources?: ClientCorporationSource[];
+  ships?: ClientShipsResponse | null;
 };
 
 export type ClientAssetsResponse = {
-  assets?: PlanStockItem[];
-  locations?: Array<{
-    locationId: number;
-    name: string;
-    locationType: "station" | "structure" | "anchored";
-    systemId?: number;
-    systemName?: string;
-    typeId?: number;
-  }>;
+  assets?: StockItem[];
+  facilities?: Facility[];
+  settings?: FacilitySettingsPayload;
+  productionGroups?: ProductionGroupReference[];
   filteredLocationIds?: number[];
   corporationSources?: ClientCorporationSource[];
 };
@@ -41,13 +56,12 @@ function normalizeClientLocationName(
 }
 
 export function normalizeClientAssetsResponse(data: ClientAssetsResponse): ClientAssetsResponse {
+  const { locations: _legacyLocations, ...response } = data as ClientAssetsResponse & {
+    locations?: unknown;
+  };
   return {
-    ...data,
-    locations: data.locations?.map((location) => ({
-      ...location,
-      name: normalizeClientLocationName(location.name, location.locationType, location.systemName),
-    })),
-    corporationSources: data.corporationSources?.map((source) => ({
+    ...response,
+    corporationSources: response.corporationSources?.map((source) => ({
       ...source,
       ...(source.rootLocation?.name
         ? {
@@ -151,14 +165,37 @@ export type ClientCorporationSource = {
 };
 
 export function groupClientAssetsByLocation(data: ClientAssetsResponse) {
-  return (data.locations ?? []).map((location) => ({
-    ...location,
-    items: (data.assets ?? []).filter(
-      (item) =>
-        item.rootLocationId === location.locationId
-        || item.sourceLocationId === location.locationId,
-    ),
-  }));
+  return (data.facilities ?? [])
+    .filter((facility): facility is Facility & { id: number } => typeof facility.id === "number")
+    .map((facility) => {
+      const items = (data.assets ?? []).filter(
+        (item) => item.rootLocationId === facility.id || item.sourceLocationId === facility.id,
+      );
+      return {
+        locationId: facility.id,
+        name: facility.name,
+        locationType: facility.locationType,
+        typeId: facility.typeId,
+        systemId: facility.systemId,
+        systemName: facility.systemName,
+        securityStatus: facility.securityStatus,
+        resolved: true,
+        assetCount: items.length,
+        personalAssetCount: items.filter((item) => item.ownerType !== "corporation").length,
+        corporationAssetCount: items.filter((item) => item.ownerType === "corporation").length,
+        totalCount: items.reduce((total, item) => total + item.quantity, 0),
+        totalVolume: items.reduce(
+          (total, item) =>
+            total
+            + item.quantity
+              * (item.isPackaged
+                ? (item.packagedVolume ?? item.assembledVolume ?? 0)
+                : (item.assembledVolume ?? 0)),
+          0,
+        ),
+        items,
+      };
+    });
 }
 
 export type ClientShipsResponse = {
@@ -343,7 +380,7 @@ export function loadClientAssets(language: SdeLanguage, reload = false) {
   const pending = assetsRequests.get(key);
   if (pending) return pending;
   const cached = assetsResponses.get(key);
-  if (!reload && cached) return Promise.resolve(cached);
+  if (!reload && cached?.facilities) return Promise.resolve(cached);
 
   const query = new URLSearchParams({ language });
   const loadCachedStock = !reload
@@ -359,6 +396,7 @@ export function loadClientAssets(language: SdeLanguage, reload = false) {
           return null;
         }
         const data = normalizeClientAssetsResponse(record.data);
+        if (!data.facilities) return null;
         assetsResponses.set(key, data);
         return data;
       })
@@ -471,7 +509,7 @@ export async function saveClientCorporationSettings(settings: ClientCorporationS
   return data.settings;
 }
 
-export function loadClientCharacterState(reload = false) {
+export function loadClientCharacterState(reload = false): Promise<ClientCharacterState> {
   return loadClientSession(reload).then((session) => session.state ?? { characters: [] });
 }
 

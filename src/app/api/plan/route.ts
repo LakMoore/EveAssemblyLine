@@ -68,6 +68,7 @@ const planStockpileSchema = z.object({
     invention: z.number().int().positive(),
   }),
   groupAssignments: groupAssignmentsSchema.optional(),
+  reprocessingEfficiencies: reprocessingEfficienciesSchema.optional(),
   items: z.array(planBuildItemSchema),
 });
 const facilityGroupBonusSchema = z.object({

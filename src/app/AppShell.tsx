@@ -23,8 +23,11 @@ import {
   loadClientSession,
   loadClientShips,
   loadClientAssets,
+  type ClientAssetsResponse,
   type ClientCharacterStatus,
+  type ClientCharacterState,
   type ClientCorporationSource,
+  type ClientRefreshEventDetail,
 } from "@/lib/client/requestCache";
 import {
   endpointNeedsRefresh,
@@ -32,7 +35,6 @@ import {
   refreshDependentEndpoints,
   saveLastRefreshAt,
 } from "@/lib/client/refreshCache";
-import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
 import { loadCompressOptions } from "@/lib/planning/reprocessingClient";
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import {
@@ -359,8 +361,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
       return;
     }
     let cancelled = false;
-    const loadStatuses = (reload = false) => {
-      void loadClientCharacterState(reload)
+    const loadStatuses = (reload = false, state?: ClientCharacterState) => {
+      void (state ? Promise.resolve(state) : loadClientCharacterState(reload))
         .then((data) => {
           if (cancelled) return;
           const nextStatuses = data.characters ?? [];
@@ -384,8 +386,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
         });
     };
     loadStatuses();
-    const handleRefresh = () => {
-      if (activePage !== "imagechecker" && activePage !== "characters") loadStatuses(true);
+    const handleRefresh = (event: Event) => {
+      if (activePage === "imagechecker" || activePage === "characters") return;
+      const detail = (event as CustomEvent<ClientRefreshEventDetail>).detail;
+      loadStatuses(!detail.state, detail.state);
     };
     const statusTimer = window.setInterval(() => setStatusCheckAt(Date.now()), 5_000);
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
@@ -449,6 +453,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
     window.dispatchEvent(new CustomEvent("assembly-line-esi-refresh-started"));
     let assetLocations: EsiStockResponse["locations"] | undefined;
     let corporationSources: ClientCorporationSource[] | undefined;
+    let assetsResponse: ClientAssetsResponse | undefined;
+    let stateResponse: ClientCharacterState | undefined;
     let refreshSucceeded = false;
     try {
       const results = await runRefreshUnits(
@@ -508,6 +514,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       if (requiredEndpoints.has("state/assets")) {
         try {
           const assetsData = await loadClientAssets(language, true);
+          assetsResponse = assetsData;
           corporationSources = assetsData.corporationSources;
           assetLocations = groupClientAssetsByLocation(assetsData);
           await replaceEsiStock(
@@ -523,9 +530,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
         }
         catch {}
       }
-      if (requiredEndpoints.has("facilities")) {
+      try {
+        stateResponse = await loadClientCharacterState(true);
+      }
+      catch {}
+      if (requiredEndpoints.has("compress/options")) {
         try {
-          await fetchFacilityResponse(true);
+          await loadCompressOptions(language, true);
         }
         catch {}
       }
@@ -537,6 +548,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
             detail: {
               refreshedAt,
               rateLimitedUntil: null,
+              state: stateResponse,
+              assets: assetsResponse,
               assetLocations,
               corporationSources,
               ships: shipsResponse ?? null,
@@ -588,7 +601,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
         if (staleEndpoints.has("state/assets")) await loadClientAssets(language, true);
         if (staleEndpoints.has("state/jobs")) await loadClientJobs(true);
         if (staleEndpoints.has("state/ships")) await loadClientShips(true);
-        if (staleEndpoints.has("facilities")) await fetchFacilityResponse(true);
         if (staleEndpoints.has("compress/options")) await loadCompressOptions(language, true);
       })
       .catch(() => undefined);

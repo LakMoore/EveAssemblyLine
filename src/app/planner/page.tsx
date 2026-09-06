@@ -40,15 +40,16 @@ import {
   loadClientSession,
   loadClientJobs,
   loadClientAssets,
+  groupClientAssetsByLocation,
+  type ClientRefreshEventDetail,
   filterClientAssetsForPlanning,
   type ClientAssetsResponse,
   type ClientCharacterStatus,
   type ClientCorporationSource,
   type ClientJobsResponse,
 } from "@/lib/client/requestCache";
-import { fetchFacilityResponse } from "@/lib/planning/facilitiesStore";
 import { loadPlanResult, savePlanResult } from "@/lib/planning/planResultStore";
-import { loadPlannerReprocessingEfficiencies } from "@/lib/planning/reprocessingClient";
+import { refreshPlannerStockpileEfficiencies } from "@/lib/planning/reprocessingClient";
 import {
   getNonProductionHaulingQuantity,
   groupBuyEntriesByMarketCategory,
@@ -583,13 +584,6 @@ function Planner() {
   const [productionGroupReferences, setProductionGroupReferences] = useState<
     ProductionGroupReference[]
   >([]);
-  const [reprocessingEfficiencies, setReprocessingEfficiencies] = useState<Record<string, number>>(
-    {},
-  );
-  const [reprocessingEfficienciesKey, setReprocessingEfficienciesKey] = useState("");
-  const [reprocessingEfficienciesError, setReprocessingEfficienciesError] = useState<string | null>(
-    null,
-  );
   const [includeStock, setIncludeStock] = useState(true);
   const [corporationSources, setCorporationSources] = useState<ClientCorporationSource[]>([]);
   const [locations, setLocations] = useState<PlannerLocations>(defaultLocations);
@@ -645,14 +639,16 @@ function Planner() {
         setPlanningCharacterId((current) => current ?? activeStatuses[0]?.characterId);
       })
       .catch(() => setIsAuthenticated(false));
-    const handleRefresh = () => {
-      void loadClientCharacterState(true)
-        .then(async (state) => {
+    const handleRefresh = (event: Event) => {
+      const detail = (event as CustomEvent<ClientRefreshEventDetail>).detail;
+      void Promise
+        .all([
+          detail.state ? Promise.resolve(detail.state) : loadClientCharacterState(),
+          detail.assets ? Promise.resolve(detail.assets) : loadClientAssets(language),
+          detail.jobs ? Promise.resolve(detail.jobs) : loadClientJobs(),
+        ])
+        .then(([state, assets, loadedJobs]) => {
           if (cancelled) return;
-          const [assets, loadedJobs] = await Promise.all([
-            loadClientAssets(language, true),
-            loadClientJobs(true),
-          ]);
           setClientAssets(assets);
           setJobs(loadedJobs);
           setCorporationSources(assets.corporationSources ?? []);
@@ -699,16 +695,25 @@ function Planner() {
               items: await localizeItems(stockpile.items, language),
             })),
           );
-          setStockpiles(localizedStockpiles);
-          setItems(localizedStockpiles[0]?.items ?? []);
+          const enrichedStockpiles = await refreshPlannerStockpileEfficiencies(
+            language,
+            localizedStockpiles,
+          );
+          setStockpiles(enrichedStockpiles);
+          setItems(enrichedStockpiles[0]?.items ?? []);
           return;
         }
         const savedItems = await loadBuildList();
         const localizedItems = await localizeItems(savedItems, language);
-        setItems(localizedItems);
-        setStockpiles([
+        const initialStockpiles = [
           createPlannerStockpile(defaultLocations, localizedItems, "Primary destination"),
-        ]);
+        ];
+        const enrichedStockpiles = await refreshPlannerStockpileEfficiencies(
+          language,
+          initialStockpiles,
+        );
+        setItems(localizedItems);
+        setStockpiles(enrichedStockpiles);
       })
       .catch(() => {
         setItems([]);
@@ -724,33 +729,22 @@ function Planner() {
   useEffect(() => {
     let cancelled = false;
     async function loadLocationOptions(reload = false) {
-      const [data, storedLocations, assetsData] = await Promise.all([
-        fetchFacilityResponse(reload, language),
+      const [data, storedLocations] = await Promise.all([
+        loadClientAssets(language, reload).catch(() => null),
         loadPlannerLocations(),
-        loadClientAssets(language).catch(() => null),
       ]);
       if (cancelled) return;
-      if (assetsData?.locations) {
+      if (data) {
+        const assetLocations = groupClientAssetsByLocation(data);
         setCachedAssetLocations(
-          assetsData.locations
-            .filter(
-              (
-                location,
-              ): location is typeof location & {
-                locationType: "station" | "structure";
-              } => location.locationType === "station" || location.locationType === "structure",
-            )
-            .map((location) => ({
-              locationId: location.locationId,
-              name:
-                location.locationType === "structure"
-                  ? formatLocationName(location.systemName, location.name)
-                  : location.name,
-              kind: location.locationType,
-              baseYield: 0,
-              baseManufacturingMe: 0,
-              baseReactionMe: 0,
-            })),
+          assetLocations.map((location) => ({
+            locationId: location.locationId,
+            name: location.name,
+            kind: location.locationType,
+            baseYield: 0,
+            baseManufacturingMe: 0,
+            baseReactionMe: 0,
+          })),
         );
       }
       const options = (data?.facilities ?? [])
@@ -813,7 +807,7 @@ function Planner() {
       if (!cancelled) setLocationOptions([]);
     });
     function handleFacilitiesRefresh() {
-      void loadLocationOptions().catch(() => {
+      void loadLocationOptions(false).catch(() => {
         if (!cancelled) setLocationOptions([]);
       });
     }
@@ -828,39 +822,18 @@ function Planner() {
     if (areStockpilesLoaded) void savePlannerStockpiles(stockpiles);
   }, [areStockpilesLoaded, stockpiles]);
 
-  useEffect(() => {
-    let cancelled = false;
-    void loadPlannerReprocessingEfficiencies(language, locations.reprocessing)
-      .then((efficiencies) => {
-        if (cancelled) return;
-        setReprocessingEfficiencies(efficiencies);
-        setReprocessingEfficienciesKey(`${language}:${locations.reprocessing}`);
-        setReprocessingEfficienciesError(null);
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        setReprocessingEfficiencies({});
-        setReprocessingEfficienciesError(
-          error instanceof Error ? error.message : "Could not load compression efficiencies.",
-        );
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [language, locations.reprocessing]);
-
   async function submitPlan(exclusions: Set<number>) {
     const plannerItems = stockpiles.flatMap((stockpile) => stockpile.items);
     if (plannerItems.length === 0 || isPlanLoading) return;
     setIsPlanLoading(true);
     setPlanStatus("Calculating...");
     try {
-      if (reprocessingEfficienciesKey !== `${language}:${locations.reprocessing}`) {
-        setPlanStatus(
-          reprocessingEfficienciesError
-            ? `Compression efficiencies unavailable: ${reprocessingEfficienciesError}`
-            : "Compression efficiencies are still loading",
-        );
+      const populatedStockpiles = stockpiles.filter((stockpile) => stockpile.items.length > 0);
+      const missingEfficiencies = populatedStockpiles.some(
+        (stockpile) => Object.keys(stockpile.reprocessingEfficiencies ?? {}).length === 0,
+      );
+      if (missingEfficiencies) {
+        setPlanStatus("Compression efficiencies are still loading");
         return;
       }
       let workingAssets: PlanStockItem[] = [];
@@ -873,7 +846,6 @@ function Planner() {
       }
       const compressSettings = await loadCompressSettings();
       const compressLocationId = Number(compressSettings.locationId);
-      const populatedStockpiles = stockpiles.filter((stockpile) => stockpile.items.length > 0);
       const primaryStockpileLocations = populatedStockpiles[0]?.locations;
       const planningLocations = Number.isInteger(compressLocationId)
         ? { ...locations, ...primaryStockpileLocations, reprocessing: compressLocationId }
@@ -918,7 +890,6 @@ function Planner() {
               sizeId: location.sizeId,
               buildTypeGroups: location.buildTypeGroups,
             })),
-            reprocessingEfficiencies,
             assets: requestStock.map(
               ({ sourceLocationName: _sourceLocationName, ...item }) => item,
             ),
@@ -1019,6 +990,12 @@ function Planner() {
       if (existingIndex < 0) return [...current, stockpile];
       return current.map((existing, index) => (index === existingIndex ? stockpile : existing));
     });
+    void refreshPlannerStockpileEfficiencies(language, [stockpile], true).then(([updated]) => {
+      if (!updated.reprocessingEfficiencies) return;
+      setStockpiles((current) =>
+        current.map((existing) => (existing.id === updated.id ? updated : existing)),
+      );
+    });
     setEditingStockpile(null);
     setStockpileEditorMode(null);
     return true;
@@ -1113,7 +1090,12 @@ function Planner() {
           items: await localizeItems(stockpile.items, language),
         })),
       );
-      setStockpiles(localizedStockpiles);
+      const enrichedStockpiles = await refreshPlannerStockpileEfficiencies(
+        language,
+        localizedStockpiles,
+        true,
+      );
+      setStockpiles(enrichedStockpiles);
       if (typeof parsed.settings === "object" && parsed.settings !== null) {
         setSettings(parsePlannerSettings(parsed.settings));
       }

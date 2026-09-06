@@ -46,6 +46,22 @@ function isGroupAssignments(value: unknown): value is ClientPlanStockpile["group
     );
 }
 
+function isReprocessingEfficiencies(
+  value: unknown,
+): value is ClientPlanStockpile["reprocessingEfficiencies"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  return Object
+    .entries(value)
+    .every(
+      ([typeId, efficiency]) =>
+        /^\d+$/.test(typeId)
+        && typeof efficiency === "number"
+        && Number.isFinite(efficiency)
+        && efficiency >= 0
+        && efficiency <= 100,
+    );
+}
+
 function isClientPlanStockpile(value: unknown): value is ClientPlanStockpile {
   if (!value || typeof value !== "object") return false;
   const stockpile = value as Record<string, unknown>;
@@ -61,6 +77,10 @@ function isClientPlanStockpile(value: unknown): value is ClientPlanStockpile {
     )
     && isStockpileLocations(stockpile.locations)
     && (stockpile.groupAssignments === undefined || isGroupAssignments(stockpile.groupAssignments))
+    && (
+      stockpile.reprocessingEfficiencies === undefined
+      || isReprocessingEfficiencies(stockpile.reprocessingEfficiencies)
+    )
     && Array.isArray(stockpile.items)
     && stockpile.items.every(isClientBuildItem)
   );

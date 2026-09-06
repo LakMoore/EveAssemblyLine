@@ -220,7 +220,7 @@ async function reloadStockAfterCharacterRemoval() {
   const assetLocations = groupClientAssetsByLocation(assetsData);
   await replaceEsiStock(
     assetLocations.map((location) => ({
-      systemId: location.systemId ?? 0,
+      systemId: location.systemId,
       systemName: location.systemName ?? "Unknown system",
       structureId: String(location.locationId),
       structureName: location.name,

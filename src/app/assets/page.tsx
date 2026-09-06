@@ -21,7 +21,7 @@ import {
   filterClientAssetsForPlanning,
   groupClientAssetsByLocation,
   loadClientAssets,
-  type ClientCorporationSource,
+  type ClientAssetsResponse,
 } from "@/lib/client/requestCache";
 import { type KnownStructure } from "@/lib/planning/preferences";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
@@ -77,20 +77,6 @@ import type { StockItem } from "@/lib/planning/types";
 
 type StructureOption = { id: string; name: string };
 type SystemOption = { id: number; name: string };
-type EsiStockLocation = {
-  structureId?: number;
-  name: string;
-  systemId?: number;
-  systemName?: string;
-  locationType: "structure" | "station" | "anchored";
-  items?: StockItem[];
-};
-type EsiStockResponse = {
-  locations?: Array<EsiStockLocation & { locationId: number }>;
-  assets?: StockItem[];
-  filteredLocationIds?: number[];
-  corporationSources?: ClientCorporationSource[];
-};
 type PasteResult = {
   name: string;
   quantity?: number;
@@ -213,42 +199,21 @@ export default function StockPage() {
   }
 
   useEffect(() => {
-    async function loadPageData(
-      refreshedLocations?: EsiStockResponse["locations"],
-      refreshedCorporationSources?: ClientCorporationSource[],
-      loadEsiStock = true,
-      reloadEsiStock = false,
-    ) {
+    async function loadPageData(loadEsiStock = true, reloadEsiStock = false) {
       setIsHydratingVolumes(true);
       try {
         const [records, structures, esiResponse] = await Promise.all([
           loadStockRecords().catch(() => []),
           loadStructures().catch(() => []),
-          refreshedLocations
-            ? Promise.resolve({
+          loadEsiStock
+            ? loadClientAssets(language, reloadEsiStock).then((data) => ({
                 ok: true,
-                json: async () => ({
-                  locations: refreshedLocations,
-                }),
-              })
-            : loadEsiStock
-              ? loadClientAssets(language, reloadEsiStock).then((data) => ({
-                  ok: true,
-                  json: async () => data,
-                }))
-              : Promise.resolve({ ok: false, json: async () => ({}) }),
+                json: async () => data,
+              }))
+            : Promise.resolve({ ok: false, json: async () => ({}) }),
         ]);
-        const esiData = (await esiResponse.json()) as EsiStockResponse;
-        const filteredEsiData = filterClientAssetsForPlanning(
-          refreshedLocations
-            ? {
-                ...esiData,
-                locations: refreshedLocations,
-                assets: refreshedLocations.flatMap((location) => location.items ?? []),
-                corporationSources: refreshedCorporationSources,
-              }
-            : esiData,
-        );
+        const esiData = (await esiResponse.json()) as ClientAssetsResponse;
+        const filteredEsiData = filterClientAssetsForPlanning(esiData);
         const esiLocations = esiResponse.ok
           ? groupClientAssetsByLocation(filteredEsiData)
               .filter((location) => location.items.length > 0)
@@ -273,7 +238,7 @@ export default function StockPage() {
             (structure) => structure.esiStructureId === location.structureId,
           );
           return {
-            systemId: location.systemId ?? knownStructure?.systemId ?? 0,
+            systemId: location.systemId,
             systemName: location.systemName ?? knownStructure?.systemName ?? "Unknown system",
             structureId: String(location.structureId),
             structureName: knownStructure?.name ?? location.name,
@@ -359,24 +324,18 @@ export default function StockPage() {
         setIsHydratingVolumes(false);
       }
     }
-    void loadPageData(undefined, undefined, true);
+    void loadPageData(true, false);
     const handleRefresh = (event: Event) => {
       const detail = (
         event as CustomEvent<{
           rateLimitedUntil?: string | null;
-          assetLocations?: EsiStockResponse["locations"];
-          corporationSources?: ClientCorporationSource[];
         }>
       ).detail;
       if (detail.rateLimitedUntil) return;
-      if (!detail.assetLocations) {
-        void loadPageData();
-        return;
-      }
-      void loadPageData(detail.assetLocations, detail.corporationSources, true, false);
+      void loadPageData(true, false);
     };
     const handleCorporationSettingsChanged = () => {
-      void loadPageData(undefined, undefined, true, true);
+      void loadPageData(true, true);
     };
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
     window.addEventListener(

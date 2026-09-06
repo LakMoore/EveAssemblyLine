@@ -319,7 +319,10 @@ async function getFutureCompressedMaterialStock(
           typeId,
           availableQuantity: quantity,
           portionSize,
-          efficiency: request.reprocessingEfficiencies?.[String(typeId)] ?? 50,
+          efficiency:
+            stockpile.reprocessingEfficiencies?.[String(typeId)]
+            ?? request.reprocessingEfficiencies?.[String(typeId)]
+            ?? 50,
           yields: new Map(
             materialRecord.materials.map((material) => [
               material.materialTypeID,
@@ -934,7 +937,6 @@ async function calculatePlanPass(
   const consumedStock = new Map<number, number>();
   const consumedMarketOrderStock = new Set<number>();
   const buildBlacklist = new Set(request.settings.buildBlacklist);
-  const buyBlacklist = new Set(request.settings.buyBlacklist);
   const buildBlueprintsByTypeId = new Map<
     number,
     ReturnType<typeof getBuildBlueprintByProductTypeId>
@@ -1153,7 +1155,7 @@ async function calculatePlanPass(
         }
         if (quantity <= 0) return;
 
-        if (stack.has(typeId) || buildBlacklist.has(typeId) || buyBlacklist.has(typeId)) {
+        if (stack.has(typeId) || buildBlacklist.has(typeId)) {
           await addMaterial(
             typeId,
             quantity,
@@ -1921,6 +1923,8 @@ async function allocateStockpileStock(
           ...stockpile.locations,
           market: request.locations?.market ?? stockpile.locations.stock,
         },
+        reprocessingEfficiencies:
+          stockpile.reprocessingEfficiencies ?? request.reprocessingEfficiencies,
         groupAssignments: stockpile.groupAssignments,
       });
       return result;
@@ -1994,6 +1998,8 @@ async function allocateStockpileStock(
           ...stockpile.locations,
           market: request.locations?.market ?? stockpile.locations.stock,
         },
+        reprocessingEfficiencies:
+          stockpile.reprocessingEfficiencies ?? request.reprocessingEfficiencies,
         groupAssignments: stockpile.groupAssignments,
       });
       const demand = new Map<number, number>();
@@ -2062,6 +2068,8 @@ async function calculateStockpilePlan(request: PlannerRequest): Promise<PlanResu
         items: stockpile.items,
         stock: stockpileStock[stockpileIndex],
         locations,
+        reprocessingEfficiencies:
+          stockpile.reprocessingEfficiencies ?? request.reprocessingEfficiencies,
         groupAssignments: stockpile.groupAssignments,
       },
       { finalProductLocations },

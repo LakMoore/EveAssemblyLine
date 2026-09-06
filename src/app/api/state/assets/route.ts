@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
 import { getCollectionCorporationSettings } from "@/lib/auth/tokensStore";
+import { getCollectionFacilities } from "@/lib/auth/tokensStore";
 import {
   getAllAssetsRaw,
   getCorporationSourceCatalog,
@@ -43,6 +44,7 @@ import type {
   StockContribution,
   StockItem,
 } from "@/lib/planning/types";
+import { calculateFacilities } from "@/lib/planning/facilitiesServer";
 
 type RootLocation = {
   locationId: number;
@@ -793,10 +795,11 @@ export async function GET(request: NextRequest) {
     }
   }
   markPhase("aggregate");
+  const facilityResponse = await calculateFacilities(
+    request,
+    await getCollectionFacilities(session.collectionId!),
+  );
   const payload = {
-    locations: [...buckets.values()]
-      .map(({ items: _items, ...location }) => location)
-      .sort((left, right) => left.name.localeCompare(right.name)),
     assets: [
       ...[...buckets.values()].flatMap((bucket) =>
         [...bucket.items.values()].map((item) => ({
@@ -806,6 +809,9 @@ export async function GET(request: NextRequest) {
       ),
       ...(marketStock ?? []),
     ] as PlanStockItem[],
+    facilities: facilityResponse.facilities,
+    settings: facilityResponse.settings,
+    productionGroups: facilityResponse.productionGroups,
     corporationSources,
   };
   const totalMs = Math.round(performance.now() - startedAt);
@@ -820,7 +826,7 @@ export async function GET(request: NextRequest) {
         assets: assets.length,
         jobs: jobs.length,
         jobLocations: jobLocations.size,
-        locations: payload.locations.length,
+        facilities: payload.facilities.length,
       },
     );
   }

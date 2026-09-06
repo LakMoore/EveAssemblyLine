@@ -8,11 +8,37 @@ import {
 
 test("groups each market order at its source location once", () => {
   const locations = groupClientAssetsByLocation({
-    locations: [
+    facilities: [
       {
-        locationId: 1,
+        id: 1,
         name: "Jita",
         locationType: "station",
+        typeId: 52678,
+        systemId: 30000142,
+        sizeId: 0,
+        systemCostIndices: {},
+        activities: {
+          reprocessing: { available: true },
+          manufacturing: {
+            available: true,
+            standard: { available: true },
+            capital: { available: false },
+          },
+          reactions: {
+            available: true,
+            biochemical: { available: true },
+            composite: { available: true },
+            hybrid: { available: true },
+          },
+          meResearch: { available: true },
+          teResearch: { available: true },
+          invention: { available: true },
+          copying: { available: true },
+        },
+        buildTypeGroups: {},
+        services: [],
+        rigTypeIds: [],
+        settingsLastModified: "",
       },
     ],
     assets: [
@@ -35,25 +61,33 @@ test("groups each market order at its source location once", () => {
 
 test("normalizes structure names and hides legacy raw location labels", () => {
   const normalized = normalizeClientAssetsResponse({
-    locations: [
+    facilities: [],
+    corporationSources: [
       {
-        locationId: 1,
-        name: "J130330 - Rocky Balboa",
-        locationType: "structure",
-        systemName: "J130330",
-      },
-      {
-        locationId: 2,
-        name: "Location ID 2",
-        locationType: "structure",
+        corporationId: 900,
+        rootLocationId: 1,
+        locationFlag: "",
+        label: "Structure",
+        rootLocation: {
+          locationId: 1,
+          kind: "structure",
+          name: "J130330 - Rocky Balboa",
+          systemName: "J130330",
+          resolved: true,
+        },
+        canTake: true,
+        canQuery: true,
+        selected: true,
+        containers: [],
       },
     ],
   });
 
   assert.deepEqual(
-    normalized.locations?.map((location) => location.name),
-    ["J130330 - Rocky Balboa", "Structure details unavailable"],
+    normalized.corporationSources?.map((source) => source.rootLocation?.name),
+    ["J130330 - Rocky Balboa"],
   );
+  assert.equal("locations" in normalized, false);
 });
 
 test("matches direct corporation assets by their resolved root location", () => {

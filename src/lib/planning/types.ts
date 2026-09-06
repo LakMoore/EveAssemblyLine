@@ -29,6 +29,7 @@ export interface PlanStockpile {
   stockLocationName?: string;
   locations: PlanStockpileLocations;
   groupAssignments?: Partial<Record<ProductionGroupKey, number>>;
+  reprocessingEfficiencies?: Record<string, number>;
   items: PlanBuildItem[];
 }
 

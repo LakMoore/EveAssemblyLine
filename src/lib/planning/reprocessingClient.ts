@@ -1,8 +1,14 @@
 import type { SdeLanguage } from "@/lib/reference/languages";
-import { loadClientCharacterState, loadClientSession } from "@/lib/client/requestCache";
+import {
+  loadClientAssets,
+  loadClientCharacterState,
+  loadClientSession,
+} from "@/lib/client/requestCache";
 import { loadEndpointRecord, saveEndpointResponse } from "@/lib/client/refreshCache";
+import type { ClientPlanStockpile } from "./types";
 import { loadCompressSettings } from "./compressSettingsStore";
-import { fetchFacilityResponse } from "./facilitiesStore";
+import type { FacilityResponse } from "./facilities";
+import { loadPlannerStockpiles, savePlannerStockpiles } from "./plannerStockpilesStore";
 
 type CharacterOption = {
   id: string;
@@ -76,20 +82,29 @@ async function selectedSkillLevels(options: CompressOptions, characterId: string
 export async function loadPlannerReprocessingEfficiencies(
   language: SdeLanguage,
   reprocessingLocationId: number | undefined,
+  facilities?: Pick<FacilityResponse, "facilities"> | null,
 ): Promise<Record<string, number>> {
-  const [settings, facilities, options] = await Promise.all([
+  const [settings, loadedFacilities, options] = await Promise.all([
     loadCompressSettings(),
-    fetchFacilityResponse(),
+    facilities === undefined
+      ? loadClientAssets(language).then((data) => ({ facilities: data.facilities ?? [] }))
+      : Promise.resolve(facilities),
     loadCompressOptions(language),
   ]);
   if (!options) throw new Error("Could not load compression options.");
-  const selectedFacility = facilities?.facilities.find(
+  const selectedFacility = loadedFacilities?.facilities.find(
     (facility) => facility.id === reprocessingLocationId,
   );
   const selectedImplant = options.implants.find((implant) => implant.id === settings.implantId);
   const selectedCharacter = options.characters.find(
     (character) => character.id === settings.characterId,
   );
+  const structureTypeId =
+    selectedFacility?.locationType === "structure" ? selectedFacility.typeId : 0;
+  const rigTypeIds =
+    selectedFacility?.locationType === "structure"
+      ? selectedFacility.rigTypeIds.filter((typeId) => typeId > 0)
+      : [];
   const implantAllowed =
     selectedImplant?.typeId === undefined
     || selectedCharacter?.implants.includes(selectedImplant.typeId) === true;
@@ -100,8 +115,8 @@ export async function loadPlannerReprocessingEfficiencies(
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
       body: JSON.stringify({
-        structureTypeId: selectedFacility?.typeId ?? 0,
-        rigTypeIds: (selectedFacility?.rigTypeIds ?? []).filter((typeId) => typeId > 0),
+        structureTypeId,
+        rigTypeIds,
         skillLevels: await selectedSkillLevels(options, settings.characterId),
         implantLevel: implantAllowed ? (selectedImplant?.level ?? 0) : 0,
         securityStatus: selectedFacility?.securityStatus,
@@ -119,4 +134,54 @@ export async function loadPlannerReprocessingEfficiencies(
     throw new Error("Compression efficiencies were empty.");
   }
   return result.efficiencies;
+}
+
+function hasReprocessingEfficiencies(stockpile: ClientPlanStockpile) {
+  return Object.keys(stockpile.reprocessingEfficiencies ?? {}).length > 0;
+}
+
+/** Refreshes one efficiency response per distinct stockpile reprocessing location. */
+export async function refreshPlannerStockpileEfficiencies(
+  language: SdeLanguage,
+  stockpiles: ClientPlanStockpile[],
+  force = false,
+  facilities?: Pick<FacilityResponse, "facilities"> | null,
+) {
+  const requests = new Map<number, Promise<Record<string, number>>>();
+  const requestFor = (locationId: number) => {
+    let request = requests.get(locationId);
+    if (!request) {
+      request = loadPlannerReprocessingEfficiencies(language, locationId, facilities);
+      requests.set(locationId, request);
+    }
+    return request;
+  };
+  return Promise.all(
+    stockpiles.map(async (stockpile) => {
+      if (!force && hasReprocessingEfficiencies(stockpile)) return stockpile;
+      try {
+        return {
+          ...stockpile,
+          reprocessingEfficiencies: await requestFor(stockpile.locations.reprocessing),
+        };
+      }
+      catch {
+        return stockpile;
+      }
+    }),
+  );
+}
+
+/** Refreshes and persists every saved stockpile after structure configuration changes. */
+export async function refreshAllPlannerStockpileEfficiencies(language: SdeLanguage) {
+  const stockpiles = await loadPlannerStockpiles();
+  if (!stockpiles) return;
+  const assets = await loadClientAssets(language, true);
+  const refreshed = await refreshPlannerStockpileEfficiencies(
+    language,
+    stockpiles,
+    true,
+    { facilities: assets.facilities ?? [] },
+  );
+  await savePlannerStockpiles(refreshed);
 }

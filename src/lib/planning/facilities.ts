@@ -37,6 +37,7 @@ export type Facility = {
   locationType: "station" | "structure";
   typeId: number;
   systemId: number;
+  systemName?: string;
   sizeId: number;
   securityStatus?: number;
   systemCostIndices: Record<string, number>;
