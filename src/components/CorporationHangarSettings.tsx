@@ -158,24 +158,27 @@ export default function CorporationHangarSettings() {
 
   useEffect(() => {
     let cancelled = false;
+    let latestLoad = 0;
 
     async function loadPageData(reload = false) {
+      const loadId = ++latestLoad;
       try {
         const [assetsData, settings, loadedCharacters] = await Promise.all([
           loadClientAssets(language, reload),
           loadClientCorporationSettings(reload),
           loadClientCharacters(reload),
         ]);
-        if (cancelled) return;
+        if (cancelled || loadId !== latestLoad) return;
         setCorporationSources(assetsData.corporationSources ?? []);
         setCorporationSettings(settings);
         setCharacters(loadedCharacters);
+        setSourceError(null);
       }
-      catch {
-        if (cancelled) return;
-        setCorporationSources([]);
-        setCorporationSettings([]);
-        setCharacters([]);
+      catch (error) {
+        if (cancelled || loadId !== latestLoad) return;
+        setSourceError(
+          error instanceof Error ? error.message : "Could not load corporation hangar data.",
+        );
       }
     }
 
