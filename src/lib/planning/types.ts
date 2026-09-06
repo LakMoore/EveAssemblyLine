@@ -20,6 +20,10 @@ export interface PlanStockpileLocations {
   invention: number;
 }
 
+export type PlanActivityLocations = Omit<PlanStockpileLocations, "stock"> & {
+  market: number;
+};
+
 export type PlanStockpileKind = "standard" | "special";
 
 export interface PlanStockpile {
@@ -176,14 +180,6 @@ export interface PlanRequest {
       };
   /** @deprecated Use the flat assets array for current planner inputs. */
   stock?: PlanStockItem[];
-  locations?: {
-    manufacturing: number;
-    reactions: number;
-    market: number;
-    reprocessing?: number;
-    copying?: number;
-    invention?: number;
-  };
   facilityTimeMultipliers?: {
     manufacturing: number;
     reactions: number;

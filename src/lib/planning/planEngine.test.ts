@@ -39,24 +39,38 @@ function request(
   stock: PlannerRequest["stock"],
   options: Partial<PlannerRequest> = {},
 ): PlannerRequest {
-  return {
-    items: [
-      {
-        typeId: tritaniumTypeId,
-        name: "Tritanium",
-        quantity,
-        me: 0,
-        te: 0,
-        fromCompression: false,
-      },
-    ],
-    stock,
-    locations: {
-      manufacturing: manufacturingLocationId,
-      reactions: manufacturingLocationId,
-      market: 30,
-      reprocessing: reprocessingLocationId,
+  const items = options.items ?? [
+    {
+      typeId: tritaniumTypeId,
+      name: "Tritanium",
+      quantity,
+      me: 0,
+      te: 0,
+      fromCompression: false,
     },
+  ];
+  const stockpiles = Object.prototype.hasOwnProperty.call(options, "stockpiles")
+    ? options.stockpiles
+    : [
+        {
+          id: "test-stockpile",
+          name: "Test stockpile",
+          locations: {
+            stock: manufacturingLocationId,
+            manufacturing: manufacturingLocationId,
+            reactions: manufacturingLocationId,
+            reprocessing: reprocessingLocationId,
+            copying: manufacturingLocationId,
+            invention: manufacturingLocationId,
+          },
+          ...(options.groupAssignments ? { groupAssignments: options.groupAssignments } : {}),
+          items,
+        },
+      ];
+  return {
+    items,
+    stock,
+    stockpiles,
     settings: {
       includeCorporationAssets: true,
       personalSellOrdersAsStock: true,
@@ -2090,7 +2104,7 @@ test("uses ready and delivered manufacturing and reaction output locally", async
 
 test("does not use industry output at another location as a future job input", async () => {
   const result = await calculatePlan(
-    request(100, [industryOutputStock("ready", sourceLocationId)]),
+    request(100, [industryOutputStock("ready", sourceLocationId)], { stockpiles: undefined }),
   );
   const tritanium = result.lists.materialsToBuy.find(
     (material) => material.typeId === tritaniumTypeId,

@@ -844,17 +844,12 @@ function Planner() {
       if (includeStock && clientAssets) {
         workingAssets = filterClientAssetsForPlanning(clientAssets).assets ?? [];
       }
-      const compressSettings = await loadCompressSettings();
-      const compressLocationId = Number(compressSettings.locationId);
-      const primaryStockpileLocations = populatedStockpiles[0]?.locations;
-      const planningLocations = Number.isInteger(compressLocationId)
-        ? { ...locations, ...primaryStockpileLocations, reprocessing: compressLocationId }
-        : { ...locations, ...primaryStockpileLocations };
+      const primaryStockpileLocations = populatedStockpiles[0].locations;
       const selectedManufacturingFacility = locationOptions.find(
-        (location) => location.locationId === planningLocations.manufacturing,
+        (location) => location.locationId === primaryStockpileLocations.manufacturing,
       );
       const selectedReactionFacility = locationOptions.find(
-        (location) => location.locationId === planningLocations.reactions,
+        (location) => location.locationId === primaryStockpileLocations.reactions,
       );
       const requestStock = workingAssets.filter((item) => {
         const locationId = getStockLocationId(item);
@@ -893,7 +888,6 @@ function Planner() {
             assets: requestStock.map(
               ({ sourceLocationName: _sourceLocationName, ...item }) => item,
             ),
-            locations: planningLocations,
             facilityTimeMultipliers: {
               manufacturing: selectedManufacturingFacility?.manufacturingTimeMultiplier ?? 1,
               reactions: selectedReactionFacility?.reactionTimeMultiplier ?? 1,
@@ -1463,7 +1457,7 @@ function Planner() {
               )}
               <Button variant="destructive" onClick={deleteAllItems} disabled={items.length === 0}>
                 <Trash2 data-icon="inline-start" aria-hidden="true" />
-                <span>Delete all</span>
+                <span>Remove All</span>
               </Button>
             </div>
             <p className={styles.panelDescription}>What are you making?</p>
@@ -1894,7 +1888,7 @@ function Planner() {
           }
           isLoading={isPlanLoading}
           onRemove={(locationId) => void removeExcludedLocation(locationId)}
-          onClearAll={() => void clearExcludedLocations()}
+          onClearAll={() => setIsClearExcludedLocationsDialogOpen(true)}
           onSave={() => setIsExcludedLocationsModalOpen(false)}
           onCancel={() => setIsExcludedLocationsModalOpen(false)}
         />
@@ -1902,7 +1896,7 @@ function Planner() {
       <AlertDialog open={isDeleteAllDialogOpen} onOpenChange={setIsDeleteAllDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete all build-list items?</AlertDialogTitle>
+            <AlertDialogTitle>Remove all build-list items?</AlertDialogTitle>
             <AlertDialogDescription>
               This will remove every item from the current build list. This action cannot be undone.
             </AlertDialogDescription>
@@ -1910,7 +1904,7 @@ function Planner() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction variant="destructive" onClick={confirmDeleteAllItems}>
-              Delete all
+              Remove All
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1932,13 +1926,14 @@ function Planner() {
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
+              variant="destructive"
               disabled={isPlanLoading}
               onClick={() => {
                 setIsClearExcludedLocationsDialogOpen(false);
                 void clearExcludedLocations();
               }}
             >
-              Clear all
+              Remove All
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -2212,6 +2207,15 @@ function ExcludedLocationsModal({
           </div>
         </div>
         <DialogFooter>
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={isLoading || locationIds.length === 0}
+            onClick={onClearAll}
+          >
+            <Trash2 data-icon="inline-start" aria-hidden="true" />
+            Remove All
+          </Button>
           <Button type="button" variant="outline" onClick={onCancel}>
             Close
           </Button>

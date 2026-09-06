@@ -189,7 +189,6 @@ async function calculateWorkingAssetsPlan(input: PlanRequest, assets: PlanStockI
     stockpiles,
     reprocessingEfficiencies: input.reprocessingEfficiencies,
     stock: await hydrateStockCategories(assets),
-    locations: input.locations,
     facilityTimeMultipliers: input.facilityTimeMultipliers,
     facilityProfiles: input.facilityProfiles,
     skillTimeMultipliers: input.skillTimeMultipliers,
@@ -201,7 +200,17 @@ async function calculateWorkingAssetsPlan(input: PlanRequest, assets: PlanStockI
 
 export async function POST(request: Request) {
   try {
-    const input = (await request.json()) as PlanRequest;
+    const body: unknown = await request.json();
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return NextResponse.json({ error: "The plan request was not valid JSON." }, { status: 400 });
+    }
+    if ("locations" in body) {
+      return NextResponse.json(
+        { error: "Locations must be provided on each stockpile." },
+        { status: 400 },
+      );
+    }
+    const input = body as PlanRequest;
     const parsedEfficiencies = reprocessingEfficienciesSchema.safeParse(
       input.reprocessingEfficiencies ?? {},
     );
@@ -256,10 +265,21 @@ export async function POST(request: Request) {
       const populatedStockpiles = parsedStockpiles.data.filter(
         (stockpile) => stockpile.items.length > 0,
       );
-      input.stockpiles = populatedStockpiles.length > 0 ? populatedStockpiles : undefined;
+      if (populatedStockpiles.length === 0) {
+        return NextResponse.json(
+          { error: "Add at least one build item to a stockpile." },
+          { status: 400 },
+        );
+      }
+      input.stockpiles = populatedStockpiles;
     }
-    const requestedItems =
-      input.stockpiles?.flatMap((stockpile) => stockpile.items) ?? input.toBuild ?? [];
+    if (!input.stockpiles) {
+      return NextResponse.json(
+        { error: "Every plan request needs at least one stockpile with locations." },
+        { status: 400 },
+      );
+    }
+    const requestedItems = input.stockpiles.flatMap((stockpile) => stockpile.items);
     if (requestedItems.length === 0) {
       return NextResponse.json({ error: "Add at least one build item." }, { status: 400 });
     }
@@ -322,7 +342,7 @@ export async function POST(request: Request) {
         ?? `Type ${item.typeId}`,
     });
     const buildItems = requestedItems.map(resolveBuildItem);
-    const stockpiles = input.stockpiles?.map((stockpile) => ({
+    const stockpiles = input.stockpiles.map((stockpile) => ({
       ...stockpile,
       items: stockpile.items.map(resolveBuildItem),
     }));
@@ -444,7 +464,6 @@ export async function POST(request: Request) {
       stockpiles,
       reprocessingEfficiencies: input.reprocessingEfficiencies,
       stock,
-      locations: input.locations,
       facilityTimeMultipliers: input.facilityTimeMultipliers,
       facilityProfiles: input.facilityProfiles,
       skillTimeMultipliers: input.skillTimeMultipliers,

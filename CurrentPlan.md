@@ -45,7 +45,7 @@ This section is authoritative where the older design below differs from the runn
 - ESI refresh is session-scoped in the in-process cache. It refreshes the selected collection's character data and eligible corporation data, including assets, blueprints, industry jobs, skills, market orders, and structure/location data. The refresh endpoint deduplicates concurrent refreshes and exposes endpoint status without exposing tokens.
 - Corporation support is opted in per corporation and stored on the collection. Corporation source selections are shared by that collection: direct hangar contents and named containers are selected independently, selected containers include nested contents, new sources default to excluded, and inaccessible roots are hidden. Query-only access contributes blueprints only; Take access contributes materials and blueprints. The Director used for a corporation refresh may be found across collections and is never returned as an attached character.
 - `/api/state/assets` is the boundary between ESI state and planning. It resolves and groups assets by root location, includes blueprint/job/market-order context, filters special ship and structure records as appropriate, and carries personal/corporation ownership into the planner input.
-- `/api/plan` is intentionally unauthenticated and makes no ESI calls. It accepts a build list plus client-supplied assets, locations, and settings. Do not reintroduce `characterIds` ownership checks or server-side refreshes into this endpoint; authenticated state preparation belongs in the state routes.
+- `/api/plan` is intentionally unauthenticated and makes no ESI calls. It accepts stockpiles with their per-stockpile locations, client-supplied assets, and settings. Do not reintroduce `characterIds` ownership checks or server-side refreshes into this endpoint; authenticated state preparation belongs in the state routes.
 - The planner is asset-aware and supports compressed/reprocessable material handling, blueprint print/run accounting, industry-in-progress output, market orders, localized SDE names, ME/TE settings, and source metadata. Its request model is not the original minimal `typeId + quantity` plus raw assets model.
 - The UI is a multi-page production-control application. The build planner is one workflow alongside assets, jobs, ships, compression, locations, characters, and settings. The original component-only single-page layout is descriptive history, not an implementation requirement.
 - The deployment target is Firebase App Hosting with a Cloud Run backend configuration and Firestore. The repository does not currently define a Dockerfile-based deployment contract; do not add container-specific storage assumptions without deciding whether App Hosting remains the target.
@@ -749,7 +749,7 @@ The assets endpoint defaults to cached data. Refresh remains an explicit operati
 
 The current request has two supported forms:
 
-- The normal UI sends `language`, `toBuild`, `assets`, `locations`, and `settings`. `assets` is the working asset list produced by `/api/state/assets` and client-side selections.
+- The normal UI sends `language`, populated `stockpiles`, `assets`, and `settings`. Each stockpile carries its stock, manufacturing, reaction, reprocessing, copying, and invention locations. `assets` is the working asset list produced by `/api/state/assets` and client-side selections.
 - A lower-level compatibility form may send `toBuild` plus categorized `assets` (`items`, `blueprints`, `industry`, and `market`); the route normalizes these rows into working stock before calculation.
 
 The request does not contain `characterIds` or a `lists` selector. The route calculates the complete `PlanResult`; the client chooses which result view to display.
@@ -761,7 +761,7 @@ Implement in `planning/planEngine.ts`:
 1. **Validate the request**
 
 - `/api/plan` does not require an authenticated session.
-- The caller supplies `toBuild`, working `assets` (or categorized compatibility assets), `locations`, and `settings` in the request. The endpoint makes no secured ESI calls.
+- The caller supplies populated `stockpiles`, working `assets` (or categorized compatibility assets), and `settings` in the request. The endpoint makes no secured ESI calls. Market demand is matched to each stockpile's stock location.
 
 2. **Merge inventory**
 
@@ -794,12 +794,12 @@ Implement in `planning/planEngine.ts`:
      - For each required material:
        - Compare required quantity to available inventory (character + corp).
        - If required > available and material is not in build blacklist:
-         - Add to “materialsToBuy” list with quantity difference, target `locations.market`.
+         - Add to “materialsToBuy” list with quantity difference, targeting the stockpile's stock location.
    - **2. Reprocessing jobs**
-     - List only selected reprocessable assets already located at `locations.reprocessing`.
-     - Include the input type, quantity, efficiency, and reprocessing location.
-     - Do not list remote or purchased inputs until a later plan refresh observes them at the refinery.
-     - Treat reprocessing output as future production in the plan summary, not currently available stock.
+   - List only selected reprocessable assets already located at the stockpile's `reprocessing` location.
+   - Include the input type, quantity, efficiency, and reprocessing location.
+   - Do not list remote or purchased inputs until a later plan refresh observes them at the refinery.
+   - Treat reprocessing output as future production in the plan summary, not currently available stock.
    - **3. BPCs needed**
      - Determine which blueprints/BPCs are required for the planned builds.
      - Check inventory and active jobs for existing BPCs.
@@ -808,12 +808,12 @@ Implement in `planning/planEngine.ts`:
 - **4. Invention jobs**
   - For required BPCs that must be invented (T2, etc.):
     - Use SDE blueprint activities and invention data to compute required invention jobs.
-    - Add each job with location `locations.manufacturing` or user-selected structure.
+    - Add each job with the stockpile's `manufacturing` location or user-selected structure.
 - **5. Reaction jobs**
   - For materials produced via reactions:
     - Determine reaction formulas (from SDE).
     - Determine number of runs needed.
-    - Add reaction jobs with location `locations.reactions`.
+    - Add reaction jobs with the stockpile's `reactions` location.
 - **6. Manufacturing jobs**
   - For final items to build and intermediary items (due to buy blacklist):
     - Compute manufacturing job requirements:
@@ -906,7 +906,7 @@ Never create a hauling task with a guessed origin. If assets are unresolved, ret
 
 The original generic planner has evolved into a broader production-control application. In addition to the planner, the product includes first-class assets, jobs, ships, compression, locations, characters, and settings workflows. The planner still owns the six required outputs, including hauling; the hauling view may be temporarily hidden while that workflow is being completed, but it remains a planned capability.
 
-The current planner does not perform character selection or refresh orchestration itself. Authentication, character attachment, collection management, and state refresh are handled by the characters/auth/state workflows. The planner loads working assets, build-list preferences, locations, and settings, then sends the unauthenticated asset-driven request to `/api/plan`.
+The current planner does not perform character selection or refresh orchestration itself. Authentication, character attachment, collection management, and state refresh are handled by the characters/auth/state workflows. The planner loads working assets, build-list preferences, per-stockpile locations, and settings, then sends the unauthenticated asset-driven request to `/api/plan`.
 
 Components:
 
@@ -965,7 +965,7 @@ Components:
    - Shows summary from response.
 8. User clicks **“Calculate plan”**:
 
-- Frontend sends `POST /api/plan` with the build list, cached/working assets, locations, and settings.
+- Frontend sends `POST /api/plan` with populated stockpiles, cached/working assets, and settings. Location facts are carried only by each stockpile.
 - On response:
 - Populates the planner output views with the seven operational lists.
 
