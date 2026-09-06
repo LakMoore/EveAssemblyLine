@@ -11,9 +11,7 @@ function parseTsvLines(lines: string[]): ParsedPasteItem[] {
   return lines
     .filter((line) => !line.trimStart().startsWith("Total:"))
     .flatMap((line) => {
-      const [name = "", quantityText = ""] = line
-        .split("\t")
-        .map((value) => value.trim());
+      const [name = "", quantityText = ""] = line.split("\t").map((value) => value.trim());
       if (name.length === 0) return [];
       if (!isIntegerValue(quantityText)) return [{ name }];
       return [{ name, quantity: Number(quantityText.replaceAll(",", "")) }];
