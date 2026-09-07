@@ -128,14 +128,8 @@ function getPreferredActivityLocationIds(locations: PlanActivityLocations | unde
   );
 }
 
-function haulingKey(
-  itemTypeId: number,
-  fromLocationId: number,
-  toLocationId: number,
-  ownerType: "character" | "corporation" | undefined,
-  ownerId: number | undefined,
-) {
-  return `${itemTypeId}:${fromLocationId}:${toLocationId}:${ownerType ?? "unknown"}:${ownerId ?? "unknown"}`;
+function haulingKey(itemTypeId: number, fromLocationId: number, toLocationId: number) {
+  return `${itemTypeId}:${fromLocationId}:${toLocationId}`;
 }
 
 type ProfileEntry = { count: number; totalMs: number; maxMs: number };
@@ -584,13 +578,7 @@ async function calculatePlanPass(
       || !preferredActivityLocationIds.has(destinationRootLocationId)
       || lot.rootLocationId === destinationRootLocationId
     ) return;
-    const key = haulingKey(
-      lot.typeId,
-      lot.rootLocationId,
-      destinationRootLocationId,
-      lot.ownerType,
-      lot.ownerId,
-    );
+    const key = haulingKey(lot.typeId, lot.rootLocationId, destinationRootLocationId);
     const existing = haulingByKey.get(key);
     const task = existing ?? {
       itemTypeId: lot.typeId,
@@ -602,6 +590,10 @@ async function calculatePlanPass(
       ownerType: lot.ownerType,
       ownerId: lot.ownerId,
     };
+    if (existing && (existing.ownerType !== lot.ownerType || existing.ownerId !== lot.ownerId)) {
+      delete task.ownerType;
+      delete task.ownerId;
+    }
     task.quantity += quantity;
     task.volume += quantity * lot.volumePerUnit;
     if (lot.industryJobOutput) {
@@ -1271,7 +1263,7 @@ async function calculatePlanPass(
             typeId,
             quantity,
             fallbackName,
-            false,
+            true,
             "icon",
             true,
             activityRootLocationId,
@@ -1797,6 +1789,7 @@ function stockpileActivityLocations(stockpile: NonNullable<PlannerRequest["stock
     stockpile.locations.reprocessing,
     stockpile.locations.copying,
     stockpile.locations.invention,
+    ...Object.values(stockpile.groupAssignments ?? {}),
   ]);
 }
 
@@ -2248,15 +2241,13 @@ function tagStockpileResult(
 function mergeHaulingTasks(tasks: PlanResult["lists"]["haulingTasks"]) {
   const mergedByRoute = new Map<string, PlanResult["lists"]["haulingTasks"][number]>();
   for (const task of tasks) {
-    const key = haulingKey(
-      task.itemTypeId,
-      task.fromLocationId,
-      task.toLocationId,
-      task.ownerType,
-      task.ownerId,
-    );
+    const key = haulingKey(task.itemTypeId, task.fromLocationId, task.toLocationId);
     const existing = mergedByRoute.get(key);
     if (existing) {
+      if (existing.ownerType !== task.ownerType || existing.ownerId !== task.ownerId) {
+        delete existing.ownerType;
+        delete existing.ownerId;
+      }
       existing.quantity += task.quantity;
       existing.volume += task.volume;
       const productionQuantity =

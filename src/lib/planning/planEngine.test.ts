@@ -143,6 +143,7 @@ test("build blacklist forces a buildable item to be purchased", async () => {
 
   const rifter = result.lists.materialsToBuy.find((item) => item.typeId === rifterTypeId);
   assert(rifter);
+  assert.equal(rifter.requiredQuantity, 1);
   assert.equal(rifter.buyQuantity, 1);
   assert.equal(rifter.buildQuantity, 0);
   assert.equal(
@@ -572,6 +573,86 @@ test("applies assigned reaction group facility modifiers", async () => {
   );
 });
 
+test("allocates reaction material at an assigned reaction facility", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: 16636,
+          name: "Reaction Material B",
+          quantity: 100,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "other-reaction",
+            name: "Other reaction",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: fuelReactionProductTypeId,
+                name: "Fuel Reaction Product",
+                quantity: 200,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "mino-order",
+            name: "Mino order",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            groupAssignments: { compositeReactions: alternateSourceLocationId },
+            items: [
+              {
+                typeId: fuelReactionProductTypeId,
+                name: "Fuel Reaction Product",
+                quantity: 200,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const otherMaterial = result.lists.materialsToBuy.find(
+    (item) => item.stockpileId === "other-reaction" && item.typeId === 16636,
+  );
+  const minoMaterial = result.lists.materialsToBuy.find(
+    (item) => item.stockpileId === "mino-order" && item.typeId === 16636,
+  );
+
+  assert(otherMaterial);
+  assert(minoMaterial);
+  assert.equal(otherMaterial.stockQuantity, 0);
+  assert.equal(otherMaterial.buyQuantity, 100);
+  assert.equal(minoMaterial.stockQuantity, 100);
+  assert.equal(minoMaterial.buyQuantity, 0);
+});
+
 test("combines global facility and skill time multipliers", async () => {
   const result = await calculatePlan(
     request(
@@ -856,6 +937,89 @@ test("counts active output toward availability in stockpiled plans", async () =>
   assert.equal(tritanium.availableSourceCounts?.industry, 20);
 });
 
+test("allocates matching market orders and active output across stockpiles", async () => {
+  const locations = (stock: number) => ({
+    stock,
+    manufacturing: manufacturingLocationId,
+    reactions: manufacturingLocationId,
+    reprocessing: reprocessingLocationId,
+    copying: manufacturingLocationId,
+    invention: manufacturingLocationId,
+  });
+  const stockpile = (id: string, stock: number) => ({
+    id,
+    name: id,
+    locations: locations(stock),
+    items: [
+      {
+        typeId: tritaniumTypeId,
+        name: "Tritanium",
+        quantity: 1_000_000,
+        me: 0,
+        te: 0,
+        fromCompression: false,
+      },
+    ],
+  });
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: tritaniumTypeId,
+          name: "Tritanium",
+          quantity: 221_407,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+        industryOutputStock("active", manufacturingLocationId, "Manufacturing", 380_000),
+        {
+          typeId: tritaniumTypeId,
+          name: "Tritanium",
+          quantity: 1_031_667,
+          category: "item",
+          source: "marketOrder",
+          sourceLocationId: alternateSourceLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: tritaniumTypeId,
+            name: "Tritanium",
+            quantity: 3_000_000,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        stockpiles: [
+          stockpile("stockpile-one", sourceLocationId),
+          stockpile("stockpile-two", manufacturingLocationId),
+          stockpile("stockpile-three", alternateSourceLocationId),
+        ],
+      },
+    ),
+  );
+  const tritanium = result.lists.planItems
+    .filter((entry) => entry.kind === "material")
+    .filter((material) => material.typeId === tritaniumTypeId);
+
+  assert.equal(
+    tritanium.reduce((total, material) => total + material.requiredQuantity, 0),
+    3_000_000,
+  );
+  assert.equal(
+    tritanium.reduce((total, material) => total + material.availableStockQuantity, 0),
+    1_601_407,
+  );
+  assert.equal(
+    tritanium.reduce((total, material) => total + material.buyQuantity, 0),
+    1_398_593,
+  );
+  assert.equal(result.metadata.availableStockByTypeId?.[tritaniumTypeId], 1_633_074);
+});
+
 test("uses remote active output for a stockpile final product", async () => {
   const result = await calculatePlan(
     request(
@@ -1067,6 +1231,77 @@ test("reallocates shared stock after intermediate inventory reduces stockpile de
     gasRows.reduce((total, item) => total + item.buyQuantity, 0),
     0,
   );
+});
+
+test("reallocates material stock after reaction formulas are reserved", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: 16636,
+          name: "Silicates",
+          quantity: 1_000_000,
+          category: "item",
+          rootLocationId: reprocessingLocationId,
+        },
+        {
+          typeId: 57494,
+          name: "Reaction Formula",
+          quantity: 1,
+          category: "reactionformula",
+          rootLocationId: reprocessingLocationId,
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "formula-stockpile",
+            name: "Formula stockpile",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: reprocessingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: 57457,
+                name: "Reaction Product",
+                quantity: 1_000_000,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "other-stockpile",
+            name: "Other stockpile",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: reprocessingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [],
+          },
+        ],
+      },
+    ),
+  );
+  const silicates = result.lists.materialsToBuy.find(
+    (item) => item.stockpileId === "formula-stockpile" && item.typeId === 16636,
+  );
+
+  assert(silicates);
+  assert.equal(silicates.buyQuantity, 0);
+  assert.equal(silicates.stockQuantity > 0, true);
 });
 
 test("uses reaction formulas held at a stockpile's reaction location", async () => {
@@ -2016,7 +2251,7 @@ test("combines haul tasks with the same type and route", async () => {
   assert.equal(matchingHauls[0]?.quantity, 64000);
 });
 
-test("keeps hauling ownership separate for shared routes", async () => {
+test("merges shared haul routes across ownership sources", async () => {
   const result = await calculatePlan(
     request(
       0,
@@ -2077,17 +2312,10 @@ test("keeps hauling ownership separate for shared routes", async () => {
       && task.toLocationId === manufacturingLocationId,
   );
 
-  assert.deepEqual(
-    tritaniumHauls.map((task) => ({
-      ownerType: task.ownerType,
-      ownerId: task.ownerId,
-      quantity: task.quantity,
-    })),
-    [
-      { ownerType: "character", ownerId: 101, quantity: 32000 },
-      { ownerType: "corporation", ownerId: 202, quantity: 32000 },
-    ],
-  );
+  assert.equal(tritaniumHauls.length, 1);
+  assert.equal(tritaniumHauls[0]?.quantity, 64000);
+  assert.equal(tritaniumHauls[0]?.ownerType, undefined);
+  assert.equal(tritaniumHauls[0]?.ownerId, undefined);
 });
 
 test("hauls ready manufactured stock to the stockpile stock location", async () => {

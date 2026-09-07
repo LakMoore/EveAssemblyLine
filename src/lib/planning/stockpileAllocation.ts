@@ -38,7 +38,16 @@ function stockpileActivityLocations(stockpile: Stockpile) {
     stockpile.locations.reprocessing,
     stockpile.locations.copying,
     stockpile.locations.invention,
+    ...Object.values(stockpile.groupAssignments ?? {}),
   ]);
+}
+
+function isAllocatableOrdinaryStock(item: PlanStockItem) {
+  return (
+    !isBlueprintOrReactionFormula(item)
+    && item.category === "item"
+    && (item.source === "marketOrder" || isAvailableIndustryProductionOutput(item))
+  );
 }
 
 /** Extracts the material and job-input demand used to reserve shared stock. */
@@ -129,12 +138,7 @@ export async function allocateStockpileStock(
   );
   let remainingDemand = demandByStockpile.map((demand) => new Map(demand));
   let remainingStock = request.stock.map((item) =>
-    !isBlueprintOrReactionFormula(item)
-    && item.category === "item"
-    && item.source !== "marketOrder"
-    && isUsableIndustryProductionOutput(item)
-      ? item.quantity
-      : 0,
+    isAllocatableOrdinaryStock(item) ? item.quantity : 0,
   );
   const allocations = stockpiles.map(() => new Map<number, number>());
   const canUseFutureStock = (stockIndex: number, stockpileIndex: number) =>
@@ -189,6 +193,11 @@ export async function allocateStockpileStock(
             || (
               preferActivityLocations
               && item.category !== "reactionformula"
+              && !isUsableIndustryProductionOutput(item)
+            )
+            || (
+              preferActivityLocations
+              && item.category !== "reactionformula"
               && stockLocationId !== undefined
               && !stockpileActivityLocations(stockpile).has(stockLocationId)
             )
@@ -204,6 +213,7 @@ export async function allocateStockpileStock(
             ({ stockpile, stockpileIndex, activityLocationIds }) =>
               (remainingDemand[stockpileIndex].get(typeId) ?? 0) > 0
               && stockLocationId !== undefined
+              && (item.source !== "marketOrder" || stockLocationId === stockpile.locations.stock)
               && (item.category === "reactionformula"
                 ? stockLocationId === stockpile.locations.reactions
                 : activityLocationIds.has(stockLocationId)),
@@ -235,6 +245,10 @@ export async function allocateStockpileStock(
             item.category === "reactionformula"
             && getStockRootLocationId(item) !== stockpiles[stockpileIndex].locations.reactions
           ) continue;
+          if (
+            item.source === "marketOrder"
+            && getStockRootLocationId(item) !== stockpiles[stockpileIndex].locations.stock
+          ) continue;
           const quantity = Math.min(remainingStock[index], remaining);
           allocate(index, stockpileIndex, quantity);
           remaining -= quantity;
@@ -259,12 +273,7 @@ export async function allocateStockpileStock(
     jobInputDemandByStockpile: StockpileDemand[],
   ) => {
     remainingStock = request.stock.map((item) =>
-      !isBlueprintOrReactionFormula(item)
-      && item.category === "item"
-      && item.source !== "marketOrder"
-      && isUsableIndustryProductionOutput(item)
-        ? item.quantity
-        : 0,
+      isAllocatableOrdinaryStock(item) ? item.quantity : 0,
     );
     for (const allocation of allocations) allocation.clear();
     const standingDemandByStockpile = demandByStockpile.map((demand, stockpileIndex) => {
@@ -291,6 +300,7 @@ export async function allocateStockpileStock(
       && item.source !== "marketOrder"
       && isAvailableIndustryProductionOutput(item)
       && !isUsableIndustryProductionOutput(item)
+      && !isAllocatableOrdinaryStock(item)
         ? item.quantity
         : 0,
     );
@@ -395,6 +405,39 @@ export async function allocateStockpileStock(
     }
   }
   allocateTypes(specialTypeIds, specialDemandByStockpile);
+
+  const specialAllocations = allocations.map((allocation) =>
+    [...allocation.entries()].filter(([stockIndex]) =>
+      isBlueprintOrReactionFormula(request.stock[stockIndex]),
+    ),
+  );
+  const finalSpecialStock = allocatedStockpileStock();
+  const finalDemandByStockpile: StockpileDemand[] = [];
+  const finalJobInputDemandByStockpile: StockpileDemand[] = [];
+  for (const [stockpileIndex, stockpile] of stockpiles.entries()) {
+    const result = await calculatePlanPass(
+      {
+        ...request,
+        stockpiles: undefined,
+        items: stockpile.items,
+        stock: finalSpecialStock[stockpileIndex],
+        reprocessingEfficiencies:
+          stockpile.reprocessingEfficiencies ?? request.reprocessingEfficiencies,
+        groupAssignments: stockpile.groupAssignments,
+      },
+      planningData,
+      { locations: activityLocations(stockpile) },
+    );
+    const { demand, jobInputDemand } = getPlanDemand(result);
+    finalDemandByStockpile.push(demand);
+    finalJobInputDemandByStockpile.push(jobInputDemand);
+  }
+  allocateOrdinaryStock(finalDemandByStockpile, finalJobInputDemandByStockpile);
+  for (const [stockpileIndex, allocation] of allocations.entries()) {
+    for (const [stockIndex, quantity] of specialAllocations[stockpileIndex]) {
+      allocation.set(stockIndex, quantity);
+    }
+  }
 
   return allocatedStockpileStock();
 }

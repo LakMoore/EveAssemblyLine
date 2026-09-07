@@ -58,10 +58,22 @@ function normalizePlanRequestLog(entry: PlanRequestLog): PlanRequestLog {
   };
 }
 
+function deserializePlanRequestLog(value: PlanRequestLog | string | undefined) {
+  if (typeof value !== "string") return value;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    return parsed as PlanRequestLog;
+  }
+  catch {
+    return undefined;
+  }
+}
+
 /** Writes one log to its own Firestore document so concurrent requests do not overwrite each other. */
 async function persistPlanRequestLog(entry: PlanRequestLog): Promise<void> {
   const storage = await initStorage();
-  await storage.setItem(storageKey(entry.id), entry);
+  await storage.setItem(storageKey(entry.id), JSON.stringify(entry));
 }
 
 /** Assigns an ID and waits for durable persistence to complete. */
@@ -80,7 +92,7 @@ export async function getPlanRequestLog(id: string): Promise<PlanRequestLog | un
   const remembered = loggerRuntime.entries.get(id);
   if (remembered) return remembered;
   const storage = await initStorage();
-  return storage.getItem<PlanRequestLog>(storageKey(id));
+  return deserializePlanRequestLog(await storage.getItem<PlanRequestLog | string>(storageKey(id)));
 }
 
 /** Loads a time-ordered page of plan request logs from Firestore and process memory. */
@@ -89,10 +101,11 @@ export async function getPlanRequestLogPage(
   pageSize: number,
 ): Promise<PlanRequestLogPage> {
   const storage = await initStorage();
-  const stored = await storage.getItemsByPrefix<PlanRequestLog>(storageKeyPrefix);
+  const stored = await storage.getItemsByPrefix<PlanRequestLog | string>(storageKeyPrefix);
   const entries = new Map<string, PlanRequestLog>();
   for (const item of stored) {
-    if (item.value) entries.set(item.value.id, item.value);
+    const entry = deserializePlanRequestLog(item.value);
+    if (entry) entries.set(entry.id, entry);
   }
   for (const entry of loggerRuntime.entries.values()) entries.set(entry.id, entry);
   const orderedEntries = [...entries.values()].sort((left, right) =>

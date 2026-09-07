@@ -501,10 +501,15 @@ async function recordPlanRequestLog(
     await logPlanRequest(entry);
   }
   catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "unknown error";
     console.error(
       "Plan request log persistence failed",
-      entry.id,
-      error instanceof Error ? error.message : "unknown error",
+      {
+        planId: entry.id,
+        error: errorMessage,
+        logEntry: entry,
+        serializedLogEntry: JSON.stringify(entry),
+      },
     );
   }
 }
