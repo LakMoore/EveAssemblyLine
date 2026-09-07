@@ -146,9 +146,8 @@ function getReactionFormulaCount(
 /** Calculates the readiness percentage used to sort a reaction job. */
 function getReactionInputsCompletionPercent(
   entry: PlanResult["lists"]["reactionJobs"][number],
-  stock: PlanStockItem[],
 ): number {
-  return getJobInputsCompletionPercent(entry.inputs, getReactionFormulaCount(entry, stock));
+  return getJobInputsCompletionPercent(entry.inputs);
 }
 
 function getStockLocationId(item: PlanStockItem) {
@@ -242,6 +241,10 @@ function formatDuration(totalSeconds: number) {
   if (minutes > 0) parts.push(`${minutes}m`);
   if (parts.length === 0) parts.push("0m");
   return parts.join(" ");
+}
+
+function formatOptionalCount(count: number | undefined) {
+  return count?.toLocaleString() ?? "0";
 }
 
 function getReactionScheduleRuns(schedules: ReactionSchedule[] | undefined) {
@@ -892,7 +895,6 @@ function PlanList({
                   : reactionSort.key === "inputs"
                     ? getReactionInputsCompletionPercent(
                         left as PlanResult["lists"]["reactionJobs"][number],
-                        stock,
                       )
                     : reactionSort.key === "suggestedRuns"
                       ? getReactionScheduleRuns(leftSchedule)
@@ -909,7 +911,6 @@ function PlanList({
                   : reactionSort.key === "inputs"
                     ? getReactionInputsCompletionPercent(
                         right as PlanResult["lists"]["reactionJobs"][number],
-                        stock,
                       )
                     : reactionSort.key === "suggestedRuns"
                       ? getReactionScheduleRuns(rightSchedule)
@@ -1485,6 +1486,8 @@ function PlanList({
                 <ArrowDown aria-hidden="true" />
               ))}
           </button>
+          <span>BPO count</span>
+          <span>BPC runs</span>
           <button
             type="button"
             className={styles.reactionSortButton}
@@ -1857,12 +1860,7 @@ function PlanList({
                         </div>
                         {activeTab === "React" && "inputs" in entry && (
                           <span className={styles.jobInputsTrigger}>
-                            <JobInputsResponsive
-                              inputs={reactionInputs ?? entry.inputs}
-                              reactionFormulaCount={
-                                reactionPlan?.availableBlueprints ?? reactionFormulaCount
-                              }
-                            />
+                            <JobInputsResponsive inputs={reactionInputs ?? entry.inputs} />
                           </span>
                         )}
                         {activeTab === "Manufacture" && "inputs" in entry && (
@@ -1897,16 +1895,24 @@ function PlanList({
                             ),
                           )
                         ) : activeTab === "Manufacture" ? (
-                          <span className={styles.manufacturingRunCell}>
-                            <strong>
-                              <CopyableText
-                                textToRender={`${manufacturingDisplayedRuns.toLocaleString()} runs`}
-                                textToCopy={String(manufacturingDisplayedRuns)}
-                                copyLabel="Runs"
-                              />
-                            </strong>
-                            <small>{formatDuration(manufacturingDisplayedTime)}</small>
-                          </span>
+                          <>
+                            <span className={styles.manufacturingBlueprintCell}>
+                              {formatOptionalCount(manufacturingEntry?.inputs.bpoCount)}
+                            </span>
+                            <span className={styles.manufacturingBlueprintCell}>
+                              {formatOptionalCount(manufacturingEntry?.inputs.bpcRuns)}
+                            </span>
+                            <span className={styles.manufacturingRunCell}>
+                              <strong>
+                                <CopyableText
+                                  textToRender={`${manufacturingDisplayedRuns.toLocaleString()} runs`}
+                                  textToCopy={String(manufacturingDisplayedRuns)}
+                                  copyLabel="Runs"
+                                />
+                              </strong>
+                              <small>{formatDuration(manufacturingDisplayedTime)}</small>
+                            </span>
+                          </>
                         ) : (
                           <span className={styles.planRowAmount}>
                             {activeTab === "React" ? (

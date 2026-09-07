@@ -389,6 +389,51 @@ test("uses an available T2 BPC without scheduling invention", async () => {
   assert.equal(blueprint.buyQuantity, 0);
 });
 
+test("reports BPO count and BPC runs separately for manufacturing", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: rifterBlueprintTypeId,
+          name: "Rifter Blueprint",
+          quantity: 1,
+          category: "blueprint",
+          blueprintType: "bpo",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: rifterBlueprintTypeId,
+          name: "Rifter Blueprint Copy",
+          quantity: 1,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [{ itemId: 9101, type: "bpc", runs: 7 }],
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+
+  const job = result.lists.manufacturingJobs.find(
+    (entry) => entry.typeId === rifterBlueprintTypeId,
+  );
+  assert(job);
+  assert.equal(job.inputs.bpoCount, 1);
+  assert.equal(job.inputs.bpcRuns, 7);
+});
+
 test("applies assigned manufacturing group facility modifiers", async () => {
   const result = await calculatePlan(
     request(

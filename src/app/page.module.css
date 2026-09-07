@@ -2480,7 +2480,12 @@
 .manufacturingTableHeader,
 .manufacturingRow {
   display: grid;
-  grid-template-columns: minmax(190px, 1.9fr) minmax(90px, 0.78fr) minmax(110px, 0.78fr);
+  grid-template-columns:
+    minmax(190px, 1.9fr)
+    minmax(90px, 0.78fr)
+    minmax(70px, 0.55fr)
+    minmax(95px, 0.7fr)
+    minmax(110px, 0.78fr);
   gap: 13px;
   align-items: center;
 }
@@ -2501,6 +2506,14 @@
   display: flex;
   min-width: 0;
   justify-content: center;
+}
+
+.manufacturingBlueprintCell {
+  min-width: 0;
+  color: var(--foreground);
+  font: 11px "DM Mono";
+  text-align: right;
+  white-space: nowrap;
 }
 
 .manufacturingRunCell {
@@ -2999,7 +3012,12 @@
 
   .manufacturingTableHeader,
   .manufacturingRow {
-    grid-template-columns: minmax(0, 1fr) minmax(82px, auto) minmax(85px, auto);
+    grid-template-columns:
+      minmax(0, 1fr)
+      minmax(62px, auto)
+      minmax(45px, auto)
+      minmax(70px, auto)
+      minmax(85px, auto);
   }
 
   .planRow {
@@ -3046,8 +3064,18 @@
     grid-row: 2;
   }
 
-  .manufacturingRow .manufacturingRunCell {
+  .manufacturingRow .manufacturingBlueprintCell:nth-child(3) {
     grid-column: 3;
+    grid-row: 2;
+  }
+
+  .manufacturingRow .manufacturingBlueprintCell:nth-child(4) {
+    grid-column: 4;
+    grid-row: 2;
+  }
+
+  .manufacturingRow .manufacturingRunCell {
+    grid-column: 5;
     grid-row: 2;
   }
 

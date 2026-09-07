@@ -45,6 +45,19 @@ function remember(entry: PlanRequestLog) {
   }
 }
 
+function normalizePlanRequestLog(entry: PlanRequestLog): PlanRequestLog {
+  return {
+    id: entry.id,
+    requestedAt: entry.requestedAt,
+    ...(typeof entry.sessionCollectionId === "string"
+      ? { sessionCollectionId: entry.sessionCollectionId }
+      : {}),
+    rawRequestBody: entry.rawRequestBody,
+    rawResponseBody: entry.rawResponseBody,
+    responseStatus: entry.responseStatus,
+  };
+}
+
 /** Writes one log to its own Firestore document so concurrent requests do not overwrite each other. */
 async function persistPlanRequestLog(entry: PlanRequestLog): Promise<void> {
   const storage = await initStorage();
@@ -56,7 +69,7 @@ export async function logPlanRequest(
   entry: Omit<PlanRequestLog, "id"> & { id?: string },
 ): Promise<string> {
   const id = entry.id ?? randomUUID();
-  const completeEntry = { ...entry, id };
+  const completeEntry = normalizePlanRequestLog({ ...entry, id });
   remember(completeEntry);
   await persistPlanRequestLog(completeEntry);
   return id;

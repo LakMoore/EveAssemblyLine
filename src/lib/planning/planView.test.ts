@@ -147,6 +147,8 @@ test("recalculates split reaction inputs and carries availability forward", () =
         status: "partial" as const,
       },
     ],
+    bpoCount: 0,
+    bpcRuns: 0,
     completionPercent: 68,
     status: "partial" as const,
   };

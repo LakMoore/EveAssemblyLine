@@ -18,24 +18,11 @@ function statusClassName(status: PlanJobInputStatus) {
       : "border-destructive/40 text-destructive";
 }
 
-function statusForCompletionPercent(completionPercent: number): PlanJobInputStatus {
-  return completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked";
-}
-
 /** Calculates the readiness percentage shown for an industry's inputs trigger. */
-export function getJobInputsCompletionPercent(
-  inputs: PlanJobInputs,
-  reactionFormulaCount?: number,
-): number {
-  if (reactionFormulaCount === undefined) {
-    return inputs.completionPercent;
-  }
-
-  const blueprintCompletionPercent = reactionFormulaCount > 0 ? 100 : 0;
-  return Math.min(
-    blueprintCompletionPercent,
-    ...inputs.materials.map((input) => input.completionPercent),
-  );
+export function getJobInputsCompletionPercent(inputs: PlanJobInputs): number {
+  return inputs.materials.length
+    ? Math.min(...inputs.materials.map((input) => input.completionPercent))
+    : 100;
 }
 
 function InputRow({ input }: { input: PlanJobInput }) {
@@ -67,24 +54,10 @@ function InputRow({ input }: { input: PlanJobInput }) {
 }
 
 /** Renders the authoritative inputs and readiness state for an industry job. */
-export default function JobInputsResponsive({
-  inputs,
-  reactionFormulaCount,
-}: {
-  inputs: PlanJobInputs;
-  reactionFormulaCount?: number;
-}) {
-  const isReactionFormula = reactionFormulaCount !== undefined;
-  const blueprint = isReactionFormula
-    ? {
-        ...inputs.blueprint,
-        availableQuantity: reactionFormulaCount,
-        completionPercent: reactionFormulaCount > 0 ? 100 : 0,
-        status: reactionFormulaCount > 0 ? ("ready" as const) : ("blocked" as const),
-      }
-    : inputs.blueprint;
-  const completionPercent = getJobInputsCompletionPercent(inputs, reactionFormulaCount);
-  const status = statusForCompletionPercent(completionPercent);
+export default function JobInputsResponsive({ inputs }: { inputs: PlanJobInputs }) {
+  const completionPercent = getJobInputsCompletionPercent(inputs);
+  const status: PlanJobInputStatus =
+    completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked";
   return (
     <ResponsiveDialogDrawer
       trigger={
@@ -100,7 +73,7 @@ export default function JobInputsResponsive({
         </button>
       }
       title="Job inputs"
-      description="Blueprint and material availability for this job."
+      description="Material availability for this job."
       headerContent={
         <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
           <p className="font-semibold">{completionPercent}% ready</p>
@@ -110,34 +83,6 @@ export default function JobInputsResponsive({
         </div>
       }
     >
-      <div className="grid grid-cols-[37px_minmax(0,1fr)_auto] items-center gap-x-2 border-b border-border py-2">
-        <TypeIdentity
-          name={inputs.blueprint.name}
-          typeId={inputs.blueprint.typeId}
-          imageSize={28}
-          variation="bpc"
-          subline={
-            isReactionFormula
-              ? `•\t${blueprint.availableQuantity.toLocaleString()} available`
-              : `•\t${blueprint.availableQuantity.toLocaleString()} / ${blueprint.requiredQuantity.toLocaleString()} available`
-          }
-          className="col-span-2 min-w-0 [&>span]:min-w-0"
-        />
-        <div className="col-start-3 row-start-1 flex shrink-0 items-center gap-2 self-center">
-          <span className={cn("font-mono", statusClassName(blueprint.status))}>
-            {blueprint.completionPercent}%
-          </span>
-          <span
-            aria-label={`Blueprint: ${statusLabel(blueprint.status)}`}
-            className={cn(
-              "size-1.5 rounded-full",
-              blueprint.status === "ready" && "bg-success",
-              blueprint.status === "partial" && "bg-warning",
-              blueprint.status === "blocked" && "bg-destructive",
-            )}
-          />
-        </div>
-      </div>
       <div>
         <p className="pt-2 text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
           Materials

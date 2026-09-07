@@ -50,12 +50,21 @@ type StockLot = {
 };
 
 /** Builds a job-input group and derives its aggregate completion state. */
-function summarizePlanJobInputs(blueprint: PlanJobInput, materials: PlanJobInput[]): PlanJobInputs {
-  const allInputs = [blueprint, ...materials];
-  const completionPercent = Math.min(...allInputs.map((input) => input.completionPercent));
+function summarizePlanJobInputs(
+  blueprint: PlanJobInput,
+  materials: PlanJobInput[],
+  blueprintCounts: Pick<PlanJobInputs, "bpoCount" | "bpcRuns"> = {
+    bpoCount: 0,
+    bpcRuns: 0,
+  },
+): PlanJobInputs {
+  const completionPercent = materials.length
+    ? Math.min(...materials.map((input) => input.completionPercent))
+    : 100;
   return {
     blueprint,
     materials,
+    ...blueprintCounts,
     completionPercent,
     status: completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked",
   };
@@ -970,7 +979,14 @@ async function calculatePlanPass(
       availableBlueprintQuantity,
       requiredBlueprintQuantity,
     );
-    return summarizePlanJobInputs(blueprintInput, materials);
+    return summarizePlanJobInputs(
+      blueprintInput,
+      materials,
+      {
+        bpoCount: activity === "manufacturing" ? bpoCount : 0,
+        bpcRuns: activity === "manufacturing" ? (copyStock?.runs ?? 0) : 0,
+      },
+    );
   }
   function mergeJobInputs(
     existing: PlanJobInputs | undefined,
@@ -1003,7 +1019,14 @@ async function calculatePlanPass(
         ? Math.max(existing.blueprint.requiredQuantity, next.blueprint.requiredQuantity)
         : existing.blueprint.requiredQuantity + next.blueprint.requiredQuantity,
     );
-    return summarizePlanJobInputs(blueprint, [...materialByTypeId.values()]);
+    return summarizePlanJobInputs(
+      blueprint,
+      [...materialByTypeId.values()],
+      {
+        bpoCount: next.bpoCount,
+        bpcRuns: next.bpcRuns,
+      },
+    );
   }
   const usedRunsByBlueprint = new Map<number, number>();
   const consumedMarketOrderStock = new Set<number>();
@@ -2308,7 +2331,14 @@ function mergePlanJobInputs(entries: PlanJobInputs[]): PlanJobInputs {
     }
   }
   const materials = [...materialsByTypeId.values()].map(mergePlanJobInputEntries);
-  return summarizePlanJobInputs(blueprint, materials);
+  return summarizePlanJobInputs(
+    blueprint,
+    materials,
+    {
+      bpoCount: entries.reduce((total, entry) => total + entry.bpoCount, 0),
+      bpcRuns: entries.reduce((total, entry) => total + entry.bpcRuns, 0),
+    },
+  );
 }
 
 type PlanJobEntry =

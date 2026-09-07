@@ -229,6 +229,8 @@ export interface PlanJobInput {
 export interface PlanJobInputs {
   blueprint: PlanJobInput;
   materials: PlanJobInput[];
+  bpoCount: number;
+  bpcRuns: number;
   completionPercent: number;
   status: PlanJobInputStatus;
 }
