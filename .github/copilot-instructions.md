@@ -276,6 +276,7 @@ Keep each step independently testable. Avoid broad UI rewrites while server cont
 - Use `NextResponse.json` with appropriate status codes and stable error shapes.
 - Treat request JSON, query strings, ESI responses, and SDE records as untrusted external data.
 - Validate all external input at the API boundary and narrow it to a safe internal type before passing it to the plan engine or other internal modules. Use Zod's `safeParse` and associated methods for validation.
+- Never create an asset endpoint that returns raw or unfiltered records based only on ordinary session authentication, an arbitrary item ID, or an arbitrary location ID. Asset reads must enforce explicit authorization and session or collection scope, and corporation assets must pass through the corporation-source visibility rules.
 - Persist and transmit stable numeric IDs rather than localized or display type names. Users may change language at any time, so names must never be the identifier used by a stored record or API request.
 - Do not expose internal token records. Map them to public character/session DTOs.
 - Keep `/api/plan` fast and side-effect free. Refresh belongs in `/api/state/refresh`.

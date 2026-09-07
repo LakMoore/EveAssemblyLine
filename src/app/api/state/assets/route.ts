@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
 import { getCollectionCorporationSettings } from "@/lib/auth/tokensStore";
 import { getCollectionFacilities } from "@/lib/auth/tokensStore";
@@ -75,16 +74,6 @@ type StockBucket = {
   totalVolume: number;
   items: Map<string, StockItem>;
 };
-
-const rawAssetDiagnosticSchema = z
-  .object({
-    rawAsset: z.coerce.number().int().positive().safe().optional(),
-    rawAssetsAtLocation: z.coerce.number().int().positive().safe().optional(),
-  })
-  .refine(
-    (query) => (query.rawAsset === undefined) !== (query.rawAssetsAtLocation === undefined),
-    { message: "Specify exactly one raw asset diagnostic." },
-  );
 
 function isDirectLocation(asset: AssetRecord): asset is AssetRecord & {
   rootLocation: AssetLocation;
@@ -411,37 +400,6 @@ export async function GET(request: NextRequest) {
     session.sessionId,
   );
   const url = new URL(request.url);
-  if (url.searchParams.has("rawAsset") || url.searchParams.has("rawAssetsAtLocation")) {
-    const parsedDiagnostic = rawAssetDiagnosticSchema.safeParse({
-      rawAsset: url.searchParams.get("rawAsset") ?? undefined,
-      rawAssetsAtLocation: url.searchParams.get("rawAssetsAtLocation") ?? undefined,
-    });
-    if (!parsedDiagnostic.success) {
-      return NextResponse.json({ error: "Invalid raw asset diagnostic query." }, { status: 400 });
-    }
-    const rawAssets = await getAllAssetsRaw(
-      characterIds,
-      true,
-      session.sessionId,
-      corporationPolicies,
-    );
-    if (parsedDiagnostic.data.rawAsset !== undefined) {
-      const itemId = parsedDiagnostic.data.rawAsset;
-      return NextResponse.json({
-        query: "rawAsset",
-        itemId,
-        asset: rawAssets.find((asset) => asset.itemId === itemId) ?? null,
-      });
-    }
-    const locationId = parsedDiagnostic.data.rawAssetsAtLocation!;
-    const assetsAtLocation = rawAssets.filter((asset) => asset.locationId === locationId);
-    return NextResponse.json({
-      query: "rawAssetsAtLocation",
-      locationId,
-      count: assetsAtLocation.length,
-      assets: assetsAtLocation,
-    });
-  }
   const requestedLanguage = url.searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
   const corporationSourcesPromise = getCorporationSourceCatalog(

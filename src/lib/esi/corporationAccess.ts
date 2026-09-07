@@ -6,8 +6,8 @@ import {
 
 export type CorporationHangarPermission = {
   flag: CorporationHangarFlag;
-  canTake: boolean;
-  canQuery: boolean;
+  canTake: boolean;   // Whether the character can see and use items from the hangar
+  canQuery: boolean;  // Whether the character can see and use Blueprints and Reaction Formulas in the hangar
 };
 
 export const corporationRefreshScopes = [
