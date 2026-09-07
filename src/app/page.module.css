@@ -2472,7 +2472,7 @@
 .reactionTableHeader,
 .reactionRow {
   display: grid;
-  grid-template-columns: minmax(190px, 1.9fr) repeat(5, minmax(0, 0.78fr));
+  grid-template-columns: minmax(190px, 1.9fr) minmax(90px, 0.78fr) repeat(4, minmax(60px, 0.55fr));
   gap: 13px;
   align-items: center;
 }
@@ -2480,13 +2480,13 @@
 .manufacturingTableHeader,
 .manufacturingRow {
   display: grid;
-  grid-template-columns: minmax(190px, 1.9fr) minmax(110px, 0.78fr);
+  grid-template-columns: minmax(190px, 1.9fr) minmax(90px, 0.78fr) minmax(110px, 0.78fr);
   gap: 13px;
   align-items: center;
 }
 
 .manufacturingTableHeader {
-  padding: 14px 0 8px;
+  padding: 8px 0 2px;
   color: var(--muted-foreground);
   font: 10px "DM Mono";
   letter-spacing: 0.5px;
@@ -2495,6 +2495,12 @@
 
 .manufacturingTableHeader > :first-child {
   justify-content: flex-start;
+}
+
+.manufacturingInputsCell {
+  display: flex;
+  min-width: 0;
+  justify-content: center;
 }
 
 .manufacturingRunCell {
@@ -2519,7 +2525,7 @@
 
 .reactionTableHeader {
   background: var(--card);
-  padding: 14px 0 8px;
+  padding: 8px 0 2px;
   color: var(--muted-foreground);
   font: 10px "DM Mono";
   letter-spacing: 0.5px;
@@ -2547,6 +2553,11 @@
 
 .reactionTableHeader > :first-child {
   justify-content: flex-start;
+}
+
+.reactionSortButton.inputsSortHeader {
+  justify-content: center;
+  text-align: center;
 }
 
 .reactionSortButton svg {
@@ -2824,6 +2835,10 @@
   color: #f28c8c;
 }
 
+.availableSourceIcon[data-source="reprocessing"] {
+  color: var(--lime);
+}
+
 .planTableCellEmpty {
   min-width: 0;
 }
@@ -2843,6 +2858,10 @@
 
 .jobInputsTrigger {
   flex: 0 0 auto;
+}
+
+.reactionRow .jobInputsTrigger {
+  justify-self: center;
 }
 
 .planRowMain strong,
@@ -2954,7 +2973,7 @@
 
   .manufacturingTableHeader,
   .manufacturingRow {
-    grid-template-columns: minmax(0, 1fr) minmax(85px, auto);
+    grid-template-columns: minmax(0, 1fr) minmax(82px, auto) minmax(85px, auto);
   }
 
   .planRow {
@@ -2981,6 +3000,7 @@
   .reactionRow .jobInputsTrigger {
     grid-column: 1;
     width: 100%;
+    justify-self: start;
   }
 
   .manufacturingRow {
@@ -2995,14 +3015,13 @@
     grid-column: 1 / -1;
   }
 
-  .manufacturingRow .jobInputsTrigger {
-    grid-column: 1;
-    flex-basis: auto;
-    padding-left: 0;
+  .manufacturingRow .manufacturingInputsCell {
+    grid-column: 2;
+    grid-row: 2;
   }
 
   .manufacturingRow .manufacturingRunCell {
-    grid-column: 2;
+    grid-column: 3;
     grid-row: 2;
   }
 
@@ -3022,10 +3041,13 @@
 
 @media (min-width: 641px) {
   .tableHead,
-  .planTableHeader {
+  .planTableHeader,
+  .reactionTableHeader,
+  .manufacturingTableHeader {
     position: sticky;
     top: 0;
     z-index: 2;
+    background: var(--card);
     box-shadow: 0 1px 0 var(--line);
   }
 }

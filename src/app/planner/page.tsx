@@ -199,7 +199,7 @@ type ReactionSchedule = { installs: number; runs: number; time: number };
 type ReactionCoverage = { installable: number; total: number };
 type ReactionSortKey = "type" | "inputs" | "suggestedRuns" | "totalNeeded";
 type ReactionSort = { key: ReactionSortKey; direction: "asc" | "desc" };
-type ManufacturingSort = { key: "type" | "runs"; direction: "asc" | "desc" };
+type ManufacturingSort = { key: "type" | "inputs" | "runs"; direction: "asc" | "desc" };
 type PlanViewMode = "all" | "build-location";
 
 function reactionJobKey(job: { typeId: number; locationId?: number }) {
@@ -2510,15 +2510,19 @@ function PlanList({
                 const leftValue =
                   manufacturingSort.key === "type"
                     ? leftManufacturing.name
-                    : showTotalManufacturingRunCounts
-                      ? leftManufacturing.runs
-                      : leftManufacturing.runsAvailable;
+                    : manufacturingSort.key === "inputs"
+                      ? getJobInputsCompletionPercent(leftManufacturing.inputs)
+                      : showTotalManufacturingRunCounts
+                        ? leftManufacturing.runs
+                        : leftManufacturing.runsAvailable;
                 const rightValue =
                   manufacturingSort.key === "type"
                     ? rightManufacturing.name
-                    : showTotalManufacturingRunCounts
-                      ? rightManufacturing.runs
-                      : rightManufacturing.runsAvailable;
+                    : manufacturingSort.key === "inputs"
+                      ? getJobInputsCompletionPercent(rightManufacturing.inputs)
+                      : showTotalManufacturingRunCounts
+                        ? rightManufacturing.runs
+                        : rightManufacturing.runsAvailable;
                 const comparison =
                   typeof leftValue === "string" && typeof rightValue === "string"
                     ? leftValue.localeCompare(rightValue)
@@ -3027,7 +3031,7 @@ function PlanList({
           </button>
           <button
             type="button"
-            className={styles.reactionSortButton}
+            className={`${styles.reactionSortButton} ${styles.inputsSortHeader}`}
             aria-label={`Sort reactions by Inputs${reactionSort.key === "inputs" ? `, currently ${reactionSort.direction}ending` : ""}`}
             onClick={() =>
               setReactionSort((current) => ({
@@ -3103,6 +3107,25 @@ function PlanList({
           >
             Type
             {manufacturingSort.key === "type"
+              && (manufacturingSort.direction === "asc" ? (
+                <ArrowUp aria-hidden="true" />
+              ) : (
+                <ArrowDown aria-hidden="true" />
+              ))}
+          </button>
+          <button
+            type="button"
+            className={`${styles.reactionSortButton} ${styles.inputsSortHeader}`}
+            aria-label={`Sort manufacturing jobs by % inputs${manufacturingSort.key === "inputs" ? `, currently ${manufacturingSort.direction}ending` : ""}`}
+            onClick={() =>
+              setManufacturingSort((current) => ({
+                key: "inputs",
+                direction: current.key === "inputs" && current.direction === "asc" ? "desc" : "asc",
+              }))
+            }
+          >
+            % inputs
+            {manufacturingSort.key === "inputs"
               && (manufacturingSort.direction === "asc" ? (
                 <ArrowUp aria-hidden="true" />
               ) : (
@@ -3413,11 +3436,6 @@ function PlanList({
                         {bposInUse > 0 && (
                           <Badge variant="outline">{formatBposInUse(bposInUse)}</Badge>
                         )}
-                        {activeTab === "Manufacture" && "inputs" in entry && (
-                          <span className={styles.jobInputsTrigger}>
-                            <JobInputsResponsive inputs={entry.inputs} />
-                          </span>
-                        )}
                       </div>
                       {activeTab === "React" && "inputs" in entry && (
                         <span className={styles.jobInputsTrigger}>
@@ -3425,6 +3443,11 @@ function PlanList({
                             inputs={entry.inputs}
                             reactionFormulaCount={reactionFormulaCount}
                           />
+                        </span>
+                      )}
+                      {activeTab === "Manufacture" && "inputs" in entry && (
+                        <span className={styles.manufacturingInputsCell}>
+                          <JobInputsResponsive inputs={entry.inputs} />
                         </span>
                       )}
                       {activeTab === "Plan" ? (
