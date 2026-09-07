@@ -47,21 +47,18 @@ function remember(entry: PlanRequestLog) {
 
 /** Writes one log to its own Firestore document so concurrent requests do not overwrite each other. */
 async function persistPlanRequestLog(entry: PlanRequestLog): Promise<void> {
-  try {
-    const storage = await initStorage();
-    await storage.setItem(storageKey(entry.id), entry);
-  }
-  catch {
-    // Logging must never make a plan request fail.
-  }
+  const storage = await initStorage();
+  await storage.setItem(storageKey(entry.id), entry);
 }
 
-/** Assigns an ID and schedules durable persistence without delaying the plan response. */
-export function logPlanRequest(entry: Omit<PlanRequestLog, "id"> & { id?: string }): string {
+/** Assigns an ID and waits for durable persistence to complete. */
+export async function logPlanRequest(
+  entry: Omit<PlanRequestLog, "id"> & { id?: string },
+): Promise<string> {
   const id = entry.id ?? randomUUID();
   const completeEntry = { ...entry, id };
   remember(completeEntry);
-  void persistPlanRequestLog(completeEntry);
+  await persistPlanRequestLog(completeEntry);
   return id;
 }
 
