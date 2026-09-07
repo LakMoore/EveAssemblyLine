@@ -242,6 +242,7 @@ export type PlanSkillRequirement = {
 export interface PlanResult {
   metadata: {
     generatedAt: string;
+    planId?: string;
     unresolvedAssetCount?: number;
     corporationAssetSources?: number[];
     availableStockByTypeId?: Record<string, number>;

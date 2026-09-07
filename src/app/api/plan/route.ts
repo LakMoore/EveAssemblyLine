@@ -18,6 +18,9 @@ import type {
   PlanStockItem,
 } from "@/lib/planning/types";
 import { productionGroupDefinitions } from "@/lib/planning/productionGroups";
+import { logPlanRequest } from "@/lib/planning/planRequestLogger";
+import { getSessionFromRequest } from "@/lib/auth/session";
+import { randomUUID } from "node:crypto";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -197,9 +200,8 @@ async function calculateWorkingAssetsPlan(input: PlanRequest, assets: PlanStockI
   return result;
 }
 
-export async function POST(request: Request) {
+export async function calculatePlanRequest(body: unknown): Promise<Response> {
   try {
-    const body: unknown = await request.json();
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       return NextResponse.json({ error: "The plan request was not valid JSON." }, { status: 400 });
     }
@@ -471,6 +473,65 @@ export async function POST(request: Request) {
     return NextResponse.json(result, noStoreResponseInit);
   }
   catch {
-    return NextResponse.json({ error: "The plan request was not valid JSON." }, { status: 400 });
+    return NextResponse.json({ error: "Could not calculate the plan." }, { status: 400 });
   }
+}
+
+function withPlanId(body: unknown, planId: string): unknown {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { planId, error: "The plan request was not valid JSON." };
+  }
+  const record = body as Record<string, unknown>;
+  if (record.error) return { ...record, planId };
+  const metadata = record.metadata;
+  return {
+    ...record,
+    metadata: {
+      ...(metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {}),
+      planId,
+    },
+  };
+}
+
+/** Calculates and logs one plan request while keeping Firestore persistence off the response path. */
+export async function POST(request: Request) {
+  const planId = randomUUID();
+  const requestedAt = new Date().toISOString();
+  const session = await getSessionFromRequest(request).catch(() => null);
+  const rawRequestBody = await request.text();
+  let body: unknown;
+  try {
+    body = JSON.parse(rawRequestBody);
+  }
+  catch {
+    const responseBody = { planId, error: "The plan request was not valid JSON." };
+    logPlanRequest({
+      id: planId,
+      requestedAt,
+      sessionCollectionId: session?.collectionId,
+      rawRequestBody,
+      rawResponseBody: JSON.stringify(responseBody),
+      responseStatus: 400,
+    });
+    return NextResponse.json(responseBody, { status: 400, ...noStoreResponseInit });
+  }
+
+  const response = await calculatePlanRequest(body);
+  const responseBody = withPlanId(await response.json(), planId);
+  const rawResponseBody = JSON.stringify(responseBody);
+  logPlanRequest({
+    id: planId,
+    requestedAt,
+    sessionCollectionId: session?.collectionId,
+    rawRequestBody,
+    rawResponseBody,
+    responseStatus: response.status,
+  });
+  return NextResponse.json(
+    responseBody,
+    {
+      status: response.status,
+      ...noStoreResponseInit,
+    },
+  );
 }
