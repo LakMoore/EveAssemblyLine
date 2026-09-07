@@ -394,23 +394,23 @@ function AvailableSourceIcons({
   return (
     <span className={styles.availableSourceIcons} aria-label="Available sources">
       {icons.map((icon) => {
-        const Icon =
-          icon === "market"
-            ? ChartLine
-            : icon === "industry"
-              ? Factory
-              : icon === "invention"
-                ? Microscope
-                : TestTubes;
+        const sourceIcons: Record<PlanSourceIcon, LucideIcon> = {
+          market: ChartLine,
+          industry: Factory,
+          invention: Microscope,
+          copying: TestTubes,
+          reprocessing: Minimize2,
+        };
+        const Icon = sourceIcons[icon];
         const quantity = counts?.[icon] ?? 0;
-        const label =
-          icon === "market"
-            ? `${quantity.toLocaleString()} in Sell Orders`
-            : icon === "industry"
-              ? `${quantity.toLocaleString()} in Production`
-              : icon === "invention"
-                ? `${quantity.toLocaleString()} being Invented`
-                : `${quantity.toLocaleString()} being Copied`;
+        const sourceDescriptions: Record<PlanSourceIcon, string> = {
+          market: "in Sell Orders",
+          industry: "in Production",
+          invention: "being Invented",
+          copying: "being Copied",
+          reprocessing: "from Reprocessing",
+        };
+        const label = `${quantity.toLocaleString()} ${sourceDescriptions[icon]}`;
         return (
           <span
             key={icon}
@@ -2609,7 +2609,10 @@ function PlanList({
       return {
         Required: entry.requiredQuantity.toLocaleString(),
         Available: entry.availableStockQuantity.toLocaleString(),
-        "Buy/Build": (entry.productionQuantity + entry.buyQuantity).toLocaleString(),
+        "Buy/Build": (
+          Math.max(0, entry.productionQuantity - (entry.reprocessingQuantity ?? 0))
+          + entry.buyQuantity
+        ).toLocaleString(),
         Surplus: (
           entry.remainingStockQuantity + entry.remainingProductionQuantity
         ).toLocaleString(),

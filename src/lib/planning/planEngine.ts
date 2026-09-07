@@ -762,6 +762,12 @@ async function calculatePlanPass(
     }
     if (sourceCounts.size > 0) sourceCountsByTypeId.set(stockItem.typeId, sourceCounts);
   }
+  for (const [typeId, quantity] of reprocessing?.producedMaterials ?? []) {
+    if (quantity <= 0) continue;
+    const sourceCounts = sourceCountsByTypeId.get(typeId) ?? new Map<PlanSourceIcon, number>();
+    sourceCounts.set("reprocessing", (sourceCounts.get("reprocessing") ?? 0) + quantity);
+    sourceCountsByTypeId.set(typeId, sourceCounts);
+  }
   function sourceMetadata(typeId: number) {
     const counts = sourceCountsByTypeId.get(typeId);
     if (!counts) return undefined;
@@ -779,6 +785,9 @@ async function calculatePlanPass(
   const initialBuildTypeIds = new Set(request.items.map((item) => item.typeId));
   for (const [typeId, quantity] of marketOrderStock) {
     if (!initialBuildTypeIds.has(typeId)) continue;
+    totalStock.set(typeId, (totalStock.get(typeId) ?? 0) + quantity);
+  }
+  for (const [typeId, quantity] of reprocessing?.producedMaterials ?? []) {
     totalStock.set(typeId, (totalStock.get(typeId) ?? 0) + quantity);
   }
   const allBlueprintStockItems = request.stock.filter((item) => item.category === "blueprint");
@@ -1025,6 +1034,7 @@ async function calculatePlanPass(
         stockQuantity: existing?.stockQuantity ?? 0,
         availableStockQuantity: existing?.availableStockQuantity ?? totalStock.get(typeId) ?? 0,
         productionQuantity: existing?.productionQuantity ?? 0,
+        reprocessingQuantity: existing?.reprocessingQuantity ?? 0,
         buildQuantity: existing?.buildQuantity ?? 0,
         buyQuantity: existing?.buyQuantity ?? 0,
         remainingStockQuantity: existing?.remainingStockQuantity ?? 0,
@@ -1038,7 +1048,14 @@ async function calculatePlanPass(
   }
 
   for (const [typeId, quantity] of reprocessing?.producedMaterials ?? []) {
-    updateMaterial(typeId, `Type ${typeId}`, { productionQuantity: quantity });
+    updateMaterial(
+      typeId,
+      `Type ${typeId}`,
+      {
+        productionQuantity: quantity,
+        reprocessingQuantity: quantity,
+      },
+    );
   }
 
   const selectedReprocessingTypeIds = new Set([
@@ -2345,6 +2362,16 @@ function mergeStockpileResults(
   stock: PlanStockItem[],
   request: PlannerRequest,
 ): PlanResult {
+  const availableStockByTypeId = getAvailableStockByTypeId(request, request.stockpiles);
+  for (const result of results) {
+    for (const material of result.lists.materialsToBuy) {
+      const reprocessingQuantity = material.reprocessingQuantity ?? 0;
+      if (reprocessingQuantity <= 0) continue;
+      const typeKey = String(material.typeId);
+      availableStockByTypeId[typeKey] =
+        (availableStockByTypeId[typeKey] ?? 0) + reprocessingQuantity;
+    }
+  }
   const mergedBpcRequirements = mergeBpcBuyEntries(
     results.flatMap((result) => [...result.lists.bpcsToBuy, ...result.lists.bpcsNeeded]),
   );
@@ -2361,7 +2388,7 @@ function mergeStockpileResults(
     metadata: {
       generatedAt: new Date().toISOString(),
       unresolvedAssetCount: stock.length,
-      availableStockByTypeId: getAvailableStockByTypeId(request, request.stockpiles),
+      availableStockByTypeId,
       corporationAssetSources: [
         ...new Set(
           stock

@@ -210,7 +210,7 @@ export type PlannerRequest = Omit<PlanRequest, "toBuild" | "assets" | "stock" | 
   groupAssignments?: Partial<Record<ProductionGroupKey, number>>;
 };
 
-export type PlanSourceIcon = "market" | "industry" | "invention" | "copying";
+export type PlanSourceIcon = "market" | "industry" | "invention" | "copying" | "reprocessing";
 export type PlanSourceCounts = Partial<Record<PlanSourceIcon, number>>;
 export type PlanJobInputKind = "blueprint" | "material";
 export type PlanJobInputStatus = "ready" | "partial" | "blocked";
@@ -278,6 +278,7 @@ export interface PlanResult {
         stockQuantity: number;
         availableStockQuantity: number;
         productionQuantity: number;
+        reprocessingQuantity?: number;
         buildQuantity: number;
         buyQuantity: number;
         remainingStockQuantity: number;

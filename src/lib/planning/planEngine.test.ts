@@ -3030,7 +3030,7 @@ test("hauls only complete compressed portions needed by the plan", async () => {
     (material) => material.typeId === tritaniumTypeId,
   );
   assert(tritanium);
-  assert.equal(tritanium.availableStockQuantity, 0);
+  assert.equal(tritanium.availableStockQuantity, 800);
   assert.equal(tritanium.productionQuantity, 800);
   const compressedVeldspar = result.lists.planItems.find(
     (item) => item.kind === "material" && item.typeId === compressedVeldsparTypeId,
@@ -3302,6 +3302,45 @@ test("credits aggregate fractional gas output against the raw material buy quant
   assert.equal(compressedGas.buyQuantity, 106);
   assert.equal(rawGas.productionQuantity, 100);
   assert.equal(rawGas.buyQuantity, 0);
+});
+
+test("makes refinery compressed stock available as reprocessed material", async () => {
+  const result = await calculatePlan(
+    request(
+      100,
+      [
+        {
+          typeId: compressedAmberMykoserocinTypeId,
+          name: "Compressed Amber Mykoserocin",
+          quantity: 106,
+          category: "item",
+          rootLocationId: reprocessingLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: amberMykoserocinTypeId,
+            name: "Amber Mykoserocin",
+            quantity: 100,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        reprocessingEfficiencies: { [compressedAmberMykoserocinTypeId]: 95 },
+      },
+    ),
+  );
+  const rawGas = result.lists.materialsToBuy.find(
+    (material) => material.typeId === amberMykoserocinTypeId,
+  );
+
+  assert(rawGas);
+  assert.equal(rawGas.availableStockQuantity, 100);
+  assert.equal(rawGas.availableSourceCounts?.reprocessing, 100);
+  assert.equal(rawGas.buyQuantity, 0);
+  assert.equal(result.metadata.availableStockByTypeId?.[String(amberMykoserocinTypeId)], 100);
 });
 
 test("falls back to 50 percent when no efficiency snapshot is supplied", async () => {

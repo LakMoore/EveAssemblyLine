@@ -59,6 +59,8 @@ export function mergePlanItemEntries(
           stockQuantity: existing.stockQuantity + entry.stockQuantity,
           availableStockQuantity: existing.availableStockQuantity + entry.availableStockQuantity,
           productionQuantity: existing.productionQuantity + entry.productionQuantity,
+          reprocessingQuantity:
+            (existing.reprocessingQuantity ?? 0) + (entry.reprocessingQuantity ?? 0),
           buildQuantity: existing.buildQuantity + entry.buildQuantity,
           buyQuantity: existing.buyQuantity + entry.buyQuantity,
           remainingStockQuantity: existing.remainingStockQuantity + entry.remainingStockQuantity,
@@ -172,6 +174,8 @@ export function mergeBuyEntries(entries: PlanBuyEntry[]): PlanBuyEntry[] {
           stockQuantity: existing.stockQuantity + entry.stockQuantity,
           availableStockQuantity: existing.availableStockQuantity + entry.availableStockQuantity,
           productionQuantity: existing.productionQuantity + entry.productionQuantity,
+          reprocessingQuantity:
+            (existing.reprocessingQuantity ?? 0) + (entry.reprocessingQuantity ?? 0),
           buildQuantity: existing.buildQuantity + entry.buildQuantity,
           buyQuantity: existing.buyQuantity + entry.buyQuantity,
           remainingStockQuantity: existing.remainingStockQuantity + entry.remainingStockQuantity,
