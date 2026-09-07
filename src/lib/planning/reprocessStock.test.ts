@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   allocateReprocessing,
+  getNetReprocessingRequirements,
   type ReprocessingCandidate,
   reprocessCommittedPurchases,
 } from "./reprocessStock";
@@ -18,6 +19,32 @@ function candidate(overrides: Partial<ReprocessingCandidate> = {}): Reprocessing
     ...overrides,
   };
 }
+
+test("excludes stock and production surplus from reprocessing requirements", () => {
+  assert.deepEqual(
+    getNetReprocessingRequirements([
+      {
+        typeId: 34,
+        buyQuantity: 100,
+        remainingStockQuantity: 20,
+        remainingProductionQuantity: 80,
+      },
+      {
+        typeId: 35,
+        buyQuantity: 100,
+        remainingStockQuantity: 0,
+        remainingProductionQuantity: 125,
+      },
+      {
+        typeId: 36,
+        buyQuantity: 100,
+        remainingStockQuantity: 20,
+        remainingProductionQuantity: 30,
+      },
+    ]),
+    new Map([[36, 50]]),
+  );
+});
 
 test("does not allocate reprocessable stock without a material shortage", () => {
   const result = allocateReprocessing(new Map(), [candidate()]);

@@ -194,7 +194,6 @@ async function calculateWorkingAssetsPlan(input: PlanRequest, assets: PlanStockI
     skillTimeMultipliers: input.skillTimeMultipliers,
     settings: input.settings,
   });
-  result.metadata.unresolvedAssetCount = 0;
   return result;
 }
 
@@ -469,7 +468,6 @@ export async function POST(request: Request) {
       skillTimeMultipliers: input.skillTimeMultipliers,
       settings: input.settings,
     });
-    result.metadata.unresolvedAssetCount = 0;
     return NextResponse.json(result, noStoreResponseInit);
   }
   catch {

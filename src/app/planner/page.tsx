@@ -2613,9 +2613,9 @@ function PlanList({
           Math.max(0, entry.productionQuantity - (entry.reprocessingQuantity ?? 0))
           + entry.buyQuantity
         ).toLocaleString(),
-        Surplus: (
-          entry.remainingStockQuantity + entry.remainingProductionQuantity
-        ).toLocaleString(),
+        Surplus: Math
+          .max(0, entry.availableStockQuantity - entry.requiredQuantity)
+          .toLocaleString(),
       };
     }
     if (entry.kind === "bpc") {

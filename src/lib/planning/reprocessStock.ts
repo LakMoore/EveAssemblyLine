@@ -27,6 +27,30 @@ export type CommittedReprocessing = {
   producedMaterials: Map<number, number>;
 };
 
+export type ReprocessingMaterialRequirement = {
+  typeId: number;
+  buyQuantity: number;
+  remainingStockQuantity: number;
+  remainingProductionQuantity: number;
+};
+
+/** Returns material shortages that are not already covered by plan surplus. */
+export function getNetReprocessingRequirements(
+  materials: readonly ReprocessingMaterialRequirement[],
+): Map<number, number> {
+  return new Map(
+    materials.flatMap((material) => {
+      const shortage = Math.max(
+        0,
+        material.buyQuantity
+          - material.remainingStockQuantity
+          - material.remainingProductionQuantity,
+      );
+      return shortage > 0 ? [[material.typeId, shortage] as const] : [];
+    }),
+  );
+}
+
 /** Returns fractional material output from one complete reprocessing portion. */
 function yieldsPerPortion(candidate: ReprocessingCandidate) {
   return new Map(

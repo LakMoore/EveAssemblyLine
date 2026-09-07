@@ -208,6 +208,7 @@ export type PlannerRequest = Omit<PlanRequest, "toBuild" | "assets" | "stock" | 
   stock: PlanStockItem[];
   stockpiles?: PlannerStockpile[];
   groupAssignments?: Partial<Record<ProductionGroupKey, number>>;
+  unresolvedAssetCount?: number;
 };
 
 export type PlanSourceIcon = "market" | "industry" | "invention" | "copying" | "reprocessing";

@@ -151,6 +151,20 @@ test("build blacklist forces a buildable item to be purchased", async () => {
   );
 });
 
+test("reports the explicit unresolved asset count", async () => {
+  const result = await calculatePlan(
+    request(
+      1,
+      [{ ...compressedStock(1), ownerType: "character", ownerId: 101 }],
+      {
+        unresolvedAssetCount: 3,
+      },
+    ),
+  );
+
+  assert.equal(result.metadata.unresolvedAssetCount, 3);
+});
+
 test("buy blacklist keeps a buildable item on the manufacturing path", async () => {
   const result = await calculatePlan(
     request(
@@ -1957,6 +1971,80 @@ test("combines haul tasks with the same type and route", async () => {
   assert.equal(matchingHauls[0]?.quantity, 64000);
 });
 
+test("keeps hauling ownership separate for shared routes", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: tritaniumTypeId,
+          name: "Tritanium",
+          quantity: 32000,
+          category: "item",
+          rootLocationId: sourceLocationId,
+          ownerType: "character",
+          ownerId: 101,
+        },
+        {
+          typeId: tritaniumTypeId,
+          name: "Tritanium",
+          quantity: 32000,
+          category: "item",
+          rootLocationId: sourceLocationId,
+          ownerType: "corporation",
+          ownerId: 202,
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "owned-route",
+            name: "Owned route",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: rifterTypeId,
+                name: "Rifter",
+                quantity: 2,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+
+  const tritaniumHauls = result.lists.haulingTasks.filter(
+    (task) =>
+      task.itemTypeId === tritaniumTypeId
+      && task.fromLocationId === sourceLocationId
+      && task.toLocationId === manufacturingLocationId,
+  );
+
+  assert.deepEqual(
+    tritaniumHauls.map((task) => ({
+      ownerType: task.ownerType,
+      ownerId: task.ownerId,
+      quantity: task.quantity,
+    })),
+    [
+      { ownerType: "character", ownerId: 101, quantity: 32000 },
+      { ownerType: "corporation", ownerId: 202, quantity: 32000 },
+    ],
+  );
+});
+
 test("hauls ready manufactured stock to the stockpile stock location", async () => {
   const result = await calculatePlan(
     request(
@@ -2903,6 +2991,74 @@ test("merges manufacturing jobs by blueprint type across stockpiles", async () =
   assert.equal(manufacturingJob.runs, 2);
   assert.equal(manufacturingJob.stockpileId, undefined);
   assert.equal(manufacturingJob.buildLocationId, undefined);
+});
+
+test("keeps manufacturing jobs separate across build locations", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "first-location-stockpile",
+            name: "First location stockpile",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: rifterTypeId,
+                name: "Rifter",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "second-location-stockpile",
+            name: "Second location stockpile",
+            locations: {
+              stock: alternateSourceLocationId,
+              manufacturing: alternateSourceLocationId,
+              reactions: alternateSourceLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: alternateSourceLocationId,
+              invention: alternateSourceLocationId,
+            },
+            items: [
+              {
+                typeId: rifterTypeId,
+                name: "Rifter",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+
+  assert.deepEqual(
+    result.lists.manufacturingJobs
+      .filter((job) => job.typeId === rifterBlueprintTypeId)
+      .map((job) => [job.locationId, job.runs]),
+    [
+      [manufacturingLocationId, 1],
+      [alternateSourceLocationId, 1],
+    ],
+  );
 });
 
 test("allocates reaction formulas at the reaction location to stockpile jobs", async () => {

@@ -22,6 +22,7 @@ import {
 } from "./types";
 import {
   allocateReprocessing,
+  getNetReprocessingRequirements,
   type ReprocessingAllocation,
   type ReprocessingCandidate,
   reprocessCommittedPurchases,
@@ -135,6 +136,16 @@ function getPreferredActivityLocationIds(locations: PlanActivityLocations | unde
   );
 }
 
+function haulingKey(
+  itemTypeId: number,
+  fromLocationId: number,
+  toLocationId: number,
+  ownerType: "character" | "corporation" | undefined,
+  ownerId: number | undefined,
+) {
+  return `${itemTypeId}:${fromLocationId}:${toLocationId}:${ownerType ?? "unknown"}:${ownerId ?? "unknown"}`;
+}
+
 type ProfileEntry = { count: number; totalMs: number; maxMs: number };
 
 class PlanProfiler {
@@ -201,6 +212,30 @@ class PlanProfiler {
     );
   }
 }
+
+type PlanningData = {
+  types: Awaited<ReturnType<typeof getTypes>>;
+  compressibleTypes: Awaited<ReturnType<typeof getCompressibleTypes>>;
+  typeMaterials: Awaited<ReturnType<typeof getTypeMaterials>>;
+  groups: Awaited<ReturnType<typeof getGroups>>;
+  targetFilters: Awaited<ReturnType<typeof getIndustryTargetFilters>>;
+  skillPrerequisites: Awaited<ReturnType<typeof getSkillPrerequisites>>;
+};
+
+/** Loads the immutable SDE data shared by every pass in one plan calculation. */
+async function loadPlanningData(): Promise<PlanningData> {
+  const [types, compressibleTypes, typeMaterials, groups, targetFilters, skillPrerequisites] =
+    await Promise.all([
+      getTypes(),
+      getCompressibleTypes(),
+      getTypeMaterials(),
+      getGroups(),
+      getIndustryTargetFilters(),
+      getSkillPrerequisites(),
+    ]);
+  return { types, compressibleTypes, typeMaterials, groups, targetFilters, skillPrerequisites };
+}
+
 function clampEfficiency(value: number, maximum: number) {
   return Math.min(maximum, Math.max(0, Number.isFinite(value) ? value : 0));
 }
@@ -210,21 +245,14 @@ async function allocatePlanReprocessing(
   request: PlannerRequest,
   preliminaryPlan: PlanResult,
   locations: PlanActivityLocations | undefined,
+  planningData: PlanningData,
 ): Promise<ReprocessingAllocation> {
-  const [types, compressibleTypes, typeMaterials] = await Promise.all([
-    getTypes(),
-    getCompressibleTypes(),
-    getTypeMaterials(),
-  ]);
+  const { types, compressibleTypes, typeMaterials } = planningData;
   const reprocessableTypeIds = new Set([
     ...compressibleTypes.values(),
     ...specialReprocessableTypeIds,
   ]);
-  const requiredMaterials = new Map(
-    preliminaryPlan.lists.materialsToBuy
-      .filter((material) => material.buyQuantity > 0)
-      .map((material) => [material.typeId, material.buyQuantity]),
-  );
+  const requiredMaterials = getNetReprocessingRequirements(preliminaryPlan.lists.materialsToBuy);
   const reservedDirectStock = new Map(
     preliminaryPlan.lists.materialsToBuy
       .filter((material) => reprocessableTypeIds.has(material.typeId))
@@ -324,8 +352,9 @@ async function allocatePlanReprocessing(
 async function getFutureCompressedMaterialStock(
   request: PlannerRequest,
   stockpiles: NonNullable<PlannerRequest["stockpiles"]>,
+  planningData: PlanningData,
 ): Promise<PlanStockItem[]> {
-  const [types, typeMaterials] = await Promise.all([getTypes(), getTypeMaterials()]);
+  const { types, typeMaterials } = planningData;
   const futureStock: PlanStockItem[] = [];
   for (const stockpile of stockpiles) {
     if (stockpile.kind !== "special") continue;
@@ -380,16 +409,24 @@ async function getFutureCompressedMaterialStock(
 
 /** Calculates a plan after selecting only reprocessing portions that satisfy real shortages. */
 export async function calculatePlan(request: PlannerRequest): Promise<PlanResult> {
+  const planningData = await loadPlanningData();
   const populatedStockpiles = request.stockpiles?.filter((stockpile) => stockpile.items.length > 0);
   if (populatedStockpiles && populatedStockpiles.length > 0) {
-    return calculateStockpilePlan({ ...request, stockpiles: populatedStockpiles });
+    return calculateStockpilePlan({ ...request, stockpiles: populatedStockpiles }, planningData);
   }
-  return calculatePlanWithoutStockpiles({ ...request, stockpiles: undefined }, undefined);
+  return calculatePlanWithoutStockpiles(
+    { ...request, stockpiles: undefined },
+    undefined,
+    planningData,
+  );
 }
 
 /** Configures final-product hauling for a planning pass. */
 type PlanPassOptions = {
   finalProductLocations?: Map<number, number>;
+  locations?: PlanActivityLocations;
+  reprocessing?: ReprocessingAllocation;
+  persistStockConsumption?: boolean;
 };
 
 function activityLocations(
@@ -409,6 +446,7 @@ function activityLocations(
 async function calculatePlanWithoutStockpiles(
   request: PlannerRequest,
   locations: PlanActivityLocations | undefined,
+  planningData: PlanningData,
   options: PlanPassOptions = {},
 ): Promise<PlanResult> {
   const preliminaryPlan = await calculatePlanPass(
@@ -416,23 +454,39 @@ async function calculatePlanWithoutStockpiles(
       ...request,
       items: request.items.filter((item) => !item.fromCompression),
     },
-    undefined,
-    false,
-    options,
-    locations,
+    planningData,
+    { ...options, locations },
   );
-  const reprocessing = await allocatePlanReprocessing(request, preliminaryPlan, locations);
-  return calculatePlanPass(request, reprocessing, true, options, locations);
+  const reprocessing = await allocatePlanReprocessing(
+    request,
+    preliminaryPlan,
+    locations,
+    planningData,
+  );
+  return calculatePlanPass(
+    request,
+    planningData,
+    {
+      ...options,
+      reprocessing,
+      persistStockConsumption: true,
+      locations,
+    },
+  );
 }
 
 /** Executes one deterministic planning pass with an optional prepared reprocessing allocation. */
 async function calculatePlanPass(
   request: PlannerRequest,
-  reprocessing?: ReprocessingAllocation,
-  persistStockConsumption = false,
+  planningData: PlanningData,
   options: PlanPassOptions = {},
-  locations?: PlanActivityLocations,
 ): Promise<PlanResult> {
+  const {
+    finalProductLocations,
+    locations,
+    reprocessing,
+    persistStockConsumption = false,
+  } = options;
   const profiler = new PlanProfiler();
   const startedAt = performance.now();
   profiler.count("calculatePlan");
@@ -442,15 +496,7 @@ async function calculatePlanPass(
     return fallback;
   }
   const language = request.language ?? "en";
-  const [typeRecords, compressibleTypes, typeMaterials, groups, targetFilters, skillPrerequisites] =
-    await Promise.all([
-      profiler.measure("typeNameBatch", () => getTypes()),
-      getCompressibleTypes(),
-      getTypeMaterials(),
-      getGroups(),
-      getIndustryTargetFilters(),
-      getSkillPrerequisites(),
-    ]);
+  const { types: typeRecords, groups, targetFilters, skillPrerequisites } = planningData;
   const productionGroups = getProductionGroupReferences(targetFilters, groups, language);
   const facilityProfilesByLocationId = new Map(
     (request.facilityProfiles ?? []).map((profile) => [profile.locationId, profile]),
@@ -493,6 +539,18 @@ async function calculatePlanPass(
         : (typeRecords.get(item.typeId)?.volume ?? 0),
       sourceItem: item,
     }));
+  const stockLotsByTypeId = new Map<number, StockLot[]>();
+  const industryOutputLotsByTypeId = new Map<number, StockLot[]>();
+  for (const lot of stockLots) {
+    const lots = stockLotsByTypeId.get(lot.typeId) ?? [];
+    lots.push(lot);
+    stockLotsByTypeId.set(lot.typeId, lots);
+    if (lot.industryJobOutput) {
+      const outputLots = industryOutputLotsByTypeId.get(lot.typeId) ?? [];
+      outputLots.push(lot);
+      industryOutputLotsByTypeId.set(lot.typeId, outputLots);
+    }
+  }
   const stockByLocationAndType = new Map<number, Map<number, number>>();
   const industryOutputByLocationAndType = new Map<number, Map<number, number>>();
   const industryOutputByType = new Map<number, number>();
@@ -521,7 +579,7 @@ async function calculatePlanPass(
   const reprocessingLocationId = locations?.reprocessing ?? locations?.manufacturing;
   const preferredActivityLocationIds = new Set([
     ...getPreferredActivityLocationIds(locations),
-    ...(options.finalProductLocations?.values() ?? []),
+    ...(finalProductLocations?.values() ?? []),
   ]);
   function addHauling(
     lot: StockLot,
@@ -534,7 +592,13 @@ async function calculatePlanPass(
       || !preferredActivityLocationIds.has(destinationRootLocationId)
       || lot.rootLocationId === destinationRootLocationId
     ) return;
-    const key = `${lot.typeId}:${lot.rootLocationId}:${destinationRootLocationId}`;
+    const key = haulingKey(
+      lot.typeId,
+      lot.rootLocationId,
+      destinationRootLocationId,
+      lot.ownerType,
+      lot.ownerId,
+    );
     const existing = haulingByKey.get(key);
     const task = existing ?? {
       itemTypeId: lot.typeId,
@@ -561,8 +625,8 @@ async function calculatePlanPass(
     allowRemoteInBuild = false,
   ) {
     let remaining = quantity;
-    const candidateLots = stockLots
-      .filter((lot) => lot.typeId === typeId && lot.quantity > 0)
+    const candidateLots = (stockLotsByTypeId.get(typeId) ?? [])
+      .filter((lot) => lot.quantity > 0)
       .filter((lot) => (source === "inBuild" ? lot.industryJobOutput : !lot.industryJobOutput))
       .filter(
         (lot) =>
@@ -652,8 +716,8 @@ async function calculatePlanPass(
     }
     if (inBuildConsumed > 0) {
       let remainingInBuild = inBuildConsumed;
-      const outputLots = stockLots
-        .filter((lot) => lot.typeId === typeId && lot.industryJobOutput && lot.quantity > 0)
+      const outputLots = (industryOutputLotsByTypeId.get(typeId) ?? [])
+        .filter((lot) => lot.quantity > 0)
         .filter((lot) => allowRemoteInBuild || lot.rootLocationId === destinationRootLocationId)
         .sort(
           (left, right) =>
@@ -1456,7 +1520,7 @@ async function calculatePlanPass(
 
   for (const item of request.items) {
     if (item.fromCompression) continue;
-    const finalProductLocationId = options.finalProductLocations?.get(item.typeId);
+    const finalProductLocationId = finalProductLocations?.get(item.typeId);
     await expand(
       item.typeId,
       item.quantity,
@@ -1657,7 +1721,7 @@ async function calculatePlanPass(
   const result = {
     metadata: {
       generatedAt: new Date().toISOString(),
-      unresolvedAssetCount: request.stock.length,
+      unresolvedAssetCount: request.unresolvedAssetCount ?? 0,
       availableStockByTypeId: Object.fromEntries(totalStock),
       corporationAssetSources: [
         ...new Set(
@@ -1784,11 +1848,17 @@ function getPlanDemand(result: PlanResult): StockpileDemandResult {
 async function allocateStockpileStock(
   request: PlannerRequest,
   stockpiles: NonNullable<PlannerRequest["stockpiles"]>,
+  planningData: PlanningData,
   futureStockIndexes = new Set<number>(),
 ): Promise<PlanStockItem[][]> {
   if (stockpiles.length === 1) {
     return [request.stock.map((item) => ({ ...item }))];
   }
+  const stockpileEntries = stockpiles.map((stockpile, stockpileIndex) => ({
+    stockpile,
+    stockpileIndex,
+    activityLocationIds: stockpileActivityLocations(stockpile),
+  }));
   const stockpileDemandResults = await Promise.all(
     stockpiles.map(async (stockpile) => {
       const result = await calculatePlanPass(
@@ -1799,10 +1869,8 @@ async function allocateStockpileStock(
           stock: [],
           groupAssignments: stockpile.groupAssignments,
         },
-        undefined,
-        false,
-        {},
-        activityLocations(stockpile),
+        planningData,
+        { locations: activityLocations(stockpile) },
       );
       const { demand, jobInputDemand } = getPlanDemand(result);
       return {
@@ -1857,14 +1925,12 @@ async function allocateStockpileStock(
               && getStockRootLocationId(item) === stockpile.locations.reactions,
           );
         });
-      for (const { stockpile, stockpileIndex } of stockpiles
-        .map((stockpile, stockpileIndex) => ({ stockpile, stockpileIndex }))
-        .sort(
-          (left, right) =>
-            (remainingDemand[right.stockpileIndex].get(typeId) ?? 0)
-              - (remainingDemand[left.stockpileIndex].get(typeId) ?? 0)
-            || left.stockpileIndex - right.stockpileIndex,
-        )) {
+      for (const { stockpile, stockpileIndex } of [...stockpileEntries].sort(
+        (left, right) =>
+          (remainingDemand[right.stockpileIndex].get(typeId) ?? 0)
+            - (remainingDemand[left.stockpileIndex].get(typeId) ?? 0)
+          || left.stockpileIndex - right.stockpileIndex,
+      )) {
         const remaining = remainingDemand[stockpileIndex].get(typeId) ?? 0;
         if (remaining <= 0) continue;
         for (const { item, index } of stockIndexes) {
@@ -1891,15 +1957,14 @@ async function allocateStockpileStock(
       }
       for (const { item, index } of stockIndexes) {
         const stockLocationId = getStockRootLocationId(item);
-        const localStockpiles = stockpiles
-          .map((stockpile, stockpileIndex) => ({ stockpile, stockpileIndex }))
+        const localStockpiles = stockpileEntries
           .filter(
-            ({ stockpile, stockpileIndex }) =>
+            ({ stockpile, stockpileIndex, activityLocationIds }) =>
               (remainingDemand[stockpileIndex].get(typeId) ?? 0) > 0
               && stockLocationId !== undefined
               && (item.category === "reactionformula"
                 ? stockLocationId === stockpile.locations.reactions
-                : stockpileActivityLocations(stockpile).has(stockLocationId)),
+                : activityLocationIds.has(stockLocationId)),
           )
           .sort(
             (left, right) =>
@@ -1917,10 +1982,7 @@ async function allocateStockpileStock(
           );
         }
       }
-      for (const { stockpileIndex } of stockpiles.map((stockpile, index) => ({
-        stockpile,
-        stockpileIndex: index,
-      }))) {
+      for (const { stockpile, stockpileIndex } of stockpileEntries) {
         let remaining = remainingDemand[stockpileIndex].get(typeId) ?? 0;
         if (remaining <= 0) continue;
         for (const { index } of stockIndexes) {
@@ -1994,8 +2056,7 @@ async function allocateStockpileStock(
     );
     for (const [stockIndex, item] of request.stock.entries()) {
       if (remainingDemandOnlyOutput[stockIndex] <= 0) continue;
-      const stockpileIndexes = stockpiles
-        .map((stockpile, stockpileIndex) => ({ stockpile, stockpileIndex }))
+      const stockpileIndexes = stockpileEntries
         .filter(
           ({ stockpileIndex }) => (demandByStockpile[stockpileIndex].get(item.typeId) ?? 0) > 0,
         )
@@ -2034,10 +2095,8 @@ async function allocateStockpileStock(
             stockpile.reprocessingEfficiencies ?? request.reprocessingEfficiencies,
           groupAssignments: stockpile.groupAssignments,
         },
-        undefined,
-        false,
-        {},
-        activityLocations(stockpile),
+        planningData,
+        { locations: activityLocations(stockpile) },
       );
       return result;
     }),
@@ -2065,10 +2124,8 @@ async function allocateStockpileStock(
             stockpile.reprocessingEfficiencies ?? request.reprocessingEfficiencies,
           groupAssignments: stockpile.groupAssignments,
         },
-        undefined,
-        false,
-        {},
-        activityLocations(stockpile),
+        planningData,
+        { locations: activityLocations(stockpile) },
       );
       const demand = new Map<number, number>();
       for (const entry of result.lists.planItems) {
@@ -2104,9 +2161,16 @@ async function allocateStockpileStock(
 }
 
 /** Calculates stockpiles using a globally reserved, location-aware asset pool. */
-async function calculateStockpilePlan(request: PlannerRequest): Promise<PlanResult> {
+async function calculateStockpilePlan(
+  request: PlannerRequest,
+  planningData: PlanningData,
+): Promise<PlanResult> {
   const stockpiles = request.stockpiles ?? [];
-  const futureCompressedMaterialStock = await getFutureCompressedMaterialStock(request, stockpiles);
+  const futureCompressedMaterialStock = await getFutureCompressedMaterialStock(
+    request,
+    stockpiles,
+    planningData,
+  );
   const planningRequest =
     futureCompressedMaterialStock.length > 0
       ? { ...request, stock: [...request.stock, ...futureCompressedMaterialStock] }
@@ -2117,6 +2181,7 @@ async function calculateStockpilePlan(request: PlannerRequest): Promise<PlanResu
   const stockpileStock = await allocateStockpileStock(
     planningRequest,
     stockpiles,
+    planningData,
     futureStockIndexes,
   );
   const stockpileResults: PlanResult[] = [];
@@ -2136,6 +2201,7 @@ async function calculateStockpilePlan(request: PlannerRequest): Promise<PlanResu
         groupAssignments: stockpile.groupAssignments,
       },
       locations,
+      planningData,
       { finalProductLocations },
     );
     const taggedResult = tagStockpileResult(result, stockpile);
@@ -2175,7 +2241,13 @@ function tagStockpileResult(
 function mergeHaulingTasks(tasks: PlanResult["lists"]["haulingTasks"]) {
   const mergedByRoute = new Map<string, PlanResult["lists"]["haulingTasks"][number]>();
   for (const task of tasks) {
-    const key = `${task.itemTypeId}:${task.fromLocationId}:${task.toLocationId}`;
+    const key = haulingKey(
+      task.itemTypeId,
+      task.fromLocationId,
+      task.toLocationId,
+      task.ownerType,
+      task.ownerId,
+    );
     const existing = mergedByRoute.get(key);
     if (existing) {
       existing.quantity += task.quantity;
@@ -2340,7 +2412,11 @@ function mergeInventionJobs(entries: PlanResult["lists"]["inventionJobs"]) {
 
 /** Merges manufacturing jobs by blueprint type. */
 function mergeManufacturingJobs(entries: PlanResult["lists"]["manufacturingJobs"]) {
-  return mergeJobEntries(entries, (entry) => entry.typeId, mergePlanJobInputs);
+  return mergeJobEntries(
+    entries,
+    (entry) => locationTypeKey(entry.locationId, entry.typeId),
+    mergePlanJobInputs,
+  );
 }
 
 function mergeReactionJobInputs(entries: PlanJobInputs[]): PlanJobInputs {
@@ -2387,7 +2463,7 @@ function mergeStockpileResults(
   return {
     metadata: {
       generatedAt: new Date().toISOString(),
-      unresolvedAssetCount: stock.length,
+      unresolvedAssetCount: request.unresolvedAssetCount ?? 0,
       availableStockByTypeId,
       corporationAssetSources: [
         ...new Set(
