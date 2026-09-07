@@ -128,6 +128,18 @@ export function filterClientAssetsForPlanning(data: ClientAssetsResponse): Clien
         );
       }
       const sourceKey = `${item.ownerId}:${source.rootLocationId}:${source.locationFlag}`;
+      const sourceDetails = (data.corporationSources ?? []).find(
+        (entry) =>
+          entry.corporationId === item.ownerId
+          && entry.rootLocationId === source.rootLocationId
+          && entry.locationFlag === source.locationFlag,
+      );
+      if (
+        sourceDetails
+        && !sourceDetails.canTake
+        && item.category !== "blueprint"
+        && item.category !== "reactionformula"
+      ) return false;
       const itemRootSourceKey =
         item.rootLocationId === undefined
           ? undefined

@@ -28,6 +28,13 @@ import {
   reprocessCommittedPurchases,
   specialReprocessableTypeIds,
 } from "./reprocessStock";
+import { allocateStockpileStock } from "./stockpileAllocation";
+import {
+  getStockRootLocationId,
+  isAvailableIndustryProductionOutput,
+  isIndustryProductionOutput,
+  isUsableIndustryProductionOutput,
+} from "./stockPolicies";
 
 type Material = PlanResult["lists"]["materialsToBuy"][number];
 type Efficiency = { me: number; te: number };
@@ -63,30 +70,6 @@ function aggregateQuantitiesByTypeId(
     quantitiesByTypeId.set(item.typeId, (quantitiesByTypeId.get(item.typeId) ?? 0) + item.quantity);
   }
   return quantitiesByTypeId;
-}
-
-function getStockRootLocationId(item: PlannerRequest["stock"][number]) {
-  return item.rootLocationId ?? item.sourceLocationId ?? item.locationId;
-}
-
-function isIndustryProductionOutput(item: PlannerRequest["stock"][number]) {
-  const activity = item.activityName?.toLowerCase();
-  return (
-    item.inBuild === true
-    && item.jobId !== undefined
-    && item.category === "item"
-    && (activity === "manufacturing" || activity === "reactions" || activity === "reaction")
-  );
-}
-
-function isUsableIndustryProductionOutput(item: PlannerRequest["stock"][number]) {
-  if (!isIndustryProductionOutput(item)) return true;
-  return item.industryJobStatus === "ready" || item.industryJobStatus === "delivered";
-}
-
-function isAvailableIndustryProductionOutput(item: PlannerRequest["stock"][number]) {
-  if (!isIndustryProductionOutput(item)) return true;
-  return item.industryJobStatus !== "cancelled" && item.industryJobStatus !== "reverted";
 }
 
 /** Returns the stock eligible for the global view before stockpile allocation. */
@@ -213,7 +196,7 @@ class PlanProfiler {
   }
 }
 
-type PlanningData = {
+export type PlanningData = {
   types: Awaited<ReturnType<typeof getTypes>>;
   compressibleTypes: Awaited<ReturnType<typeof getCompressibleTypes>>;
   typeMaterials: Awaited<ReturnType<typeof getTypeMaterials>>;
@@ -1799,7 +1782,7 @@ function isBlueprintOrReactionFormula(item: PlanStockItem) {
 }
 
 /** Extracts the material and job-input demand used to reserve shared stock. */
-function getPlanDemand(result: PlanResult): StockpileDemandResult {
+function legacyGetPlanDemand(result: PlanResult): StockpileDemandResult {
   const demand = new Map<number, number>();
   const jobInputDemand = new Map<number, number>();
   for (const material of result.lists.materialsToBuy) {
@@ -1845,7 +1828,7 @@ function getPlanDemand(result: PlanResult): StockpileDemandResult {
 }
 
 /** Reserves ordinary stock globally so a remote stockpile cannot consume another stockpile's local lot. */
-async function allocateStockpileStock(
+async function legacyAllocateStockpileStock(
   request: PlannerRequest,
   stockpiles: NonNullable<PlannerRequest["stockpiles"]>,
   planningData: PlanningData,
@@ -1872,7 +1855,7 @@ async function allocateStockpileStock(
         planningData,
         { locations: activityLocations(stockpile) },
       );
-      const { demand, jobInputDemand } = getPlanDemand(result);
+      const { demand, jobInputDemand } = legacyGetPlanDemand(result);
       return {
         demand: new Map([...demand].filter(([, quantity]) => quantity > 0)),
         jobInputDemand: new Map([...jobInputDemand].filter(([, quantity]) => quantity > 0)),
@@ -2104,7 +2087,7 @@ async function allocateStockpileStock(
   const actualDemandByStockpile: StockpileDemand[] = [];
   const actualJobInputDemandByStockpile: StockpileDemand[] = [];
   for (const result of ordinaryStockpileResults) {
-    const { demand, jobInputDemand } = getPlanDemand(result);
+    const { demand, jobInputDemand } = legacyGetPlanDemand(result);
     actualDemandByStockpile.push(demand);
     actualJobInputDemandByStockpile.push(jobInputDemand);
   }
@@ -2182,6 +2165,7 @@ async function calculateStockpilePlan(
     planningRequest,
     stockpiles,
     planningData,
+    calculatePlanPass,
     futureStockIndexes,
   );
   const stockpileResults: PlanResult[] = [];

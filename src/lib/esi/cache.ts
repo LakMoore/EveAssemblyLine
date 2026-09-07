@@ -66,6 +66,7 @@ import {
   isCorporationHangarFlag,
 } from "./corporationAccess";
 import { formatLocationName, normalizeLocationName } from "@/lib/reference/locationName";
+import { retainAssetAncestors } from "./assetGraph";
 
 export type EndpointStatus = "fresh" | "cached" | "stale" | "rate_limited" | "error";
 export type EndpointCache<T> = {
@@ -2392,15 +2393,20 @@ export async function getAllAssetsRaw(
       const blueprintItemIds = new Set(
         (cache.blueprintInstances?.lastBody ?? []).map((blueprint) => blueprint.itemId),
       );
-      return rawAssets.filter((asset) =>
-        isCorporationRecordAccessible(
-          asset,
-          policy,
-          projection.characters,
-          blueprintItemIds,
-          rawAssetsByItemId,
-        ),
+      const accessibleItemIds = new Set(
+        rawAssets
+          .filter((asset) =>
+            isCorporationRecordAccessible(
+              asset,
+              policy,
+              projection.characters,
+              blueprintItemIds,
+              rawAssetsByItemId,
+            ),
+          )
+          .map((asset) => asset.itemId),
       );
+      return retainAssetAncestors(rawAssets, accessibleItemIds);
     }),
   ];
 }

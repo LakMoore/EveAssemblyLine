@@ -62,6 +62,22 @@ test("merges duplicate plan types in the global view", () => {
   assert.equal(tritaniumMaterial.buyQuantity, 15);
 });
 
+test("keeps plan rows with the same type but different kinds", () => {
+  const rows = mergePlanItemEntries([
+    material({ typeId: 12345, name: "Example Item" }),
+    {
+      kind: "reaction",
+      typeId: 12345,
+      name: "Example Formula",
+      runsNeeded: 2,
+      availableQuantity: 0,
+    },
+  ]);
+
+  assert.deepEqual(rows.map((row) => row.kind).sort(), ["material", "reaction"].sort());
+  assert.equal(rows.filter((row) => row.typeId === 12345).length, 2);
+});
+
 test("preserves total global availability and calculates surplus", () => {
   const rows = mergePlanItemEntries(
     [

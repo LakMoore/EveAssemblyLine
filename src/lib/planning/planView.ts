@@ -4,6 +4,7 @@ export type PlanItemEntry = PlanResult["lists"]["planItems"][number];
 export type PlanBuyEntry =
   | PlanResult["lists"]["materialsToBuy"][number]
   | PlanResult["lists"]["bpcsToBuy"][number];
+type MaterialValues = Omit<Extract<PlanItemEntry, { kind: "material" }>, "kind">;
 
 /**
  * Return haul quantity not already represented by in-production stock.
@@ -32,78 +33,21 @@ export function mergePlanItemEntries(
   buildLocationId?: number,
   totalAvailableStockByTypeId?: Record<string, number>,
 ): PlanItemEntry[] {
-  const merged = new Map<number, PlanItemEntry>();
+  const merged = new Map<string, PlanItemEntry>();
   for (const entry of entries) {
-    const existing = merged.get(entry.typeId);
+    const existing = merged.get(planEntryKey(entry));
     if (!existing) {
-      merged.set(
-        entry.typeId,
-        {
-          ...entry,
-          stockpileId: undefined,
-          stockpileName: undefined,
-          buildLocationId,
-          stockLocationId: undefined,
-        },
-      );
+      merged.set(planEntryKey(entry), withoutPlanContext(entry, buildLocationId));
       continue;
     }
-    if (existing.kind !== entry.kind) continue;
     if (entry.kind === "material" && existing.kind === "material") {
-      merged.set(
-        entry.typeId,
-        {
-          ...existing,
-          quantity: existing.quantity + entry.quantity,
-          requiredQuantity: existing.requiredQuantity + entry.requiredQuantity,
-          stockQuantity: existing.stockQuantity + entry.stockQuantity,
-          availableStockQuantity: existing.availableStockQuantity + entry.availableStockQuantity,
-          productionQuantity: existing.productionQuantity + entry.productionQuantity,
-          reprocessingQuantity:
-            (existing.reprocessingQuantity ?? 0) + (entry.reprocessingQuantity ?? 0),
-          buildQuantity: existing.buildQuantity + entry.buildQuantity,
-          buyQuantity: existing.buyQuantity + entry.buyQuantity,
-          remainingStockQuantity: existing.remainingStockQuantity + entry.remainingStockQuantity,
-          remainingProductionQuantity:
-            existing.remainingProductionQuantity + entry.remainingProductionQuantity,
-          fromMarketOrder: existing.fromMarketOrder || entry.fromMarketOrder,
-          availableSourceCounts: mergeSourceCounts(
-            existing.availableSourceCounts,
-            entry.availableSourceCounts,
-          ),
-        },
-      );
+      merged.set(planEntryKey(entry), mergeMaterialEntries(existing, entry));
     }
     else if (entry.kind === "bpc" && existing.kind === "bpc") {
-      merged.set(
-        entry.typeId,
-        {
-          ...existing,
-          neededQuantity: existing.neededQuantity + entry.neededQuantity,
-          stockQuantity: existing.stockQuantity + entry.stockQuantity,
-          stockRuns: existing.stockRuns + entry.stockRuns,
-          buyQuantity: existing.buyQuantity + entry.buyQuantity,
-          bpoCount: existing.bpoCount + entry.bpoCount,
-          availableSourceCounts: mergeSourceCounts(
-            existing.availableSourceCounts,
-            entry.availableSourceCounts,
-          ),
-        },
-      );
+      merged.set(planEntryKey(entry), mergeBpcEntries(existing, entry));
     }
     else if (entry.kind === "reaction" && existing.kind === "reaction") {
-      merged.set(
-        entry.typeId,
-        {
-          ...existing,
-          runsNeeded: existing.runsNeeded + entry.runsNeeded,
-          availableQuantity: existing.availableQuantity + entry.availableQuantity,
-          availableSourceCounts: mergeSourceCounts(
-            existing.availableSourceCounts,
-            entry.availableSourceCounts,
-          ),
-        },
-      );
+      merged.set(planEntryKey(entry), mergeReactionEntries(existing, entry));
     }
   }
   const rows = [...merged.values()].map((entry) => {
@@ -133,66 +77,135 @@ export function mergePlanItemEntries(
  * @returns One aggregated purchase row per type ID.
  */
 export function mergeBuyEntries(entries: PlanBuyEntry[]): PlanBuyEntry[] {
-  const merged = new Map<number, PlanBuyEntry>();
+  const merged = new Map<string, PlanBuyEntry>();
   for (const entry of entries) {
-    const existing = merged.get(entry.typeId);
+    const existing = merged.get(buyEntryKey(entry));
     if (!existing) {
-      merged.set(entry.typeId, { ...entry });
+      merged.set(buyEntryKey(entry), { ...entry });
       continue;
     }
 
     if ("bpoCount" in entry && "bpoCount" in existing) {
-      merged.set(
-        entry.typeId,
-        {
-          ...existing,
-          quantity: existing.quantity + entry.quantity,
-          neededQuantity: existing.neededQuantity + entry.neededQuantity,
-          stockQuantity: existing.stockQuantity + entry.stockQuantity,
-          stockRuns: existing.stockRuns + entry.stockRuns,
-          buyQuantity: Math.max(
-            0,
-            existing.neededQuantity + entry.neededQuantity - existing.stockRuns - entry.stockRuns,
-          ),
-          bpoCount: existing.bpoCount + entry.bpoCount,
-          availableSourceCounts: mergeSourceCounts(
-            existing.availableSourceCounts,
-            entry.availableSourceCounts,
-          ),
-        },
-      );
+      merged.set(buyEntryKey(entry), mergeBuyBpcEntries(existing, entry));
       continue;
     }
 
     if (!("bpoCount" in entry) && !("bpoCount" in existing)) {
-      merged.set(
-        entry.typeId,
-        {
-          ...existing,
-          quantity: existing.quantity + entry.quantity,
-          requiredQuantity: existing.requiredQuantity + entry.requiredQuantity,
-          stockQuantity: existing.stockQuantity + entry.stockQuantity,
-          availableStockQuantity: existing.availableStockQuantity + entry.availableStockQuantity,
-          productionQuantity: existing.productionQuantity + entry.productionQuantity,
-          reprocessingQuantity:
-            (existing.reprocessingQuantity ?? 0) + (entry.reprocessingQuantity ?? 0),
-          buildQuantity: existing.buildQuantity + entry.buildQuantity,
-          buyQuantity: existing.buyQuantity + entry.buyQuantity,
-          remainingStockQuantity: existing.remainingStockQuantity + entry.remainingStockQuantity,
-          remainingProductionQuantity:
-            existing.remainingProductionQuantity + entry.remainingProductionQuantity,
-          fromMarketOrder: existing.fromMarketOrder || entry.fromMarketOrder,
-          availableSourceCounts: mergeSourceCounts(
-            existing.availableSourceCounts,
-            entry.availableSourceCounts,
-          ),
-        },
-      );
+      merged.set(buyEntryKey(entry), mergeBuyMaterialEntries(existing, entry));
     }
   }
   return [...merged.values()].sort(
     (left, right) => left.name.localeCompare(right.name) || left.typeId - right.typeId,
   );
+}
+
+function planEntryKey(entry: PlanItemEntry) {
+  return `${entry.kind}:${entry.typeId}`;
+}
+
+function buyEntryKey(entry: PlanBuyEntry) {
+  return `${"bpoCount" in entry ? "bpc" : "material"}:${entry.typeId}`;
+}
+
+function withoutPlanContext(entry: PlanItemEntry, buildLocationId?: number): PlanItemEntry {
+  return {
+    ...entry,
+    stockpileId: undefined,
+    stockpileName: undefined,
+    buildLocationId,
+    stockLocationId: undefined,
+  };
+}
+
+function mergeMaterialValues(existing: MaterialValues, entry: MaterialValues) {
+  return {
+    ...existing,
+    quantity: existing.quantity + entry.quantity,
+    requiredQuantity: existing.requiredQuantity + entry.requiredQuantity,
+    stockQuantity: existing.stockQuantity + entry.stockQuantity,
+    availableStockQuantity: existing.availableStockQuantity + entry.availableStockQuantity,
+    productionQuantity: existing.productionQuantity + entry.productionQuantity,
+    reprocessingQuantity: (existing.reprocessingQuantity ?? 0) + (entry.reprocessingQuantity ?? 0),
+    buildQuantity: existing.buildQuantity + entry.buildQuantity,
+    buyQuantity: existing.buyQuantity + entry.buyQuantity,
+    remainingStockQuantity: existing.remainingStockQuantity + entry.remainingStockQuantity,
+    remainingProductionQuantity:
+      existing.remainingProductionQuantity + entry.remainingProductionQuantity,
+    fromMarketOrder: existing.fromMarketOrder || entry.fromMarketOrder,
+    availableSourceCounts: mergeSourceCounts(
+      existing.availableSourceCounts,
+      entry.availableSourceCounts,
+    ),
+  };
+}
+
+function mergeMaterialEntries(
+  existing: Extract<PlanItemEntry, { kind: "material" }>,
+  entry: Extract<PlanItemEntry, { kind: "material" }>,
+) {
+  return { kind: "material" as const, ...mergeMaterialValues(existing, entry) };
+}
+
+function mergeBpcEntries(
+  existing: Extract<PlanItemEntry, { kind: "bpc" }>,
+  entry: Extract<PlanItemEntry, { kind: "bpc" }>,
+) {
+  return {
+    ...existing,
+    neededQuantity: existing.neededQuantity + entry.neededQuantity,
+    stockQuantity: existing.stockQuantity + entry.stockQuantity,
+    stockRuns: existing.stockRuns + entry.stockRuns,
+    buyQuantity: existing.buyQuantity + entry.buyQuantity,
+    bpoCount: existing.bpoCount + entry.bpoCount,
+    availableSourceCounts: mergeSourceCounts(
+      existing.availableSourceCounts,
+      entry.availableSourceCounts,
+    ),
+  };
+}
+
+function mergeReactionEntries(
+  existing: Extract<PlanItemEntry, { kind: "reaction" }>,
+  entry: Extract<PlanItemEntry, { kind: "reaction" }>,
+) {
+  return {
+    ...existing,
+    runsNeeded: existing.runsNeeded + entry.runsNeeded,
+    availableQuantity: existing.availableQuantity + entry.availableQuantity,
+    availableSourceCounts: mergeSourceCounts(
+      existing.availableSourceCounts,
+      entry.availableSourceCounts,
+    ),
+  };
+}
+
+function mergeBuyMaterialEntries(
+  existing: Extract<PlanBuyEntry, { requiredQuantity: number }>,
+  entry: Extract<PlanBuyEntry, { requiredQuantity: number }>,
+) {
+  return mergeMaterialValues(existing, entry);
+}
+
+function mergeBuyBpcEntries(
+  existing: Extract<PlanBuyEntry, { bpoCount: number }>,
+  entry: Extract<PlanBuyEntry, { bpoCount: number }>,
+) {
+  return {
+    ...existing,
+    quantity: existing.quantity + entry.quantity,
+    neededQuantity: existing.neededQuantity + entry.neededQuantity,
+    stockQuantity: existing.stockQuantity + entry.stockQuantity,
+    stockRuns: existing.stockRuns + entry.stockRuns,
+    buyQuantity: Math.max(
+      0,
+      existing.neededQuantity + entry.neededQuantity - existing.stockRuns - entry.stockRuns,
+    ),
+    bpoCount: existing.bpoCount + entry.bpoCount,
+    availableSourceCounts: mergeSourceCounts(
+      existing.availableSourceCounts,
+      entry.availableSourceCounts,
+    ),
+  };
 }
 
 /**

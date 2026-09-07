@@ -141,3 +141,63 @@ test("matches direct corporation assets by their resolved root location", () => 
 
   assert.equal(filtered.assets?.length, 1);
 });
+
+test("keeps reaction formulas from selected corporation containers", () => {
+  const filtered = filterClientAssetsForPlanning({
+    corporationSources: [
+      {
+        corporationId: 900,
+        rootLocationId: 100,
+        locationFlag: "CorpSAG6",
+        label: "Hangar 6",
+        canTake: false,
+        canQuery: true,
+        selected: false,
+        containers: [
+          {
+            itemId: 500,
+            name: "001 - Reactions",
+            locationId: 50,
+            rootLocationId: 100,
+            selected: true,
+          },
+        ],
+      },
+    ],
+    assets: [
+      {
+        typeId: 46165,
+        name: "C3-FTM Acid Reaction Formula",
+        quantity: 1,
+        ownerType: "corporation",
+        ownerId: 900,
+        rootLocationId: 100,
+        category: "reactionformula",
+        corporationSource: {
+          rootLocationId: 100,
+          locationFlag: "CorpSAG6",
+          containerItemIds: [500],
+        },
+      },
+      {
+        typeId: 34,
+        name: "Tritanium",
+        quantity: 100,
+        ownerType: "corporation",
+        ownerId: 900,
+        rootLocationId: 100,
+        category: "item",
+        corporationSource: {
+          rootLocationId: 100,
+          locationFlag: "CorpSAG6",
+          containerItemIds: [500],
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(
+    filtered.assets?.map((item) => item.typeId),
+    [46165],
+  );
+});
