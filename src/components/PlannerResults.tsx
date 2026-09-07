@@ -18,6 +18,11 @@ import {
   groupPlanItemEntriesByBuildLocation,
   mergeBuyEntries,
   mergePlanItemEntries,
+  createHaulItemExclusionKey,
+  parseHaulItemExclusionKey,
+  splitReactionRunAllocations,
+  splitReactionJobInputs,
+  type HaulItemExclusion,
   type PlanBuyEntry,
   type PlanItemEntry,
 } from "@/lib/planning/planView";
@@ -43,6 +48,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import styles from "@/app/page.module.css";
 import {
@@ -90,7 +96,13 @@ const tabs: { value: PlannerTab; icon: LucideIcon }[] = [
 ];
 
 type ReactionScheduleMode = "simple" | "available-slots" | "max-job-length";
-type ReactionSchedule = { installs: number; runs: number; time: number };
+type ReactionSchedule = {
+  installs: number;
+  runs: number;
+  totalRuns: number;
+  time: number;
+  availableBlueprints: number;
+};
 type ReactionCoverage = { installable: number; total: number };
 type ReactionSortKey = "type" | "inputs" | "suggestedRuns" | "totalNeeded";
 type ReactionSort = { key: ReactionSortKey; direction: "asc" | "desc" };
@@ -143,6 +155,60 @@ function getStockLocationId(item: PlanStockItem) {
   return item.rootLocationId ?? item.sourceLocationId ?? item.locationId;
 }
 
+function haulTaskKey(task: PlanResult["lists"]["haulingTasks"][number]) {
+  return createHaulItemExclusionKey(task.fromLocationId, task.itemTypeId);
+}
+
+type HaulStockItem = PlanStockItem & {
+  assembledVolume?: number;
+  packagedVolume?: number;
+};
+
+function getHaulTasksWithExclusions(
+  tasks: PlanResult["lists"]["haulingTasks"],
+  stock: HaulStockItem[],
+  exclusions: HaulItemExclusion,
+): PlanResult["lists"]["haulingTasks"] {
+  const tasksByKey = new Map(tasks.map((task) => [haulTaskKey(task), task]));
+  const displayedTasks = tasks.filter((task) => !exclusions.has(haulTaskKey(task)));
+  for (const [key, destinationLocationId] of exclusions) {
+    const parsedKey = parseHaulItemExclusionKey(key);
+    if (!parsedKey) continue;
+    const existingTask = tasksByKey.get(key);
+    if (existingTask) {
+      displayedTasks.push({ ...existingTask, toLocationId: destinationLocationId });
+      continue;
+    }
+    const matchingStockItems = stock.filter(
+      (item) =>
+        item.rootLocationId === parsedKey.sourceRootLocationId
+        && item.typeId === parsedKey.itemTypeId
+        && item.category !== "blueprint"
+        && item.category !== "reactionformula",
+    );
+    const stockItem = matchingStockItems.at(0);
+    const quantity = matchingStockItems.reduce((total, item) => total + item.quantity, 0);
+    const volume = matchingStockItems.reduce(
+      (total, item) => {
+        const unitVolume = item.isPackaged
+          ? (item.packagedVolume ?? item.assembledVolume ?? 0)
+          : (item.assembledVolume ?? 0);
+        return total + item.quantity * unitVolume;
+      },
+      0,
+    );
+    displayedTasks.push({
+      itemTypeId: parsedKey.itemTypeId,
+      name: stockItem?.name ?? `Type ${parsedKey.itemTypeId}`,
+      quantity,
+      volume,
+      fromLocationId: parsedKey.sourceRootLocationId,
+      toLocationId: destinationLocationId,
+    });
+  }
+  return displayedTasks;
+}
+
 function getBposInUseCount(typeId: number, stock: PlanStockItem[]) {
   return stock
     .filter((item) => item.typeId === typeId && item.category === "blueprint" && item.inUse)
@@ -176,6 +242,10 @@ function formatDuration(totalSeconds: number) {
   if (minutes > 0) parts.push(`${minutes}m`);
   if (parts.length === 0) parts.push("0m");
   return parts.join(" ");
+}
+
+function getReactionScheduleRuns(schedules: ReactionSchedule[] | undefined) {
+  return Math.max(...(schedules ?? []).map((schedule) => schedule.runs), 0);
 }
 
 function ScrollTopButton({
@@ -224,7 +294,7 @@ function buildReactionSchedule(
   mode: ReactionScheduleMode,
   availableReactionSlots: number,
   maxJobHours: number,
-): Map<string, ReactionSchedule> {
+): Map<string, ReactionSchedule[]> {
   const rows = jobs.map((job) => {
     const blueprintCount = stock
       .filter(
@@ -280,19 +350,17 @@ function buildReactionSchedule(
               ? Math.min(blueprintCount, Math.ceil(runs / timeLimitedRuns))
               : 0
             : simpleInstalls;
-      const runsPerInstall =
-        installCount > 0
-          ? mode === "max-job-length"
-            ? Math.min(timeLimitedRuns, Math.floor(runs / installCount))
-            : Math.floor(runs / installCount)
-          : 0;
+      const allocations = splitReactionRunAllocations(
+        runs,
+        Math.min(installCount, maxInstalls),
+        blueprintCount,
+      );
       return [
         reactionJobKey(job),
-        {
-          installs: Math.min(installCount, maxInstalls),
-          runs: runsPerInstall,
-          time: perRunTime * runsPerInstall,
-        },
+        allocations.map((allocation) => ({
+          ...allocation,
+          time: perRunTime * allocation.runs,
+        })),
       ];
     }),
   );
@@ -312,6 +380,8 @@ export default function PlannerResults({
   locationOptions,
   onAddBuildItem,
   onExcludeHaulStockpile,
+  haulItemExclusion,
+  onToggleHaulItemExclusion,
 }: {
   language: SdeLanguage;
   plan: PlanResult | null;
@@ -325,6 +395,12 @@ export default function PlannerResults({
   locationOptions: Array<{ locationId: number; name: string }>;
   onAddBuildItem: (item: { name: string; typeId: number; quantity: number }) => void;
   onExcludeHaulStockpile: (fromLocationId: number) => Promise<void>;
+  haulItemExclusion: HaulItemExclusion;
+  onToggleHaulItemExclusion: (
+    key: string,
+    destinationLocationId: number,
+    excluded: boolean,
+  ) => Promise<void>;
 }) {
   const [activeTab, setActiveTab] = useState<PlannerTab>("Plan");
   const [isBugReportOpen, setIsBugReportOpen] = useState(false);
@@ -482,6 +558,8 @@ export default function PlannerResults({
               locationNamesById={locationNamesById}
               onAddBuildItem={onAddBuildItem}
               onExcludeHaulStockpile={onExcludeHaulStockpile}
+              haulItemExclusion={haulItemExclusion}
+              onToggleHaulItemExclusion={onToggleHaulItemExclusion}
               resultsHeaderRef={resultsHeaderRef}
             />
           ) : (
@@ -511,6 +589,8 @@ function PlanList({
   locationNamesById,
   onAddBuildItem,
   onExcludeHaulStockpile,
+  haulItemExclusion,
+  onToggleHaulItemExclusion,
   resultsHeaderRef,
 }: {
   activeTab: PlannerTab;
@@ -524,6 +604,12 @@ function PlanList({
   locationNamesById: Map<number, string>;
   onAddBuildItem: (item: { name: string; typeId: number; quantity: number }) => void;
   onExcludeHaulStockpile: (fromLocationId: number) => Promise<void>;
+  haulItemExclusion: HaulItemExclusion;
+  onToggleHaulItemExclusion: (
+    key: string,
+    destinationLocationId: number,
+    excluded: boolean,
+  ) => Promise<void>;
   resultsHeaderRef: RefObject<HTMLElement | null>;
 }) {
   const router = useRouter();
@@ -535,6 +621,7 @@ function PlanList({
   const [excludingHaulFromLocationId, setExcludingHaulFromLocationId] = useState<number | null>(
     null,
   );
+  const [togglingHaulItemKey, setTogglingHaulItemKey] = useState<string | null>(null);
   const [showTotalRunCounts, setShowTotalRunCounts] = useState(false);
   const [showTotalManufacturingRunCounts, setShowTotalManufacturingRunCounts] = useState(false);
   const [planViewMode, setPlanViewMode] = useState<PlanViewMode>("all");
@@ -577,6 +664,11 @@ function PlanList({
         reprocessingJobs?: PlanResult["lists"]["reprocessingJobs"];
       }
     ).reprocessingJobs ?? [];
+  const haulingTasks = getHaulTasksWithExclusions(
+    plan.lists.haulingTasks,
+    stock,
+    haulItemExclusion,
+  );
   const rawList =
     activeTab === "Plan"
       ? plan.lists.planItems
@@ -595,7 +687,7 @@ function PlanList({
                 ? plan.lists.reactionJobs
                 : activeTab === "Manufacture"
                   ? plan.lists.manufacturingJobs
-                  : plan.lists.haulingTasks;
+                  : haulingTasks;
   const list =
     activeTab === "Buy"
       ? mergeBuyEntries(rawList as PlanBuyEntry[])
@@ -652,6 +744,11 @@ function PlanList({
     | PlanResult["lists"]["reactionJobs"][number]
     | PlanResult["lists"]["manufacturingJobs"][number]
     | PlanResult["lists"]["haulingTasks"][number];
+  type ReactionDisplayRow = {
+    entry: PlanListEntry;
+    reactionPlan: ReactionSchedule | null;
+    reactionIndex: number;
+  };
   const locationGroups = new Map<number | undefined, PlanListEntry[]>();
   if (locationGroupedTab) {
     if (activeTab === "Plan") {
@@ -696,10 +793,11 @@ function PlanList({
   );
   const reactionSummary = plan.lists.reactionJobs.reduce(
     (summary, job) => {
-      const schedule = reactionSchedule.get(reactionJobKey(job));
+      const schedules = reactionSchedule.get(reactionJobKey(job)) ?? [];
       return {
-        installs: summary.installs + (schedule?.installs ?? 0),
-        maxTime: Math.max(summary.maxTime, schedule?.time ?? 0),
+        installs:
+          summary.installs + schedules.reduce((total, schedule) => total + schedule.installs, 0),
+        maxTime: Math.max(summary.maxTime, ...schedules.map((schedule) => schedule.time)),
       };
     },
     { installs: 0, maxTime: 0 },
@@ -707,20 +805,31 @@ function PlanList({
   const reactionCoverage = plan.lists.reactionJobs
     .map((job) => ({
       job,
-      schedule: reactionSchedule.get(reactionJobKey(job)),
+      schedules: reactionSchedule.get(reactionJobKey(job)) ?? [],
     }))
-    .sort((left, right) => (right.schedule?.runs ?? 0) - (left.schedule?.runs ?? 0))
+    .sort(
+      (left, right) =>
+        getReactionScheduleRuns(right.schedules) - getReactionScheduleRuns(left.schedules),
+    )
     .reduce<{ coverage: ReactionCoverage; remainingSlots: number }>(
-      (result, { job, schedule }) => {
-        const installCount = Math.min(schedule?.installs ?? 0, result.remainingSlots);
-        const coveredRuns = Math.min(job.runs, installCount * (schedule?.runs ?? 0));
-        const coveredInstallableRuns = Math.min(job.runsAvailable, coveredRuns);
+      (result, { job, schedules }) => {
+        let remainingRuns = job.runs;
+        let coveredRuns = 0;
+        let remainingSlots = result.remainingSlots;
+        for (const schedule of schedules) {
+          if (remainingSlots <= 0 || remainingRuns <= 0) break;
+          const installCount = Math.min(schedule.installs, remainingSlots);
+          const scheduleRuns = Math.min(remainingRuns, installCount * schedule.runs);
+          coveredRuns += scheduleRuns;
+          remainingRuns -= scheduleRuns;
+          remainingSlots -= installCount;
+        }
         return {
           coverage: {
-            installable: result.coverage.installable + coveredInstallableRuns,
+            installable: result.coverage.installable + Math.min(job.runsAvailable, coveredRuns),
             total: result.coverage.total + coveredRuns,
           },
-          remainingSlots: result.remainingSlots - installCount,
+          remainingSlots,
         };
       },
       {
@@ -786,7 +895,7 @@ function PlanList({
                         stock,
                       )
                     : reactionSort.key === "suggestedRuns"
-                      ? (leftSchedule?.runs ?? 0)
+                      ? getReactionScheduleRuns(leftSchedule)
                       : "runs" in left
                         ? showTotalRunCounts
                           ? left.runs
@@ -803,7 +912,7 @@ function PlanList({
                         stock,
                       )
                     : reactionSort.key === "suggestedRuns"
-                      ? (rightSchedule?.runs ?? 0)
+                      ? getReactionScheduleRuns(rightSchedule)
                       : "runs" in right
                         ? showTotalRunCounts
                           ? right.runs
@@ -832,7 +941,7 @@ function PlanList({
     }
   >();
   if (activeTab === "Haul") {
-    for (const task of plan.lists.haulingTasks) {
+    for (const task of haulingTasks) {
       const key = `${task.fromLocationId}:${task.toLocationId}`;
       const group = haulGroups.get(key) ?? {
         fromLocationId: task.fromLocationId,
@@ -841,6 +950,11 @@ function PlanList({
       };
       group.tasks.push(task);
       haulGroups.set(key, group);
+    }
+    for (const group of haulGroups.values()) {
+      group.tasks.sort(
+        (left, right) => left.name.localeCompare(right.name) || left.itemTypeId - right.itemTypeId,
+      );
     }
   }
   const planColumns = ["Required", "Available", "Buy/Build", "Surplus"] as const;
@@ -1437,27 +1551,50 @@ function PlanList({
                 </div>
               </header>
               <div className={styles.haulGroupRows}>
-                {group.tasks.map((task) => (
-                  <div
-                    className={styles.haulRow}
-                    key={`${task.itemTypeId}:${task.stockpileId ?? "unstockpiled"}`}
-                  >
-                    <TypeIdentity
-                      name={task.name}
-                      typeId={task.itemTypeId}
-                      imageSize={40}
-                      className={styles.planTypeIdentity}
-                    />
-                    <span className={styles.haulRowAmount}>
-                      <CopyableText
-                        textToRender={`${task.quantity.toLocaleString()} units`}
-                        textToCopy={String(task.quantity)}
-                        copyLabel="Quantity"
+                {group.tasks.map((task) => {
+                  const key = haulTaskKey(task);
+                  const isExcluded = haulItemExclusion.has(key);
+                  return (
+                    <div
+                      className={`${styles.haulRow} ${isExcluded ? styles.haulRowDisabled : ""}`}
+                      key={key}
+                    >
+                      <span className={styles.haulRowSwitch}>
+                        {togglingHaulItemKey === key ? (
+                          <Spinner aria-hidden="true" />
+                        ) : (
+                          <Switch
+                            aria-label={`Include ${task.name} haul`}
+                            checked={!isExcluded}
+                            disabled={togglingHaulItemKey !== null}
+                            onCheckedChange={(checked) => {
+                              setTogglingHaulItemKey(key);
+                              void onToggleHaulItemExclusion(
+                                key,
+                                task.toLocationId,
+                                !checked,
+                              ).finally(() => setTogglingHaulItemKey(null));
+                            }}
+                          />
+                        )}
+                      </span>
+                      <TypeIdentity
+                        name={task.name}
+                        typeId={task.itemTypeId}
+                        imageSize={40}
+                        className={styles.planTypeIdentity}
                       />
-                      <small>{Math.ceil(task.volume).toLocaleString()} m3</small>
-                    </span>
-                  </div>
-                ))}
+                      <span className={styles.haulRowAmount}>
+                        <CopyableText
+                          textToRender={`${task.quantity.toLocaleString()} units`}
+                          textToCopy={String(task.quantity)}
+                          copyLabel="Quantity"
+                        />
+                        <small>{Math.ceil(task.volume).toLocaleString()} m3</small>
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </section>
           ))}
@@ -1493,334 +1630,387 @@ function PlanList({
                   )}
                 </h3>
               )}
-              {entries.map((entry, index) => {
-                const typeId = "itemTypeId" in entry ? entry.itemTypeId : entry.typeId;
-                const name = entry.name;
-                const isPlanBpc = "kind" in entry && entry.kind === "bpc";
-                const isBpcPurchase = activeTab === "Buy" && "bpoCount" in entry;
-                const isCopyOfBpo =
-                  activeTab === "Copy" && "bpoCount" in entry && entry.bpoCount > 0;
-                const bposInUse =
-                  activeTab === "Buy" && "bpoCount" in entry
-                    ? "bposInUse" in entry && typeof entry.bposInUse === "number"
-                      ? entry.bposInUse
-                      : getBposInUseCount(typeId, stock)
-                    : 0;
-                const isBlueprintName = / blueprint$/i.test(name);
-                const isReactionFormulaName = / formula$/i.test(name);
-                const isPlanReaction = "kind" in entry && entry.kind === "reaction";
-                const planBlueprintVariation =
-                  activeTab === "Plan" && (isPlanBpc || isBlueprintName)
-                    ? isPlanBpc && entry.bpoCount > 0
-                      ? "bp"
-                      : "bpc"
-                    : null;
-                const detail =
-                  activeTab === "Reprocess" && "efficiency" in entry
-                    ? `${entry.efficiency.toFixed(1)}% yield`
-                    : "fromLocationId" in entry && activeTab !== "Buy"
-                      ? `From ${locationNamesById.get(entry.fromLocationId) ?? entry.fromLocationId} to ${locationNamesById.get(entry.toLocationId) ?? entry.toLocationId}`
-                      : "";
-                const totalTime =
-                  "totalTime" in entry && typeof entry.totalTime === "number"
-                    ? entry.totalTime
-                    : null;
-                const reactionFormulaCount =
-                  activeTab === "React" && "inputs" in entry && "locationId" in entry
-                    ? getReactionFormulaCount(
-                        entry as PlanResult["lists"]["reactionJobs"][number],
-                        stock,
-                      )
-                    : 0;
-                const reactionPlan =
-                  activeTab === "React"
-                    ? reactionSchedule.get(
-                        reactionJobKey(entry as PlanResult["lists"]["reactionJobs"][number]),
-                      )
-                    : null;
-                const targetRuns = reactionPlan?.runs ?? null;
-                const suggestedInstallCount = reactionPlan?.installs ?? 0;
-                const installTime = reactionPlan?.time ?? totalTime;
-                const totalNeeded =
-                  activeTab === "React" && "runs" in entry && "runsAvailable" in entry
-                    ? showTotalRunCounts
-                      ? entry.runs
-                      : entry.runsAvailable
-                    : null;
-                const suggestedCapacity = suggestedInstallCount * (targetRuns ?? 0);
-                const additionalInstallCount =
-                  totalNeeded !== null && targetRuns !== null && targetRuns > 0
-                    ? Math.max(
-                        0,
-                        Math.ceil(Math.max(0, totalNeeded - suggestedCapacity) / targetRuns)
-                          - Math.max(0, reactionFormulaCount - suggestedInstallCount),
-                      )
-                    : 0;
-                const materialEntry =
-                  (activeTab === "Buy" && !isBpcPurchase && "quantity" in entry)
-                  || (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
-                    ? (entry as PlanResult["lists"]["materialsToBuy"][number])
-                    : null;
-                const amount =
-                  "volume" in entry
-                    ? `${entry.quantity.toLocaleString()} units | ${Math.ceil(entry.volume).toLocaleString()} m3`
-                    : isBpcPurchase
-                      ? `${entry.buyQuantity.toLocaleString()} runs`
-                      : isPlanBpc
-                        ? `${entry.neededQuantity.toLocaleString()} needed`
-                        : isPlanReaction
-                          ? `${entry.runsNeeded.toLocaleString()} runs`
-                          : materialEntry
-                            ? `${(materialEntry.buildQuantity || materialEntry.buyQuantity).toLocaleString()} units`
-                            : activeTab === "Copy" && "neededQuantity" in entry
-                              ? `${Math.max(0, entry.neededQuantity - entry.stockRuns).toLocaleString()} runs`
-                              : "quantity" in entry
-                                ? `${entry.quantity.toLocaleString()} ${activeTab === "Copy" ? "runs" : "units"}`
-                                : "runs" in entry
-                                  ? entry.runs >= 10
-                                    && suggestedInstallCount > 1
-                                    && targetRuns !== null
-                                    && installTime !== null
-                                    ? `${suggestedInstallCount.toLocaleString()} x ${targetRuns.toLocaleString()} runs @ ${formatDuration(installTime)} | ${entry.runs.toLocaleString()} runs`
-                                    : `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
-                                  : "";
-                const amountToCopy =
-                  "volume" in entry
-                    ? String(entry.quantity)
-                    : isBpcPurchase
-                      ? String(entry.buyQuantity)
-                      : isPlanBpc
-                        ? String(entry.neededQuantity)
-                        : isPlanReaction
-                          ? String(entry.runsNeeded)
-                          : materialEntry
-                            ? String(materialEntry.buildQuantity || materialEntry.buyQuantity)
-                            : activeTab === "Copy" && "neededQuantity" in entry
-                              ? String(Math.max(0, entry.neededQuantity - entry.stockRuns))
-                              : "quantity" in entry
-                                ? String(entry.quantity)
-                                : "runs" in entry
-                                  ? String(entry.runs)
-                                  : null;
-                const amountCopyLabel =
-                  activeTab === "Invent"
-                    ? "Attempts"
-                    : "volume" in entry || materialEntry
-                      ? "Quantity"
-                      : isBpcPurchase
-                          || isPlanBpc
-                          || isPlanReaction
-                          || activeTab === "Copy"
-                          || "runs" in entry
-                        ? "Runs"
-                        : "Quantity";
-                const imageVariation =
-                  planBlueprintVariation
-                  ?? ("imageVariation" in entry && entry.imageVariation
-                    ? entry.imageVariation === "icon" && isBlueprintName
-                      ? "bp"
-                      : entry.imageVariation === "icon" && isReactionFormulaName
-                        ? "bpc"
-                        : entry.imageVariation
-                    : isCopyOfBpo || (isPlanBpc && entry.bpoCount > 0)
-                      ? "bp"
-                      : isBlueprintName
-                        ? "bp"
-                        : isReactionFormulaName
-                          ? "bpc"
-                          : activeTab === "Manufacture"
-                              || activeTab === "React"
-                              || isPlanBpc
-                              || isBpcPurchase
-                              || isPlanReaction
-                              || activeTab === "Copy"
-                              || activeTab === "Invent"
-                            ? "bpc"
-                            : "icon");
-                const planCells =
-                  activeTab === "Plan"
-                    ? getPlanCells(entry as PlanResult["lists"]["planItems"][number])
-                    : null;
-                const planHaulingQuantity =
-                  activeTab === "Plan"
-                    ? getPlanHaulingQuantity(entry as PlanResult["lists"]["planItems"][number])
-                    : 0;
-                const manufacturingEntry =
-                  activeTab === "Manufacture"
-                    ? (entry as PlanResult["lists"]["manufacturingJobs"][number])
-                    : null;
-                const manufacturingDisplayedRuns = manufacturingEntry
-                  ? showTotalManufacturingRunCounts
-                    ? manufacturingEntry.runs
-                    : manufacturingEntry.runsAvailable
-                  : 0;
-                const manufacturingDisplayedTime =
-                  manufacturingEntry && manufacturingEntry.runs > 0
-                    ? (manufacturingEntry.totalTime * manufacturingDisplayedRuns)
-                      / manufacturingEntry.runs
-                    : 0;
-                return (
-                  <Fragment key={`${activeTab}-${index}`}>
-                    <div
-                      className={`${activeTab === "Plan" ? styles.planTableRow : styles.planRow} ${activeTab === "React" ? styles.reactionRow : activeTab === "Manufacture" ? styles.manufacturingRow : ""}`}
-                    >
-                      <div className={styles.planTypeCell}>
-                        <TypeIdentity
-                          name={name}
-                          typeId={typeId}
-                          imageSize={40}
-                          variation={imageVariation}
-                          className={styles.planTypeIdentity}
-                        />
-                        {bposInUse > 0 && (
-                          <Badge variant="outline">{formatBposInUse(bposInUse)}</Badge>
-                        )}
-                      </div>
-                      {activeTab === "React" && "inputs" in entry && (
-                        <span className={styles.jobInputsTrigger}>
-                          <JobInputsResponsive
-                            inputs={entry.inputs}
-                            reactionFormulaCount={reactionFormulaCount}
-                          />
-                        </span>
-                      )}
-                      {activeTab === "Manufacture" && "inputs" in entry && (
-                        <span className={styles.manufacturingInputsCell}>
-                          <JobInputsResponsive inputs={entry.inputs} />
-                        </span>
-                      )}
-                      {activeTab === "Plan" ? (
-                        planColumns.map((column) =>
-                          planCells?.[column] ? (
-                            <span className={styles.planTableCell} data-label={column} key={column}>
-                              <span className={styles.planTableValue}>
-                                {column === "Available" && (
-                                  <AvailableSourceIcons
-                                    counts={
-                                      "availableSourceCounts" in entry
-                                        ? entry.availableSourceCounts
-                                        : undefined
-                                    }
-                                    haulingQuantity={planHaulingQuantity}
-                                  />
-                                )}
-                                {planCells[column]}
-                              </span>
-                            </span>
-                          ) : (
-                            <span className={styles.planTableCellEmpty} key={column} />
-                          ),
+              {entries
+                .flatMap<ReactionDisplayRow>((entry) => {
+                  const schedules =
+                    activeTab === "React" && "inputs" in entry
+                      ? (
+                          reactionSchedule.get(
+                            reactionJobKey(entry as PlanResult["lists"]["reactionJobs"][number]),
+                          ) ?? []
                         )
-                      ) : activeTab === "Manufacture" ? (
-                        <span className={styles.manufacturingRunCell}>
-                          <strong>
-                            <CopyableText
-                              textToRender={`${manufacturingDisplayedRuns.toLocaleString()} runs`}
-                              textToCopy={String(manufacturingDisplayedRuns)}
-                              copyLabel="Runs"
+                      : [];
+                  return schedules.length > 0
+                    ? schedules.map((reactionPlan, reactionIndex) => ({
+                        entry,
+                        reactionPlan,
+                        reactionIndex,
+                      }))
+                    : [{ entry, reactionPlan: null, reactionIndex: 0 }];
+                })
+                .map(({ entry, reactionPlan, reactionIndex }, index, rows) => {
+                  const rowSchedules =
+                    activeTab === "React" && "inputs" in entry
+                      ? (
+                          reactionSchedule.get(
+                            reactionJobKey(entry as PlanResult["lists"]["reactionJobs"][number]),
+                          ) ?? []
+                        )
+                      : [];
+                  const typeId = "itemTypeId" in entry ? entry.itemTypeId : entry.typeId;
+                  const name = entry.name;
+                  const isPlanBpc = "kind" in entry && entry.kind === "bpc";
+                  const isBpcPurchase = activeTab === "Buy" && "bpoCount" in entry;
+                  const isCopyOfBpo =
+                    activeTab === "Copy" && "bpoCount" in entry && entry.bpoCount > 0;
+                  const bposInUse =
+                    activeTab === "Buy" && "bpoCount" in entry
+                      ? "bposInUse" in entry && typeof entry.bposInUse === "number"
+                        ? entry.bposInUse
+                        : getBposInUseCount(typeId, stock)
+                      : 0;
+                  const isBlueprintName = / blueprint$/i.test(name);
+                  const isReactionFormulaName = / formula$/i.test(name);
+                  const isPlanReaction = "kind" in entry && entry.kind === "reaction";
+                  const planBlueprintVariation =
+                    activeTab === "Plan" && (isPlanBpc || isBlueprintName)
+                      ? isPlanBpc && entry.bpoCount > 0
+                        ? "bp"
+                        : "bpc"
+                      : null;
+                  const detail =
+                    activeTab === "Reprocess" && "efficiency" in entry
+                      ? `${entry.efficiency.toFixed(1)}% yield`
+                      : "fromLocationId" in entry && activeTab !== "Buy"
+                        ? `From ${locationNamesById.get(entry.fromLocationId) ?? entry.fromLocationId} to ${locationNamesById.get(entry.toLocationId) ?? entry.toLocationId}`
+                        : "";
+                  const totalTime =
+                    "totalTime" in entry && typeof entry.totalTime === "number"
+                      ? entry.totalTime
+                      : null;
+                  const reactionFormulaCount =
+                    activeTab === "React" && "inputs" in entry && "locationId" in entry
+                      ? getReactionFormulaCount(
+                          entry as PlanResult["lists"]["reactionJobs"][number],
+                          stock,
+                        )
+                      : 0;
+                  const precedingRuns = rowSchedules
+                    .slice(0, reactionIndex)
+                    .reduce((total, schedule) => total + schedule.totalRuns, 0);
+                  const reactionInputs =
+                    activeTab === "React"
+                    && reactionPlan !== null
+                    && rowSchedules.length > 1
+                    && "inputs" in entry
+                    && "runs" in entry
+                      ? splitReactionJobInputs(
+                          entry.inputs,
+                          entry.runs,
+                          reactionPlan.totalRuns,
+                          precedingRuns,
+                        )
+                      : "inputs" in entry
+                        ? entry.inputs
+                        : null;
+                  const targetRuns = reactionPlan?.runs ?? null;
+                  const suggestedInstallCount = reactionPlan?.installs ?? 0;
+                  const installTime = reactionPlan?.time ?? totalTime;
+                  const totalNeeded =
+                    activeTab === "React" && "runs" in entry && "runsAvailable" in entry
+                      ? (
+                          reactionPlan?.totalRuns
+                          ?? (showTotalRunCounts ? entry.runs : entry.runsAvailable)
+                        )
+                      : null;
+                  const scheduledRuns = rowSchedules.reduce(
+                    (total, schedule) => total + schedule.totalRuns,
+                    0,
+                  );
+                  const scheduleRuns = getReactionScheduleRuns(rowSchedules);
+                  const additionalInstallCount =
+                    totalNeeded !== null && scheduleRuns > 0
+                      ? Math.max(
+                          0,
+                          Math.ceil(Math.max(0, totalNeeded - scheduledRuns) / scheduleRuns),
+                        )
+                      : 0;
+                  const materialEntry =
+                    (activeTab === "Buy" && !isBpcPurchase && "quantity" in entry)
+                    || (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
+                      ? (entry as PlanResult["lists"]["materialsToBuy"][number])
+                      : null;
+                  const amount =
+                    "volume" in entry
+                      ? `${entry.quantity.toLocaleString()} units | ${Math.ceil(entry.volume).toLocaleString()} m3`
+                      : isBpcPurchase
+                        ? `${entry.buyQuantity.toLocaleString()} runs`
+                        : isPlanBpc
+                          ? `${entry.neededQuantity.toLocaleString()} needed`
+                          : isPlanReaction
+                            ? `${entry.runsNeeded.toLocaleString()} runs`
+                            : materialEntry
+                              ? `${(materialEntry.buildQuantity || materialEntry.buyQuantity).toLocaleString()} units`
+                              : activeTab === "Copy" && "neededQuantity" in entry
+                                ? `${Math.max(0, entry.neededQuantity - entry.stockRuns).toLocaleString()} runs`
+                                : "quantity" in entry
+                                  ? `${entry.quantity.toLocaleString()} ${activeTab === "Copy" ? "runs" : "units"}`
+                                  : "runs" in entry
+                                    ? entry.runs >= 10
+                                      && suggestedInstallCount > 1
+                                      && targetRuns !== null
+                                      && installTime !== null
+                                      ? `${suggestedInstallCount.toLocaleString()} x ${targetRuns.toLocaleString()} runs @ ${formatDuration(installTime)} | ${entry.runs.toLocaleString()} runs`
+                                      : `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
+                                    : "";
+                  const amountToCopy =
+                    "volume" in entry
+                      ? String(entry.quantity)
+                      : isBpcPurchase
+                        ? String(entry.buyQuantity)
+                        : isPlanBpc
+                          ? String(entry.neededQuantity)
+                          : isPlanReaction
+                            ? String(entry.runsNeeded)
+                            : materialEntry
+                              ? String(materialEntry.buildQuantity || materialEntry.buyQuantity)
+                              : activeTab === "Copy" && "neededQuantity" in entry
+                                ? String(Math.max(0, entry.neededQuantity - entry.stockRuns))
+                                : "quantity" in entry
+                                  ? String(entry.quantity)
+                                  : "runs" in entry
+                                    ? String(entry.runs)
+                                    : null;
+                  const amountCopyLabel =
+                    activeTab === "Invent"
+                      ? "Attempts"
+                      : "volume" in entry || materialEntry
+                        ? "Quantity"
+                        : isBpcPurchase
+                            || isPlanBpc
+                            || isPlanReaction
+                            || activeTab === "Copy"
+                            || "runs" in entry
+                          ? "Runs"
+                          : "Quantity";
+                  const imageVariation =
+                    planBlueprintVariation
+                    ?? ("imageVariation" in entry && entry.imageVariation
+                      ? entry.imageVariation === "icon" && isBlueprintName
+                        ? "bp"
+                        : entry.imageVariation === "icon" && isReactionFormulaName
+                          ? "bpc"
+                          : entry.imageVariation
+                      : isCopyOfBpo || (isPlanBpc && entry.bpoCount > 0)
+                        ? "bp"
+                        : isBlueprintName
+                          ? "bp"
+                          : isReactionFormulaName
+                            ? "bpc"
+                            : activeTab === "Manufacture"
+                                || activeTab === "React"
+                                || isPlanBpc
+                                || isBpcPurchase
+                                || isPlanReaction
+                                || activeTab === "Copy"
+                                || activeTab === "Invent"
+                              ? "bpc"
+                              : "icon");
+                  const planCells =
+                    activeTab === "Plan"
+                      ? getPlanCells(entry as PlanResult["lists"]["planItems"][number])
+                      : null;
+                  const planHaulingQuantity =
+                    activeTab === "Plan"
+                      ? getPlanHaulingQuantity(entry as PlanResult["lists"]["planItems"][number])
+                      : 0;
+                  const manufacturingEntry =
+                    activeTab === "Manufacture"
+                      ? (entry as PlanResult["lists"]["manufacturingJobs"][number])
+                      : null;
+                  const manufacturingDisplayedRuns = manufacturingEntry
+                    ? showTotalManufacturingRunCounts
+                      ? manufacturingEntry.runs
+                      : manufacturingEntry.runsAvailable
+                    : 0;
+                  const manufacturingDisplayedTime =
+                    manufacturingEntry && manufacturingEntry.runs > 0
+                      ? (manufacturingEntry.totalTime * manufacturingDisplayedRuns)
+                        / manufacturingEntry.runs
+                      : 0;
+                  return (
+                    <Fragment key={`${activeTab}-${index}`}>
+                      <div
+                        className={`${activeTab === "Plan" ? styles.planTableRow : styles.planRow} ${activeTab === "React" ? styles.reactionRow : activeTab === "Manufacture" ? styles.manufacturingRow : ""}`}
+                      >
+                        <div className={styles.planTypeCell}>
+                          <TypeIdentity
+                            name={name}
+                            typeId={typeId}
+                            imageSize={40}
+                            variation={imageVariation}
+                            className={styles.planTypeIdentity}
+                          />
+                          {bposInUse > 0 && (
+                            <Badge variant="outline">{formatBposInUse(bposInUse)}</Badge>
+                          )}
+                        </div>
+                        {activeTab === "React" && "inputs" in entry && (
+                          <span className={styles.jobInputsTrigger}>
+                            <JobInputsResponsive
+                              inputs={reactionInputs ?? entry.inputs}
+                              reactionFormulaCount={
+                                reactionPlan?.availableBlueprints ?? reactionFormulaCount
+                              }
                             />
-                          </strong>
-                          <small>{formatDuration(manufacturingDisplayedTime)}</small>
-                        </span>
-                      ) : (
-                        <span className={styles.planRowAmount}>
-                          {activeTab === "React" ? (
-                            <span className={styles.reactionCells}>
+                          </span>
+                        )}
+                        {activeTab === "Manufacture" && "inputs" in entry && (
+                          <span className={styles.manufacturingInputsCell}>
+                            <JobInputsResponsive inputs={entry.inputs} />
+                          </span>
+                        )}
+                        {activeTab === "Plan" ? (
+                          planColumns.map((column) =>
+                            planCells?.[column] ? (
                               <span
-                                className={styles.reactionAvailableCell}
-                                data-label="BPs available"
+                                className={styles.planTableCell}
+                                data-label={column}
+                                key={column}
                               >
-                                {additionalInstallCount > 0
-                                  && !addedReactionBuildItems.has(typeId) && (
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="xs"
-                                      className={styles.buyReactionButton}
-                                      onClick={() => {
-                                        onAddBuildItem({
-                                          name,
-                                          typeId,
-                                          quantity: additionalInstallCount,
-                                        });
-                                        setAddedReactionBuildItems((current) =>
-                                          new Set(current).add(typeId),
-                                        );
-                                      }}
-                                    >
-                                      Buy +{additionalInstallCount.toLocaleString()}
-                                    </Button>
-                                  )}
-                                <strong>{reactionFormulaCount.toLocaleString()}</strong>
-                              </span>
-                              <span
-                                className={styles.reactionValue}
-                                data-label="Suggested installs"
-                              >
-                                <strong>{suggestedInstallCount.toLocaleString()}</strong>
-                              </span>
-                              <span className={styles.reactionValue} data-label="Suggested runs">
-                                <strong>
-                                  {targetRuns === null ? (
-                                    "-"
-                                  ) : targetRuns > 0 ? (
-                                    <CopyableText
-                                      textToRender={targetRuns.toLocaleString()}
-                                      textToCopy={String(targetRuns)}
-                                      copyLabel="Suggested runs"
+                                <span className={styles.planTableValue}>
+                                  {column === "Available" && (
+                                    <AvailableSourceIcons
+                                      counts={
+                                        "availableSourceCounts" in entry
+                                          ? entry.availableSourceCounts
+                                          : undefined
+                                      }
+                                      haulingQuantity={planHaulingQuantity}
                                     />
-                                  ) : (
-                                    targetRuns.toLocaleString()
                                   )}
-                                </strong>
-                                <small>
-                                  {installTime !== null ? formatDuration(installTime) : "-"}
-                                </small>
+                                  {planCells[column]}
+                                </span>
                               </span>
-                              <span className={styles.reactionValue} data-label="Total needed">
-                                <strong>
-                                  {totalNeeded === null ? (
-                                    "-"
-                                  ) : totalNeeded > 0 ? (
-                                    <CopyableText
-                                      textToRender={totalNeeded.toLocaleString()}
-                                      textToCopy={String(totalNeeded)}
-                                      copyLabel="Total needed"
-                                    />
-                                  ) : (
-                                    totalNeeded.toLocaleString()
-                                  )}
-                                </strong>
-                                <small>
-                                  {totalNeeded !== null && totalTime !== null && "runs" in entry
-                                    ? formatDuration(
-                                        totalNeeded > 0
-                                          ? (totalTime * totalNeeded) / entry.runs
-                                          : 0,
-                                      )
-                                    : "-"}
-                                </small>
-                              </span>
-                            </span>
-                          ) : (
+                            ) : (
+                              <span className={styles.planTableCellEmpty} key={column} />
+                            ),
+                          )
+                        ) : activeTab === "Manufacture" ? (
+                          <span className={styles.manufacturingRunCell}>
                             <strong>
                               <CopyableText
-                                textToRender={amount}
-                                textToCopy={amountToCopy ?? amount}
-                                copyLabel={amountCopyLabel}
+                                textToRender={`${manufacturingDisplayedRuns.toLocaleString()} runs`}
+                                textToCopy={String(manufacturingDisplayedRuns)}
+                                copyLabel="Runs"
                               />
                             </strong>
-                          )}
-                          {detail && activeTab !== "React" && <small>{detail}</small>}
-                        </span>
+                            <small>{formatDuration(manufacturingDisplayedTime)}</small>
+                          </span>
+                        ) : (
+                          <span className={styles.planRowAmount}>
+                            {activeTab === "React" ? (
+                              <span className={styles.reactionCells}>
+                                <span
+                                  className={styles.reactionAvailableCell}
+                                  data-label="BPs available"
+                                >
+                                  {additionalInstallCount > 0
+                                    && reactionIndex === 0
+                                    && !addedReactionBuildItems.has(typeId) && (
+                                      <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="xs"
+                                        className={styles.buyReactionButton}
+                                        onClick={() => {
+                                          onAddBuildItem({
+                                            name,
+                                            typeId,
+                                            quantity: additionalInstallCount,
+                                          });
+                                          setAddedReactionBuildItems((current) =>
+                                            new Set(current).add(typeId),
+                                          );
+                                        }}
+                                      >
+                                        Buy +{additionalInstallCount.toLocaleString()}
+                                      </Button>
+                                    )}
+                                  <strong>
+                                    {(
+                                      reactionPlan?.availableBlueprints ?? reactionFormulaCount
+                                    ).toLocaleString()}
+                                  </strong>
+                                </span>
+                                <span
+                                  className={styles.reactionValue}
+                                  data-label="Suggested installs"
+                                >
+                                  <strong>{suggestedInstallCount.toLocaleString()}</strong>
+                                </span>
+                                <span className={styles.reactionValue} data-label="Suggested runs">
+                                  <strong>
+                                    {targetRuns === null ? (
+                                      "-"
+                                    ) : targetRuns > 0 ? (
+                                      <CopyableText
+                                        textToRender={targetRuns.toLocaleString()}
+                                        textToCopy={String(targetRuns)}
+                                        copyLabel="Suggested runs"
+                                      />
+                                    ) : (
+                                      targetRuns.toLocaleString()
+                                    )}
+                                  </strong>
+                                  <small>
+                                    {installTime !== null ? formatDuration(installTime) : "-"}
+                                  </small>
+                                </span>
+                                <span className={styles.reactionValue} data-label="Total needed">
+                                  <strong>
+                                    {totalNeeded === null ? (
+                                      "-"
+                                    ) : totalNeeded > 0 ? (
+                                      <CopyableText
+                                        textToRender={totalNeeded.toLocaleString()}
+                                        textToCopy={String(totalNeeded)}
+                                        copyLabel="Total needed"
+                                      />
+                                    ) : (
+                                      totalNeeded.toLocaleString()
+                                    )}
+                                  </strong>
+                                  <small>
+                                    {totalNeeded !== null && totalTime !== null && "runs" in entry
+                                      ? formatDuration(
+                                          totalNeeded > 0
+                                            ? (totalTime * totalNeeded) / entry.runs
+                                            : 0,
+                                        )
+                                      : "-"}
+                                  </small>
+                                </span>
+                              </span>
+                            ) : (
+                              <strong>
+                                <CopyableText
+                                  textToRender={amount}
+                                  textToCopy={amountToCopy ?? amount}
+                                  copyLabel={amountCopyLabel}
+                                />
+                              </strong>
+                            )}
+                            {detail && activeTab !== "React" && <small>{detail}</small>}
+                          </span>
+                        )}
+                      </div>
+                      {activeTab !== "Plan" && index < rows.length - 1 && (
+                        <hr className={styles.planRowSeparator} />
                       )}
-                    </div>
-                    {activeTab !== "Plan" && index < entries.length - 1 && (
-                      <hr className={styles.planRowSeparator} />
-                    )}
-                  </Fragment>
-                );
-              })}
+                    </Fragment>
+                  );
+                })}
             </Fragment>
           ))}
         </div>

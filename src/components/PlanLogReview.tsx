@@ -9,7 +9,9 @@ import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Spinner } from "@/components/ui/spinner";
 import type { PlanRequestLog } from "@/lib/planning/planRequestLogger";
 
-type PlanRequestLogSummary = Omit<PlanRequestLog, "rawRequestBody" | "rawResponseBody">;
+type PlanRequestLogSummary = Omit<PlanRequestLog, "rawRequestBody" | "rawResponseBody"> & {
+  characterName: string | null;
+};
 type PlanLogPage = {
   logs: PlanRequestLogSummary[];
   page: number;
@@ -81,6 +83,7 @@ export default function PlanLogReview() {
             <thead className="border-b text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">Time</th>
+                <th className="px-4 py-3 font-medium">Character</th>
                 <th className="px-4 py-3 font-medium">Plan ID</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Review</th>
@@ -92,6 +95,7 @@ export default function PlanLogReview() {
                   <td className="whitespace-nowrap px-4 py-3">
                     {new Date(log.requestedAt).toLocaleString()}
                   </td>
+                  <td className="px-4 py-3">{log.characterName ?? "Anonymous"}</td>
                   <td className="px-4 py-3 font-mono text-xs">
                     <Link
                       className="underline decoration-muted-foreground/50 underline-offset-2 hover:decoration-foreground"

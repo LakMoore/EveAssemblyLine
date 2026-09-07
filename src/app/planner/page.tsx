@@ -37,6 +37,7 @@ import {
   type ClientJobsResponse,
 } from "@/lib/client/requestCache";
 import { loadPlanResult, savePlanResult } from "@/lib/planning/planResultStore";
+import { createHaulItemExclusionKey, excludeHaulItemsFromStock } from "@/lib/planning/planView";
 import { refreshPlannerStockpileEfficiencies } from "@/lib/planning/reprocessingClient";
 import {
   defaultLocations,
@@ -160,6 +161,24 @@ function getPlannerStock(
     const locationId = getStockLocationId(item);
     return locationId === undefined || !excludedLocationIds.has(locationId);
   });
+}
+
+function retainCurrentHaulItemExclusions(
+  assets: ClientAssetsResponse,
+  exclusions: ReadonlyMap<string, number>,
+): Map<string, number> {
+  const receivedAssets = assets.assets ?? [];
+  if (receivedAssets.length === 0 || exclusions.size === 0) {
+    return new Map(exclusions);
+  }
+  const assetKeys = new Set(
+    receivedAssets.flatMap((item) =>
+      item.rootLocationId === undefined
+        ? []
+        : [createHaulItemExclusionKey(item.rootLocationId, item.typeId)],
+    ),
+  );
+  return new Map([...exclusions].filter(([key]) => assetKeys.has(key)));
 }
 
 function selectSavedLocation(
@@ -333,6 +352,7 @@ function Planner() {
     ProductionGroupReference[]
   >([]);
   const [includeStock, setIncludeStock] = useState(true);
+  const [haulItemExclusion, setHaulItemExclusion] = useState<Map<string, number>>(() => new Map());
   const [corporationSources, setCorporationSources] = useState<ClientCorporationSource[]>([]);
   const [locations, setLocations] = useState<PlannerLocations>(defaultLocations);
   const [settings, setSettings] = useState<PlannerSettings>(() => {
@@ -368,6 +388,7 @@ function Planner() {
           loadClientJobs(),
         ]);
         setClientAssets(assets);
+        setHaulItemExclusion((current) => retainCurrentHaulItemExclusions(assets, current));
         setJobs(loadedJobs);
         setCorporationSources(assets.corporationSources ?? []);
         const activeCharacters = (session.characters ?? []).filter(
@@ -398,6 +419,7 @@ function Planner() {
         .then(([state, assets, loadedJobs]) => {
           if (cancelled) return;
           setClientAssets(assets);
+          setHaulItemExclusion((current) => retainCurrentHaulItemExclusions(assets, current));
           setJobs(loadedJobs);
           setCorporationSources(assets.corporationSources ?? []);
           setCharacterStatuses(
@@ -485,6 +507,7 @@ function Planner() {
       ]);
       if (cancelled) return;
       if (data) {
+        setHaulItemExclusion((current) => retainCurrentHaulItemExclusions(data, current));
         const assetLocations = groupClientAssetsByLocation(data);
         setCachedAssetLocations(
           assetLocations.map((location) => ({
@@ -572,7 +595,10 @@ function Planner() {
     if (areStockpilesLoaded) void savePlannerStockpiles(stockpiles);
   }, [areStockpilesLoaded, stockpiles]);
 
-  async function submitPlan(exclusions: Set<number>) {
+  async function submitPlan(
+    exclusions: Set<number>,
+    itemExclusions: ReadonlyMap<string, number> = haulItemExclusion,
+  ) {
     const plannerItems = stockpiles.flatMap((stockpile) => stockpile.items);
     if (plannerItems.length === 0 || isPlanLoading) return;
     setIsPlanLoading(true);
@@ -599,7 +625,7 @@ function Planner() {
       const selectedReactionFacility = locationOptions.find(
         (location) => location.locationId === primaryStockpileLocations.reactions,
       );
-      const requestStock = workingAssets;
+      const requestStock = excludeHaulItemsFromStock(workingAssets, itemExclusions);
       const planningCharacter = characterStatuses.find(
         (character) => character.characterId === planningCharacterId,
       );
@@ -707,6 +733,18 @@ function Planner() {
     setIsExcludedLocationsModalOpen(false);
     await saveExcludedLocationIds([]);
     await submitPlan(new Set());
+  }
+
+  async function toggleHaulItemExclusion(
+    key: string,
+    destinationLocationId: number,
+    excluded: boolean,
+  ) {
+    const nextExclusions = new Map(haulItemExclusion);
+    if (excluded) nextExclusions.set(key, destinationLocationId);
+    else nextExclusions.delete(key);
+    setHaulItemExclusion(nextExclusions);
+    await submitPlan(new Set(excludedLocationIds), nextExclusions);
   }
 
   function saveStockpile(stockpile: ClientPlanStockpile): boolean {
@@ -1725,6 +1763,8 @@ function Planner() {
           ])
         }
         onExcludeHaulStockpile={excludeHaulStockpile}
+        haulItemExclusion={haulItemExclusion}
+        onToggleHaulItemExclusion={toggleHaulItemExclusion}
       />
     </>
   );
