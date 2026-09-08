@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { Fragment, type RefObject, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
@@ -34,6 +35,7 @@ import CopyableText from "@/components/CopyableText";
 import JobInputsResponsive, {
   getJobInputsCompletionPercent,
 } from "@/components/JobInputsResponsive";
+import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { toast } from "@/components/ui/toast";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +55,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import styles from "@/app/page.module.css";
 import {
   ArrowDown,
@@ -71,6 +74,7 @@ import {
   TestTubes,
   ShoppingCart,
   Truck,
+  UsersRound,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -98,7 +102,7 @@ const tabs: { value: PlannerTab; icon: LucideIcon }[] = [
   { value: "Skills", icon: Brain },
 ];
 
-type ReactionScheduleMode = "simple" | "available-slots" | "max-job-length";
+type ReactionScheduleMode = "available-slots" | "max-job-length";
 type ReactionSchedule = {
   installs: number;
   runs: number;
@@ -254,6 +258,59 @@ function getReactionScheduleRuns(schedules: ReactionSchedule[] | undefined) {
   return Math.max(...(schedules ?? []).map((schedule) => schedule.runs), 0);
 }
 
+type ActivitySlot = "Manufacturing" | "Reactions";
+type ActivitySlotCharacter = {
+  characterId: number;
+  name: string;
+  availableSlots: number;
+};
+
+function getActivitySlotCharacters(
+  jobs: ClientJobsResponse | null,
+  characterNamesById: Map<number, string>,
+  activity: ActivitySlot,
+): ActivitySlotCharacter[] {
+  return Object
+    .entries(jobs?.slotUsage ?? {})
+    .flatMap(([characterId, usage]) => {
+      const id = Number(characterId);
+      const name = characterNamesById.get(id);
+      const availableSlots = Math.max(0, usage.availableSlots[activity] - usage.slots[activity]);
+      return name && availableSlots > 0 ? [{ characterId: id, name, availableSlots }] : [];
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function ActivitySlotCharacters({ characters }: { characters: ActivitySlotCharacter[] }) {
+  return (
+    <div className="flex flex-col gap-2">
+      {characters.length > 0 ? (
+        characters.map((character) => (
+          <div
+            className="grid grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 border-t border-border/60 py-2 first:border-t-0"
+            key={character.characterId}
+          >
+            <Image
+              src={eveCharacterPortraitUrl(character.characterId, 64)}
+              alt={`${character.name} portrait`}
+              width={32}
+              height={32}
+              className="size-8 rounded-none"
+            />
+            <span className="min-w-0 truncate font-medium">{character.name}</span>
+            <Badge variant="outline">
+              {character.availableSlots.toLocaleString()} slot
+              {character.availableSlots === 1 ? "" : "s"}
+            </Badge>
+          </div>
+        ))
+      ) : (
+        <p className="py-4 text-muted-foreground">No characters have available reaction slots.</p>
+      )}
+    </div>
+  );
+}
+
 function ScrollTopButton({
   targetRef,
   headerRef,
@@ -347,15 +404,12 @@ function buildReactionSchedule(
       const perRunTime = job.runs > 0 ? job.totalTime / job.runs : 0;
       const timeLimitedRuns =
         maxJobHours > 0 && perRunTime > 0 ? Math.floor((maxJobHours * 3600) / perRunTime) : runs;
-      const simpleInstalls = runs > 0 ? Math.min(blueprintCount, Math.ceil(runs / 10)) : 0;
       const installCount =
         mode === "available-slots"
           ? (installs.get(reactionJobKey(job)) ?? 0)
-          : mode === "max-job-length"
-            ? timeLimitedRuns > 0
-              ? Math.min(blueprintCount, Math.ceil(runs / timeLimitedRuns))
-              : 0
-            : simpleInstalls;
+          : timeLimitedRuns > 0
+            ? Math.min(blueprintCount, Math.ceil(runs / timeLimitedRuns))
+            : 0;
       const allocations = splitReactionRunAllocations(
         runs,
         Math.min(installCount, maxInstalls),
@@ -370,6 +424,36 @@ function buildReactionSchedule(
       ];
     }),
   );
+}
+
+function getManufacturingSummary(
+  jobs: PlanResult["lists"]["manufacturingJobs"],
+  availableSlots: number,
+  showTotalRunCounts: boolean,
+) {
+  const rows = jobs.map((job) => {
+    const runs = showTotalRunCounts ? job.runs : job.runsAvailable;
+    return {
+      runs,
+      time: job.runs > 0 ? (job.totalTime * runs) / job.runs : 0,
+    };
+  });
+  const totalRuns = jobs.reduce((total, job) => total + job.runs, 0);
+  const installableRuns = jobs.reduce((total, job) => total + job.runsAvailable, 0);
+  const selectedRows = rows
+    .filter((row) => row.runs > 0)
+    .sort((left, right) => right.runs - left.runs)
+    .slice(0, Math.max(0, availableSlots));
+
+  return {
+    installs: selectedRows.length,
+    maxTime: Math.max(...selectedRows.map((row) => row.time), 0),
+    installableCoverage: formatCoverage(installableRuns, totalRuns),
+    totalCoverage: formatCoverage(
+      selectedRows.reduce((total, row) => total + row.runs, 0),
+      totalRuns,
+    ),
+  };
 }
 
 /** Renders the planner output header, bug-report dialog, and every output tab. */
@@ -412,15 +496,20 @@ export default function PlannerResults({
   const [isBugReportOpen, setIsBugReportOpen] = useState(false);
   const resultsHeaderRef = useRef<HTMLDivElement>(null);
 
-  const availableReactionSlots = Object
-    .entries(jobs?.slotUsage ?? {})
-    .reduce(
-      (total, [characterId, usage]) =>
-        characterNamesById.has(Number(characterId))
-          ? total + Math.max(0, usage.availableSlots.Reactions - usage.slots.Reactions)
-          : total,
-      0,
-    );
+  const reactionSlotCharacters = getActivitySlotCharacters(jobs, characterNamesById, "Reactions");
+  const manufacturingSlotCharacters = getActivitySlotCharacters(
+    jobs,
+    characterNamesById,
+    "Manufacturing",
+  );
+  const availableReactionSlots = reactionSlotCharacters.reduce(
+    (total, character) => total + character.availableSlots,
+    0,
+  );
+  const availableManufacturingSlots = manufacturingSlotCharacters.reduce(
+    (total, character) => total + character.availableSlots,
+    0,
+  );
   const activityLocationIds = [
     ...new Set(
       [
@@ -561,6 +650,9 @@ export default function PlannerResults({
               stock={stock}
               activityLocationIds={activityLocationIds}
               availableReactionSlots={availableReactionSlots}
+              availableManufacturingSlots={availableManufacturingSlots}
+              reactionSlotCharacters={reactionSlotCharacters}
+              manufacturingSlotCharacters={manufacturingSlotCharacters}
               locationNamesById={locationNamesById}
               onAddBuildItem={onAddBuildItem}
               onExcludeHaulStockpile={onExcludeHaulStockpile}
@@ -592,6 +684,9 @@ function PlanList({
   stock,
   activityLocationIds,
   availableReactionSlots,
+  availableManufacturingSlots,
+  reactionSlotCharacters,
+  manufacturingSlotCharacters,
   locationNamesById,
   onAddBuildItem,
   onExcludeHaulStockpile,
@@ -607,6 +702,9 @@ function PlanList({
   stock: PlanStockItem[];
   activityLocationIds: number[];
   availableReactionSlots: number;
+  availableManufacturingSlots: number;
+  reactionSlotCharacters: ActivitySlotCharacter[];
+  manufacturingSlotCharacters: ActivitySlotCharacter[];
   locationNamesById: Map<number, string>;
   onAddBuildItem: (item: { name: string; typeId: number; quantity: number }) => void;
   onExcludeHaulStockpile: (fromLocationId: number) => Promise<void>;
@@ -631,7 +729,8 @@ function PlanList({
   const [showTotalRunCounts, setShowTotalRunCounts] = useState(false);
   const [showTotalManufacturingRunCounts, setShowTotalManufacturingRunCounts] = useState(false);
   const [planViewMode, setPlanViewMode] = useState<PlanViewMode>("all");
-  const [reactionScheduleMode, setReactionScheduleMode] = useState<ReactionScheduleMode>("simple");
+  const [reactionScheduleMode, setReactionScheduleMode] =
+    useState<ReactionScheduleMode>("available-slots");
   const [maxJobHours, setMaxJobHours] = useState("24");
   const [reactionSort, setReactionSort] = useState<ReactionSort>({
     key: "type",
@@ -807,6 +906,11 @@ function PlanList({
       };
     },
     { installs: 0, maxTime: 0 },
+  );
+  const manufacturingSummary = getManufacturingSummary(
+    plan.lists.manufacturingJobs,
+    availableManufacturingSlots,
+    showTotalManufacturingRunCounts,
   );
   const reactionCoverage = plan.lists.reactionJobs
     .map((job) => ({
@@ -1227,15 +1331,12 @@ function PlanList({
                     className={styles.modeSelect}
                   >
                     <SelectValue>
-                      {reactionScheduleMode === "available-slots"
-                        ? "Solve for available slots"
-                        : reactionScheduleMode === "max-job-length"
-                          ? "Max job length"
-                          : "Simple"}
+                      {reactionScheduleMode === "max-job-length"
+                        ? "Max job length"
+                        : "Solve for available slots"}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="simple">Simple</SelectItem>
                     <SelectItem value="available-slots">Solve for available slots</SelectItem>
                     <SelectItem value="max-job-length">Max job length</SelectItem>
                   </SelectContent>
@@ -1278,10 +1379,28 @@ function PlanList({
             </>
           )}
           {activeTab === "React" && (
-            <div className={styles.reactionResultsActions}>
+            <>
               <div className={styles.reactionSummary}>
                 <span>
-                  <strong>{availableReactionSlots.toLocaleString()}</strong>
+                  <strong className="flex items-center gap-1">
+                    {availableReactionSlots.toLocaleString()}
+                    <ResponsiveDialogDrawer
+                      trigger={
+                        <button
+                          type="button"
+                          className="inline-flex size-5 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+                          aria-label="View characters with available reaction slots"
+                          title="View characters with available reaction slots"
+                        >
+                          <UsersRound className="size-4" aria-hidden="true" />
+                        </button>
+                      }
+                      title="Reaction slots by character"
+                      description="Characters with available reaction slots."
+                    >
+                      <ActivitySlotCharacters characters={reactionSlotCharacters} />
+                    </ResponsiveDialogDrawer>
+                  </strong>
                   <small>AVAILABLE SLOTS</small>
                 </span>
                 <span>
@@ -1303,14 +1422,19 @@ function PlanList({
                   <small>TOTAL COVERAGE</small>
                 </span>
               </div>
-              <Button type="button" variant="outline" onClick={copyList}>
+              <Button
+                type="button"
+                variant="outline"
+                className={styles.reactionCopyButton}
+                onClick={copyList}
+              >
                 <CopyIcon aria-hidden="true" />
                 {copyStatus || "Copy list"}
               </Button>
-            </div>
+            </>
           )}
           {activeTab === "Manufacture" && (
-            <div className={styles.reactionDisplayControls}>
+            <div className={`${styles.reactionDisplayControls} mr-auto`}>
               <Label htmlFor="manufacturing-run-count-mode">Show</Label>
               <Select
                 value={showTotalManufacturingRunCounts ? "total" : "installable"}
@@ -1330,6 +1454,48 @@ function PlanList({
                   <SelectItem value="total">Total</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+          )}
+          {activeTab === "Manufacture" && (
+            <div className={styles.reactionSummary}>
+              <span>
+                <strong className="flex items-center gap-1">
+                  {availableManufacturingSlots.toLocaleString()}
+                  <ResponsiveDialogDrawer
+                    trigger={
+                      <button
+                        type="button"
+                        className="inline-flex size-5 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
+                        aria-label="View characters with available manufacturing slots"
+                        title="View characters with available manufacturing slots"
+                      >
+                        <UsersRound className="size-4" aria-hidden="true" />
+                      </button>
+                    }
+                    title="Manufacturing slots by character"
+                    description="Characters with available manufacturing slots."
+                  >
+                    <ActivitySlotCharacters characters={manufacturingSlotCharacters} />
+                  </ResponsiveDialogDrawer>
+                </strong>
+                <small>AVAILABLE SLOTS</small>
+              </span>
+              <span>
+                <strong>{manufacturingSummary.installs.toLocaleString()}</strong>
+                <small>SUGGESTED INSTALLS</small>
+              </span>
+              <span>
+                <strong>{formatDuration(manufacturingSummary.maxTime)}</strong>
+                <small>MAX JOB LENGTH</small>
+              </span>
+              <span>
+                <strong>{manufacturingSummary.installableCoverage}</strong>
+                <small>INSTALLABLE COVERAGE</small>
+              </span>
+              <span>
+                <strong>{manufacturingSummary.totalCoverage}</strong>
+                <small>TOTAL COVERAGE</small>
+              </span>
             </div>
           )}
           {activeTab === "Plan" && (
