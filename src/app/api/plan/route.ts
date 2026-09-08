@@ -20,6 +20,7 @@ import type {
 import { productionGroupDefinitions } from "@/lib/planning/productionGroups";
 import { logPlanRequest } from "@/lib/planning/planRequestLogger";
 import { getSessionFromRequest } from "@/lib/auth/session";
+import { incrementPlansCreated } from "@/lib/statistics";
 import { randomUUID } from "node:crypto";
 
 export const dynamic = "force-dynamic";
@@ -519,6 +520,17 @@ export async function POST(request: Request) {
   const response = await calculatePlanRequest(body);
   const responseBody = withPlanId(await response.json(), planId);
   const rawResponseBody = JSON.stringify(responseBody);
+  if (response.ok) {
+    try {
+      await incrementPlansCreated();
+    }
+    catch (error) {
+      console.error(
+        "Could not increment plans-created statistic",
+        error instanceof Error ? error.message : "unknown error",
+      );
+    }
+  }
   logPlanRequest({
     id: planId,
     requestedAt,
