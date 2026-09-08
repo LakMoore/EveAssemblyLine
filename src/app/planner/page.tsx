@@ -510,14 +510,16 @@ function Planner() {
         setHaulItemExclusion((current) => retainCurrentHaulItemExclusions(data, current));
         const assetLocations = groupClientAssetsByLocation(data);
         setCachedAssetLocations(
-          assetLocations.map((location) => ({
-            locationId: location.locationId,
-            name: location.name,
-            kind: location.locationType,
-            baseYield: 0,
-            baseManufacturingMe: 0,
-            baseReactionMe: 0,
-          })),
+          assetLocations
+            .filter((location) => location.locationType !== "anchored")
+            .map((location) => ({
+              locationId: location.locationId,
+              name: location.name,
+              kind: location.locationType,
+              baseYield: 0,
+              baseManufacturingMe: 0,
+              baseReactionMe: 0,
+            })),
         );
       }
       const options = (data?.facilities ?? [])
@@ -598,11 +600,12 @@ function Planner() {
   async function submitPlan(
     exclusions: Set<number>,
     itemExclusions: ReadonlyMap<string, number> = haulItemExclusion,
-  ) {
+  ): Promise<boolean> {
     const plannerItems = stockpiles.flatMap((stockpile) => stockpile.items);
-    if (plannerItems.length === 0 || isPlanLoading) return;
+    if (plannerItems.length === 0 || isPlanLoading) return false;
     setIsPlanLoading(true);
     setPlanStatus("Calculating...");
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
     try {
       const populatedStockpiles = stockpiles.filter((stockpile) => stockpile.items.length > 0);
       const missingEfficiencies = populatedStockpiles.some(
@@ -610,12 +613,12 @@ function Planner() {
       );
       if (missingEfficiencies) {
         setPlanStatus("Compression efficiencies are still loading");
-        return;
+        return false;
       }
       let workingAssets: PlanStockItem[] = [];
       if (includeStock && isAuthenticated && !clientAssets) {
         setPlanStatus("Account assets are still loading");
-        return;
+        return false;
       }
       workingAssets = getPlannerStock(clientAssets, includeStock, exclusions);
       const primaryStockpileLocations = populatedStockpiles[0].locations;
@@ -691,16 +694,18 @@ function Planner() {
       const data = (await response.json()) as PlanResult | { error?: string };
       if (!response.ok) {
         setPlanStatus("error" in data && data.error ? data.error : "Could not calculate plan");
-        return;
+        return false;
       }
       const calculatedPlan = data as PlanResult;
       await savePlanResult(calculatedPlan);
       setPlan(calculatedPlan);
       await savePlannerLocations(locations);
       setPlanStatus("Plan updated just now");
+      return true;
     }
     catch {
       setPlanStatus("Could not reach the planning service");
+      return false;
     }
     finally {
       setIsPlanLoading(false);
@@ -717,22 +722,25 @@ function Planner() {
     nextExcludedLocationIds.add(fromLocationId);
     const nextIds = [...nextExcludedLocationIds];
     setExcludedLocationIds(nextIds);
-    await saveExcludedLocationIds(nextIds);
+    const savePromise = saveExcludedLocationIds(nextIds);
     await submitPlan(nextExcludedLocationIds);
+    await savePromise;
   }
 
   async function removeExcludedLocation(locationId: number) {
     const nextExcludedLocationIds = excludedLocationIds.filter((id) => id !== locationId);
     setExcludedLocationIds(nextExcludedLocationIds);
-    await saveExcludedLocationIds(nextExcludedLocationIds);
+    const savePromise = saveExcludedLocationIds(nextExcludedLocationIds);
     await submitPlan(new Set(nextExcludedLocationIds));
+    await savePromise;
   }
 
   async function clearExcludedLocations() {
     setExcludedLocationIds([]);
     setIsExcludedLocationsModalOpen(false);
-    await saveExcludedLocationIds([]);
+    const savePromise = saveExcludedLocationIds([]);
     await submitPlan(new Set());
+    await savePromise;
   }
 
   async function toggleHaulItemExclusion(
@@ -743,8 +751,9 @@ function Planner() {
     const nextExclusions = new Map(haulItemExclusion);
     if (excluded) nextExclusions.set(key, destinationLocationId);
     else nextExclusions.delete(key);
-    setHaulItemExclusion(nextExclusions);
-    await submitPlan(new Set(excludedLocationIds), nextExclusions);
+    if (await submitPlan(new Set(excludedLocationIds), nextExclusions)) {
+      setHaulItemExclusion(nextExclusions);
+    }
   }
 
   function saveStockpile(stockpile: ClientPlanStockpile): boolean {
@@ -1861,6 +1870,12 @@ function ExcludedLocationsModal({
   onSave: () => void;
   onCancel: () => void;
 }) {
+  const sortedLocationIds = [...locationIds].sort((leftLocationId, rightLocationId) => {
+    const leftName = locationNamesById.get(leftLocationId) ?? String(leftLocationId);
+    const rightName = locationNamesById.get(rightLocationId) ?? String(rightLocationId);
+    return leftName.localeCompare(rightName, undefined, { sensitivity: "base" });
+  });
+
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className={styles.importModal}>
@@ -1872,7 +1887,7 @@ function ExcludedLocationsModal({
         </div>
         <div className="no-scrollbar max-h-[70vh] overflow-y-auto overscroll-contain">
           <div className={styles.excludedLocationList}>
-            {locationIds.map((locationId) => (
+            {sortedLocationIds.map((locationId) => (
               <div className={styles.excludedLocationRow} key={locationId}>
                 <span>{locationNamesById.get(locationId) ?? locationId}</span>
                 <button

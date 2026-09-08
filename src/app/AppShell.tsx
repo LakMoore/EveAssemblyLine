@@ -590,7 +590,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         const staleEndpoints = new Set(
           stale.filter((entry) => entry.stale).map((entry) => entry.endpoint),
         );
-        await Promise.all([
+        const [loadedAssets] = await Promise.all([
           staleEndpoints.has("state/assets") ? loadClientAssets(language, true) : Promise.resolve(),
           staleEndpoints.has("state/jobs") ? loadClientJobs(true) : Promise.resolve(),
           staleEndpoints.has("state/ships") ? loadClientShips(true) : Promise.resolve(),
@@ -598,6 +598,20 @@ export default function AppShell({ children }: { children: ReactNode }) {
             ? loadCompressOptions(language, true)
             : Promise.resolve(),
         ]);
+        if (loadedAssets) {
+          window.dispatchEvent(
+            new CustomEvent(
+              "assembly-line-esi-refreshed",
+              {
+                detail: {
+                  refreshedAt: new Date().toISOString(),
+                  assets: loadedAssets,
+                  corporationSources: loadedAssets.corporationSources,
+                },
+              },
+            ),
+          );
+        }
       })
       .catch(() => undefined);
     return () => {

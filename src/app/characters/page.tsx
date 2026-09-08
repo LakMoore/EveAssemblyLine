@@ -522,6 +522,18 @@ export default function CharactersPage() {
       await saveClientCorporationSettings(nextSettings);
       invalidateClientCharacterData();
       window.dispatchEvent(new CustomEvent("assembly-line-corporation-settings-changed"));
+      try {
+        const savedLanguage = window.localStorage.getItem(languageStorageKey);
+        const language: SdeLanguage = isSdeLanguage(savedLanguage) ? savedLanguage : "en";
+        await loadClientAssets(language, true);
+      }
+      catch (cacheError) {
+        setError(
+          cacheError instanceof Error
+            ? `Corporation support saved, but the asset cache could not be refreshed: ${cacheError.message}`
+            : "Corporation support saved, but the asset cache could not be refreshed.",
+        );
+      }
     }
     catch (supportError) {
       setCorporationSettings((current) =>

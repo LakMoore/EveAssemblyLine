@@ -34,18 +34,13 @@ export type ReprocessingMaterialRequirement = {
   remainingProductionQuantity: number;
 };
 
-/** Returns material shortages that are not already covered by plan surplus. */
+/** Returns net material shortages after the plan's available stock calculation. */
 export function getNetReprocessingRequirements(
   materials: readonly ReprocessingMaterialRequirement[],
 ): Map<number, number> {
   return new Map(
     materials.flatMap((material) => {
-      const shortage = Math.max(
-        0,
-        material.buyQuantity
-          - material.remainingStockQuantity
-          - material.remainingProductionQuantity,
-      );
+      const shortage = Math.max(0, material.buyQuantity - material.remainingProductionQuantity);
       return shortage > 0 ? [[material.typeId, shortage] as const] : [];
     }),
   );
@@ -93,9 +88,13 @@ export function reprocessCommittedPurchases(
   return { purchased, producedMaterials };
 }
 
-/** Scores how efficiently one candidate portion covers the remaining requirements. */
-function candidateScore(candidate: ReprocessingCandidate, remaining: ReadonlyMap<number, number>) {
-  const yields = yieldsPerPortion(candidate);
+/** Scores the complete candidate contribution selected for the remaining requirements. */
+function candidateScore(
+  candidate: ReprocessingCandidate,
+  remaining: ReadonlyMap<number, number>,
+  runs: number,
+) {
+  const yields = yieldsForRuns(candidate, runs);
   let covered = 0;
   let surplus = 0;
   for (const [typeId, quantity] of yields) {
@@ -108,7 +107,13 @@ function candidateScore(candidate: ReprocessingCandidate, remaining: ReadonlyMap
     (candidate.quantityAtReprocessingLocation ?? 0) / candidate.portionSize,
   );
   const haulingVolume = localRuns > 0 ? 0 : candidate.portionSize * candidate.volumePerUnit;
-  return { covered, surplus, haulingVolume };
+  return {
+    covered,
+    surplus,
+    haulingVolume,
+    coverageEfficiency: covered / (1 + surplus),
+    coveragePerVolume: covered / ((1 + surplus) * (1 + haulingVolume)),
+  };
 }
 
 /** Calculates how many candidate portions can contribute to current shortages. */
@@ -150,27 +155,69 @@ export function allocateReprocessing(
   const readyToReprocess = new Map<number, number>();
   const allocatedRunsByCandidate = new Map<ReprocessingCandidate, number>();
 
+  const recordAllocation = (
+    source: "owned" | "purchase",
+    selected: ReprocessingCandidate,
+    runs: number,
+  ) => {
+    const consumedQuantity = runs * selected.portionSize;
+    const localQuantity = Math.min(consumedQuantity, selected.quantityAtReprocessingLocation ?? 0);
+    selected.availableQuantity -= consumedQuantity;
+    selected.quantityAtReprocessingLocation = Math.max(
+      0,
+      (selected.quantityAtReprocessingLocation ?? 0) - consumedQuantity,
+    );
+    const consumed = source === "owned" ? consumedOwned : consumedPurchases;
+    consumed.set(selected.typeId, (consumed.get(selected.typeId) ?? 0) + consumedQuantity);
+    if (source === "owned" && localQuantity > 0) {
+      readyToReprocess.set(
+        selected.typeId,
+        (readyToReprocess.get(selected.typeId) ?? 0) + localQuantity,
+      );
+    }
+    const previouslyAllocatedRuns = allocatedRunsByCandidate.get(selected) ?? 0;
+    const totalAllocatedRuns = previouslyAllocatedRuns + runs;
+    allocatedRunsByCandidate.set(selected, totalAllocatedRuns);
+    const previousYields = yieldsForRuns(selected, previouslyAllocatedRuns);
+    for (const [typeId, totalQuantity] of yieldsForRuns(selected, totalAllocatedRuns)) {
+      const produced = totalQuantity - (previousYields.get(typeId) ?? 0);
+      producedMaterials.set(typeId, (producedMaterials.get(typeId) ?? 0) + produced);
+      remainingRequirements.set(
+        typeId,
+        Math.max(0, (remainingRequirements.get(typeId) ?? 0) - produced),
+      );
+    }
+  };
+
   for (const source of ["owned", "purchase"] as const) {
     const available = candidates
       .filter((candidate) => candidate.source === source)
       .map((candidate) => ({ ...candidate }));
     while ([...remainingRequirements.values()].some((quantity) => quantity > 0)) {
       const ranked = available
-        .map((candidate) => ({
-          candidate,
-          score: candidateScore(candidate, remainingRequirements),
-        }))
+        .map((candidate) => {
+          const runs = contributingRuns(candidate, remainingRequirements);
+          return {
+            candidate,
+            runs,
+            score: runs > 0 ? candidateScore(candidate, remainingRequirements, runs) : undefined,
+          };
+        })
         .filter(
-          (entry): entry is typeof entry & { score: NonNullable<typeof entry.score> } =>
-            entry.score !== undefined
-            && contributingRuns(entry.candidate, remainingRequirements) > 0,
+          (
+            entry,
+          ): entry is typeof entry & {
+            runs: number;
+            score: NonNullable<typeof entry.score>;
+          } => entry.runs > 0 && entry.score !== undefined,
         )
         .sort(
           (left, right) =>
             Number(left.score.haulingVolume > 0) - Number(right.score.haulingVolume > 0)
-            || right.score.covered / (1 + right.score.haulingVolume)
-              - left.score.covered / (1 + left.score.haulingVolume)
             || left.score.surplus - right.score.surplus
+            || right.score.coveragePerVolume - left.score.coveragePerVolume
+            || right.score.coverageEfficiency - left.score.coverageEfficiency
+            || right.score.covered - left.score.covered
             || left.candidate.typeId - right.candidate.typeId,
         );
       const selectedEntry = ranked.at(0);
@@ -178,36 +225,7 @@ export function allocateReprocessing(
       const selected = selectedEntry.candidate;
 
       const runs = contributingRuns(selected, remainingRequirements);
-      const consumedQuantity = runs * selected.portionSize;
-      const localQuantity = Math.min(
-        consumedQuantity,
-        selected.quantityAtReprocessingLocation ?? 0,
-      );
-      selected.availableQuantity -= consumedQuantity;
-      selected.quantityAtReprocessingLocation = Math.max(
-        0,
-        (selected.quantityAtReprocessingLocation ?? 0) - consumedQuantity,
-      );
-      const consumed = source === "owned" ? consumedOwned : consumedPurchases;
-      consumed.set(selected.typeId, (consumed.get(selected.typeId) ?? 0) + consumedQuantity);
-      if (source === "owned" && localQuantity > 0) {
-        readyToReprocess.set(
-          selected.typeId,
-          (readyToReprocess.get(selected.typeId) ?? 0) + localQuantity,
-        );
-      }
-      const previouslyAllocatedRuns = allocatedRunsByCandidate.get(selected) ?? 0;
-      const totalAllocatedRuns = previouslyAllocatedRuns + runs;
-      allocatedRunsByCandidate.set(selected, totalAllocatedRuns);
-      const previousYields = yieldsForRuns(selected, previouslyAllocatedRuns);
-      for (const [typeId, totalQuantity] of yieldsForRuns(selected, totalAllocatedRuns)) {
-        const produced = totalQuantity - (previousYields.get(typeId) ?? 0);
-        producedMaterials.set(typeId, (producedMaterials.get(typeId) ?? 0) + produced);
-        remainingRequirements.set(
-          typeId,
-          Math.max(0, (remainingRequirements.get(typeId) ?? 0) - produced),
-        );
-      }
+      recordAllocation(source, selected, runs);
     }
   }
 

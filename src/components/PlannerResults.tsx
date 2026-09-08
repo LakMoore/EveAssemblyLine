@@ -14,6 +14,9 @@ import type { ClientCharacterStatus, ClientJobsResponse } from "@/lib/client/req
 import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
 import {
   getNonProductionHaulingQuantity,
+  getMaterialBuyOrBuildQuantity,
+  getMaterialOverviewSurplus,
+  getMaterialSurplus,
   groupBuyEntriesByMarketCategory,
   groupPlanItemEntriesByBuildLocation,
   mergeBuyEntries,
@@ -958,6 +961,17 @@ function PlanList({
       );
     }
   }
+  const sortedHaulGroups = [...haulGroups.values()].sort((left, right) => {
+    const leftSourceName =
+      locationNamesById.get(left.fromLocationId) ?? String(left.fromLocationId);
+    const rightSourceName =
+      locationNamesById.get(right.fromLocationId) ?? String(right.fromLocationId);
+    return (
+      leftSourceName.localeCompare(rightSourceName)
+      || left.fromLocationId - right.fromLocationId
+      || left.toLocationId - right.toLocationId
+    );
+  });
   const planColumns = ["Required", "Available", "Buy/Build", "Surplus"] as const;
 
   function getPlanCells(
@@ -967,13 +981,18 @@ function PlanList({
       return {
         Required: entry.requiredQuantity.toLocaleString(),
         Available: entry.availableStockQuantity.toLocaleString(),
-        "Buy/Build": (
-          Math.max(0, entry.productionQuantity - (entry.reprocessingQuantity ?? 0))
-          + entry.buyQuantity
+        "Buy/Build": getMaterialBuyOrBuildQuantity(
+          entry.requiredQuantity,
+          entry.availableStockQuantity,
+          entry.productionQuantity,
+          entry.reprocessingQuantity ?? 0,
         ).toLocaleString(),
-        Surplus: Math
-          .max(0, entry.availableStockQuantity - entry.requiredQuantity)
-          .toLocaleString(),
+        Surplus: getMaterialOverviewSurplus(
+          entry.requiredQuantity,
+          entry.availableStockQuantity,
+          entry.productionQuantity,
+          entry.reprocessingQuantity ?? 0,
+        ).toLocaleString(),
       };
     }
     if (entry.kind === "bpc") {
@@ -1517,7 +1536,7 @@ function PlanList({
       )}
       {activeTab === "Haul" ? (
         <div className={styles.haulGroups}>
-          {[...haulGroups.values()].map((group) => (
+          {sortedHaulGroups.map((group) => (
             <section
               className={styles.haulGroup}
               key={`${group.fromLocationId}:${group.toLocationId}`}

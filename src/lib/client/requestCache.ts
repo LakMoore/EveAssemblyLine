@@ -192,7 +192,7 @@ export type ClientCorporationSource = {
 };
 
 export function groupClientAssetsByLocation(data: ClientAssetsResponse) {
-  return (data.facilities ?? [])
+  const facilityLocations = (data.facilities ?? [])
     .filter((facility): facility is Facility & { id: number } => typeof facility.id === "number")
     .map((facility) => {
       const items = (data.assets ?? []).filter(
@@ -223,6 +223,41 @@ export function groupClientAssetsByLocation(data: ClientAssetsResponse) {
         items,
       };
     });
+  const facilityIds = new Set(facilityLocations.map((location) => location.locationId));
+  const anchoredItemsBySystem = new Map<number, StockItem[]>();
+  for (const item of data.assets ?? []) {
+    if (
+      item.sourceLocationKind !== "anchored"
+      || item.sourceSystemId === undefined
+      || facilityIds.has(item.rootLocationId ?? -1)
+    ) continue;
+    const items = anchoredItemsBySystem.get(item.sourceSystemId) ?? [];
+    items.push(item);
+    anchoredItemsBySystem.set(item.sourceSystemId, items);
+  }
+  const anchoredLocations = [...anchoredItemsBySystem].map(([systemId, items]) => ({
+    locationId: systemId,
+    name: items[0]?.sourceSystemName ?? `System ${systemId}`,
+    locationType: "anchored" as const,
+    systemId,
+    systemName: items[0]?.sourceSystemName ?? `System ${systemId}`,
+    resolved: items.every((item) => item.sourceSystemName !== undefined),
+    assetCount: items.length,
+    personalAssetCount: items.filter((item) => item.ownerType !== "corporation").length,
+    corporationAssetCount: items.filter((item) => item.ownerType === "corporation").length,
+    totalCount: items.reduce((total, item) => total + item.quantity, 0),
+    totalVolume: items.reduce(
+      (total, item) =>
+        total
+        + item.quantity
+          * (item.isPackaged
+            ? (item.packagedVolume ?? item.assembledVolume ?? 0)
+            : (item.assembledVolume ?? 0)),
+      0,
+    ),
+    items,
+  }));
+  return [...facilityLocations, ...anchoredLocations];
 }
 
 export type ClientShipsResponse = {

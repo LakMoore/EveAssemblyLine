@@ -25,7 +25,6 @@ import {
   getTypes,
   getTypesByIds,
   getShipTypeIds,
-  getHaulerShipTypeIds,
   getBlueprintById,
   getSystems,
 } from "@/cache/services/sdeCache";
@@ -1163,6 +1162,32 @@ async function refreshJobAdjustments(
   }
 }
 
+const haulableShipHoldFlags = new Set([
+  "Cargo",
+  "ExpeditionHold",
+  "FleetHangar",
+  "MoonMaterialBay",
+  "SpecializedAmmoHold",
+  "SpecializedAsteroidHold",
+  "SpecializedGasHold",
+  "SpecializedIceHold",
+  "SpecializedIndustrialShipHold",
+  "SpecializedLargeShipHold",
+  "SpecializedMaterialBay",
+  "SpecializedMediumShipHold",
+  "SpecializedMineralHold",
+  "SpecializedOreHold",
+  "SpecializedPlanetaryCommoditiesHold",
+  "SpecializedSalvageHold",
+  "SpecializedShipHold",
+  "SpecializedSmallShipHold",
+]);
+
+/** Returns whether a ship-held asset can be used as haulable planning stock. */
+export function isHaulableShipHoldAsset(asset: Pick<AssetRecord, "locationFlag">) {
+  return haulableShipHoldFlags.has(asset.locationFlag);
+}
+
 function effectiveAssets(cache: OwnerCache) {
   const deductions = new Map(cache.jobAssetDeductions);
   const additions = new Map(cache.jobAssetAdditions);
@@ -1295,10 +1320,7 @@ async function indexAssetsByPurpose(rawAssets: AssetRecord[]) {
       assembledShipsByItemId: new Map<number, AssetRecord>(),
     };
   }
-  const [shipTypeIds, haulerShipTypeIds] = await Promise.all([
-    getShipTypeIds(),
-    getHaulerShipTypeIds(),
-  ]);
+  const shipTypeIds = await getShipTypeIds();
 
   const assetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
   const shipByAssetId = new Map<number, AssetRecord | null>();
@@ -1359,15 +1381,14 @@ async function indexAssetsByPurpose(rawAssets: AssetRecord[]) {
         // filter out assets that are assembled ships
         if (assembledShipsByItemId.has(asset.itemId)) return false;
 
-        // filter out assets that are locations of other assets, unless they are packaged hauler descendants
+        // filter out assets that are locations of other assets, unless they are haulable ship descendants
         const containingShip = shipByAssetId.get(asset.itemId) ?? null;
         const isParentedByShip = containingShip !== null && containingShip.itemId !== asset.itemId;
-        const isPackagedHaulerDescendant =
-          isParentedByShip && !asset.isSingleton && haulerShipTypeIds.has(containingShip.typeId);
+        const isHaulableShipDescendant = isParentedByShip && isHaulableShipHoldAsset(asset);
 
-        // not parented by a ship and not a stock location, or is a packaged hauler descendant
+        // not parented by a ship and not a stock location, or is a haulable ship descendant
         return (
-          (!isParentedByShip && !stockLocationIds.has(asset.itemId)) || isPackagedHaulerDescendant
+          (!isParentedByShip && !stockLocationIds.has(asset.itemId)) || isHaulableShipDescendant
         );
       })
       .map((asset) => [asset.itemId, asset]),

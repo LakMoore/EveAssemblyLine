@@ -20,7 +20,7 @@ function candidate(overrides: Partial<ReprocessingCandidate> = {}): Reprocessing
   };
 }
 
-test("excludes stock and production surplus from reprocessing requirements", () => {
+test("excludes production surplus from net reprocessing requirements", () => {
   assert.deepEqual(
     getNetReprocessingRequirements([
       {
@@ -42,7 +42,10 @@ test("excludes stock and production surplus from reprocessing requirements", () 
         remainingProductionQuantity: 30,
       },
     ]),
-    new Map([[36, 50]]),
+    new Map([
+      [34, 20],
+      [36, 70],
+    ]),
   );
 });
 
@@ -59,6 +62,79 @@ test("allocates only the complete portions needed to cover a shortage", () => {
   assert.deepEqual(result.consumedOwned, new Map([[62516, 200]]));
   assert.deepEqual(result.producedMaterials, new Map([[34, 800]]));
   assert.deepEqual(result.remainingRequirements, new Map([[34, 0]]));
+});
+
+test("prefers the candidate that covers demand with less collateral output", () => {
+  const result = allocateReprocessing(
+    new Map([[34, 1_000]]),
+    [
+      candidate({
+        typeId: 62520,
+        availableQuantity: 100,
+        yields: new Map([
+          [34, 1_000],
+          [35, 1_000],
+        ]),
+      }),
+      candidate({
+        typeId: 62521,
+        availableQuantity: 1_000,
+        yields: new Map([[34, 100]]),
+      }),
+    ],
+  );
+
+  assert.deepEqual(result.consumedOwned, new Map([[62521, 1_000]]));
+  assert.deepEqual(result.producedMaterials, new Map([[34, 1_000]]));
+  assert.deepEqual(result.remainingRequirements, new Map([[34, 0]]));
+});
+
+test("does not consume owned portions beyond the material shortage", () => {
+  const result = allocateReprocessing(
+    new Map([[34, 500]]),
+    [candidate({ availableQuantity: 1_000 })],
+  );
+
+  assert.deepEqual(result.consumedOwned, new Map([[62516, 200]]));
+  assert.deepEqual(result.producedMaterials, new Map([[34, 800]]));
+  assert.deepEqual(result.remainingRequirements, new Map([[34, 0]]));
+});
+
+test("selects only the complete portions needed for the largest shortage", () => {
+  const result = allocateReprocessing(
+    new Map([[37, 6_004]]),
+    [
+      candidate({
+        typeId: 62553,
+        availableQuantity: 120_400,
+        portionSize: 100,
+        efficiency: 52.75,
+        yields: new Map([
+          [35, 2_100],
+          [36, 1_575],
+          [37, 840],
+        ]),
+      }),
+    ],
+  );
+
+  assert.deepEqual(result.consumedOwned, new Map([[62553, 1_400]]));
+  assert.deepEqual(
+    result.producedMaterials,
+    new Map([
+      [35, 15_508],
+      [36, 11_631],
+      [37, 6_203],
+    ]),
+  );
+  assert.deepEqual(
+    result.remainingRequirements,
+    new Map([
+      [37, 0],
+      [35, 0],
+      [36, 0],
+    ]),
+  );
 });
 
 test("uses mixed yields to satisfy several shortages", () => {

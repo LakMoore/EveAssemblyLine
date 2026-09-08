@@ -232,6 +232,7 @@ async function allocatePlanReprocessing(
   preliminaryPlan: PlanResult,
   locations: PlanActivityLocations | undefined,
   planningData: PlanningData,
+  ownedQuantityLimits?: ReadonlyMap<number, number>,
 ): Promise<ReprocessingAllocation> {
   const { types, compressibleTypes, typeMaterials } = planningData;
   const reprocessableTypeIds = new Set([
@@ -245,6 +246,7 @@ async function allocatePlanReprocessing(
       .map((material) => [material.typeId, material.stockQuantity]),
   );
   const reprocessingLocationId = locations?.reprocessing ?? locations?.manufacturing;
+
   const ownedQuantityByTypeId = new Map<number, number>();
   const localQuantityByTypeId = new Map<number, number>();
   for (const item of request.stock) {
@@ -302,7 +304,12 @@ async function allocatePlanReprocessing(
     };
   };
   const ownedCandidates = [...ownedQuantityByTypeId].flatMap(([typeId, quantity]) => {
-    const availableQuantity = Math.max(0, quantity - (reservedDirectStock.get(typeId) ?? 0));
+    const reservedQuantity = reservedDirectStock.get(typeId) ?? 0;
+    const usableQuantity = Math.max(0, quantity - reservedQuantity);
+    const availableQuantity = Math.min(
+      usableQuantity,
+      ownedQuantityLimits?.get(typeId) ?? usableQuantity,
+    );
     const candidate = candidateFor(typeId, availableQuantity, "owned");
     return candidate ? [candidate] : [];
   });
@@ -332,6 +339,86 @@ async function allocatePlanReprocessing(
     consumedPurchases: committed.purchased,
     producedMaterials,
   };
+}
+
+/** Returns the first complete contribution from an owned candidate to a preliminary shortage. */
+function firstOwnedContributionQuantity(
+  typeId: number,
+  currentQuantity: number,
+  preliminaryPlan: PlanResult,
+  request: PlannerRequest,
+  planningData: PlanningData,
+) {
+  const type = planningData.types.get(typeId);
+  const materials = planningData.typeMaterials.get(typeId)?.materials;
+  const portionSize = type?.portionSize ?? 1;
+  if (!type || !materials?.length || portionSize <= 0) return currentQuantity;
+  const requirements = getNetReprocessingRequirements(preliminaryPlan.lists.materialsToBuy);
+  const efficiency = request.reprocessingEfficiencies?.[String(typeId)] ?? 50;
+  const usefulRuns = materials.flatMap((material) => {
+    const yieldPerRun = (material.quantity * efficiency) / 100;
+    const shortage = requirements.get(material.materialTypeID) ?? 0;
+    return yieldPerRun > 0 && shortage > 0 ? [Math.ceil(shortage / yieldPerRun)] : [];
+  });
+  if (usefulRuns.length === 0) return currentQuantity;
+  return Math.min(currentQuantity, Math.min(...usefulRuns) * portionSize);
+}
+
+/** Returns whether a reduced allocation preserves the current material purchases. */
+function preservesPurchaseQuantities(current: PlanResult, baseline: PlanResult) {
+  const baselineBuyQuantities = new Map(
+    baseline.lists.materialsToBuy.map((material) => [material.typeId, material.buyQuantity]),
+  );
+  return current.lists.materialsToBuy.every(
+    (material) => material.buyQuantity <= (baselineBuyQuantities.get(material.typeId) ?? 0),
+  );
+}
+
+/** Removes owned reprocessing that is not needed to preserve the current purchase plan. */
+async function minimizeOwnedReprocessing(
+  request: PlannerRequest,
+  allocation: ReprocessingAllocation,
+  baseline: PlanResult,
+  preliminaryPlan: PlanResult,
+  locations: PlanActivityLocations | undefined,
+  planningData: PlanningData,
+  options: PlanPassOptions,
+): Promise<ReprocessingAllocation> {
+  let minimized = allocation;
+  let currentPlan = baseline;
+  for (const [typeId, currentQuantity] of allocation.consumedOwned) {
+    const limitedQuantity = firstOwnedContributionQuantity(
+      typeId,
+      currentQuantity,
+      preliminaryPlan,
+      request,
+      planningData,
+    );
+    if (limitedQuantity >= currentQuantity) continue;
+    const quantityLimits = new Map(minimized.consumedOwned);
+    quantityLimits.set(typeId, limitedQuantity);
+    const candidateAllocation = await allocatePlanReprocessing(
+      request,
+      preliminaryPlan,
+      locations,
+      planningData,
+      quantityLimits,
+    );
+    const candidatePlan = await calculatePlanPass(
+      request,
+      planningData,
+      {
+        ...options,
+        locations,
+        persistStockConsumption: false,
+        reprocessing: candidateAllocation,
+      },
+    );
+    if (!preservesPurchaseQuantities(candidatePlan, currentPlan)) continue;
+    minimized = candidateAllocation;
+    currentPlan = candidatePlan;
+  }
+  return minimized;
 }
 
 /** Converts committed compressed purchases in special stockpiles into future available stock. */
@@ -449,12 +536,31 @@ async function calculatePlanWithoutStockpiles(
     locations,
     planningData,
   );
-  return calculatePlanPass(
+  const preliminaryFinalPlan = await calculatePlanPass(
     request,
     planningData,
     {
       ...options,
       reprocessing,
+      persistStockConsumption: false,
+      locations,
+    },
+  );
+  const minimizedReprocessing = await minimizeOwnedReprocessing(
+    request,
+    reprocessing,
+    preliminaryFinalPlan,
+    preliminaryPlan,
+    locations,
+    planningData,
+    options,
+  );
+  return calculatePlanPass(
+    request,
+    planningData,
+    {
+      ...options,
+      reprocessing: minimizedReprocessing,
       persistStockConsumption: true,
       locations,
     },
@@ -540,6 +646,7 @@ async function calculatePlanPass(
   const stockByLocationAndType = new Map<number, Map<number, number>>();
   const industryOutputByLocationAndType = new Map<number, Map<number, number>>();
   const industryOutputByType = new Map<number, number>();
+  const reservedJobInputByLocationAndType = new Map<string, number>();
   for (const lot of stockLots) {
     const locationStock = stockByLocationAndType.get(lot.rootLocationId) ?? new Map();
     locationStock.set(lot.typeId, (locationStock.get(lot.typeId) ?? 0) + lot.quantity);
@@ -649,6 +756,35 @@ async function calculatePlanPass(
         Math.floor((input.availableQuantity * requestedRuns) / input.requiredQuantity),
       ),
     );
+  }
+  function getMaterialInstallableRuns(inputs: PlanJobInputs, requestedRuns: number) {
+    if (requestedRuns <= 0) return 0;
+    const materialInputs = inputs.materials.filter((input) => input.requiredQuantity > 0);
+    if (materialInputs.length === 0) return requestedRuns;
+    return Math.min(
+      requestedRuns,
+      ...materialInputs.map((input) =>
+        Math.floor(
+          ((standardStock.get(input.typeId) ?? 0) * requestedRuns) / input.requiredQuantity,
+        ),
+      ),
+    );
+  }
+  function reserveJobInputDemand(
+    inputs: PlanJobInputs,
+    requestedRuns: number,
+    installableRuns: number,
+    locationId: number | undefined,
+  ) {
+    if (locationId === undefined || requestedRuns <= 0 || installableRuns <= 0) return;
+    for (const material of inputs.materials) {
+      const key = `${locationId}:${material.typeId}`;
+      const quantity = Math.ceil((material.requiredQuantity * installableRuns) / requestedRuns);
+      reservedJobInputByLocationAndType.set(
+        key,
+        (reservedJobInputByLocationAndType.get(key) ?? 0) + quantity,
+      );
+    }
   }
   function reserveJobInputAvailability(
     inputs: PlanJobInputs,
@@ -1194,6 +1330,7 @@ async function calculatePlanPass(
     allowMarketOrderStock = false,
     activityRootLocationId?: number,
     finalProductLocationId?: number,
+    stockConsumptionQuantity = quantity,
   ) {
     let phase = "stock";
     let activity = "unknown";
@@ -1202,23 +1339,31 @@ async function calculatePlanPass(
       "expand",
       async () => {
         if (quantity <= 0) return;
+        let remainingStockConsumption = Math.min(quantity, Math.max(0, stockConsumptionQuantity));
 
         quantity -= consumeDemandOnlyOutput(typeId, quantity);
         const finalProductStockConsumed =
           finalProductLocationId === undefined
             ? 0
-            : consumeAvailableStock(typeId, quantity, finalProductLocationId, true);
+            : consumeAvailableStock(
+                typeId,
+                remainingStockConsumption,
+                finalProductLocationId,
+                true,
+              );
+        remainingStockConsumption -= finalProductStockConsumed;
         const standardConsumed =
           finalProductStockConsumed
           + consumeAvailableStock(
             typeId,
-            quantity - finalProductStockConsumed,
+            remainingStockConsumption,
             activityRootLocationId,
             false,
             finalProductLocationId,
           );
+        remainingStockConsumption -= standardConsumed - finalProductStockConsumed;
         const marketAvailable = allowMarketOrderStock ? (marketOrderStock.get(typeId) ?? 0) : 0;
-        const marketConsumed = Math.min(marketAvailable, quantity - standardConsumed);
+        const marketConsumed = Math.min(marketAvailable, remainingStockConsumption);
         const stockConsumed = standardConsumed + marketConsumed;
         updateMaterial(
           typeId,
@@ -1249,7 +1394,7 @@ async function calculatePlanPass(
         if (quantity <= 0) return;
 
         const available = producedParts.get(typeId) ?? 0;
-        const consumed = Math.min(available, quantity);
+        const consumed = Math.min(available, quantity, remainingStockConsumption);
         if (consumed > 0) {
           const remaining = available - consumed;
           if (remaining > 0) producedParts.set(typeId, remaining);
@@ -1265,7 +1410,7 @@ async function calculatePlanPass(
             fallbackName,
             true,
             "icon",
-            true,
+            false,
             activityRootLocationId,
           );
           return;
@@ -1291,7 +1436,7 @@ async function calculatePlanPass(
             fallbackName,
             true,
             "icon",
-            true,
+            false,
             activityRootLocationId,
           );
           return;
@@ -1350,6 +1495,8 @@ async function calculatePlanPass(
             profile.materialMultiplier,
           );
           const installableRuns = getInstallableRuns(jobInputs, runsNeeded);
+          const materialInstallableRuns = getMaterialInstallableRuns(jobInputs, runsNeeded);
+          reserveJobInputDemand(jobInputs, runsNeeded, materialInstallableRuns, activityLocationId);
           reserveJobInputAvailability(jobInputs, runsNeeded, activityLocationId);
           const mergedJobInputs = mergeJobInputs(
             existingInputs,
@@ -1397,6 +1544,17 @@ async function calculatePlanPass(
                   defaultEfficiency,
                   false,
                   activityLocationId,
+                  undefined,
+                  Math.ceil(
+                    (
+                      material.quantity
+                      * runsNeeded
+                      * (1 - efficiency.me / 100)
+                      * profile.materialMultiplier
+                      * materialInstallableRuns
+                    )
+                      / runsNeeded,
+                  ),
                 );
               }
             },
@@ -1440,6 +1598,8 @@ async function calculatePlanPass(
           profile.materialMultiplier,
         );
         const installableRuns = getInstallableRuns(jobInputs, runsNeeded);
+        const materialInstallableRuns = getMaterialInstallableRuns(jobInputs, runsNeeded);
+        reserveJobInputDemand(jobInputs, runsNeeded, materialInstallableRuns, activityLocationId);
         reserveJobInputAvailability(jobInputs, runsNeeded, activityLocationId);
         const mergedJobInputs = mergeJobInputs(existingInputs, jobInputs, false);
         jobInputsByBlueprint.set(blueprint._key, mergedJobInputs);
@@ -1507,6 +1667,16 @@ async function calculatePlanPass(
                 defaultEfficiency,
                 false,
                 activityLocationId,
+                undefined,
+                Math.ceil(
+                  (
+                    material.quantity
+                    * runsNeeded
+                    * profile.materialMultiplier
+                    * materialInstallableRuns
+                  )
+                    / runsNeeded,
+                ),
               );
             }
           },
@@ -1619,8 +1789,18 @@ async function calculatePlanPass(
 
   addSkillPrerequisites();
 
+  const reprocessingTypeIds = new Set([
+    ...(reprocessing?.consumedOwned.keys() ?? []),
+    ...(reprocessing?.consumedPurchases.keys() ?? []),
+  ]);
   for (const material of materials.values()) {
     material.remainingProductionQuantity = producedParts.get(material.typeId) ?? 0;
+    if (locations !== undefined && !reprocessingTypeIds.has(material.typeId)) {
+      material.buyQuantity = Math.max(
+        0,
+        material.requiredQuantity - material.availableStockQuantity - material.buildQuantity,
+      );
+    }
   }
 
   const resolvedName = (typeId: number) => {
@@ -1657,17 +1837,7 @@ async function calculatePlanPass(
           locationId: reprocessingLocationId,
         }));
 
-  const localDemandByLocationAndType = new Map<string, number>();
-  for (const job of [...manufacturingJobs.values(), ...reactionJobs.values()]) {
-    if (job.locationId === undefined) continue;
-    for (const input of job.inputs.materials) {
-      const key = `${job.locationId}:${input.typeId}`;
-      localDemandByLocationAndType.set(
-        key,
-        (localDemandByLocationAndType.get(key) ?? 0) + input.requiredQuantity,
-      );
-    }
-  }
+  const localDemandByLocationAndType = reservedJobInputByLocationAndType;
   const localStockByLocationAndType = new Map<string, number>();
   for (const lot of stockLots) {
     const key = `${lot.rootLocationId}:${lot.typeId}`;

@@ -10,6 +10,7 @@ import {
   getKnownNonStructureItemIds,
   isCorporationRecordAllowed,
   isCargoContainerType,
+  isHaulableShipHoldAsset,
   setFresh,
 } from "./cache";
 import { getGroups, getMarketGroups, getTypesByIds } from "@/cache/services/sdeCache";
@@ -488,6 +489,12 @@ test("builds an undocked current ship with a solar-system root", () => {
       resolved: true,
     },
   );
+});
+
+test("only includes assets from haulable ship holds in planning stock", () => {
+  assert.equal(isHaulableShipHoldAsset({ locationFlag: "Cargo" }), true);
+  assert.equal(isHaulableShipHoldAsset({ locationFlag: "SpecializedMiningHold" }), false);
+  assert.equal(isHaulableShipHoldAsset({ locationFlag: "DroneBay" }), false);
 });
 
 test("builds a docked current ship with its known system", () => {

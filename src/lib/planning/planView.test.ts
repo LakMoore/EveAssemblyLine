@@ -3,6 +3,9 @@ import test from "node:test";
 import {
   createHaulItemExclusionKey,
   excludeHaulItemsFromStock,
+  getMaterialOverviewSurplus,
+  getMaterialSurplus,
+  getMaterialBuyOrBuildQuantity,
   getNonProductionHaulingQuantity,
   groupBuyEntriesByMarketCategory,
   groupPlanItemEntriesByBuildLocation,
@@ -182,6 +185,26 @@ test("gives in-production stock precedence over overlapping haul quantity", () =
   assert.equal(getNonProductionHaulingQuantity(40, 28), 12);
   assert.equal(getNonProductionHaulingQuantity(12, 28), 0);
   assert.equal(getNonProductionHaulingQuantity(12, 0), 12);
+});
+
+test("calculates material surplus from unconsumed stock and production", () => {
+  assert.equal(getMaterialSurplus(0, 100), 100);
+  assert.equal(getMaterialSurplus(25, 75), 100);
+  assert.equal(getMaterialSurplus(-10, -5), 0);
+});
+
+test("calculates material buy or build quantity from uncovered demand", () => {
+  assert.equal(getMaterialBuyOrBuildQuantity(17_628_713, 16_925_705, 0, 0), 703_008);
+  assert.equal(getMaterialBuyOrBuildQuantity(7_560, 283, 7_800, 0), 7_800);
+  assert.equal(getMaterialBuyOrBuildQuantity(7_240, 5_723, 2_473, 2_473), 1_517);
+  assert.equal(getMaterialBuyOrBuildQuantity(500, 800, 0, 0), 0);
+});
+
+test("calculates overview surplus from required and available totals", () => {
+  assert.equal(getMaterialOverviewSurplus(17_628_713, 16_925_705, 0, 0), 0);
+  assert.equal(getMaterialOverviewSurplus(7_560, 283, 7_800, 0), 523);
+  assert.equal(getMaterialOverviewSurplus(7_240, 5_723, 2_473, 2_473), 0);
+  assert.equal(getMaterialOverviewSurplus(500, 800, 0, 0), 300);
 });
 
 test("merges duplicate plan types in the global view", () => {

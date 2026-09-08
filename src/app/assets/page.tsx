@@ -219,7 +219,10 @@ export default function StockPage() {
               .filter((location) => location.items.length > 0)
               .map((location) => ({
                 ...location,
-                structureId: location.locationId,
+                structureId:
+                  location.locationType === "anchored" ? null : String(location.locationId),
+                structureName:
+                  location.locationType === "anchored" ? "\u00abUndocked\u00bb" : location.name,
               }))
           : [];
         setKnownStructures(structures);
@@ -234,14 +237,17 @@ export default function StockPage() {
           };
         });
         const esiRecords = esiLocations.map((location) => {
-          const knownStructure = structures.find(
-            (structure) => structure.esiStructureId === location.structureId,
-          );
+          const isAnchored = location.locationType === "anchored";
+          const knownStructure = isAnchored
+            ? undefined
+            : structures.find((structure) => structure.esiStructureId === location.locationId);
           return {
             systemId: location.systemId,
             systemName: location.systemName ?? knownStructure?.systemName ?? "Unknown system",
-            structureId: String(location.structureId),
-            structureName: knownStructure?.name ?? location.name,
+            structureId: isAnchored ? null : String(location.locationId),
+            structureName: isAnchored
+              ? "\u00abUndocked\u00bb"
+              : (knownStructure?.name ?? location.name),
             source: "esi" as const,
             items: location.items,
           };
@@ -335,7 +341,7 @@ export default function StockPage() {
       void loadPageData(true, false);
     };
     const handleCorporationSettingsChanged = () => {
-      void loadPageData(true, true);
+      void loadPageData(true, false);
     };
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
     window.addEventListener(

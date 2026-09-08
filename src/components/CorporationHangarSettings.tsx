@@ -160,13 +160,13 @@ export default function CorporationHangarSettings() {
     let cancelled = false;
     let latestLoad = 0;
 
-    async function loadPageData(reload = false) {
+    async function loadPageData() {
       const loadId = ++latestLoad;
       try {
         const [assetsData, settings, loadedCharacters] = await Promise.all([
-          loadClientAssets(language, reload),
-          loadClientCorporationSettings(reload),
-          loadClientCharacters(reload),
+          loadClientAssets(language),
+          loadClientCorporationSettings(),
+          loadClientCharacters(),
         ]);
         if (cancelled || loadId !== latestLoad) return;
         setCorporationSources(assetsData.corporationSources ?? []);
@@ -190,10 +190,10 @@ export default function CorporationHangarSettings() {
         setCorporationSources(detail.corporationSources);
         return;
       }
-      void loadPageData(true);
+      void loadPageData();
     };
     const handleSettingsChanged = () => {
-      void loadPageData(true);
+      void loadPageData();
     };
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
     window.addEventListener("assembly-line-corporation-settings-changed", handleSettingsChanged);
@@ -269,6 +269,16 @@ export default function CorporationHangarSettings() {
         ...current.filter((entry) => entry.corporationId !== source.corporationId),
         nextSettings,
       ]);
+      try {
+        await loadClientAssets(language, true);
+      }
+      catch (error) {
+        setSourceError(
+          error instanceof Error
+            ? `Settings saved, but the asset cache could not be refreshed: ${error.message}`
+            : "Settings saved, but the asset cache could not be refreshed.",
+        );
+      }
       window.dispatchEvent(new CustomEvent("assembly-line-corporation-settings-changed"));
     }
     catch (error) {
@@ -335,6 +345,16 @@ export default function CorporationHangarSettings() {
         ...current.filter((entry) => entry.corporationId !== corporation.corporationId),
         nextSettings,
       ]);
+      try {
+        await loadClientAssets(language, true);
+      }
+      catch (error) {
+        setSourceError(
+          error instanceof Error
+            ? `Settings saved, but the asset cache could not be refreshed: ${error.message}`
+            : "Settings saved, but the asset cache could not be refreshed.",
+        );
+      }
       window.dispatchEvent(new CustomEvent("assembly-line-corporation-settings-changed"));
     }
     catch (error) {

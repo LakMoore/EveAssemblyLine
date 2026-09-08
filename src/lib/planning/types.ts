@@ -138,6 +138,9 @@ export interface PlanStockItem extends StockItemBase {
   blueprintPrints?: BlueprintPrint[];
   sourceLocationId?: number;
   sourceLocationName?: string;
+  sourceLocationKind?: "station" | "structure" | "anchored";
+  sourceSystemId?: number;
+  sourceSystemName?: string;
   category?: "blueprint" | "reactionformula" | "item";
   inBuildQuantity?: number;
   source?: "marketOrder";

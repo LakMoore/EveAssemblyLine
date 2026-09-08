@@ -214,6 +214,40 @@ export function getNonProductionHaulingQuantity(
   return Math.max(0, haulingQuantity - productionQuantity);
 }
 
+/** Return material left after stock and production have covered the plan. */
+export function getMaterialSurplus(
+  remainingStockQuantity: number,
+  remainingProductionQuantity: number,
+): number {
+  return Math.max(0, remainingStockQuantity) + Math.max(0, remainingProductionQuantity);
+}
+
+/** Return the material quantity still needing purchase or production. */
+export function getMaterialBuyOrBuildQuantity(
+  requiredQuantity: number,
+  availableStockQuantity: number,
+  productionQuantity: number,
+  reprocessingQuantity: number,
+): number {
+  const plannedProductionQuantity = Math.max(0, productionQuantity - reprocessingQuantity);
+  return Math.max(0, plannedProductionQuantity, requiredQuantity - availableStockQuantity);
+}
+
+/** Return material that remains after stock and planned production cover the requirement. */
+export function getMaterialOverviewSurplus(
+  requiredQuantity: number,
+  availableStockQuantity: number,
+  productionQuantity: number,
+  reprocessingQuantity: number,
+): number {
+  return Math.max(
+    0,
+    availableStockQuantity
+      + Math.max(0, productionQuantity - reprocessingQuantity)
+      - requiredQuantity,
+  );
+}
+
 /**
  * Merge plan rows that represent the same type within one view scope.
  *

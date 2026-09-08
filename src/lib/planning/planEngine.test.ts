@@ -201,6 +201,48 @@ test("buy blacklist keeps a buildable item on the manufacturing path", async () 
   assert.equal(rifter.buildQuantity, 1);
 });
 
+test("uses co-located corporation material stock for manufacturing", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: 57450,
+          name: "Electro-Neural Signaller",
+          quantity: 3,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+          locationId: 123456,
+          ownerType: "corporation",
+          ownerId: 202,
+          corporationSource: {
+            rootLocationId: manufacturingLocationId,
+            locationFlag: "CorpSAG3",
+            containerItemIds: [123456],
+          },
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: 37605,
+            name: "Test final product",
+            quantity: 3,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const material = result.lists.materialsToBuy.find((entry) => entry.typeId === 57450);
+
+  assert(material);
+  assert.equal(material.stockQuantity, 0);
+  assert.equal(material.buyQuantity, 0);
+});
+
 test("plans invention attempts and materials for a missing T2 BPC", async () => {
   const result = await calculatePlan(
     request(
@@ -578,6 +620,20 @@ test("allocates reaction material at an assigned reaction facility", async () =>
     request(
       0,
       [
+        {
+          typeId: 4247,
+          name: "Helium Fuel Block",
+          quantity: 5,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: 16633,
+          name: "Hydrocarbons",
+          quantity: 100,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
         {
           typeId: 16636,
           name: "Reaction Material B",
@@ -1156,9 +1212,23 @@ test("reallocates shared stock after intermediate inventory reduces stockpile de
       0,
       [
         {
+          typeId: 16633,
+          name: "Hydrocarbons",
+          quantity: 200000,
+          category: "item",
+          rootLocationId: reprocessingLocationId,
+        },
+        {
           typeId: 16634,
           name: "Atmospheric Gases",
           quantity: 200000,
+          category: "item",
+          rootLocationId: reprocessingLocationId,
+        },
+        {
+          typeId: 4312,
+          name: "Oxygen Fuel Block",
+          quantity: 100,
           category: "item",
           rootLocationId: reprocessingLocationId,
         },
@@ -1250,6 +1320,20 @@ test("reallocates material stock after reaction formulas are reserved", async ()
           name: "Reaction Formula",
           quantity: 1,
           category: "reactionformula",
+          rootLocationId: reprocessingLocationId,
+        },
+        {
+          typeId: 4312,
+          name: "Oxygen Fuel Block",
+          quantity: 25_000,
+          category: "item",
+          rootLocationId: reprocessingLocationId,
+        },
+        {
+          typeId: 16634,
+          name: "Atmospheric Gases",
+          quantity: 1_500_000,
+          category: "item",
           rootLocationId: reprocessingLocationId,
         },
       ],
@@ -1870,6 +1954,27 @@ test("uses activity-location stock before stockpile stock-location stock", async
           category: "item",
           rootLocationId: manufacturingLocationId,
         },
+        {
+          typeId: tritaniumTypeId,
+          name: "Tritanium",
+          quantity: 8682,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 36,
+          name: "Mexallon",
+          quantity: 486,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 37,
+          name: "Isogen",
+          quantity: 24,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
       ],
       {
         items: [
@@ -1993,6 +2098,27 @@ test("reserves stock for manufacturing inputs before direct stockpile demand", a
           category: "item",
           rootLocationId: manufacturingLocationId,
         },
+        {
+          typeId: 35,
+          name: "Pyerite",
+          quantity: 6000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 36,
+          name: "Mexallon",
+          quantity: 2500,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 37,
+          name: "Isogen",
+          quantity: 500,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
       ],
       {
         items: [],
@@ -2068,6 +2194,286 @@ test("reserves stock for manufacturing inputs before direct stockpile demand", a
   assert(tritaniumInput);
   assert.equal(tritaniumInput.availableQuantity, 32000);
   assert.equal(tritaniumInput.status, "ready");
+});
+
+test("does not reserve blocked manufacturing inputs before reaction demand", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: tritaniumTypeId,
+          name: "Tritanium",
+          quantity: 1000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 46158,
+          name: "Reaction Formula",
+          quantity: 1,
+          category: "reactionformula",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: 4312,
+          name: "Oxygen Fuel Block",
+          quantity: 5,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: 30371,
+          name: "Reaction Material A",
+          quantity: 100,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: 30370,
+          name: "Reaction Material B",
+          quantity: 200,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: rifterBlueprintTypeId,
+          name: "Rifter Blueprint",
+          quantity: 1,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [{ itemId: 9014, type: "bpo", runs: -1 }],
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "blocked-manufacturing",
+            name: "Blocked manufacturing",
+            locations: {
+              stock: manufacturingLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: manufacturingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: rifterTypeId,
+                name: "Rifter",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "reaction",
+            name: "Reaction",
+            locations: {
+              stock: alternateSourceLocationId,
+              manufacturing: alternateSourceLocationId,
+              reactions: alternateSourceLocationId,
+              reprocessing: alternateSourceLocationId,
+              copying: alternateSourceLocationId,
+              invention: alternateSourceLocationId,
+            },
+            items: [
+              {
+                typeId: 30303,
+                name: "Reaction Product",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const manufacturingJob = result.lists.manufacturingJobs.find(
+    (job) => job.stockpileId === "blocked-manufacturing" && job.typeId === rifterBlueprintTypeId,
+  );
+  const reactionJob = result.lists.reactionJobs.find(
+    (job) => job.stockpileId === "reaction" && job.typeId === 46158,
+  );
+  const tritaniumHaul = result.lists.haulingTasks.find(
+    (task) =>
+      task.stockpileId === "reaction"
+      && task.itemTypeId === tritaniumTypeId
+      && task.fromLocationId === manufacturingLocationId
+      && task.toLocationId === alternateSourceLocationId,
+  );
+
+  assert(manufacturingJob);
+  assert(reactionJob);
+  assert.equal(manufacturingJob.runsAvailable, 0);
+  assert(tritaniumHaul);
+  assert.equal(tritaniumHaul.quantity, 1000);
+});
+
+test("hauls remote mexallon for a reaction after blocked capital manufacturing", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: 21018,
+          name: "Capital Armor Plates Blueprint",
+          quantity: 1,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [{ itemId: 9020, type: "bpo", runs: -1 }],
+        },
+        {
+          typeId: 36,
+          name: "Mexallon",
+          quantity: 1_350_000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 2870,
+          name: "Capital Armor Plate Material",
+          quantity: 150,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 34,
+          name: "Tritanium",
+          quantity: 1_350_000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 35,
+          name: "Pyerite",
+          quantity: 4_725_000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 37,
+          name: "Isogen",
+          quantity: 360_000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 38,
+          name: "Nocxium",
+          quantity: 36_000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 39,
+          name: "Zydrine",
+          quantity: 18_450,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 46160,
+          name: "Fullerene Intercalated Graphite Reaction Formula",
+          quantity: 1,
+          category: "reactionformula",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: 4246,
+          name: "Helium Fuel Block",
+          quantity: 5,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: 30371,
+          name: "Reaction Material A",
+          quantity: 100,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: 30372,
+          name: "Reaction Material B",
+          quantity: 100,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: 21017,
+            name: "Capital Armor Plates",
+            quantity: 30,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+          {
+            typeId: 30305,
+            name: "Fullerene Intercalated Graphite",
+            quantity: 120,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        stockpiles: [
+          {
+            id: "capital-reaction",
+            name: "Capital reaction",
+            locations: {
+              stock: manufacturingLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: alternateSourceLocationId,
+              reprocessing: manufacturingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: 21017,
+                name: "Capital Armor Plates",
+                quantity: 30,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+              {
+                typeId: 30305,
+                name: "Fullerene Intercalated Graphite",
+                quantity: 120,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const manufacturingJob = result.lists.manufacturingJobs.find((job) => job.typeId === 21018);
+  const mexallonHaul = result.lists.haulingTasks.find(
+    (task) =>
+      task.itemTypeId === 36
+      && task.fromLocationId === manufacturingLocationId
+      && task.toLocationId === alternateSourceLocationId,
+  );
+
+  assert(manufacturingJob);
+  assert.equal(manufacturingJob.runsAvailable, 0);
+  assert(mexallonHaul);
+  assert.equal(mexallonHaul.quantity, 600);
 });
 
 test("reserves fuel blocks for reaction inputs before direct stockpile demand", async () => {
@@ -2188,6 +2594,27 @@ test("combines haul tasks with the same type and route", async () => {
           category: "item",
           rootLocationId: sourceLocationId,
         },
+        {
+          typeId: 35,
+          name: "Pyerite",
+          quantity: 12000,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+        {
+          typeId: 36,
+          name: "Mexallon",
+          quantity: 5000,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+        {
+          typeId: 37,
+          name: "Isogen",
+          quantity: 1000,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
       ],
       {
         items: [],
@@ -2273,6 +2700,27 @@ test("merges shared haul routes across ownership sources", async () => {
           rootLocationId: sourceLocationId,
           ownerType: "corporation",
           ownerId: 202,
+        },
+        {
+          typeId: 35,
+          name: "Pyerite",
+          quantity: 12000,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+        {
+          typeId: 36,
+          name: "Mexallon",
+          quantity: 5000,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+        {
+          typeId: 37,
+          name: "Isogen",
+          quantity: 1000,
+          category: "item",
+          rootLocationId: sourceLocationId,
         },
       ],
       {
@@ -2483,6 +2931,27 @@ test("plans input delivery and ready output delivery as separate hauls", async (
           quantity: 32000,
           category: "item",
           rootLocationId: sourceLocationId,
+        },
+        {
+          typeId: 35,
+          name: "Pyerite",
+          quantity: 6000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 36,
+          name: "Mexallon",
+          quantity: 2500,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 37,
+          name: "Isogen",
+          quantity: 500,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
         },
       ],
       {
@@ -3469,6 +3938,49 @@ test("hauls only complete compressed portions needed by the plan", async () => {
   assert.equal(compressedVeldspar.availableStockQuantity, 250);
 });
 
+test("hauls Gneiss when remote direct stock leaves a material shortage", async () => {
+  const compressedGneissTypeId = 62553;
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: compressedGneissTypeId,
+          name: "Compressed Gneiss II-Grade",
+          quantity: 120_400,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: 37,
+            name: "Isogen",
+            quantity: 6_004,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        reprocessingEfficiencies: { [compressedGneissTypeId]: 52.75 },
+      },
+    ),
+  );
+  const isogen = result.lists.materialsToBuy.find((material) => material.typeId === 37);
+  const gneissHaul = result.lists.haulingTasks.find(
+    (task) => task.itemTypeId === compressedGneissTypeId,
+  );
+
+  assert(isogen);
+  assert(gneissHaul);
+  assert.equal(isogen.buyQuantity, 0);
+  assert.equal(isogen.productionQuantity, 6_203);
+  assert.equal(gneissHaul.quantity, 1_400);
+  assert.equal(gneissHaul.fromLocationId, sourceLocationId);
+  assert.equal(gneissHaul.toLocationId, reprocessingLocationId);
+});
+
 test("lists only selected stock already at the refinery for immediate reprocessing", async () => {
   const result = await calculatePlan(
     request(
@@ -3770,6 +4282,64 @@ test("makes refinery compressed stock available as reprocessed material", async 
   assert.equal(rawGas.availableSourceCounts?.reprocessing, 100);
   assert.equal(rawGas.buyQuantity, 0);
   assert.equal(result.metadata.availableStockByTypeId?.[String(amberMykoserocinTypeId)], 100);
+});
+
+test("consumes owned compressed gas surplus and hauls it to the refinery", async () => {
+  const result = await calculatePlan(
+    request(
+      7_240,
+      [
+        {
+          typeId: amberMykoserocinTypeId,
+          name: "Amber Mykoserocin",
+          quantity: 3_250,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: compressedAmberMykoserocinTypeId,
+          name: "Compressed Amber Mykoserocin",
+          quantity: 2_748,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: amberMykoserocinTypeId,
+            name: "Amber Mykoserocin",
+            quantity: 7_240,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        reprocessingEfficiencies: { [compressedAmberMykoserocinTypeId]: 90 },
+      },
+    ),
+  );
+  const rawGas = result.lists.materialsToBuy.find(
+    (material) => material.typeId === amberMykoserocinTypeId,
+  );
+  const compressedGas = result.lists.materialsToBuy.find(
+    (material) => material.typeId === compressedAmberMykoserocinTypeId,
+  );
+  const compressedHaul = result.lists.haulingTasks.find(
+    (task) => task.itemTypeId === compressedAmberMykoserocinTypeId,
+  );
+
+  assert(rawGas);
+  assert(compressedGas);
+  assert(compressedHaul);
+  assert.equal(rawGas.productionQuantity, 2_473);
+  assert.equal(rawGas.buyQuantity, 1_517);
+  assert.equal(compressedGas.requiredQuantity, 2_748);
+  assert.equal(compressedGas.stockQuantity, 2_748);
+  assert.equal(compressedGas.buyQuantity, 0);
+  assert.equal(compressedHaul.quantity, 2_748);
+  assert.equal(compressedHaul.fromLocationId, sourceLocationId);
+  assert.equal(compressedHaul.toLocationId, reprocessingLocationId);
 });
 
 test("falls back to 50 percent when no efficiency snapshot is supplied", async () => {

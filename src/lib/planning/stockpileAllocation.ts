@@ -12,6 +12,7 @@ type StockpileDemand = Map<number, number>;
 type StockpileDemandResult = {
   demand: StockpileDemand;
   jobInputDemand: StockpileDemand;
+  fullJobInputDemand: StockpileDemand;
 };
 
 type CalculatePlanPass = (
@@ -50,10 +51,46 @@ function isAllocatableOrdinaryStock(item: PlanStockItem) {
   );
 }
 
+function getOrdinaryStockByTypeId(stock: PlanStockItem[]) {
+  const quantities = new Map<number, number>();
+  for (const item of stock) {
+    if (!isAllocatableOrdinaryStock(item)) continue;
+    quantities.set(item.typeId, (quantities.get(item.typeId) ?? 0) + item.quantity);
+  }
+  return quantities;
+}
+
+function getInstallableInputQuantity(
+  job:
+    | PlanResult["lists"]["manufacturingJobs"][number]
+    | PlanResult["lists"]["reactionJobs"][number],
+  requiredQuantity: number,
+  availableStockByTypeId: ReadonlyMap<number, number>,
+) {
+  if (job.runs <= 0 || requiredQuantity <= 0) return 0;
+  const materialInputs = job.inputs.materials.filter((input) => input.requiredQuantity > 0);
+  const installableRuns = materialInputs.length
+    ? Math.min(
+        job.runs,
+        ...materialInputs.map((input) =>
+          Math.floor(
+            ((availableStockByTypeId.get(input.typeId) ?? 0) * job.runs) / input.requiredQuantity,
+          ),
+        ),
+      )
+    : job.runs;
+  if (installableRuns <= 0) return 0;
+  return Math.min(requiredQuantity, Math.ceil((requiredQuantity * installableRuns) / job.runs));
+}
+
 /** Extracts the material and job-input demand used to reserve shared stock. */
-export function getPlanDemand(result: PlanResult): StockpileDemandResult {
+export function getPlanDemand(
+  result: PlanResult,
+  availableStockByTypeId = new Map<number, number>(),
+): StockpileDemandResult {
   const demand = new Map<number, number>();
   const jobInputDemand = new Map<number, number>();
+  const fullJobInputDemand = new Map<number, number>();
   for (const material of result.lists.materialsToBuy) {
     demand.set(
       material.typeId,
@@ -67,9 +104,18 @@ export function getPlanDemand(result: PlanResult): StockpileDemandResult {
   }
   for (const job of [...result.lists.manufacturingJobs, ...result.lists.reactionJobs]) {
     for (const material of job.inputs.materials) {
+      fullJobInputDemand.set(
+        material.typeId,
+        (fullJobInputDemand.get(material.typeId) ?? 0) + material.requiredQuantity,
+      );
+      const installableQuantity = getInstallableInputQuantity(
+        job,
+        material.requiredQuantity,
+        availableStockByTypeId,
+      );
       jobInputDemand.set(
         material.typeId,
-        (jobInputDemand.get(material.typeId) ?? 0) + material.requiredQuantity,
+        (jobInputDemand.get(material.typeId) ?? 0) + installableQuantity,
       );
     }
   }
@@ -93,7 +139,7 @@ export function getPlanDemand(result: PlanResult): StockpileDemandResult {
   for (const [typeId, quantity] of jobInputDemand) {
     demand.set(typeId, Math.max(demand.get(typeId) ?? 0, quantity));
   }
-  return { demand, jobInputDemand };
+  return { demand, jobInputDemand, fullJobInputDemand };
 }
 
 /** Reserves ordinary stock globally so remote stockpiles cannot consume local lots. */
@@ -125,16 +171,23 @@ export async function allocateStockpileStock(
         planningData,
         { locations: activityLocations(stockpile) },
       );
-      const { demand, jobInputDemand } = getPlanDemand(result);
+      const { demand, jobInputDemand, fullJobInputDemand } = getPlanDemand(
+        result,
+        getOrdinaryStockByTypeId(request.stock),
+      );
       return {
         demand: new Map([...demand].filter(([, quantity]) => quantity > 0)),
         jobInputDemand: new Map([...jobInputDemand].filter(([, quantity]) => quantity > 0)),
+        fullJobInputDemand: new Map([...fullJobInputDemand].filter(([, quantity]) => quantity > 0)),
       };
     }),
   );
   const demandByStockpile = stockpileDemandResults.map(({ demand }) => demand);
   const jobInputDemandByStockpile = stockpileDemandResults.map(
     ({ jobInputDemand }) => jobInputDemand,
+  );
+  const fullJobInputDemandByStockpile = stockpileDemandResults.map(
+    ({ fullJobInputDemand }) => fullJobInputDemand,
   );
   let remainingDemand = demandByStockpile.map((demand) => new Map(demand));
   let remainingStock = request.stock.map((item) =>
@@ -271,17 +324,18 @@ export async function allocateStockpileStock(
   const allocateOrdinaryStock = (
     demandByStockpile: StockpileDemand[],
     jobInputDemandByStockpile: StockpileDemand[],
+    fullJobInputDemandByStockpile: StockpileDemand[],
   ) => {
     remainingStock = request.stock.map((item) =>
       isAllocatableOrdinaryStock(item) ? item.quantity : 0,
     );
     for (const allocation of allocations) allocation.clear();
     const standingDemandByStockpile = demandByStockpile.map((demand, stockpileIndex) => {
-      const jobInputDemand = jobInputDemandByStockpile[stockpileIndex];
+      const fullJobInputDemand = fullJobInputDemandByStockpile[stockpileIndex];
       return new Map(
         [...demand].map(([typeId, quantity]) => [
           typeId,
-          Math.max(0, quantity - (jobInputDemand.get(typeId) ?? 0)),
+          Math.max(0, quantity - (fullJobInputDemand.get(typeId) ?? 0)),
         ]),
       );
     });
@@ -332,6 +386,7 @@ export async function allocateStockpileStock(
   const ordinaryStockpileStock = allocateOrdinaryStock(
     demandByStockpile,
     jobInputDemandByStockpile,
+    fullJobInputDemandByStockpile,
   );
   const ordinaryStockpileResults = await Promise.all(
     stockpiles.map(async (stockpile, stockpileIndex) =>
@@ -352,14 +407,20 @@ export async function allocateStockpileStock(
   );
   const actualDemandByStockpile: StockpileDemand[] = [];
   const actualJobInputDemandByStockpile: StockpileDemand[] = [];
+  const actualFullJobInputDemandByStockpile: StockpileDemand[] = [];
   for (const result of ordinaryStockpileResults) {
-    const { demand, jobInputDemand } = getPlanDemand(result);
+    const { demand, jobInputDemand, fullJobInputDemand } = getPlanDemand(
+      result,
+      getOrdinaryStockByTypeId(request.stock),
+    );
     actualDemandByStockpile.push(demand);
     actualJobInputDemandByStockpile.push(jobInputDemand);
+    actualFullJobInputDemandByStockpile.push(fullJobInputDemand);
   }
   const correctedStockpileStock = allocateOrdinaryStock(
     actualDemandByStockpile,
     actualJobInputDemandByStockpile,
+    actualFullJobInputDemandByStockpile,
   );
   const specialDemandByStockpile: StockpileDemand[] = await Promise.all(
     stockpiles.map(async (stockpile, stockpileIndex) => {
@@ -414,6 +475,7 @@ export async function allocateStockpileStock(
   const finalSpecialStock = allocatedStockpileStock();
   const finalDemandByStockpile: StockpileDemand[] = [];
   const finalJobInputDemandByStockpile: StockpileDemand[] = [];
+  const finalFullJobInputDemandByStockpile: StockpileDemand[] = [];
   for (const [stockpileIndex, stockpile] of stockpiles.entries()) {
     const result = await calculatePlanPass(
       {
@@ -428,11 +490,19 @@ export async function allocateStockpileStock(
       planningData,
       { locations: activityLocations(stockpile) },
     );
-    const { demand, jobInputDemand } = getPlanDemand(result);
+    const { demand, jobInputDemand, fullJobInputDemand } = getPlanDemand(
+      result,
+      getOrdinaryStockByTypeId(request.stock),
+    );
     finalDemandByStockpile.push(demand);
     finalJobInputDemandByStockpile.push(jobInputDemand);
+    finalFullJobInputDemandByStockpile.push(fullJobInputDemand);
   }
-  allocateOrdinaryStock(finalDemandByStockpile, finalJobInputDemandByStockpile);
+  allocateOrdinaryStock(
+    finalDemandByStockpile,
+    finalJobInputDemandByStockpile,
+    finalFullJobInputDemandByStockpile,
+  );
   for (const [stockpileIndex, allocation] of allocations.entries()) {
     for (const [stockIndex, quantity] of specialAllocations[stockpileIndex]) {
       allocation.set(stockIndex, quantity);

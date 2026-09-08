@@ -77,6 +77,42 @@ test("groups each market order at its source location once", () => {
   );
 });
 
+test("groups anchored assets under their solar system", () => {
+  const locations = groupClientAssetsByLocation({
+    facilities: [],
+    assets: [
+      {
+        typeId: 62456,
+        name: "Compressed Glistening Bitumens",
+        quantity: 15_750,
+        rootLocationId: 30_004_129,
+        sourceLocationKind: "anchored",
+        sourceSystemId: 30_004_129,
+        sourceSystemName: "Munory",
+        ownerType: "character",
+        ownerId: 2118225169,
+      },
+    ],
+  });
+
+  assert.deepEqual(
+    locations.map((location) => ({
+      locationId: location.locationId,
+      locationType: location.locationType,
+      name: location.name,
+      quantity: location.items[0]?.quantity,
+    })),
+    [
+      {
+        locationId: 30_004_129,
+        locationType: "anchored",
+        name: "Munory",
+        quantity: 15_750,
+      },
+    ],
+  );
+});
+
 test("normalizes structure names and hides legacy raw location labels", () => {
   const normalized = normalizeClientAssetsResponse({
     facilities: [],
