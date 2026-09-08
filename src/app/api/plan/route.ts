@@ -521,15 +521,12 @@ export async function POST(request: Request) {
   const responseBody = withPlanId(await response.json(), planId);
   const rawResponseBody = JSON.stringify(responseBody);
   if (response.ok) {
-    try {
-      await incrementPlansCreated();
-    }
-    catch (error) {
+    void incrementPlansCreated().catch((error: unknown) => {
       console.error(
         "Could not increment plans-created statistic",
         error instanceof Error ? error.message : "unknown error",
       );
-    }
+    });
   }
   logPlanRequest({
     id: planId,
