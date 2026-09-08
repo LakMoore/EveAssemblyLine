@@ -9,12 +9,14 @@ import type {
   PlanSourceCounts,
   PlanSourceIcon,
   PlanStockItem,
+  HaulPatch,
 } from "@/lib/planning/types";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import type { ClientCharacterStatus, ClientJobsResponse } from "@/lib/client/requestCache";
 import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
 import {
   getNonProductionHaulingQuantity,
+  getMaterialDisplayQuantity,
   getMaterialBuyOrBuildQuantity,
   getMaterialOverviewSurplus,
   getMaterialSurplus,
@@ -30,6 +32,7 @@ import {
   type PlanBuyEntry,
   type PlanItemEntry,
 } from "@/lib/planning/planView";
+import { isHaulTaskPatched } from "@/lib/planning/haulPatches";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import CopyableText from "@/components/CopyableText";
 import JobInputsResponsive, {
@@ -40,6 +43,7 @@ import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { toast } from "@/components/ui/toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
@@ -55,6 +59,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import styles from "@/app/page.module.css";
 import {
@@ -170,6 +175,14 @@ type HaulStockItem = PlanStockItem & {
   packagedVolume?: number;
 };
 
+type DisplayHaulTask = PlanResult["lists"]["haulingTasks"][number] & {
+  completed?: boolean;
+};
+
+function haulTaskRenderKey(task: DisplayHaulTask) {
+  return `${task.fromLocationId}:${task.toLocationId}:${task.itemTypeId}:${task.completed ? "completed" : "pending"}`;
+}
+
 function getHaulTasksWithExclusions(
   tasks: PlanResult["lists"]["haulingTasks"],
   stock: HaulStockItem[],
@@ -210,6 +223,75 @@ function getHaulTasksWithExclusions(
       volume,
       fromLocationId: parsedKey.sourceRootLocationId,
       toLocationId: destinationLocationId,
+    });
+  }
+  return displayedTasks;
+}
+
+/** Restores completed haul rows from persisted patches when recalculation removes them. */
+function getHaulTasksWithPatches(
+  tasks: PlanResult["lists"]["haulingTasks"],
+  stock: HaulStockItem[],
+  patches: ReadonlyMap<string, HaulPatch>,
+): DisplayHaulTask[] {
+  const displayedTasks: DisplayHaulTask[] = [...tasks];
+  const liveTaskKeys = new Set(
+    tasks.map((task) => `${task.fromLocationId}:${task.toLocationId}:${task.itemTypeId}`),
+  );
+  const patchGroups = new Map<
+    string,
+    {
+      fromLocationId: number;
+      toLocationId: number;
+      itemTypeId: number;
+      name?: string;
+      quantity: number;
+      volume: number;
+    }
+  >();
+
+  for (const patch of patches.values()) {
+    const routeKey = `${patch.fromLocationId}:${patch.toLocationId}:${patch.itemTypeId}`;
+    const group = patchGroups.get(routeKey) ?? {
+      fromLocationId: patch.fromLocationId,
+      toLocationId: patch.toLocationId,
+      itemTypeId: patch.itemTypeId,
+      name: patch.name,
+      quantity: 0,
+      volume: 0,
+    };
+    group.name ??= patch.name;
+    group.quantity += patch.quantity;
+    group.volume += patch.volume ?? 0;
+    patchGroups.set(routeKey, group);
+  }
+
+  for (const [routeKey, group] of patchGroups) {
+    if (liveTaskKeys.has(routeKey)) continue;
+    const matchingStock = stock.filter(
+      (item) =>
+        item.typeId === group.itemTypeId
+        && item.category !== "blueprint"
+        && item.category !== "reactionformula"
+        && (
+          getStockLocationId(item) === group.fromLocationId
+          || getStockLocationId(item) === group.toLocationId
+        ),
+    );
+    const stockItem = matchingStock.at(0);
+    const unitVolume = stockItem
+      ? stockItem.isPackaged
+        ? (stockItem.packagedVolume ?? stockItem.assembledVolume ?? 0)
+        : (stockItem.assembledVolume ?? 0)
+      : 0;
+    displayedTasks.push({
+      itemTypeId: group.itemTypeId,
+      name: group.name ?? stockItem?.name ?? `Type ${group.itemTypeId}`,
+      quantity: group.quantity,
+      volume: group.volume || group.quantity * unitVolume,
+      fromLocationId: group.fromLocationId,
+      toLocationId: group.toLocationId,
+      completed: true,
     });
   }
   return displayedTasks;
@@ -472,6 +554,8 @@ export default function PlannerResults({
   onExcludeHaulStockpile,
   haulItemExclusion,
   onToggleHaulItemExclusion,
+  haulPatches,
+  onToggleHaulPatches,
 }: {
   language: SdeLanguage;
   plan: PlanResult | null;
@@ -490,6 +574,11 @@ export default function PlannerResults({
     key: string,
     destinationLocationId: number,
     excluded: boolean,
+  ) => Promise<void>;
+  haulPatches: ReadonlyMap<string, HaulPatch>;
+  onToggleHaulPatches: (
+    tasks: PlanResult["lists"]["haulingTasks"],
+    patched: boolean,
   ) => Promise<void>;
 }) {
   const [activeTab, setActiveTab] = useState<PlannerTab>("Plan");
@@ -658,6 +747,8 @@ export default function PlannerResults({
               onExcludeHaulStockpile={onExcludeHaulStockpile}
               haulItemExclusion={haulItemExclusion}
               onToggleHaulItemExclusion={onToggleHaulItemExclusion}
+              haulPatches={haulPatches}
+              onToggleHaulPatches={onToggleHaulPatches}
               resultsHeaderRef={resultsHeaderRef}
             />
           ) : (
@@ -692,6 +783,8 @@ function PlanList({
   onExcludeHaulStockpile,
   haulItemExclusion,
   onToggleHaulItemExclusion,
+  haulPatches,
+  onToggleHaulPatches,
   resultsHeaderRef,
 }: {
   activeTab: PlannerTab;
@@ -714,6 +807,11 @@ function PlanList({
     destinationLocationId: number,
     excluded: boolean,
   ) => Promise<void>;
+  haulPatches: ReadonlyMap<string, HaulPatch>;
+  onToggleHaulPatches: (
+    tasks: PlanResult["lists"]["haulingTasks"],
+    patched: boolean,
+  ) => Promise<void>;
   resultsHeaderRef: RefObject<HTMLElement | null>;
 }) {
   const router = useRouter();
@@ -726,6 +824,8 @@ function PlanList({
     null,
   );
   const [togglingHaulItemKey, setTogglingHaulItemKey] = useState<string | null>(null);
+  const [togglingHaulPatchKey, setTogglingHaulPatchKey] = useState<string | null>(null);
+  const [togglingHaulPatchGroupKey, setTogglingHaulPatchGroupKey] = useState<string | null>(null);
   const [showTotalRunCounts, setShowTotalRunCounts] = useState(false);
   const [showTotalManufacturingRunCounts, setShowTotalManufacturingRunCounts] = useState(false);
   const [planViewMode, setPlanViewMode] = useState<PlanViewMode>("all");
@@ -769,10 +869,10 @@ function PlanList({
         reprocessingJobs?: PlanResult["lists"]["reprocessingJobs"];
       }
     ).reprocessingJobs ?? [];
-  const haulingTasks = getHaulTasksWithExclusions(
-    plan.lists.haulingTasks,
+  const haulingTasks = getHaulTasksWithPatches(
+    getHaulTasksWithExclusions(plan.lists.haulingTasks, stock, haulItemExclusion),
     stock,
-    haulItemExclusion,
+    haulPatches,
   );
   const rawList =
     activeTab === "Plan"
@@ -1736,34 +1836,72 @@ function PlanList({
                         : "Exclude and Recalculate"}
                     </span>
                   </Button>
+                  {(() => {
+                    const eligibleTasks = group.tasks.filter(
+                      (task) => !haulItemExclusion.has(haulTaskKey(task)),
+                    );
+                    const patchedCount = eligibleTasks.filter((task) =>
+                      isHaulTaskPatched(task, haulPatches),
+                    ).length;
+                    const groupChecked =
+                      eligibleTasks.length > 0 && patchedCount === eligibleTasks.length;
+                    const groupIndeterminate = patchedCount > 0 && !groupChecked;
+                    const groupKey = `${group.fromLocationId}:${group.toLocationId}`;
+                    return (
+                      <Checkbox
+                        aria-label="Mark all eligible items as moved"
+                        checked={groupChecked}
+                        indeterminate={groupIndeterminate}
+                        disabled={
+                          eligibleTasks.length === 0
+                          || togglingHaulPatchGroupKey !== null
+                          || togglingHaulPatchKey !== null
+                        }
+                        onCheckedChange={(checked) => {
+                          setTogglingHaulPatchGroupKey(groupKey);
+                          void onToggleHaulPatches(eligibleTasks, checked).finally(() => {
+                            setTogglingHaulPatchGroupKey(null);
+                          });
+                        }}
+                      />
+                    );
+                  })()}
                 </div>
               </header>
               <div className={styles.haulGroupRows}>
                 {group.tasks.map((task) => {
                   const key = haulTaskKey(task);
                   const isExcluded = haulItemExclusion.has(key);
+                  const isPatched = isHaulTaskPatched(task, haulPatches);
                   return (
                     <div
-                      className={`${styles.haulRow} ${isExcluded ? styles.haulRowDisabled : ""}`}
-                      key={key}
+                      className={`${styles.haulRow} ${isExcluded ? styles.haulRowDisabled : ""} ${isPatched ? styles.haulRowCompleted : ""}`}
+                      key={haulTaskRenderKey(task)}
                     >
                       <span className={styles.haulRowSwitch}>
                         {togglingHaulItemKey === key ? (
                           <Spinner aria-hidden="true" />
                         ) : (
-                          <Switch
-                            aria-label={`Include ${task.name} haul`}
-                            checked={!isExcluded}
-                            disabled={togglingHaulItemKey !== null}
-                            onCheckedChange={(checked) => {
-                              setTogglingHaulItemKey(key);
-                              void onToggleHaulItemExclusion(
-                                key,
-                                task.toLocationId,
-                                !checked,
-                              ).finally(() => setTogglingHaulItemKey(null));
-                            }}
-                          />
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Switch
+                                  aria-label="Include in haul plan?"
+                                  checked={!isExcluded}
+                                  disabled={isPatched || togglingHaulItemKey !== null}
+                                  onCheckedChange={(checked) => {
+                                    setTogglingHaulItemKey(key);
+                                    void onToggleHaulItemExclusion(
+                                      key,
+                                      task.toLocationId,
+                                      !checked,
+                                    ).finally(() => setTogglingHaulItemKey(null));
+                                  }}
+                                />
+                              }
+                            />
+                            <TooltipContent>Include in haul plan?</TooltipContent>
+                          </Tooltip>
                         )}
                       </span>
                       <TypeIdentity
@@ -1779,6 +1917,27 @@ function PlanList({
                           copyLabel="Quantity"
                         />
                         <small>{Math.ceil(task.volume).toLocaleString()} m3</small>
+                      </span>
+                      <span className={styles.haulRowPatch}>
+                        {togglingHaulPatchKey === key ? (
+                          <Spinner aria-hidden="true" />
+                        ) : (
+                          <Checkbox
+                            aria-label={`Mark ${task.name} as moved`}
+                            checked={isPatched}
+                            disabled={
+                              isExcluded
+                              || togglingHaulPatchGroupKey !== null
+                              || togglingHaulPatchKey !== null
+                            }
+                            onCheckedChange={(checked) => {
+                              setTogglingHaulPatchKey(key);
+                              void onToggleHaulPatches([task], checked).finally(() => {
+                                setTogglingHaulPatchKey(null);
+                              });
+                            }}
+                          />
+                        )}
                       </span>
                     </div>
                   );
@@ -1938,7 +2097,7 @@ function PlanList({
                           : isPlanReaction
                             ? `${entry.runsNeeded.toLocaleString()} runs`
                             : materialEntry
-                              ? `${(materialEntry.buildQuantity || materialEntry.buyQuantity).toLocaleString()} units`
+                              ? `${getMaterialDisplayQuantity(materialEntry, activeTab === "Buy" ? "buy" : "plan").toLocaleString()} units`
                               : activeTab === "Copy" && "neededQuantity" in entry
                                 ? `${Math.max(0, entry.neededQuantity - entry.stockRuns).toLocaleString()} runs`
                                 : "quantity" in entry
@@ -1961,7 +2120,12 @@ function PlanList({
                           : isPlanReaction
                             ? String(entry.runsNeeded)
                             : materialEntry
-                              ? String(materialEntry.buildQuantity || materialEntry.buyQuantity)
+                              ? String(
+                                  getMaterialDisplayQuantity(
+                                    materialEntry,
+                                    activeTab === "Buy" ? "buy" : "plan",
+                                  ),
+                                )
                               : activeTab === "Copy" && "neededQuantity" in entry
                                 ? String(Math.max(0, entry.neededQuantity - entry.stockRuns))
                                 : "quantity" in entry

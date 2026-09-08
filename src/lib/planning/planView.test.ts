@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   createHaulItemExclusionKey,
   excludeHaulItemsFromStock,
+  getMaterialDisplayQuantity,
   getMaterialOverviewSurplus,
   getMaterialSurplus,
   getMaterialBuyOrBuildQuantity,
@@ -198,6 +199,13 @@ test("calculates material buy or build quantity from uncovered demand", () => {
   assert.equal(getMaterialBuyOrBuildQuantity(7_560, 283, 7_800, 0), 7_800);
   assert.equal(getMaterialBuyOrBuildQuantity(7_240, 5_723, 2_473, 2_473), 1_517);
   assert.equal(getMaterialBuyOrBuildQuantity(500, 800, 0, 0), 0);
+});
+
+test("shows purchase quantity in the Buy view when production is also planned", () => {
+  const materialEntry = material({ buildQuantity: 214_183, buyQuantity: 0 });
+
+  assert.equal(getMaterialDisplayQuantity(materialEntry, "plan"), 214_183);
+  assert.equal(getMaterialDisplayQuantity(materialEntry, "buy"), 0);
 });
 
 test("calculates overview surplus from required and available totals", () => {

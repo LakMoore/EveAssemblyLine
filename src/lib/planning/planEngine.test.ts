@@ -3529,6 +3529,86 @@ test("reports reaction formula and material inputs", async () => {
   assert.equal(job.inputs.status, "ready");
 });
 
+test("does not buy a buildable reaction product when output rounding covers demand", async () => {
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: 57493,
+          name: "Reinforced Carbon Fiber Reaction Formula",
+          quantity: 1,
+          category: "reactionformula",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 57453,
+          name: "Carbon Fiber",
+          quantity: 214_200,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 57454,
+          name: "Oxy-Organic Solvents",
+          quantity: 1_071,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 57455,
+          name: "Thermosetting Polymer",
+          quantity: 214_200,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "rounded-reaction-output",
+            name: "Rounded reaction output",
+            locations: {
+              stock: manufacturingLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: manufacturingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: 57457,
+                name: "Reinforced Carbon Fiber",
+                quantity: 214_183,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+              {
+                typeId: 57457,
+                name: "Reinforced Carbon Fiber",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const material = result.lists.materialsToBuy.find((entry) => entry.typeId === 57457);
+
+  assert(material);
+  assert.equal(material.requiredQuantity, 214_184);
+  assert.equal(material.buildQuantity, 214_183);
+  assert.equal(material.productionQuantity, 214_200);
+  assert.equal(material.buyQuantity, 0);
+});
+
 test("accumulates installable reaction runs across repeated expansions", async () => {
   const result = await calculatePlan(
     request(

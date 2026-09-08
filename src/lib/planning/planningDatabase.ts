@@ -1,5 +1,5 @@
 const databaseName = "assembly-line";
-const databaseVersion = 9;
+const databaseVersion = 10;
 
 export const buildStoreName = "build-lists";
 export const stockStoreName = "stock";
@@ -8,6 +8,7 @@ export const compressSettingsStoreName = "compress-settings";
 export const plannerPreferencesStoreName = "planner-preferences";
 export const stockMetadataStoreName = "stock-metadata";
 export const endpointCacheStoreName = "endpoint-cache";
+export const haulPatchesStoreName = "haul-patches";
 
 let databasePromise: Promise<IDBDatabase> | null = null;
 
@@ -24,6 +25,7 @@ function openDatabase() {
         plannerPreferencesStoreName,
         stockMetadataStoreName,
         endpointCacheStoreName,
+        haulPatchesStoreName,
       ]) {
         if (!database.objectStoreNames.contains(storeName)) database.createObjectStore(storeName);
       }

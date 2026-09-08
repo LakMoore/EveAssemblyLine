@@ -1798,7 +1798,9 @@ async function calculatePlanPass(
     if (locations !== undefined && !reprocessingTypeIds.has(material.typeId)) {
       material.buyQuantity = Math.max(
         0,
-        material.requiredQuantity - material.availableStockQuantity - material.buildQuantity,
+        material.requiredQuantity
+          - material.availableStockQuantity
+          - Math.max(0, material.productionQuantity - (material.reprocessingQuantity ?? 0)),
       );
     }
   }

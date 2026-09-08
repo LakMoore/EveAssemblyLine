@@ -146,6 +146,19 @@ export interface PlanStockItem extends StockItemBase {
   source?: "marketOrder";
 }
 
+export interface HaulPatch {
+  key: string;
+  itemTypeId: number;
+  name?: string;
+  quantity: number;
+  volume?: number;
+  fromLocationId: number;
+  toLocationId: number;
+  ownerType: StockOwnerType;
+  ownerId: number;
+  assetsLastModified?: string;
+}
+
 export interface StockItem extends PlanStockItem {
   assembledVolume?: number;
   packagedVolume?: number;

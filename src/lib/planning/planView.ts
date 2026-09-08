@@ -14,6 +14,14 @@ export type PlanBuyEntry =
 export type HaulItemExclusion = ReadonlyMap<string, number>;
 type MaterialValues = Omit<Extract<PlanItemEntry, { kind: "material" }>, "kind">;
 
+/** Returns the quantity that a material row should display in the selected output view. */
+export function getMaterialDisplayQuantity(
+  material: Pick<MaterialValues, "buildQuantity" | "buyQuantity">,
+  view: "plan" | "buy",
+): number {
+  return view === "buy" ? material.buyQuantity : material.buildQuantity || material.buyQuantity;
+}
+
 /** Creates the stable identity used to retain one excluded haul item across plan requests. */
 export function createHaulItemExclusionKey(
   sourceRootLocationId: number,

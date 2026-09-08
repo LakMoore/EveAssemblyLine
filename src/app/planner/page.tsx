@@ -38,6 +38,14 @@ import {
 } from "@/lib/client/requestCache";
 import { loadPlanResult, savePlanResult } from "@/lib/planning/planResultStore";
 import { createHaulItemExclusionKey, excludeHaulItemsFromStock } from "@/lib/planning/planView";
+import { loadHaulPatches, saveHaulPatches } from "@/lib/planning/haulPatchStore";
+import {
+  applyHaulPatches,
+  createHaulPatchesForTask,
+  invalidateHaulPatches,
+  isHaulPatchForTask,
+} from "@/lib/planning/haulPatches";
+import type { HaulPatch } from "@/lib/planning/types";
 import { refreshPlannerStockpileEfficiencies } from "@/lib/planning/reprocessingClient";
 import {
   defaultLocations,
@@ -353,6 +361,8 @@ function Planner() {
   >([]);
   const [includeStock, setIncludeStock] = useState(true);
   const [haulItemExclusion, setHaulItemExclusion] = useState<Map<string, number>>(() => new Map());
+  const [haulPatches, setHaulPatches] = useState<Map<string, HaulPatch>>(() => new Map());
+  const [haulPatchesLoaded, setHaulPatchesLoaded] = useState(false);
   const [corporationSources, setCorporationSources] = useState<ClientCorporationSource[]>([]);
   const [locations, setLocations] = useState<PlannerLocations>(defaultLocations);
   const [settings, setSettings] = useState<PlannerSettings>(() => {
@@ -374,6 +384,20 @@ function Planner() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    void loadHaulPatches().then((patches) => {
+      setHaulPatches(new Map(patches.map((patch) => [patch.key, patch])));
+      setHaulPatchesLoaded(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!haulPatchesLoaded || characterStatuses.length === 0) return;
+    const retainedPatches = invalidateHaulPatches([...haulPatches.values()], characterStatuses);
+    if (retainedPatches.length === haulPatches.size) return;
+    void saveHaulPatches(retainedPatches);
+  }, [characterStatuses, haulPatches, haulPatchesLoaded]);
 
   useEffect(() => {
     let cancelled = false;
@@ -438,6 +462,15 @@ function Planner() {
   }, [language]);
 
   const stock = getPlannerStock(clientAssets, includeStock, new Set(excludedLocationIds));
+  const activeHaulPatches =
+    haulPatchesLoaded && characterStatuses.length > 0
+      ? new Map(
+          invalidateHaulPatches([...haulPatches.values()], characterStatuses).map((patch) => [
+            patch.key,
+            patch,
+          ]),
+        )
+      : haulPatches;
 
   function updateLocations(next: Partial<Pick<PlannerLocations, "manufacturing" | "reactions">>) {
     const updatedLocations = { ...locations, ...next };
@@ -600,6 +633,7 @@ function Planner() {
   async function submitPlan(
     exclusions: Set<number>,
     itemExclusions: ReadonlyMap<string, number> = haulItemExclusion,
+    patches: ReadonlyMap<string, HaulPatch> = activeHaulPatches,
   ): Promise<boolean> {
     const plannerItems = stockpiles.flatMap((stockpile) => stockpile.items);
     if (plannerItems.length === 0 || isPlanLoading) return false;
@@ -628,7 +662,10 @@ function Planner() {
       const selectedReactionFacility = locationOptions.find(
         (location) => location.locationId === primaryStockpileLocations.reactions,
       );
-      const requestStock = excludeHaulItemsFromStock(workingAssets, itemExclusions);
+      const requestStock = applyHaulPatches(
+        excludeHaulItemsFromStock(workingAssets, itemExclusions),
+        [...patches.values()],
+      );
       const planningCharacter = characterStatuses.find(
         (character) => character.characterId === planningCharacterId,
       );
@@ -753,6 +790,29 @@ function Planner() {
     else nextExclusions.delete(key);
     if (await submitPlan(new Set(excludedLocationIds), nextExclusions)) {
       setHaulItemExclusion(nextExclusions);
+    }
+  }
+
+  async function toggleHaulPatches(tasks: PlanResult["lists"]["haulingTasks"], patched: boolean) {
+    const nextPatches = new Map(activeHaulPatches);
+    const currentStock = getPlannerStock(clientAssets, includeStock, new Set(excludedLocationIds));
+    for (const task of tasks) {
+      if (haulItemExclusion.has(createHaulItemExclusionKey(task.fromLocationId, task.itemTypeId))) {
+        continue;
+      }
+      const taskPatches = createHaulPatchesForTask(task, currentStock, characterStatuses);
+      if (patched) {
+        for (const patch of taskPatches) nextPatches.set(patch.key, patch);
+      }
+      else {
+        for (const [key, patch] of nextPatches) {
+          if (isHaulPatchForTask(task, patch)) nextPatches.delete(key);
+        }
+      }
+    }
+    if (await submitPlan(new Set(excludedLocationIds), haulItemExclusion, nextPatches)) {
+      setHaulPatches(nextPatches);
+      await saveHaulPatches([...nextPatches.values()]);
     }
   }
 
@@ -1774,6 +1834,8 @@ function Planner() {
         onExcludeHaulStockpile={excludeHaulStockpile}
         haulItemExclusion={haulItemExclusion}
         onToggleHaulItemExclusion={toggleHaulItemExclusion}
+        haulPatches={activeHaulPatches}
+        onToggleHaulPatches={toggleHaulPatches}
       />
     </>
   );
