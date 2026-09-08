@@ -18,7 +18,7 @@ import type {
   PlanStockItem,
 } from "@/lib/planning/types";
 import { productionGroupDefinitions } from "@/lib/planning/productionGroups";
-import { logPlanRequest, type PlanRequestLog } from "@/lib/planning/planRequestLogger";
+import { logPlanRequest } from "@/lib/planning/planRequestLogger";
 import { getSessionFromRequest } from "@/lib/auth/session";
 import { randomUUID } from "node:crypto";
 
@@ -493,28 +493,7 @@ function withPlanId(body: unknown, planId: string): unknown {
   };
 }
 
-/** Persists a plan log and reports failures without hiding the plan response. */
-async function recordPlanRequestLog(
-  entry: Omit<PlanRequestLog, "id"> & { id: string },
-): Promise<void> {
-  try {
-    await logPlanRequest(entry);
-  }
-  catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "unknown error";
-    console.error(
-      "Plan request log persistence failed",
-      {
-        planId: entry.id,
-        error: errorMessage,
-        logEntry: entry,
-        serializedLogEntry: JSON.stringify(entry),
-      },
-    );
-  }
-}
-
-/** Calculates and logs one plan request before returning its response. */
+/** Calculates and logs one plan request while keeping Firestore persistence off the response path. */
 export async function POST(request: Request) {
   const planId = randomUUID();
   const requestedAt = new Date().toISOString();
@@ -526,7 +505,7 @@ export async function POST(request: Request) {
   }
   catch {
     const responseBody = { planId, error: "The plan request was not valid JSON." };
-    await recordPlanRequestLog({
+    logPlanRequest({
       id: planId,
       requestedAt,
       sessionCollectionId: session?.collectionId,
@@ -540,7 +519,7 @@ export async function POST(request: Request) {
   const response = await calculatePlanRequest(body);
   const responseBody = withPlanId(await response.json(), planId);
   const rawResponseBody = JSON.stringify(responseBody);
-  await recordPlanRequestLog({
+  logPlanRequest({
     id: planId,
     requestedAt,
     sessionCollectionId: session?.collectionId,

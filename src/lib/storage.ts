@@ -22,11 +22,15 @@ export interface StorageTransaction {
 function getFirestoreDatabase() {
   if (!firestorePromise) {
     firestorePromise = Promise.resolve().then(() => {
-      const app = getApps()[0] ?? initializeApp(getFirebaseOptions());
-      return getFirestore(app);
+      return getFirestore(getFirebaseApp());
     });
   }
   return firestorePromise;
+}
+
+/** Returns the shared Firebase Admin application for Firestore and Cloud Storage. */
+export function getFirebaseApp() {
+  return getApps()[0] ?? initializeApp(getFirebaseOptions());
 }
 
 function withoutUndefined(value: unknown): unknown {
@@ -44,10 +48,20 @@ function getFirebaseOptions() {
   const projectId = process.env.FIREBASE_PROJECT_ID;
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+  const storageBucket = process.env.FIREBASE_STORAGE_BUCKET;
   if (projectId && clientEmail && privateKey) {
-    return { credential: cert({ projectId, clientEmail, privateKey }) };
+    return {
+      credential: cert({ projectId, clientEmail, privateKey }),
+      ...(storageBucket ? { storageBucket } : {}),
+    };
   }
-  if (projectId) return { credential: applicationDefault(), projectId };
+  if (projectId) {
+    return {
+      credential: applicationDefault(),
+      projectId,
+      ...(storageBucket ? { storageBucket } : {}),
+    };
+  }
   return undefined;
 }
 

@@ -1,25 +1,43 @@
 import { randomUUID } from "node:crypto";
-import { initStorage } from "@/lib/storage";
+import { gunzipSync, gzipSync } from "node:zlib";
+import { getFirestore, Timestamp } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
+import { getFirebaseApp } from "@/lib/storage";
 
-const storageKeyPrefix = "plan-request-log:";
+const planRequestsCollection = "planRequests";
+const planLogStoragePrefix = "plan-logs";
 const maximumMemoryEntries = 100;
 
 /** The raw request and response retained for one plan calculation. */
 export type PlanRequestLog = {
   id: string;
   requestedAt: string;
+  storagePath: string;
+  sizeBytes: number;
   sessionCollectionId?: string;
   rawRequestBody: string;
   rawResponseBody: string;
   responseStatus: number;
 };
 
+export type PlanRequestLogMetadata = Omit<PlanRequestLog, "rawRequestBody" | "rawResponseBody">;
+
 export type PlanRequestLogPage = {
-  logs: PlanRequestLog[];
+  logs: PlanRequestLogMetadata[];
   page: number;
   pageSize: number;
   total: number;
   totalPages: number;
+};
+
+export type PlanRequestLogCleanupResult = {
+  eligible: number;
+  deleted: number;
+  failed: number;
+};
+
+type PlanRequestLogInput = Omit<PlanRequestLog, "id" | "storagePath" | "sizeBytes"> & {
+  id?: string;
 };
 
 type PlanLoggerRuntime = {
@@ -32,8 +50,8 @@ const runtime = globalThis as typeof globalThis & {
 const loggerRuntime =
   runtime.__assemblyLinePlanLogger ?? (runtime.__assemblyLinePlanLogger = { entries: new Map() });
 
-function storageKey(id: string) {
-  return `${storageKeyPrefix}${id}`;
+function storagePath(id: string) {
+  return `${planLogStoragePrefix}/${id}.json.gz`;
 }
 
 function remember(entry: PlanRequestLog) {
@@ -45,45 +63,118 @@ function remember(entry: PlanRequestLog) {
   }
 }
 
-function normalizePlanRequestLog(entry: PlanRequestLog): PlanRequestLog {
-  return {
-    id: entry.id,
-    requestedAt: entry.requestedAt,
-    ...(typeof entry.sessionCollectionId === "string"
-      ? { sessionCollectionId: entry.sessionCollectionId }
-      : {}),
-    rawRequestBody: entry.rawRequestBody,
-    rawResponseBody: entry.rawResponseBody,
-    responseStatus: entry.responseStatus,
-  };
+function toMetadata(entry: PlanRequestLog): PlanRequestLogMetadata {
+  const { rawRequestBody: _rawRequestBody, rawResponseBody: _rawResponseBody, ...metadata } = entry;
+  return metadata;
 }
 
-function deserializePlanRequestLog(value: PlanRequestLog | string | undefined) {
-  if (typeof value !== "string") return value;
+function getStorageBucket() {
+  const app = getFirebaseApp();
+  const storage = getStorage(app);
+  const bucketName = process.env.FIREBASE_STORAGE_BUCKET;
+  return bucketName ? storage.bucket(bucketName) : storage.bucket();
+}
+
+function parseStoredBlob(value: Buffer, id: string): PlanRequestLog | undefined {
   try {
-    const parsed: unknown = JSON.parse(value);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
-    return parsed as PlanRequestLog;
+    const parsed = JSON.parse(gunzipSync(value).toString("utf8")) as {
+      requestId?: unknown;
+      rawRequestBody?: unknown;
+      rawResponseBody?: unknown;
+    };
+    if (
+      parsed.requestId !== id
+      || typeof parsed.rawRequestBody !== "string"
+      || typeof parsed.rawResponseBody !== "string"
+    ) {
+      return undefined;
+    }
+    return {
+      id,
+      requestedAt: "",
+      storagePath: storagePath(id),
+      sizeBytes: value.byteLength,
+      rawRequestBody: parsed.rawRequestBody,
+      rawResponseBody: parsed.rawResponseBody,
+      responseStatus: 0,
+    };
   }
   catch {
     return undefined;
   }
 }
 
-/** Writes one log to its own Firestore document so concurrent requests do not overwrite each other. */
-async function persistPlanRequestLog(entry: PlanRequestLog): Promise<void> {
-  const storage = await initStorage();
-  await storage.setItem(storageKey(entry.id), JSON.stringify(entry));
+/** Writes the compressed request blob before its metadata reference. */
+export async function writePlanRequestLog(entry: PlanRequestLog): Promise<void> {
+  const blob = gzipSync(
+    JSON.stringify({
+      requestId: entry.id,
+      rawRequestBody: entry.rawRequestBody,
+      rawResponseBody: entry.rawResponseBody,
+    }),
+  );
+  const path = storagePath(entry.id);
+  remember({ ...entry, storagePath: path, sizeBytes: blob.byteLength });
+  try {
+    const bucket = getStorageBucket();
+    await bucket
+      .file(path)
+      .save(
+        blob,
+        {
+          resumable: false,
+          metadata: {
+            contentType: "application/json",
+            contentEncoding: "gzip",
+          },
+        },
+      );
+    const database = getFirestore(getFirebaseApp());
+    await database
+      .collection(planRequestsCollection)
+      .doc(entry.id)
+      .set({
+        requestId: entry.id,
+        storagePath: path,
+        sizeBytes: blob.byteLength,
+        createdAt: Timestamp.fromDate(new Date(entry.requestedAt)),
+        summary: {
+          responseStatus: entry.responseStatus,
+          ...(entry.sessionCollectionId ? { sessionCollectionId: entry.sessionCollectionId } : {}),
+        },
+      });
+  }
+  catch (error) {
+    try {
+      await getStorageBucket().file(path).delete({ ignoreNotFound: true });
+    }
+    catch {
+      // Cleanup is best effort because logging must never affect plan requests.
+    }
+    throw error;
+  }
 }
 
-/** Assigns an ID and waits for durable persistence to complete. */
-export async function logPlanRequest(
-  entry: Omit<PlanRequestLog, "id"> & { id?: string },
-): Promise<string> {
+async function persistPlanRequestLog(entry: PlanRequestLog): Promise<void> {
+  try {
+    await writePlanRequestLog(entry);
+  }
+  catch {
+    // Logging must never make a plan request fail.
+  }
+}
+
+/** Assigns an ID and schedules durable persistence without delaying the plan response. */
+export function logPlanRequest(entry: PlanRequestLogInput): string {
   const id = entry.id ?? randomUUID();
-  const completeEntry = normalizePlanRequestLog({ ...entry, id });
+  const completeEntry: PlanRequestLog = {
+    ...entry,
+    id,
+    storagePath: storagePath(id),
+    sizeBytes: 0,
+  };
   remember(completeEntry);
-  await persistPlanRequestLog(completeEntry);
+  void persistPlanRequestLog(completeEntry);
   return id;
 }
 
@@ -91,8 +182,33 @@ export async function logPlanRequest(
 export async function getPlanRequestLog(id: string): Promise<PlanRequestLog | undefined> {
   const remembered = loggerRuntime.entries.get(id);
   if (remembered) return remembered;
-  const storage = await initStorage();
-  return deserializePlanRequestLog(await storage.getItem<PlanRequestLog | string>(storageKey(id)));
+  const database = getFirestore(getFirebaseApp());
+  const snapshot = await database.collection(planRequestsCollection).doc(id).get();
+  if (snapshot.exists) {
+    const metadata = snapshot.data() as {
+      requestId?: string;
+      storagePath?: string;
+      sizeBytes?: number;
+      createdAt?: Timestamp;
+      summary?: { responseStatus?: number; sessionCollectionId?: string };
+    };
+    if (metadata.requestId === id && metadata.storagePath) {
+      const [contents] = await getStorageBucket().file(metadata.storagePath).download();
+      const blob = parseStoredBlob(contents, id);
+      if (blob) {
+        return {
+          ...blob,
+          requestedAt: metadata.createdAt?.toDate().toISOString() ?? "",
+          storagePath: metadata.storagePath,
+          sizeBytes: metadata.sizeBytes ?? contents.byteLength,
+          responseStatus: metadata.summary?.responseStatus ?? 0,
+          sessionCollectionId: metadata.summary?.sessionCollectionId,
+        };
+      }
+    }
+  }
+
+  return undefined;
 }
 
 /** Loads a time-ordered page of plan request logs from Firestore and process memory. */
@@ -100,23 +216,88 @@ export async function getPlanRequestLogPage(
   page: number,
   pageSize: number,
 ): Promise<PlanRequestLogPage> {
-  const storage = await initStorage();
-  const stored = await storage.getItemsByPrefix<PlanRequestLog | string>(storageKeyPrefix);
-  const entries = new Map<string, PlanRequestLog>();
-  for (const item of stored) {
-    const entry = deserializePlanRequestLog(item.value);
-    if (entry) entries.set(entry.id, entry);
+  const database = getFirestore(getFirebaseApp());
+  const collection = database.collection(planRequestsCollection);
+
+  const [snapshot, countSnapshot] = await Promise.all([
+    collection
+      .orderBy("createdAt", "desc")
+      .offset((page - 1) * pageSize)
+      .limit(pageSize)
+      .get(),
+    collection.count().get(),
+  ]);
+  const entries = new Map<string, PlanRequestLogMetadata>();
+  for (const document of snapshot.docs) {
+    const value = document.data() as {
+      requestId?: string;
+      storagePath?: string;
+      sizeBytes?: number;
+      createdAt?: Timestamp;
+      summary?: { responseStatus?: number; sessionCollectionId?: string };
+    };
+    if (!value.requestId || !value.storagePath) continue;
+    entries.set(
+      value.requestId,
+      {
+        id: value.requestId,
+        requestedAt: value.createdAt?.toDate().toISOString() ?? "",
+        storagePath: value.storagePath,
+        sizeBytes: value.sizeBytes ?? 0,
+        responseStatus: value.summary?.responseStatus ?? 0,
+        sessionCollectionId: value.summary?.sessionCollectionId,
+      },
+    );
   }
-  for (const entry of loggerRuntime.entries.values()) entries.set(entry.id, entry);
+
+  if (page === 1) {
+    for (const entry of loggerRuntime.entries.values()) entries.set(entry.id, toMetadata(entry));
+  }
   const orderedEntries = [...entries.values()].sort((left, right) =>
     right.requestedAt.localeCompare(left.requestedAt),
   );
-  const totalPages = Math.max(1, Math.ceil(orderedEntries.length / pageSize));
+  const total = Math.max(countSnapshot.data().count, orderedEntries.length);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   return {
-    logs: orderedEntries.slice((page - 1) * pageSize, page * pageSize),
+    logs: page === 1 ? orderedEntries.slice(0, pageSize) : orderedEntries,
     page,
     pageSize,
-    total: orderedEntries.length,
+    total,
     totalPages,
   };
+}
+
+/** Removes old Cloud Storage blobs and their Firestore metadata references. */
+export async function cullPlanRequestLogs(
+  before: Date,
+  apply: boolean,
+): Promise<PlanRequestLogCleanupResult> {
+  const database = getFirestore(getFirebaseApp());
+  const snapshot = await database
+    .collection(planRequestsCollection)
+    .where("createdAt", "<", Timestamp.fromDate(before))
+    .orderBy("createdAt", "asc")
+    .get();
+  const bucket = apply ? getStorageBucket() : undefined;
+  const result: PlanRequestLogCleanupResult = { eligible: snapshot.size, deleted: 0, failed: 0 };
+
+  for (const document of snapshot.docs) {
+    const value = document.data() as { requestId?: string; storagePath?: string };
+    if (!value.requestId || !value.storagePath) {
+      result.failed += 1;
+      continue;
+    }
+    if (!apply) continue;
+    try {
+      await bucket!.file(value.storagePath).delete({ ignoreNotFound: true });
+      await document.ref.delete();
+      loggerRuntime.entries.delete(value.requestId);
+      result.deleted += 1;
+    }
+    catch {
+      result.failed += 1;
+    }
+  }
+
+  return result;
 }

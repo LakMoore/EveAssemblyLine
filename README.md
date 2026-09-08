@@ -19,7 +19,7 @@ Without SDE data the application still builds, but SDE-backed routes should call
 
 ## Firebase persistence
 
-Durable server-side accounts, sessions, EVE tokens, and pending SSO state are stored in Cloud Firestore through the Firebase Admin SDK. The application uses one document per storage key in the `assemblyLineStorage` collection. SDE data remains a build/runtime input loaded into process memory; it is not stored in Firestore.
+Durable server-side accounts, sessions, EVE tokens, and pending SSO state are stored in Cloud Firestore through the Firebase Admin SDK. The application uses one document per storage key in the `assemblyLineStorage` collection. Plan request logs use the dedicated `planRequests/{requestId}` collection for metadata and store their compressed request/response JSON in Cloud Storage at `plan-logs/{requestId}.json.gz`. SDE data remains a build/runtime input loaded into process memory; it is not stored in Firestore.
 
 For Firebase App Hosting, no Firebase-specific `.env` variables are required. App Hosting provides `FIREBASE_CONFIG` automatically and the Firebase Admin SDK uses Application Default Credentials from the backend's runtime service account. The backend service account must have permission to access Firestore.
 
@@ -29,9 +29,10 @@ For local development, either use Google Application Default Credentials with `g
 FIREBASE_PROJECT_ID=your-firebase-project-id
 FIREBASE_CLIENT_EMAIL=firebase-adminsdk-...@your-firebase-project-id.iam.gserviceaccount.com
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+FIREBASE_STORAGE_BUCKET=your-firebase-project-id.firebasestorage.app
 ```
 
-Use a dedicated service account with access limited to the required Firestore database. Never expose these variables to the browser or commit them.
+Use a dedicated service account with access limited to the required Firestore database and Cloud Storage bucket. The service account needs Firestore read/write access and permission to create, read, and delete objects in the plan-log bucket. Never expose these variables to the browser or commit them.
 
 The Firestore database must be created in the Firebase project before the first authenticated request. Existing `data/` files are intentionally not migrated; they contain disposable pre-Firestore state and will be abandoned on deployment.
 
@@ -57,9 +58,26 @@ session can always refresh that Director's corporation when the required scopes 
 3. Choose **Production mode**, not Test mode. This server uses the Admin SDK and IAM; browser clients should not have direct access to the token collection.
 4. Select a database location close to the App Hosting backend and confirm **Create**. The default `(default)` database is sufficient.
 5. Open **Project settings > Service accounts** and identify the service account used by the App Hosting backend. Grant it a Firestore role such as **Cloud Datastore User** (`roles/datastore.user`) at the project level if it does not already have access.
-6. Roll out the App Hosting backend. The first successful authenticated request creates the `assemblyLineStorage` collection and its documents automatically; no manual collection creation is needed.
+6. Confirm the App Hosting backend service account can create, read, and delete objects in the default Firebase Storage bucket.
+7. Roll out the App Hosting backend. The build runs the idempotent plan-log migration before the new `planRequests` shape is used; no manual collection or object creation is needed.
 
 For local ADC setup, install the Google Cloud CLI, run `gcloud auth application-default login`, set `FIREBASE_PROJECT_ID` in `.env.local`, and run the app from the application root. Do not use production credentials for local experiments; use a separate Firebase project or the Firestore emulator.
+
+If existing plan logs were created before the Cloud Storage migration, run the migration from the application root. It is a dry run by default:
+
+```bash
+npm run migrate-plan-request-logs
+npm run migrate-plan-request-logs -- --apply
+```
+
+Plan logs can be culled with a dry run first. The default retention period is 30 days; use
+`--days=N` to choose another period. Cloud Storage objects are deleted before their Firestore
+metadata, and failed deletions are reported:
+
+```bash
+npm run cleanup-plan-request-logs -- --days=30
+npm run cleanup-plan-request-logs -- --days=30 --apply
+```
 
 ### Migrate corporation settings
 
