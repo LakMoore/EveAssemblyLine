@@ -1935,6 +1935,164 @@ test("reserves a stockpile's local assets before remote stockpiles can use them"
   );
 });
 
+test("does not transfer partially stocked finished products between stockpiles", async () => {
+  const finishedProductTypeId = 57457;
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: finishedProductTypeId,
+          name: "Reinforced Carbon Fiber",
+          quantity: 80,
+          category: "item",
+          rootLocationId: sourceLocationId,
+          inBuild: true,
+          inBuildQuantity: 80,
+          jobId: 5745701,
+          activityName: "Reactions",
+          industryJobStatus: "ready",
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "partially-stocked-source",
+            name: "Partially stocked source",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: sourceLocationId,
+              reactions: sourceLocationId,
+              reprocessing: sourceLocationId,
+              copying: sourceLocationId,
+              invention: sourceLocationId,
+            },
+            items: [
+              {
+                typeId: finishedProductTypeId,
+                name: "Reinforced Carbon Fiber",
+                quantity: 100,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "remote-destination",
+            name: "Remote destination",
+            locations: {
+              stock: alternateSourceLocationId,
+              manufacturing: alternateSourceLocationId,
+              reactions: alternateSourceLocationId,
+              reprocessing: alternateSourceLocationId,
+              copying: alternateSourceLocationId,
+              invention: alternateSourceLocationId,
+            },
+            items: [
+              {
+                typeId: finishedProductTypeId,
+                name: "Reinforced Carbon Fiber",
+                quantity: 100,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+
+  assert.equal(
+    result.lists.haulingTasks.some(
+      (task) =>
+        task.itemTypeId === finishedProductTypeId
+        && task.fromLocationId === sourceLocationId
+        && task.toLocationId === alternateSourceLocationId,
+    ),
+    false,
+  );
+});
+
+test("caps finished-product transfers at the source stockpile overage", async () => {
+  const finishedProductTypeId = 57457;
+  const result = await calculatePlan(
+    request(
+      0,
+      [
+        {
+          typeId: finishedProductTypeId,
+          name: "Reinforced Carbon Fiber",
+          quantity: 140,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "overstocked-source",
+            name: "Overstocked source",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: sourceLocationId,
+              reactions: sourceLocationId,
+              reprocessing: sourceLocationId,
+              copying: sourceLocationId,
+              invention: sourceLocationId,
+            },
+            items: [
+              {
+                typeId: finishedProductTypeId,
+                name: "Reinforced Carbon Fiber",
+                quantity: 100,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "remote-destination",
+            name: "Remote destination",
+            locations: {
+              stock: alternateSourceLocationId,
+              manufacturing: alternateSourceLocationId,
+              reactions: alternateSourceLocationId,
+              reprocessing: alternateSourceLocationId,
+              copying: alternateSourceLocationId,
+              invention: alternateSourceLocationId,
+            },
+            items: [
+              {
+                typeId: finishedProductTypeId,
+                name: "Reinforced Carbon Fiber",
+                quantity: 100,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const transfer = result.lists.haulingTasks.find(
+    (task) =>
+      task.itemTypeId === finishedProductTypeId
+      && task.fromLocationId === sourceLocationId
+      && task.toLocationId === alternateSourceLocationId,
+  );
+
+  assert(transfer);
+  assert.equal(transfer.quantity, 40);
+});
+
 test("uses activity-location stock before stockpile stock-location stock", async () => {
   const result = await calculatePlan(
     request(

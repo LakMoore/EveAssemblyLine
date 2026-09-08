@@ -2432,6 +2432,67 @@ function mergeHaulingTasks(tasks: PlanResult["lists"]["haulingTasks"]) {
   return [...mergedByRoute.values()];
 }
 
+/** Caps outbound haulage at a location to stock that remains after its own final-product demand. */
+function capHaulingTasksToLocalStockpileSurplus(
+  tasks: PlanResult["lists"]["haulingTasks"],
+  stock: PlanStockItem[],
+  stockpiles: NonNullable<PlannerRequest["stockpiles"]>,
+) {
+  const stockByLocationAndType = new Map<string, number>();
+  for (const item of stock) {
+    const rootLocationId = getStockRootLocationId(item);
+    if (
+      rootLocationId === undefined
+      || item.category === "blueprint"
+      || item.category === "reactionformula"
+      || item.source === "marketOrder"
+      || !isAvailableIndustryProductionOutput(item)
+    ) continue;
+    const key = locationTypeKey(rootLocationId, item.typeId);
+    stockByLocationAndType.set(key, (stockByLocationAndType.get(key) ?? 0) + item.quantity);
+  }
+
+  const demandByLocationAndType = new Map<string, number>();
+  for (const stockpile of stockpiles) {
+    for (const item of stockpile.items) {
+      const key = locationTypeKey(stockpile.locations.stock, item.typeId);
+      demandByLocationAndType.set(key, (demandByLocationAndType.get(key) ?? 0) + item.quantity);
+    }
+  }
+
+  const outboundQuantityByLocationAndType = new Map<string, number>();
+  return tasks
+    .map((task) => {
+      const key = locationTypeKey(task.fromLocationId, task.itemTypeId);
+      const stockQuantity = stockByLocationAndType.get(key);
+      if (stockQuantity === undefined) return task;
+      const localDemand = demandByLocationAndType.get(key) ?? 0;
+      const surplus = Math.max(0, stockQuantity - localDemand);
+      const alreadyOutbound = outboundQuantityByLocationAndType.get(key) ?? 0;
+      const availableSurplus = Math.max(0, surplus - alreadyOutbound);
+      const retainedQuantity = Math.min(task.quantity, availableSurplus);
+      outboundQuantityByLocationAndType.set(key, alreadyOutbound + retainedQuantity);
+      if (retainedQuantity === task.quantity) return task;
+
+      const removedQuantity = task.quantity - retainedQuantity;
+      const volumePerUnit = task.volume / task.quantity;
+      const cappedTask = {
+        ...task,
+        quantity: retainedQuantity,
+        volume: retainedQuantity * volumePerUnit,
+      };
+      if (cappedTask.productionQuantity !== undefined) {
+        cappedTask.productionQuantity = Math.max(
+          0,
+          cappedTask.productionQuantity - removedQuantity,
+        );
+        if (cappedTask.productionQuantity === 0) delete cappedTask.productionQuantity;
+      }
+      return cappedTask;
+    })
+    .filter((task) => task.quantity > 0);
+}
+
 /** Merge stockpile BPC requirements before calculating the shared shortage. */
 function mergeBpcBuyEntries(entries: PlanResult["lists"]["bpcsToBuy"]) {
   const mergedByType = new Map<number, PlanResult["lists"]["bpcsToBuy"][number]>();
@@ -2628,6 +2689,11 @@ function mergeStockpileResults(
   const mergedBpcRequirements = mergeBpcBuyEntries(
     results.flatMap((result) => [...result.lists.bpcsToBuy, ...result.lists.bpcsNeeded]),
   );
+  const haulingTasks = capHaulingTasksToLocalStockpileSurplus(
+    mergeHaulingTasks(results.flatMap((result) => result.lists.haulingTasks)),
+    stock,
+    request.stockpiles ?? [],
+  );
   const skillsById = new Map<number, PlanResult["lists"]["skillsRequired"][number]>();
   for (const result of results) {
     for (const skill of result.lists.skillsRequired) {
@@ -2663,7 +2729,7 @@ function mergeStockpileResults(
       ),
       reprocessingJobs: results.flatMap((result) => result.lists.reprocessingJobs),
       skillsRequired: [...skillsById.values()],
-      haulingTasks: mergeHaulingTasks(results.flatMap((result) => result.lists.haulingTasks)),
+      haulingTasks,
     },
   };
 }
