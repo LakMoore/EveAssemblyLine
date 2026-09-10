@@ -29,14 +29,17 @@ async function sendErrorMessage(message: string, context: DiscordErrorContext): 
   }
 }
 
-/** Sends application errors to the configured Discord webhook without blocking the caller. */
+/** Sends application errors to the configured Discord webhook. */
 export const discordLogger = {
-  error(message: string, context: DiscordErrorContext = {}): void {
-    void sendErrorMessage(message, context).catch((error: unknown) => {
+  async error(message: string, context: DiscordErrorContext = {}): Promise<void> {
+    try {
+      await sendErrorMessage(message, context);
+    }
+    catch (error: unknown) {
       console.error(
         "Could not send Discord error log",
         error instanceof Error ? error.message : "unknown error",
       );
-    });
+    }
   },
 };

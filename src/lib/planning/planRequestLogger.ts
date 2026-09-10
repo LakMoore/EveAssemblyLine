@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
-import { after } from "next/server";
 import { discordLogger } from "@/lib/discordLogger";
 import { getFirebaseApp } from "@/lib/storage";
 
@@ -169,7 +168,7 @@ async function persistPlanRequestLog(entry: PlanRequestLog): Promise<void> {
   catch (error) {
     const errorMessage = error instanceof Error ? error.message : "unknown error";
     console.error("Could not persist plan request log", entry.id, errorMessage);
-    discordLogger.error(
+    await discordLogger.error(
       "Could not persist plan request log",
       {
         requestId: entry.id,
@@ -179,8 +178,8 @@ async function persistPlanRequestLog(entry: PlanRequestLog): Promise<void> {
   }
 }
 
-/** Assigns an ID and schedules durable persistence without delaying the plan response. */
-export function logPlanRequest(entry: PlanRequestLogInput): string {
+/** Assigns an ID and persists the log before the plan response is returned. */
+export async function logPlanRequest(entry: PlanRequestLogInput): Promise<string> {
   const id = entry.id ?? randomUUID();
   const completeEntry: PlanRequestLog = {
     ...entry,
@@ -189,7 +188,7 @@ export function logPlanRequest(entry: PlanRequestLogInput): string {
     sizeBytes: 0,
   };
   remember(completeEntry);
-  after(() => persistPlanRequestLog(completeEntry));
+  await persistPlanRequestLog(completeEntry);
   return id;
 }
 

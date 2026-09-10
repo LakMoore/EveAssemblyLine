@@ -1322,7 +1322,15 @@ function PlanList({
   function getPlanCells(
     entry: ResponsePlanItem,
   ): Partial<Record<(typeof planColumns)[number], string>> {
-    if (entry.kind === "material" || entry.kind === "bpc") {
+    if (entry.kind === "bpc") {
+      return {
+        Required: `${entry.requiredQuantity.toLocaleString()} runs`,
+        Available: `${entry.availableQuantity.toLocaleString()} runs`,
+        "Buy/Build": `${entry.neededQuantity.toLocaleString()} runs`,
+        Surplus: `${entry.surplusQuantity.toLocaleString()} runs`,
+      };
+    }
+    if (entry.kind === "material") {
       return {
         Required: entry.requiredQuantity.toLocaleString(),
         Available: entry.availableQuantity.toLocaleString(),
