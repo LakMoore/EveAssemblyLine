@@ -716,7 +716,7 @@ export default function CharactersPage() {
                       </span>
                     </button>
                     <div className="flex min-w-44 flex-col items-end gap-2">
-                      <label className="flex items-center gap-2 text-xs">
+                      Label className="flex items-center gap-2 text-xs">
                         <span>On Deployment</span>
                         <Switch
                           checked={character.onDeployment}
@@ -730,7 +730,7 @@ export default function CharactersPage() {
                       {character.corpRefreshOptInEnabled
                         && character.hasDirectorRole
                         && character.canManageCorpRefreshOptIn && (
-                          <label className="flex items-center gap-2 text-xs">
+                          Label className="flex items-center gap-2 text-xs">
                             <span>Corp refresh opt-in</span>
                             <Switch
                               checked={character.allowCorpRefreshOptIn}
@@ -1093,7 +1093,7 @@ export default function CharactersPage() {
                         {corporation.pilots.map((pilot) => pilot.characterName).join(" · ")}
                       </small>
                     </button>
-                    <label className="flex shrink-0 items-center gap-2 text-xs">
+                    Label className="flex shrink-0 items-center gap-2 text-xs">
                       <span>Include in Refresh</span>
                       <Switch
                         checked={

@@ -142,7 +142,7 @@ export default function ImageCheckerPage() {
         >
           ←
         </Button>
-        <label className={styles.startField}>
+        Label className={styles.startField}>
           <span>FIRST TYPE ID</span>
           <Input
             aria-label="First type ID"

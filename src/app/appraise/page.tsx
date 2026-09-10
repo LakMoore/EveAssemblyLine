@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import styles from "../page.module.css";
+import { Label } from "@/components/ui/label";
 
 type AppraiseItem = {
   name: string;
@@ -263,7 +264,7 @@ Pyerite 60000`}
           </div>
           <div className="flex items-center justify-between gap-4 border-b py-3">
             <span className="text-xs font-medium">Appraisal details</span>
-            <label className="flex items-center gap-2 text-xs">
+            <Label className="flex items-center gap-2 text-xs">
               <span>{valueColumnLabel}</span>
               <Switch
                 id="appraise-total-values"
@@ -271,7 +272,7 @@ Pyerite 60000`}
                 onCheckedChange={setShowTotalValues}
                 aria-label="Toggle total values"
               />
-            </label>
+            </Label>
           </div>
           <div className="overflow-x-auto" role="table" aria-label="Appraisal results">
             <div

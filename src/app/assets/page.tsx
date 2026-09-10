@@ -1167,6 +1167,7 @@ function ViewItemsModal({
                       imageSize={40}
                       className={styles.stockTypeIdentity}
                       variation={item.category === "reactionformula" ? "bpc" : "icon"}
+                      linkPath={null}
                       blueprintType={
                         isBlueprintStockItem(item) ? (bpoCount > 0 ? "bpo" : "bpc") : undefined
                       }
@@ -1329,14 +1330,14 @@ function StockPasteModal({
             onValueChange={(value) => setMode(value as "add" | "replace")}
             aria-label="Paste mode"
           >
-            <label>
+            <Label>
               <RadioGroupItem value="add" />
               Add to existing
-            </label>
-            <label>
+            </Label>
+            <Label>
               <RadioGroupItem value="replace" />
               Replace existing
-            </label>
+            </Label>
           </RadioGroup>
           <Textarea
             className={styles.importTextarea}

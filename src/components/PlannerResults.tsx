@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { Fragment, type RefObject, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type {
   ClientPlanStockpile,
   ResponseLocationBucket,
@@ -42,6 +42,15 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Combobox,
+  ComboboxCollection,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "@/components/ui/combobox";
 import {
   Select,
   SelectContent,
@@ -100,6 +109,18 @@ const tabs: { value: PlannerTab; icon: LucideIcon }[] = [
   { value: "Manufacture", icon: Factory },
   { value: "Skills", icon: Brain },
 ];
+
+const plannerTabParam = "tab";
+const plannerTypeIdParam = "typeId";
+
+function isPlannerTab(value: string | null): value is PlannerTab {
+  return tabs.some((tab) => tab.value === value);
+}
+
+function parsePlannerTypeId(value: string | null) {
+  const typeId = Number(value);
+  return Number.isSafeInteger(typeId) && typeId > 0 ? typeId : null;
+}
 
 type ReactionScheduleMode = "available-slots" | "max-job-length";
 type ReactionSchedule = {
@@ -582,8 +603,51 @@ export default function PlannerResults({
   onToggleHaulPatches: (tasks: ResponseHaulTask[], patched: boolean) => Promise<void>;
 }) {
   const [activeTab, setActiveTab] = useState<PlannerTab>("Plan");
+  const [selectedTypeId, setSelectedTypeId] = useState<number | null>(null);
   const [isBugReportOpen, setIsBugReportOpen] = useState(false);
   const resultsHeaderRef = useRef<HTMLDivElement>(null);
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const applyUrlState = () => {
+      const currentSearchParams = new URLSearchParams(window.location.search);
+      const tab = currentSearchParams.get(plannerTabParam);
+      const nextTab = isPlannerTab(tab) ? tab : "Plan";
+      const nextTypeId = parsePlannerTypeId(currentSearchParams.get(plannerTypeIdParam));
+      setActiveTab(nextTab);
+      setSelectedTypeId(nextTypeId);
+      const url = new URL(window.location.href);
+      url.searchParams.set(plannerTabParam, nextTab);
+      if (nextTypeId === null) url.searchParams.delete(plannerTypeIdParam);
+      else url.searchParams.set(plannerTypeIdParam, String(nextTypeId));
+      if (url.pathname === pathname && url.search !== window.location.search) {
+        window.history.replaceState(null, "", url);
+      }
+    };
+    applyUrlState();
+    window.addEventListener("popstate", applyUrlState);
+    return () => window.removeEventListener("popstate", applyUrlState);
+  }, [pathname, searchParams]);
+
+  function updatePlannerUrl(tab: PlannerTab, typeId: number | null) {
+    const url = new URL(window.location.href);
+    url.searchParams.set(plannerTabParam, tab);
+    if (typeId === null) url.searchParams.delete(plannerTypeIdParam);
+    else url.searchParams.set(plannerTypeIdParam, String(typeId));
+    window.history.replaceState(null, "", url);
+  }
+
+  function selectTab(value: string) {
+    if (!isPlannerTab(value)) return;
+    setActiveTab(value);
+    updatePlannerUrl(value, selectedTypeId);
+  }
+
+  function selectTypeId(typeId: number | null) {
+    setSelectedTypeId(typeId);
+    updatePlannerUrl(activeTab, typeId);
+  }
 
   const reactionSlotCharacters = getActivitySlotCharacters(jobs, characterNamesById, "Reactions");
   const manufacturingSlotCharacters = getActivitySlotCharacters(
@@ -692,7 +756,7 @@ export default function PlannerResults({
           </div>
         </DialogContent>
       </Dialog>
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as PlannerTab)}>
+      <Tabs value={activeTab} onValueChange={selectTab}>
         <TabsList
           variant="line"
           className={`${styles.desktopTabList} w-full max-w-full justify-start overflow-x-auto overflow-y-hidden`}
@@ -706,10 +770,7 @@ export default function PlannerResults({
         </TabsList>
         <div className={styles.mobileTabSelect}>
           <span className={styles.mobileTabLabel}>OUTPUT VIEW</span>
-          <Select
-            value={activeTab}
-            onValueChange={(value) => value && setActiveTab(value as PlannerTab)}
-          >
+          <Select value={activeTab} onValueChange={(value) => value && selectTab(value)}>
             <SelectTrigger className="w-full" aria-label="Plan output view">
               <SelectValue>
                 <ActiveTabIcon data-icon="inline-start" />
@@ -750,6 +811,8 @@ export default function PlannerResults({
               onToggleHaulItemExclusion={onToggleHaulItemExclusion}
               haulPatches={haulPatches}
               onToggleHaulPatches={onToggleHaulPatches}
+              selectedTypeId={selectedTypeId}
+              onSelectedTypeIdChange={selectTypeId}
               resultsHeaderRef={resultsHeaderRef}
             />
           ) : (
@@ -787,6 +850,8 @@ function PlanList({
   onToggleHaulItemExclusion,
   haulPatches,
   onToggleHaulPatches,
+  selectedTypeId,
+  onSelectedTypeIdChange,
   resultsHeaderRef,
 }: {
   activeTab: PlannerTab;
@@ -812,6 +877,8 @@ function PlanList({
   ) => Promise<void>;
   haulPatches: ReadonlyMap<string, HaulPatch>;
   onToggleHaulPatches: (tasks: ResponseHaulTask[], patched: boolean) => Promise<void>;
+  selectedTypeId: number | null;
+  onSelectedTypeIdChange: (typeId: number | null) => void;
   resultsHeaderRef: RefObject<HTMLElement | null>;
 }) {
   const router = useRouter();
@@ -864,10 +931,24 @@ function PlanList({
     };
   });
   const planItems = plan.lists.planItems.all;
+  const planTypeOptions = [
+    ...new Map(
+      planItems.map((entry) => [entry.typeId, { id: entry.typeId, name: getEntryName(entry) }]),
+    ).values(),
+  ].sort((left, right) => left.name.localeCompare(right.name) || left.id - right.id);
+  const selectedType = planTypeOptions.find((option) => option.id === selectedTypeId);
+  const filteredPlanItems =
+    selectedTypeId === null
+      ? planItems
+      : planItems.filter((entry) => entry.typeId === selectedTypeId);
   const planItemsByActivityLocation = flattenLocationBuckets(
     plan.lists.planItems.byActivityLocation,
     "activityLocationId",
   );
+  const filteredPlanItemsByActivityLocation =
+    selectedTypeId === null
+      ? planItemsByActivityLocation
+      : planItemsByActivityLocation.filter((entry) => entry.typeId === selectedTypeId);
   const inventionJobs = flattenLocationBuckets(plan.lists.inventionJobs, "locationId");
   const reactionJobs = flattenLocationBuckets(plan.lists.reactionJobs, "locationId");
   const manufacturingJobs = flattenLocationBuckets(plan.lists.manufacturingJobs, "locationId");
@@ -897,8 +978,8 @@ function PlanList({
   const rawList =
     activeTab === "Plan"
       ? planViewMode === "all"
-        ? planItems
-        : planItemsByActivityLocation
+        ? filteredPlanItems
+        : filteredPlanItemsByActivityLocation
       : activeTab === "Buy"
         ? buyEntries
         : activeTab === "Copy"
@@ -1562,7 +1643,36 @@ function PlanList({
           )}
           {activeTab === "Plan" && (
             <div className={styles.planViewControls}>
-              <Label htmlFor="plan-view-mode">View</Label>
+              <Label htmlFor="plan-type">TYPE</Label>
+              <Combobox
+                items={planTypeOptions.map((option) => option.name)}
+                value={selectedType?.name ?? null}
+                onValueChange={(value) => {
+                  const nextTypeId =
+                    planTypeOptions.find((option) => option.name === value)?.id ?? null;
+                  onSelectedTypeIdChange(nextTypeId);
+                }}
+              >
+                <ComboboxInput
+                  id="plan-type"
+                  placeholder="Filter by type"
+                  aria-label="Filter plan by asset type"
+                  showClear
+                />
+                <ComboboxContent>
+                  <ComboboxEmpty>No matching asset types.</ComboboxEmpty>
+                  <ComboboxList>
+                    <ComboboxCollection>
+                      {(option) => (
+                        <ComboboxItem key={option} value={option}>
+                          {option}
+                        </ComboboxItem>
+                      )}
+                    </ComboboxCollection>
+                  </ComboboxList>
+                </ComboboxContent>
+              </Combobox>
+              <Label htmlFor="plan-view-mode">VIEW</Label>
               <Select
                 value={planViewMode}
                 onValueChange={(value) => setPlanViewMode(value as PlanViewMode)}
@@ -1890,6 +2000,10 @@ function PlanList({
                         name={task.typeName}
                         typeId={task.typeId}
                         imageSize={40}
+                        linkPath="planner"
+                        linkIcon={ClipboardList}
+                        linkSearchParams={{ tab: "Plan" }}
+                        navigateInPlace
                         className={styles.planTypeIdentity}
                       />
                       <span className={styles.haulRowAmount}>
@@ -2168,6 +2282,10 @@ function PlanList({
                             typeId={typeId}
                             imageSize={40}
                             variation={imageVariation}
+                            linkPath={activeTab === "Plan" ? "assets" : "planner"}
+                            linkIcon={activeTab === "Plan" ? undefined : ClipboardList}
+                            linkSearchParams={activeTab === "Plan" ? undefined : { tab: "Plan" }}
+                            navigateInPlace={activeTab !== "Plan"}
                             className={styles.planTypeIdentity}
                           />
                         </div>

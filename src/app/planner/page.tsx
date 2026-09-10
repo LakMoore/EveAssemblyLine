@@ -1218,14 +1218,14 @@ function Planner() {
             )}
           </div>
           <div className="flex flex-wrap items-center gap-4 border-t pt-4">
-            <label className="flex items-center gap-2 text-sm">
+            <Label className="flex items-center gap-2 text-sm">
               <Switch
                 aria-label="Include assets"
                 checked={includeStock}
                 onCheckedChange={setIncludeStock}
               />
               Include selected assets
-            </label>
+            </Label>
             <span className="text-sm text-muted-foreground">{selectedSourceLabel}</span>
             <Button
               type="button"
@@ -1384,7 +1384,7 @@ function Planner() {
                       </Tooltip>
                     )}
                   </div>
-                  <label className={`${styles.itemField} ${styles.quantityField}`}>
+                  <Label className={`${styles.itemField} ${styles.quantityField}`}>
                     <span>Quantity</span>
                     <Input
                       className="text-right"
@@ -1403,8 +1403,8 @@ function Planner() {
                         )
                       }
                     />
-                  </label>
-                  <label className={`${styles.itemField} ${styles.meField}`}>
+                  </Label>
+                  <Label className={`${styles.itemField} ${styles.meField}`}>
                     <span>ME</span>
                     <Input
                       className="text-right"
@@ -1427,8 +1427,8 @@ function Planner() {
                         )
                       }
                     />
-                  </label>
-                  <label className={`${styles.itemField} ${styles.teField}`}>
+                  </Label>
+                  <Label className={`${styles.itemField} ${styles.teField}`}>
                     <span>TE</span>
                     <Input
                       className="text-right"
@@ -1451,7 +1451,7 @@ function Planner() {
                         )
                       }
                     />
-                  </label>
+                  </Label>
                   <Button
                     variant="destructive"
                     size="icon-sm"
@@ -1466,7 +1466,7 @@ function Planner() {
             <div className={styles.planOptions}>
               {sharedLocationOptions.length > 0 ? (
                 <>
-                  <label>
+                  <Label>
                     <div className={`${styles.planOptionHeader} text-xs`}>
                       <span>MANUFACTURING LOCATION</span>
                       <span className={styles.planOptionBonus}>
@@ -1525,8 +1525,8 @@ function Planner() {
                         </SelectGroup>
                       </SelectContent>
                     </Select>
-                  </label>
-                  <label>
+                  </Label>
+                  <Label>
                     <div className={`${styles.planOptionHeader} text-xs`}>
                       <span>REACTION LOCATION</span>
                       <span className={styles.planOptionBonus}>
@@ -1585,7 +1585,7 @@ function Planner() {
                         </SelectGroup>
                       </SelectContent>
                     </Select>
-                  </label>
+                  </Label>
                 </>
               ) : (
                 <Alert className={styles.locationAlert}>
@@ -1611,7 +1611,7 @@ function Planner() {
                 </Alert>
               )}
               {characterNamesById.size > 0 && (
-                <label>
+                <Label>
                   <div className={`${styles.planOptionHeader} text-xs`}>
                     <span>INDUSTRY SKILLS</span>
                     <span className={styles.planOptionBonus}>
@@ -1648,9 +1648,9 @@ function Planner() {
                       </SelectGroup>
                     </SelectContent>
                   </Select>
-                </label>
+                </Label>
               )}
-              <label className={styles.checkboxOption}>
+              <Label className={styles.checkboxOption}>
                 <div className={`${styles.planOptionHeader} text-xs`}>
                   <span>INCLUDE SELECTED ASSETS</span>
                 </div>
@@ -1659,7 +1659,7 @@ function Planner() {
                   checked={includeStock}
                   onCheckedChange={setIncludeStock}
                 />
-              </label>
+              </Label>
               <div className={styles.checkboxOption}>
                 <div className={`${styles.planOptionHeader} text-xs`}>
                   <span>PLANNING SOURCES</span>

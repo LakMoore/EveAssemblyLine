@@ -595,7 +595,7 @@ function CompressContent() {
                     ))}
                   </SelectContent>
                 </Select>
-              </Label>
+              </Label>>
             ) : (
               <Alert>
                 <Info aria-hidden="true" />
@@ -650,7 +650,7 @@ function CompressContent() {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-            </Label>
+            </Label>>
             <Label className="flex-col items-start gap-1.5">
               <span className="text-muted-foreground text-xs">IMPLANT</span>
               <Select
@@ -683,7 +683,7 @@ function CompressContent() {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-            </Label>
+            </Label>>
             <Label className="flex-col items-start gap-1.5">
               <span className="text-muted-foreground text-xs">MARKET</span>
               <Select
@@ -707,7 +707,7 @@ function CompressContent() {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-            </Label>
+            </Label>>
             <Label className="flex-col items-start gap-1.5">
               <span className="text-muted-foreground text-xs">ORDER TYPE</span>
               <Select
@@ -732,7 +732,7 @@ function CompressContent() {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-            </Label>
+            </Label>>
           </div>
           <div className={styles.listHeader}>
             <span>ITEM</span>
@@ -993,7 +993,7 @@ function Results({
         <div className={styles.resultViewSelect}>
           <Label htmlFor="compress-result-view" className="shrink-0">
             View
-          </Label>
+          </Label>>
           <Select
             value={activeTab}
             onValueChange={(value) => setActiveTab(value as (typeof tabs)[number]["key"])}

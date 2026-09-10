@@ -589,7 +589,7 @@ export default function CorporationHangarSettings() {
                                     : "No access"}
                               </span>
                             </div>
-                            <label className="flex shrink-0 items-center gap-2 text-xs">
+                            Label className="flex shrink-0 items-center gap-2 text-xs">
                               <span>Direct hangar contents</span>
                               {savingSourceKey === directKey ? (
                                 <span className="inline-flex h-[18px] w-8 items-center justify-center">
@@ -617,7 +617,7 @@ export default function CorporationHangarSettings() {
                               {source.containers.map((container) => {
                                 const containerKey = `${source.corporationId}:${source.rootLocationId}:${source.locationFlag}:container:${container.itemId}`;
                                 return (
-                                  <label
+                                  Label
                                     className="flex min-w-0 items-center justify-between gap-3 text-sm"
                                     key={container.itemId}
                                   >

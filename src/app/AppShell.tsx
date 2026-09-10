@@ -73,6 +73,7 @@ import { toast } from "@/components/ui/toast";
 import { Progress, ProgressLabel } from "@/components/ui/progress";
 import { buildRefreshUnits, runRefreshUnits } from "@/lib/esi/refreshOrchestration";
 import { CharacterTokenRecord } from "@/lib/auth/model";
+import { Label } from "@/components/ui/label";
 
 const languageStorageKey = "assembly-line-language";
 const sidebarStorageKey = "assembly-line-sidebar-collapsed";
@@ -691,11 +692,11 @@ export default function AppShell({ children }: { children: ReactNode }) {
               <div
                 className={`${styles.topMeta} ${isMobileMetaExpanded || isMobileMetaCollapsing ? styles.topMetaExpanded : ""} ${isMobileMetaCollapsing ? styles.topMetaCollapsing : ""}`}
               >
-                <label className={styles.themeControl}>
+                <Label className={styles.themeControl}>
                   <span>THEME</span>
                   <ThemeSelect className="w-36" />
-                </label>
-                <label className={styles.languageControl}>
+                </Label>
+                <Label className={styles.languageControl}>
                   <span>LANGUAGE</span>
                   <Select
                     aria-label="Language"
@@ -742,7 +743,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                       </SelectGroup>
                     </SelectContent>
                   </Select>
-                </label>
+                </Label>
                 {authenticated ? (
                   <span
                     className={styles.esiStatus}

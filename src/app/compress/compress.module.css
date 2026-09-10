@@ -1,3 +1,5 @@
+/* Try to reduce the CSS used.  Favour tailwind in components and theme tokens for styling */
+
 .intro {
   display: flex;
   justify-content: space-between;

@@ -1,3 +1,5 @@
+/* Try to reduce the CSS used.  Favour tailwind in components and theme tokens for styling */
+
 .identity {
   display: flex;
   min-width: 0;
@@ -31,8 +33,28 @@
   white-space: nowrap;
 }
 
-.name {
+.nameRow {
+  display: flex;
   grid-column: 1 / -1;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  gap: 4px;
+}
+
+.searchLink {
+  display: inline-flex;
+  flex: 0 0 auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.name {
+  min-width: 0;
+  flex: 1 1 auto;
   font: inherit;
   font-weight: 700;
 }
@@ -56,6 +78,8 @@
 
 .name:hover,
 .name:focus-visible,
+.searchLink:hover,
+.searchLink:focus-visible,
 .typeId:hover,
 .typeId:focus-visible {
   color: var(--cyan);

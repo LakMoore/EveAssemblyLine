@@ -20,6 +20,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Label } from "./ui/label";
 
 type EveAuthorizationWarningProps = {
   href: string;
@@ -115,7 +116,7 @@ export default function EveAuthorizationWarning({ href, children }: EveAuthoriza
           <p>
             Learn more on our <Link href="/privacy">privacy page.</Link>
           </p>
-          <label className="flex items-start gap-2">
+          <Label className="flex items-start gap-2">
             <input
               type="checkbox"
               className="mt-0.5 shrink-0"
@@ -124,7 +125,7 @@ export default function EveAuthorizationWarning({ href, children }: EveAuthoriza
               }}
             />
             <span>I understand. Do not show me this again.</span>
-          </label>
+          </Label>
         </div>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>

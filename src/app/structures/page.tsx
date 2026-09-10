@@ -540,7 +540,7 @@ export default function LocationsPage() {
           </div>
           <div className={styles.locationControls}>
             <div className="flex min-w-0 items-center gap-2">
-              <Label htmlFor="structures-sort">Sort</Label>
+              <Label htmlFor="structures-sort">Sort</Label>>
               <Select
                 aria-label="Sort structures"
                 value={locationSort}

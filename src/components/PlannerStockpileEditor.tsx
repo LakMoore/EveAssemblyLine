@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
+import { useState } from "react";
 import { Clipboard, Copy, ListRestart, Save, Trash2, WandSparkles, X } from "lucide-react";
 import type {
   ClientBuildItem,
@@ -47,6 +46,7 @@ import TypeSearch from "@/components/TypeSearch";
 import PasteListDialog from "@/components/PasteListDialog";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
+import { Label } from "./ui/label";
 
 type ActivityLocationOption = {
   locationId: number;
@@ -310,7 +310,7 @@ function StockpileDetailsContent({
   return (
     <div className="flex min-w-0 flex-col gap-5">
       <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <label className="flex min-w-0 flex-col gap-2">
+        <Label className="flex min-w-0 flex-col gap-2">
           <span className="text-xs font-medium uppercase">Stockpile name</span>
           <Input
             value={draft.name}
@@ -318,7 +318,7 @@ function StockpileDetailsContent({
             placeholder="e.g. Jita staging"
             aria-label="Stockpile name"
           />
-        </label>
+        </Label>
         <div className="flex min-w-0 flex-col gap-2">
           <span className="text-xs font-medium uppercase">
             Stockpile location (end destination)
@@ -346,7 +346,7 @@ function StockpileDetailsContent({
             (location) => location.locationId === draft.locations[key],
           );
           return (
-            <label className="flex min-w-0 flex-col gap-2" key={key}>
+            <Label className="flex min-w-0 flex-col gap-2" key={key}>
               <span className="flex items-center justify-between gap-2 text-xs font-medium uppercase">
                 <span>{label}</span>
                 {formatSelectedLocationModifier(selected, bonus) && (
@@ -367,7 +367,7 @@ function StockpileDetailsContent({
                   })
                 }
               />
-            </label>
+            </Label>
           );
         })}
       </div>

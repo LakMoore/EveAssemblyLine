@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { parsePasteList } from "@/lib/reference/pasteList";
 import { cn } from "@/lib/utils";
 import { CircleAlert, FileUp, X } from "lucide-react";
+import { Label } from "./ui/label";
 
 type PasteResult = Partial<TypeMetadata> & {
   name: string;
@@ -176,7 +177,7 @@ export default function PasteListDialog({
             onValueChange={(value) => setMode(value as "add" | "replace")}
             aria-label="Paste behavior"
           >
-            <label className="flex items-start gap-2">
+            <Label className="flex items-start gap-2">
               <RadioGroupItem value="add" />
               <span className="grid min-w-0 gap-1">
                 <span className="text-sm font-medium">Add to list</span>
@@ -184,8 +185,8 @@ export default function PasteListDialog({
                   Keep the imported items with the current list.
                 </span>
               </span>
-            </label>
-            <label className="flex items-start gap-2">
+            </Label>
+            <Label className="flex items-start gap-2">
               <RadioGroupItem value="replace" />
               <span className="grid min-w-0 gap-1">
                 <span className="text-sm font-medium">Replace list</span>
@@ -193,7 +194,7 @@ export default function PasteListDialog({
                   Clear the current list before importing.
                 </span>
               </span>
-            </label>
+            </Label>
           </RadioGroup>
         </div>
         <DialogFooter>
