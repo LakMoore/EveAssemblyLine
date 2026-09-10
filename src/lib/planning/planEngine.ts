@@ -2596,7 +2596,10 @@ async function calculateStockpilePlan(
   }
   const mergedResult = mergeStockpileResults(stockpileResults, request.stock, request);
   return restorePlanResourceCounts(
-    restorePlanStockQuantities(mergedResult, request.stock, request.items),
+    restorePlanSourceCounts(
+      restorePlanStockQuantities(mergedResult, request.stock, request.items),
+      request.stock,
+    ),
     request.stock,
   );
 }
@@ -2760,6 +2763,64 @@ function restorePlanStockQuantities(
     availableStockQuantitiesByLocationAndType,
     availableStockQuantitiesByType,
   };
+}
+
+function restorePlanSourceCounts(result: PlanCalculation, stock: PlanStockItem[]): PlanCalculation {
+  const stockSourceCountsByType = getStockSourceCountsByType(stock);
+  const availableSourceCountsByType = new Map(result.availableSourceCountsByType ?? []);
+  for (const [typeId, sourceCounts] of stockSourceCountsByType) {
+    const mergedSourceCounts = mergePlanSourceCountsByMaximum(
+      availableSourceCountsByType.get(typeId),
+      sourceCounts,
+    );
+    if (mergedSourceCounts) availableSourceCountsByType.set(typeId, mergedSourceCounts);
+  }
+  return { ...result, availableSourceCountsByType };
+}
+
+function getStockSourceCountsByType(stock: PlanStockItem[]): PlanSourceCountsByType {
+  const sourceCountsByType = new Map<number, PlanSourceCountsByLocation>();
+  for (const stockItem of stock) {
+    const locationId = getStockRootLocationId(stockItem);
+    if (locationId === undefined) continue;
+    const sourceCountsByLocation = sourceCountsByType.get(stockItem.typeId) ?? {};
+    const sourceCounts = sourceCountsByLocation[locationId] ?? {};
+    const addSource = (source: PlanSourceIcon, quantityOverride?: number) => {
+      const quantity =
+        quantityOverride
+        ?? (source === "invention" || source === "copying"
+          ? (stockItem.jobRuns ?? stockItem.quantity)
+            * (source === "copying" ? (stockItem.licensedRuns ?? 1) : 1)
+          : stockItem.quantity);
+      sourceCounts[source] = (sourceCounts[source] ?? 0) + quantity;
+    };
+    if (stockItem.category === "item" && stockItem.source === "marketOrder") {
+      addSource("market");
+    }
+    if (isIndustryProductionOutput(stockItem) && !isUsableIndustryProductionOutput(stockItem)) {
+      addSource("industry", stockItem.inBuildQuantity ?? stockItem.quantity);
+    }
+    if (
+      stockItem.inBuild
+      && stockItem.category === "blueprint"
+      && stockItem.blueprintRunsAtInstall !== undefined
+      && stockItem.activityName === "Invention"
+    ) {
+      addSource("invention");
+    }
+    if (
+      stockItem.inBuild
+      && stockItem.category === "blueprint"
+      && stockItem.activityName === "Copying"
+    ) {
+      addSource("copying");
+    }
+    if (Object.keys(sourceCounts).length > 0) {
+      sourceCountsByLocation[locationId] = sourceCounts;
+      sourceCountsByType.set(stockItem.typeId, sourceCountsByLocation);
+    }
+  }
+  return sourceCountsByType;
 }
 
 function restorePlanResourceCounts(

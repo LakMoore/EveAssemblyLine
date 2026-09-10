@@ -1155,6 +1155,94 @@ test("uses output from an active industry job as committed availability", async 
   assert.deepEqual(result.lists.haulingTasks, []);
 });
 
+test("reports aggregate industry source counts for multiple active outputs", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      570,
+      [
+        {
+          typeId: tritaniumTypeId,
+          name: "Tritanium",
+          quantity: 402,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        industryOutputStock("active", manufacturingLocationId, "Manufacturing", 37),
+        industryOutputStock("active", manufacturingLocationId, "Manufacturing", 37),
+      ],
+    ),
+  );
+  const response = await toPlanResponse(result);
+  const tritanium = response.lists.planItems.all.find((item) => item.typeId === tritaniumTypeId);
+
+  assert(tritanium);
+  assert.equal(tritanium.availableQuantity, 476);
+  assert.deepEqual(
+    tritanium.availableSourceCounts,
+    {
+      [manufacturingLocationId]: { industry: 74 },
+    },
+  );
+});
+
+test("restores industry source counts across multiple stockpiles", async () => {
+  const stockpile = (id: string, locationId: number, quantity: number) => ({
+    id,
+    name: id,
+    locations: {
+      stock: locationId,
+      manufacturing: locationId,
+      reactions: locationId,
+      reprocessing: reprocessingLocationId,
+      copying: locationId,
+      invention: locationId,
+    },
+    items: [
+      {
+        typeId: tritaniumTypeId,
+        name: "Tritanium",
+        quantity,
+        me: 0,
+        te: 0,
+        fromCompression: false,
+      },
+    ],
+  });
+  const result = await calculatePlanCalculation(
+    request(
+      684,
+      [
+        {
+          typeId: tritaniumTypeId,
+          name: "Tritanium",
+          quantity: 402,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        industryOutputStock("active", manufacturingLocationId, "Manufacturing", 37),
+        industryOutputStock("active", manufacturingLocationId, "Manufacturing", 37),
+      ],
+      {
+        stockpiles: [
+          stockpile("primary", manufacturingLocationId, 570),
+          stockpile("secondary", sourceLocationId, 114),
+        ],
+      },
+    ),
+  );
+  const response = await toPlanResponse(result);
+  const tritanium = response.lists.planItems.all.find((item) => item.typeId === tritaniumTypeId);
+
+  assert(tritanium);
+  assert.equal(tritanium.availableQuantity, 476);
+  assert.deepEqual(
+    tritanium.availableSourceCounts,
+    {
+      [manufacturingLocationId]: { industry: 74 },
+    },
+  );
+});
+
 test("does not count cancelled or reverted industry output as available stock", async () => {
   for (const status of ["cancelled", "reverted"] as const) {
     const result = await calculatePlanCalculation(

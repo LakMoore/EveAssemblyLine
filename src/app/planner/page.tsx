@@ -70,6 +70,13 @@ import PlannerResults from "@/components/PlannerResults";
 import CalculateButton from "@/components/CalculateButton";
 import TypeSearch from "@/components/TypeSearch";
 import { toast } from "@/components/ui/toast";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarGroup,
+  AvatarGroupCount,
+  AvatarImage,
+} from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -113,6 +120,7 @@ import {
   Plus,
   Upload,
 } from "lucide-react";
+import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import PasteListDialog from "@/components/PasteListDialog";
 import {
   PlannerStockpileDetailsDialog,
@@ -175,6 +183,27 @@ function getPlannerStock(
     const locationId = getStockLocationId(item);
     return locationId === undefined || !excludedLocationIds.has(locationId);
   });
+}
+
+function getStockpileLocations(stockpiles: readonly ClientPlanStockpile[]): Set<number> {
+  const locations = new Set<number>();
+  for (const stockpile of stockpiles) {
+    for (const locationId of Object.values(stockpile.locations)) {
+      if (Number.isInteger(locationId)) locations.add(locationId);
+    }
+    for (const locationId of Object.values(stockpile.groupAssignments ?? {})) {
+      if (Number.isInteger(locationId)) locations.add(locationId);
+    }
+  }
+  return locations;
+}
+
+function getReconciledExcludedLocationIds(
+  stockpiles: readonly ClientPlanStockpile[],
+  excludedLocationIds: readonly number[],
+): number[] {
+  const stockpileLocations = getStockpileLocations(stockpiles);
+  return excludedLocationIds.filter((locationId) => !stockpileLocations.has(locationId));
 }
 
 function getHaulSourceStock(stock: PlanStockItem[], task: ResponseHaulTask) {
@@ -570,9 +599,10 @@ function Planner() {
     void loadBuildBlacklist().then((buildBlacklist) => {
       if (buildBlacklist) setSettings((current) => ({ ...current, buildBlacklist }));
     });
-    void loadExcludedLocationIds().then(setExcludedLocationIds);
-    loadPlannerStockpiles()
-      .then(async (savedStockpiles) => {
+    Promise
+      .all([loadExcludedLocationIds(), loadPlannerStockpiles()])
+      .then(async ([loadedExcludedLocationIds, savedStockpiles]) => {
+        setExcludedLocationIds(loadedExcludedLocationIds);
         if (savedStockpiles !== null) {
           const localizedStockpiles = await Promise.all(
             savedStockpiles.map(async (stockpile) => ({
@@ -585,6 +615,14 @@ function Planner() {
             localizedStockpiles,
           );
           setStockpiles(enrichedStockpiles);
+          const nextExcludedLocationIds = getReconciledExcludedLocationIds(
+            enrichedStockpiles,
+            loadedExcludedLocationIds,
+          );
+          if (nextExcludedLocationIds.length !== loadedExcludedLocationIds.length) {
+            setExcludedLocationIds(nextExcludedLocationIds);
+            void saveExcludedLocationIds(nextExcludedLocationIds);
+          }
           setItems(enrichedStockpiles[0]?.items ?? []);
           return;
         }
@@ -599,6 +637,14 @@ function Planner() {
         );
         setItems(localizedItems);
         setStockpiles(enrichedStockpiles);
+        const nextExcludedLocationIds = getReconciledExcludedLocationIds(
+          enrichedStockpiles,
+          loadedExcludedLocationIds,
+        );
+        if (nextExcludedLocationIds.length !== loadedExcludedLocationIds.length) {
+          setExcludedLocationIds(nextExcludedLocationIds);
+          void saveExcludedLocationIds(nextExcludedLocationIds);
+        }
       })
       .catch(() => {
         setItems([]);
@@ -955,11 +1001,22 @@ function Planner() {
       });
       return false;
     }
+    const nextStockpiles = stockpiles.some((existing) => existing.id === stockpile.id)
+      ? stockpiles.map((existing) => (existing.id === stockpile.id ? stockpile : existing))
+      : [...stockpiles, stockpile];
     setStockpiles((current) => {
       const existingIndex = current.findIndex((existing) => existing.id === stockpile.id);
       if (existingIndex < 0) return [...current, stockpile];
       return current.map((existing, index) => (index === existingIndex ? stockpile : existing));
     });
+    const nextExcludedLocationIds = getReconciledExcludedLocationIds(
+      nextStockpiles,
+      excludedLocationIds,
+    );
+    if (nextExcludedLocationIds.length !== excludedLocationIds.length) {
+      setExcludedLocationIds(nextExcludedLocationIds);
+      void saveExcludedLocationIds(nextExcludedLocationIds);
+    }
     void refreshPlannerStockpileEfficiencies(language, [stockpile], true).then(([updated]) => {
       if (!updated.reprocessingEfficiencies) return;
       setStockpiles((current) =>
@@ -1179,6 +1236,7 @@ function Planner() {
   );
   const activityLocationOptions = sharedLocationOptions;
   const stockLocationOptions: StockLocationOption[] = sharedLocationOptions;
+  const stockpileLocations = getStockpileLocations(stockpiles);
   const plannerLocationNames = new Map<number, string>([
     ...stockpiles.flatMap((stockpile) =>
       stockpile.stockLocationName
@@ -1951,6 +2009,7 @@ function Planner() {
         marketBuyOrderQuantities={clientAssets?.marketBuyOrderQuantities}
         locations={locations}
         stockpiles={stockpiles}
+        stockpileLocations={stockpileLocations}
         locationOptions={locationOptions}
         onAddBuildItem={(item) =>
           importItems([
@@ -1988,6 +2047,8 @@ function PlannerStockpileSummary({
 }) {
   const locationName = (locationId: number) =>
     locationNamesById.get(locationId) ?? String(locationId);
+  const productAvatarItems = stockpile.items.slice(0, 5);
+  const remainingProductCount = stockpile.items.length - productAvatarItems.length;
 
   return (
     <article className="grid min-w-0 gap-3 border p-4">
@@ -2003,15 +2064,42 @@ function PlannerStockpileSummary({
             units
           </p>
         </div>
-        <div className="flex shrink-0 gap-2">
-          <Button type="button" variant="outline" onClick={onEditDetails}>
-            <Pencil data-icon="inline-start" aria-hidden="true" />
-            Edit details
-          </Button>
-          <Button type="button" variant="outline" onClick={onEditItems}>
-            <ClipboardList data-icon="inline-start" aria-hidden="true" />
-            Edit items
-          </Button>
+        <div className="flex shrink-0 items-center gap-8">
+          <div className="flex items-center gap-3">
+            <AvatarGroup>
+              {productAvatarItems.map((item) => (
+                <Avatar key={item.typeId} size="lg">
+                  <AvatarImage
+                    className="bg-muted"
+                    src={eveTypeImageUrl(
+                      item.typeId,
+                      item.iconCategory === "bpc"
+                        ? "bpc"
+                        : item.iconCategory === "reactionformula"
+                          ? "bp"
+                          : "icon",
+                      64,
+                    )}
+                    alt={`${item.name} icon`}
+                  />
+                  <AvatarFallback>{item.name.slice(0, 2)}</AvatarFallback>
+                </Avatar>
+              ))}
+              {remainingProductCount > 0 && (
+                <AvatarGroupCount>+{remainingProductCount}</AvatarGroupCount>
+              )}
+            </AvatarGroup>
+            <Button type="button" variant="outline" onClick={onEditItems}>
+              <ClipboardList data-icon="inline-start" aria-hidden="true" />
+              Edit items
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" onClick={onEditDetails}>
+              <Pencil data-icon="inline-start" aria-hidden="true" />
+              Edit details
+            </Button>
+          </div>
           <Button
             type="button"
             variant="destructive"

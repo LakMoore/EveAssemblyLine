@@ -631,6 +631,7 @@ function PlannerResultsContent({
   marketBuyOrderQuantities,
   locations,
   stockpiles,
+  stockpileLocations,
   locationOptions,
   onAddBuildItem,
   onExcludeHaulStockpile,
@@ -650,6 +651,7 @@ function PlannerResultsContent({
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
   locations: ResultsLocations;
   stockpiles: ClientPlanStockpile[];
+  stockpileLocations: ReadonlySet<number>;
   locationOptions: Array<{ locationId: number; name: string }>;
   onAddBuildItem: (item: { name: string; typeId: number; quantity: number }) => void;
   onExcludeHaulStockpile: (fromLocationId: number) => Promise<void>;
@@ -868,6 +870,7 @@ function PlannerResultsContent({
               locationNamesById={locationNamesById}
               onAddBuildItem={onAddBuildItem}
               onExcludeHaulStockpile={onExcludeHaulStockpile}
+              stockpileLocations={stockpileLocations}
               haulItemExclusion={haulItemExclusion}
               onToggleHaulItemExclusion={onToggleHaulItemExclusion}
               haulPatches={haulPatches}
@@ -908,6 +911,7 @@ function PlanList({
   locationNamesById,
   onAddBuildItem,
   onExcludeHaulStockpile,
+  stockpileLocations,
   haulItemExclusion,
   onToggleHaulItemExclusion,
   haulPatches,
@@ -932,6 +936,7 @@ function PlanList({
   locationNamesById: Map<number, string>;
   onAddBuildItem: (item: { name: string; typeId: number; quantity: number }) => void;
   onExcludeHaulStockpile: (fromLocationId: number) => Promise<void>;
+  stockpileLocations: ReadonlySet<number>;
   haulItemExclusion: HaulItemExclusion;
   onToggleHaulItemExclusion: (
     key: string,
@@ -1948,66 +1953,30 @@ function PlanList({
         <div className={styles.haulGroups}>
           {sortedHaulGroups.map((group) => (
             <section
-              className={styles.haulGroup}
+              className={`${styles.haulGroup} w-full min-w-0`}
               key={`${group.fromLocationId}:${group.toLocationId}:${group.ownerType ?? "unassigned"}:${group.ownerId ?? 0}`}
             >
-              <header className={styles.haulGroupHeader}>
-                <strong className={styles.haulGroupVolume}>
+              <header className="flex min-h-14 w-full min-w-0 flex-col justify-between py-3 md:grid md:grid-cols-[auto_minmax(0,1fr)_auto_auto] md:items-center md:gap-y-0">
+                <strong className="shrink-0 whitespace-nowrap min-w-14">
                   {getHaulGroupVolume(group.tasks).toLocaleString()} m<sup>3</sup>
                 </strong>
-                <span className={styles.haulFromLabel}>From</span>
-                <strong className={styles.haulFromName}>
-                  {locationNamesById.get(group.fromLocationId) ?? group.fromLocationId}
-                </strong>
-                <span className={styles.haulToLabel}>To</span>
-                <strong className={styles.haulToName}>
-                  {locationNamesById.get(group.toLocationId) ?? group.toLocationId}
-                </strong>
-                {group.ownerType !== undefined && group.ownerId !== undefined && (
-                  <strong className={styles.haulOwner}>
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          group.ownerType === "corporation" ? (
-                            <Image
-                              src={eveCorporationLogoUrl(group.ownerId, 64)}
-                              alt={`${corporationNamesById.get(group.ownerId) ?? `Corporation ${group.ownerId}`} logo`}
-                              width={24}
-                              height={24}
-                              className="size-6 rounded-none"
-                            />
-                          ) : (
-                            <Image
-                              src={eveCharacterPortraitUrl(group.ownerId, 64)}
-                              alt={`${characterNamesById.get(group.ownerId) ?? `Character ${group.ownerId}`} portrait`}
-                              width={24}
-                              height={24}
-                              className="size-6 rounded-none"
-                            />
-                          )
-                        }
-                      />
-                      <TooltipContent>
-                        {group.ownerType === "corporation"
-                          ? (
-                              corporationNamesById.get(group.ownerId)
-                              ?? `Corporation ${group.ownerId}`
-                            )
-                          : (characterNamesById.get(group.ownerId) ?? `Character ${group.ownerId}`)}
-                      </TooltipContent>
-                    </Tooltip>
-                    <span className={styles.haulOwnerName}>
-                      {group.ownerType === "corporation"
-                        ? (
-                            corporationNamesById.get(group.ownerId)
-                            ?? `Corporation ${group.ownerId}`
-                          )
-                        : (characterNamesById.get(group.ownerId) ?? `Character ${group.ownerId}`)}
-                    </span>
-                  </strong>
-                )}
-                <div className={styles.haulHeaderActions}>
+                <div className="flex min-w-0 flex-col gap-1 md:ml-2 md:gap-0">
+                  <span className="flex min-w-0 items-baseline gap-2 truncate text-xs uppercase">
+                    <span className="shrink-0">From</span>
+                    <strong className="min-w-0 truncate normal-case">
+                      {locationNamesById.get(group.fromLocationId) ?? group.fromLocationId}
+                    </strong>
+                  </span>
+                  <span className="flex min-w-0 items-baseline gap-2 truncate text-xs uppercase">
+                    <span className="shrink-0">To</span>
+                    <strong className="min-w-0 truncate normal-case">
+                      {locationNamesById.get(group.toLocationId) ?? group.toLocationId}
+                    </strong>
+                  </span>
+                </div>
+                {!stockpileLocations.has(group.fromLocationId) && (
                   <Button
+                    className="w-full md:w-auto"
                     variant="outline"
                     disabled={excludingHaulFromLocationId !== null}
                     onClick={() => {
@@ -2028,6 +1997,55 @@ function PlanList({
                         : "Exclude Location"}
                     </span>
                   </Button>
+                )}
+                <span className="flex min-w-0 items-center justify-between gap-2 md:justify-end">
+                  {group.ownerType !== undefined && group.ownerId !== undefined && (
+                    <strong className="flex min-w-0 items-center gap-2 ml-4">
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            group.ownerType === "corporation" ? (
+                              <Image
+                                src={eveCorporationLogoUrl(group.ownerId, 64)}
+                                alt={`${corporationNamesById.get(group.ownerId) ?? `Corporation ${group.ownerId}`} logo`}
+                                width={24}
+                                height={24}
+                                className="size-6 rounded-none"
+                              />
+                            ) : (
+                              <Image
+                                src={eveCharacterPortraitUrl(group.ownerId, 64)}
+                                alt={`${characterNamesById.get(group.ownerId) ?? `Character ${group.ownerId}`} portrait`}
+                                width={24}
+                                height={24}
+                                className="size-6 rounded-none"
+                              />
+                            )
+                          }
+                        />
+                        <TooltipContent>
+                          Owner:&nbsp;
+                          {group.ownerType === "corporation"
+                            ? (
+                                corporationNamesById.get(group.ownerId)
+                                ?? `Corporation ${group.ownerId}`
+                              )
+                            : (
+                                characterNamesById.get(group.ownerId)
+                                ?? `Character ${group.ownerId}`
+                              )}
+                        </TooltipContent>
+                      </Tooltip>
+                      <span className="min-w-20 truncate">
+                        {group.ownerType === "corporation"
+                          ? (
+                              corporationNamesById.get(group.ownerId)
+                              ?? `Corporation ${group.ownerId}`
+                            )
+                          : (characterNamesById.get(group.ownerId) ?? `Character ${group.ownerId}`)}
+                      </span>
+                    </strong>
+                  )}
                   {(() => {
                     const eligibleTasks = group.tasks.filter(
                       (task) => !haulItemExclusion.has(haulTaskKey(task)),
@@ -2045,6 +2063,7 @@ function PlanList({
                           render={
                             <Checkbox
                               aria-label="Mark all eligible items as moved"
+                              className="ml-2 shrink-0"
                               checked={groupChecked}
                               indeterminate={groupIndeterminate}
                               disabled={
@@ -2065,7 +2084,7 @@ function PlanList({
                       </Tooltip>
                     );
                   })()}
-                </div>
+                </span>
               </header>
               <div className={styles.haulGroupRows}>
                 {group.tasks.map((task) => {
@@ -2330,8 +2349,9 @@ function PlanList({
                     const totalNeeded =
                       activeTab === "React" && "countNeeded" in entry && "runsAvailable" in entry
                         ? (
-                            reactionPlan?.totalRuns
-                            ?? (showTotalRunCounts ? entry.countNeeded : entry.runsAvailable)
+                            showTotalRunCounts
+                              ? entry.countNeeded
+                              : (reactionPlan?.totalRuns ?? entry.runsAvailable)
                           )
                         : null;
                     const scheduledRuns = rowSchedules.reduce(

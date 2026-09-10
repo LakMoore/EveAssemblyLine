@@ -858,7 +858,7 @@ function StockLocationCard({
       );
       return {
         ...category,
-        count: categoryItems.length,
+        count: new Set(categoryItems.map((item) => item.typeId)).size,
         detail: isVolumesLoading
           ? "Calculating..."
           : formatVolume(categoryItems.reduce((total, item) => total + stockItemVolume(item), 0)),
@@ -1010,11 +1010,16 @@ function ViewItemsModal({
   onClearAssetTypeFilter: () => void;
   onCancel: () => void;
 }) {
+  const jobTypeIds = new Set(
+    location.items
+      .filter((item) => item.inBuild || item.jobId !== undefined)
+      .map((item) => item.typeId),
+  );
   const filteredItems = location.items.filter((item) => {
     if (assetTypeFilter !== null && item.typeId !== assetTypeFilter.id) return false;
     if (filter.kind === "all") return true;
     if (filter.kind === "sales") return item.source === "marketOrder";
-    if (filter.kind === "jobs") return item.inBuild || item.jobId !== undefined;
+    if (filter.kind === "jobs") return jobTypeIds.has(item.typeId);
     if (filter.kind === "market") return item.assemblyLineGroup === filter.value;
     return filter.value === "bpc"
       ? isBlueprintStockItem(item)
