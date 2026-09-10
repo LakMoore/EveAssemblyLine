@@ -2348,11 +2348,9 @@ function PlanList({
                     const installTime = reactionPlan?.time ?? totalTime;
                     const totalNeeded =
                       activeTab === "React" && "countNeeded" in entry && "runsAvailable" in entry
-                        ? (
-                            showTotalRunCounts
-                              ? entry.countNeeded
-                              : (reactionPlan?.totalRuns ?? entry.runsAvailable)
-                          )
+                        ? showTotalRunCounts
+                          ? entry.countNeeded
+                          : (reactionPlan?.totalRuns ?? entry.runsAvailable)
                         : null;
                     const scheduledRuns = rowSchedules.reduce(
                       (total, schedule) => total + schedule.totalRuns,
