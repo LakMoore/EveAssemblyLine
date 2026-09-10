@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
+import { after } from "next/server";
+import { discordLogger } from "@/lib/discordLogger";
 import { getFirebaseApp } from "@/lib/storage";
 
 const planRequestsCollection = "planRequests";
@@ -71,8 +73,13 @@ function toMetadata(entry: PlanRequestLog): PlanRequestLogMetadata {
 function getStorageBucket() {
   const app = getFirebaseApp();
   const storage = getStorage(app);
-  const bucketName = process.env.FIREBASE_STORAGE_BUCKET;
-  return bucketName ? storage.bucket(bucketName) : storage.bucket();
+  const bucketName = process.env.FIREBASE_STORAGE_BUCKET ?? app.options.storageBucket;
+  if (!bucketName) {
+    throw new Error(
+      "Firebase Storage bucket is not configured. Set FIREBASE_STORAGE_BUCKET for plan logs.",
+    );
+  }
+  return storage.bucket(bucketName);
 }
 
 function parseStoredBlob(value: Buffer, id: string): PlanRequestLog | undefined {
@@ -159,8 +166,16 @@ async function persistPlanRequestLog(entry: PlanRequestLog): Promise<void> {
   try {
     await writePlanRequestLog(entry);
   }
-  catch {
-    // Logging must never make a plan request fail.
+  catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "unknown error";
+    console.error("Could not persist plan request log", entry.id, errorMessage);
+    discordLogger.error(
+      "Could not persist plan request log",
+      {
+        requestId: entry.id,
+        error: errorMessage,
+      },
+    );
   }
 }
 
@@ -174,7 +189,7 @@ export function logPlanRequest(entry: PlanRequestLogInput): string {
     sizeBytes: 0,
   };
   remember(completeEntry);
-  void persistPlanRequestLog(completeEntry);
+  after(() => persistPlanRequestLog(completeEntry));
   return id;
 }
 

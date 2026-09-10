@@ -22,6 +22,7 @@ import { logPlanRequest } from "@/lib/planning/planRequestLogger";
 import { getSessionFromRequest } from "@/lib/auth/session";
 import { incrementPlansCreated } from "@/lib/statistics";
 import { randomUUID } from "node:crypto";
+import { after } from "next/server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -33,6 +34,10 @@ const noStoreResponseInit: ResponseInit = {
 const reprocessingEfficienciesSchema = z.record(
   z.string().regex(/^\d+$/, "Reprocessable type IDs must be numeric."),
   z.number().finite().min(0).max(100),
+);
+const marketBuyOrderQuantitiesSchema = z.record(
+  z.string().regex(/^\d+$/, "Market buy-order type IDs must be numeric."),
+  z.number().int().nonnegative(),
 );
 const facilityTimeMultipliersSchema = z.object({
   manufacturing: z.number().finite().min(0).max(1),
@@ -191,6 +196,7 @@ async function calculateWorkingAssetsPlan(input: PlanRequest, assets: PlanStockI
     language: input.language,
     items: buildItems,
     stockpiles,
+    marketBuyOrderQuantities: input.marketBuyOrderQuantities,
     reprocessingEfficiencies: input.reprocessingEfficiencies,
     stock: await hydrateStockCategories(assets),
     facilityTimeMultipliers: input.facilityTimeMultipliers,
@@ -223,6 +229,18 @@ export async function calculatePlanRequest(body: unknown): Promise<Response> {
       );
     }
     input.reprocessingEfficiencies = parsedEfficiencies.data;
+    const parsedMarketBuyOrderQuantities = marketBuyOrderQuantitiesSchema.safeParse(
+      input.marketBuyOrderQuantities ?? {},
+    );
+    if (!parsedMarketBuyOrderQuantities.success) {
+      return NextResponse.json(
+        {
+          error: "Market buy-order quantities must map numeric type IDs to non-negative integers.",
+        },
+        { status: 400 },
+      );
+    }
+    input.marketBuyOrderQuantities = parsedMarketBuyOrderQuantities.data;
     if (input.facilityTimeMultipliers !== undefined) {
       const parsedMultipliers = facilityTimeMultipliersSchema.safeParse(
         input.facilityTimeMultipliers,
@@ -288,10 +306,8 @@ export async function calculatePlanRequest(body: unknown): Promise<Response> {
     input.toBuild = requestedItems;
     const workingAssets = Array.isArray(input.assets) ? input.assets : input.stock;
     if (Array.isArray(workingAssets)) {
-      return NextResponse.json(
-        await calculateWorkingAssetsPlan(input, workingAssets),
-        noStoreResponseInit,
-      );
+      const result = await calculateWorkingAssetsPlan(input, workingAssets);
+      return NextResponse.json(result, noStoreResponseInit);
     }
     const assets = input.assets;
     if (
@@ -470,6 +486,7 @@ export async function calculatePlanRequest(body: unknown): Promise<Response> {
       facilityProfiles: input.facilityProfiles,
       skillTimeMultipliers: input.skillTimeMultipliers,
       settings: input.settings,
+      marketBuyOrderQuantities: input.marketBuyOrderQuantities,
     });
     return NextResponse.json(result, noStoreResponseInit);
   }
@@ -521,11 +538,16 @@ export async function POST(request: Request) {
   const responseBody = withPlanId(await response.json(), planId);
   const rawResponseBody = JSON.stringify(responseBody);
   if (response.ok) {
-    void incrementPlansCreated().catch((error: unknown) => {
-      console.error(
-        "Could not increment plans-created statistic",
-        error instanceof Error ? error.message : "unknown error",
-      );
+    after(async () => {
+      try {
+        await incrementPlansCreated();
+      }
+      catch (error) {
+        console.error(
+          "Could not increment plans-created statistic",
+          error instanceof Error ? error.message : "unknown error",
+        );
+      }
     });
   }
   logPlanRequest({

@@ -2826,6 +2826,63 @@ export async function getMarketOrderStock(
   return resolveNames();
 }
 
+/** Returns open personal and accessible corporation buy-order quantities by type. */
+export async function getMarketOrderBuyQuantities(
+  characterIds: number[],
+  sessionId = "default",
+  policies?: readonly CorporationSourcePolicy[],
+): Promise<Record<string, number> | null> {
+  const quantities = new Map<number, number>();
+  let hasUsableSource = false;
+  let hasUnavailableSource = false;
+  const addOrders = (orders: readonly MarketOrderRecord[]) => {
+    for (const order of orders) {
+      if (!order.isBuyOrder || order.volumeRemain <= 0) continue;
+      quantities.set(order.typeId, (quantities.get(order.typeId) ?? 0) + order.volumeRemain);
+    }
+  };
+
+  for (const characterId of characterIds) {
+    const cache = getCache(characterCaches, characterId, sessionId);
+    if (!hasUsableMarketOrders(cache)) {
+      hasUnavailableSource = true;
+      continue;
+    }
+    hasUsableSource = true;
+    addOrders(cache.marketOrders!.lastBody);
+  }
+
+  const projection = await getCorporationProjection(characterIds, true, sessionId, policies);
+  for (const corporationId of projection.corporationIds) {
+    const cache = getCache(corporationCaches, corporationId, sessionId);
+    if (!hasUsableMarketOrders(cache)) {
+      hasUnavailableSource = true;
+      continue;
+    }
+    hasUsableSource = true;
+    const policy = projection.policiesByCorporationId.get(corporationId);
+    const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
+    const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+    addOrders(
+      cache.marketOrders!.lastBody.filter(
+        (order) =>
+          !policy
+          || isCorporationLocationAccessible(
+            order.locationId,
+            policy,
+            projection.characters,
+            rawAssetsByItemId,
+          ),
+      ),
+    );
+  }
+
+  if (!hasUsableSource && hasUnavailableSource) return null;
+  return Object.fromEntries(
+    [...quantities].map(([typeId, quantity]) => [String(typeId), quantity]),
+  );
+}
+
 export async function getBlueprintInstances(
   characterIds: number[],
   includeCorporationBlueprints: boolean,

@@ -5,6 +5,9 @@ import { Fragment, type RefObject, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
   ClientPlanStockpile,
+  PlanBucketContext,
+  PlanContextBucket,
+  PlanResponse,
   PlanResult,
   PlanSourceCounts,
   PlanSourceIcon,
@@ -22,7 +25,6 @@ import {
   getMaterialSurplus,
   groupBuyEntriesByMarketCategory,
   groupPlanItemEntriesByBuildLocation,
-  mergeBuyEntries,
   mergePlanItemEntries,
   createHaulItemExclusionKey,
   parseHaulItemExclusionKey,
@@ -129,7 +131,11 @@ type ResultsLocations = {
 };
 
 function isMultibuyMaterial(entry: PlanBuyEntry): boolean {
-  return !("bpoCount" in entry) && !/ formula$/i.test(entry.name);
+  return "typeName" in entry && !("bpoCount" in entry);
+}
+
+function getEntryName(entry: { name?: string; typeName?: string }) {
+  return entry.typeName ?? entry.name ?? "";
 }
 
 function reactionJobKey(job: { typeId: number; locationId?: number }) {
@@ -168,6 +174,23 @@ function getStockLocationId(item: PlanStockItem) {
 
 function haulTaskKey(task: PlanResult["lists"]["haulingTasks"][number]) {
   return createHaulItemExclusionKey(task.fromLocationId, task.itemTypeId);
+}
+function flattenHaulBuckets(
+  buckets: PlanResponse["lists"]["haulingTasks"],
+): PlanResult["lists"]["haulingTasks"] {
+  return buckets.flatMap((bucket) =>
+    bucket.items.map((item) => ({
+      ...item,
+      fromLocationId: bucket.fromLocationId,
+      toLocationId: bucket.toLocationId,
+      ...(bucket.ownerType ? { ownerType: bucket.ownerType } : {}),
+      ...(bucket.ownerId !== undefined ? { ownerId: bucket.ownerId } : {}),
+    })),
+  );
+}
+
+function flattenContextBuckets<T>(buckets: PlanContextBucket<T>[]): Array<T & PlanBucketContext> {
+  return buckets.flatMap((bucket) => bucket.items.map((item) => ({ ...item, ...bucket.context })));
 }
 
 type HaulStockItem = PlanStockItem & {
@@ -558,7 +581,7 @@ export default function PlannerResults({
   onToggleHaulPatches,
 }: {
   language: SdeLanguage;
-  plan: PlanResult | null;
+  plan: PlanResponse | null;
   planStatus: string;
   characterStatuses: ClientCharacterStatus[];
   characterNamesById: Map<number, string>;
@@ -789,7 +812,7 @@ function PlanList({
 }: {
   activeTab: PlannerTab;
   language: SdeLanguage;
-  plan: PlanResult;
+  plan: PlanResponse;
   characterStatuses: ClientCharacterStatus[];
   characterNamesById: Map<number, string>;
   stock: PlanStockItem[];
@@ -863,39 +886,46 @@ function PlanList({
         .filter((skill) => skill.currentLevel < skill.requiredLevel),
     };
   });
-  const reprocessingJobs =
-    (
-      plan.lists as Omit<PlanResult["lists"], "reprocessingJobs"> & {
-        reprocessingJobs?: PlanResult["lists"]["reprocessingJobs"];
-      }
-    ).reprocessingJobs ?? [];
+  const planItems = flattenContextBuckets(plan.lists.planItems);
+  const inventionJobs = flattenContextBuckets(plan.lists.inventionJobs);
+  const reactionJobs = flattenContextBuckets(plan.lists.reactionJobs);
+  const manufacturingJobs = flattenContextBuckets(plan.lists.manufacturingJobs);
+  const reprocessingJobs = flattenContextBuckets(plan.lists.reprocessingJobs);
   const haulingTasks = getHaulTasksWithPatches(
-    getHaulTasksWithExclusions(plan.lists.haulingTasks, stock, haulItemExclusion),
+    getHaulTasksWithExclusions(
+      flattenHaulBuckets(plan.lists.haulingTasks),
+      stock,
+      haulItemExclusion,
+    ),
     stock,
     haulPatches,
   );
+  const copyPlanItems = planItems.filter(
+    (entry): entry is Extract<PlanItemEntry, { kind: "bpc" }> =>
+      entry.kind === "bpc" && entry.bpoCount > 0 && entry.neededQuantity > 0,
+  );
   const rawList =
     activeTab === "Plan"
-      ? plan.lists.planItems
+      ? planItems
       : activeTab === "Buy"
         ? [
-            ...plan.lists.materialsToBuy.filter((entry) => entry.buyQuantity > 0),
-            ...plan.lists.bpcsToBuy.filter((entry) => entry.buyQuantity > 0),
+            ...plan.lists.materialsToBuy.filter((entry) => entry.neededQuantity > 0),
+            ...plan.lists.bpoToBuy.filter((entry) => entry.neededQuantity > 0),
           ]
         : activeTab === "Copy"
-          ? plan.lists.bpcsNeeded.filter((entry) => entry.buyQuantity > 0)
+          ? copyPlanItems
           : activeTab === "Reprocess"
             ? reprocessingJobs
             : activeTab === "Invent"
-              ? plan.lists.inventionJobs
+              ? inventionJobs
               : activeTab === "React"
-                ? plan.lists.reactionJobs
+                ? reactionJobs
                 : activeTab === "Manufacture"
-                  ? plan.lists.manufacturingJobs
+                  ? manufacturingJobs
                   : haulingTasks;
   const list =
     activeTab === "Buy"
-      ? mergeBuyEntries(rawList as PlanBuyEntry[])
+      ? rawList
       : activeTab === "Plan" && planViewMode === "all"
         ? mergePlanItemEntries(
             rawList as PlanItemEntry[],
@@ -941,13 +971,13 @@ function PlanList({
     || activeTab === "Manufacture"
     || (activeTab === "Plan" && planViewMode === "build-location");
   type PlanListEntry =
-    | PlanResult["lists"]["planItems"][number]
+    | (typeof planItems)[number]
     | PlanResult["lists"]["materialsToBuy"][number]
     | PlanResult["lists"]["bpcsNeeded"][number]
-    | PlanResult["lists"]["inventionJobs"][number]
-    | PlanResult["lists"]["reprocessingJobs"][number]
-    | PlanResult["lists"]["reactionJobs"][number]
-    | PlanResult["lists"]["manufacturingJobs"][number]
+    | (typeof inventionJobs)[number]
+    | (typeof reprocessingJobs)[number]
+    | (typeof reactionJobs)[number]
+    | (typeof manufacturingJobs)[number]
     | PlanResult["lists"]["haulingTasks"][number];
   type ReactionDisplayRow = {
     entry: PlanListEntry;
@@ -989,14 +1019,14 @@ function PlanList({
         : [[undefined, list as PlanListEntry[]]]
   ) as Array<[number | string | undefined, PlanListEntry[]]>;
   const reactionSchedule = buildReactionSchedule(
-    plan.lists.reactionJobs,
+    reactionJobs,
     stock,
     showTotalRunCounts,
     reactionScheduleMode,
     availableReactionSlots,
     Number(maxJobHours),
   );
-  const reactionSummary = plan.lists.reactionJobs.reduce(
+  const reactionSummary = reactionJobs.reduce(
     (summary, job) => {
       const schedules = reactionSchedule.get(reactionJobKey(job)) ?? [];
       return {
@@ -1008,11 +1038,11 @@ function PlanList({
     { installs: 0, maxTime: 0 },
   );
   const manufacturingSummary = getManufacturingSummary(
-    plan.lists.manufacturingJobs,
+    manufacturingJobs,
     availableManufacturingSlots,
     showTotalManufacturingRunCounts,
   );
-  const reactionCoverage = plan.lists.reactionJobs
+  const reactionCoverage = reactionJobs
     .map((job) => ({
       job,
       schedules: reactionSchedule.get(reactionJobKey(job)) ?? [],
@@ -1047,11 +1077,11 @@ function PlanList({
         remainingSlots: Math.max(0, availableReactionSlots),
       },
     ).coverage;
-  const totalInstallableReactionRuns = plan.lists.reactionJobs.reduce(
+  const totalInstallableReactionRuns = reactionJobs.reduce(
     (total, job) => total + job.runsAvailable,
     0,
   );
-  const totalReactionRuns = plan.lists.reactionJobs.reduce((total, job) => total + job.runs, 0);
+  const totalReactionRuns = reactionJobs.reduce((total, job) => total + job.runs, 0);
   const sortedDisplayGroups =
     activeTab === "React" || activeTab === "Manufacture"
       ? (displayGroups.map(([locationId, entries]) => [
@@ -1139,21 +1169,25 @@ function PlanList({
             }),
         ]) as Array<[number | undefined, PlanListEntry[]]>)
       : displayGroups;
-  const maxCopyBuildTime = Math.max(...plan.lists.bpcsNeeded.map((entry) => entry.buildTime), 0);
+  const maxCopyBuildTime = Math.max(...copyPlanItems.map((entry) => entry.buildTime), 0);
   const haulGroups = new Map<
     string,
     {
       fromLocationId: number;
       toLocationId: number;
+      ownerType?: "character" | "corporation";
+      ownerId?: number;
       tasks: PlanResult["lists"]["haulingTasks"];
     }
   >();
   if (activeTab === "Haul") {
     for (const task of haulingTasks) {
-      const key = `${task.fromLocationId}:${task.toLocationId}`;
+      const key = `${task.fromLocationId}:${task.toLocationId}:${task.ownerType ?? "unassigned"}:${task.ownerId ?? 0}`;
       const group = haulGroups.get(key) ?? {
         fromLocationId: task.fromLocationId,
         toLocationId: task.toLocationId,
+        ownerType: task.ownerType,
+        ownerId: task.ownerId,
         tasks: [],
       };
       group.tasks.push(task);
@@ -1174,6 +1208,8 @@ function PlanList({
       leftSourceName.localeCompare(rightSourceName)
       || left.fromLocationId - right.fromLocationId
       || left.toLocationId - right.toLocationId
+      || (left.ownerType ?? "").localeCompare(right.ownerType ?? "")
+      || (left.ownerId ?? 0) - (right.ownerId ?? 0)
     );
   });
   const planColumns = ["Required", "Available", "Buy/Build", "Surplus"] as const;
@@ -1216,17 +1252,15 @@ function PlanList({
   }
 
   function getPlanHaulingQuantity(entry: PlanResult["lists"]["planItems"][number]) {
-    const stockpileId = "stockpileId" in entry ? entry.stockpileId : undefined;
     const buildLocationId = "buildLocationId" in entry ? entry.buildLocationId : undefined;
     const haulActivityLocationIds = new Set(activityLocationIds);
     if (buildLocationId !== undefined) haulActivityLocationIds.add(buildLocationId);
     if (haulActivityLocationIds.size === 0) return 0;
-    return plan.lists.haulingTasks
-      .filter(
-        (task) =>
-          task.itemTypeId === entry.typeId
-          && haulActivityLocationIds.has(task.toLocationId)
-          && (stockpileId === undefined || task.stockpileId === stockpileId),
+    return flattenHaulBuckets(plan.lists.haulingTasks)
+      .flatMap((bucket) =>
+        bucket.itemTypeId === entry.typeId && haulActivityLocationIds.has(bucket.toLocationId)
+          ? [{ ...bucket, toLocationId: bucket.toLocationId }]
+          : [],
       )
       .reduce(
         (total, task) =>
@@ -1235,8 +1269,8 @@ function PlanList({
       );
   }
 
-  function getListAmount(entry: (typeof list)[number]) {
-    return activeTab === "Copy" && "neededQuantity" in entry
+  function getListAmount(entry: PlanBuyEntry | (typeof list)[number]) {
+    return activeTab === "Copy" && "neededQuantity" in entry && "stockRuns" in entry
       ? Math.max(0, entry.neededQuantity - entry.stockRuns)
       : "runsNeeded" in entry
         ? entry.runsNeeded
@@ -1244,7 +1278,9 @@ function PlanList({
           ? entry.runs
           : "buyQuantity" in entry
             ? entry.buyQuantity
-            : entry.quantity;
+            : "quantity" in entry
+              ? entry.quantity
+              : 0;
   }
 
   async function sendToCompress() {
@@ -1252,16 +1288,16 @@ function PlanList({
     await saveCompressSettings({
       ...settings,
       items: materialBuyEntries.map((entry) => ({
-        name: entry.name,
+        name: getEntryName(entry),
         typeId: entry.typeId,
         quantity: getListAmount(entry),
         category: "item" as const,
         imageVariation:
           "bpoCount" in entry
             ? ("bpc" as const)
-            : / blueprint$/i.test(entry.name)
+            : / blueprint$/i.test(getEntryName(entry))
               ? ("bp" as const)
-              : / formula$/i.test(entry.name)
+              : / formula$/i.test(getEntryName(entry))
                 ? ("bpc" as const)
                 : ("icon" as const),
       })),
@@ -1282,7 +1318,7 @@ function PlanList({
               }),
           ]
         : (activeTab === "Buy" ? materialBuyEntries : list).map((entry) => {
-            return `${entry.name}\t${getListAmount(entry)}`;
+            return `${getEntryName(entry)}\t${getListAmount(entry)}`;
           });
     try {
       await navigator.clipboard.writeText(lines.join("\n"));
@@ -1301,7 +1337,7 @@ function PlanList({
       await navigator.clipboard.writeText(
         entries
           .filter(isMultibuyMaterial)
-          .map((entry) => `${entry.name}\t${getListAmount(entry)}`)
+          .map((entry) => `${getEntryName(entry)}\t${getListAmount(entry)}`)
           .join("\n"),
       );
       setGroupCopyStatus({ category, label: "Copied" });
@@ -1805,7 +1841,7 @@ function PlanList({
           {sortedHaulGroups.map((group) => (
             <section
               className={styles.haulGroup}
-              key={`${group.fromLocationId}:${group.toLocationId}`}
+              key={`${group.fromLocationId}:${group.toLocationId}:${group.ownerType ?? "unassigned"}:${group.ownerId ?? 0}`}
             >
               <header className={styles.haulGroupHeader}>
                 <span>From</span>
@@ -1814,6 +1850,18 @@ function PlanList({
                 </strong>
                 <span>To</span>
                 <strong>{locationNamesById.get(group.toLocationId) ?? group.toLocationId}</strong>
+                {group.ownerType === "character" && group.ownerId !== undefined && (
+                  <strong className={styles.haulOwner}>
+                    <Image
+                      src={eveCharacterPortraitUrl(group.ownerId, 64)}
+                      alt={`${characterNamesById.get(group.ownerId) ?? `Character ${group.ownerId}`} portrait`}
+                      width={24}
+                      height={24}
+                      className="size-6 rounded-none"
+                    />
+                    {characterNamesById.get(group.ownerId) ?? `Character ${group.ownerId}`}
+                  </strong>
+                )}
                 <div className={styles.haulHeaderActions}>
                   <Button
                     variant="outline"
@@ -1846,7 +1894,7 @@ function PlanList({
                     const groupChecked =
                       eligibleTasks.length > 0 && patchedCount === eligibleTasks.length;
                     const groupIndeterminate = patchedCount > 0 && !groupChecked;
-                    const groupKey = `${group.fromLocationId}:${group.toLocationId}`;
+                    const groupKey = `${group.fromLocationId}:${group.toLocationId}:${group.ownerType ?? "unassigned"}:${group.ownerId ?? 0}`;
                     return (
                       <Checkbox
                         aria-label="Mark all eligible items as moved"
@@ -2005,7 +2053,7 @@ function PlanList({
                         )
                       : [];
                   const typeId = "itemTypeId" in entry ? entry.itemTypeId : entry.typeId;
-                  const name = entry.name;
+                  const name = getEntryName(entry);
                   const isPlanBpc = "kind" in entry && entry.kind === "bpc";
                   const isBpcPurchase = activeTab === "Buy" && "bpoCount" in entry;
                   const isCopyOfBpo =
@@ -2083,21 +2131,28 @@ function PlanList({
                         )
                       : 0;
                   const materialEntry =
-                    (activeTab === "Buy" && !isBpcPurchase && "quantity" in entry)
+                    (activeTab === "Buy" && !isBpcPurchase && "typeName" in entry)
                     || (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
-                      ? (entry as PlanResult["lists"]["materialsToBuy"][number])
+                      ? (entry as
+                          | PlanResponse["lists"]["materialsToBuy"][number]
+                          | Extract<PlanResult["lists"]["planItems"][number], { kind: "material" }>)
                       : null;
+                  const materialAmount = materialEntry
+                    ? "typeName" in materialEntry
+                      ? materialEntry.neededQuantity
+                      : getMaterialDisplayQuantity(materialEntry, "plan")
+                    : null;
                   const amount =
                     "volume" in entry
                       ? `${entry.quantity.toLocaleString()} units | ${Math.ceil(entry.volume).toLocaleString()} m3`
                       : isBpcPurchase
-                        ? `${entry.buyQuantity.toLocaleString()} runs`
+                        ? `${entry.neededQuantity.toLocaleString()} runs`
                         : isPlanBpc
                           ? `${entry.neededQuantity.toLocaleString()} needed`
                           : isPlanReaction
                             ? `${entry.runsNeeded.toLocaleString()} runs`
-                            : materialEntry
-                              ? `${getMaterialDisplayQuantity(materialEntry, activeTab === "Buy" ? "buy" : "plan").toLocaleString()} units`
+                            : materialAmount !== null
+                              ? `${materialAmount.toLocaleString()} units`
                               : activeTab === "Copy" && "neededQuantity" in entry
                                 ? `${Math.max(0, entry.neededQuantity - entry.stockRuns).toLocaleString()} runs`
                                 : "quantity" in entry
@@ -2114,18 +2169,13 @@ function PlanList({
                     "volume" in entry
                       ? String(entry.quantity)
                       : isBpcPurchase
-                        ? String(entry.buyQuantity)
+                        ? String(entry.neededQuantity)
                         : isPlanBpc
                           ? String(entry.neededQuantity)
                           : isPlanReaction
                             ? String(entry.runsNeeded)
-                            : materialEntry
-                              ? String(
-                                  getMaterialDisplayQuantity(
-                                    materialEntry,
-                                    activeTab === "Buy" ? "buy" : "plan",
-                                  ),
-                                )
+                            : materialAmount !== null
+                              ? String(materialAmount)
                               : activeTab === "Copy" && "neededQuantity" in entry
                                 ? String(Math.max(0, entry.neededQuantity - entry.stockRuns))
                                 : "quantity" in entry
@@ -2136,7 +2186,7 @@ function PlanList({
                   const amountCopyLabel =
                     activeTab === "Invent"
                       ? "Attempts"
-                      : "volume" in entry || materialEntry
+                      : "volume" in entry || materialAmount !== null
                         ? "Quantity"
                         : isBpcPurchase
                             || isPlanBpc

@@ -2639,7 +2639,7 @@
 .haulGroupHeader {
   position: relative;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto auto;
   gap: 8px;
   align-items: baseline;
   padding: 11px 0;
@@ -2648,7 +2648,7 @@
 
 .haulHeaderActions {
   display: flex;
-  grid-column: 5;
+  grid-column: 6;
   justify-self: end;
   gap: 6px;
 }
@@ -2662,6 +2662,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   text-transform: none;
+}
+
+.haulOwner {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .haulGroupRows {
@@ -2748,9 +2754,14 @@
     grid-row: 2;
   }
 
-  .haulHeaderActions {
+  .haulOwner {
     grid-column: 1 / -1;
     grid-row: 3;
+  }
+
+  .haulHeaderActions {
+    grid-column: 1 / -1;
+    grid-row: 4;
     justify-self: end;
     flex-direction: column;
     align-items: flex-end;

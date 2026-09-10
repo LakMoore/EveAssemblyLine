@@ -14,6 +14,7 @@ import {
   getMarketOrderStock,
   getCorporationAssetSource,
   getCorporationLocationSource,
+  getMarketOrderBuyQuantities,
 } from "@/lib/esi/cache";
 import type { Facility } from "@/lib/planning/facilities";
 import {
@@ -420,6 +421,11 @@ export async function GET(request: NextRequest) {
     session.sessionId,
     corporationPolicies,
   );
+  const marketBuyOrderQuantitiesPromise = getMarketOrderBuyQuantities(
+    characterIds,
+    session.sessionId,
+    corporationPolicies,
+  );
   const facilitySettingsPromise = getCollectionFacilities(session.collectionId!);
   markPhase("session");
   const [
@@ -435,6 +441,7 @@ export async function GET(request: NextRequest) {
     rootLocationsByItemId,
     corporationSources,
     marketStock,
+    marketBuyOrderQuantities,
     facilitySettings,
   ] = await Promise.all([
     getResolvedAssets(characterIds, true, session.sessionId, corporationPolicies),
@@ -449,6 +456,7 @@ export async function GET(request: NextRequest) {
     getRootLocationsByItemId(characterIds, true, session.sessionId, corporationPolicies),
     corporationSourcesPromise,
     marketStockPromise,
+    marketBuyOrderQuantitiesPromise,
     facilitySettingsPromise,
   ]);
   markPhase("data");
@@ -694,6 +702,7 @@ export async function GET(request: NextRequest) {
       ),
       ...(marketStock ?? []),
     ] as PlanStockItem[],
+    marketBuyOrderQuantities: marketBuyOrderQuantities ?? {},
     facilities: facilityResponse.facilities,
     settings: facilityResponse.settings,
     productionGroups: facilityResponse.productionGroups,

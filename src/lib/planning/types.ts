@@ -185,6 +185,7 @@ export interface PlanRequest {
   language?: SdeLanguage;
   toBuild?: PlanBuildItem[];
   stockpiles?: PlanStockpile[];
+  marketBuyOrderQuantities?: Record<string, number>;
   reprocessingEfficiencies?: Record<string, number>;
   assets?:
     | PlanStockItem[]
@@ -257,6 +258,7 @@ export type PlanSkillRequirement = {
   requiredLevel: number;
 };
 
+/** Detailed internal result used while allocating stock and merging stockpile plans. */
 export interface PlanResult {
   metadata: {
     generatedAt: string;
@@ -267,20 +269,24 @@ export interface PlanResult {
   };
   lists: {
     planItems: Array<
-      | (PlanOutputContext & { kind: "material" } & PlanResult["lists"]["materialsToBuy"][number])
-      | (PlanOutputContext & {
+      | (PlanBucketContext & { kind: "material" } & PlanMaterial)
+      | (PlanBucketContext & {
           kind: "bpc";
           typeId: number;
           name: string;
+          typeGroupId: number;
+          typeGroup: string;
+          unitVolume: number;
           neededQuantity: number;
           stockQuantity: number;
           stockRuns: number;
           buyQuantity: number;
           bpoCount: number;
           bposInUse?: number;
+          buildTime: number;
           availableSourceCounts?: PlanSourceCounts;
         })
-      | (PlanOutputContext & {
+      | (PlanBucketContext & {
           kind: "reaction";
           typeId: number;
           name: string;
@@ -289,30 +295,14 @@ export interface PlanResult {
           availableSourceCounts?: PlanSourceCounts;
         })
     >;
-    materialsToBuy: Array<
-      PlanOutputContext & {
-        typeId: number;
-        name: string;
-        quantity: number;
-        requiredQuantity: number;
-        stockQuantity: number;
-        availableStockQuantity: number;
-        productionQuantity: number;
-        reprocessingQuantity?: number;
-        buildQuantity: number;
-        buyQuantity: number;
-        remainingStockQuantity: number;
-        remainingProductionQuantity: number;
-        fromMarketOrder?: boolean;
-        availableSourceCounts?: PlanSourceCounts;
-        imageVariation?: "icon" | "bp" | "bpc";
-        locationId?: number;
-      }
-    >;
+    materialsToBuy: PlanMaterial[];
     bpcsNeeded: Array<
-      PlanOutputContext & {
+      PlanBucketContext & {
         typeId: number;
         name: string;
+        typeGroupId: number;
+        typeGroup: string;
+        unitVolume: number;
         quantity: number;
         neededQuantity: number;
         stockQuantity: number;
@@ -325,9 +315,12 @@ export interface PlanResult {
       }
     >;
     bpcsToBuy: Array<
-      PlanOutputContext & {
+      PlanBucketContext & {
         typeId: number;
         name: string;
+        typeGroupId: number;
+        typeGroup: string;
+        unitVolume: number;
         quantity: number;
         neededQuantity: number;
         stockQuantity: number;
@@ -340,10 +333,10 @@ export interface PlanResult {
       }
     >;
     inventionJobs: Array<
-      PlanOutputContext & { typeId: number; name: string; runs: number; locationId?: number }
+      PlanBucketContext & { typeId: number; name: string; runs: number; locationId?: number }
     >;
     reactionJobs: Array<
-      PlanOutputContext & {
+      PlanBucketContext & {
         typeId: number;
         name: string;
         runs: number;
@@ -354,7 +347,7 @@ export interface PlanResult {
       }
     >;
     manufacturingJobs: Array<
-      PlanOutputContext & {
+      PlanBucketContext & {
         typeId: number;
         name: string;
         runs: number;
@@ -365,7 +358,7 @@ export interface PlanResult {
       }
     >;
     reprocessingJobs: Array<
-      PlanOutputContext & {
+      PlanBucketContext & {
         typeId: number;
         name: string;
         quantity: number;
@@ -374,25 +367,121 @@ export interface PlanResult {
       }
     >;
     skillsRequired: PlanSkillRequirement[];
-    haulingTasks: Array<
-      PlanOutputContext & {
-        itemTypeId: number;
-        name: string;
-        quantity: number;
-        productionQuantity?: number;
-        volume: number;
-        fromLocationId: number;
-        toLocationId: number;
-        ownerType?: "character" | "corporation";
-        ownerId?: number;
-      }
-    >;
+    haulingTasks: Array<{
+      itemTypeId: number;
+      name: string;
+      quantity: number;
+      productionQuantity?: number;
+      volume: number;
+      fromLocationId: number;
+      toLocationId: number;
+      ownerType?: "character" | "corporation";
+      ownerId?: number;
+    }>;
   };
 }
 
-export interface PlanOutputContext {
+export type PlanMaterial = PlanBucketContext & {
+  typeId: number;
+  name: string;
+  typeGroupId: number;
+  typeGroup: string;
+  unitVolume: number;
+  quantity: number;
+  requiredQuantity: number;
+  stockQuantity: number;
+  availableStockQuantity: number;
+  productionQuantity: number;
+  reprocessingQuantity?: number;
+  buildQuantity: number;
+  buyQuantity: number;
+  remainingStockQuantity: number;
+  remainingProductionQuantity: number;
+  fromMarketOrder?: boolean;
+  availableSourceCounts?: PlanSourceCounts;
+  imageVariation?: "icon" | "bp" | "bpc";
+  locationId?: number;
+};
+
+export interface PlanMaterialBuyResponse {
+  typeId: number;
+  typeName: string;
+  typeGroupId: number;
+  typeGroup: string;
+  unitVolume: number;
+  neededQuantity: number;
+  marketBuyOrderQuantity: number;
+}
+
+export interface PlanBlueprintPurchaseResponse extends PlanMaterialBuyResponse {
+  bpoCount: number;
+  bposInUse: number;
+}
+
+export interface PlanBpcToCopyResponse extends PlanBlueprintPurchaseResponse {}
+
+export interface PlanBpoBuyResponse extends PlanBlueprintPurchaseResponse {}
+
+export type PlanMaterialPurchaseResponse = Omit<
+  PlanResult["lists"]["haulingTasks"][number],
+  "fromLocationId" | "toLocationId" | "ownerType" | "ownerId"
+>;
+
+export interface PlanBucketContext {
   stockpileId?: string;
   stockpileName?: string;
   buildLocationId?: number;
   stockLocationId?: number;
 }
+
+export interface PlanContextBucket<T> {
+  context?: PlanBucketContext;
+  items: T[];
+}
+
+export type WithoutPlanBucketContext<T> = T extends unknown
+  ? Omit<T, keyof PlanBucketContext>
+  : never;
+
+export interface PlanHaulBucketResponse {
+  fromLocationId: number;
+  toLocationId: number;
+  ownerType?: "character" | "corporation";
+  ownerId?: number;
+  items: PlanMaterialPurchaseResponse[];
+}
+
+export type PlanResponse = Omit<PlanResult, "lists"> & {
+  lists: Omit<
+    PlanResult["lists"],
+    | "planItems"
+    | "materialsToBuy"
+    | "bpcsNeeded"
+    | "bpcsToBuy"
+    | "inventionJobs"
+    | "reactionJobs"
+    | "manufacturingJobs"
+    | "reprocessingJobs"
+    | "haulingTasks"
+  > & {
+    planItems: PlanContextBucket<
+      WithoutPlanBucketContext<PlanResult["lists"]["planItems"][number]>
+    >[];
+    materialsToBuy: PlanMaterialBuyResponse[];
+    bpcToCopy: PlanBpcToCopyResponse[];
+    bpoToBuy: PlanBpoBuyResponse[];
+    inventionJobs: PlanContextBucket<
+      WithoutPlanBucketContext<PlanResult["lists"]["inventionJobs"][number]>
+    >[];
+    reactionJobs: PlanContextBucket<
+      WithoutPlanBucketContext<PlanResult["lists"]["reactionJobs"][number]>
+    >[];
+    manufacturingJobs: PlanContextBucket<
+      WithoutPlanBucketContext<PlanResult["lists"]["manufacturingJobs"][number]>
+    >[];
+    reprocessingJobs: PlanContextBucket<
+      WithoutPlanBucketContext<PlanResult["lists"]["reprocessingJobs"][number]>
+    >[];
+    haulingTasks: PlanHaulBucketResponse[];
+  };
+};

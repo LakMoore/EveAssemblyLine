@@ -30,9 +30,12 @@ FIREBASE_PROJECT_ID=your-firebase-project-id
 FIREBASE_CLIENT_EMAIL=firebase-adminsdk-...@your-firebase-project-id.iam.gserviceaccount.com
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 FIREBASE_STORAGE_BUCKET=your-firebase-project-id.firebasestorage.app
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/your-webhook-id/your-webhook-token
 ```
 
 Use a dedicated service account with access limited to the required Firestore database and Cloud Storage bucket. The service account needs Firestore read/write access and permission to create, read, and delete objects in the plan-log bucket. Never expose these variables to the browser or commit them.
+
+`DISCORD_WEBHOOK_URL` is optional. When configured, server-side persistence errors are sent to Discord without delaying the request. Configure the same value as a runtime secret for App Hosting.
 
 The Firestore database must be created in the Firebase project before the first authenticated request. Existing `data/` files are intentionally not migrated; they contain disposable pre-Firestore state and will be abandoned on deployment.
 

@@ -31,6 +31,7 @@ export type ClientRefreshEventDetail = {
 
 export type ClientAssetsResponse = {
   assets?: StockItem[];
+  marketBuyOrderQuantities?: Record<string, number>;
   facilities?: Facility[];
   settings?: FacilitySettingsPayload;
   productionGroups?: ProductionGroupReference[];

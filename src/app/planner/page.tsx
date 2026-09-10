@@ -6,6 +6,7 @@ import type {
   ClientBuildItem,
   ClientPlanStockpile,
   PlanStockpileLocations,
+  PlanResponse,
   PlanResult,
   PlanStockItem,
 } from "@/lib/planning/types";
@@ -334,7 +335,7 @@ function Planner() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
   const [isExcludedLocationsModalOpen, setIsExcludedLocationsModalOpen] = useState(false);
-  const [plan, setPlan] = useState<PlanResult | null>(null);
+  const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [isDeleteAllDialogOpen, setIsDeleteAllDialogOpen] = useState(false);
   const [isClearExcludedLocationsDialogOpen, setIsClearExcludedLocationsDialogOpen] =
     useState(false);
@@ -698,6 +699,7 @@ function Planner() {
             assets: requestStock.map(
               ({ sourceLocationName: _sourceLocationName, ...item }) => item,
             ),
+            marketBuyOrderQuantities: clientAssets?.marketBuyOrderQuantities ?? {},
             facilityTimeMultipliers: {
               manufacturing: selectedManufacturingFacility?.manufacturingTimeMultiplier ?? 1,
               reactions: selectedReactionFacility?.reactionTimeMultiplier ?? 1,
@@ -728,12 +730,12 @@ function Planner() {
           }),
         },
       );
-      const data = (await response.json()) as PlanResult | { error?: string };
+      const data = (await response.json()) as PlanResponse | { error?: string };
       if (!response.ok) {
         setPlanStatus("error" in data && data.error ? data.error : "Could not calculate plan");
         return false;
       }
-      const calculatedPlan = data as PlanResult;
+      const calculatedPlan = data as PlanResponse;
       await savePlanResult(calculatedPlan);
       setPlan(calculatedPlan);
       await savePlannerLocations(locations);

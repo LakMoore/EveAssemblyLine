@@ -5,8 +5,8 @@ import { isPlanResult } from "./planResultStore";
 const planListNames = [
   "planItems",
   "materialsToBuy",
-  "bpcsNeeded",
-  "bpcsToBuy",
+  "bpcToCopy",
+  "bpoToBuy",
   "inventionJobs",
   "reactionJobs",
   "manufacturingJobs",
@@ -28,6 +28,30 @@ test("rejects a cached plan with a missing output list", () => {
   const plan = {
     metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
     lists: Object.fromEntries(planListNames.slice(0, -1).map((name) => [name, []])),
+  };
+
+  assert.equal(isPlanResult(plan), false);
+});
+
+test("rejects flat contextual output rows", () => {
+  const plan = {
+    metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
+    lists: {
+      ...Object.fromEntries(planListNames.map((name) => [name, []])),
+      planItems: [{ stockpileId: "stockpile", items: [] }],
+    },
+  };
+
+  assert.equal(isPlanResult(plan), false);
+});
+
+test("rejects haul buckets with legacy context", () => {
+  const plan = {
+    metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
+    lists: {
+      ...Object.fromEntries(planListNames.map((name) => [name, []])),
+      haulingTasks: [{ fromLocationId: 1, toLocationId: 2, context: {}, items: [] }],
+    },
   };
 
   assert.equal(isPlanResult(plan), false);

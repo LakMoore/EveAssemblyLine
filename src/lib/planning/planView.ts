@@ -1,6 +1,7 @@
 import type {
   PlanJobInput,
   PlanJobInputs,
+  PlanResponse,
   PlanResult,
   PlanStockItem,
   PlanSourceCounts,
@@ -9,6 +10,8 @@ import type {
 
 export type PlanItemEntry = PlanResult["lists"]["planItems"][number];
 export type PlanBuyEntry =
+  | PlanResponse["lists"]["materialsToBuy"][number]
+  | PlanResponse["lists"]["bpoToBuy"][number]
   | PlanResult["lists"]["materialsToBuy"][number]
   | PlanResult["lists"]["bpcsToBuy"][number];
 export type HaulItemExclusion = ReadonlyMap<string, number>;
@@ -306,41 +309,8 @@ export function mergePlanItemEntries(
   );
 }
 
-/**
- * Merge Buy rows that represent the same type across planner stockpiles.
- *
- * @param entries Material and BPC purchase rows from the planner.
- * @returns One aggregated purchase row per type ID.
- */
-export function mergeBuyEntries(entries: PlanBuyEntry[]): PlanBuyEntry[] {
-  const merged = new Map<string, PlanBuyEntry>();
-  for (const entry of entries) {
-    const existing = merged.get(buyEntryKey(entry));
-    if (!existing) {
-      merged.set(buyEntryKey(entry), { ...entry });
-      continue;
-    }
-
-    if ("bpoCount" in entry && "bpoCount" in existing) {
-      merged.set(buyEntryKey(entry), mergeBuyBpcEntries(existing, entry));
-      continue;
-    }
-
-    if (!("bpoCount" in entry) && !("bpoCount" in existing)) {
-      merged.set(buyEntryKey(entry), mergeBuyMaterialEntries(existing, entry));
-    }
-  }
-  return [...merged.values()].sort(
-    (left, right) => left.name.localeCompare(right.name) || left.typeId - right.typeId,
-  );
-}
-
 function planEntryKey(entry: PlanItemEntry) {
   return `${entry.kind}:${entry.typeId}`;
-}
-
-function buyEntryKey(entry: PlanBuyEntry) {
-  return `${"bpoCount" in entry ? "bpc" : "material"}:${entry.typeId}`;
 }
 
 function withoutPlanContext(entry: PlanItemEntry, buildLocationId?: number): PlanItemEntry {
@@ -391,7 +361,7 @@ function mergeBpcEntries(
     neededQuantity: existing.neededQuantity + entry.neededQuantity,
     stockQuantity: existing.stockQuantity + entry.stockQuantity,
     stockRuns: existing.stockRuns + entry.stockRuns,
-    buyQuantity: existing.buyQuantity + entry.buyQuantity,
+    buyQuantity: existing.neededQuantity + entry.neededQuantity,
     bpoCount: existing.bpoCount + entry.bpoCount,
     availableSourceCounts: mergeSourceCounts(
       existing.availableSourceCounts,
@@ -408,35 +378,6 @@ function mergeReactionEntries(
     ...existing,
     runsNeeded: existing.runsNeeded + entry.runsNeeded,
     availableQuantity: existing.availableQuantity + entry.availableQuantity,
-    availableSourceCounts: mergeSourceCounts(
-      existing.availableSourceCounts,
-      entry.availableSourceCounts,
-    ),
-  };
-}
-
-function mergeBuyMaterialEntries(
-  existing: Extract<PlanBuyEntry, { requiredQuantity: number }>,
-  entry: Extract<PlanBuyEntry, { requiredQuantity: number }>,
-) {
-  return mergeMaterialValues(existing, entry);
-}
-
-function mergeBuyBpcEntries(
-  existing: Extract<PlanBuyEntry, { bpoCount: number }>,
-  entry: Extract<PlanBuyEntry, { bpoCount: number }>,
-) {
-  return {
-    ...existing,
-    quantity: existing.quantity + entry.quantity,
-    neededQuantity: existing.neededQuantity + entry.neededQuantity,
-    stockQuantity: existing.stockQuantity + entry.stockQuantity,
-    stockRuns: existing.stockRuns + entry.stockRuns,
-    buyQuantity: Math.max(
-      0,
-      existing.neededQuantity + entry.neededQuantity - existing.stockRuns - entry.stockRuns,
-    ),
-    bpoCount: existing.bpoCount + entry.bpoCount,
     availableSourceCounts: mergeSourceCounts(
       existing.availableSourceCounts,
       entry.availableSourceCounts,
@@ -468,10 +409,16 @@ export function groupBuyEntriesByMarketCategory(
       .map(([category, categoryEntries]) => [
         category,
         categoryEntries.sort(
-          (left, right) => left.name.localeCompare(right.name) || left.typeId - right.typeId,
+          (left, right) =>
+            getBuyEntryName(left).localeCompare(getBuyEntryName(right))
+            || left.typeId - right.typeId,
         ),
       ]),
   );
+}
+
+function getBuyEntryName(entry: PlanBuyEntry) {
+  return "typeName" in entry ? entry.typeName : entry.name;
 }
 
 /**

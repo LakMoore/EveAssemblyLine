@@ -10,18 +10,14 @@ import {
   getNonProductionHaulingQuantity,
   groupBuyEntriesByMarketCategory,
   groupPlanItemEntriesByBuildLocation,
-  mergeBuyEntries,
   mergePlanItemEntries,
   parseHaulItemExclusionKey,
   splitReactionRunAllocations,
   splitReactionJobInputs,
-  type PlanBuyEntry,
   type PlanItemEntry,
 } from "./planView";
 
 type MaterialPlanEntry = Extract<PlanItemEntry, { kind: "material" }>;
-type BuyMaterialEntry = Extract<PlanBuyEntry, { requiredQuantity: number }>;
-type BuyBpcEntry = Extract<PlanBuyEntry, { bpoCount: number }>;
 
 /** Creates a material plan row for view aggregation tests. */
 function material(overrides: Partial<MaterialPlanEntry> = {}): MaterialPlanEntry {
@@ -29,6 +25,9 @@ function material(overrides: Partial<MaterialPlanEntry> = {}): MaterialPlanEntry
     kind: "material",
     typeId: 34,
     name: "Tritanium",
+    typeGroupId: 18,
+    typeGroup: "Mineral",
+    unitVolume: 0.01,
     quantity: 10,
     requiredQuantity: 10,
     stockQuantity: 0,
@@ -289,41 +288,6 @@ test("merges duplicate plan types separately for each build location", () => {
   assert.equal((rows.get(60008494)?.[0] as MaterialPlanEntry | undefined)?.requiredQuantity, 10);
 });
 
-test("merges duplicate Buy material rows by type ID", () => {
-  const rows = mergeBuyEntries([
-    {
-      typeId: 34,
-      name: "Tritanium",
-      quantity: 10,
-      requiredQuantity: 10,
-      stockQuantity: 0,
-      availableStockQuantity: 0,
-      productionQuantity: 0,
-      buildQuantity: 0,
-      buyQuantity: 10,
-      remainingStockQuantity: 0,
-      remainingProductionQuantity: 0,
-    },
-    {
-      typeId: 34,
-      name: "Tritanium",
-      quantity: 5,
-      requiredQuantity: 5,
-      stockQuantity: 0,
-      availableStockQuantity: 0,
-      productionQuantity: 0,
-      buildQuantity: 0,
-      buyQuantity: 5,
-      remainingStockQuantity: 0,
-      remainingProductionQuantity: 0,
-    },
-  ]);
-
-  assert.equal(rows.length, 1);
-  assert.equal((rows[0] as BuyMaterialEntry).requiredQuantity, 15);
-  assert.equal(rows[0].buyQuantity, 15);
-});
-
 test("groups Buy rows by market category", () => {
   const rows = groupBuyEntriesByMarketCategory(
     [
@@ -332,6 +296,9 @@ test("groups Buy rows by market category", () => {
       {
         typeId: 12345,
         name: "Example Blueprint",
+        typeGroupId: 9,
+        typeGroup: "Blueprints",
+        unitVolume: 0.01,
         quantity: 1,
         neededQuantity: 1,
         stockQuantity: 0,
@@ -350,41 +317,7 @@ test("groups Buy rows by market category", () => {
 
   assert.deepEqual([...rows.keys()], ["Blueprints", "Minerals"]);
   assert.deepEqual(
-    rows.get("Minerals")?.map((row) => row.name),
+    rows.get("Minerals")?.map((row) => ("typeName" in row ? row.typeName : row.name)),
     ["Pyerite", "Tritanium"],
   );
-});
-
-test("merges duplicate Buy BPC rows by type ID", () => {
-  const rows = mergeBuyEntries([
-    {
-      typeId: 12345,
-      name: "Example Blueprint",
-      quantity: 2,
-      neededQuantity: 4,
-      stockQuantity: 1,
-      stockRuns: 1,
-      buyQuantity: 3,
-      bpoCount: 0,
-      buildTime: 1,
-    },
-    {
-      typeId: 12345,
-      name: "Example Blueprint",
-      quantity: 3,
-      neededQuantity: 5,
-      stockQuantity: 2,
-      stockRuns: 2,
-      buyQuantity: 3,
-      bpoCount: 1,
-      buildTime: 1,
-    },
-  ]);
-
-  assert.equal(rows.length, 1);
-  const bpc = rows[0] as BuyBpcEntry;
-  assert.equal(bpc.neededQuantity, 9);
-  assert.equal(bpc.stockRuns, 3);
-  assert.equal(bpc.buyQuantity, 6);
-  assert.equal(bpc.bpoCount, 1);
 });
