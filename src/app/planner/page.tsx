@@ -403,6 +403,10 @@ function Planner() {
   const [jobs, setJobs] = useState<ClientJobsResponse | null>(null);
   const [clientAssets, setClientAssets] = useState<ClientAssetsResponse | null>(null);
   const [characterNamesById, setCharacterNamesById] = useState<Map<number, string>>(new Map());
+  const [corporationNamesById, setCorporationNamesById] = useState<Map<number, string>>(new Map());
+  const [activeCharacterNamesById, setActiveCharacterNamesById] = useState<Map<number, string>>(
+    new Map(),
+  );
   const [planningCharacterId, setPlanningCharacterId] = useState<number | undefined>();
   const [stockpiles, setStockpiles] = useState<ClientPlanStockpile[]>([]);
   const [areStockpilesLoaded, setAreStockpilesLoaded] = useState(false);
@@ -479,6 +483,23 @@ function Planner() {
         );
         activeCharacterIds = new Set(activeCharacters.map((character) => character.characterId));
         setCharacterNamesById(
+          new Map(
+            (session.characters ?? []).map((character) => [
+              character.characterId,
+              character.characterName,
+            ]),
+          ),
+        );
+        setCorporationNamesById(
+          new Map(
+            (session.characters ?? []).flatMap((character) =>
+              character.corporationId !== undefined && character.corporationName
+                ? [[character.corporationId, character.corporationName] as const]
+                : [],
+            ),
+          ),
+        );
+        setActiveCharacterNamesById(
           new Map(
             activeCharacters.map((character) => [character.characterId, character.characterName]),
           ),
@@ -1713,7 +1734,7 @@ function Planner() {
                   </div>
                 </Alert>
               )}
-              {characterNamesById.size > 0 && (
+              {activeCharacterNamesById.size > 0 && (
                 <Label>
                   <div className={`${styles.planOptionHeader} text-xs`}>
                     <span>INDUSTRY SKILLS</span>
@@ -1731,7 +1752,8 @@ function Planner() {
                     >
                       <SelectValue>
                         <span className={styles.locationSelectName}>
-                          {characterNamesById.get(planningCharacterId ?? -1) ?? "Select character"}
+                          {activeCharacterNamesById.get(planningCharacterId ?? -1)
+                            ?? "Select character"}
                         </span>
                         <span className={styles.locationSelectYield}>
                           -{reactionSkillBonus(planningCharacterId).toFixed(1)}%
@@ -1740,14 +1762,16 @@ function Planner() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        {[...characterNamesById.entries()].map(([characterId, characterName]) => (
-                          <SelectItem key={characterId} value={String(characterId)}>
-                            <span className={styles.locationOptionName}>{characterName}</span>
-                            <span className={styles.locationOptionYield}>
-                              -{reactionSkillBonus(characterId).toFixed(1)}%
-                            </span>
-                          </SelectItem>
-                        ))}
+                        {[...activeCharacterNamesById.entries()].map(
+                          ([characterId, characterName]) => (
+                            <SelectItem key={characterId} value={String(characterId)}>
+                              <span className={styles.locationOptionName}>{characterName}</span>
+                              <span className={styles.locationOptionYield}>
+                                -{reactionSkillBonus(characterId).toFixed(1)}%
+                              </span>
+                            </SelectItem>
+                          ),
+                        )}
                       </SelectGroup>
                     </SelectContent>
                   </Select>
@@ -1921,6 +1945,7 @@ function Planner() {
         planStatus={planStatus}
         characterStatuses={characterStatuses}
         characterNamesById={characterNamesById}
+        corporationNamesById={corporationNamesById}
         jobs={jobs}
         stock={stock}
         marketBuyOrderQuantities={clientAssets?.marketBuyOrderQuantities}

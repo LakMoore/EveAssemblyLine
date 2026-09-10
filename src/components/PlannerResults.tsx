@@ -36,8 +36,16 @@ import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { toast } from "@/components/ui/toast";
 import { Badge } from "@/components/ui/badge";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarGroup,
+  AvatarGroupCount,
+  AvatarImage,
+} from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
@@ -63,7 +71,11 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
+import {
+  eveCharacterPortraitUrl,
+  eveCorporationLogoUrl,
+  eveTypeImageUrl,
+} from "@/lib/eve/imageServer";
 import styles from "@/app/page.module.css";
 import {
   ArrowDown,
@@ -73,8 +85,11 @@ import {
   Bug,
   ChartLine,
   Check,
+  ChevronDown,
   ClipboardList,
   Copy as CopyIcon,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Factory,
   Minimize2,
   Microscope,
@@ -246,6 +261,10 @@ type DisplayHaulTask = PublicHaulTask & {
 
 function haulTaskRenderKey(task: DisplayHaulTask) {
   return `${task.fromLocationId}:${task.toLocationId}:${task.typeId}:${task.ownerType ?? "unassigned"}:${task.ownerId ?? 0}:${task.completed ? "completed" : "pending"}`;
+}
+
+function getHaulGroupVolume(tasks: DisplayHaulTask[]) {
+  return Math.ceil(tasks.reduce((total, task) => total + task.neededQuantity * task.unitVolume, 0));
 }
 
 function getHaulTasksWithExclusions(
@@ -606,6 +625,7 @@ function PlannerResultsContent({
   planStatus,
   characterStatuses,
   characterNamesById,
+  corporationNamesById,
   jobs,
   stock,
   marketBuyOrderQuantities,
@@ -624,6 +644,7 @@ function PlannerResultsContent({
   planStatus: string;
   characterStatuses: ClientCharacterStatus[];
   characterNamesById: Map<number, string>;
+  corporationNamesById: Map<number, string>;
   jobs: ClientJobsResponse | null;
   stock: PlanStockItem[];
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
@@ -836,6 +857,7 @@ function PlannerResultsContent({
               plan={plan}
               characterStatuses={characterStatuses}
               characterNamesById={characterNamesById}
+              corporationNamesById={corporationNamesById}
               stock={stock}
               marketBuyOrderQuantities={marketBuyOrderQuantities}
               activityLocationIds={activityLocationIds}
@@ -875,6 +897,7 @@ function PlanList({
   plan,
   characterStatuses,
   characterNamesById,
+  corporationNamesById,
   stock,
   marketBuyOrderQuantities,
   activityLocationIds,
@@ -898,6 +921,7 @@ function PlanList({
   plan: PlanResponse;
   characterStatuses: ClientCharacterStatus[];
   characterNamesById: Map<number, string>;
+  corporationNamesById: Map<number, string>;
   stock: PlanStockItem[];
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
   activityLocationIds: number[];
@@ -949,6 +973,7 @@ function PlanList({
   const [addedReactionBuildItems, setAddedReactionBuildItems] = useState<Set<number>>(
     () => new Set(),
   );
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const planListHeaderRef = useRef<HTMLDivElement>(null);
   const skillRequirements = plan.lists.skillsRequired;
   const skillsByCharacter = characterStatuses.map((character) => {
@@ -1287,7 +1312,7 @@ function PlanList({
       || (left.ownerId ?? 0) - (right.ownerId ?? 0)
     );
   });
-  const planColumns = ["Required", "Available", "Buy/Build", "Surplus"] as const;
+  const planColumns = ["Available", "Required", "Buy/Build", "Surplus"] as const;
 
   function getPlanCells(
     entry: ResponsePlanItem,
@@ -1927,22 +1952,58 @@ function PlanList({
               key={`${group.fromLocationId}:${group.toLocationId}:${group.ownerType ?? "unassigned"}:${group.ownerId ?? 0}`}
             >
               <header className={styles.haulGroupHeader}>
-                <span>From</span>
-                <strong>
+                <strong className={styles.haulGroupVolume}>
+                  {getHaulGroupVolume(group.tasks).toLocaleString()} m<sup>3</sup>
+                </strong>
+                <span className={styles.haulFromLabel}>From</span>
+                <strong className={styles.haulFromName}>
                   {locationNamesById.get(group.fromLocationId) ?? group.fromLocationId}
                 </strong>
-                <span>To</span>
-                <strong>{locationNamesById.get(group.toLocationId) ?? group.toLocationId}</strong>
-                {group.ownerType === "character" && group.ownerId !== undefined && (
+                <span className={styles.haulToLabel}>To</span>
+                <strong className={styles.haulToName}>
+                  {locationNamesById.get(group.toLocationId) ?? group.toLocationId}
+                </strong>
+                {group.ownerType !== undefined && group.ownerId !== undefined && (
                   <strong className={styles.haulOwner}>
-                    <Image
-                      src={eveCharacterPortraitUrl(group.ownerId, 64)}
-                      alt={`${characterNamesById.get(group.ownerId) ?? `Character ${group.ownerId}`} portrait`}
-                      width={24}
-                      height={24}
-                      className="size-6 rounded-none"
-                    />
-                    {characterNamesById.get(group.ownerId) ?? `Character ${group.ownerId}`}
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          group.ownerType === "corporation" ? (
+                            <Image
+                              src={eveCorporationLogoUrl(group.ownerId, 64)}
+                              alt={`${corporationNamesById.get(group.ownerId) ?? `Corporation ${group.ownerId}`} logo`}
+                              width={24}
+                              height={24}
+                              className="size-6 rounded-none"
+                            />
+                          ) : (
+                            <Image
+                              src={eveCharacterPortraitUrl(group.ownerId, 64)}
+                              alt={`${characterNamesById.get(group.ownerId) ?? `Character ${group.ownerId}`} portrait`}
+                              width={24}
+                              height={24}
+                              className="size-6 rounded-none"
+                            />
+                          )
+                        }
+                      />
+                      <TooltipContent>
+                        {group.ownerType === "corporation"
+                          ? (
+                              corporationNamesById.get(group.ownerId)
+                              ?? `Corporation ${group.ownerId}`
+                            )
+                          : (characterNamesById.get(group.ownerId) ?? `Character ${group.ownerId}`)}
+                      </TooltipContent>
+                    </Tooltip>
+                    <span className={styles.haulOwnerName}>
+                      {group.ownerType === "corporation"
+                        ? (
+                            corporationNamesById.get(group.ownerId)
+                            ?? `Corporation ${group.ownerId}`
+                          )
+                        : (characterNamesById.get(group.ownerId) ?? `Character ${group.ownerId}`)}
+                    </span>
                   </strong>
                 )}
                 <div className={styles.haulHeaderActions}>
@@ -1964,7 +2025,7 @@ function PlanList({
                     <span>
                       {excludingHaulFromLocationId === group.fromLocationId
                         ? "Recalculating..."
-                        : "Exclude and Recalculate"}
+                        : "Exclude Location"}
                     </span>
                   </Button>
                   {(() => {
@@ -1979,22 +2040,29 @@ function PlanList({
                     const groupIndeterminate = patchedCount > 0 && !groupChecked;
                     const groupKey = `${group.fromLocationId}:${group.toLocationId}:${group.ownerType ?? "unassigned"}:${group.ownerId ?? 0}`;
                     return (
-                      <Checkbox
-                        aria-label="Mark all eligible items as moved"
-                        checked={groupChecked}
-                        indeterminate={groupIndeterminate}
-                        disabled={
-                          eligibleTasks.length === 0
-                          || togglingHaulPatchGroupKey !== null
-                          || togglingHaulPatchKey !== null
-                        }
-                        onCheckedChange={(checked) => {
-                          setTogglingHaulPatchGroupKey(groupKey);
-                          void onToggleHaulPatches(eligibleTasks, checked).finally(() => {
-                            setTogglingHaulPatchGroupKey(null);
-                          });
-                        }}
-                      />
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Checkbox
+                              aria-label="Mark all eligible items as moved"
+                              checked={groupChecked}
+                              indeterminate={groupIndeterminate}
+                              disabled={
+                                eligibleTasks.length === 0
+                                || togglingHaulPatchGroupKey !== null
+                                || togglingHaulPatchKey !== null
+                              }
+                              onCheckedChange={(checked) => {
+                                setTogglingHaulPatchGroupKey(groupKey);
+                                void onToggleHaulPatches(eligibleTasks, checked).finally(() => {
+                                  setTogglingHaulPatchGroupKey(null);
+                                });
+                              }}
+                            />
+                          }
+                        />
+                        <TooltipContent>Haul completed?</TooltipContent>
+                      </Tooltip>
                     );
                   })()}
                 </div>
@@ -2052,28 +2120,36 @@ function PlanList({
                           copyLabel="Quantity"
                         />
                         <small>
-                          {Math.ceil(task.neededQuantity * task.unitVolume).toLocaleString()} m3
+                          {Math.ceil(task.neededQuantity * task.unitVolume).toLocaleString()} m
+                          <sup>3</sup>
                         </small>
                       </span>
                       <span className={styles.haulRowPatch}>
                         {togglingHaulPatchKey === key ? (
                           <Spinner aria-hidden="true" />
                         ) : (
-                          <Checkbox
-                            aria-label={`Mark ${task.typeName} as moved`}
-                            checked={isPatched}
-                            disabled={
-                              isExcluded
-                              || togglingHaulPatchGroupKey !== null
-                              || togglingHaulPatchKey !== null
-                            }
-                            onCheckedChange={(checked) => {
-                              setTogglingHaulPatchKey(key);
-                              void onToggleHaulPatches([task], checked).finally(() => {
-                                setTogglingHaulPatchKey(null);
-                              });
-                            }}
-                          />
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Checkbox
+                                  aria-label={`Mark ${task.typeName} as moved`}
+                                  checked={isPatched}
+                                  disabled={
+                                    isExcluded
+                                    || togglingHaulPatchGroupKey !== null
+                                    || togglingHaulPatchKey !== null
+                                  }
+                                  onCheckedChange={(checked) => {
+                                    setTogglingHaulPatchKey(key);
+                                    void onToggleHaulPatches([task], checked).finally(() => {
+                                      setTogglingHaulPatchKey(null);
+                                    });
+                                  }}
+                                />
+                              }
+                            />
+                            <TooltipContent>Haul completed?</TooltipContent>
+                          </Tooltip>
                         )}
                       </span>
                     </div>
@@ -2085,479 +2161,541 @@ function PlanList({
         </div>
       ) : (
         <div className={activeTab === "Plan" ? styles.planTable : styles.planList}>
-          {sortedDisplayGroups.map(([locationId, entries]) => (
-            <Fragment key={locationId ?? "unlocated"}>
-              {(locationGroupedTab || categoryGroupedTab) && (
-                <h3 className={styles.locationGroupHeader}>
-                  <span>
-                    {categoryGroupedTab
-                      ? locationId
-                      : (
-                          locationNamesById.get(Number(locationId ?? 0))
-                          ?? locationId
-                          ?? "Location unavailable"
-                        )}
-                  </span>
-                  {categoryGroupedTab && (
-                    <Button
+          {sortedDisplayGroups.map(([locationId, entries]) => {
+            const groupKey = `${activeTab}:${locationId ?? "unlocated"}`;
+            const isGroupOpen = openGroups[groupKey] ?? true;
+            const displayRows = entries.flatMap<ReactionDisplayRow>((entry) => {
+              const schedules =
+                activeTab === "React" && "inputs" in entry
+                  ? (reactionSchedule.get(reactionJobKey(entry as ResponseReactionJob)) ?? [])
+                  : [];
+              return schedules.length > 0
+                ? schedules.map((reactionPlan, reactionIndex) => ({
+                    entry,
+                    reactionPlan,
+                    reactionIndex,
+                  }))
+                : [{ entry, reactionPlan: null, reactionIndex: 0 }];
+            });
+            const groupAvatarRows = displayRows
+              .filter(
+                ({ entry }, index, rows) =>
+                  rows.findIndex((row) => row.entry.typeId === entry.typeId) === index,
+              )
+              .sort(({ entry: a }, { entry: b }) =>
+                getEntryName(b).includes("Reaction Formula")
+                || getEntryName(b).includes("Blueprint")
+                  ? -1
+                  : 1,
+              )
+              .slice(0, 5);
+            return (
+              <Collapsible
+                className="group/plan-group"
+                key={groupKey}
+                open={isGroupOpen}
+                onOpenChange={(open) =>
+                  setOpenGroups((current) => ({ ...current, [groupKey]: open }))
+                }
+              >
+                {(locationGroupedTab || categoryGroupedTab) && (
+                  <h3 className={styles.locationGroupHeader}>
+                    <CollapsibleTrigger
                       type="button"
-                      variant="outline"
-                      onClick={() =>
-                        void copyGroupMultibuy(
-                          String(locationId),
-                          entries as unknown as PlanBuyEntry[],
-                        )
-                      }
+                      className="flex min-w-0 min-h-10 flex-1 items-center justify-between gap-3 border-0 bg-transparent p-0 text-left font-inherit uppercase text-inherit"
+                      aria-label="Toggle group"
                     >
-                      <CopyIcon aria-hidden="true" />
-                      {groupCopyStatus?.category === String(locationId)
-                        ? groupCopyStatus.label
-                        : "Copy Group Multibuy"}
-                    </Button>
-                  )}
-                </h3>
-              )}
-              {entries
-                .flatMap<ReactionDisplayRow>((entry) => {
-                  const schedules =
-                    activeTab === "React" && "inputs" in entry
-                      ? (reactionSchedule.get(reactionJobKey(entry as ResponseReactionJob)) ?? [])
-                      : [];
-                  return schedules.length > 0
-                    ? schedules.map((reactionPlan, reactionIndex) => ({
-                        entry,
-                        reactionPlan,
-                        reactionIndex,
-                      }))
-                    : [{ entry, reactionPlan: null, reactionIndex: 0 }];
-                })
-                .map(({ entry, reactionPlan, reactionIndex }, index, rows) => {
-                  const rowSchedules =
-                    activeTab === "React" && "inputs" in entry
-                      ? (reactionSchedule.get(reactionJobKey(entry as ResponseReactionJob)) ?? [])
-                      : [];
-                  const typeId = entry.typeId;
-                  const name = getEntryName(entry);
-                  const marketBuyOrderQuantity =
-                    activeTab === "Buy" ? (marketBuyOrderQuantities?.[String(typeId)] ?? 0) : 0;
-                  const isPlanBpc = "kind" in entry && entry.kind === "bpc";
-                  const isBpcPurchase = activeTab === "Buy" && "bpoCount" in entry;
-                  const buyBpoEntry = isBpcPurchase && "bpoCount" in entry ? entry : null;
-                  const isCopyOfBpo =
-                    activeTab === "Copy" && "bpoCount" in entry && entry.bpoCount > 0;
-                  const copyBpoEntry = activeTab === "Copy" && "bpoCount" in entry ? entry : null;
-                  const isBlueprintName = / blueprint$/i.test(name);
-                  const isReactionFormulaName = / formula$/i.test(name);
-                  const isReactionFormulaBuy = activeTab === "Buy" && isReactionFormulaName;
-                  const reactionFormulaSummary = isReactionFormulaBuy
-                    ? getReactionFormulaSummary(typeId, stock)
-                    : null;
-                  const isPlanReaction = "kind" in entry && entry.kind === "reaction";
-                  const planBlueprintVariation =
-                    activeTab === "Plan" && (isPlanBpc || isBlueprintName)
-                      ? isPlanBpc && entry.bpoCount > 0
-                        ? "bp"
-                        : "bpc"
+                      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                        {categoryGroupedTab
+                          ? locationId
+                          : (
+                              locationNamesById.get(Number(locationId ?? 0))
+                              ?? locationId
+                              ?? "Location unavailable"
+                            )}
+                      </span>
+                      <AvatarGroup className="ml-auto hidden group-data-closed/plan-group:flex">
+                        {groupAvatarRows.map(({ entry }, index) => (
+                          <Avatar key={`${entry.typeId}-${index}`} size="lg">
+                            <AvatarImage
+                              className="bg-muted"
+                              src={eveTypeImageUrl(
+                                entry.typeId,
+                                "kind" in entry
+                                  ? entry.kind === "bpc"
+                                    ? "bpc"
+                                    : entry.kind === "reaction"
+                                      ? "bp"
+                                      : "icon"
+                                  : "icon",
+                                64,
+                              )}
+                              alt={`${getEntryName(entry)} icon`}
+                            />
+                            <AvatarFallback>{getEntryName(entry).slice(0, 2)}</AvatarFallback>
+                          </Avatar>
+                        ))}
+                        {displayRows.length - groupAvatarRows.length > 0 && (
+                          <AvatarGroupCount>
+                            +{displayRows.length - groupAvatarRows.length}
+                          </AvatarGroupCount>
+                        )}
+                      </AvatarGroup>
+                      {isGroupOpen ? <ChevronsDownUp /> : <ChevronsUpDown />}
+                    </CollapsibleTrigger>
+                    {categoryGroupedTab && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="shrink-0 normal-case"
+                        onClick={() =>
+                          void copyGroupMultibuy(
+                            String(locationId),
+                            entries as unknown as PlanBuyEntry[],
+                          )
+                        }
+                      >
+                        <CopyIcon aria-hidden="true" />
+                        {groupCopyStatus?.category === String(locationId)
+                          ? groupCopyStatus.label
+                          : "Copy Group Multibuy"}
+                      </Button>
+                    )}
+                  </h3>
+                )}
+                <CollapsibleContent>
+                  {displayRows.map(({ entry, reactionPlan, reactionIndex }, index, rows) => {
+                    const rowSchedules =
+                      activeTab === "React" && "inputs" in entry
+                        ? (reactionSchedule.get(reactionJobKey(entry as ResponseReactionJob)) ?? [])
+                        : [];
+                    const typeId = entry.typeId;
+                    const name = getEntryName(entry);
+                    const marketBuyOrderQuantity =
+                      activeTab === "Buy" ? (marketBuyOrderQuantities?.[String(typeId)] ?? 0) : 0;
+                    const isPlanBpc = "kind" in entry && entry.kind === "bpc";
+                    const isBpcPurchase = activeTab === "Buy" && "bpoCount" in entry;
+                    const buyBpoEntry = isBpcPurchase && "bpoCount" in entry ? entry : null;
+                    const isCopyOfBpo =
+                      activeTab === "Copy" && "bpoCount" in entry && entry.bpoCount > 0;
+                    const copyBpoEntry = activeTab === "Copy" && "bpoCount" in entry ? entry : null;
+                    const isBlueprintName = / blueprint$/i.test(name);
+                    const isReactionFormulaName = / formula$/i.test(name);
+                    const isReactionFormulaBuy = activeTab === "Buy" && isReactionFormulaName;
+                    const reactionFormulaSummary = isReactionFormulaBuy
+                      ? getReactionFormulaSummary(typeId, stock)
                       : null;
-                  const detail =
-                    activeTab === "Reprocess" && "efficiency" in entry
-                      ? `${entry.efficiency.toFixed(1)}% yield`
-                      : "fromLocationId" in entry && activeTab !== "Buy"
-                        ? `From ${locationNamesById.get(entry.fromLocationId) ?? entry.fromLocationId} to ${locationNamesById.get(entry.toLocationId) ?? entry.toLocationId}`
-                        : "";
-                  const totalTime =
-                    "totalTime" in entry && typeof entry.totalTime === "number"
-                      ? entry.totalTime
-                      : null;
-                  const reactionFormulaCount =
-                    activeTab === "React" && "inputs" in entry && "locationId" in entry
-                      ? getReactionFormulaCount(entry as ResponseReactionJob, stock)
-                      : 0;
-                  const precedingRuns = rowSchedules
-                    .slice(0, reactionIndex)
-                    .reduce((total, schedule) => total + schedule.totalRuns, 0);
-                  const reactionInputs =
-                    activeTab === "React"
-                    && reactionPlan !== null
-                    && rowSchedules.length > 1
-                    && "inputs" in entry
-                    && "countNeeded" in entry
-                      ? splitReactionJobInputs(
-                          entry.inputs,
-                          entry.countNeeded,
-                          reactionPlan.totalRuns,
-                          precedingRuns,
-                        )
-                      : "inputs" in entry
-                        ? entry.inputs
+                    const isPlanReaction = "kind" in entry && entry.kind === "reaction";
+                    const planBlueprintVariation =
+                      activeTab === "Plan" && (isPlanBpc || isBlueprintName)
+                        ? isPlanBpc && entry.bpoCount > 0
+                          ? "bp"
+                          : "bpc"
                         : null;
-                  const targetRuns = reactionPlan?.runs ?? null;
-                  const suggestedInstallCount = reactionPlan?.installs ?? 0;
-                  const installTime = reactionPlan?.time ?? totalTime;
-                  const totalNeeded =
-                    activeTab === "React" && "countNeeded" in entry && "runsAvailable" in entry
-                      ? (
-                          reactionPlan?.totalRuns
-                          ?? (showTotalRunCounts ? entry.countNeeded : entry.runsAvailable)
-                        )
-                      : null;
-                  const scheduledRuns = rowSchedules.reduce(
-                    (total, schedule) => total + schedule.totalRuns,
-                    0,
-                  );
-                  const scheduleRuns = getReactionScheduleRuns(rowSchedules);
-                  const additionalInstallCount =
-                    totalNeeded !== null && scheduleRuns > 0
-                      ? Math.max(
-                          0,
-                          Math.ceil(Math.max(0, totalNeeded - scheduledRuns) / scheduleRuns),
-                        )
-                      : 0;
-                  const materialEntry =
-                    activeTab === "Buy" && !isBpcPurchase
-                      ? (entry as ResponseMaterialBuy)
-                      : activeTab === "Plan" && "kind" in entry && entry.kind === "material"
-                        ? (entry as Extract<ResponsePlanItem, { kind: "material" }>)
+                    const detail =
+                      activeTab === "Reprocess" && "efficiency" in entry
+                        ? `${entry.efficiency.toFixed(1)}% yield`
+                        : "fromLocationId" in entry && activeTab !== "Buy"
+                          ? `From ${locationNamesById.get(entry.fromLocationId) ?? entry.fromLocationId} to ${locationNamesById.get(entry.toLocationId) ?? entry.toLocationId}`
+                          : "";
+                    const totalTime =
+                      "totalTime" in entry && typeof entry.totalTime === "number"
+                        ? entry.totalTime
                         : null;
-                  const materialAmount = materialEntry?.neededQuantity ?? null;
-                  const amount =
-                    "fromLocationId" in entry
-                      ? `${entry.neededQuantity.toLocaleString()} units | ${Math.ceil(entry.neededQuantity * entry.unitVolume).toLocaleString()} m3`
-                      : isBpcPurchase
-                        ? `${entry.neededQuantity.toLocaleString()} runs`
-                        : isPlanBpc
-                          ? `${entry.neededQuantity.toLocaleString()} needed`
-                          : isPlanReaction
-                            ? `${entry.requiredQuantity.toLocaleString()} runs`
-                            : materialAmount !== null
-                              ? `${materialAmount.toLocaleString()} units`
-                              : activeTab === "Copy" && "kind" in entry && entry.kind === "bpc"
-                                ? `${entry.neededQuantity.toLocaleString()} runs`
-                                : "quantity" in entry && typeof entry.quantity === "number"
-                                  ? `${entry.quantity.toLocaleString()} ${activeTab === "Copy" ? "runs" : "units"}`
-                                  : "countNeeded" in entry
-                                    ? entry.countNeeded >= 10
-                                      && suggestedInstallCount > 1
-                                      && targetRuns !== null
-                                      && installTime !== null
-                                      ? `${suggestedInstallCount.toLocaleString()} x ${targetRuns.toLocaleString()} runs @ ${formatDuration(installTime)} | ${entry.countNeeded.toLocaleString()} runs`
-                                      : `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.countNeeded.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
-                                    : "";
-                  const amountToCopy =
-                    "fromLocationId" in entry
-                      ? String(entry.neededQuantity)
-                      : isBpcPurchase
-                        ? String(entry.neededQuantity)
-                        : isPlanBpc
-                          ? String(entry.neededQuantity)
-                          : isPlanReaction
-                            ? String(entry.requiredQuantity)
-                            : materialAmount !== null
-                              ? String(materialAmount)
-                              : activeTab === "Copy" && "kind" in entry && entry.kind === "bpc"
-                                ? String(entry.neededQuantity)
-                                : "quantity" in entry
-                                  ? String(entry.quantity)
-                                  : "countNeeded" in entry
-                                    ? String(entry.countNeeded)
-                                    : null;
-                  const amountCopyLabel =
-                    activeTab === "Invent"
-                      ? "Attempts"
-                      : "fromLocationId" in entry || materialAmount !== null
-                        ? "Quantity"
+                    const reactionFormulaCount =
+                      activeTab === "React" && "inputs" in entry && "locationId" in entry
+                        ? getReactionFormulaCount(entry as ResponseReactionJob, stock)
+                        : 0;
+                    const precedingRuns = rowSchedules
+                      .slice(0, reactionIndex)
+                      .reduce((total, schedule) => total + schedule.totalRuns, 0);
+                    const reactionInputs =
+                      activeTab === "React"
+                      && reactionPlan !== null
+                      && rowSchedules.length > 1
+                      && "inputs" in entry
+                      && "countNeeded" in entry
+                        ? splitReactionJobInputs(
+                            entry.inputs,
+                            entry.countNeeded,
+                            reactionPlan.totalRuns,
+                            precedingRuns,
+                          )
+                        : "inputs" in entry
+                          ? entry.inputs
+                          : null;
+                    const targetRuns = reactionPlan?.runs ?? null;
+                    const suggestedInstallCount = reactionPlan?.installs ?? 0;
+                    const installTime = reactionPlan?.time ?? totalTime;
+                    const totalNeeded =
+                      activeTab === "React" && "countNeeded" in entry && "runsAvailable" in entry
+                        ? (
+                            reactionPlan?.totalRuns
+                            ?? (showTotalRunCounts ? entry.countNeeded : entry.runsAvailable)
+                          )
+                        : null;
+                    const scheduledRuns = rowSchedules.reduce(
+                      (total, schedule) => total + schedule.totalRuns,
+                      0,
+                    );
+                    const scheduleRuns = getReactionScheduleRuns(rowSchedules);
+                    const additionalInstallCount =
+                      totalNeeded !== null && scheduleRuns > 0
+                        ? Math.max(
+                            0,
+                            Math.ceil(Math.max(0, totalNeeded - scheduledRuns) / scheduleRuns),
+                          )
+                        : 0;
+                    const materialEntry =
+                      activeTab === "Buy" && !isBpcPurchase
+                        ? (entry as ResponseMaterialBuy)
+                        : activeTab === "Plan" && "kind" in entry && entry.kind === "material"
+                          ? (entry as Extract<ResponsePlanItem, { kind: "material" }>)
+                          : null;
+                    const materialAmount = materialEntry?.neededQuantity ?? null;
+                    const amount =
+                      "fromLocationId" in entry
+                        ? `${entry.neededQuantity.toLocaleString()} units | ${Math.ceil(entry.neededQuantity * entry.unitVolume).toLocaleString()} m<sup>3</sup>`
                         : isBpcPurchase
-                            || isPlanBpc
-                            || isPlanReaction
-                            || activeTab === "Copy"
-                            || "countNeeded" in entry
-                          ? "Runs"
-                          : "Quantity";
-                  const imageVariation =
-                    planBlueprintVariation
-                    ?? (isCopyOfBpo || (isPlanBpc && entry.bpoCount > 0)
-                      ? "bp"
-                      : isBlueprintName
-                        ? "bp"
-                        : isReactionFormulaName
-                          ? "bpc"
-                          : activeTab === "Manufacture"
-                              || activeTab === "React"
+                          ? `${entry.neededQuantity.toLocaleString()} runs`
+                          : isPlanBpc
+                            ? `${entry.neededQuantity.toLocaleString()} needed`
+                            : isPlanReaction
+                              ? `${entry.requiredQuantity.toLocaleString()} runs`
+                              : materialAmount !== null
+                                ? `${materialAmount.toLocaleString()} units`
+                                : activeTab === "Copy" && "kind" in entry && entry.kind === "bpc"
+                                  ? `${entry.neededQuantity.toLocaleString()} runs`
+                                  : "quantity" in entry && typeof entry.quantity === "number"
+                                    ? `${entry.quantity.toLocaleString()} ${activeTab === "Copy" ? "runs" : "units"}`
+                                    : "countNeeded" in entry
+                                      ? entry.countNeeded >= 10
+                                        && suggestedInstallCount > 1
+                                        && targetRuns !== null
+                                        && installTime !== null
+                                        ? `${suggestedInstallCount.toLocaleString()} x ${targetRuns.toLocaleString()} runs @ ${formatDuration(installTime)} | ${entry.countNeeded.toLocaleString()} runs`
+                                        : `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.countNeeded.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
+                                      : "";
+                    const amountToCopy =
+                      "fromLocationId" in entry
+                        ? String(entry.neededQuantity)
+                        : isBpcPurchase
+                          ? String(entry.neededQuantity)
+                          : isPlanBpc
+                            ? String(entry.neededQuantity)
+                            : isPlanReaction
+                              ? String(entry.requiredQuantity)
+                              : materialAmount !== null
+                                ? String(materialAmount)
+                                : activeTab === "Copy" && "kind" in entry && entry.kind === "bpc"
+                                  ? String(entry.neededQuantity)
+                                  : "quantity" in entry
+                                    ? String(entry.quantity)
+                                    : "countNeeded" in entry
+                                      ? String(entry.countNeeded)
+                                      : null;
+                    const amountCopyLabel =
+                      activeTab === "Invent"
+                        ? "Attempts"
+                        : "fromLocationId" in entry || materialAmount !== null
+                          ? "Quantity"
+                          : isBpcPurchase
                               || isPlanBpc
-                              || isBpcPurchase
                               || isPlanReaction
                               || activeTab === "Copy"
-                              || activeTab === "Invent"
+                              || "countNeeded" in entry
+                            ? "Runs"
+                            : "Quantity";
+                    const imageVariation =
+                      planBlueprintVariation
+                      ?? (isCopyOfBpo || (isPlanBpc && entry.bpoCount > 0)
+                        ? "bp"
+                        : isBlueprintName
+                          ? "bp"
+                          : isReactionFormulaName
                             ? "bpc"
-                            : "icon");
-                  const planCells =
-                    activeTab === "Plan" ? getPlanCells(entry as ResponsePlanItem) : null;
-                  const planHaulingQuantity =
-                    activeTab === "Plan" && "kind" in entry
-                      ? (entry as ResponsePlanItem).haulingQuantity
+                            : activeTab === "Manufacture"
+                                || activeTab === "React"
+                                || isPlanBpc
+                                || isBpcPurchase
+                                || isPlanReaction
+                                || activeTab === "Copy"
+                                || activeTab === "Invent"
+                              ? "bpc"
+                              : "icon");
+                    const planCells =
+                      activeTab === "Plan" ? getPlanCells(entry as ResponsePlanItem) : null;
+                    const planHaulingQuantity =
+                      activeTab === "Plan" && "kind" in entry
+                        ? (entry as ResponsePlanItem).haulingQuantity
+                        : 0;
+                    const manufacturingEntry =
+                      activeTab === "Manufacture" ? (entry as ResponseManufacturingJob) : null;
+                    const manufacturingDisplayedRuns = manufacturingEntry
+                      ? showTotalManufacturingRunCounts
+                        ? manufacturingEntry.countNeeded
+                        : manufacturingEntry.runsAvailable
                       : 0;
-                  const manufacturingEntry =
-                    activeTab === "Manufacture" ? (entry as ResponseManufacturingJob) : null;
-                  const manufacturingDisplayedRuns = manufacturingEntry
-                    ? showTotalManufacturingRunCounts
-                      ? manufacturingEntry.countNeeded
-                      : manufacturingEntry.runsAvailable
-                    : 0;
-                  const manufacturingDisplayedTime =
-                    manufacturingEntry && manufacturingEntry.countNeeded > 0
-                      ? (manufacturingEntry.totalTime * manufacturingDisplayedRuns)
-                        / manufacturingEntry.countNeeded
-                      : 0;
-                  return (
-                    <Fragment key={`${activeTab}-${index}`}>
-                      <div
-                        className={`${activeTab === "Plan" ? styles.planTableRow : activeTab === "Copy" ? "grid grid-cols-[minmax(0,1fr)_minmax(74px,auto)_minmax(74px,auto)_minmax(90px,auto)] items-center gap-[13px] max-[640px]:grid-cols-3 max-[640px]:items-start max-[640px]:gap-y-2" : buyBpoEntry || isReactionFormulaBuy ? "grid grid-cols-[minmax(0,1fr)_minmax(150px,auto)_minmax(100px,auto)] items-center gap-[13px] max-[640px]:grid-cols-1 max-[640px]:items-start max-[640px]:gap-y-2" : styles.planRow} ${activeTab === "React" ? styles.reactionRow : activeTab === "Manufacture" ? styles.manufacturingRow : ""}`}
-                      >
+                    const manufacturingDisplayedTime =
+                      manufacturingEntry && manufacturingEntry.countNeeded > 0
+                        ? (manufacturingEntry.totalTime * manufacturingDisplayedRuns)
+                          / manufacturingEntry.countNeeded
+                        : 0;
+                    return (
+                      <Fragment key={`${activeTab}-${index}`}>
                         <div
-                          className={`${styles.planTypeCell} ${activeTab === "Copy" ? "max-[640px]:col-span-full max-[640px]:w-full" : buyBpoEntry || isReactionFormulaBuy ? "max-[640px]:col-span-1 max-[640px]:w-full" : ""}`}
+                          className={`${activeTab === "Plan" ? styles.planTableRow : activeTab === "Copy" ? "grid grid-cols-[minmax(0,1fr)_minmax(74px,auto)_minmax(74px,auto)_minmax(90px,auto)] items-center gap-[13px] max-[640px]:grid-cols-3 max-[640px]:items-start max-[640px]:gap-y-2" : buyBpoEntry || isReactionFormulaBuy ? "grid grid-cols-[minmax(0,1fr)_minmax(150px,auto)_minmax(100px,auto)] items-center gap-[13px] max-[640px]:grid-cols-1 max-[640px]:items-start max-[640px]:gap-y-2" : styles.planRow} ${activeTab === "React" ? styles.reactionRow : activeTab === "Manufacture" ? styles.manufacturingRow : ""}`}
                         >
-                          <TypeIdentity
-                            name={name}
-                            typeId={typeId}
-                            imageSize={40}
-                            variation={imageVariation}
-                            linkPath={activeTab === "Plan" ? "assets" : "planner"}
-                            linkIcon={activeTab === "Plan" ? undefined : ClipboardList}
-                            linkSearchParams={activeTab === "Plan" ? undefined : { tab: "Plan" }}
-                            navigateInPlace={activeTab !== "Plan"}
-                            className={styles.planTypeIdentity}
-                          />
-                        </div>
-                        {activeTab === "React" && "inputs" in entry && (
-                          <span className={styles.jobInputsTrigger}>
-                            <JobInputsResponsive inputs={reactionInputs ?? entry.inputs} />
-                          </span>
-                        )}
-                        {activeTab === "Manufacture" && "inputs" in entry && (
-                          <span className={styles.manufacturingInputsCell}>
-                            <JobInputsResponsive inputs={entry.inputs} />
-                          </span>
-                        )}
-                        {activeTab === "Plan" ? (
-                          planColumns.map((column) =>
-                            planCells?.[column] ? (
-                              <span
-                                className={styles.planTableCell}
-                                data-label={column}
-                                key={column}
-                              >
-                                <span className={styles.planTableValue}>
-                                  {column === "Available" && (
-                                    <AvailableSourceIcons
-                                      counts={
-                                        "availableSourceCounts" in entry
-                                          ? entry.availableSourceCounts
-                                          : undefined
-                                      }
-                                      haulingQuantity={planHaulingQuantity}
-                                    />
-                                  )}
-                                  {planCells[column]}
-                                </span>
-                              </span>
-                            ) : (
-                              <span className={styles.planTableCellEmpty} key={column} />
-                            ),
-                          )
-                        ) : activeTab === "Manufacture" ? (
-                          <>
-                            <span className={styles.manufacturingBlueprintCell}>
-                              {formatOptionalCount(manufacturingEntry?.inputs.bpoCount)}
+                          <div
+                            className={`${styles.planTypeCell} ${activeTab === "Copy" ? "max-[640px]:col-span-full max-[640px]:w-full" : buyBpoEntry || isReactionFormulaBuy ? "max-[640px]:col-span-1 max-[640px]:w-full" : ""}`}
+                          >
+                            <TypeIdentity
+                              name={name}
+                              typeId={typeId}
+                              imageSize={40}
+                              variation={imageVariation}
+                              linkPath={activeTab === "Plan" ? "assets" : "planner"}
+                              linkIcon={activeTab === "Plan" ? undefined : ClipboardList}
+                              linkSearchParams={activeTab === "Plan" ? undefined : { tab: "Plan" }}
+                              navigateInPlace={activeTab !== "Plan"}
+                              className={styles.planTypeIdentity}
+                            />
+                          </div>
+                          {activeTab === "React" && "inputs" in entry && (
+                            <span className={styles.jobInputsTrigger}>
+                              <JobInputsResponsive inputs={reactionInputs ?? entry.inputs} />
                             </span>
-                            <span className={styles.manufacturingBlueprintCell}>
-                              {formatOptionalCount(manufacturingEntry?.inputs.bpcRuns)}
+                          )}
+                          {activeTab === "Manufacture" && "inputs" in entry && (
+                            <span className={styles.manufacturingInputsCell}>
+                              <JobInputsResponsive inputs={entry.inputs} />
                             </span>
-                            <span className={styles.manufacturingRunCell}>
-                              <strong>
-                                <CopyableText
-                                  textToRender={`${manufacturingDisplayedRuns.toLocaleString()} runs`}
-                                  textToCopy={String(manufacturingDisplayedRuns)}
-                                  copyLabel="Runs"
-                                />
-                              </strong>
-                              <small>{formatDuration(manufacturingDisplayedTime)}</small>
-                            </span>
-                          </>
-                        ) : activeTab === "Buy" && buyBpoEntry ? (
-                          <>
-                            <span className="text-right font-mono text-[11px] leading-normal text-muted-foreground whitespace-nowrap max-[640px]:text-left max-[640px]:col-span-1 max-[640px]:w-full">
-                              BPO: {buyBpoEntry.bpoCount.toLocaleString()} /{" "}
-                              {buyBpoEntry.bposInUse.toLocaleString()} in use
-                            </span>
-                            <span
-                              className={`${styles.planRowAmount} max-[640px]:col-span-1 max-[640px]:w-full`}
-                            >
-                              <strong>
-                                <CopyableText
-                                  textToRender={`${buyBpoEntry.neededQuantity.toLocaleString()} runs needed`}
-                                  textToCopy={String(buyBpoEntry.neededQuantity)}
-                                  copyLabel="Runs needed"
-                                />
-                                <MarketBuyOrderIndicator quantity={marketBuyOrderQuantity} />
-                              </strong>
-                            </span>
-                          </>
-                        ) : activeTab === "Copy" && copyBpoEntry ? (
-                          <>
-                            <span
-                              className="text-right font-mono text-[12px] leading-normal text-foreground max-[640px]:relative max-[640px]:w-auto max-[640px]:pt-3.5 max-[640px]:text-left max-[640px]:before:absolute max-[640px]:before:top-0 max-[640px]:before:left-0 max-[640px]:before:block max-[640px]:before:font-mono max-[640px]:before:text-[9px] max-[640px]:before:tracking-[0.3px] max-[640px]:before:text-muted-foreground max-[640px]:before:uppercase max-[640px]:before:content-[attr(data-label)]"
-                              data-label="BPOs in use"
-                            >
-                              {formatOptionalCount(copyBpoEntry.bposInUse)}
-                            </span>
-                            <span
-                              className="text-right font-mono text-[12px] leading-normal text-foreground max-[640px]:relative max-[640px]:w-auto max-[640px]:pt-3.5 max-[640px]:text-left max-[640px]:before:absolute max-[640px]:before:top-0 max-[640px]:before:left-0 max-[640px]:before:block max-[640px]:before:font-mono max-[640px]:before:text-[9px] max-[640px]:before:tracking-[0.3px] max-[640px]:before:text-muted-foreground max-[640px]:before:uppercase max-[640px]:before:content-[attr(data-label)]"
-                              data-label="BPOs owned"
-                            >
-                              {formatOptionalCount(copyBpoEntry.bpoCount)}
-                            </span>
-                            <span
-                              className={`${styles.planRowAmount} max-[640px]:relative max-[640px]:w-auto max-[640px]:pt-3.5 max-[640px]:text-left max-[640px]:before:absolute max-[640px]:before:top-0 max-[640px]:before:left-0 max-[640px]:before:block max-[640px]:before:font-mono max-[640px]:before:text-[9px] max-[640px]:before:tracking-[0.3px] max-[640px]:before:text-muted-foreground max-[640px]:before:uppercase max-[640px]:before:content-[attr(data-label)]`}
-                              data-label="BPC runs"
-                            >
-                              <strong>
-                                <CopyableText
-                                  textToRender={`${copyBpoEntry.neededQuantity.toLocaleString()} needed`}
-                                  textToCopy={String(copyBpoEntry.neededQuantity)}
-                                  copyLabel="BPC runs needed"
-                                />
-                              </strong>
-                            </span>
-                          </>
-                        ) : isReactionFormulaBuy && reactionFormulaSummary ? (
-                          <>
-                            <span className="text-right font-mono text-[11px] leading-normal text-muted-foreground whitespace-nowrap max-[640px]:text-left max-[640px]:col-span-1 max-[640px]:w-full">
-                              Formulas: {reactionFormulaSummary.inUse.toLocaleString()} /{" "}
-                              {reactionFormulaSummary.owned.toLocaleString()} in use
-                            </span>
-                            <span
-                              className={`${styles.planRowAmount} max-[640px]:col-span-1 max-[640px]:w-full`}
-                            >
-                              <strong>
-                                <CopyableText
-                                  textToRender={`${materialAmount?.toLocaleString() ?? "0"} units`}
-                                  textToCopy={amountToCopy ?? "0"}
-                                  copyLabel={amountCopyLabel}
-                                />
-                              </strong>
-                            </span>
-                          </>
-                        ) : (
-                          <span className={styles.planRowAmount}>
-                            {activeTab === "React" ? (
-                              <span className={styles.reactionCells}>
+                          )}
+                          {activeTab === "Plan" ? (
+                            planColumns.map((column) =>
+                              planCells?.[column] ? (
                                 <span
-                                  className={styles.reactionAvailableCell}
-                                  data-label="BPs available"
+                                  className={styles.planTableCell}
+                                  data-label={column}
+                                  key={column}
                                 >
-                                  {additionalInstallCount > 0
-                                    && reactionIndex === 0
-                                    && !addedReactionBuildItems.has(typeId) && (
-                                      <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="xs"
-                                        className={styles.buyReactionButton}
-                                        onClick={() => {
-                                          onAddBuildItem({
-                                            name,
-                                            typeId,
-                                            quantity: additionalInstallCount,
-                                          });
-                                          setAddedReactionBuildItems((current) =>
-                                            new Set(current).add(typeId),
-                                          );
-                                        }}
-                                      >
-                                        Buy +{additionalInstallCount.toLocaleString()}
-                                      </Button>
-                                    )}
-                                  <strong>
-                                    {(
-                                      reactionPlan?.availableBlueprints ?? reactionFormulaCount
-                                    ).toLocaleString()}
-                                  </strong>
-                                </span>
-                                <span
-                                  className={styles.reactionValue}
-                                  data-label="Suggested installs"
-                                >
-                                  <strong>{suggestedInstallCount.toLocaleString()}</strong>
-                                </span>
-                                <span className={styles.reactionValue} data-label="Suggested runs">
-                                  <strong>
-                                    {targetRuns === null ? (
-                                      "-"
-                                    ) : targetRuns > 0 ? (
-                                      <CopyableText
-                                        textToRender={targetRuns.toLocaleString()}
-                                        textToCopy={String(targetRuns)}
-                                        copyLabel="Suggested runs"
+                                  <span className={styles.planTableValue}>
+                                    {column === "Available" && (
+                                      <AvailableSourceIcons
+                                        counts={
+                                          "availableSourceCounts" in entry
+                                            ? entry.availableSourceCounts
+                                            : undefined
+                                        }
+                                        haulingQuantity={planHaulingQuantity}
                                       />
-                                    ) : (
-                                      targetRuns.toLocaleString()
                                     )}
-                                  </strong>
-                                  <small>
-                                    {installTime !== null ? formatDuration(installTime) : "-"}
-                                  </small>
+                                    {planCells[column]}
+                                  </span>
                                 </span>
-                                <span className={styles.reactionValue} data-label="Total needed">
-                                  <strong>
-                                    {totalNeeded === null ? (
-                                      "-"
-                                    ) : totalNeeded > 0 ? (
-                                      <CopyableText
-                                        textToRender={totalNeeded.toLocaleString()}
-                                        textToCopy={String(totalNeeded)}
-                                        copyLabel="Total needed"
-                                      />
-                                    ) : (
-                                      totalNeeded.toLocaleString()
-                                    )}
-                                  </strong>
-                                  <small>
-                                    {totalNeeded !== null
-                                    && totalTime !== null
-                                    && "countNeeded" in entry
-                                      ? formatDuration(
-                                          totalNeeded > 0
-                                            ? (totalTime * totalNeeded) / entry.countNeeded
-                                            : 0,
-                                        )
-                                      : "-"}
-                                  </small>
-                                </span>
+                              ) : (
+                                <span className={styles.planTableCellEmpty} key={column} />
+                              ),
+                            )
+                          ) : activeTab === "Manufacture" ? (
+                            <>
+                              <span className={styles.manufacturingBlueprintCell}>
+                                {formatOptionalCount(manufacturingEntry?.inputs.bpoCount)}
                               </span>
-                            ) : (
-                              <>
+                              <span className={styles.manufacturingBlueprintCell}>
+                                {formatOptionalCount(manufacturingEntry?.inputs.bpcRuns)}
+                              </span>
+                              <span className={styles.manufacturingRunCell}>
                                 <strong>
                                   <CopyableText
-                                    textToRender={amount}
-                                    textToCopy={amountToCopy ?? amount}
+                                    textToRender={`${manufacturingDisplayedRuns.toLocaleString()} runs`}
+                                    textToCopy={String(manufacturingDisplayedRuns)}
+                                    copyLabel="Runs"
+                                  />
+                                </strong>
+                                <small>{formatDuration(manufacturingDisplayedTime)}</small>
+                              </span>
+                            </>
+                          ) : activeTab === "Buy" && buyBpoEntry ? (
+                            <>
+                              <span className="text-right font-mono text-[11px] leading-normal text-muted-foreground whitespace-nowrap max-[640px]:text-left max-[640px]:col-span-1 max-[640px]:w-full">
+                                BPO: {buyBpoEntry.bpoCount.toLocaleString()} /{" "}
+                                {buyBpoEntry.bposInUse.toLocaleString()} in use
+                              </span>
+                              <span
+                                className={`${styles.planRowAmount} max-[640px]:col-span-1 max-[640px]:w-full`}
+                              >
+                                <strong>
+                                  <CopyableText
+                                    textToRender={`${buyBpoEntry.neededQuantity.toLocaleString()} runs needed`}
+                                    textToCopy={String(buyBpoEntry.neededQuantity)}
+                                    copyLabel="Runs needed"
+                                  />
+                                  <MarketBuyOrderIndicator quantity={marketBuyOrderQuantity} />
+                                </strong>
+                              </span>
+                            </>
+                          ) : activeTab === "Copy" && copyBpoEntry ? (
+                            <>
+                              <span
+                                className="text-right font-mono text-[12px] leading-normal text-foreground max-[640px]:relative max-[640px]:w-auto max-[640px]:pt-3.5 max-[640px]:text-left max-[640px]:before:absolute max-[640px]:before:top-0 max-[640px]:before:left-0 max-[640px]:before:block max-[640px]:before:font-mono max-[640px]:before:text-[9px] max-[640px]:before:tracking-[0.3px] max-[640px]:before:text-muted-foreground max-[640px]:before:uppercase max-[640px]:before:content-[attr(data-label)]"
+                                data-label="BPOs in use"
+                              >
+                                {formatOptionalCount(copyBpoEntry.bposInUse)}
+                              </span>
+                              <span
+                                className="text-right font-mono text-[12px] leading-normal text-foreground max-[640px]:relative max-[640px]:w-auto max-[640px]:pt-3.5 max-[640px]:text-left max-[640px]:before:absolute max-[640px]:before:top-0 max-[640px]:before:left-0 max-[640px]:before:block max-[640px]:before:font-mono max-[640px]:before:text-[9px] max-[640px]:before:tracking-[0.3px] max-[640px]:before:text-muted-foreground max-[640px]:before:uppercase max-[640px]:before:content-[attr(data-label)]"
+                                data-label="BPOs owned"
+                              >
+                                {formatOptionalCount(copyBpoEntry.bpoCount)}
+                              </span>
+                              <span
+                                className={`${styles.planRowAmount} max-[640px]:relative max-[640px]:w-auto max-[640px]:pt-3.5 max-[640px]:text-left max-[640px]:before:absolute max-[640px]:before:top-0 max-[640px]:before:left-0 max-[640px]:before:block max-[640px]:before:font-mono max-[640px]:before:text-[9px] max-[640px]:before:tracking-[0.3px] max-[640px]:before:text-muted-foreground max-[640px]:before:uppercase max-[640px]:before:content-[attr(data-label)]`}
+                                data-label="BPC runs"
+                              >
+                                <strong>
+                                  <CopyableText
+                                    textToRender={`${copyBpoEntry.neededQuantity.toLocaleString()} needed`}
+                                    textToCopy={String(copyBpoEntry.neededQuantity)}
+                                    copyLabel="BPC runs needed"
+                                  />
+                                </strong>
+                              </span>
+                            </>
+                          ) : isReactionFormulaBuy && reactionFormulaSummary ? (
+                            <>
+                              <span className="text-right font-mono text-[11px] leading-normal text-muted-foreground whitespace-nowrap max-[640px]:text-left max-[640px]:col-span-1 max-[640px]:w-full">
+                                Formulas: {reactionFormulaSummary.inUse.toLocaleString()} /{" "}
+                                {reactionFormulaSummary.owned.toLocaleString()} in use
+                              </span>
+                              <span
+                                className={`${styles.planRowAmount} max-[640px]:col-span-1 max-[640px]:w-full`}
+                              >
+                                <strong>
+                                  <CopyableText
+                                    textToRender={`${materialAmount?.toLocaleString() ?? "0"} units`}
+                                    textToCopy={amountToCopy ?? "0"}
                                     copyLabel={amountCopyLabel}
                                   />
                                 </strong>
-                                <MarketBuyOrderIndicator quantity={marketBuyOrderQuantity} />
-                              </>
-                            )}
-                            {detail && activeTab !== "React" && <small>{detail}</small>}
-                          </span>
+                              </span>
+                            </>
+                          ) : (
+                            <span className={styles.planRowAmount}>
+                              {activeTab === "React" ? (
+                                <span className={styles.reactionCells}>
+                                  <span
+                                    className={styles.reactionAvailableCell}
+                                    data-label="BPs available"
+                                  >
+                                    {additionalInstallCount > 0
+                                      && reactionIndex === 0
+                                      && !addedReactionBuildItems.has(typeId) && (
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="xs"
+                                          className={styles.buyReactionButton}
+                                          onClick={() => {
+                                            onAddBuildItem({
+                                              name,
+                                              typeId,
+                                              quantity: additionalInstallCount,
+                                            });
+                                            setAddedReactionBuildItems((current) =>
+                                              new Set(current).add(typeId),
+                                            );
+                                          }}
+                                        >
+                                          Buy +{additionalInstallCount.toLocaleString()}
+                                        </Button>
+                                      )}
+                                    <strong>
+                                      {(
+                                        reactionPlan?.availableBlueprints ?? reactionFormulaCount
+                                      ).toLocaleString()}
+                                    </strong>
+                                  </span>
+                                  <span
+                                    className={styles.reactionValue}
+                                    data-label="Suggested installs"
+                                  >
+                                    <strong>{suggestedInstallCount.toLocaleString()}</strong>
+                                  </span>
+                                  <span
+                                    className={styles.reactionValue}
+                                    data-label="Suggested runs"
+                                  >
+                                    <strong>
+                                      {targetRuns === null ? (
+                                        "-"
+                                      ) : targetRuns > 0 ? (
+                                        <CopyableText
+                                          textToRender={targetRuns.toLocaleString()}
+                                          textToCopy={String(targetRuns)}
+                                          copyLabel="Suggested runs"
+                                        />
+                                      ) : (
+                                        targetRuns.toLocaleString()
+                                      )}
+                                    </strong>
+                                    <small>
+                                      {installTime !== null ? formatDuration(installTime) : "-"}
+                                    </small>
+                                  </span>
+                                  <span className={styles.reactionValue} data-label="Total needed">
+                                    <strong>
+                                      {totalNeeded === null ? (
+                                        "-"
+                                      ) : totalNeeded > 0 ? (
+                                        <CopyableText
+                                          textToRender={totalNeeded.toLocaleString()}
+                                          textToCopy={String(totalNeeded)}
+                                          copyLabel="Total needed"
+                                        />
+                                      ) : (
+                                        totalNeeded.toLocaleString()
+                                      )}
+                                    </strong>
+                                    <small>
+                                      {totalNeeded !== null
+                                      && totalTime !== null
+                                      && "countNeeded" in entry
+                                        ? formatDuration(
+                                            totalNeeded > 0
+                                              ? (totalTime * totalNeeded) / entry.countNeeded
+                                              : 0,
+                                          )
+                                        : "-"}
+                                    </small>
+                                  </span>
+                                </span>
+                              ) : (
+                                <>
+                                  <strong>
+                                    <CopyableText
+                                      textToRender={amount}
+                                      textToCopy={amountToCopy ?? amount}
+                                      copyLabel={amountCopyLabel}
+                                    />
+                                  </strong>
+                                  <MarketBuyOrderIndicator quantity={marketBuyOrderQuantity} />
+                                </>
+                              )}
+                              {detail && activeTab !== "React" && <small>{detail}</small>}
+                            </span>
+                          )}
+                        </div>
+                        {activeTab !== "Plan" && index < rows.length - 1 && (
+                          <hr className={styles.planRowSeparator} />
                         )}
-                      </div>
-                      {activeTab !== "Plan" && index < rows.length - 1 && (
-                        <hr className={styles.planRowSeparator} />
-                      )}
-                    </Fragment>
-                  );
-                })}
-            </Fragment>
-          ))}
+                      </Fragment>
+                    );
+                  })}
+                </CollapsibleContent>
+              </Collapsible>
+            );
+          })}
         </div>
       )}
     </>

@@ -1095,14 +1095,18 @@ function Results({
                     <div
                       className={`${styles.resultRow} ${styles.planResultRow} ${styles.totalRow}`}
                     >
-                      <strong>Total volume (m3)</strong>
+                      <strong>
+                        Total volume (m<sup>3</sup>)
+                      </strong>
                       <strong data-label="Required">{totalQuantity.toLocaleString()}</strong>
                       <strong data-label="Reprocessed">{totalReprocessed.toLocaleString()}</strong>
                       <strong data-label="Surplus">{totalSurplus.toLocaleString()}</strong>
                     </div>
                   ) : active.key === "toBuy" ? (
                     <div className={styles.totalRow}>
-                      <strong>Total volume (m3)</strong>
+                      <strong>
+                        Total volume (m<sup>3</sup>)
+                      </strong>
                       <strong>{totalQuantity.toLocaleString()}</strong>
                     </div>
                   ) : null}
