@@ -25,7 +25,7 @@ type PasteListItem = {
   name: string;
   quantity?: number;
   category?: string;
-  marketCategory?: string;
+  assemblyLineGroup?: string;
 };
 
 type PasteListDialogProps = {

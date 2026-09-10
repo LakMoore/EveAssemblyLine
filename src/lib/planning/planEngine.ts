@@ -3,28 +3,35 @@ import {
   getBuildBlueprintByProductTypeId,
   getCompressibleTypes,
   getGroups,
+  getMarketGroups,
   getIndustryTargetFilters,
   getSkillPrerequisites,
   getTypeMaterials,
 } from "@/cache/services/sdeCache";
 import { getTypes } from "@/lib/sde/loader";
+import { categorizeType } from "@/lib/reference/category";
+import { AssemblyLineGroups } from "@/lib/reference/assemblyLineGroups";
 import { getProductionGroupReferences, productionGroupForType } from "./productionGroups";
 import {
   PlanJobInput,
   PlanJobInputs,
   PlanJobInputStatus,
   PlanActivityLocations,
-  PlanBucketContext,
-  PlanBlueprintPurchaseResponse,
-  PlanContextBucket,
-  PlanHaulBucketResponse,
+  ResponseHaulBucket,
+  PlanHaulTask,
+  ResponseLocationBucket,
   PlanResponse,
   PlannerRequest,
-  PlanResult,
+  PlanCalculation,
   PlanSourceCounts,
+  PlanSourceCountsByLocation,
+  PlanSourceCountsByType,
   PlanSourceIcon,
   PlanStockItem,
-  WithoutPlanBucketContext,
+  ResponsePlanItem,
+  ResponsePlanItems,
+  ResponseMaterial,
+  ResponseItem,
 } from "./types";
 import {
   allocateReprocessing,
@@ -42,7 +49,7 @@ import {
   isUsableIndustryProductionOutput,
 } from "./stockPolicies";
 
-type Material = PlanResult["lists"]["materialsToBuy"][number];
+type Material = PlanCalculation["lists"]["materialsToBuy"][number];
 type Efficiency = { me: number; te: number };
 type StockLot = {
   typeId: number;
@@ -87,45 +94,6 @@ function aggregateQuantitiesByTypeId(
   return quantitiesByTypeId;
 }
 
-/** Returns the stock eligible for the global view before stockpile allocation. */
-function getAvailableStockByTypeId(
-  request: PlannerRequest,
-  stockpiles: PlannerRequest["stockpiles"],
-) {
-  const initialBuildTypeIds = new Set(request.items.map((item) => item.typeId));
-  const marketLocationIds = new Set(stockpiles?.map((stockpile) => stockpile.locations.stock));
-  const availableStockByTypeId = new Map<number, number>();
-  for (const item of request.stock) {
-    const isMarketOrder = item.category === "item" && item.source === "marketOrder";
-    const marketLocationMatches =
-      marketLocationIds.size === 0 || marketLocationIds.has(getStockRootLocationId(item) ?? -1);
-    if (
-      item.category === "item"
-      && isMarketOrder
-      && marketLocationMatches
-      && initialBuildTypeIds.has(item.typeId)
-    ) {
-      availableStockByTypeId.set(
-        item.typeId,
-        (availableStockByTypeId.get(item.typeId) ?? 0) + item.quantity,
-      );
-      continue;
-    }
-    if (
-      !isMarketOrder
-      && isAvailableIndustryProductionOutput(item)
-      && item.category !== "blueprint"
-      && item.category !== "reactionformula"
-    ) {
-      availableStockByTypeId.set(
-        item.typeId,
-        (availableStockByTypeId.get(item.typeId) ?? 0) + item.quantity,
-      );
-    }
-  }
-  return Object.fromEntries(availableStockByTypeId);
-}
-
 function getPreferredActivityLocationIds(locations: PlanActivityLocations | undefined) {
   return new Set(
     [locations?.manufacturing, locations?.reactions, locations?.reprocessing].filter(
@@ -140,8 +108,9 @@ function haulingKey(
   toLocationId: number,
   ownerType?: "character" | "corporation",
   ownerId?: number,
+  source?: "production",
 ) {
-  return `${itemTypeId}:${fromLocationId}:${toLocationId}:${ownerType ?? "unassigned"}:${ownerId ?? 0}`;
+  return `${itemTypeId}:${fromLocationId}:${toLocationId}:${ownerType ?? "unassigned"}:${ownerId ?? 0}:${source ?? "stock"}`;
 }
 
 type ProfileEntry = { count: number; totalMs: number; maxMs: number };
@@ -216,22 +185,39 @@ export type PlanningData = {
   compressibleTypes: Awaited<ReturnType<typeof getCompressibleTypes>>;
   typeMaterials: Awaited<ReturnType<typeof getTypeMaterials>>;
   groups: Awaited<ReturnType<typeof getGroups>>;
+  marketGroups: Awaited<ReturnType<typeof getMarketGroups>>;
   targetFilters: Awaited<ReturnType<typeof getIndustryTargetFilters>>;
   skillPrerequisites: Awaited<ReturnType<typeof getSkillPrerequisites>>;
 };
 
 /** Loads the immutable SDE data shared by every pass in one plan calculation. */
 async function loadPlanningData(): Promise<PlanningData> {
-  const [types, compressibleTypes, typeMaterials, groups, targetFilters, skillPrerequisites] =
-    await Promise.all([
-      getTypes(),
-      getCompressibleTypes(),
-      getTypeMaterials(),
-      getGroups(),
-      getIndustryTargetFilters(),
-      getSkillPrerequisites(),
-    ]);
-  return { types, compressibleTypes, typeMaterials, groups, targetFilters, skillPrerequisites };
+  const [
+    types,
+    compressibleTypes,
+    typeMaterials,
+    groups,
+    marketGroups,
+    targetFilters,
+    skillPrerequisites,
+  ] = await Promise.all([
+    getTypes(),
+    getCompressibleTypes(),
+    getTypeMaterials(),
+    getGroups(),
+    getMarketGroups(),
+    getIndustryTargetFilters(),
+    getSkillPrerequisites(),
+  ]);
+  return {
+    types,
+    compressibleTypes,
+    typeMaterials,
+    groups,
+    marketGroups,
+    targetFilters,
+    skillPrerequisites,
+  };
 }
 
 function clampEfficiency(value: number, maximum: number) {
@@ -241,7 +227,7 @@ function clampEfficiency(value: number, maximum: number) {
 /** Builds bounded owned-stock and purchase candidates for demand-limited reprocessing. */
 async function allocatePlanReprocessing(
   request: PlannerRequest,
-  preliminaryPlan: PlanResult,
+  preliminaryPlan: PlanCalculation,
   locations: PlanActivityLocations | undefined,
   planningData: PlanningData,
   ownedQuantityLimits?: ReadonlyMap<number, number>,
@@ -357,7 +343,7 @@ async function allocatePlanReprocessing(
 function firstOwnedContributionQuantity(
   typeId: number,
   currentQuantity: number,
-  preliminaryPlan: PlanResult,
+  preliminaryPlan: PlanCalculation,
   request: PlannerRequest,
   planningData: PlanningData,
 ) {
@@ -377,7 +363,7 @@ function firstOwnedContributionQuantity(
 }
 
 /** Returns whether a reduced allocation preserves the current material purchases. */
-function preservesPurchaseQuantities(current: PlanResult, baseline: PlanResult) {
+function preservesPurchaseQuantities(current: PlanCalculation, baseline: PlanCalculation) {
   const baselineBuyQuantities = new Map(
     baseline.lists.materialsToBuy.map((material) => [material.typeId, material.buyQuantity]),
   );
@@ -390,8 +376,8 @@ function preservesPurchaseQuantities(current: PlanResult, baseline: PlanResult) 
 async function minimizeOwnedReprocessing(
   request: PlannerRequest,
   allocation: ReprocessingAllocation,
-  baseline: PlanResult,
-  preliminaryPlan: PlanResult,
+  baseline: PlanCalculation,
+  preliminaryPlan: PlanCalculation,
   locations: PlanActivityLocations | undefined,
   planningData: PlanningData,
   options: PlanPassOptions,
@@ -493,132 +479,455 @@ async function getFutureCompressedMaterialStock(
 }
 
 /** Calculates the detailed internal result after selecting reprocessing portions for shortages. */
-export async function calculatePlanResult(request: PlannerRequest): Promise<PlanResult> {
-  const planningData = await loadPlanningData();
-  const populatedStockpiles = request.stockpiles?.filter((stockpile) => stockpile.items.length > 0);
-  if (populatedStockpiles && populatedStockpiles.length > 0) {
-    return calculateStockpilePlan({ ...request, stockpiles: populatedStockpiles }, planningData);
+export async function calculatePlanCalculation(request: PlannerRequest): Promise<PlanCalculation> {
+  const populatedStockpiles = request.stockpiles.filter((stockpile) => stockpile.items.length > 0);
+  if (populatedStockpiles.length === 0) {
+    throw new Error("Plan calculation requires at least one populated stockpile.");
   }
-  return calculatePlanWithoutStockpiles(
-    { ...request, stockpiles: undefined },
-    undefined,
-    planningData,
-  );
+  const planningData = await loadPlanningData();
+  return calculateStockpilePlan({ ...request, stockpiles: populatedStockpiles }, planningData);
 }
 
 /** Calculates a plan and returns the compact public response shape. */
 export async function calculatePlan(request: PlannerRequest): Promise<PlanResponse> {
-  const result = await calculatePlanResult(request);
-  return toPlanResponse(result, request.marketBuyOrderQuantities);
+  const result = await calculatePlanCalculation(request);
+  return toPlanResponse(result, getRequestActivityLocationIds(request), request.language ?? "en");
+}
+
+async function loadResponseTypeData() {
+  const [types, groups, marketGroups] = await Promise.all([
+    getTypes(),
+    getGroups(),
+    getMarketGroups(),
+  ]);
+  return { types, groups, marketGroups };
 }
 
 /** Converts the detailed internal result into the compact public response. */
 export function toPlanResponse(
-  result: PlanResult,
-  marketBuyOrderQuantities: Record<string, number> = {},
-): PlanResponse {
-  const {
-    planItems,
-    materialsToBuy: _materialsToBuy,
-    bpcsNeeded,
-    bpcsToBuy,
-    inventionJobs,
-    reactionJobs,
-    manufacturingJobs,
-    reprocessingJobs,
-    haulingTasks,
-    ...otherLists
-  } = result.lists;
-  const contextKey = (context: PlanBucketContext | undefined) =>
-    [
-      context?.stockpileId ?? "",
-      context?.stockpileName ?? "",
-      context?.buildLocationId ?? "",
-      context?.stockLocationId ?? "",
-    ].join(":");
-  const contextBuckets = <T extends PlanBucketContext>(
-    entries: T[],
-  ): PlanContextBucket<WithoutPlanBucketContext<T>>[] => {
-    const buckets = new Map<string, PlanContextBucket<WithoutPlanBucketContext<T>>>();
-    for (const entry of entries) {
-      const { stockpileId, stockpileName, buildLocationId, stockLocationId, ...item } = entry;
-      const context = {
-        ...(stockpileId !== undefined ? { stockpileId } : {}),
-        ...(stockpileName !== undefined ? { stockpileName } : {}),
-        ...(buildLocationId !== undefined ? { buildLocationId } : {}),
-        ...(stockLocationId !== undefined ? { stockLocationId } : {}),
-      };
-      const key = contextKey(context);
-      const bucket = buckets.get(key) ?? {
-        ...(Object.keys(context).length > 0 ? { context } : {}),
+  result: PlanCalculation,
+  activityLocationIds?: ReadonlySet<number>,
+  language: NonNullable<PlannerRequest["language"]> = "en",
+): Promise<PlanResponse> {
+  return loadResponseTypeData().then(({ types, groups, marketGroups }) => {
+    const resolveTypeName = (typeId: number) => {
+      const name = types.get(typeId)?.name;
+      return name?.[language] ?? name?.en ?? `Type ${typeId}`;
+    };
+    const resolveAssemblyLineGroup = (typeId: number) => {
+      const type = types.get(typeId);
+      const groupId = type?.groupID;
+      return (
+        categorizeType(
+          {
+            name: type?.name ?? {},
+            groupID: type?.groupID,
+            marketGroupID: type?.marketGroupID,
+          },
+          language,
+          marketGroups,
+          groups,
+        ).assemblyLineGroup
+        ?? (groupId === undefined
+          ? "Unknown"
+          : (
+              groups.get(groupId)?.name[language]
+              ?? groups.get(groupId)?.name.en
+              ?? `Group ${groupId}`
+            ))
+      );
+    };
+    const {
+      planItems,
+      materialsToBuy: _materialsToBuy,
+      bpcsNeeded,
+      bpcsToBuy,
+      inventionJobs,
+      reactionJobs,
+      manufacturingJobs,
+      reprocessingJobs,
+      haulingTasks,
+      ...otherLists
+    } = result.lists;
+    const locationBuckets = <T extends { locationId?: number; activityLocationId?: number }>(
+      entries: T[],
+      locationFor: (entry: T) => number | undefined,
+    ): ResponseLocationBucket<ResponseItem<T>>[] => {
+      const buckets = new Map<string, ResponseLocationBucket<ResponseItem<T>>>();
+      for (const entry of entries) {
+        const locationId = locationFor(entry);
+        const { activityLocationId: _activityLocationId, locationId: _locationId, ...item } = entry;
+        delete (item as { locationId?: number }).locationId;
+        const key = String(locationId ?? "unlocated");
+        const bucket = buckets.get(key) ?? {
+          ...(locationId !== undefined ? { locationId } : {}),
+          items: [],
+        };
+        bucket.items.push(item as ResponseItem<T>);
+        buckets.set(key, bucket);
+      }
+      return [...buckets.values()];
+    };
+    const toBlueprintPurchaseItem = (blueprint: (typeof bpcsNeeded)[number]) => ({
+      typeId: blueprint.typeId,
+      typeName: resolveTypeName(blueprint.typeId),
+      unitVolume: blueprint.unitVolume,
+      neededQuantity: blueprint.buyQuantity,
+      bposInUse: blueprint.bposInUse ?? 0,
+      bpoCount: blueprint.bpoCount + (blueprint.bposInUse ?? 0),
+    });
+    const toBlueprintPurchase = (blueprint: (typeof bpcsNeeded)[number]) => ({
+      item: toBlueprintPurchaseItem(blueprint),
+      assemblyLineGroup: resolveAssemblyLineGroup(blueprint.typeId),
+    });
+    const planActivityLocationIds = activityLocationIds ?? getResultActivityLocationIds(result);
+    const allPlanActivityLocationIds = new Set([
+      ...planActivityLocationIds,
+      ...planItems
+        .map((entry) => entry.stockpileLocationId ?? entry.activityLocationId)
+        .filter((locationId): locationId is number => locationId !== undefined),
+    ]);
+    const allPlanItems = mergeResponsePlanItems(planItems, undefined).map((entry) =>
+      toResponsePlanItem(
+        entry,
+        haulingTasks,
+        allPlanActivityLocationIds,
+        resolveTypeName,
+        result.availableSourceCountsByType?.get(entry.typeId),
+        result.availableStockQuantitiesByType?.get(entry.typeId),
+      ),
+    );
+    const planItemsByActivityLocation = new Map<
+      number | undefined,
+      PlanCalculation["lists"]["planItems"]
+    >();
+    for (const entry of planItems) {
+      const locationId = entry.stockpileLocationId ?? entry.activityLocationId;
+      const locationEntries = planItemsByActivityLocation.get(locationId) ?? [];
+      locationEntries.push(entry);
+      planItemsByActivityLocation.set(locationId, locationEntries);
+    }
+    const responsePlanItems: ResponsePlanItems = {
+      all: allPlanItems,
+      byActivityLocation: [...planItemsByActivityLocation.entries()].map(
+        ([locationId, entries]) => ({
+          ...(locationId !== undefined ? { locationId } : {}),
+          items: mergeResponsePlanItems(entries, locationId).map((entry) =>
+            toResponsePlanItem(
+              entry,
+              haulingTasks,
+              new Set([...(locationId !== undefined ? [locationId] : [])]),
+              resolveTypeName,
+              sourceCountsForLocation(
+                result.availableSourceCountsByType?.get(entry.typeId),
+                locationId,
+              ),
+              locationId === undefined
+                ? undefined
+                : (
+                    result.availableStockQuantitiesByLocationAndType?.get(
+                      locationTypeKey(locationId, entry.typeId),
+                    ) ?? 0
+                  ),
+            ),
+          ),
+        }),
+      ),
+    };
+    const haulBuckets = new Map<string, ResponseHaulBucket>();
+    for (const task of haulingTasks) {
+      const ownerKey = `${task.ownerType ?? "unassigned"}:${task.ownerId ?? 0}`;
+      const key = `${task.fromLocationId}:${task.toLocationId}:${ownerKey}`;
+      const bucket = haulBuckets.get(key) ?? {
+        fromLocationId: task.fromLocationId,
+        toLocationId: task.toLocationId,
+        ...(task.ownerType ? { ownerType: task.ownerType } : {}),
+        ...(task.ownerId !== undefined ? { ownerId: task.ownerId } : {}),
         items: [],
       };
-      bucket.items.push(item as WithoutPlanBucketContext<T>);
-      buckets.set(key, bucket);
+      const item: ResponseMaterial = {
+        typeId: task.typeId,
+        typeName: task.typeName,
+        unitVolume: task.unitVolume,
+        neededQuantity: task.neededQuantity,
+      };
+      const existingItem = bucket.items.find((candidate) => candidate.typeId === item.typeId);
+      if (existingItem) {
+        const totalVolume =
+          existingItem.neededQuantity * existingItem.unitVolume
+          + item.neededQuantity * item.unitVolume;
+        existingItem.neededQuantity += item.neededQuantity;
+        existingItem.unitVolume = totalVolume / existingItem.neededQuantity;
+      }
+      else bucket.items.push(item);
+      haulBuckets.set(key, bucket);
     }
-    return [...buckets.values()];
-  };
-  const toBlueprintPurchase = (
-    blueprint: (typeof bpcsNeeded)[number],
-  ): PlanBlueprintPurchaseResponse => ({
-    typeId: blueprint.typeId,
-    typeName: blueprint.name,
-    typeGroupId: blueprint.typeGroupId,
-    typeGroup: blueprint.typeGroup,
-    unitVolume: blueprint.unitVolume,
-    neededQuantity: blueprint.buyQuantity,
-    marketBuyOrderQuantity: marketBuyOrderQuantities[String(blueprint.typeId)] ?? 0,
-    bposInUse: blueprint.bposInUse ?? 0,
-    bpoCount: blueprint.bpoCount + (blueprint.bposInUse ?? 0),
-  });
-  const haulBuckets = new Map<string, PlanHaulBucketResponse>();
-  for (const task of haulingTasks) {
-    const ownerKey = `${task.ownerType ?? "unassigned"}:${task.ownerId ?? 0}`;
-    const key = `${task.fromLocationId}:${task.toLocationId}:${ownerKey}`;
-    const bucket = haulBuckets.get(key) ?? {
-      fromLocationId: task.fromLocationId,
-      toLocationId: task.toLocationId,
-      ...(task.ownerType ? { ownerType: task.ownerType } : {}),
-      ...(task.ownerId !== undefined ? { ownerId: task.ownerId } : {}),
-      items: [],
-    };
-    bucket.items.push({
-      itemTypeId: task.itemTypeId,
-      name: task.name,
-      quantity: task.quantity,
-      ...(task.productionQuantity !== undefined
-        ? { productionQuantity: task.productionQuantity }
-        : {}),
-      volume: task.volume,
-    });
-    haulBuckets.set(key, bucket);
-  }
-  return {
-    ...result,
-    lists: {
-      ...otherLists,
-      planItems: contextBuckets(planItems),
-      materialsToBuy: _materialsToBuy
-        .filter((material) => material.buyQuantity > 0)
-        .map((material) => ({
+    const materialPurchaseEntries = _materialsToBuy
+      .filter((material) => material.buyQuantity > 0)
+      .map((material) => ({
+        item: {
           typeId: material.typeId,
-          typeName: material.name,
-          typeGroupId: material.typeGroupId,
-          typeGroup: material.typeGroup,
+          typeName: resolveTypeName(material.typeId),
           unitVolume: material.unitVolume,
           neededQuantity: material.buyQuantity,
-          marketBuyOrderQuantity: marketBuyOrderQuantities[String(material.typeId)] ?? 0,
-        })),
-      bpcToCopy: bpcsNeeded
-        .filter((blueprint) => blueprint.buyQuantity > 0)
-        .map(toBlueprintPurchase),
-      bpoToBuy: bpcsToBuy.filter((blueprint) => blueprint.buyQuantity > 0).map(toBlueprintPurchase),
-      inventionJobs: contextBuckets(inventionJobs),
-      reactionJobs: contextBuckets(reactionJobs),
-      manufacturingJobs: contextBuckets(manufacturingJobs),
-      reprocessingJobs: contextBuckets(reprocessingJobs),
-      haulingTasks: [...haulBuckets.values()],
-    },
+        },
+        assemblyLineGroup: resolveAssemblyLineGroup(material.typeId),
+      }));
+    const blueprintCopyEntries = bpcsNeeded
+      .filter((blueprint) => blueprint.buyQuantity > 0)
+      .map((blueprint) => ({
+        ...toBlueprintPurchaseItem(blueprint),
+        ...(blueprint.activityLocationId !== undefined
+          ? { locationId: blueprint.activityLocationId }
+          : {}),
+      }));
+    const blueprintBuyEntries = bpcsToBuy
+      .filter((blueprint) => blueprint.buyQuantity > 0)
+      .map(toBlueprintPurchase);
+    return {
+      metadata: {
+        generatedAt: result.metadata.generatedAt,
+        ...(result.metadata.planId ? { planId: result.metadata.planId } : {}),
+        ...(result.metadata.unresolvedAssetCount !== undefined
+          ? { unresolvedAssetCount: result.metadata.unresolvedAssetCount }
+          : {}),
+        ...(result.metadata.corporationAssetSources
+          ? { corporationAssetSources: result.metadata.corporationAssetSources }
+          : {}),
+      },
+      lists: {
+        ...otherLists,
+        planItems: responsePlanItems,
+        materialsToBuy: groupResponseMaterialEntries(materialPurchaseEntries),
+        bpcToCopy: locationBuckets(blueprintCopyEntries, (entry) => entry.locationId),
+        bpoToBuy: groupResponseMaterialEntries(blueprintBuyEntries),
+        inventionJobs: locationBuckets(inventionJobs, (entry) => entry.locationId),
+        reactionJobs: locationBuckets(reactionJobs, (entry) => entry.locationId),
+        manufacturingJobs: locationBuckets(manufacturingJobs, (entry) => entry.locationId),
+        reprocessingJobs: locationBuckets(reprocessingJobs, (entry) => entry.locationId),
+        haulingTasks: [...haulBuckets.values()],
+      },
+    };
+  });
+}
+
+type ResponseMaterialEntry<T extends ResponseMaterial> = {
+  item: T;
+  assemblyLineGroup: string;
+};
+
+function groupResponseMaterialEntries<T extends ResponseMaterial>(
+  entries: ResponseMaterialEntry<T>[],
+): AssemblyLineGroups<T> {
+  return AssemblyLineGroups
+    .groupBy(entries, (entry) => entry.assemblyLineGroup)
+    .map((bucket) => ({
+      assemblyLineGroup: bucket.assemblyLineGroup,
+      items: bucket.items
+        .map((entry) => entry.item)
+        .slice()
+        .sort(
+          (left, right) =>
+            left.typeName.localeCompare(right.typeName) || left.typeId - right.typeId,
+        ),
+    }))
+    .sort((left, right) => left.assemblyLineGroup.localeCompare(right.assemblyLineGroup));
+}
+
+function getRequestActivityLocationIds(request: PlannerRequest): Set<number> {
+  return new Set(
+    request.stockpiles.flatMap((stockpile) => [
+      stockpile.locations.manufacturing,
+      stockpile.locations.reactions,
+      stockpile.locations.reprocessing,
+      stockpile.locations.copying,
+      stockpile.locations.invention,
+      ...Object.values(stockpile.groupAssignments ?? {}),
+    ]),
+  );
+}
+
+function getResultActivityLocationIds(result: PlanCalculation): Set<number> {
+  return new Set(
+    [
+      ...result.lists.inventionJobs,
+      ...result.lists.reactionJobs,
+      ...result.lists.manufacturingJobs,
+      ...result.lists.reprocessingJobs,
+    ]
+      .map((job) => job.locationId)
+      .filter((locationId): locationId is number => locationId !== undefined),
+  );
+}
+
+function mergeResponsePlanItems(
+  entries: PlanCalculation["lists"]["planItems"],
+  activityLocationId?: number,
+): PlanCalculation["lists"]["planItems"] {
+  const merged = new Map<string, PlanCalculation["lists"]["planItems"][number]>();
+  const mergeSourceCounts =
+    activityLocationId === undefined ? mergePlanSourceCountsByMaximum : mergePlanSourceCounts;
+  for (const entry of entries) {
+    const sourceCounts = sourceCountsForLocation(entry.availableSourceCounts, activityLocationId);
+    const key = `${entry.kind}:${entry.typeId}`;
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(
+        key,
+        {
+          ...entry,
+          activityLocationId,
+          availableSourceCounts: sourceCounts,
+        },
+      );
+      continue;
+    }
+    if (entry.kind === "material" && existing.kind === "material") {
+      merged.set(
+        key,
+        {
+          ...existing,
+          quantity: existing.quantity + entry.quantity,
+          requiredQuantity: existing.requiredQuantity + entry.requiredQuantity,
+          stockQuantity: existing.stockQuantity + entry.stockQuantity,
+          availableStockQuantity: Math.max(
+            existing.availableStockQuantity,
+            entry.availableStockQuantity,
+          ),
+          productionQuantity: existing.productionQuantity + entry.productionQuantity,
+          reprocessingQuantity:
+            (existing.reprocessingQuantity ?? 0) + (entry.reprocessingQuantity ?? 0),
+          buyQuantity: existing.buyQuantity + entry.buyQuantity,
+          remainingProductionQuantity:
+            existing.remainingProductionQuantity + entry.remainingProductionQuantity,
+          availableSourceCounts: mergeSourceCounts(existing.availableSourceCounts, sourceCounts),
+        },
+      );
+    }
+    else if (entry.kind === "bpc" && existing.kind === "bpc") {
+      merged.set(
+        key,
+        {
+          ...existing,
+          neededQuantity: existing.neededQuantity + entry.neededQuantity,
+          stockQuantity: existing.stockQuantity + entry.stockQuantity,
+          stockRuns: existing.stockRuns + entry.stockRuns,
+          buyQuantity: existing.buyQuantity + entry.buyQuantity,
+          bpoCount: existing.bpoCount + entry.bpoCount,
+          bposInUse: (existing.bposInUse ?? 0) + (entry.bposInUse ?? 0),
+          availableSourceCounts: mergeSourceCounts(existing.availableSourceCounts, sourceCounts),
+        },
+      );
+    }
+    else if (entry.kind === "reaction" && existing.kind === "reaction") {
+      merged.set(
+        key,
+        {
+          ...existing,
+          runsNeeded: existing.runsNeeded + entry.runsNeeded,
+          availableQuantity: existing.availableQuantity + entry.availableQuantity,
+          availableSourceCounts: mergeSourceCounts(existing.availableSourceCounts, sourceCounts),
+        },
+      );
+    }
+  }
+  return [...merged.values()];
+}
+
+function mergePlanSourceCounts(
+  left: PlanSourceCountsByLocation | undefined,
+  right: PlanSourceCountsByLocation | undefined,
+): PlanSourceCountsByLocation | undefined {
+  const counts: PlanSourceCountsByLocation = {};
+  for (const sourceCountsByLocation of [left, right]) {
+    for (const [locationId, sourceCounts] of Object.entries(sourceCountsByLocation ?? {})) {
+      const mergedSourceCounts = counts[Number(locationId)] ?? {};
+      for (const [source, count] of Object.entries(sourceCounts ?? {})) {
+        const sourceIcon = source as PlanSourceIcon;
+        mergedSourceCounts[sourceIcon] = (mergedSourceCounts[sourceIcon] ?? 0) + count;
+      }
+      counts[Number(locationId)] = mergedSourceCounts;
+    }
+  }
+  return Object.keys(counts).length > 0 ? counts : undefined;
+}
+
+function sourceCountsForLocation(
+  countsByLocation: PlanSourceCountsByLocation | undefined,
+  locationId: number | undefined,
+) {
+  if (locationId === undefined) return countsByLocation;
+  const counts = countsByLocation?.[locationId];
+  return counts ? { [locationId]: counts } : undefined;
+}
+
+function toResponsePlanItem(
+  entry: PlanCalculation["lists"]["planItems"][number],
+  haulingTasks: PlanCalculation["lists"]["haulingTasks"],
+  activityLocationIds: ReadonlySet<number>,
+  resolveTypeName: (typeId: number) => string,
+  availableSourceCountsOverride?: PlanSourceCountsByLocation,
+  availableQuantityOverride?: number,
+): ResponsePlanItem {
+  const haulingQuantity = haulingTasks
+    .filter(
+      (task) =>
+        task.typeId === entry.typeId
+        && task.source !== "production"
+        && activityLocationIds.has(task.toLocationId),
+    )
+    .reduce((total, task) => total + task.neededQuantity, 0);
+  const identity = {
+    typeId: entry.typeId,
+    typeName: resolveTypeName(entry.typeId),
+    unitVolume: entry.unitVolume,
+    availableSourceCounts: availableSourceCountsOverride ?? entry.availableSourceCounts,
+    haulingQuantity,
+  };
+  if (entry.kind === "material") {
+    const availableQuantity =
+      (availableQuantityOverride ?? entry.availableStockQuantity)
+      + (availableQuantityOverride !== undefined ? haulingQuantity : 0);
+    const plannedProductionQuantity = Math.max(
+      0,
+      entry.productionQuantity - (entry.reprocessingQuantity ?? 0),
+    );
+    const neededQuantity = Math.max(
+      plannedProductionQuantity,
+      entry.requiredQuantity - availableQuantity,
+    );
+    return {
+      ...identity,
+      kind: "material",
+      requiredQuantity: entry.requiredQuantity,
+      availableQuantity,
+      neededQuantity,
+      surplusQuantity: Math.max(
+        0,
+        availableQuantity + plannedProductionQuantity - entry.requiredQuantity,
+      ),
+    };
+  }
+  if (entry.kind === "bpc") {
+    return {
+      ...identity,
+      kind: "bpc",
+      requiredQuantity: entry.neededQuantity,
+      availableQuantity: entry.stockRuns,
+      neededQuantity: Math.max(0, entry.neededQuantity - entry.stockRuns),
+      surplusQuantity: Math.max(0, entry.stockRuns - entry.neededQuantity),
+      bpoCount: entry.bpoCount,
+      bposInUse: entry.bposInUse ?? 0,
+      buildTime: entry.buildTime,
+    };
+  }
+  return {
+    ...identity,
+    kind: "reaction",
+    requiredQuantity: entry.runsNeeded,
+    availableQuantity: entry.availableQuantity,
+    neededQuantity: 0,
+    surplusQuantity: 0,
   };
 }
 
@@ -643,13 +952,13 @@ function activityLocations(
   };
 }
 
-/** Calculates a plan without stockpiles, including prepared reprocessing allocation. */
-async function calculatePlanWithoutStockpiles(
+/** Calculates one stockpile plan, including prepared reprocessing allocation. */
+async function calculateStockpilePlanPass(
   request: PlannerRequest,
   locations: PlanActivityLocations | undefined,
   planningData: PlanningData,
   options: PlanPassOptions = {},
-): Promise<PlanResult> {
+): Promise<PlanCalculation> {
   const preliminaryPlan = await calculatePlanPass(
     {
       ...request,
@@ -700,7 +1009,7 @@ async function calculatePlanPass(
   request: PlannerRequest,
   planningData: PlanningData,
   options: PlanPassOptions = {},
-): Promise<PlanResult> {
+): Promise<PlanCalculation> {
   const {
     finalProductLocations,
     locations,
@@ -716,17 +1025,14 @@ async function calculatePlanPass(
     return fallback;
   }
   const language = request.language ?? "en";
-  const { types: typeRecords, groups, targetFilters, skillPrerequisites } = planningData;
+  const {
+    types: typeRecords,
+    groups,
+    marketGroups,
+    targetFilters,
+    skillPrerequisites,
+  } = planningData;
   const productionGroups = getProductionGroupReferences(targetFilters, groups, language);
-  function typeGroupName(typeId: number) {
-    const groupId = typeRecords.get(typeId)?.groupID;
-    return groupId === undefined
-      ? "Unknown"
-      : (groups.get(groupId)?.name[language] ?? groups.get(groupId)?.name.en ?? `Group ${groupId}`);
-  }
-  function typeGroupId(typeId: number) {
-    return typeRecords.get(typeId)?.groupID ?? 0;
-  }
   const facilityProfilesByLocationId = new Map(
     (request.facilityProfiles ?? []).map((profile) => [profile.locationId, profile]),
   );
@@ -805,7 +1111,7 @@ async function calculatePlanPass(
       new Map(quantities),
     ]),
   );
-  const haulingByKey = new Map<string, PlanResult["lists"]["haulingTasks"][number]>();
+  const haulingByKey = new Map<string, PlanHaulTask>();
   const reprocessingLocationId = locations?.reprocessing ?? locations?.manufacturing;
   const preferredActivityLocationIds = new Set([
     ...getPreferredActivityLocationIds(locations),
@@ -822,29 +1128,30 @@ async function calculatePlanPass(
       || !preferredActivityLocationIds.has(destinationRootLocationId)
       || lot.rootLocationId === destinationRootLocationId
     ) return;
+    const source = lot.industryJobOutput ? ("production" as const) : undefined;
     const key = haulingKey(
       lot.typeId,
       lot.rootLocationId,
       destinationRootLocationId,
       lot.ownerType,
       lot.ownerId,
+      source,
     );
     const existing = haulingByKey.get(key);
     const task = existing ?? {
-      itemTypeId: lot.typeId,
-      name: `Type ${lot.typeId}`,
-      quantity: 0,
-      volume: 0,
+      typeId: lot.typeId,
+      typeName: lot.sourceItem.name,
+      unitVolume: lot.volumePerUnit,
+      neededQuantity: 0,
       fromLocationId: lot.rootLocationId,
       toLocationId: destinationRootLocationId,
       ownerType: lot.ownerType,
       ownerId: lot.ownerId,
+      ...(source ? { source } : {}),
     };
-    task.quantity += quantity;
-    task.volume += quantity * lot.volumePerUnit;
-    if (lot.industryJobOutput) {
-      task.productionQuantity = (task.productionQuantity ?? 0) + quantity;
-    }
+    const totalVolume = task.neededQuantity * task.unitVolume + quantity * lot.volumePerUnit;
+    task.neededQuantity += quantity;
+    task.unitVolume = totalVolume / task.neededQuantity;
     haulingByKey.set(key, task);
   }
   function consumeTrackedStock(
@@ -971,7 +1278,12 @@ async function calculatePlanPass(
     if (remainingTotal > 0) standardStock.set(typeId, remainingTotal);
     else standardStock.delete(typeId);
     if (inStockConsumed > 0) {
-      consumeTrackedStock(typeId, inStockConsumed, destinationRootLocationId, "inStock");
+      consumeTrackedStock(
+        typeId,
+        inStockConsumed,
+        finalProductLocationId ?? destinationRootLocationId,
+        "inStock",
+      );
     }
     if (inBuildConsumed > 0) {
       let remainingInBuild = inBuildConsumed;
@@ -1039,20 +1351,27 @@ async function calculatePlanPass(
     }
   }
 
-  const materials = new Map<number, Material>();
-  const bpcs = new Map<number, PlanResult["lists"]["bpcsNeeded"][number]>();
-  const reactionFormulas = new Map<number, PlanResult["lists"]["planItems"][number]>();
-  const manufacturingJobs = new Map<number, PlanResult["lists"]["manufacturingJobs"][number]>();
-  const reactionJobs = new Map<number, PlanResult["lists"]["reactionJobs"][number]>();
-  const inventionJobs = new Map<string, PlanResult["lists"]["inventionJobs"][number]>();
+  const materials = new Map<string, Material>();
+  const bpcs = new Map<number, PlanCalculation["lists"]["bpcsNeeded"][number]>();
+  const reactionFormulas = new Map<number, PlanCalculation["lists"]["planItems"][number]>();
+  const manufacturingJobs = new Map<
+    number,
+    PlanCalculation["lists"]["manufacturingJobs"][number]
+  >();
+  const reactionJobs = new Map<number, PlanCalculation["lists"]["reactionJobs"][number]>();
+  const inventionJobs = new Map<string, PlanCalculation["lists"]["inventionJobs"][number]>();
   const jobInputsByBlueprint = new Map<number, PlanJobInputs>();
   const requiredSkillLevels = new Map<number, number>();
   const inventedBpcTypeIds = new Set<number>();
   const producedParts = new Map(reprocessing?.producedMaterials ?? []);
-  const sourceCountsByTypeId = new Map<number, Map<PlanSourceIcon, number>>();
+  const sourceCountsByTypeId = new Map<number, Map<number, Map<PlanSourceIcon, number>>>();
   for (const stockItem of request.stock) {
+    const locationId = getStockRootLocationId(stockItem);
+    if (locationId === undefined) continue;
+    const sourceCountsByLocation =
+      sourceCountsByTypeId.get(stockItem.typeId) ?? new Map<number, Map<PlanSourceIcon, number>>();
     const sourceCounts =
-      sourceCountsByTypeId.get(stockItem.typeId) ?? new Map<PlanSourceIcon, number>();
+      sourceCountsByLocation.get(locationId) ?? new Map<PlanSourceIcon, number>();
     const addSource = (source: PlanSourceIcon, quantityOverride?: number) => {
       const quantity =
         quantityOverride
@@ -1083,35 +1402,74 @@ async function calculatePlanPass(
     ) {
       addSource("copying");
     }
-    if (sourceCounts.size > 0) sourceCountsByTypeId.set(stockItem.typeId, sourceCounts);
+    if (sourceCounts.size > 0) {
+      sourceCountsByLocation.set(locationId, sourceCounts);
+      sourceCountsByTypeId.set(stockItem.typeId, sourceCountsByLocation);
+    }
   }
   for (const [typeId, quantity] of reprocessing?.producedMaterials ?? []) {
     if (quantity <= 0) continue;
-    const sourceCounts = sourceCountsByTypeId.get(typeId) ?? new Map<PlanSourceIcon, number>();
+    const locationId = reprocessingLocationId;
+    if (locationId === undefined) continue;
+    const sourceCountsByLocation =
+      sourceCountsByTypeId.get(typeId) ?? new Map<number, Map<PlanSourceIcon, number>>();
+    const sourceCounts =
+      sourceCountsByLocation.get(locationId) ?? new Map<PlanSourceIcon, number>();
     sourceCounts.set("reprocessing", (sourceCounts.get("reprocessing") ?? 0) + quantity);
-    sourceCountsByTypeId.set(typeId, sourceCounts);
+    sourceCountsByLocation.set(locationId, sourceCounts);
+    sourceCountsByTypeId.set(typeId, sourceCountsByLocation);
   }
   function sourceMetadata(typeId: number) {
-    const counts = sourceCountsByTypeId.get(typeId);
-    if (!counts) return undefined;
+    const countsByLocation = sourceCountsByTypeId.get(typeId);
+    if (!countsByLocation) return undefined;
     return {
-      icons: [...counts.keys()],
-      counts: Object.fromEntries(counts) as PlanSourceCounts,
+      icons: [...countsByLocation.values()].flatMap((counts) => [...counts.keys()]),
+      counts: Object.fromEntries(
+        [...countsByLocation].map(([locationId, counts]) => [
+          locationId,
+          Object.fromEntries(counts),
+        ]),
+      ) as PlanSourceCountsByLocation,
     };
   }
+  const initialBuildTypeIds = new Set(request.items.map((item) => item.typeId));
   const totalStock = aggregateQuantitiesByTypeId(
     request.stock
       .filter(isAvailableIndustryProductionOutput)
       .filter((item) => item.category !== "blueprint" && item.category !== "reactionformula")
       .filter((item) => item.source !== "marketOrder"),
   );
-  const initialBuildTypeIds = new Set(request.items.map((item) => item.typeId));
   for (const [typeId, quantity] of marketOrderStock) {
     if (!initialBuildTypeIds.has(typeId)) continue;
     totalStock.set(typeId, (totalStock.get(typeId) ?? 0) + quantity);
   }
   for (const [typeId, quantity] of reprocessing?.producedMaterials ?? []) {
     totalStock.set(typeId, (totalStock.get(typeId) ?? 0) + quantity);
+  }
+  const availableStockQuantitiesByLocationAndType = new Map<string, number>();
+  const availableStockQuantitiesByType = new Map<number, number>();
+  const addAvailableStock = (typeId: number, quantity: number, locationId: number | undefined) => {
+    if (quantity <= 0) return;
+    const locationKey = locationTypeKey(locationId, typeId);
+    availableStockQuantitiesByLocationAndType.set(
+      locationKey,
+      (availableStockQuantitiesByLocationAndType.get(locationKey) ?? 0) + quantity,
+    );
+    availableStockQuantitiesByType.set(
+      typeId,
+      (availableStockQuantitiesByType.get(typeId) ?? 0) + quantity,
+    );
+  };
+  for (const stockItem of request.stock) {
+    if (
+      stockItem.category !== "item"
+      || !isAvailableIndustryProductionOutput(stockItem)
+      || (stockItem.source === "marketOrder" && !initialBuildTypeIds.has(stockItem.typeId))
+    ) continue;
+    addAvailableStock(stockItem.typeId, stockItem.quantity, getStockRootLocationId(stockItem));
+  }
+  for (const [typeId, quantity] of reprocessing?.producedMaterials ?? []) {
+    addAvailableStock(typeId, quantity, reprocessingLocationId);
   }
   const allBlueprintStockItems = request.stock.filter((item) => item.category === "blueprint");
   const blueprintCopyStock = new Map<number, { copies: number; runs: number }>();
@@ -1359,15 +1717,27 @@ async function calculatePlanPass(
     }
   }
 
-  function updateMaterial(typeId: number, fallbackName: string, update: Partial<Material>) {
-    const existing = materials.get(typeId);
+  function materialKey(typeId: number, activityLocationId?: number, stockpileLocationId?: number) {
+    if (stockpileLocationId !== undefined) return `${typeId}:stockpile:${stockpileLocationId}`;
+    if (activityLocationId !== undefined) return `${typeId}:activity:${activityLocationId}`;
+    return `${typeId}:unlocated`;
+  }
+
+  function getMaterial(typeId: number, activityLocationId?: number, stockpileLocationId?: number) {
+    return materials.get(materialKey(typeId, activityLocationId, stockpileLocationId));
+  }
+
+  function updateMaterial(
+    typeId: number,
+    update: Partial<Material>,
+    activityLocationId?: number,
+    stockpileLocationId?: number,
+  ) {
+    const existing = getMaterial(typeId, activityLocationId, stockpileLocationId);
     materials.set(
-      typeId,
+      materialKey(typeId, activityLocationId, stockpileLocationId),
       {
         typeId,
-        name: typeName(typeId, fallbackName),
-        typeGroupId: existing?.typeGroupId ?? typeGroupId(typeId),
-        typeGroup: existing?.typeGroup ?? typeGroupName(typeId),
         unitVolume:
           existing?.unitVolume
           ?? typeRecords.get(typeId)?.packagedVolume
@@ -1379,14 +1749,12 @@ async function calculatePlanPass(
         availableStockQuantity: existing?.availableStockQuantity ?? totalStock.get(typeId) ?? 0,
         productionQuantity: existing?.productionQuantity ?? 0,
         reprocessingQuantity: existing?.reprocessingQuantity ?? 0,
-        buildQuantity: existing?.buildQuantity ?? 0,
         buyQuantity: existing?.buyQuantity ?? 0,
-        remainingStockQuantity: existing?.remainingStockQuantity ?? 0,
         remainingProductionQuantity: existing?.remainingProductionQuantity ?? 0,
-        fromMarketOrder: existing?.fromMarketOrder || consumedMarketOrderStock.has(typeId),
         availableSourceCounts: existing?.availableSourceCounts ?? sourceMetadata(typeId)?.counts,
+        ...(activityLocationId !== undefined ? { activityLocationId } : {}),
+        ...(stockpileLocationId !== undefined ? { stockpileLocationId } : {}),
         ...update,
-        ...(locations ? { locationId: locations.market } : {}),
       },
     );
   }
@@ -1394,7 +1762,6 @@ async function calculatePlanPass(
   for (const [typeId, quantity] of reprocessing?.producedMaterials ?? []) {
     updateMaterial(
       typeId,
-      `Type ${typeId}`,
       {
         productionQuantity: quantity,
         reprocessingQuantity: quantity,
@@ -1419,15 +1786,12 @@ async function calculatePlanPass(
     const consumedPurchases = reprocessing?.consumedPurchases.get(typeId) ?? 0;
     updateMaterial(
       typeId,
-      `Type ${typeId}`,
       {
         quantity: consumedPurchases,
         requiredQuantity: consumedOwned + consumedPurchases,
         stockQuantity: consumedOwned,
         availableStockQuantity: ownedQuantity,
         buyQuantity: consumedPurchases,
-        remainingStockQuantity: Math.max(0, ownedQuantity - consumedOwned),
-        imageVariation: "icon",
       },
     );
   }
@@ -1435,11 +1799,10 @@ async function calculatePlanPass(
   async function addMaterial(
     typeId: number,
     quantity: number,
-    fallbackName: string,
     demandAlreadyRecorded = false,
-    imageVariation: "icon" | "bp" | "bpc" = "icon",
     useAvailableStock = true,
     activityRootLocationId?: number,
+    stockpileLocationId?: number,
   ) {
     return profiler.measure(
       "addMaterial",
@@ -1447,11 +1810,11 @@ async function calculatePlanPass(
         const stockConsumed = useAvailableStock
           ? consumeAvailableStock(typeId, quantity, activityRootLocationId)
           : 0;
-        const remainingStock = standardStock.get(typeId) ?? 0;
-        const existing = materials.get(typeId);
+        const materialActivityLocationId =
+          stockpileLocationId === undefined ? activityRootLocationId : undefined;
+        const existing = getMaterial(typeId, materialActivityLocationId, stockpileLocationId);
         updateMaterial(
           typeId,
-          fallbackName,
           {
             quantity: (existing?.quantity ?? 0) + quantity - stockConsumed,
             requiredQuantity:
@@ -1459,9 +1822,9 @@ async function calculatePlanPass(
             stockQuantity:
               (existing?.stockQuantity ?? 0) + (demandAlreadyRecorded ? 0 : stockConsumed),
             buyQuantity: (existing?.buyQuantity ?? 0) + quantity - stockConsumed,
-            remainingStockQuantity: remainingStock,
-            imageVariation,
           },
+          materialActivityLocationId,
+          stockpileLocationId,
         );
       },
     );
@@ -1477,6 +1840,8 @@ async function calculatePlanPass(
     activityRootLocationId?: number,
     finalProductLocationId?: number,
     stockConsumptionQuantity = quantity,
+    demandActivityLocationId?: number,
+    demandStockpileLocationId?: number,
   ) {
     let phase = "stock";
     let activity = "unknown";
@@ -1487,7 +1852,6 @@ async function calculatePlanPass(
         if (quantity <= 0) return;
         let remainingStockConsumption = Math.min(quantity, Math.max(0, stockConsumptionQuantity));
 
-        quantity -= consumeDemandOnlyOutput(typeId, quantity);
         const finalProductStockConsumed =
           finalProductLocationId === undefined
             ? 0
@@ -1511,13 +1875,19 @@ async function calculatePlanPass(
         const marketAvailable = allowMarketOrderStock ? (marketOrderStock.get(typeId) ?? 0) : 0;
         const marketConsumed = Math.min(marketAvailable, remainingStockConsumption);
         const stockConsumed = standardConsumed + marketConsumed;
+        const existingMaterial = getMaterial(
+          typeId,
+          demandActivityLocationId,
+          demandStockpileLocationId,
+        );
         updateMaterial(
           typeId,
-          fallbackName,
           {
-            requiredQuantity: (materials.get(typeId)?.requiredQuantity ?? 0) + requestedQuantity,
-            stockQuantity: (materials.get(typeId)?.stockQuantity ?? 0) + stockConsumed,
+            requiredQuantity: (existingMaterial?.requiredQuantity ?? 0) + requestedQuantity,
+            stockQuantity: (existingMaterial?.stockQuantity ?? 0) + stockConsumed,
           },
+          demandActivityLocationId,
+          demandStockpileLocationId,
         );
         if (stockConsumed > 0) {
           if (marketConsumed > 0) {
@@ -1527,16 +1897,28 @@ async function calculatePlanPass(
             consumedMarketOrderStock.add(typeId);
           }
           quantity -= stockConsumed;
-          updateMaterial(
-            typeId,
-            fallbackName,
-            {
-              remainingStockQuantity:
-                (standardStock.get(typeId) ?? 0) + (marketOrderStock.get(typeId) ?? 0),
-              ...(marketConsumed > 0 ? { fromMarketOrder: true } : {}),
-            },
-          );
         }
+        if (quantity <= 0) return;
+
+        let buildBlueprint: ReturnType<typeof getBuildBlueprintByProductTypeId> | undefined;
+        let candidate:
+          | Awaited<ReturnType<typeof getBuildBlueprintByProductTypeId>>
+          | null
+          | undefined;
+        if (!stack.has(typeId) && !buildBlacklist.has(typeId)) {
+          phase = "blueprint lookup";
+          buildBlueprint = buildBlueprintsByTypeId.get(typeId);
+          if (!buildBlueprintsByTypeId.has(typeId)) {
+            buildBlueprint = profiler.measure(
+              "expand.buildBlueprintLookup",
+              () => getBuildBlueprintByProductTypeId(typeId),
+              () => ({ typeId }),
+            );
+            buildBlueprintsByTypeId.set(typeId, buildBlueprint);
+          }
+          candidate = await buildBlueprint;
+        }
+        if (!candidate?.blueprint) quantity -= consumeDemandOnlyOutput(typeId, quantity);
         if (quantity <= 0) return;
 
         const available = producedParts.get(typeId) ?? 0;
@@ -1553,48 +1935,26 @@ async function calculatePlanPass(
           await addMaterial(
             typeId,
             quantity,
-            fallbackName,
             true,
-            "icon",
             false,
             activityRootLocationId,
+            demandStockpileLocationId,
           );
           return;
         }
 
-        phase = "blueprint lookup";
-        let buildBlueprint = buildBlueprintsByTypeId.get(typeId);
-        if (!buildBlueprintsByTypeId.has(typeId)) {
-          buildBlueprint = profiler.measure(
-            "expand.buildBlueprintLookup",
-            () => getBuildBlueprintByProductTypeId(typeId),
-            () => ({ typeId }),
-          );
-          buildBlueprintsByTypeId.set(typeId, buildBlueprint);
-        }
-        const candidate = await buildBlueprint;
-        const blueprint = candidate?.blueprint;
-
-        if (!blueprint) {
+        if (!candidate?.blueprint) {
           await addMaterial(
             typeId,
             quantity,
-            fallbackName,
             true,
-            "icon",
             false,
             activityRootLocationId,
+            demandStockpileLocationId,
           );
           return;
         }
-
-        updateMaterial(
-          typeId,
-          fallbackName,
-          {
-            buildQuantity: (materials.get(typeId)?.buildQuantity ?? 0) + quantity,
-          },
-        );
+        const blueprint = candidate.blueprint;
 
         activity = candidate.activity;
         const profile = activityProfile(typeId, candidate.activity);
@@ -1611,10 +1971,15 @@ async function calculatePlanPass(
         const producedQuantity = runsNeeded * productQuantity;
         updateMaterial(
           typeId,
-          fallbackName,
           {
-            productionQuantity: (materials.get(typeId)?.productionQuantity ?? 0) + producedQuantity,
+            productionQuantity:
+              (
+                getMaterial(typeId, demandActivityLocationId, demandStockpileLocationId)
+                  ?.productionQuantity ?? 0
+              ) + producedQuantity,
           },
+          demandActivityLocationId,
+          demandStockpileLocationId,
         );
         const surplus = producedQuantity - quantity;
         if (surplus > 0) producedParts.set(typeId, (producedParts.get(typeId) ?? 0) + surplus);
@@ -1655,7 +2020,7 @@ async function calculatePlanPass(
             {
               typeId: blueprint._key,
               name: typeName(blueprint._key, `${fallbackName} Blueprint`),
-              runs: (existing?.runs ?? 0) + runsNeeded,
+              countNeeded: (existing?.countNeeded ?? 0) + runsNeeded,
               runsAvailable: Math.min(
                 existing?.runsAvailable ?? Number.MAX_SAFE_INTEGER,
                 installableRuns,
@@ -1701,6 +2066,8 @@ async function calculatePlanPass(
                     )
                       / runsNeeded,
                   ),
+                  activityLocationId,
+                  undefined,
                 );
               }
             },
@@ -1717,14 +2084,10 @@ async function calculatePlanPass(
             blueprint._key,
             {
               typeId: blueprint._key,
-              name: typeName(blueprint._key, `${fallbackName} Blueprint`),
-              typeGroupId: typeGroupId(blueprint._key),
-              typeGroup: typeGroupName(blueprint._key),
               unitVolume:
                 typeRecords.get(blueprint._key)?.packagedVolume
                 ?? typeRecords.get(blueprint._key)?.volume
                 ?? 0,
-              quantity: (bpcs.get(blueprint._key)?.quantity ?? 0) + runsNeeded,
               neededQuantity: (bpcs.get(blueprint._key)?.neededQuantity ?? 0) + runsNeeded,
               stockQuantity: copyStock?.copies ?? 0,
               stockRuns: copyStock?.runs ?? 0,
@@ -1732,12 +2095,12 @@ async function calculatePlanPass(
               bpoCount,
               bposInUse: blueprintInUseCounts.get(blueprint._key) ?? 0,
               buildTime: blueprint.activities.copying?.time ?? 0,
+              activityLocationId,
               buyQuantity: (bpcs.get(blueprint._key)?.buyQuantity ?? 0) + bpcBuyQuantity,
             },
           );
           return;
         }
-
         addRequiredSkills(blueprint.activities.reaction?.skills);
         const existing = reactionJobs.get(blueprint._key);
         const existingInputs = jobInputsByBlueprint.get(blueprint._key);
@@ -1760,7 +2123,7 @@ async function calculatePlanPass(
           {
             typeId: blueprint._key,
             name: typeName(blueprint._key, `${fallbackName} Reaction Formula`),
-            runs: (existing?.runs ?? 0) + runsNeeded,
+            countNeeded: (existing?.countNeeded ?? 0) + runsNeeded,
             runsAvailable: (existing?.runsAvailable ?? 0) + installableRuns,
             totalTime:
               (existing?.totalTime ?? 0)
@@ -1784,24 +2147,20 @@ async function calculatePlanPass(
           {
             kind: "reaction",
             typeId: blueprint._key,
-            name: typeName(blueprint._key, `${fallbackName} Formula`),
+            unitVolume:
+              typeRecords.get(blueprint._key)?.packagedVolume
+              ?? typeRecords.get(blueprint._key)?.volume
+              ?? 0,
             runsNeeded:
               (existingFormula && existingFormula.kind === "reaction"
                 ? existingFormula.runsNeeded
                 : 0) + runsNeeded,
             availableQuantity: formulaCount,
+            activityLocationId,
           },
         );
         if (runsNeeded > 0 && formulaCount === 0) {
-          await addMaterial(
-            blueprint._key,
-            1,
-            `${fallbackName} Formula`,
-            false,
-            "bpc",
-            true,
-            activityLocationId,
-          );
+          await addMaterial(blueprint._key, 1, false, true, activityLocationId);
         }
         else if (runsNeeded > 0) {
           consumeTrackedStock(blueprint._key, 1, locations?.reactions);
@@ -1829,6 +2188,8 @@ async function calculatePlanPass(
                   )
                     / runsNeeded,
                 ),
+                activityLocationId,
+                undefined,
               );
             }
           },
@@ -1852,6 +2213,9 @@ async function calculatePlanPass(
       },
       true,
       locations?.manufacturing,
+      finalProductLocationId,
+      item.quantity,
+      undefined,
       finalProductLocationId,
     );
   }
@@ -1889,7 +2253,7 @@ async function calculatePlanPass(
           {
             typeId: inventingBlueprint._key,
             name: typeName(inventingBlueprint._key, "Blueprint Copy"),
-            runs: (existing?.runs ?? 0) + inventionAttempts,
+            countNeeded: (existing?.countNeeded ?? 0) + inventionAttempts,
             ...(locations
               ? {
                   locationId: locations.manufacturing,
@@ -1909,14 +2273,10 @@ async function calculatePlanPass(
           inventingBlueprint._key,
           {
             typeId: inventingBlueprint._key,
-            name: typeName(inventingBlueprint._key, "Blueprint Copy"),
-            typeGroupId: typeGroupId(inventingBlueprint._key),
-            typeGroup: typeGroupName(inventingBlueprint._key),
             unitVolume:
               typeRecords.get(inventingBlueprint._key)?.packagedVolume
               ?? typeRecords.get(inventingBlueprint._key)?.volume
               ?? 0,
-            quantity: (sourceBpc?.quantity ?? 0) + inventionAttempts,
             neededQuantity: sourceNeededQuantity,
             stockQuantity: sourceBpc?.stockQuantity ?? 0,
             stockRuns: sourceBpc?.stockRuns ?? 0,
@@ -1924,6 +2284,7 @@ async function calculatePlanPass(
             bpoCount: sourceBpoCount,
             bposInUse: blueprintInUseCounts.get(inventingBlueprint._key) ?? 0,
             buildTime: inventingBlueprint.activities.copying?.time ?? 0,
+            activityLocationId: locations?.manufacturing,
             buyQuantity:
               sourceBpoCount > 0
                 ? Math.ceil(sourceRemainingRuns / inventingBlueprint.maxProductionLimit)
@@ -1934,9 +2295,7 @@ async function calculatePlanPass(
           await addMaterial(
             material.typeID,
             material.quantity * inventionAttempts,
-            typeName(material.typeID, `Type ${material.typeID}`),
             false,
-            "icon",
             true,
             locations?.manufacturing,
           );
@@ -1971,28 +2330,25 @@ async function calculatePlanPass(
     inputs.blueprint.name = resolvedName(inputs.blueprint.typeId);
     for (const material of inputs.materials) material.name = resolvedName(material.typeId);
   };
-  const skillsRequired: PlanResult["lists"]["skillsRequired"] = [...requiredSkillLevels]
+  const skillsRequired: PlanCalculation["lists"]["skillsRequired"] = [...requiredSkillLevels]
     .map(([skillId, requiredLevel]) => ({
       skillId,
       name: resolvedName(skillId),
       requiredLevel,
     }))
     .sort((left, right) => left.name.localeCompare(right.name));
-  for (const material of materials.values()) material.name = resolvedName(material.typeId);
-  for (const bpc of bpcs.values()) bpc.name = resolvedName(bpc.typeId);
   for (const job of manufacturingJobs.values()) job.name = resolvedName(job.typeId);
   for (const job of reactionJobs.values()) job.name = resolvedName(job.typeId);
   for (const job of manufacturingJobs.values()) resolveJobInputs(job.inputs);
   for (const job of reactionJobs.values()) resolveJobInputs(job.inputs);
   for (const job of inventionJobs.values()) job.name = resolvedName(job.typeId);
-  for (const formula of reactionFormulas.values()) formula.name = resolvedName(formula.typeId);
-  const reprocessingJobs: PlanResult["lists"]["reprocessingJobs"] =
+  const reprocessingJobs: PlanCalculation["lists"]["reprocessingJobs"] =
     reprocessingLocationId === undefined
       ? []
       : [...(reprocessing?.readyToReprocess ?? [])].map(([typeId, quantity]) => ({
           typeId,
           name: resolvedName(typeId),
-          quantity,
+          countNeeded: quantity,
           efficiency: request.reprocessingEfficiencies?.[String(typeId)] ?? 50,
           locationId: reprocessingLocationId,
         }));
@@ -2015,22 +2371,15 @@ async function calculatePlanPass(
   }
   const haulingTasks = [...haulingByKey.values()]
     .map((task) => {
-      const key = `${task.fromLocationId}:${task.itemTypeId}`;
+      const key = `${task.fromLocationId}:${task.typeId}`;
       const outboundCapacity = outboundCapacityByLocationAndType.get(key);
-      if (outboundCapacity === undefined || task.quantity <= outboundCapacity) return task;
+      if (outboundCapacity === undefined || task.neededQuantity <= outboundCapacity) return task;
       const retainedQuantity = Math.max(0, outboundCapacity);
-      const removedQuantity = task.quantity - retainedQuantity;
-      const volumePerUnit = task.volume / task.quantity;
-      task.quantity = retainedQuantity;
-      task.volume = retainedQuantity * volumePerUnit;
-      if (task.productionQuantity !== undefined) {
-        task.productionQuantity = Math.max(0, task.productionQuantity - removedQuantity);
-        if (task.productionQuantity === 0) delete task.productionQuantity;
-      }
+      task.neededQuantity = retainedQuantity;
       outboundCapacityByLocationAndType.set(key, 0);
       return task;
     })
-    .filter((task) => task.quantity > 0);
+    .filter((task) => task.neededQuantity > 0);
 
   const materialsToBuy = [...materials.values()];
   const bpcRequirements = [...bpcs.values()];
@@ -2040,17 +2389,27 @@ async function calculatePlanPass(
   const bpcsToBuy = bpcRequirements.filter(
     (bpc) => !inventedBpcTypeIds.has(bpc.typeId) && bpc.bpoCount === 0,
   );
-  const planItems: PlanResult["lists"]["planItems"] = [
-    ...materialsToBuy.map((material) => ({ kind: "material" as const, ...material })),
+  const reactionFormulaTypeIds = new Set(reactionFormulas.keys());
+  const planItems: PlanCalculation["lists"]["planItems"] = [
+    ...materialsToBuy
+      .filter((material) => !reactionFormulaTypeIds.has(material.typeId))
+      .map((material) => ({ kind: "material" as const, ...material })),
     ...[...bpcs.values()].map((bpc) => ({ kind: "bpc" as const, ...bpc })),
     ...reactionFormulas.values(),
   ];
-  for (const task of haulingTasks) task.name = resolvedName(task.itemTypeId);
+  const availableSourceCountsByType: PlanSourceCountsByType = new Map();
+  for (const entry of planItems) {
+    const mergedSourceCounts = mergePlanSourceCountsByMaximum(
+      availableSourceCountsByType.get(entry.typeId),
+      entry.availableSourceCounts,
+    );
+    if (mergedSourceCounts) availableSourceCountsByType.set(entry.typeId, mergedSourceCounts);
+  }
+  for (const task of haulingTasks) task.typeName = resolvedName(task.typeId);
   const result = {
     metadata: {
       generatedAt: new Date().toISOString(),
       unresolvedAssetCount: request.unresolvedAssetCount ?? 0,
-      availableStockByTypeId: Object.fromEntries(totalStock),
       corporationAssetSources: [
         ...new Set(
           request.stock
@@ -2072,6 +2431,9 @@ async function calculatePlanPass(
       skillsRequired,
       haulingTasks,
     },
+    availableSourceCountsByType,
+    availableStockQuantitiesByLocationAndType,
+    availableStockQuantitiesByType,
   };
   if (persistStockConsumption) {
     for (const lot of stockLots) lot.sourceItem.quantity = lot.quantity;
@@ -2106,395 +2468,11 @@ async function calculatePlanPass(
   return result;
 }
 
-type StockpileDemand = Map<number, number>;
-type StockpileDemandResult = {
-  demand: StockpileDemand;
-  jobInputDemand: StockpileDemand;
-};
-
-function stockpileActivityLocations(stockpile: NonNullable<PlannerRequest["stockpiles"]>[number]) {
-  return new Set([
-    stockpile.locations.manufacturing,
-    stockpile.locations.reactions,
-    stockpile.locations.reprocessing,
-    stockpile.locations.copying,
-    stockpile.locations.invention,
-    ...Object.values(stockpile.groupAssignments ?? {}),
-  ]);
-}
-
-function isBlueprintOrReactionFormula(item: PlanStockItem) {
-  return item.category === "blueprint" || item.category === "reactionformula";
-}
-
-/** Extracts the material and job-input demand used to reserve shared stock. */
-function legacyGetPlanDemand(result: PlanResult): StockpileDemandResult {
-  const demand = new Map<number, number>();
-  const jobInputDemand = new Map<number, number>();
-  for (const material of result.lists.materialsToBuy) {
-    demand.set(
-      material.typeId,
-      Math.max(
-        demand.get(material.typeId) ?? 0,
-        material.requiredQuantity,
-        material.quantity,
-        material.buyQuantity,
-      ),
-    );
-  }
-  for (const job of [...result.lists.manufacturingJobs, ...result.lists.reactionJobs]) {
-    for (const material of job.inputs.materials) {
-      jobInputDemand.set(
-        material.typeId,
-        (jobInputDemand.get(material.typeId) ?? 0) + material.requiredQuantity,
-      );
-    }
-  }
-  for (const job of result.lists.reactionJobs) {
-    demand.set(
-      job.inputs.blueprint.typeId,
-      Math.max(demand.get(job.inputs.blueprint.typeId) ?? 0, job.inputs.blueprint.requiredQuantity),
-    );
-  }
-  for (const blueprint of result.lists.bpcsToBuy) {
-    demand.set(
-      blueprint.typeId,
-      Math.max(
-        demand.get(blueprint.typeId) ?? 0,
-        blueprint.neededQuantity,
-        blueprint.buyQuantity,
-        1,
-      ),
-    );
-  }
-  for (const [typeId, quantity] of jobInputDemand) {
-    demand.set(typeId, Math.max(demand.get(typeId) ?? 0, quantity));
-  }
-  return { demand, jobInputDemand };
-}
-
-/** Reserves ordinary stock globally so a remote stockpile cannot consume another stockpile's local lot. */
-async function legacyAllocateStockpileStock(
-  request: PlannerRequest,
-  stockpiles: NonNullable<PlannerRequest["stockpiles"]>,
-  planningData: PlanningData,
-  futureStockIndexes = new Set<number>(),
-): Promise<PlanStockItem[][]> {
-  if (stockpiles.length === 1) {
-    return [request.stock.map((item) => ({ ...item }))];
-  }
-  const stockpileEntries = stockpiles.map((stockpile, stockpileIndex) => ({
-    stockpile,
-    stockpileIndex,
-    activityLocationIds: stockpileActivityLocations(stockpile),
-  }));
-  const stockpileDemandResults = await Promise.all(
-    stockpiles.map(async (stockpile) => {
-      const result = await calculatePlanPass(
-        {
-          ...request,
-          stockpiles: undefined,
-          items: stockpile.items,
-          stock: [],
-          groupAssignments: stockpile.groupAssignments,
-        },
-        planningData,
-        { locations: activityLocations(stockpile) },
-      );
-      const { demand, jobInputDemand } = legacyGetPlanDemand(result);
-      return {
-        demand: new Map([...demand].filter(([, quantity]) => quantity > 0)),
-        jobInputDemand: new Map([...jobInputDemand].filter(([, quantity]) => quantity > 0)),
-      };
-    }),
-  );
-  const demandByStockpile = stockpileDemandResults.map(({ demand }) => demand);
-  const jobInputDemandByStockpile = stockpileDemandResults.map(
-    ({ jobInputDemand }) => jobInputDemand,
-  );
-  let remainingDemand = demandByStockpile.map((demand) => new Map(demand));
-  let remainingStock = request.stock.map((item) =>
-    !isBlueprintOrReactionFormula(item)
-    && item.category === "item"
-    && item.source !== "marketOrder"
-    && isUsableIndustryProductionOutput(item)
-      ? item.quantity
-      : 0,
-  );
-  const allocations = stockpiles.map(() => new Map<number, number>());
-  const canUseFutureStock = (stockIndex: number, stockpileIndex: number) =>
-    stockpiles[stockpileIndex].kind !== "special" || !futureStockIndexes.has(stockIndex);
-  const allocate = (stockIndex: number, stockpileIndex: number, quantity: number) => {
-    if (quantity <= 0) return;
-    const current = allocations[stockpileIndex].get(stockIndex) ?? 0;
-    allocations[stockpileIndex].set(stockIndex, current + quantity);
-    remainingStock[stockIndex] -= quantity;
-    const item = request.stock[stockIndex];
-    remainingDemand[stockpileIndex].set(
-      item.typeId,
-      Math.max(0, (remainingDemand[stockpileIndex].get(item.typeId) ?? 0) - quantity),
-    );
-  };
-
-  const allocateTypes = (
-    typeIdsToAllocate: Set<number>,
-    demandByPriority: StockpileDemand[],
-    preferActivityLocations = false,
-  ) => {
-    remainingDemand = demandByPriority.map((demand) => new Map(demand));
-    for (const typeId of typeIdsToAllocate) {
-      const stockIndexes = request.stock
-        .map((item, index) => ({ item, index }))
-        .filter(({ item, index }) => {
-          if (item.typeId !== typeId || remainingStock[index] <= 0) return false;
-          if (item.category !== "reactionformula") return true;
-          return stockpiles.some(
-            (stockpile, stockpileIndex) =>
-              (remainingDemand[stockpileIndex].get(typeId) ?? 0) > 0
-              && getStockRootLocationId(item) === stockpile.locations.reactions,
-          );
-        });
-      for (const { stockpile, stockpileIndex } of [...stockpileEntries].sort(
-        (left, right) =>
-          (remainingDemand[right.stockpileIndex].get(typeId) ?? 0)
-            - (remainingDemand[left.stockpileIndex].get(typeId) ?? 0)
-          || left.stockpileIndex - right.stockpileIndex,
-      )) {
-        const remaining = remainingDemand[stockpileIndex].get(typeId) ?? 0;
-        if (remaining <= 0) continue;
-        for (const { item, index } of stockIndexes) {
-          const stockLocationId = getStockRootLocationId(item);
-          const matchingLocation =
-            item.category === "reactionformula"
-              ? stockLocationId === stockpile.locations.reactions
-              : stockLocationId === stockpile.locations.stock;
-          if (
-            remainingStock[index] <= 0
-            || !matchingLocation
-            || (
-              preferActivityLocations
-              && item.category !== "reactionformula"
-              && stockLocationId !== undefined
-              && !stockpileActivityLocations(stockpile).has(stockLocationId)
-            )
-            || !canUseFutureStock(index, stockpileIndex)
-          ) {
-            continue;
-          }
-          allocate(index, stockpileIndex, Math.min(remainingStock[index], remaining));
-        }
-      }
-      for (const { item, index } of stockIndexes) {
-        const stockLocationId = getStockRootLocationId(item);
-        const localStockpiles = stockpileEntries
-          .filter(
-            ({ stockpile, stockpileIndex, activityLocationIds }) =>
-              (remainingDemand[stockpileIndex].get(typeId) ?? 0) > 0
-              && stockLocationId !== undefined
-              && (item.category === "reactionformula"
-                ? stockLocationId === stockpile.locations.reactions
-                : activityLocationIds.has(stockLocationId)),
-          )
-          .sort(
-            (left, right) =>
-              (remainingDemand[right.stockpileIndex].get(typeId) ?? 0)
-                - (remainingDemand[left.stockpileIndex].get(typeId) ?? 0)
-              || left.stockpileIndex - right.stockpileIndex,
-          );
-        for (const { stockpileIndex } of localStockpiles) {
-          if (remainingStock[index] <= 0) break;
-          if (!canUseFutureStock(index, stockpileIndex)) continue;
-          allocate(
-            index,
-            stockpileIndex,
-            Math.min(remainingStock[index], remainingDemand[stockpileIndex].get(typeId) ?? 0),
-          );
-        }
-      }
-      for (const { stockpile, stockpileIndex } of stockpileEntries) {
-        let remaining = remainingDemand[stockpileIndex].get(typeId) ?? 0;
-        if (remaining <= 0) continue;
-        for (const { index } of stockIndexes) {
-          if (remaining <= 0) break;
-          const item = request.stock[index];
-          if (!canUseFutureStock(index, stockpileIndex)) continue;
-          if (
-            item.category === "reactionformula"
-            && getStockRootLocationId(item) !== stockpiles[stockpileIndex].locations.reactions
-          ) {
-            continue;
-          }
-          const quantity = Math.min(remainingStock[index], remaining);
-          allocate(index, stockpileIndex, quantity);
-          remaining -= quantity;
-        }
-      }
-    }
-  };
-
-  const allocatedStockpileStock = () =>
-    stockpiles.map((_, stockpileIndex) =>
-      [...allocations[stockpileIndex].entries()].map(([stockIndex, quantity]) => ({
-        ...request.stock[stockIndex],
-        quantity,
-        ...(request.stock[stockIndex].inBuildQuantity !== undefined
-          ? { inBuildQuantity: Math.min(request.stock[stockIndex].inBuildQuantity, quantity) }
-          : {}),
-      })),
-    );
-
-  const allocateOrdinaryStock = (
-    demandByStockpile: StockpileDemand[],
-    jobInputDemandByStockpile: StockpileDemand[],
-  ) => {
-    remainingStock = request.stock.map((item) =>
-      !isBlueprintOrReactionFormula(item)
-      && item.category === "item"
-      && item.source !== "marketOrder"
-      && isUsableIndustryProductionOutput(item)
-        ? item.quantity
-        : 0,
-    );
-    for (const allocation of allocations) allocation.clear();
-    const standingDemandByStockpile = demandByStockpile.map((demand, stockpileIndex) => {
-      const jobInputDemand = jobInputDemandByStockpile[stockpileIndex];
-      return new Map(
-        [...demand].map(([typeId, quantity]) => [
-          typeId,
-          Math.max(0, quantity - (jobInputDemand.get(typeId) ?? 0)),
-        ]),
-      );
-    });
-    allocateTypes(
-      new Set(jobInputDemandByStockpile.flatMap((demand) => [...demand.keys()])),
-      jobInputDemandByStockpile,
-      true,
-    );
-    allocateTypes(
-      new Set(standingDemandByStockpile.flatMap((demand) => [...demand.keys()])),
-      standingDemandByStockpile,
-    );
-    const remainingDemandOnlyOutput = request.stock.map((item) =>
-      !isBlueprintOrReactionFormula(item)
-      && item.category === "item"
-      && item.source !== "marketOrder"
-      && isAvailableIndustryProductionOutput(item)
-      && !isUsableIndustryProductionOutput(item)
-        ? item.quantity
-        : 0,
-    );
-    for (const [stockIndex, item] of request.stock.entries()) {
-      if (remainingDemandOnlyOutput[stockIndex] <= 0) continue;
-      const stockpileIndexes = stockpileEntries
-        .filter(
-          ({ stockpileIndex }) => (demandByStockpile[stockpileIndex].get(item.typeId) ?? 0) > 0,
-        )
-        .sort(
-          (left, right) =>
-            (demandByStockpile[right.stockpileIndex].get(item.typeId) ?? 0)
-              - (demandByStockpile[left.stockpileIndex].get(item.typeId) ?? 0)
-            || left.stockpileIndex - right.stockpileIndex,
-        );
-      for (const { stockpileIndex } of stockpileIndexes) {
-        const demand = demandByStockpile[stockpileIndex].get(item.typeId) ?? 0;
-        if (demand <= 0 || remainingDemandOnlyOutput[stockIndex] <= 0) continue;
-        const quantity = Math.min(remainingDemandOnlyOutput[stockIndex], demand);
-        const current = allocations[stockpileIndex].get(stockIndex) ?? 0;
-        allocations[stockpileIndex].set(stockIndex, current + quantity);
-        remainingDemandOnlyOutput[stockIndex] -= quantity;
-        demandByStockpile[stockpileIndex].set(item.typeId, demand - quantity);
-      }
-    }
-    return allocatedStockpileStock();
-  };
-
-  const ordinaryStockpileStock = allocateOrdinaryStock(
-    demandByStockpile,
-    jobInputDemandByStockpile,
-  );
-  const ordinaryStockpileResults = await Promise.all(
-    stockpiles.map(async (stockpile, stockpileIndex) => {
-      const result = await calculatePlanPass(
-        {
-          ...request,
-          stockpiles: undefined,
-          items: stockpile.items,
-          stock: ordinaryStockpileStock[stockpileIndex],
-          reprocessingEfficiencies:
-            stockpile.reprocessingEfficiencies ?? request.reprocessingEfficiencies,
-          groupAssignments: stockpile.groupAssignments,
-        },
-        planningData,
-        { locations: activityLocations(stockpile) },
-      );
-      return result;
-    }),
-  );
-  const actualDemandByStockpile: StockpileDemand[] = [];
-  const actualJobInputDemandByStockpile: StockpileDemand[] = [];
-  for (const result of ordinaryStockpileResults) {
-    const { demand, jobInputDemand } = legacyGetPlanDemand(result);
-    actualDemandByStockpile.push(demand);
-    actualJobInputDemandByStockpile.push(jobInputDemand);
-  }
-  const correctedStockpileStock = allocateOrdinaryStock(
-    actualDemandByStockpile,
-    actualJobInputDemandByStockpile,
-  );
-  const specialDemandByStockpile: StockpileDemand[] = await Promise.all(
-    stockpiles.map(async (stockpile, stockpileIndex) => {
-      const result = await calculatePlanPass(
-        {
-          ...request,
-          stockpiles: undefined,
-          items: stockpile.items,
-          stock: correctedStockpileStock[stockpileIndex],
-          reprocessingEfficiencies:
-            stockpile.reprocessingEfficiencies ?? request.reprocessingEfficiencies,
-          groupAssignments: stockpile.groupAssignments,
-        },
-        planningData,
-        { locations: activityLocations(stockpile) },
-      );
-      const demand = new Map<number, number>();
-      for (const entry of result.lists.planItems) {
-        if (entry.kind === "bpc") {
-          demand.set(entry.typeId, Math.max(demand.get(entry.typeId) ?? 0, entry.neededQuantity));
-        }
-        else if (entry.kind === "reaction" && entry.availableQuantity <= 0) {
-          demand.set(entry.typeId, Math.max(demand.get(entry.typeId) ?? 0, 1));
-        }
-      }
-      for (const job of result.lists.reactionJobs) {
-        demand.set(
-          job.inputs.blueprint.typeId,
-          Math.max(
-            demand.get(job.inputs.blueprint.typeId) ?? 0,
-            job.inputs.blueprint.requiredQuantity,
-          ),
-        );
-      }
-      return demand;
-    }),
-  );
-  remainingDemand = specialDemandByStockpile;
-  const specialTypeIds = new Set(specialDemandByStockpile.flatMap((demand) => [...demand.keys()]));
-  for (const [index, item] of request.stock.entries()) {
-    if (isBlueprintOrReactionFormula(item) && item.source !== "marketOrder") {
-      remainingStock[index] = item.quantity;
-    }
-  }
-  allocateTypes(specialTypeIds, specialDemandByStockpile);
-
-  return allocatedStockpileStock();
-}
-
-/** Calculates stockpiles using a globally reserved, location-aware asset pool. */
 async function calculateStockpilePlan(
   request: PlannerRequest,
   planningData: PlanningData,
-): Promise<PlanResult> {
-  const stockpiles = request.stockpiles ?? [];
+): Promise<PlanCalculation> {
+  const stockpiles = request.stockpiles;
   const futureCompressedMaterialStock = await getFutureCompressedMaterialStock(
     request,
     stockpiles,
@@ -2514,16 +2492,16 @@ async function calculateStockpilePlan(
     calculatePlanPass,
     futureStockIndexes,
   );
-  const stockpileResults: PlanResult[] = [];
+  const stockpileResults: PlanCalculation[] = [];
   for (const [stockpileIndex, stockpile] of stockpiles.entries()) {
     const locations = activityLocations(stockpile);
     const finalProductLocations = new Map(
       stockpile.items.map((item) => [item.typeId, stockpile.locations.stock] as const),
     );
-    const result = await calculatePlanWithoutStockpiles(
+    const result = await calculateStockpilePlanPass(
       {
         ...planningRequest,
-        stockpiles: undefined,
+        stockpiles: [],
         items: stockpile.items,
         stock: stockpileStock[stockpileIndex],
         reprocessingEfficiencies:
@@ -2534,57 +2512,28 @@ async function calculateStockpilePlan(
       planningData,
       { finalProductLocations },
     );
-    const taggedResult = tagStockpileResult(result, stockpile);
-    stockpileResults.push(taggedResult);
+    stockpileResults.push(result);
   }
   return mergeStockpileResults(stockpileResults, request.stock, request);
 }
 
-function tagStockpileResult(
-  result: PlanResult,
-  stockpile: NonNullable<PlannerRequest["stockpiles"]>[number],
-) {
-  const context = {
-    stockpileId: stockpile.id,
-    stockpileName: stockpile.name,
-    buildLocationId: stockpile.locations.manufacturing,
-    stockLocationId: stockpile.locations.stock,
-  };
-  return {
-    ...result,
-    lists: {
-      ...result.lists,
-      planItems: result.lists.planItems.map((entry) => ({ ...entry, ...context })),
-      materialsToBuy: result.lists.materialsToBuy.map((entry) => ({ ...entry, ...context })),
-      bpcsNeeded: result.lists.bpcsNeeded.map((entry) => ({ ...entry, ...context })),
-      bpcsToBuy: result.lists.bpcsToBuy.map((entry) => ({ ...entry, ...context })),
-      inventionJobs: result.lists.inventionJobs.map((entry) => ({ ...entry, ...context })),
-      reactionJobs: result.lists.reactionJobs.map((entry) => ({ ...entry, ...context })),
-      manufacturingJobs: result.lists.manufacturingJobs.map((entry) => ({ ...entry, ...context })),
-      reprocessingJobs: result.lists.reprocessingJobs.map((entry) => ({ ...entry, ...context })),
-      skillsRequired: result.lists.skillsRequired,
-      haulingTasks: result.lists.haulingTasks,
-    },
-  };
-}
-
-function mergeHaulingTasks(tasks: PlanResult["lists"]["haulingTasks"]) {
-  const mergedByRoute = new Map<string, PlanResult["lists"]["haulingTasks"][number]>();
+function mergeHaulingTasks(tasks: PlanCalculation["lists"]["haulingTasks"]) {
+  const mergedByRoute = new Map<string, PlanCalculation["lists"]["haulingTasks"][number]>();
   for (const task of tasks) {
     const key = haulingKey(
-      task.itemTypeId,
+      task.typeId,
       task.fromLocationId,
       task.toLocationId,
       task.ownerType,
       task.ownerId,
+      task.source,
     );
     const existing = mergedByRoute.get(key);
     if (existing) {
-      existing.quantity += task.quantity;
-      existing.volume += task.volume;
-      const productionQuantity =
-        (existing.productionQuantity ?? 0) + (task.productionQuantity ?? 0);
-      if (productionQuantity > 0) existing.productionQuantity = productionQuantity;
+      const totalVolume =
+        existing.neededQuantity * existing.unitVolume + task.neededQuantity * task.unitVolume;
+      existing.neededQuantity += task.neededQuantity;
+      existing.unitVolume = totalVolume / existing.neededQuantity;
       continue;
     }
     mergedByRoute.set(key, { ...task });
@@ -2594,7 +2543,7 @@ function mergeHaulingTasks(tasks: PlanResult["lists"]["haulingTasks"]) {
 
 /** Caps outbound haulage at a location to stock that remains after its own final-product demand. */
 function capHaulingTasksToLocalStockpileSurplus(
-  tasks: PlanResult["lists"]["haulingTasks"],
+  tasks: PlanCalculation["lists"]["haulingTasks"],
   stock: PlanStockItem[],
   stockpiles: NonNullable<PlannerRequest["stockpiles"]>,
 ) {
@@ -2623,39 +2572,29 @@ function capHaulingTasksToLocalStockpileSurplus(
   const outboundQuantityByLocationAndType = new Map<string, number>();
   return tasks
     .map((task) => {
-      const key = locationTypeKey(task.fromLocationId, task.itemTypeId);
+      const key = locationTypeKey(task.fromLocationId, task.typeId);
       const stockQuantity = stockByLocationAndType.get(key);
       if (stockQuantity === undefined) return task;
       const localDemand = demandByLocationAndType.get(key) ?? 0;
       const surplus = Math.max(0, stockQuantity - localDemand);
       const alreadyOutbound = outboundQuantityByLocationAndType.get(key) ?? 0;
       const availableSurplus = Math.max(0, surplus - alreadyOutbound);
-      const retainedQuantity = Math.min(task.quantity, availableSurplus);
+      const retainedQuantity = Math.min(task.neededQuantity, availableSurplus);
       outboundQuantityByLocationAndType.set(key, alreadyOutbound + retainedQuantity);
-      if (retainedQuantity === task.quantity) return task;
+      if (retainedQuantity === task.neededQuantity) return task;
 
-      const removedQuantity = task.quantity - retainedQuantity;
-      const volumePerUnit = task.volume / task.quantity;
       const cappedTask = {
         ...task,
-        quantity: retainedQuantity,
-        volume: retainedQuantity * volumePerUnit,
+        neededQuantity: retainedQuantity,
       };
-      if (cappedTask.productionQuantity !== undefined) {
-        cappedTask.productionQuantity = Math.max(
-          0,
-          cappedTask.productionQuantity - removedQuantity,
-        );
-        if (cappedTask.productionQuantity === 0) delete cappedTask.productionQuantity;
-      }
       return cappedTask;
     })
-    .filter((task) => task.quantity > 0);
+    .filter((task) => task.neededQuantity > 0);
 }
 
 /** Merge stockpile BPC requirements before calculating the shared shortage. */
-function mergeBpcBuyEntries(entries: PlanResult["lists"]["bpcsToBuy"]) {
-  const mergedByType = new Map<number, PlanResult["lists"]["bpcsToBuy"][number]>();
+function mergeBpcBuyEntries(entries: PlanCalculation["lists"]["bpcsToBuy"]) {
+  const mergedByType = new Map<number, PlanCalculation["lists"]["bpcsToBuy"][number]>();
   for (const entry of entries) {
     const existing = mergedByType.get(entry.typeId);
     if (!existing) {
@@ -2666,7 +2605,6 @@ function mergeBpcBuyEntries(entries: PlanResult["lists"]["bpcsToBuy"]) {
       entry.typeId,
       {
         ...existing,
-        quantity: existing.quantity + entry.quantity,
         neededQuantity: existing.neededQuantity + entry.neededQuantity,
         stockQuantity: existing.stockQuantity + entry.stockQuantity,
         stockRuns: existing.stockRuns + entry.stockRuns,
@@ -2683,21 +2621,14 @@ function mergeBpcBuyEntries(entries: PlanResult["lists"]["bpcsToBuy"]) {
 }
 
 /** Merges stockpile material requirements before calculating the shared shortage. */
-function mergeMaterialBuyEntries(entries: PlanResult["lists"]["materialsToBuy"]) {
-  const mergedByType = new Map<number, PlanResult["lists"]["materialsToBuy"][number]>();
-  const entryCountByType = new Map<number, number>();
+function mergeMaterialBuyEntries(entries: PlanCalculation["lists"]["materialsToBuy"]) {
+  const mergedByType = new Map<number, PlanCalculation["lists"]["materialsToBuy"][number]>();
   for (const entry of entries) {
-    entryCountByType.set(entry.typeId, (entryCountByType.get(entry.typeId) ?? 0) + 1);
     const existing = mergedByType.get(entry.typeId);
     if (!existing) {
       mergedByType.set(entry.typeId, { ...entry });
       continue;
     }
-    const sameStockpile =
-      existing.stockpileId === entry.stockpileId
-      && existing.stockpileName === entry.stockpileName
-      && existing.buildLocationId === entry.buildLocationId
-      && existing.stockLocationId === entry.stockLocationId;
     mergedByType.set(
       entry.typeId,
       {
@@ -2709,54 +2640,133 @@ function mergeMaterialBuyEntries(entries: PlanResult["lists"]["materialsToBuy"])
         productionQuantity: existing.productionQuantity + entry.productionQuantity,
         reprocessingQuantity:
           (existing.reprocessingQuantity ?? 0) + (entry.reprocessingQuantity ?? 0),
-        buildQuantity: existing.buildQuantity + entry.buildQuantity,
-        buyQuantity: 0,
-        remainingStockQuantity: existing.remainingStockQuantity + entry.remainingStockQuantity,
+        buyQuantity: existing.buyQuantity + entry.buyQuantity,
         remainingProductionQuantity:
           existing.remainingProductionQuantity + entry.remainingProductionQuantity,
-        fromMarketOrder: existing.fromMarketOrder || entry.fromMarketOrder,
         availableSourceCounts: mergeMaterialSourceCounts(
           existing.availableSourceCounts,
           entry.availableSourceCounts,
         ),
-        ...(sameStockpile
-          ? {}
-          : {
-              stockpileId: undefined,
-              stockpileName: undefined,
-              buildLocationId: undefined,
-              stockLocationId: undefined,
-            }),
       },
     );
   }
-  return [...mergedByType.values()].map((entry) => {
-    if (entryCountByType.get(entry.typeId) === 1) return entry;
+  return [...mergedByType.values()];
+}
+
+function mergeMaterialRowsWithinPass(entries: PlanCalculation["lists"]["materialsToBuy"]) {
+  const mergedByType = new Map<number, PlanCalculation["lists"]["materialsToBuy"][number]>();
+  for (const entry of entries) {
+    const existing = mergedByType.get(entry.typeId);
+    if (!existing) {
+      mergedByType.set(entry.typeId, { ...entry });
+      continue;
+    }
+    const merged = {
+      ...existing,
+      quantity: existing.quantity + entry.quantity,
+      requiredQuantity: existing.requiredQuantity + entry.requiredQuantity,
+      stockQuantity: existing.stockQuantity + entry.stockQuantity,
+      availableStockQuantity: Math.max(
+        existing.availableStockQuantity,
+        entry.availableStockQuantity,
+      ),
+      productionQuantity: existing.productionQuantity + entry.productionQuantity,
+      reprocessingQuantity:
+        (existing.reprocessingQuantity ?? 0) + (entry.reprocessingQuantity ?? 0),
+      buyQuantity: existing.buyQuantity + entry.buyQuantity,
+      remainingProductionQuantity:
+        existing.remainingProductionQuantity + entry.remainingProductionQuantity,
+      availableSourceCounts: mergeMaterialSourceCountsByMaximum(
+        existing.availableSourceCounts,
+        entry.availableSourceCounts,
+      ),
+    };
+    delete merged.activityLocationId;
+    delete merged.stockpileLocationId;
+    mergedByType.set(entry.typeId, merged);
+  }
+  return [...mergedByType.values()];
+}
+
+/** Adds purchases for destination shortages that remote usable stock cannot satisfy. */
+function addUnfulfilledRemoteStockPurchases(
+  entries: PlanCalculation["lists"]["materialsToBuy"],
+  stock: PlanStockItem[],
+  haulingTasks: PlanCalculation["lists"]["haulingTasks"],
+  buildableTypeIds: ReadonlySet<number>,
+) {
+  return entries.map((entry) => {
+    const locationId = entry.stockpileLocationId ?? entry.activityLocationId;
+    if (
+      locationId === undefined
+      || entry.productionQuantity > 0
+      || buildableTypeIds.has(entry.typeId)
+    ) return entry;
+    const localUsableStock = stock.some(
+      (item) =>
+        item.typeId === entry.typeId
+        && getStockRootLocationId(item) === locationId
+        && isAvailableIndustryProductionOutput(item)
+        && isUsableIndustryProductionOutput(item),
+    );
+    const remoteUsableStock = stock.some(
+      (item) =>
+        item.typeId === entry.typeId
+        && getStockRootLocationId(item) !== locationId
+        && isAvailableIndustryProductionOutput(item)
+        && isUsableIndustryProductionOutput(item),
+    );
+    if (localUsableStock || !remoteUsableStock) return entry;
+    const inboundQuantity = haulingTasks
+      .filter((task) => task.typeId === entry.typeId && task.toLocationId === locationId)
+      .reduce((total, task) => total + task.neededQuantity, 0);
     const plannedProductionQuantity = Math.max(
       0,
       entry.productionQuantity - (entry.reprocessingQuantity ?? 0),
     );
-    return {
-      ...entry,
-      buyQuantity: Math.max(
-        0,
-        entry.requiredQuantity - entry.availableStockQuantity - plannedProductionQuantity,
-      ),
-      remainingStockQuantity: Math.max(0, entry.availableStockQuantity - entry.stockQuantity),
-    };
+    const unfulfilledQuantity = Math.max(
+      0,
+      entry.requiredQuantity - entry.stockQuantity - inboundQuantity - plannedProductionQuantity,
+    );
+    return unfulfilledQuantity > entry.buyQuantity
+      ? { ...entry, buyQuantity: unfulfilledQuantity }
+      : entry;
   });
 }
 
 function mergeMaterialSourceCounts(
-  existing: PlanSourceCounts | undefined,
-  entry: PlanSourceCounts | undefined,
-): PlanSourceCounts | undefined {
+  existing: PlanSourceCountsByLocation | undefined,
+  entry: PlanSourceCountsByLocation | undefined,
+): PlanSourceCountsByLocation | undefined {
+  return mergePlanSourceCounts(existing, entry);
+}
+
+function mergeMaterialSourceCountsByMaximum(
+  existing: PlanSourceCountsByLocation | undefined,
+  entry: PlanSourceCountsByLocation | undefined,
+): PlanSourceCountsByLocation | undefined {
+  return mergePlanSourceCountsByMaximum(existing, entry);
+}
+
+function mergePlanSourceCountsByMaximum(
+  existing: PlanSourceCountsByLocation | undefined,
+  entry: PlanSourceCountsByLocation | undefined,
+): PlanSourceCountsByLocation | undefined {
   if (!existing) return entry;
   if (!entry) return existing;
-  const sourceCounts = {} as PlanSourceCounts;
-  for (const source of ["market", "industry", "invention", "copying", "reprocessing"] as const) {
-    const count = (existing[source] ?? 0) + (entry[source] ?? 0);
-    if (count > 0) sourceCounts[source] = count;
+  const sourceCounts: PlanSourceCountsByLocation = {};
+  for (const locationId of new Set([
+    ...Object.keys(existing).map(Number),
+    ...Object.keys(entry).map(Number),
+  ])) {
+    const existingCounts = existing[locationId] ?? {};
+    const entryCounts = entry[locationId] ?? {};
+    const mergedCounts: PlanSourceCounts = {};
+    for (const source of ["market", "industry", "invention", "copying", "reprocessing"] as const) {
+      const count = Math.max(existingCounts[source] ?? 0, entryCounts[source] ?? 0);
+      if (count > 0) mergedCounts[source] = count;
+    }
+    if (Object.keys(mergedCounts).length > 0) sourceCounts[locationId] = mergedCounts;
   }
   return sourceCounts;
 }
@@ -2805,14 +2815,14 @@ function mergePlanJobInputs(entries: PlanJobInputs[]): PlanJobInputs {
 }
 
 type PlanJobEntry =
-  | PlanResult["lists"]["reactionJobs"][number]
-  | PlanResult["lists"]["manufacturingJobs"][number];
+  | PlanCalculation["lists"]["reactionJobs"][number]
+  | PlanCalculation["lists"]["manufacturingJobs"][number];
 
 function locationTypeKey(locationId: number | undefined, typeId: number) {
   return `${locationId ?? "unlocated"}:${typeId}`;
 }
 
-/** Merges jobs that share a planning key while preserving stockpile context only when unambiguous. */
+/** Merges jobs that share an activity location and type. */
 function mergeJobEntries<T extends PlanJobEntry>(
   entries: T[],
   keyFor: (entry: T) => string | number,
@@ -2826,23 +2836,14 @@ function mergeJobEntries<T extends PlanJobEntry>(
       mergedByKey.set(key, { ...entry });
       continue;
     }
-    const sameStockpile = existing.stockpileId === entry.stockpileId;
     mergedByKey.set(
       key,
       {
         ...existing,
-        runs: existing.runs + entry.runs,
+        countNeeded: existing.countNeeded + entry.countNeeded,
         runsAvailable: existing.runsAvailable + entry.runsAvailable,
         totalTime: existing.totalTime + entry.totalTime,
         inputs: mergeInputs([existing.inputs, entry.inputs]),
-        ...(sameStockpile
-          ? {}
-          : {
-              stockpileId: undefined,
-              stockpileName: undefined,
-              buildLocationId: undefined,
-              stockLocationId: undefined,
-            }),
       },
     );
   }
@@ -2850,7 +2851,7 @@ function mergeJobEntries<T extends PlanJobEntry>(
 }
 
 /** Merges reaction jobs by reaction location and formula type. */
-function mergeReactionJobs(entries: PlanResult["lists"]["reactionJobs"]) {
+function mergeReactionJobs(entries: PlanCalculation["lists"]["reactionJobs"]) {
   return mergeJobEntries(
     entries,
     (entry) => locationTypeKey(entry.locationId, entry.typeId),
@@ -2858,8 +2859,8 @@ function mergeReactionJobs(entries: PlanResult["lists"]["reactionJobs"]) {
   );
 }
 
-function mergeInventionJobs(entries: PlanResult["lists"]["inventionJobs"]) {
-  const mergedByKey = new Map<string, PlanResult["lists"]["inventionJobs"][number]>();
+function mergeInventionJobs(entries: PlanCalculation["lists"]["inventionJobs"]) {
+  const mergedByKey = new Map<string, PlanCalculation["lists"]["inventionJobs"][number]>();
   for (const entry of entries) {
     const key = locationTypeKey(entry.locationId, entry.typeId);
     const existing = mergedByKey.get(key);
@@ -2867,20 +2868,11 @@ function mergeInventionJobs(entries: PlanResult["lists"]["inventionJobs"]) {
       mergedByKey.set(key, { ...entry });
       continue;
     }
-    const sameStockpile = existing.stockpileId === entry.stockpileId;
     mergedByKey.set(
       key,
       {
         ...existing,
-        runs: existing.runs + entry.runs,
-        ...(sameStockpile
-          ? {}
-          : {
-              stockpileId: undefined,
-              stockpileName: undefined,
-              buildLocationId: undefined,
-              stockLocationId: undefined,
-            }),
+        countNeeded: existing.countNeeded + entry.countNeeded,
       },
     );
   }
@@ -2888,7 +2880,7 @@ function mergeInventionJobs(entries: PlanResult["lists"]["inventionJobs"]) {
 }
 
 /** Merges manufacturing jobs by blueprint type. */
-function mergeManufacturingJobs(entries: PlanResult["lists"]["manufacturingJobs"]) {
+function mergeManufacturingJobs(entries: PlanCalculation["lists"]["manufacturingJobs"]) {
   return mergeJobEntries(
     entries,
     (entry) => locationTypeKey(entry.locationId, entry.typeId),
@@ -2911,29 +2903,58 @@ function mergeReactionJobInputs(entries: PlanJobInputs[]): PlanJobInputs {
 }
 
 function mergeStockpileResults(
-  results: PlanResult[],
+  results: PlanCalculation[],
   stock: PlanStockItem[],
   request: PlannerRequest,
-): PlanResult {
-  const availableStockByTypeId = getAvailableStockByTypeId(request, request.stockpiles);
-  for (const result of results) {
-    for (const material of result.lists.materialsToBuy) {
-      const reprocessingQuantity = material.reprocessingQuantity ?? 0;
-      if (reprocessingQuantity <= 0) continue;
-      const typeKey = String(material.typeId);
-      availableStockByTypeId[typeKey] =
-        (availableStockByTypeId[typeKey] ?? 0) + reprocessingQuantity;
-    }
-  }
-  const mergedBpcRequirements = mergeBpcBuyEntries(
-    results.flatMap((result) => [...result.lists.bpcsToBuy, ...result.lists.bpcsNeeded]),
-  );
+): PlanCalculation {
   const haulingTasks = capHaulingTasksToLocalStockpileSurplus(
     mergeHaulingTasks(results.flatMap((result) => result.lists.haulingTasks)),
     stock,
-    request.stockpiles ?? [],
+    request.stockpiles,
   );
-  const skillsById = new Map<number, PlanResult["lists"]["skillsRequired"][number]>();
+  const buildableTypeIds = new Set(
+    results.flatMap((result) =>
+      result.lists.planItems
+        .filter((entry) => entry.kind === "material" && entry.productionQuantity > 0)
+        .map((entry) => entry.typeId),
+    ),
+  );
+  const materialsToBuy = results.flatMap((result) =>
+    addUnfulfilledRemoteStockPurchases(
+      mergeMaterialRowsWithinPass(result.lists.materialsToBuy),
+      stock,
+      haulingTasks,
+      buildableTypeIds,
+    ),
+  );
+  const mergedBpcRequirements = mergeBpcBuyEntries(
+    results.flatMap((result) => [...result.lists.bpcsToBuy, ...result.lists.bpcsNeeded]),
+  );
+  const availableSourceCountsByType: PlanSourceCountsByType = new Map();
+  const availableStockQuantitiesByLocationAndType = new Map<string, number>();
+  const availableStockQuantitiesByType = new Map<number, number>();
+  for (const result of results) {
+    for (const [typeId, sourceCounts] of result.availableSourceCountsByType ?? []) {
+      const mergedSourceCounts = mergePlanSourceCounts(
+        availableSourceCountsByType.get(typeId),
+        sourceCounts,
+      );
+      if (mergedSourceCounts) availableSourceCountsByType.set(typeId, mergedSourceCounts);
+    }
+    for (const [key, quantity] of result.availableStockQuantitiesByLocationAndType ?? []) {
+      availableStockQuantitiesByLocationAndType.set(
+        key,
+        (availableStockQuantitiesByLocationAndType.get(key) ?? 0) + quantity,
+      );
+    }
+    for (const [typeId, quantity] of result.availableStockQuantitiesByType ?? []) {
+      availableStockQuantitiesByType.set(
+        typeId,
+        (availableStockQuantitiesByType.get(typeId) ?? 0) + quantity,
+      );
+    }
+  }
+  const skillsById = new Map<number, PlanCalculation["lists"]["skillsRequired"][number]>();
   for (const result of results) {
     for (const skill of result.lists.skillsRequired) {
       const existing = skillsById.get(skill.skillId);
@@ -2946,7 +2967,6 @@ function mergeStockpileResults(
     metadata: {
       generatedAt: new Date().toISOString(),
       unresolvedAssetCount: request.unresolvedAssetCount ?? 0,
-      availableStockByTypeId,
       corporationAssetSources: [
         ...new Set(
           stock
@@ -2958,9 +2978,7 @@ function mergeStockpileResults(
     },
     lists: {
       planItems: results.flatMap((result) => result.lists.planItems),
-      materialsToBuy: mergeMaterialBuyEntries(
-        results.flatMap((result) => result.lists.materialsToBuy),
-      ),
+      materialsToBuy: mergeMaterialBuyEntries(materialsToBuy),
       bpcsNeeded: mergedBpcRequirements.filter((entry) => entry.bpoCount > 0),
       bpcsToBuy: mergedBpcRequirements.filter((entry) => entry.bpoCount === 0),
       inventionJobs: mergeInventionJobs(results.flatMap((result) => result.lists.inventionJobs)),
@@ -2972,5 +2990,8 @@ function mergeStockpileResults(
       skillsRequired: [...skillsById.values()],
       haulingTasks,
     },
+    availableSourceCountsByType,
+    availableStockQuantitiesByLocationAndType,
+    availableStockQuantitiesByType,
   };
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { calculatePlan, calculatePlanResult, toPlanResponse } from "./planEngine";
+import { calculatePlan, calculatePlanCalculation, toPlanResponse } from "./planEngine";
 import type { IndustryJobStatus, PlannerRequest } from "./types";
 
 const tritaniumTypeId = 34;
@@ -49,24 +49,22 @@ function request(
       fromCompression: false,
     },
   ];
-  const stockpiles = Object.prototype.hasOwnProperty.call(options, "stockpiles")
-    ? options.stockpiles
-    : [
-        {
-          id: "test-stockpile",
-          name: "Test stockpile",
-          locations: {
-            stock: manufacturingLocationId,
-            manufacturing: manufacturingLocationId,
-            reactions: manufacturingLocationId,
-            reprocessing: reprocessingLocationId,
-            copying: manufacturingLocationId,
-            invention: manufacturingLocationId,
-          },
-          ...(options.groupAssignments ? { groupAssignments: options.groupAssignments } : {}),
-          items,
-        },
-      ];
+  const stockpiles = options.stockpiles ?? [
+    {
+      id: "test-stockpile",
+      name: "Test stockpile",
+      locations: {
+        stock: manufacturingLocationId,
+        manufacturing: manufacturingLocationId,
+        reactions: manufacturingLocationId,
+        reprocessing: reprocessingLocationId,
+        copying: manufacturingLocationId,
+        invention: manufacturingLocationId,
+      },
+      ...(options.groupAssignments ? { groupAssignments: options.groupAssignments } : {}),
+      items,
+    },
+  ];
   return {
     items,
     stock,
@@ -118,7 +116,7 @@ function industryOutputStock(
 }
 
 test("build blacklist forces a buildable item to be purchased", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [],
@@ -145,7 +143,6 @@ test("build blacklist forces a buildable item to be purchased", async () => {
   assert(rifter);
   assert.equal(rifter.requiredQuantity, 1);
   assert.equal(rifter.buyQuantity, 1);
-  assert.equal(rifter.buildQuantity, 0);
   assert.equal(
     result.lists.manufacturingJobs.some((job) => job.typeId === rifterBlueprintTypeId),
     false,
@@ -153,7 +150,7 @@ test("build blacklist forces a buildable item to be purchased", async () => {
 });
 
 test("reports the explicit unresolved asset count", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       1,
       [{ ...compressedStock(1), ownerType: "character", ownerId: 101 }],
@@ -179,41 +176,44 @@ test("returns aggregate material purchases in the plan response", async () => {
       },
     ],
   );
-  const result = await calculatePlanResult(planRequest);
+  const result = await calculatePlanCalculation(planRequest);
   const purchases = result.lists.materialsToBuy.filter((entry) => entry.typeId === tritaniumTypeId);
 
   assert.equal(purchases.length, 1);
   assert.equal(purchases[0].requiredQuantity, 33_750);
   assert.equal(purchases[0].availableStockQuantity, 33_300);
   assert.equal(purchases[0].buyQuantity, 450);
+  assert.equal("name" in purchases[0], false);
+  assert.equal("assemblyLineGroup" in purchases[0], false);
 
-  const response = toPlanResponse(result, { [tritaniumTypeId]: 125 });
+  const response = await toPlanResponse(result);
   assert.deepEqual(
     response.lists.materialsToBuy,
     [
       {
-        typeId: tritaniumTypeId,
-        typeName: "Tritanium",
-        typeGroupId: response.lists.materialsToBuy[0].typeGroupId,
-        typeGroup: response.lists.materialsToBuy[0].typeGroup,
-        unitVolume: response.lists.materialsToBuy[0].unitVolume,
-        neededQuantity: 450,
-        marketBuyOrderQuantity: 125,
+        assemblyLineGroup: response.lists.materialsToBuy[0].assemblyLineGroup,
+        items: [
+          {
+            typeId: tritaniumTypeId,
+            typeName: "Tritanium",
+            unitVolume: response.lists.materialsToBuy[0].items[0].unitVolume,
+            neededQuantity: 450,
+          },
+        ],
       },
     ],
   );
-  assert.equal(Object.values(response.lists.materialsToBuy[0]).length, 7);
-  assert.equal(Number.isInteger(response.lists.materialsToBuy[0].typeGroupId), true);
-  assert.equal(response.lists.materialsToBuy[0].typeGroupId > 0, true);
+  assert.equal(Object.values(response.lists.materialsToBuy[0].items[0]).length, 4);
+  assert.equal(typeof response.lists.materialsToBuy[0].assemblyLineGroup, "string");
 
   const publicResponse = await calculatePlan(planRequest);
   assert.equal("bpcsNeeded" in publicResponse.lists, false);
   assert.equal("bpcsToBuy" in publicResponse.lists, false);
-  assert.equal(publicResponse.lists.materialsToBuy[0].neededQuantity, 450);
+  assert.equal(publicResponse.lists.materialsToBuy[0].items[0].neededQuantity, 450);
 });
 
-test("attaches stockpile context to response buckets", async () => {
-  const result = await calculatePlanResult(
+test("uses location buckets in the plan response", async () => {
+  const result = await calculatePlanCalculation(
     request(
       1,
       [],
@@ -231,30 +231,344 @@ test("attaches stockpile context to response buckets", async () => {
       },
     ),
   );
-  const response = toPlanResponse(result);
-  const planBucket = response.lists.planItems.find((bucket) => bucket.items.length > 0);
+  const response = await toPlanResponse(result);
+  const planBucket = response.lists.planItems.byActivityLocation.find(
+    (bucket) => bucket.locationId === manufacturingLocationId,
+  );
   const manufacturingBucket = response.lists.manufacturingJobs.find(
     (bucket) => bucket.items.length > 0,
   );
 
   assert(planBucket);
   assert(manufacturingBucket);
-  assert.deepEqual(
-    planBucket.context,
-    {
-      stockpileId: "test-stockpile",
-      stockpileName: "Test stockpile",
-      buildLocationId: manufacturingLocationId,
-      stockLocationId: manufacturingLocationId,
-    },
-  );
-  assert.deepEqual(manufacturingBucket.context, planBucket.context);
-  assert.equal("stockpileId" in planBucket.items[0]!, false);
+  assert.equal(planBucket.locationId, manufacturingLocationId);
+  assert.equal(manufacturingBucket.locationId, manufacturingLocationId);
+  assert.equal("context" in planBucket, false);
+  assert.equal("context" in manufacturingBucket, false);
+  assert.equal("activityLocationId" in planBucket.items[0]!, false);
   assert.equal("stockpileId" in manufacturingBucket.items[0]!, false);
 });
 
+test("assigns direct final-product demand to the stockpile location", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      25,
+      [],
+      {
+        stockpiles: [
+          {
+            id: "finished-product",
+            name: "Finished product",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: tritaniumTypeId,
+                name: "Tritanium",
+                quantity: 25,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const material = result.lists.planItems.find(
+    (item) => item.kind === "material" && item.typeId === tritaniumTypeId,
+  );
+
+  assert(material?.kind === "material");
+  assert.equal(material.activityLocationId, undefined);
+  assert.equal(material.stockpileLocationId, sourceLocationId);
+});
+
+test("keeps same-type activity and stockpile demands in separate rows", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [],
+      {
+        items: [
+          {
+            typeId: tritaniumTypeId,
+            name: "Tritanium",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        stockpiles: [
+          {
+            id: "split-demand",
+            name: "Split demand",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: tritaniumTypeId,
+                name: "Tritanium",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+              {
+                typeId: rifterTypeId,
+                name: "Rifter",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const tritaniumRows = result.lists.planItems.filter(
+    (item) => item.kind === "material" && item.typeId === tritaniumTypeId,
+  );
+
+  assert.equal(tritaniumRows.length, 2);
+  assert(
+    tritaniumRows.some(
+      (item) =>
+        item.activityLocationId === manufacturingLocationId
+        && item.stockpileLocationId === undefined,
+    ),
+  );
+  assert(
+    tritaniumRows.some(
+      (item) =>
+        item.activityLocationId === undefined && item.stockpileLocationId === sourceLocationId,
+    ),
+  );
+
+  const response = await toPlanResponse(result);
+  const activityBucket = response.lists.planItems.byActivityLocation.find(
+    (bucket) => bucket.locationId === manufacturingLocationId,
+  );
+  const stockpileBucket = response.lists.planItems.byActivityLocation.find(
+    (bucket) => bucket.locationId === sourceLocationId,
+  );
+  assert(activityBucket);
+  assert(stockpileBucket);
+  assert.equal(activityBucket.items.filter((item) => item.typeId === tritaniumTypeId).length, 1);
+  assert.equal(stockpileBucket.items.filter((item) => item.typeId === tritaniumTypeId).length, 1);
+});
+
+test("filters available source counts by plan-item location", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        industryOutputStock("active", manufacturingLocationId, "Manufacturing", 20),
+        {
+          typeId: tritaniumTypeId,
+          name: "Tritanium",
+          quantity: 30,
+          category: "item",
+          source: "marketOrder",
+          rootLocationId: sourceLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: tritaniumTypeId,
+            name: "Tritanium",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        stockpiles: [
+          {
+            id: "source-count-locations",
+            name: "Source count locations",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: tritaniumTypeId,
+                name: "Tritanium",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+              {
+                typeId: rifterTypeId,
+                name: "Rifter",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const response = await toPlanResponse(result);
+  const allTritanium = response.lists.planItems.all.find((item) => item.typeId === tritaniumTypeId);
+  const activityTritanium = response.lists.planItems.byActivityLocation
+    .find((bucket) => bucket.locationId === manufacturingLocationId)
+    ?.items.find((item) => item.typeId === tritaniumTypeId);
+  const stockpileTritanium = response.lists.planItems.byActivityLocation
+    .find((bucket) => bucket.locationId === sourceLocationId)
+    ?.items.find((item) => item.typeId === tritaniumTypeId);
+
+  assert(allTritanium);
+  assert(activityTritanium);
+  assert(stockpileTritanium);
+  assert.equal(allTritanium.availableQuantity, 50);
+  assert.equal(activityTritanium.availableQuantity, 20);
+  assert.equal(stockpileTritanium.availableQuantity, 30);
+  assert.deepEqual(
+    allTritanium.availableSourceCounts,
+    {
+      [manufacturingLocationId]: { industry: 20 },
+      [sourceLocationId]: { market: 30 },
+    },
+  );
+  assert.deepEqual(
+    activityTritanium.availableSourceCounts,
+    {
+      [manufacturingLocationId]: { industry: 20 },
+    },
+  );
+  assert.deepEqual(
+    stockpileTritanium.availableSourceCounts,
+    {
+      [sourceLocationId]: { market: 30 },
+    },
+  );
+});
+
+test("filters hauling quantities by plan-item destination location", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: tritaniumTypeId,
+          name: "Tritanium",
+          quantity: 2,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "first-haul-destination",
+            name: "First haul destination",
+            locations: {
+              stock: manufacturingLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: tritaniumTypeId,
+                name: "Tritanium",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "second-haul-destination",
+            name: "Second haul destination",
+            locations: {
+              stock: alternateSourceLocationId,
+              manufacturing: alternateSourceLocationId,
+              reactions: alternateSourceLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: alternateSourceLocationId,
+              invention: alternateSourceLocationId,
+            },
+            items: [
+              {
+                typeId: tritaniumTypeId,
+                name: "Tritanium",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const response = await toPlanResponse(result);
+  const firstBucket = response.lists.planItems.byActivityLocation.find(
+    (bucket) => bucket.locationId === manufacturingLocationId,
+  );
+  const secondBucket = response.lists.planItems.byActivityLocation.find(
+    (bucket) => bucket.locationId === alternateSourceLocationId,
+  );
+  const firstTritanium = firstBucket?.items.find((item) => item.typeId === tritaniumTypeId);
+  const secondTritanium = secondBucket?.items.find((item) => item.typeId === tritaniumTypeId);
+
+  assert(firstTritanium);
+  assert(secondTritanium);
+  assert.equal(firstTritanium.haulingQuantity, 1);
+  assert.equal(secondTritanium.haulingQuantity, 1);
+});
+
 test("buy blacklist keeps a buildable item on the manufacturing path", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [],
@@ -281,15 +595,14 @@ test("buy blacklist keeps a buildable item on the manufacturing path", async () 
     (entry) => entry.typeId === rifterBlueprintTypeId,
   );
   assert(job);
-  assert.equal(job.runs, 1);
+  assert.equal(job.countNeeded, 1);
   const rifter = result.lists.materialsToBuy.find((item) => item.typeId === rifterTypeId);
   assert(rifter);
   assert.equal(rifter.buyQuantity, 0);
-  assert.equal(rifter.buildQuantity, 1);
 });
 
 test("uses co-located corporation material stock for manufacturing", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -331,7 +644,7 @@ test("uses co-located corporation material stock for manufacturing", async () =>
 });
 
 test("plans invention attempts and materials for a missing T2 BPC", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [],
@@ -354,7 +667,7 @@ test("plans invention attempts and materials for a missing T2 BPC", async () => 
     (job) => job.typeId === capRechargerInventionBlueprintTypeId,
   );
   assert(inventionJob);
-  assert.equal(inventionJob.runs, 3);
+  assert.equal(inventionJob.countNeeded, 3);
   assert.equal(inventionJob.locationId, manufacturingLocationId);
 
   for (const typeId of [highEnergyPhysicsDatacoreTypeId, quantumPhysicsDatacoreTypeId]) {
@@ -382,7 +695,7 @@ test("plans invention attempts and materials for a missing T2 BPC", async () => 
 });
 
 test("merges invention jobs by location and blueprint type", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [],
@@ -461,28 +774,28 @@ test("merges invention jobs by location and blueprint type", async () => {
   );
 
   assert.deepEqual(
-    result.lists.inventionJobs.map(({ locationId, typeId, runs }) => ({
+    result.lists.inventionJobs.map(({ locationId, typeId, countNeeded }) => ({
       locationId,
       typeId,
-      runs,
+      countNeeded,
     })),
     [
       {
         locationId: manufacturingLocationId,
         typeId: capRechargerInventionBlueprintTypeId,
-        runs: 6,
+        countNeeded: 6,
       },
       {
         locationId: alternateSourceLocationId,
         typeId: capRechargerInventionBlueprintTypeId,
-        runs: 3,
+        countNeeded: 3,
       },
     ],
   );
 });
 
 test("uses an available T2 BPC without scheduling invention", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -520,7 +833,7 @@ test("uses an available T2 BPC without scheduling invention", async () => {
 });
 
 test("reports BPO count and BPC runs separately for manufacturing", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -565,7 +878,7 @@ test("reports BPO count and BPC runs separately for manufacturing", async () => 
 });
 
 test("applies assigned manufacturing group facility modifiers", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [],
@@ -611,10 +924,15 @@ test("applies assigned manufacturing group facility modifiers", async () => {
   const tritanium = job.inputs.materials.find((input) => input.typeId === tritaniumTypeId);
   assert(tritanium);
   assert.equal(tritanium.requiredQuantity, 28_800);
+  const tritaniumPlanItem = result.lists.planItems.find(
+    (item) => item.kind === "material" && item.typeId === tritaniumTypeId,
+  );
+  assert(tritaniumPlanItem?.kind === "material");
+  assert.equal(tritaniumPlanItem.activityLocationId, alternateSourceLocationId);
 });
 
 test("applies assigned reaction group facility modifiers", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       20,
       [
@@ -692,6 +1010,11 @@ test("applies assigned reaction group facility modifiers", async () => {
       [16661, 50],
     ],
   );
+  const reactionMaterial = result.lists.planItems.find(
+    (item) => item.kind === "material" && item.typeId === 16657,
+  );
+  assert(reactionMaterial?.kind === "material");
+  assert.equal(reactionMaterial.activityLocationId, alternateSourceLocationId);
   assert.deepEqual(
     result.lists.skillsRequired.find((skill) => skill.skillId === 45746),
     {
@@ -703,7 +1026,7 @@ test("applies assigned reaction group facility modifiers", async () => {
 });
 
 test("allocates reaction material at an assigned reaction facility", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -789,7 +1112,7 @@ test("allocates reaction material at an assigned reaction facility", async () =>
 });
 
 test("combines global facility and skill time multipliers", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [],
@@ -817,7 +1140,7 @@ test("combines global facility and skill time multipliers", async () => {
 });
 
 test("uses output from an active industry job as committed availability", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(100, [industryOutputStock("active", manufacturingLocationId)]),
   );
   const tritanium = result.lists.materialsToBuy.find(
@@ -828,13 +1151,13 @@ test("uses output from an active industry job as committed availability", async 
   assert.equal(tritanium.stockQuantity, 0);
   assert.equal(tritanium.availableStockQuantity, 100);
   assert.equal(tritanium.buyQuantity, 0);
-  assert.equal(tritanium.availableSourceCounts?.industry, 100);
+  assert.equal((tritanium.availableSourceCounts?.[manufacturingLocationId] ?? {}).industry, 100);
   assert.deepEqual(result.lists.haulingTasks, []);
 });
 
 test("does not count cancelled or reverted industry output as available stock", async () => {
   for (const status of ["cancelled", "reverted"] as const) {
-    const result = await calculatePlanResult(
+    const result = await calculatePlanCalculation(
       request(100, [industryOutputStock(status, manufacturingLocationId)]),
     );
     const tritanium = result.lists.materialsToBuy.find(
@@ -848,7 +1171,7 @@ test("does not count cancelled or reverted industry output as available stock", 
 });
 
 test("uses paused industry output for demand but not installable job inputs", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [industryOutputStock("paused", manufacturingLocationId, "Manufacturing", 32_000)],
@@ -884,7 +1207,7 @@ test("uses paused industry output for demand but not installable job inputs", as
 });
 
 test("deduplicates repeated blueprint print IDs when counting BPC runs", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -929,7 +1252,7 @@ test("deduplicates repeated blueprint print IDs when counting BPC runs", async (
 });
 
 test("counts physical stock and active output toward plan availability", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       150,
       [
@@ -953,11 +1276,11 @@ test("counts physical stock and active output toward plan availability", async (
   assert.equal(tritanium.stockQuantity, 130);
   assert.equal(tritanium.productionQuantity, 0);
   assert.equal(tritanium.buyQuantity, 0);
-  assert.equal(tritanium.availableSourceCounts?.industry, 20);
+  assert.equal((tritanium.availableSourceCounts?.[manufacturingLocationId] ?? {}).industry, 20);
 });
 
 test("tracks production-origin haul quantity separately from stock haul quantity", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       110,
       [
@@ -1000,7 +1323,7 @@ test("tracks production-origin haul quantity separately from stock haul quantity
     ),
   );
   const tritaniumHauls = result.lists.haulingTasks.filter(
-    (task) => task.itemTypeId === tritaniumTypeId,
+    (task) => task.typeId === tritaniumTypeId,
   );
 
   const productionHaul = tritaniumHauls.find(
@@ -1012,14 +1335,14 @@ test("tracks production-origin haul quantity separately from stock haul quantity
 
   assert(productionHaul);
   assert(stockHaul);
-  assert.equal(productionHaul.quantity, 100);
-  assert.equal(productionHaul.productionQuantity, 100);
-  assert.equal(stockHaul.quantity, 10);
-  assert.equal(stockHaul.productionQuantity, undefined);
+  assert.equal(productionHaul.neededQuantity, 100);
+  assert.equal(productionHaul.source, "production");
+  assert.equal(stockHaul.neededQuantity, 10);
+  assert.equal(stockHaul.source, undefined);
 });
 
 test("counts active output toward availability in stockpiled plans", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       150,
       [
@@ -1069,7 +1392,7 @@ test("counts active output toward availability in stockpiled plans", async () =>
   assert.equal(tritanium.availableStockQuantity, 150);
   assert.equal(tritanium.productionQuantity, 0);
   assert.equal(tritanium.buyQuantity, 0);
-  assert.equal(tritanium.availableSourceCounts?.industry, 20);
+  assert.equal((tritanium.availableSourceCounts?.[manufacturingLocationId] ?? {}).industry, 20);
 });
 
 test("allocates matching market orders and active output across stockpiles", async () => {
@@ -1096,7 +1419,7 @@ test("allocates matching market orders and active output across stockpiles", asy
       },
     ],
   });
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -1152,11 +1475,10 @@ test("allocates matching market orders and active output across stockpiles", asy
     tritanium.reduce((total, material) => total + material.buyQuantity, 0),
     1_398_593,
   );
-  assert.equal(result.metadata.availableStockByTypeId?.[tritaniumTypeId], 1_633_074);
 });
 
 test("uses remote active output for a stockpile final product", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       150,
       [industryOutputStock("active", alternateSourceLocationId, "Manufacturing", 20)],
@@ -1196,7 +1518,7 @@ test("uses remote active output for a stockpile final product", async () => {
   assert(tritanium);
   assert.equal(tritanium.stockQuantity, 0);
   assert.equal(tritanium.availableStockQuantity, 20);
-  assert.equal(tritanium.availableSourceCounts?.industry, 20);
+  assert.equal((tritanium.availableSourceCounts?.[alternateSourceLocationId] ?? {}).industry, 20);
   assert.deepEqual(result.lists.haulingTasks, []);
 });
 
@@ -1237,10 +1559,10 @@ test("ignores empty stockpiles when calculating a plan", async () => {
     },
     items: [],
   };
-  const withoutEmptyStockpile = await calculatePlanResult(
+  const withoutEmptyStockpile = await calculatePlanCalculation(
     request(0, stock, { items: [], stockpiles: [populatedStockpile] }),
   );
-  const withEmptyStockpile = await calculatePlanResult(
+  const withEmptyStockpile = await calculatePlanCalculation(
     request(0, stock, { items: [], stockpiles: [emptyStockpile, populatedStockpile] }),
   );
 
@@ -1250,43 +1572,15 @@ test("ignores empty stockpiles when calculating a plan", async () => {
   );
 });
 
-test("falls back to top-level items when all stockpiles are empty", async () => {
-  const buildItem = {
-    typeId: tritaniumTypeId,
-    name: "Tritanium",
-    quantity: 10,
-    me: 0,
-    te: 0,
-    fromCompression: false,
-  };
-  const emptyStockpile = {
-    id: "empty-stockpile",
-    name: "Empty stockpile",
-    locations: {
-      stock: sourceLocationId,
-      manufacturing: manufacturingLocationId,
-      reactions: manufacturingLocationId,
-      reprocessing: reprocessingLocationId,
-      copying: manufacturingLocationId,
-      invention: manufacturingLocationId,
-    },
-    items: [],
-  };
-  const withoutEmptyStockpile = await calculatePlanResult(
-    request(0, [], { items: [buildItem], stockpiles: undefined }),
-  );
-  const withEmptyStockpile = await calculatePlanResult(
-    request(0, [], { items: [buildItem], stockpiles: [emptyStockpile] }),
-  );
-
-  assert.deepEqual(
-    { ...withEmptyStockpile, metadata: { ...withEmptyStockpile.metadata, generatedAt: "" } },
-    { ...withoutEmptyStockpile, metadata: { ...withoutEmptyStockpile.metadata, generatedAt: "" } },
+test("requires a populated stockpile for plan calculation", async () => {
+  await assert.rejects(
+    () => calculatePlanCalculation(request(10, [], { stockpiles: [] })),
+    /at least one populated stockpile/,
   );
 });
 
 test("reallocates shared stock after intermediate inventory reduces stockpile demand", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -1374,7 +1668,6 @@ test("reallocates shared stock after intermediate inventory reduces stockpile de
 
   assert.equal(gasRows.length, 1);
   assert.equal(gasRows[0].buyQuantity, 0);
-  assert.equal(result.metadata.availableStockByTypeId?.["16634"], 200000);
   assert.equal(
     gasRows.reduce((total, item) => total + item.buyQuantity, 0),
     0,
@@ -1382,7 +1675,7 @@ test("reallocates shared stock after intermediate inventory reduces stockpile de
 });
 
 test("reallocates material stock after reaction formulas are reserved", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -1465,7 +1758,7 @@ test("reallocates material stock after reaction formulas are reserved", async ()
 });
 
 test("uses reaction formulas held at a stockpile's reaction location", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       20,
       [
@@ -1540,7 +1833,7 @@ test("uses reaction formulas held at a stockpile's reaction location", async () 
 });
 
 test("uses BPC runs held at a stockpile's manufacturing location", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       1,
       [
@@ -1601,7 +1894,7 @@ test("uses BPC runs held at a stockpile's manufacturing location", async () => {
 });
 
 test("does not strand shared BPC stock in a stockpile covered by item stock", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -1674,16 +1967,17 @@ test("does not strand shared BPC stock in a stockpile covered by item stock", as
   );
   const blueprint = result.lists.planItems
     .filter((entry) => entry.kind === "bpc")
-    .find((entry) => entry.stockpileId === "build-stockpile");
+    .find((entry) => entry.typeId === rifterBlueprintTypeId);
 
   assert(blueprint);
   assert.equal(blueprint.typeId, rifterBlueprintTypeId);
+  assert.equal(blueprint.activityLocationId, 21);
   assert.equal(blueprint.stockRuns, 68);
   assert.equal(blueprint.buyQuantity, 0);
 });
 
 test("shares BPC runs across stockpiles when aggregate stock covers demand", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -1762,7 +2056,7 @@ test("shares BPC runs across stockpiles when aggregate stock covers demand", asy
 });
 
 test("uses BPO-backed BPC runs to cover another stockpile's purchase requirement", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -1839,9 +2133,9 @@ test("uses BPO-backed BPC runs to cover another stockpile's purchase requirement
 });
 
 test("shares assets across stockpiles without merging identical destination plans", async () => {
-  const firstBuildLocationId = manufacturingLocationId;
-  const secondBuildLocationId = 21;
-  const result = await calculatePlanResult(
+  const firstActivityLocationId = manufacturingLocationId;
+  const secondActivityLocationId = 21;
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -1850,7 +2144,7 @@ test("shares assets across stockpiles without merging identical destination plan
           name: "Tritanium",
           quantity: 100,
           category: "item",
-          rootLocationId: firstBuildLocationId,
+          rootLocationId: firstActivityLocationId,
         },
         {
           typeId: tritaniumTypeId,
@@ -1868,11 +2162,11 @@ test("shares assets across stockpiles without merging identical destination plan
             name: "First destination",
             locations: {
               stock: 10,
-              manufacturing: firstBuildLocationId,
-              reactions: firstBuildLocationId,
-              reprocessing: firstBuildLocationId,
-              copying: firstBuildLocationId,
-              invention: firstBuildLocationId,
+              manufacturing: firstActivityLocationId,
+              reactions: firstActivityLocationId,
+              reprocessing: firstActivityLocationId,
+              copying: firstActivityLocationId,
+              invention: firstActivityLocationId,
             },
             items: [
               {
@@ -1890,11 +2184,11 @@ test("shares assets across stockpiles without merging identical destination plan
             name: "Second destination",
             locations: {
               stock: 11,
-              manufacturing: secondBuildLocationId,
-              reactions: secondBuildLocationId,
-              reprocessing: secondBuildLocationId,
-              copying: secondBuildLocationId,
-              invention: secondBuildLocationId,
+              manufacturing: secondActivityLocationId,
+              reactions: secondActivityLocationId,
+              reprocessing: secondActivityLocationId,
+              copying: secondActivityLocationId,
+              invention: secondActivityLocationId,
             },
             items: [
               {
@@ -1917,14 +2211,97 @@ test("shares assets across stockpiles without merging identical destination plan
   assert.equal(material.stockQuantity, 150);
   assert.equal(material.buyQuantity, 50);
   const sharedHaul = result.lists.haulingTasks.find(
-    (task) => task.itemTypeId === tritaniumTypeId && task.fromLocationId === sourceLocationId,
+    (task) => task.typeId === tritaniumTypeId && task.fromLocationId === sourceLocationId,
   );
   assert(sharedHaul);
   assert.equal(sharedHaul.fromLocationId, sourceLocationId);
 });
 
+test("reports transferred stock as local availability", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: tritaniumTypeId,
+          name: "Tritanium",
+          quantity: 300,
+          category: "item",
+          rootLocationId: 21,
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "remote-stock",
+            name: "Remote stock",
+            locations: {
+              stock: 21,
+              manufacturing: 21,
+              reactions: 21,
+              reprocessing: 21,
+              copying: 21,
+              invention: 21,
+            },
+            items: [
+              {
+                typeId: tritaniumTypeId,
+                name: "Tritanium",
+                quantity: 200,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "local-demand",
+            name: "Local demand",
+            locations: {
+              stock: manufacturingLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: manufacturingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: tritaniumTypeId,
+                name: "Tritanium",
+                quantity: 100,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const response = await toPlanResponse(result);
+  const localPlanItem = response.lists.planItems.byActivityLocation
+    .find((bucket) => bucket.locationId === manufacturingLocationId)
+    ?.items.find((item) => item.typeId === tritaniumTypeId);
+  const material = result.lists.materialsToBuy.find((entry) => entry.typeId === tritaniumTypeId);
+  const transfer = result.lists.haulingTasks.find(
+    (task) => task.typeId === tritaniumTypeId && task.toLocationId === manufacturingLocationId,
+  );
+
+  assert(localPlanItem);
+  assert(material);
+  assert(transfer);
+  assert.equal(localPlanItem.availableQuantity, 100);
+  assert.equal(localPlanItem.neededQuantity, 0);
+  assert.equal(material.stockQuantity, 300);
+  assert.equal(material.buyQuantity, 0);
+  assert.equal(transfer.neededQuantity, 100);
+});
+
 test("reserves a stockpile's local assets before remote stockpiles can use them", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -2002,7 +2379,7 @@ test("reserves a stockpile's local assets before remote stockpiles can use them"
 
 test("does not transfer partially stocked finished products between stockpiles", async () => {
   const finishedProductTypeId = 57457;
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -2074,7 +2451,7 @@ test("does not transfer partially stocked finished products between stockpiles",
   assert.equal(
     result.lists.haulingTasks.some(
       (task) =>
-        task.itemTypeId === finishedProductTypeId
+        task.typeId === finishedProductTypeId
         && task.fromLocationId === sourceLocationId
         && task.toLocationId === alternateSourceLocationId,
     ),
@@ -2084,7 +2461,7 @@ test("does not transfer partially stocked finished products between stockpiles",
 
 test("caps finished-product transfers at the source stockpile overage", async () => {
   const finishedProductTypeId = 57457;
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -2149,17 +2526,17 @@ test("caps finished-product transfers at the source stockpile overage", async ()
   );
   const transfer = result.lists.haulingTasks.find(
     (task) =>
-      task.itemTypeId === finishedProductTypeId
+      task.typeId === finishedProductTypeId
       && task.fromLocationId === sourceLocationId
       && task.toLocationId === alternateSourceLocationId,
   );
 
   assert(transfer);
-  assert.equal(transfer.quantity, 40);
+  assert.equal(transfer.neededQuantity, 40);
 });
 
 test("uses activity-location stock before stockpile stock-location stock", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -2245,7 +2622,7 @@ test("uses activity-location stock before stockpile stock-location stock", async
   assert.equal(
     result.lists.haulingTasks.some(
       (task) =>
-        task.itemTypeId === 39
+        task.typeId === 39
         && task.fromLocationId === sourceLocationId
         && task.toLocationId === manufacturingLocationId,
     ),
@@ -2254,7 +2631,7 @@ test("uses activity-location stock before stockpile stock-location stock", async
 });
 
 test("keeps activity stock for another demand before hauling it away", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -2304,13 +2681,13 @@ test("keeps activity stock for another demand before hauling it away", async () 
   );
 
   assert.deepEqual(
-    result.lists.haulingTasks.filter((task) => task.itemTypeId === 39),
+    result.lists.haulingTasks.filter((task) => task.typeId === 39),
     [],
   );
 });
 
 test("reserves stock for manufacturing inputs before direct stockpile demand", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -2396,7 +2773,7 @@ test("reserves stock for manufacturing inputs before direct stockpile demand", a
   );
   const material = result.lists.materialsToBuy.find((item) => item.typeId === tritaniumTypeId);
   const manufacturingJob = result.lists.manufacturingJobs.find(
-    (job) => job.stockpileId === "manufacturing" && job.typeId === rifterBlueprintTypeId,
+    (job) => job.locationId === manufacturingLocationId && job.typeId === rifterBlueprintTypeId,
   );
 
   assert(material);
@@ -2412,7 +2789,7 @@ test("reserves stock for manufacturing inputs before direct stockpile demand", a
 });
 
 test("does not reserve blocked manufacturing inputs before reaction demand", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -2512,14 +2889,14 @@ test("does not reserve blocked manufacturing inputs before reaction demand", asy
     ),
   );
   const manufacturingJob = result.lists.manufacturingJobs.find(
-    (job) => job.stockpileId === "blocked-manufacturing" && job.typeId === rifterBlueprintTypeId,
+    (job) => job.locationId === manufacturingLocationId && job.typeId === rifterBlueprintTypeId,
   );
   const reactionJob = result.lists.reactionJobs.find(
-    (job) => job.stockpileId === "reaction" && job.typeId === 46158,
+    (job) => job.locationId === alternateSourceLocationId && job.typeId === 46158,
   );
   const tritaniumHaul = result.lists.haulingTasks.find(
     (task) =>
-      task.itemTypeId === tritaniumTypeId
+      task.typeId === tritaniumTypeId
       && task.fromLocationId === manufacturingLocationId
       && task.toLocationId === alternateSourceLocationId,
   );
@@ -2528,11 +2905,95 @@ test("does not reserve blocked manufacturing inputs before reaction demand", asy
   assert(reactionJob);
   assert.equal(manufacturingJob.runsAvailable, 0);
   assert(tritaniumHaul);
-  assert.equal(tritaniumHaul.quantity, 1000);
+  assert.equal(tritaniumHaul.neededQuantity, 1000);
+});
+
+test("lists remote Isogen as a purchase when destination manufacturing is blocked", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: 37,
+          name: "Isogen",
+          quantity: 1000,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "blocked-isogen",
+            name: "Blocked Isogen",
+            locations: {
+              stock: manufacturingLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: rifterTypeId,
+                name: "Rifter",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "other-manufacturing",
+            name: "Other manufacturing",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: sourceLocationId,
+              reactions: sourceLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: sourceLocationId,
+              invention: sourceLocationId,
+            },
+            items: [
+              {
+                typeId: amarrShuttleTypeId,
+                name: "Amarr Shuttle",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const isogen = result.lists.materialsToBuy.find((item) => item.typeId === 37);
+  const manufacturingJob = result.lists.manufacturingJobs.find(
+    (job) => job.locationId === manufacturingLocationId && job.typeId === rifterBlueprintTypeId,
+  );
+
+  assert(isogen);
+  assert(manufacturingJob);
+  assert.equal(manufacturingJob.runsAvailable, 0);
+  assert(isogen.buyQuantity > 0);
+  assert.equal(
+    result.lists.haulingTasks.some(
+      (task) =>
+        task.typeId === 37
+        && task.fromLocationId === alternateSourceLocationId
+        && task.toLocationId === manufacturingLocationId,
+    ),
+    false,
+  );
 });
 
 test("hauls remote mexallon for a reaction after blocked capital manufacturing", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -2679,7 +3140,7 @@ test("hauls remote mexallon for a reaction after blocked capital manufacturing",
   const manufacturingJob = result.lists.manufacturingJobs.find((job) => job.typeId === 21018);
   const mexallonHaul = result.lists.haulingTasks.find(
     (task) =>
-      task.itemTypeId === 36
+      task.typeId === 36
       && task.fromLocationId === manufacturingLocationId
       && task.toLocationId === alternateSourceLocationId,
   );
@@ -2687,11 +3148,11 @@ test("hauls remote mexallon for a reaction after blocked capital manufacturing",
   assert(manufacturingJob);
   assert.equal(manufacturingJob.runsAvailable, 0);
   assert(mexallonHaul);
-  assert.equal(mexallonHaul.quantity, 600);
+  assert.equal(mexallonHaul.neededQuantity, 600);
 });
 
 test("reserves fuel blocks for reaction inputs before direct stockpile demand", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -2779,7 +3240,7 @@ test("reserves fuel blocks for reaction inputs before direct stockpile demand", 
     (item) => item.typeId === heliumFuelBlockTypeId,
   );
   const reactionJob = result.lists.reactionJobs.find(
-    (job) => job.stockpileId === "fuel-reaction" && job.typeId === fuelReactionFormulaTypeId,
+    (job) => job.locationId === manufacturingLocationId && job.typeId === fuelReactionFormulaTypeId,
   );
 
   assert(directFuel);
@@ -2797,7 +3258,7 @@ test("reserves fuel blocks for reaction inputs before direct stockpile demand", 
 });
 
 test("combines haul tasks with the same type and route", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -2883,17 +3344,17 @@ test("combines haul tasks with the same type and route", async () => {
   );
   const matchingHauls = result.lists.haulingTasks.filter(
     (task) =>
-      task.itemTypeId === tritaniumTypeId
+      task.typeId === tritaniumTypeId
       && task.fromLocationId === sourceLocationId
       && task.toLocationId === manufacturingLocationId,
   );
 
   assert.equal(matchingHauls.length, 1);
-  assert.equal(matchingHauls[0]?.quantity, 64000);
+  assert.equal(matchingHauls[0]?.neededQuantity, 64000);
 });
 
 test("merges shared haul routes across ownership sources", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -2969,22 +3430,28 @@ test("merges shared haul routes across ownership sources", async () => {
 
   const tritaniumHauls = result.lists.haulingTasks.filter(
     (task) =>
-      task.itemTypeId === tritaniumTypeId
+      task.typeId === tritaniumTypeId
       && task.fromLocationId === sourceLocationId
       && task.toLocationId === manufacturingLocationId,
   );
 
   assert.equal(tritaniumHauls.length, 2);
-  assert.equal(tritaniumHauls.find((task) => task.ownerType === "character")?.quantity, 32000);
-  assert.equal(tritaniumHauls.find((task) => task.ownerType === "corporation")?.quantity, 32000);
+  assert.equal(
+    tritaniumHauls.find((task) => task.ownerType === "character")?.neededQuantity,
+    32000,
+  );
+  assert.equal(
+    tritaniumHauls.find((task) => task.ownerType === "corporation")?.neededQuantity,
+    32000,
+  );
 
-  const response = toPlanResponse(result);
+  const response = await toPlanResponse(result);
   const buckets = response.lists.haulingTasks
     .filter(
       (entry) =>
         entry.fromLocationId === sourceLocationId && entry.toLocationId === manufacturingLocationId,
     )
-    .filter((entry) => entry.items.some((item) => item.itemTypeId === tritaniumTypeId));
+    .filter((entry) => entry.items.some((item) => item.typeId === tritaniumTypeId));
   assert.equal(buckets.length, 2);
   const characterBucket = buckets.find((entry) => entry.ownerType === "character");
   const corporationBucket = buckets.find((entry) => entry.ownerType === "corporation");
@@ -2995,17 +3462,17 @@ test("merges shared haul routes across ownership sources", async () => {
   assert.equal("context" in characterBucket, false);
   assert.equal("context" in corporationBucket, false);
   assert.equal(
-    characterBucket.items.find((item) => item.itemTypeId === tritaniumTypeId)?.quantity,
+    characterBucket.items.find((item) => item.typeId === tritaniumTypeId)?.neededQuantity,
     32000,
   );
   assert.equal(
-    corporationBucket.items.find((item) => item.itemTypeId === tritaniumTypeId)?.quantity,
+    corporationBucket.items.find((item) => item.typeId === tritaniumTypeId)?.neededQuantity,
     32000,
   );
 });
 
 test("hauls ready manufactured stock to the stockpile stock location", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [industryOutputStock("ready", manufacturingLocationId)],
@@ -3038,16 +3505,69 @@ test("hauls ready manufactured stock to the stockpile stock location", async () 
       },
     ),
   );
-  const outputHaul = result.lists.haulingTasks.find((task) => task.itemTypeId === tritaniumTypeId);
+  const outputHaul = result.lists.haulingTasks.find((task) => task.typeId === tritaniumTypeId);
 
   assert(outputHaul);
   assert.equal(outputHaul.fromLocationId, manufacturingLocationId);
   assert.equal(outputHaul.toLocationId, reprocessingLocationId);
-  assert.equal(outputHaul.quantity, 100);
+  assert.equal(outputHaul.neededQuantity, 100);
+});
+
+test("hauls ordinary final-product stock to the stockpile stock location", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: tritaniumTypeId,
+          name: "Tritanium",
+          quantity: 100,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "ordinary-final-stock",
+            name: "Ordinary final stock",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: manufacturingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: tritaniumTypeId,
+                name: "Tritanium",
+                quantity: 100,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const outputHaul = result.lists.haulingTasks.find(
+    (task) =>
+      task.typeId === tritaniumTypeId
+      && task.fromLocationId === manufacturingLocationId
+      && task.toLocationId === sourceLocationId,
+  );
+
+  assert(outputHaul);
+  assert.equal(outputHaul.neededQuantity, 100);
 });
 
 test("reserves final-location stock before build-location output for a stockpile", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -3091,17 +3611,17 @@ test("reserves final-location stock before build-location output for a stockpile
   );
   const outputHaul = result.lists.haulingTasks.find(
     (task) =>
-      task.itemTypeId === tritaniumTypeId
+      task.typeId === tritaniumTypeId
       && task.fromLocationId === manufacturingLocationId
       && task.toLocationId === reprocessingLocationId,
   );
 
   assert(outputHaul);
-  assert.equal(outputHaul.quantity, 28);
+  assert.equal(outputHaul.neededQuantity, 28);
 });
 
 test("does not move final-destination stock to the manufacturing location", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -3147,7 +3667,7 @@ test("does not move final-destination stock to the manufacturing location", asyn
 });
 
 test("plans input delivery and ready output delivery as separate hauls", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -3223,27 +3743,27 @@ test("plans input delivery and ready output delivery as separate hauls", async (
   );
   const inputHaul = result.lists.haulingTasks.find(
     (task) =>
-      task.itemTypeId === tritaniumTypeId
+      task.typeId === tritaniumTypeId
       && task.fromLocationId === sourceLocationId
       && task.toLocationId === manufacturingLocationId,
   );
   const outputHauls = result.lists.haulingTasks.filter(
     (task) =>
-      task.itemTypeId === rifterTypeId
+      task.typeId === rifterTypeId
       && task.fromLocationId === manufacturingLocationId
       && task.toLocationId === reprocessingLocationId,
   );
 
   assert(inputHaul);
-  assert.equal(inputHaul.quantity, 32000);
+  assert.equal(inputHaul.neededQuantity, 32000);
   assert.equal(
-    outputHauls.reduce((total, task) => total + task.quantity, 0),
+    outputHauls.reduce((total, task) => total + task.neededQuantity, 0),
     1,
   );
 });
 
 test("uses sell orders only from the selected market location", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       100,
       [
@@ -3270,7 +3790,7 @@ test("uses sell orders only from the selected market location", async () => {
 test("uses ready and delivered manufacturing and reaction output locally", async () => {
   for (const status of ["ready", "delivered"] as const) {
     for (const activityName of ["Manufacturing", "Reactions"]) {
-      const result = await calculatePlanResult(
+      const result = await calculatePlanCalculation(
         request(100, [industryOutputStock(status, manufacturingLocationId, activityName)]),
       );
       const tritanium = result.lists.materialsToBuy.find(
@@ -3286,22 +3806,8 @@ test("uses ready and delivered manufacturing and reaction output locally", async
   }
 });
 
-test("does not use industry output at another location as a future job input", async () => {
-  const result = await calculatePlanResult(
-    request(100, [industryOutputStock("ready", sourceLocationId)], { stockpiles: undefined }),
-  );
-  const tritanium = result.lists.materialsToBuy.find(
-    (material) => material.typeId === tritaniumTypeId,
-  );
-
-  assert(tritanium);
-  assert.equal(tritanium.stockQuantity, 0);
-  assert.equal(tritanium.buyQuantity, 100);
-  assert.deepEqual(result.lists.haulingTasks, []);
-});
-
 test("does not use remote active output as a future job input", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [industryOutputStock("active", sourceLocationId)],
@@ -3337,7 +3843,7 @@ test("does not use remote active output as a future job input", async () => {
 });
 
 test("reports manufacturing blueprint and material inputs", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       1,
       [
@@ -3385,7 +3891,7 @@ test("reports manufacturing blueprint and material inputs", async () => {
 });
 
 test("requires buying copies when the owned BPO is in use", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -3419,7 +3925,7 @@ test("requires buying copies when the owned BPO is in use", async () => {
   assert.equal(entry.bposInUse, 1);
   assert.equal(entry.buyQuantity, 1);
 
-  const response = toPlanResponse(result, { [rifterBlueprintTypeId]: 2 });
+  const response = await toPlanResponse(result);
   assert.equal("bpcsNeeded" in response.lists, false);
   assert.equal("bpcsToBuy" in response.lists, false);
   assert.equal(response.lists.bpcToCopy.length, 0);
@@ -3427,15 +3933,17 @@ test("requires buying copies when the owned BPO is in use", async () => {
     response.lists.bpoToBuy,
     [
       {
-        typeId: rifterBlueprintTypeId,
-        typeName: entry.name,
-        typeGroupId: entry.typeGroupId,
-        typeGroup: entry.typeGroup,
-        unitVolume: entry.unitVolume,
-        neededQuantity: 1,
-        marketBuyOrderQuantity: 2,
-        bpoCount: 1,
-        bposInUse: 1,
+        assemblyLineGroup: response.lists.bpoToBuy[0].assemblyLineGroup,
+        items: [
+          {
+            typeId: rifterBlueprintTypeId,
+            typeName: "Rifter Blueprint",
+            unitVolume: entry.unitVolume,
+            neededQuantity: 1,
+            bpoCount: 1,
+            bposInUse: 1,
+          },
+        ],
       },
     ],
   );
@@ -3443,7 +3951,7 @@ test("requires buying copies when the owned BPO is in use", async () => {
 
 test("routes all runs to copying when an available BPO has no print metadata", async () => {
   const requiredRuns = 11;
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -3479,28 +3987,30 @@ test("routes all runs to copying when an available BPO has no print metadata", a
     result.lists.bpcsToBuy.some((entry) => entry.typeId === rifterBlueprintTypeId),
     false,
   );
-  const response = toPlanResponse(result, { [rifterBlueprintTypeId]: 3 });
+  const response = await toPlanResponse(result);
   assert.deepEqual(
     response.lists.bpcToCopy,
     [
       {
-        typeId: rifterBlueprintTypeId,
-        typeName: copyEntry.name,
-        typeGroupId: copyEntry.typeGroupId,
-        typeGroup: copyEntry.typeGroup,
-        unitVolume: copyEntry.unitVolume,
-        neededQuantity: copyEntry.buyQuantity,
-        marketBuyOrderQuantity: 3,
-        bpoCount: copyEntry.bpoCount + (copyEntry.bposInUse ?? 0),
-        bposInUse: copyEntry.bposInUse ?? 0,
+        locationId: manufacturingLocationId,
+        items: [
+          {
+            typeId: rifterBlueprintTypeId,
+            typeName: "Rifter Blueprint",
+            unitVolume: copyEntry.unitVolume,
+            neededQuantity: copyEntry.buyQuantity,
+            bpoCount: copyEntry.bpoCount + (copyEntry.bposInUse ?? 0),
+            bposInUse: copyEntry.bposInUse ?? 0,
+          },
+        ],
       },
     ],
   );
-  assert.equal(Object.keys(response.lists.bpcToCopy[0] ?? {}).length, 9);
+  assert.equal(Object.keys(response.lists.bpcToCopy[0]?.items[0] ?? {}).length, 6);
 });
 
 test("reports installable runs for 10 Rifters and 10 Amarr Shuttles", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -3608,7 +4118,7 @@ test("reports installable runs for 10 Rifters and 10 Amarr Shuttles", async () =
 
   assert(rifterJob);
   assert(shuttleJob);
-  assert.equal(rifterJob.runs, 10);
+  assert.equal(rifterJob.countNeeded, 10);
   assert.equal(rifterJob.runsAvailable, 5);
   const tritanium = rifterJob.inputs.materials.find((input) => input.typeId === tritaniumTypeId);
   assert(tritanium);
@@ -3620,7 +4130,7 @@ test("reports installable runs for 10 Rifters and 10 Amarr Shuttles", async () =
 });
 
 test("reserves only installable runs before the next manufacturing step", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -3705,7 +4215,7 @@ test("reserves only installable runs before the next manufacturing step", async 
 });
 
 test("reports total available BPC runs for manufacturing inputs", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       88,
       [
@@ -3747,7 +4257,7 @@ test("reports total available BPC runs for manufacturing inputs", async () => {
 });
 
 test("reports reaction formula and material inputs", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       20,
       [
@@ -3806,8 +4316,70 @@ test("reports reaction formula and material inputs", async () => {
   assert.equal(job.inputs.status, "ready");
 });
 
+test("builds Carbon Polymers through its reaction formula", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: fuelReactionFormulaTypeId,
+          name: "Carbon Polymers Reaction Formula",
+          quantity: 1,
+          category: "reactionformula",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: heliumFuelBlockTypeId,
+          name: "Helium Fuel Block",
+          quantity: 845,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: hydrocarbonsTypeId,
+          name: "Hydrocarbons",
+          quantity: 16_900,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 16636,
+          name: "Silicates",
+          quantity: 16_900,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: fuelReactionProductTypeId,
+            name: "Carbon Polymers",
+            quantity: 33_800,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const carbonPurchase = result.lists.materialsToBuy.find(
+    (material) => material.typeId === fuelReactionProductTypeId,
+  );
+  const reactionJob = result.lists.reactionJobs.find(
+    (job) => job.typeId === fuelReactionFormulaTypeId,
+  );
+
+  assert(carbonPurchase);
+  assert.equal(carbonPurchase.buyQuantity, 0);
+  assert(reactionJob);
+  assert.equal(reactionJob.countNeeded, 169);
+  assert.equal(reactionJob.inputs.status, "ready");
+});
+
 test("does not buy a buildable reaction product when output rounding covers demand", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -3881,13 +4453,12 @@ test("does not buy a buildable reaction product when output rounding covers dema
 
   assert(material);
   assert.equal(material.requiredQuantity, 214_184);
-  assert.equal(material.buildQuantity, 214_183);
   assert.equal(material.productionQuantity, 214_200);
   assert.equal(material.buyQuantity, 0);
 });
 
 test("accumulates installable reaction runs across repeated expansions", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -3947,12 +4518,12 @@ test("accumulates installable reaction runs across repeated expansions", async (
   );
 
   assert(job);
-  assert.equal(job.runs, 4);
+  assert.equal(job.countNeeded, 4);
   assert.equal(job.runsAvailable, 2);
 });
 
 test("merges reaction jobs by reaction location and formula type", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [],
@@ -4021,11 +4592,24 @@ test("merges reaction jobs by reaction location and formula type", async () => {
   assert.equal(reactionJob.inputs.blueprint.availableQuantity, 0);
   assert.equal(reactionJob.inputs.blueprint.requiredQuantity, 1);
   assert.equal(reactionJob.inputs.materials.length, 3);
-  assert.equal(reactionJob.stockpileId, undefined);
+  assert.equal("stockpileId" in reactionJob, false);
+  const response = await toPlanResponse(result);
+  const reactionPlanItems = response.lists.planItems.byActivityLocation
+    .find((bucket) => bucket.locationId === manufacturingLocationId)
+    ?.items.filter((entry) => entry.typeId === reactionFormulaTypeId);
+  assert(reactionPlanItems);
+  assert.equal(reactionPlanItems.length, 1);
+  const reactionPlanItem = reactionPlanItems[0];
+  assert(reactionPlanItem);
+  assert.equal(reactionPlanItem.kind, "reaction");
+  assert.equal(
+    response.lists.planItems.all.filter((entry) => entry.typeId === reactionFormulaTypeId).length,
+    1,
+  );
 });
 
 test("merges manufacturing jobs by blueprint type across stockpiles", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [],
@@ -4087,13 +4671,14 @@ test("merges manufacturing jobs by blueprint type across stockpiles", async () =
   assert.equal(manufacturingJobs.length, 1);
   const manufacturingJob = manufacturingJobs[0];
   assert(manufacturingJob);
-  assert.equal(manufacturingJob.runs, 2);
-  assert.equal(manufacturingJob.stockpileId, undefined);
-  assert.equal(manufacturingJob.buildLocationId, undefined);
+  assert.equal(manufacturingJob.countNeeded, 2);
+  assert.equal(manufacturingJob.locationId, manufacturingLocationId);
+  assert.equal("stockpileId" in manufacturingJob, false);
+  assert.equal("buildLocationId" in manufacturingJob, false);
 });
 
 test("keeps manufacturing jobs separate across build locations", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [],
@@ -4152,7 +4737,7 @@ test("keeps manufacturing jobs separate across build locations", async () => {
   assert.deepEqual(
     result.lists.manufacturingJobs
       .filter((job) => job.typeId === rifterBlueprintTypeId)
-      .map((job) => [job.locationId, job.runs]),
+      .map((job) => [job.locationId, job.countNeeded]),
     [
       [manufacturingLocationId, 1],
       [alternateSourceLocationId, 1],
@@ -4161,7 +4746,7 @@ test("keeps manufacturing jobs separate across build locations", async () => {
 });
 
 test("allocates reaction formulas at the reaction location to stockpile jobs", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -4239,7 +4824,7 @@ test("allocates reaction formulas at the reaction location to stockpile jobs", a
 });
 
 test("does not reprocess or haul compressed stock when direct materials cover demand", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       400,
       [
@@ -4260,7 +4845,7 @@ test("does not reprocess or haul compressed stock when direct materials cover de
 });
 
 test("hauls only complete compressed portions needed by the plan", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       500,
       [compressedStock(250)],
@@ -4270,14 +4855,14 @@ test("hauls only complete compressed portions needed by the plan", async () => {
     ),
   );
   const refineryHaul = result.lists.haulingTasks.find(
-    (task) => task.itemTypeId === compressedVeldsparTypeId,
+    (task) => task.typeId === compressedVeldsparTypeId,
   );
 
-  assert.equal(refineryHaul?.quantity, 200);
+  assert.equal(refineryHaul?.neededQuantity, 200);
   assert.equal(refineryHaul.fromLocationId, sourceLocationId);
   assert.equal(refineryHaul.toLocationId, reprocessingLocationId);
   assert.equal(
-    result.lists.haulingTasks.some((task) => task.itemTypeId === tritaniumTypeId),
+    result.lists.haulingTasks.some((task) => task.typeId === tritaniumTypeId),
     false,
   );
   assert.deepEqual(result.lists.reprocessingJobs, []);
@@ -4297,7 +4882,7 @@ test("hauls only complete compressed portions needed by the plan", async () => {
 
 test("hauls Gneiss when remote direct stock leaves a material shortage", async () => {
   const compressedGneissTypeId = 62553;
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [
@@ -4326,20 +4911,20 @@ test("hauls Gneiss when remote direct stock leaves a material shortage", async (
   );
   const isogen = result.lists.materialsToBuy.find((material) => material.typeId === 37);
   const gneissHaul = result.lists.haulingTasks.find(
-    (task) => task.itemTypeId === compressedGneissTypeId,
+    (task) => task.typeId === compressedGneissTypeId,
   );
 
   assert(isogen);
   assert(gneissHaul);
   assert.equal(isogen.buyQuantity, 0);
   assert.equal(isogen.productionQuantity, 6_203);
-  assert.equal(gneissHaul.quantity, 1_400);
+  assert.equal(gneissHaul.neededQuantity, 1_400);
   assert.equal(gneissHaul.fromLocationId, sourceLocationId);
   assert.equal(gneissHaul.toLocationId, reprocessingLocationId);
 });
 
 test("lists only selected stock already at the refinery for immediate reprocessing", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       500,
       [{ ...compressedStock(100), rootLocationId: reprocessingLocationId }, compressedStock(150)],
@@ -4347,20 +4932,19 @@ test("lists only selected stock already at the refinery for immediate reprocessi
     ),
   );
 
-  assert.equal(result.lists.reprocessingJobs[0]?.quantity, 100);
+  assert.equal(result.lists.reprocessingJobs[0]?.countNeeded, 100);
   assert.equal(result.lists.reprocessingJobs[0]?.locationId, reprocessingLocationId);
   assert.equal(
     result.lists.haulingTasks.find(
       (task) =>
-        task.itemTypeId === compressedVeldsparTypeId
-        && task.toLocationId === reprocessingLocationId,
-    )?.quantity,
+        task.typeId === compressedVeldsparTypeId && task.toLocationId === reprocessingLocationId,
+    )?.neededQuantity,
     100,
   );
 });
 
 test("credits committed compressed purchases before considering owned stock", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       800,
       [compressedStock(100)],
@@ -4394,13 +4978,13 @@ test("credits committed compressed purchases before considering owned stock", as
   assert.equal(tritanium.buyQuantity, 0);
   assert.equal(tritanium.productionQuantity, 2_000);
   assert.equal(
-    result.lists.haulingTasks.some((task) => task.itemTypeId === compressedVeldsparTypeId),
+    result.lists.haulingTasks.some((task) => task.typeId === compressedVeldsparTypeId),
     false,
   );
 });
 
 test("shares future materials from compressed purchases across stockpiles", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       0,
       [],
@@ -4473,7 +5057,7 @@ test("shares future materials from compressed purchases across stockpiles", asyn
   assert.equal(
     result.lists.haulingTasks.some(
       (task) =>
-        task.itemTypeId === tritaniumTypeId
+        task.typeId === tritaniumTypeId
         && task.fromLocationId === reprocessingLocationId
         && task.toLocationId === manufacturingLocationId,
     ),
@@ -4482,7 +5066,7 @@ test("shares future materials from compressed purchases across stockpiles", asyn
 });
 
 test("retains an incomplete committed purchase without crediting an unusable portion", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       400,
       [],
@@ -4517,7 +5101,7 @@ test("retains an incomplete committed purchase without crediting an unusable por
 });
 
 test("uses owned reprocessable stock after committed purchases leave a shortage", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       800,
       [compressedStock(100)],
@@ -4552,14 +5136,14 @@ test("uses owned reprocessable stock after committed purchases leave a shortage"
   assert.equal(tritanium.buyQuantity, 0);
   assert.equal(tritanium.productionQuantity, 800);
   assert.equal(
-    result.lists.haulingTasks.find((task) => task.itemTypeId === compressedVeldsparTypeId)
-      ?.quantity,
+    result.lists.haulingTasks.find((task) => task.typeId === compressedVeldsparTypeId)
+      ?.neededQuantity,
     100,
   );
 });
 
 test("credits aggregate fractional gas output against the raw material buy quantity", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       100,
       [],
@@ -4601,7 +5185,7 @@ test("credits aggregate fractional gas output against the raw material buy quant
 });
 
 test("makes refinery compressed stock available as reprocessed material", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       100,
       [
@@ -4634,13 +5218,12 @@ test("makes refinery compressed stock available as reprocessed material", async 
 
   assert(rawGas);
   assert.equal(rawGas.availableStockQuantity, 100);
-  assert.equal(rawGas.availableSourceCounts?.reprocessing, 100);
+  assert.equal((rawGas.availableSourceCounts?.[reprocessingLocationId] ?? {}).reprocessing, 100);
   assert.equal(rawGas.buyQuantity, 0);
-  assert.equal(result.metadata.availableStockByTypeId?.[String(amberMykoserocinTypeId)], 100);
 });
 
 test("consumes owned compressed gas surplus and hauls it to the refinery", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       7_240,
       [
@@ -4681,7 +5264,7 @@ test("consumes owned compressed gas surplus and hauls it to the refinery", async
     (material) => material.typeId === compressedAmberMykoserocinTypeId,
   );
   const compressedHaul = result.lists.haulingTasks.find(
-    (task) => task.itemTypeId === compressedAmberMykoserocinTypeId,
+    (task) => task.typeId === compressedAmberMykoserocinTypeId,
   );
 
   assert(rawGas);
@@ -4692,22 +5275,22 @@ test("consumes owned compressed gas surplus and hauls it to the refinery", async
   assert.equal(compressedGas.requiredQuantity, 2_748);
   assert.equal(compressedGas.stockQuantity, 2_748);
   assert.equal(compressedGas.buyQuantity, 0);
-  assert.equal(compressedHaul.quantity, 2_748);
+  assert.equal(compressedHaul.neededQuantity, 2_748);
   assert.equal(compressedHaul.fromLocationId, sourceLocationId);
   assert.equal(compressedHaul.toLocationId, reprocessingLocationId);
 });
 
 test("falls back to 50 percent when no efficiency snapshot is supplied", async () => {
-  const result = await calculatePlanResult(request(300, [compressedStock(250)]));
+  const result = await calculatePlanCalculation(request(300, [compressedStock(250)]));
   const refineryHaul = result.lists.haulingTasks.find(
-    (task) => task.itemTypeId === compressedVeldsparTypeId,
+    (task) => task.typeId === compressedVeldsparTypeId,
   );
 
-  assert.equal(refineryHaul?.quantity, 200);
+  assert.equal(refineryHaul?.neededQuantity, 200);
 });
 
 test("reserves compressed stock that is required directly by the plan", async () => {
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       400,
       [compressedStock(200)],
@@ -4728,22 +5311,22 @@ test("reserves compressed stock that is required directly by the plan", async ()
     ),
   );
   const compressedHauls = result.lists.haulingTasks.filter(
-    (task) => task.itemTypeId === compressedVeldsparTypeId,
+    (task) => task.typeId === compressedVeldsparTypeId,
   );
 
   assert.equal(
-    compressedHauls.find((task) => task.toLocationId === reprocessingLocationId)?.quantity,
+    compressedHauls.find((task) => task.toLocationId === reprocessingLocationId)?.neededQuantity,
     100,
   );
   assert.equal(
-    compressedHauls.find((task) => task.toLocationId === manufacturingLocationId)?.quantity,
+    compressedHauls.find((task) => task.toLocationId === manufacturingLocationId)?.neededQuantity,
     100,
   );
 });
 
 test("applies demand-limited allocation to metal scraps", async () => {
   const metalScrapsTypeId = 15331;
-  const result = await calculatePlanResult(
+  const result = await calculatePlanCalculation(
     request(
       300,
       [
@@ -4758,9 +5341,7 @@ test("applies demand-limited allocation to metal scraps", async () => {
       { reprocessingEfficiencies: { [metalScrapsTypeId]: 100 } },
     ),
   );
-  const refineryHaul = result.lists.haulingTasks.find(
-    (task) => task.itemTypeId === metalScrapsTypeId,
-  );
+  const refineryHaul = result.lists.haulingTasks.find((task) => task.typeId === metalScrapsTypeId);
 
-  assert.equal(refineryHaul?.quantity, 1);
+  assert.equal(refineryHaul?.neededQuantity, 1);
 });

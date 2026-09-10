@@ -19,7 +19,7 @@ type TypeSearchResult = {
   name: string;
   typeId: number;
   category?: "blueprint" | "bpo" | "bpc" | "reaction" | "item" | "reactionformula";
-  marketCategory?: string;
+  assemblyLineGroup?: string;
 };
 
 type TypeSearchProps = {

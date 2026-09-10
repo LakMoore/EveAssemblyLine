@@ -1,20 +1,20 @@
 import type { ClientCharacterStatus } from "@/lib/client/requestCache";
-import type { HaulPatch, PlanResult, PlanStockItem, StockOwnerType } from "./types";
+import type { HaulPatch, PlanStockItem, ResponseHaulTask, StockOwnerType } from "./types";
 import { getStockRootLocationId } from "./stockPolicies";
 
 export function createHaulPatchKey(
   fromLocationId: number,
   toLocationId: number,
-  itemTypeId: number,
+  typeId: number,
   ownerType: StockOwnerType,
   ownerId: number,
 ) {
-  return `${fromLocationId}:${toLocationId}:${itemTypeId}:${ownerType}:${ownerId}`;
+  return `${fromLocationId}:${toLocationId}:${typeId}:${ownerType}:${ownerId}`;
 }
 
 /** Returns an owner identity only when the haul task can be safely attributed to one owner. */
 export function getHaulTaskOwner(
-  task: PlanResult["lists"]["haulingTasks"][number],
+  task: ResponseHaulTask,
 ): { ownerType: StockOwnerType; ownerId: number } | null {
   const ownerId = task.ownerId;
   if (
@@ -29,23 +29,23 @@ export function getHaulTaskOwner(
 
 /** Creates a persisted patch from a single-owner haul task and its current asset freshness. */
 export function createHaulPatch(
-  task: PlanResult["lists"]["haulingTasks"][number],
+  task: ResponseHaulTask,
   assetsLastModified?: string,
 ): HaulPatch | null {
   const owner = getHaulTaskOwner(task);
-  if (!owner || task.quantity <= 0) return null;
+  if (!owner || task.neededQuantity <= 0) return null;
   return {
     key: createHaulPatchKey(
       task.fromLocationId,
       task.toLocationId,
-      task.itemTypeId,
+      task.typeId,
       owner.ownerType,
       owner.ownerId,
     ),
-    itemTypeId: task.itemTypeId,
-    name: task.name,
-    quantity: task.quantity,
-    volume: task.volume,
+    typeId: task.typeId,
+    typeName: task.typeName,
+    unitVolume: task.unitVolume,
+    neededQuantity: task.neededQuantity,
     fromLocationId: task.fromLocationId,
     toLocationId: task.toLocationId,
     ...owner,
@@ -55,7 +55,7 @@ export function createHaulPatch(
 
 /** Creates owner-specific movements for a haul task whose plan row combines owners. */
 export function createHaulPatchesForTask(
-  task: PlanResult["lists"]["haulingTasks"][number],
+  task: ResponseHaulTask,
   stock: PlanStockItem[],
   statuses: ClientCharacterStatus[],
 ): HaulPatch[] {
@@ -78,7 +78,7 @@ export function createHaulPatchesForTask(
   >();
   for (const item of stock) {
     if (
-      item.typeId !== task.itemTypeId
+      item.typeId !== task.typeId
       || getStockRootLocationId(item) !== task.fromLocationId
       || item.category === "blueprint"
       || item.category === "reactionformula"
@@ -98,7 +98,7 @@ export function createHaulPatchesForTask(
     availableByOwner.set(key, current);
   }
 
-  let remaining = task.quantity;
+  let remaining = task.neededQuantity;
   const patches: HaulPatch[] = [];
   for (const available of [...availableByOwner.values()].sort(
     (left, right) => left.ownerType.localeCompare(right.ownerType) || left.ownerId - right.ownerId,
@@ -108,8 +108,8 @@ export function createHaulPatchesForTask(
     const patch = createHaulPatch(
       {
         ...task,
-        quantity,
-        volume: task.volume * (quantity / task.quantity),
+        neededQuantity: quantity,
+        unitVolume: task.unitVolume,
         ownerType: available.ownerType,
         ownerId: available.ownerId,
       },
@@ -122,12 +122,9 @@ export function createHaulPatchesForTask(
 }
 
 /** Returns whether a persisted patch belongs to the given haul task route and item. */
-export function isHaulPatchForTask(
-  task: PlanResult["lists"]["haulingTasks"][number],
-  patch: HaulPatch,
-) {
+export function isHaulPatchForTask(task: ResponseHaulTask, patch: HaulPatch) {
   return (
-    patch.itemTypeId === task.itemTypeId
+    patch.typeId === task.typeId
     && patch.fromLocationId === task.fromLocationId
     && patch.toLocationId === task.toLocationId
     && (
@@ -138,10 +135,7 @@ export function isHaulPatchForTask(
 }
 
 /** Returns whether any owner-specific patch has moved stock for the given haul task. */
-export function isHaulTaskPatched(
-  task: PlanResult["lists"]["haulingTasks"][number],
-  patches: ReadonlyMap<string, HaulPatch>,
-) {
+export function isHaulTaskPatched(task: ResponseHaulTask, patches: ReadonlyMap<string, HaulPatch>) {
   return [...patches.values()].some((patch) => isHaulPatchForTask(task, patch));
 }
 
@@ -156,10 +150,10 @@ export function applyHaulPatches(
 ): PlanStockItem[] {
   const workingStock = stock.map((item) => ({ ...item }));
   for (const patch of patches) {
-    let remaining = patch.quantity;
+    let remaining = patch.neededQuantity;
     const sourceItems = workingStock.filter(
       (item) =>
-        item.typeId === patch.itemTypeId
+        item.typeId === patch.typeId
         && getStockRootLocationId(item) === patch.fromLocationId
         && sameOwner(item, patch)
         && item.category !== "blueprint"
@@ -175,7 +169,7 @@ export function applyHaulPatches(
       const destinationItem = workingStock.find(
         (item) =>
           item !== sourceItem
-          && item.typeId === patch.itemTypeId
+          && item.typeId === patch.typeId
           && getStockRootLocationId(item) === patch.toLocationId
           && sameOwner(item, patch)
           && item.category === sourceItem.category,

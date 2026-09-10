@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { HaulPatch, PlanResult, PlanStockItem } from "./types";
+import type { HaulPatch, PlanCalculation, PlanStockItem } from "./types";
 import { applyHaulPatches, createHaulPatchesForTask, invalidateHaulPatches } from "./haulPatches";
 
 const patch: HaulPatch = {
   key: "10:20:34:character:101",
-  itemTypeId: 34,
-  quantity: 80,
+  typeId: 34,
+  typeName: "Tritanium",
+  unitVolume: 0.01,
+  neededQuantity: 80,
   fromLocationId: 10,
   toLocationId: 20,
   ownerType: "character",
@@ -54,13 +56,13 @@ test("caps a patch at available owner stock", () => {
 
 test("splits a mixed-owner haul into owner-specific patches", () => {
   const task = {
-    itemTypeId: 34,
-    name: "Tritanium",
-    quantity: 100,
-    volume: 5,
+    typeId: 34,
+    typeName: "Tritanium",
+    unitVolume: 0.01,
+    neededQuantity: 100,
     fromLocationId: 10,
     toLocationId: 20,
-  } as PlanResult["lists"]["haulingTasks"][number];
+  } as PlanCalculation["lists"]["haulingTasks"][number];
   const patches = createHaulPatchesForTask(
     task,
     [
@@ -71,10 +73,14 @@ test("splits a mixed-owner haul into owner-specific patches", () => {
   );
 
   assert.deepEqual(
-    patches.map(({ ownerType, ownerId, quantity }) => ({ ownerType, ownerId, quantity })),
+    patches.map(({ ownerType, ownerId, neededQuantity }) => ({
+      ownerType,
+      ownerId,
+      neededQuantity,
+    })),
     [
-      { ownerType: "character", ownerId: 101, quantity: 40 },
-      { ownerType: "corporation", ownerId: 202, quantity: 60 },
+      { ownerType: "character", ownerId: 101, neededQuantity: 40 },
+      { ownerType: "corporation", ownerId: 202, neededQuantity: 60 },
     ],
   );
 });

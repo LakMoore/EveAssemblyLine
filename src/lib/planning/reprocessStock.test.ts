@@ -26,19 +26,16 @@ test("excludes production surplus from net reprocessing requirements", () => {
       {
         typeId: 34,
         buyQuantity: 100,
-        remainingStockQuantity: 20,
         remainingProductionQuantity: 80,
       },
       {
         typeId: 35,
         buyQuantity: 100,
-        remainingStockQuantity: 0,
         remainingProductionQuantity: 125,
       },
       {
         typeId: 36,
         buyQuantity: 100,
-        remainingStockQuantity: 20,
         remainingProductionQuantity: 30,
       },
     ]),

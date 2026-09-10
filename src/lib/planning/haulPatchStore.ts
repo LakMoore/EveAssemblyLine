@@ -6,15 +6,14 @@ function isHaulPatch(value: unknown): value is HaulPatch {
   const patch = value as Record<string, unknown>;
   return (
     typeof patch.key === "string"
-    && Number.isInteger(patch.itemTypeId)
-    && (patch.name === undefined || typeof patch.name === "string")
-    && typeof patch.quantity === "number"
-    && Number.isFinite(patch.quantity)
-    && patch.quantity > 0
-    && (
-      patch.volume === undefined
-      || (typeof patch.volume === "number" && Number.isFinite(patch.volume))
-    )
+    && Number.isInteger(patch.typeId)
+    && typeof patch.typeName === "string"
+    && typeof patch.unitVolume === "number"
+    && Number.isFinite(patch.unitVolume)
+    && patch.unitVolume >= 0
+    && typeof patch.neededQuantity === "number"
+    && Number.isFinite(patch.neededQuantity)
+    && patch.neededQuantity > 0
     && Number.isInteger(patch.fromLocationId)
     && Number.isInteger(patch.toLocationId)
     && (patch.ownerType === "character" || patch.ownerType === "corporation")

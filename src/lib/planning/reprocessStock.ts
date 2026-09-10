@@ -30,7 +30,6 @@ export type CommittedReprocessing = {
 export type ReprocessingMaterialRequirement = {
   typeId: number;
   buyQuantity: number;
-  remainingStockQuantity: number;
   remainingProductionQuantity: number;
 };
 

@@ -42,20 +42,20 @@ export function categorizeType(
   const root = path[0];
   const rootName = categoryName(root, language);
 
-  let marketCategory = rootName;
+  let assemblyLineGroup = rootName;
   if (type.groupID !== undefined && reactionFormulaGroupIds.has(type.groupID)) {
-    marketCategory = "Reaction Formulas";
+    assemblyLineGroup = "Reaction Formulas";
   }
   else if (categoryId === blueprintCategoryId) {
-    marketCategory = "Blueprints";
+    assemblyLineGroup = "Blueprints";
   }
   else if (categoryName(root, "en") === "Manufacture & Research") {
-    marketCategory = categoryName(path[2], language) ?? rootName;
+    assemblyLineGroup = categoryName(path[2], language) ?? rootName;
   }
 
   let category: ItemCategory = "item";
-  if (marketCategory === "Reaction Formulas") category = "reactionformula";
+  if (assemblyLineGroup === "Reaction Formulas") category = "reactionformula";
   else if (categoryId === blueprintCategoryId) category = "blueprint";
 
-  return { category, marketCategory };
+  return { category, assemblyLineGroup };
 }

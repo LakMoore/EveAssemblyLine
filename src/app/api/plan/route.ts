@@ -35,10 +35,6 @@ const reprocessingEfficienciesSchema = z.record(
   z.string().regex(/^\d+$/, "Reprocessable type IDs must be numeric."),
   z.number().finite().min(0).max(100),
 );
-const marketBuyOrderQuantitiesSchema = z.record(
-  z.string().regex(/^\d+$/, "Market buy-order type IDs must be numeric."),
-  z.number().int().nonnegative(),
-);
 const facilityTimeMultipliersSchema = z.object({
   manufacturing: z.number().finite().min(0).max(1),
   reactions: z.number().finite().min(0).max(1),
@@ -171,8 +167,7 @@ function industryProduct(
 }
 
 async function calculateWorkingAssetsPlan(input: PlanRequest, assets: PlanStockItem[]) {
-  const requestedItems =
-    input.stockpiles?.flatMap((stockpile) => stockpile.items) ?? input.toBuild ?? [];
+  const requestedItems = input.stockpiles.flatMap((stockpile) => stockpile.items);
   const types = await getTypesByIds([
     ...new Set([
       ...requestedItems.map((item) => item.typeId),
@@ -187,16 +182,13 @@ async function calculateWorkingAssetsPlan(input: PlanRequest, assets: PlanStockI
       ?? types.get(item.typeId)?.name.en
       ?? `Type ${item.typeId}`,
   });
-  const buildItems = requestedItems.map(resolveBuildItem);
-  const stockpiles = input.stockpiles?.map((stockpile) => ({
-    ...stockpile,
-    items: stockpile.items.map(resolveBuildItem),
-  }));
   const result = await calculatePlan({
     language: input.language,
-    items: buildItems,
-    stockpiles,
-    marketBuyOrderQuantities: input.marketBuyOrderQuantities,
+    items: requestedItems.map(resolveBuildItem),
+    stockpiles: input.stockpiles.map((stockpile) => ({
+      ...stockpile,
+      items: stockpile.items.map(resolveBuildItem),
+    })),
     reprocessingEfficiencies: input.reprocessingEfficiencies,
     stock: await hydrateStockCategories(assets),
     facilityTimeMultipliers: input.facilityTimeMultipliers,
@@ -229,18 +221,6 @@ export async function calculatePlanRequest(body: unknown): Promise<Response> {
       );
     }
     input.reprocessingEfficiencies = parsedEfficiencies.data;
-    const parsedMarketBuyOrderQuantities = marketBuyOrderQuantitiesSchema.safeParse(
-      input.marketBuyOrderQuantities ?? {},
-    );
-    if (!parsedMarketBuyOrderQuantities.success) {
-      return NextResponse.json(
-        {
-          error: "Market buy-order quantities must map numeric type IDs to non-negative integers.",
-        },
-        { status: 400 },
-      );
-    }
-    input.marketBuyOrderQuantities = parsedMarketBuyOrderQuantities.data;
     if (input.facilityTimeMultipliers !== undefined) {
       const parsedMultipliers = facilityTimeMultipliersSchema.safeParse(
         input.facilityTimeMultipliers,
@@ -273,40 +253,29 @@ export async function calculatePlanRequest(body: unknown): Promise<Response> {
       }
       input.facilityProfiles = parsedProfiles.data as PlanFacilityProfile[];
     }
-    const parsedStockpiles =
-      input.stockpiles === undefined ? undefined : planStockpilesSchema.safeParse(input.stockpiles);
-    if (parsedStockpiles && !parsedStockpiles.success) {
+    const parsedStockpiles = planStockpilesSchema.safeParse(input.stockpiles);
+    if (!parsedStockpiles.success) {
       return NextResponse.json(
         { error: "Every stockpile needs a name, six valid locations, and valid build items." },
         { status: 400 },
       );
     }
-    if (parsedStockpiles?.success) {
-      const populatedStockpiles = parsedStockpiles.data.filter(
-        (stockpile) => stockpile.items.length > 0,
-      );
-      if (populatedStockpiles.length === 0) {
-        return NextResponse.json(
-          { error: "Add at least one build item to a stockpile." },
-          { status: 400 },
-        );
-      }
-      input.stockpiles = populatedStockpiles;
-    }
-    if (!input.stockpiles) {
+    const populatedStockpiles = parsedStockpiles.data.filter(
+      (stockpile) => stockpile.items.length > 0,
+    );
+    if (populatedStockpiles.length === 0) {
       return NextResponse.json(
-        { error: "Every plan request needs at least one stockpile with locations." },
+        { error: "Add at least one build item to a stockpile." },
         { status: 400 },
       );
     }
+    input.stockpiles = populatedStockpiles;
     const requestedItems = input.stockpiles.flatMap((stockpile) => stockpile.items);
     if (requestedItems.length === 0) {
       return NextResponse.json({ error: "Add at least one build item." }, { status: 400 });
     }
-    input.toBuild = requestedItems;
-    const workingAssets = Array.isArray(input.assets) ? input.assets : input.stock;
-    if (Array.isArray(workingAssets)) {
-      const result = await calculateWorkingAssetsPlan(input, workingAssets);
+    if (Array.isArray(input.assets)) {
+      const result = await calculateWorkingAssetsPlan(input, input.assets);
       return NextResponse.json(result, noStoreResponseInit);
     }
     const assets = input.assets;
@@ -486,7 +455,6 @@ export async function calculatePlanRequest(body: unknown): Promise<Response> {
       facilityProfiles: input.facilityProfiles,
       skillTimeMultipliers: input.skillTimeMultipliers,
       settings: input.settings,
-      marketBuyOrderQuantities: input.marketBuyOrderQuantities,
     });
     return NextResponse.json(result, noStoreResponseInit);
   }

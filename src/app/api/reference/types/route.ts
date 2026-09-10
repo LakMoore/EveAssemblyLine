@@ -120,7 +120,7 @@ export async function POST(request: Request) {
         assembledVolume: number;
         packagedVolume?: number;
         category: ItemCategory;
-        marketCategory?: string;
+        assemblyLineGroup?: string;
       }
     >();
     for (const item of typeById.values()) {

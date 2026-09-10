@@ -20,7 +20,6 @@ export default function robots(): MetadataRoute.Robots {
         "/compress",
         "/imagechecker",
         "/jobs",
-        "/locations",
         "/planner",
         "/settings",
         "/ships",

@@ -5,37 +5,29 @@ import { Fragment, type RefObject, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
   ClientPlanStockpile,
-  PlanBucketContext,
-  PlanContextBucket,
+  ResponseLocationBucket,
   PlanResponse,
-  PlanResult,
   PlanSourceCounts,
+  PlanSourceCountsByLocation,
   PlanSourceIcon,
   PlanStockItem,
   HaulPatch,
+  ResponsePlanItem,
+  ResponseHaulTask,
+  ResponseMaterialBuy,
+  ResponseBlueprintBuy,
 } from "@/lib/planning/types";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import type { ClientCharacterStatus, ClientJobsResponse } from "@/lib/client/requestCache";
 import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
 import {
-  getNonProductionHaulingQuantity,
-  getMaterialDisplayQuantity,
-  getMaterialBuyOrBuildQuantity,
-  getMaterialOverviewSurplus,
-  getMaterialSurplus,
-  groupBuyEntriesByMarketCategory,
-  groupPlanItemEntriesByBuildLocation,
-  mergePlanItemEntries,
   createHaulItemExclusionKey,
   parseHaulItemExclusionKey,
   splitReactionRunAllocations,
   splitReactionJobInputs,
   type HaulItemExclusion,
-  type PlanBuyEntry,
-  type PlanItemEntry,
 } from "@/lib/planning/planView";
 import { isHaulTaskPatched } from "@/lib/planning/haulPatches";
-import { fetchTypeMetadata } from "@/lib/reference/types";
 import CopyableText from "@/components/CopyableText";
 import JobInputsResponsive, {
   getJobInputsCompletionPercent,
@@ -122,6 +114,13 @@ type ReactionSortKey = "type" | "inputs" | "suggestedRuns" | "totalNeeded";
 type ReactionSort = { key: ReactionSortKey; direction: "asc" | "desc" };
 type ManufacturingSort = { key: "type" | "inputs" | "runs"; direction: "asc" | "desc" };
 type PlanViewMode = "all" | "build-location";
+type ResponseReactionJob = PlanResponse["lists"]["reactionJobs"][number]["items"][number] & {
+  locationId?: number;
+};
+type ResponseManufacturingJob =
+  PlanResponse["lists"]["manufacturingJobs"][number]["items"][number] & { locationId?: number };
+type ResponseReprocessingJob =
+  PlanResponse["lists"]["reprocessingJobs"][number]["items"][number] & { locationId?: number };
 type ResultsLocations = {
   manufacturing: number;
   reactions: number;
@@ -129,6 +128,8 @@ type ResultsLocations = {
   copying?: number;
   invention?: number;
 };
+
+type PlanBuyEntry = ResponseMaterialBuy | ResponseBlueprintBuy;
 
 function isMultibuyMaterial(entry: PlanBuyEntry): boolean {
   return "typeName" in entry && !("bpoCount" in entry);
@@ -143,10 +144,7 @@ function reactionJobKey(job: { typeId: number; locationId?: number }) {
 }
 
 /** Counts unused reaction formulas available at the job's reaction location. */
-function getReactionFormulaCount(
-  entry: PlanResult["lists"]["reactionJobs"][number],
-  stock: PlanStockItem[],
-): number {
+function getReactionFormulaCount(entry: ResponseReactionJob, stock: PlanStockItem[]): number {
   if (entry.locationId === undefined) {
     return 0;
   }
@@ -161,10 +159,21 @@ function getReactionFormulaCount(
     .reduce((total, stockItem) => total + stockItem.quantity, 0);
 }
 
+/** Summarizes owned and currently used reaction formulas for a type. */
+function getReactionFormulaSummary(typeId: number, stock: PlanStockItem[]) {
+  const formulaStock = stock.filter(
+    (stockItem) => stockItem.category === "reactionformula" && stockItem.typeId === typeId,
+  );
+  return {
+    owned: formulaStock.reduce((total, stockItem) => total + stockItem.quantity, 0),
+    inUse: formulaStock
+      .filter((stockItem) => stockItem.inUse)
+      .reduce((total, stockItem) => total + stockItem.quantity, 0),
+  };
+}
+
 /** Calculates the readiness percentage used to sort a reaction job. */
-function getReactionInputsCompletionPercent(
-  entry: PlanResult["lists"]["reactionJobs"][number],
-): number {
+function getReactionInputsCompletionPercent(entry: ResponseReactionJob): number {
   return getJobInputsCompletionPercent(entry.inputs);
 }
 
@@ -172,12 +181,12 @@ function getStockLocationId(item: PlanStockItem) {
   return item.rootLocationId ?? item.sourceLocationId ?? item.locationId;
 }
 
-function haulTaskKey(task: PlanResult["lists"]["haulingTasks"][number]) {
-  return createHaulItemExclusionKey(task.fromLocationId, task.itemTypeId);
+type PublicHaulTask = ResponseHaulTask;
+
+function haulTaskKey(task: PublicHaulTask) {
+  return createHaulItemExclusionKey(task.fromLocationId, task.typeId);
 }
-function flattenHaulBuckets(
-  buckets: PlanResponse["lists"]["haulingTasks"],
-): PlanResult["lists"]["haulingTasks"] {
+function flattenHaulBuckets(buckets: PlanResponse["lists"]["haulingTasks"]): PublicHaulTask[] {
   return buckets.flatMap((bucket) =>
     bucket.items.map((item) => ({
       ...item,
@@ -189,8 +198,16 @@ function flattenHaulBuckets(
   );
 }
 
-function flattenContextBuckets<T>(buckets: PlanContextBucket<T>[]): Array<T & PlanBucketContext> {
-  return buckets.flatMap((bucket) => bucket.items.map((item) => ({ ...item, ...bucket.context })));
+function flattenLocationBuckets<T>(
+  buckets: ResponseLocationBucket<T>[],
+  field: "activityLocationId" | "locationId",
+): Array<T & { activityLocationId?: number; locationId?: number }> {
+  return buckets.flatMap((bucket) =>
+    bucket.items.map((item) => ({
+      ...item,
+      ...(bucket.locationId !== undefined ? { [field]: bucket.locationId } : {}),
+    })),
+  ) as Array<T & { activityLocationId?: number; locationId?: number }>;
 }
 
 type HaulStockItem = PlanStockItem & {
@@ -198,19 +215,19 @@ type HaulStockItem = PlanStockItem & {
   packagedVolume?: number;
 };
 
-type DisplayHaulTask = PlanResult["lists"]["haulingTasks"][number] & {
+type DisplayHaulTask = PublicHaulTask & {
   completed?: boolean;
 };
 
 function haulTaskRenderKey(task: DisplayHaulTask) {
-  return `${task.fromLocationId}:${task.toLocationId}:${task.itemTypeId}:${task.completed ? "completed" : "pending"}`;
+  return `${task.fromLocationId}:${task.toLocationId}:${task.typeId}:${task.completed ? "completed" : "pending"}`;
 }
 
 function getHaulTasksWithExclusions(
-  tasks: PlanResult["lists"]["haulingTasks"],
+  tasks: PublicHaulTask[],
   stock: HaulStockItem[],
   exclusions: HaulItemExclusion,
-): PlanResult["lists"]["haulingTasks"] {
+): PublicHaulTask[] {
   const tasksByKey = new Map(tasks.map((task) => [haulTaskKey(task), task]));
   const displayedTasks = tasks.filter((task) => !exclusions.has(haulTaskKey(task)));
   for (const [key, destinationLocationId] of exclusions) {
@@ -240,10 +257,10 @@ function getHaulTasksWithExclusions(
       0,
     );
     displayedTasks.push({
-      itemTypeId: parsedKey.itemTypeId,
-      name: stockItem?.name ?? `Type ${parsedKey.itemTypeId}`,
-      quantity,
-      volume,
+      typeId: parsedKey.itemTypeId,
+      typeName: stockItem?.name ?? `Type ${parsedKey.itemTypeId}`,
+      unitVolume: quantity > 0 ? volume / quantity : 0,
+      neededQuantity: quantity,
       fromLocationId: parsedKey.sourceRootLocationId,
       toLocationId: destinationLocationId,
     });
@@ -253,89 +270,50 @@ function getHaulTasksWithExclusions(
 
 /** Restores completed haul rows from persisted patches when recalculation removes them. */
 function getHaulTasksWithPatches(
-  tasks: PlanResult["lists"]["haulingTasks"],
-  stock: HaulStockItem[],
+  tasks: PublicHaulTask[],
   patches: ReadonlyMap<string, HaulPatch>,
 ): DisplayHaulTask[] {
   const displayedTasks: DisplayHaulTask[] = [...tasks];
   const liveTaskKeys = new Set(
-    tasks.map((task) => `${task.fromLocationId}:${task.toLocationId}:${task.itemTypeId}`),
+    tasks.map((task) => `${task.fromLocationId}:${task.toLocationId}:${task.typeId}`),
   );
   const patchGroups = new Map<
     string,
     {
       fromLocationId: number;
       toLocationId: number;
-      itemTypeId: number;
-      name?: string;
-      quantity: number;
-      volume: number;
+      typeId: number;
+      typeName: string;
+      unitVolume: number;
+      neededQuantity: number;
     }
   >();
 
   for (const patch of patches.values()) {
-    const routeKey = `${patch.fromLocationId}:${patch.toLocationId}:${patch.itemTypeId}`;
+    const routeKey = `${patch.fromLocationId}:${patch.toLocationId}:${patch.typeId}`;
     const group = patchGroups.get(routeKey) ?? {
       fromLocationId: patch.fromLocationId,
       toLocationId: patch.toLocationId,
-      itemTypeId: patch.itemTypeId,
-      name: patch.name,
-      quantity: 0,
-      volume: 0,
+      typeId: patch.typeId,
+      typeName: patch.typeName,
+      unitVolume: patch.unitVolume,
+      neededQuantity: 0,
     };
-    group.name ??= patch.name;
-    group.quantity += patch.quantity;
-    group.volume += patch.volume ?? 0;
+    const totalVolume =
+      group.neededQuantity * group.unitVolume + patch.neededQuantity * patch.unitVolume;
+    group.neededQuantity += patch.neededQuantity;
+    group.unitVolume = totalVolume / group.neededQuantity;
     patchGroups.set(routeKey, group);
   }
 
   for (const [routeKey, group] of patchGroups) {
     if (liveTaskKeys.has(routeKey)) continue;
-    const matchingStock = stock.filter(
-      (item) =>
-        item.typeId === group.itemTypeId
-        && item.category !== "blueprint"
-        && item.category !== "reactionformula"
-        && (
-          getStockLocationId(item) === group.fromLocationId
-          || getStockLocationId(item) === group.toLocationId
-        ),
-    );
-    const stockItem = matchingStock.at(0);
-    const unitVolume = stockItem
-      ? stockItem.isPackaged
-        ? (stockItem.packagedVolume ?? stockItem.assembledVolume ?? 0)
-        : (stockItem.assembledVolume ?? 0)
-      : 0;
     displayedTasks.push({
-      itemTypeId: group.itemTypeId,
-      name: group.name ?? stockItem?.name ?? `Type ${group.itemTypeId}`,
-      quantity: group.quantity,
-      volume: group.volume || group.quantity * unitVolume,
-      fromLocationId: group.fromLocationId,
-      toLocationId: group.toLocationId,
+      ...group,
       completed: true,
     });
   }
   return displayedTasks;
-}
-
-function getBposInUseCount(typeId: number, stock: PlanStockItem[]) {
-  return stock
-    .filter((item) => item.typeId === typeId && item.category === "blueprint" && item.inUse)
-    .reduce(
-      (total, item) =>
-        total
-        + (
-          item.blueprintPrints?.filter((print) => print.type === "bpo").length
-          ?? (item.blueprintType === "bpo" ? item.quantity : 0)
-        ),
-      0,
-    );
-}
-
-function formatBposInUse(count: number) {
-  return `${count} BPO${count === 1 ? "" : "s"} In Use`;
 }
 
 function formatCoverage(coveredRuns: number, totalRuns: number) {
@@ -456,7 +434,7 @@ function ScrollTopButton({
 }
 
 function buildReactionSchedule(
-  jobs: PlanResult["lists"]["reactionJobs"],
+  jobs: ResponseReactionJob[],
   stock: PlanStockItem[],
   showTotalRunCounts: boolean,
   mode: ReactionScheduleMode,
@@ -473,7 +451,7 @@ function buildReactionSchedule(
           && getStockLocationId(item) === job.locationId,
       )
       .reduce((total, item) => total + item.quantity, 0);
-    const runs = showTotalRunCounts ? job.runs : job.runsAvailable;
+    const runs = showTotalRunCounts ? job.countNeeded : job.runsAvailable;
     return { job, blueprintCount, runs, maxInstalls: Math.min(blueprintCount, Math.max(0, runs)) };
   });
   const installs = new Map<string, number>();
@@ -506,7 +484,7 @@ function buildReactionSchedule(
   }
   return new Map(
     rows.map(({ job, blueprintCount, runs, maxInstalls }) => {
-      const perRunTime = job.runs > 0 ? job.totalTime / job.runs : 0;
+      const perRunTime = job.countNeeded > 0 ? job.totalTime / job.countNeeded : 0;
       const timeLimitedRuns =
         maxJobHours > 0 && perRunTime > 0 ? Math.floor((maxJobHours * 3600) / perRunTime) : runs;
       const installCount =
@@ -532,18 +510,18 @@ function buildReactionSchedule(
 }
 
 function getManufacturingSummary(
-  jobs: PlanResult["lists"]["manufacturingJobs"],
+  jobs: ResponseManufacturingJob[],
   availableSlots: number,
   showTotalRunCounts: boolean,
 ) {
   const rows = jobs.map((job) => {
-    const runs = showTotalRunCounts ? job.runs : job.runsAvailable;
+    const runs = showTotalRunCounts ? job.countNeeded : job.runsAvailable;
     return {
       runs,
-      time: job.runs > 0 ? (job.totalTime * runs) / job.runs : 0,
+      time: job.countNeeded > 0 ? (job.totalTime * runs) / job.countNeeded : 0,
     };
   });
-  const totalRuns = jobs.reduce((total, job) => total + job.runs, 0);
+  const totalRuns = jobs.reduce((total, job) => total + job.countNeeded, 0);
   const installableRuns = jobs.reduce((total, job) => total + job.runsAvailable, 0);
   const selectedRows = rows
     .filter((row) => row.runs > 0)
@@ -570,6 +548,7 @@ export default function PlannerResults({
   characterNamesById,
   jobs,
   stock,
+  marketBuyOrderQuantities,
   locations,
   stockpiles,
   locationOptions,
@@ -587,6 +566,7 @@ export default function PlannerResults({
   characterNamesById: Map<number, string>;
   jobs: ClientJobsResponse | null;
   stock: PlanStockItem[];
+  marketBuyOrderQuantities?: Readonly<Record<string, number>>;
   locations: ResultsLocations;
   stockpiles: ClientPlanStockpile[];
   locationOptions: Array<{ locationId: number; name: string }>;
@@ -599,10 +579,7 @@ export default function PlannerResults({
     excluded: boolean,
   ) => Promise<void>;
   haulPatches: ReadonlyMap<string, HaulPatch>;
-  onToggleHaulPatches: (
-    tasks: PlanResult["lists"]["haulingTasks"],
-    patched: boolean,
-  ) => Promise<void>;
+  onToggleHaulPatches: (tasks: ResponseHaulTask[], patched: boolean) => Promise<void>;
 }) {
   const [activeTab, setActiveTab] = useState<PlannerTab>("Plan");
   const [isBugReportOpen, setIsBugReportOpen] = useState(false);
@@ -760,6 +737,7 @@ export default function PlannerResults({
               characterStatuses={characterStatuses}
               characterNamesById={characterNamesById}
               stock={stock}
+              marketBuyOrderQuantities={marketBuyOrderQuantities}
               activityLocationIds={activityLocationIds}
               availableReactionSlots={availableReactionSlots}
               availableManufacturingSlots={availableManufacturingSlots}
@@ -796,6 +774,7 @@ function PlanList({
   characterStatuses,
   characterNamesById,
   stock,
+  marketBuyOrderQuantities,
   activityLocationIds,
   availableReactionSlots,
   availableManufacturingSlots,
@@ -816,6 +795,7 @@ function PlanList({
   characterStatuses: ClientCharacterStatus[];
   characterNamesById: Map<number, string>;
   stock: PlanStockItem[];
+  marketBuyOrderQuantities?: Readonly<Record<string, number>>;
   activityLocationIds: number[];
   availableReactionSlots: number;
   availableManufacturingSlots: number;
@@ -831,10 +811,7 @@ function PlanList({
     excluded: boolean,
   ) => Promise<void>;
   haulPatches: ReadonlyMap<string, HaulPatch>;
-  onToggleHaulPatches: (
-    tasks: PlanResult["lists"]["haulingTasks"],
-    patched: boolean,
-  ) => Promise<void>;
+  onToggleHaulPatches: (tasks: ResponseHaulTask[], patched: boolean) => Promise<void>;
   resultsHeaderRef: RefObject<HTMLElement | null>;
 }) {
   const router = useRouter();
@@ -851,7 +828,7 @@ function PlanList({
   const [togglingHaulPatchGroupKey, setTogglingHaulPatchGroupKey] = useState<string | null>(null);
   const [showTotalRunCounts, setShowTotalRunCounts] = useState(false);
   const [showTotalManufacturingRunCounts, setShowTotalManufacturingRunCounts] = useState(false);
-  const [planViewMode, setPlanViewMode] = useState<PlanViewMode>("all");
+  const [planViewMode, setPlanViewMode] = useState<PlanViewMode>("build-location");
   const [reactionScheduleMode, setReactionScheduleMode] =
     useState<ReactionScheduleMode>("available-slots");
   const [maxJobHours, setMaxJobHours] = useState("24");
@@ -886,32 +863,44 @@ function PlanList({
         .filter((skill) => skill.currentLevel < skill.requiredLevel),
     };
   });
-  const planItems = flattenContextBuckets(plan.lists.planItems);
-  const inventionJobs = flattenContextBuckets(plan.lists.inventionJobs);
-  const reactionJobs = flattenContextBuckets(plan.lists.reactionJobs);
-  const manufacturingJobs = flattenContextBuckets(plan.lists.manufacturingJobs);
-  const reprocessingJobs = flattenContextBuckets(plan.lists.reprocessingJobs);
+  const planItems = plan.lists.planItems.all;
+  const planItemsByActivityLocation = flattenLocationBuckets(
+    plan.lists.planItems.byActivityLocation,
+    "activityLocationId",
+  );
+  const inventionJobs = flattenLocationBuckets(plan.lists.inventionJobs, "locationId");
+  const reactionJobs = flattenLocationBuckets(plan.lists.reactionJobs, "locationId");
+  const manufacturingJobs = flattenLocationBuckets(plan.lists.manufacturingJobs, "locationId");
+  const reprocessingJobs = flattenLocationBuckets(plan.lists.reprocessingJobs, "locationId");
   const haulingTasks = getHaulTasksWithPatches(
     getHaulTasksWithExclusions(
       flattenHaulBuckets(plan.lists.haulingTasks),
       stock,
       haulItemExclusion,
     ),
-    stock,
     haulPatches,
   );
-  const copyPlanItems = planItems.filter(
-    (entry): entry is Extract<PlanItemEntry, { kind: "bpc" }> =>
+  const copyPlanItems = planItemsByActivityLocation.filter(
+    (entry): entry is Extract<ResponsePlanItem, { kind: "bpc" }> =>
       entry.kind === "bpc" && entry.bpoCount > 0 && entry.neededQuantity > 0,
   );
+  const buyBuckets =
+    activeTab === "Buy"
+      ? [...plan.lists.materialsToBuy, ...plan.lists.bpoToBuy]
+          .map((bucket) => ({
+            ...bucket,
+            items: bucket.items.filter((entry) => entry.neededQuantity > 0),
+          }))
+          .filter((bucket) => bucket.items.length > 0)
+      : [];
+  const buyEntries = buyBuckets.flatMap((bucket) => bucket.items);
   const rawList =
     activeTab === "Plan"
-      ? planItems
+      ? planViewMode === "all"
+        ? planItems
+        : planItemsByActivityLocation
       : activeTab === "Buy"
-        ? [
-            ...plan.lists.materialsToBuy.filter((entry) => entry.neededQuantity > 0),
-            ...plan.lists.bpoToBuy.filter((entry) => entry.neededQuantity > 0),
-          ]
+        ? buyEntries
         : activeTab === "Copy"
           ? copyPlanItems
           : activeTab === "Reprocess"
@@ -923,62 +912,24 @@ function PlanList({
                 : activeTab === "Manufacture"
                   ? manufacturingJobs
                   : haulingTasks;
-  const list =
-    activeTab === "Buy"
-      ? rawList
-      : activeTab === "Plan" && planViewMode === "all"
-        ? mergePlanItemEntries(
-            rawList as PlanItemEntry[],
-            undefined,
-            plan.metadata.availableStockByTypeId,
-          )
-        : rawList;
+  const list = rawList;
   const materialBuyEntries =
     activeTab === "Buy" ? (list as PlanBuyEntry[]).filter(isMultibuyMaterial) : [];
-  const buyTypeKey =
-    activeTab === "Buy"
-      ? [...new Set((list as PlanBuyEntry[]).map((entry) => entry.typeId))].join(",")
-      : "";
-  const [buyMarketCategories, setBuyMarketCategories] = useState<Map<number, string>>(
-    () => new Map(),
-  );
-  useEffect(() => {
-    if (activeTab !== "Buy" || buyTypeKey === "") return;
-    let cancelled = false;
-    const buyTypeIds = buyTypeKey.split(",").map(Number);
-    void fetchTypeMetadata(buyTypeIds, language)
-      .then((metadata) => {
-        if (cancelled) return;
-        setBuyMarketCategories(
-          new Map(
-            metadata.flatMap((item) =>
-              item.marketCategory ? [[item.typeId, item.marketCategory] as const] : [],
-            ),
-          ),
-        );
-      })
-      .catch(() => {
-        if (!cancelled) setBuyMarketCategories(new Map());
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab, buyTypeKey, language]);
   const locationGroupedTab =
     activeTab === "Reprocess"
+    || activeTab === "Copy"
     || activeTab === "Invent"
     || activeTab === "React"
     || activeTab === "Manufacture"
     || (activeTab === "Plan" && planViewMode === "build-location");
   type PlanListEntry =
-    | (typeof planItems)[number]
-    | PlanResult["lists"]["materialsToBuy"][number]
-    | PlanResult["lists"]["bpcsNeeded"][number]
+    | ResponsePlanItem
+    | PlanBuyEntry
     | (typeof inventionJobs)[number]
     | (typeof reprocessingJobs)[number]
     | (typeof reactionJobs)[number]
     | (typeof manufacturingJobs)[number]
-    | PlanResult["lists"]["haulingTasks"][number];
+    | DisplayHaulTask;
   type ReactionDisplayRow = {
     entry: PlanListEntry;
     reactionPlan: ReactionSchedule | null;
@@ -986,20 +937,16 @@ function PlanList({
   };
   const locationGroups = new Map<number | undefined, PlanListEntry[]>();
   if (locationGroupedTab) {
-    if (activeTab === "Plan") {
-      for (const [locationId, entries] of groupPlanItemEntriesByBuildLocation(
-        rawList as PlanItemEntry[],
-      )) {
-        locationGroups.set(locationId, entries);
-      }
-    }
-    else {
-      for (const entry of list) {
-        const locationId = "locationId" in entry ? entry.locationId : undefined;
-        const group = locationGroups.get(locationId) ?? [];
-        group.push(entry as PlanListEntry);
-        locationGroups.set(locationId, group);
-      }
+    for (const entry of list) {
+      const locationId =
+        "locationId" in entry && typeof entry.locationId === "number"
+          ? entry.locationId
+          : "activityLocationId" in entry && typeof entry.activityLocationId === "number"
+            ? entry.activityLocationId
+            : undefined;
+      const group = locationGroups.get(locationId) ?? [];
+      group.push(entry as PlanListEntry);
+      locationGroups.set(locationId, group);
     }
   }
   const sortedLocationGroups = [...locationGroups.entries()].sort(([left], [right]) => {
@@ -1009,7 +956,9 @@ function PlanList({
   });
   const categoryGroupedTab = activeTab === "Buy";
   const categoryGroups = categoryGroupedTab
-    ? groupBuyEntriesByMarketCategory(list as PlanBuyEntry[], buyMarketCategories)
+    ? buyBuckets.map(
+        (bucket) => [bucket.assemblyLineGroup, bucket.items as unknown as PlanListEntry[]] as const,
+      )
     : undefined;
   const displayGroups = (
     categoryGroupedTab
@@ -1018,6 +967,13 @@ function PlanList({
         ? sortedLocationGroups
         : [[undefined, list as PlanListEntry[]]]
   ) as Array<[number | string | undefined, PlanListEntry[]]>;
+  const sortEntriesByTypeName = (entries: PlanListEntry[]) =>
+    entries
+      .slice()
+      .sort(
+        (left, right) =>
+          getEntryName(left).localeCompare(getEntryName(right)) || left.typeId - right.typeId,
+      );
   const reactionSchedule = buildReactionSchedule(
     reactionJobs,
     stock,
@@ -1053,7 +1009,7 @@ function PlanList({
     )
     .reduce<{ coverage: ReactionCoverage; remainingSlots: number }>(
       (result, { job, schedules }) => {
-        let remainingRuns = job.runs;
+        let remainingRuns = job.countNeeded;
         let coveredRuns = 0;
         let remainingSlots = result.remainingSlots;
         for (const schedule of schedules) {
@@ -1081,7 +1037,7 @@ function PlanList({
     (total, job) => total + job.runsAvailable,
     0,
   );
-  const totalReactionRuns = reactionJobs.reduce((total, job) => total + job.runs, 0);
+  const totalReactionRuns = reactionJobs.reduce((total, job) => total + job.countNeeded, 0);
   const sortedDisplayGroups =
     activeTab === "React" || activeTab === "Manufacture"
       ? (displayGroups.map(([locationId, entries]) => [
@@ -1089,19 +1045,18 @@ function PlanList({
           entries
             .slice()
             .sort((left, right) => {
-              const leftTypeId = "itemTypeId" in left ? left.itemTypeId : left.typeId;
-              const rightTypeId = "itemTypeId" in right ? right.itemTypeId : right.typeId;
+              const leftTypeId = left.typeId;
+              const rightTypeId = right.typeId;
               if (activeTab === "Manufacture") {
-                const leftManufacturing = left as PlanResult["lists"]["manufacturingJobs"][number];
-                const rightManufacturing =
-                  right as PlanResult["lists"]["manufacturingJobs"][number];
+                const leftManufacturing = left as ResponseManufacturingJob;
+                const rightManufacturing = right as ResponseManufacturingJob;
                 const leftValue =
                   manufacturingSort.key === "type"
                     ? leftManufacturing.name
                     : manufacturingSort.key === "inputs"
                       ? getJobInputsCompletionPercent(leftManufacturing.inputs)
                       : showTotalManufacturingRunCounts
-                        ? leftManufacturing.runs
+                        ? leftManufacturing.countNeeded
                         : leftManufacturing.runsAvailable;
                 const rightValue =
                   manufacturingSort.key === "type"
@@ -1109,7 +1064,7 @@ function PlanList({
                     : manufacturingSort.key === "inputs"
                       ? getJobInputsCompletionPercent(rightManufacturing.inputs)
                       : showTotalManufacturingRunCounts
-                        ? rightManufacturing.runs
+                        ? rightManufacturing.countNeeded
                         : rightManufacturing.runsAvailable;
                 const comparison =
                   typeof leftValue === "string" && typeof rightValue === "string"
@@ -1121,42 +1076,42 @@ function PlanList({
                 );
               }
               const leftSchedule = reactionSchedule.get(
-                reactionJobKey(left as PlanResult["lists"]["reactionJobs"][number]),
+                reactionJobKey(left as ResponseReactionJob),
               );
               const rightSchedule = reactionSchedule.get(
-                reactionJobKey(right as PlanResult["lists"]["reactionJobs"][number]),
+                reactionJobKey(right as ResponseReactionJob),
               );
               const leftValue =
                 reactionSort.key === "type"
-                  ? left.name
+                  ? "typeName" in left
+                    ? left.typeName
+                    : left.name
                   : reactionSort.key === "inputs"
-                    ? getReactionInputsCompletionPercent(
-                        left as PlanResult["lists"]["reactionJobs"][number],
-                      )
+                    ? getReactionInputsCompletionPercent(left as ResponseReactionJob)
                     : reactionSort.key === "suggestedRuns"
                       ? getReactionScheduleRuns(leftSchedule)
-                      : "runs" in left
+                      : "countNeeded" in left
                         ? showTotalRunCounts
-                          ? left.runs
+                          ? left.countNeeded
                           : "runsAvailable" in left
                             ? left.runsAvailable
-                            : left.runs
+                            : left.countNeeded
                         : 0;
               const rightValue =
                 reactionSort.key === "type"
-                  ? right.name
+                  ? "typeName" in right
+                    ? right.typeName
+                    : right.name
                   : reactionSort.key === "inputs"
-                    ? getReactionInputsCompletionPercent(
-                        right as PlanResult["lists"]["reactionJobs"][number],
-                      )
+                    ? getReactionInputsCompletionPercent(right as ResponseReactionJob)
                     : reactionSort.key === "suggestedRuns"
                       ? getReactionScheduleRuns(rightSchedule)
-                      : "runs" in right
+                      : "countNeeded" in right
                         ? showTotalRunCounts
-                          ? right.runs
+                          ? right.countNeeded
                           : "runsAvailable" in right
                             ? right.runsAvailable
-                            : right.runs
+                            : right.countNeeded
                         : 0;
               const comparison =
                 typeof leftValue === "string" && typeof rightValue === "string"
@@ -1168,7 +1123,7 @@ function PlanList({
               );
             }),
         ]) as Array<[number | undefined, PlanListEntry[]]>)
-      : displayGroups;
+      : displayGroups.map(([group, entries]) => [group, sortEntriesByTypeName(entries)] as const);
   const maxCopyBuildTime = Math.max(...copyPlanItems.map((entry) => entry.buildTime), 0);
   const haulGroups = new Map<
     string,
@@ -1177,7 +1132,7 @@ function PlanList({
       toLocationId: number;
       ownerType?: "character" | "corporation";
       ownerId?: number;
-      tasks: PlanResult["lists"]["haulingTasks"];
+      tasks: DisplayHaulTask[];
     }
   >();
   if (activeTab === "Haul") {
@@ -1195,7 +1150,7 @@ function PlanList({
     }
     for (const group of haulGroups.values()) {
       group.tasks.sort(
-        (left, right) => left.name.localeCompare(right.name) || left.itemTypeId - right.itemTypeId,
+        (left, right) => left.typeName.localeCompare(right.typeName) || left.typeId - right.typeId,
       );
     }
   }
@@ -1215,71 +1170,39 @@ function PlanList({
   const planColumns = ["Required", "Available", "Buy/Build", "Surplus"] as const;
 
   function getPlanCells(
-    entry: PlanResult["lists"]["planItems"][number],
+    entry: ResponsePlanItem,
   ): Partial<Record<(typeof planColumns)[number], string>> {
-    if (entry.kind === "material") {
+    if (entry.kind === "material" || entry.kind === "bpc") {
       return {
         Required: entry.requiredQuantity.toLocaleString(),
-        Available: entry.availableStockQuantity.toLocaleString(),
-        "Buy/Build": getMaterialBuyOrBuildQuantity(
-          entry.requiredQuantity,
-          entry.availableStockQuantity,
-          entry.productionQuantity,
-          entry.reprocessingQuantity ?? 0,
-        ).toLocaleString(),
-        Surplus: getMaterialOverviewSurplus(
-          entry.requiredQuantity,
-          entry.availableStockQuantity,
-          entry.productionQuantity,
-          entry.reprocessingQuantity ?? 0,
-        ).toLocaleString(),
-      };
-    }
-    if (entry.kind === "bpc") {
-      return {
-        Required: `${entry.neededQuantity.toLocaleString()} runs`,
-        Available: `${entry.stockRuns.toLocaleString()} runs`,
-        "Buy/Build": `${Math.max(0, entry.neededQuantity - entry.stockRuns).toLocaleString()} runs`,
-        Surplus: `${Math.max(0, entry.stockRuns - entry.neededQuantity).toLocaleString()} runs`,
+        Available: entry.availableQuantity.toLocaleString(),
+        "Buy/Build": entry.neededQuantity.toLocaleString(),
+        Surplus: entry.surplusQuantity.toLocaleString(),
       };
     }
     return {
-      Required: `${entry.runsNeeded.toLocaleString()} runs`,
-      Available: entry.availableQuantity.toLocaleString(),
+      Required: `${entry.requiredQuantity.toLocaleString()} runs`,
+      Available: `${entry.availableQuantity.toLocaleString()} BPs`,
       "Buy/Build": "-",
       Surplus: "-",
     };
   }
 
-  function getPlanHaulingQuantity(entry: PlanResult["lists"]["planItems"][number]) {
-    const buildLocationId = "buildLocationId" in entry ? entry.buildLocationId : undefined;
-    const haulActivityLocationIds = new Set(activityLocationIds);
-    if (buildLocationId !== undefined) haulActivityLocationIds.add(buildLocationId);
-    if (haulActivityLocationIds.size === 0) return 0;
-    return flattenHaulBuckets(plan.lists.haulingTasks)
-      .flatMap((bucket) =>
-        bucket.itemTypeId === entry.typeId && haulActivityLocationIds.has(bucket.toLocationId)
-          ? [{ ...bucket, toLocationId: bucket.toLocationId }]
-          : [],
-      )
-      .reduce(
-        (total, task) =>
-          total + getNonProductionHaulingQuantity(task.quantity, task.productionQuantity ?? 0),
-        0,
-      );
-  }
-
-  function getListAmount(entry: PlanBuyEntry | (typeof list)[number]) {
-    return activeTab === "Copy" && "neededQuantity" in entry && "stockRuns" in entry
-      ? Math.max(0, entry.neededQuantity - entry.stockRuns)
-      : "runsNeeded" in entry
+  function getListAmount(entry: PlanBuyEntry | (typeof list)[number]): number {
+    return activeTab === "Copy"
+      && "kind" in entry
+      && entry.kind === "bpc"
+      && "neededQuantity" in entry
+      && typeof entry.neededQuantity === "number"
+      ? entry.neededQuantity
+      : "runsNeeded" in entry && typeof entry.runsNeeded === "number"
         ? entry.runsNeeded
-        : "runs" in entry
-          ? entry.runs
-          : "buyQuantity" in entry
+        : "countNeeded" in entry
+          ? entry.countNeeded
+          : "buyQuantity" in entry && typeof entry.buyQuantity === "number"
             ? entry.buyQuantity
-            : "quantity" in entry
-              ? entry.quantity
+            : "neededQuantity" in entry && typeof entry.neededQuantity === "number"
+              ? entry.neededQuantity
               : 0;
   }
 
@@ -1313,8 +1236,11 @@ function PlanList({
             ...displayGroups
               .flatMap(([, entries]) => entries)
               .map((entry) => {
-                const cells = getPlanCells(entry as PlanItemEntry);
-                return [entry.name, ...planColumns.map((column) => cells[column] || "")].join("\t");
+                const cells = getPlanCells(entry as ResponsePlanItem);
+                return [
+                  getEntryName(entry),
+                  ...planColumns.map((column) => cells[column] || ""),
+                ].join("\t");
               }),
           ]
         : (activeTab === "Buy" ? materialBuyEntries : list).map((entry) => {
@@ -1831,10 +1757,18 @@ function PlanList({
         </div>
       )}
       {activeTab === "Copy" && (
-        <div className={styles.copySummary}>
-          <strong>{formatDuration(maxCopyBuildTime)}</strong>
-          <span>MAX BUILD TIME</span>
-        </div>
+        <>
+          <div className={styles.copySummary}>
+            <strong>{formatDuration(maxCopyBuildTime)}</strong>
+            <span>MAX BUILD TIME</span>
+          </div>
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(74px,auto)_minmax(74px,auto)_minmax(90px,auto)] items-center gap-[13px] py-2.5 pb-1.5 text-right font-mono text-[9px] leading-normal tracking-[0.3px] text-muted-foreground uppercase max-[640px]:hidden [&>span:first-child]:text-left">
+            <span>Type</span>
+            <span>BPOs in use</span>
+            <span>BPOs owned</span>
+            <span>BPC runs</span>
+          </div>
+        </>
       )}
       {activeTab === "Haul" ? (
         <div className={styles.haulGroups}>
@@ -1953,25 +1887,27 @@ function PlanList({
                         )}
                       </span>
                       <TypeIdentity
-                        name={task.name}
-                        typeId={task.itemTypeId}
+                        name={task.typeName}
+                        typeId={task.typeId}
                         imageSize={40}
                         className={styles.planTypeIdentity}
                       />
                       <span className={styles.haulRowAmount}>
                         <CopyableText
-                          textToRender={`${task.quantity.toLocaleString()} units`}
-                          textToCopy={String(task.quantity)}
+                          textToRender={`${task.neededQuantity.toLocaleString()} units`}
+                          textToCopy={String(task.neededQuantity)}
                           copyLabel="Quantity"
                         />
-                        <small>{Math.ceil(task.volume).toLocaleString()} m3</small>
+                        <small>
+                          {Math.ceil(task.neededQuantity * task.unitVolume).toLocaleString()} m3
+                        </small>
                       </span>
                       <span className={styles.haulRowPatch}>
                         {togglingHaulPatchKey === key ? (
                           <Spinner aria-hidden="true" />
                         ) : (
                           <Checkbox
-                            aria-label={`Mark ${task.name} as moved`}
+                            aria-label={`Mark ${task.typeName} as moved`}
                             checked={isPatched}
                             disabled={
                               isExcluded
@@ -2014,7 +1950,10 @@ function PlanList({
                       type="button"
                       variant="outline"
                       onClick={() =>
-                        void copyGroupMultibuy(String(locationId), entries as PlanBuyEntry[])
+                        void copyGroupMultibuy(
+                          String(locationId),
+                          entries as unknown as PlanBuyEntry[],
+                        )
                       }
                     >
                       <CopyIcon aria-hidden="true" />
@@ -2029,11 +1968,7 @@ function PlanList({
                 .flatMap<ReactionDisplayRow>((entry) => {
                   const schedules =
                     activeTab === "React" && "inputs" in entry
-                      ? (
-                          reactionSchedule.get(
-                            reactionJobKey(entry as PlanResult["lists"]["reactionJobs"][number]),
-                          ) ?? []
-                        )
+                      ? (reactionSchedule.get(reactionJobKey(entry as ResponseReactionJob)) ?? [])
                       : [];
                   return schedules.length > 0
                     ? schedules.map((reactionPlan, reactionIndex) => ({
@@ -2046,26 +1981,24 @@ function PlanList({
                 .map(({ entry, reactionPlan, reactionIndex }, index, rows) => {
                   const rowSchedules =
                     activeTab === "React" && "inputs" in entry
-                      ? (
-                          reactionSchedule.get(
-                            reactionJobKey(entry as PlanResult["lists"]["reactionJobs"][number]),
-                          ) ?? []
-                        )
+                      ? (reactionSchedule.get(reactionJobKey(entry as ResponseReactionJob)) ?? [])
                       : [];
-                  const typeId = "itemTypeId" in entry ? entry.itemTypeId : entry.typeId;
+                  const typeId = entry.typeId;
                   const name = getEntryName(entry);
+                  const marketBuyOrderQuantity =
+                    activeTab === "Buy" ? (marketBuyOrderQuantities?.[String(typeId)] ?? 0) : 0;
                   const isPlanBpc = "kind" in entry && entry.kind === "bpc";
                   const isBpcPurchase = activeTab === "Buy" && "bpoCount" in entry;
+                  const buyBpoEntry = isBpcPurchase && "bpoCount" in entry ? entry : null;
                   const isCopyOfBpo =
                     activeTab === "Copy" && "bpoCount" in entry && entry.bpoCount > 0;
-                  const bposInUse =
-                    activeTab === "Buy" && "bpoCount" in entry
-                      ? "bposInUse" in entry && typeof entry.bposInUse === "number"
-                        ? entry.bposInUse
-                        : getBposInUseCount(typeId, stock)
-                      : 0;
+                  const copyBpoEntry = activeTab === "Copy" && "bpoCount" in entry ? entry : null;
                   const isBlueprintName = / blueprint$/i.test(name);
                   const isReactionFormulaName = / formula$/i.test(name);
+                  const isReactionFormulaBuy = activeTab === "Buy" && isReactionFormulaName;
+                  const reactionFormulaSummary = isReactionFormulaBuy
+                    ? getReactionFormulaSummary(typeId, stock)
+                    : null;
                   const isPlanReaction = "kind" in entry && entry.kind === "reaction";
                   const planBlueprintVariation =
                     activeTab === "Plan" && (isPlanBpc || isBlueprintName)
@@ -2085,10 +2018,7 @@ function PlanList({
                       : null;
                   const reactionFormulaCount =
                     activeTab === "React" && "inputs" in entry && "locationId" in entry
-                      ? getReactionFormulaCount(
-                          entry as PlanResult["lists"]["reactionJobs"][number],
-                          stock,
-                        )
+                      ? getReactionFormulaCount(entry as ResponseReactionJob, stock)
                       : 0;
                   const precedingRuns = rowSchedules
                     .slice(0, reactionIndex)
@@ -2098,10 +2028,10 @@ function PlanList({
                     && reactionPlan !== null
                     && rowSchedules.length > 1
                     && "inputs" in entry
-                    && "runs" in entry
+                    && "countNeeded" in entry
                       ? splitReactionJobInputs(
                           entry.inputs,
-                          entry.runs,
+                          entry.countNeeded,
                           reactionPlan.totalRuns,
                           precedingRuns,
                         )
@@ -2112,10 +2042,10 @@ function PlanList({
                   const suggestedInstallCount = reactionPlan?.installs ?? 0;
                   const installTime = reactionPlan?.time ?? totalTime;
                   const totalNeeded =
-                    activeTab === "React" && "runs" in entry && "runsAvailable" in entry
+                    activeTab === "React" && "countNeeded" in entry && "runsAvailable" in entry
                       ? (
                           reactionPlan?.totalRuns
-                          ?? (showTotalRunCounts ? entry.runs : entry.runsAvailable)
+                          ?? (showTotalRunCounts ? entry.countNeeded : entry.runsAvailable)
                         )
                       : null;
                   const scheduledRuns = rowSchedules.reduce(
@@ -2131,121 +2061,108 @@ function PlanList({
                         )
                       : 0;
                   const materialEntry =
-                    (activeTab === "Buy" && !isBpcPurchase && "typeName" in entry)
-                    || (activeTab === "Plan" && "kind" in entry && entry.kind === "material")
-                      ? (entry as
-                          | PlanResponse["lists"]["materialsToBuy"][number]
-                          | Extract<PlanResult["lists"]["planItems"][number], { kind: "material" }>)
-                      : null;
-                  const materialAmount = materialEntry
-                    ? "typeName" in materialEntry
-                      ? materialEntry.neededQuantity
-                      : getMaterialDisplayQuantity(materialEntry, "plan")
-                    : null;
+                    activeTab === "Buy" && !isBpcPurchase
+                      ? (entry as ResponseMaterialBuy)
+                      : activeTab === "Plan" && "kind" in entry && entry.kind === "material"
+                        ? (entry as Extract<ResponsePlanItem, { kind: "material" }>)
+                        : null;
+                  const materialAmount = materialEntry?.neededQuantity ?? null;
                   const amount =
-                    "volume" in entry
-                      ? `${entry.quantity.toLocaleString()} units | ${Math.ceil(entry.volume).toLocaleString()} m3`
+                    "fromLocationId" in entry
+                      ? `${entry.neededQuantity.toLocaleString()} units | ${Math.ceil(entry.neededQuantity * entry.unitVolume).toLocaleString()} m3`
                       : isBpcPurchase
                         ? `${entry.neededQuantity.toLocaleString()} runs`
                         : isPlanBpc
                           ? `${entry.neededQuantity.toLocaleString()} needed`
                           : isPlanReaction
-                            ? `${entry.runsNeeded.toLocaleString()} runs`
+                            ? `${entry.requiredQuantity.toLocaleString()} runs`
                             : materialAmount !== null
                               ? `${materialAmount.toLocaleString()} units`
-                              : activeTab === "Copy" && "neededQuantity" in entry
-                                ? `${Math.max(0, entry.neededQuantity - entry.stockRuns).toLocaleString()} runs`
-                                : "quantity" in entry
+                              : activeTab === "Copy" && "kind" in entry && entry.kind === "bpc"
+                                ? `${entry.neededQuantity.toLocaleString()} runs`
+                                : "quantity" in entry && typeof entry.quantity === "number"
                                   ? `${entry.quantity.toLocaleString()} ${activeTab === "Copy" ? "runs" : "units"}`
-                                  : "runs" in entry
-                                    ? entry.runs >= 10
+                                  : "countNeeded" in entry
+                                    ? entry.countNeeded >= 10
                                       && suggestedInstallCount > 1
                                       && targetRuns !== null
                                       && installTime !== null
-                                      ? `${suggestedInstallCount.toLocaleString()} x ${targetRuns.toLocaleString()} runs @ ${formatDuration(installTime)} | ${entry.runs.toLocaleString()} runs`
-                                      : `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.runs.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
+                                      ? `${suggestedInstallCount.toLocaleString()} x ${targetRuns.toLocaleString()} runs @ ${formatDuration(installTime)} | ${entry.countNeeded.toLocaleString()} runs`
+                                      : `${totalTime !== null ? `${formatDuration(totalTime)} | ` : ""}${entry.countNeeded.toLocaleString()} ${activeTab === "Invent" ? "attempts" : "runs"}`
                                     : "";
                   const amountToCopy =
-                    "volume" in entry
-                      ? String(entry.quantity)
+                    "fromLocationId" in entry
+                      ? String(entry.neededQuantity)
                       : isBpcPurchase
                         ? String(entry.neededQuantity)
                         : isPlanBpc
                           ? String(entry.neededQuantity)
                           : isPlanReaction
-                            ? String(entry.runsNeeded)
+                            ? String(entry.requiredQuantity)
                             : materialAmount !== null
                               ? String(materialAmount)
-                              : activeTab === "Copy" && "neededQuantity" in entry
-                                ? String(Math.max(0, entry.neededQuantity - entry.stockRuns))
+                              : activeTab === "Copy" && "kind" in entry && entry.kind === "bpc"
+                                ? String(entry.neededQuantity)
                                 : "quantity" in entry
                                   ? String(entry.quantity)
-                                  : "runs" in entry
-                                    ? String(entry.runs)
+                                  : "countNeeded" in entry
+                                    ? String(entry.countNeeded)
                                     : null;
                   const amountCopyLabel =
                     activeTab === "Invent"
                       ? "Attempts"
-                      : "volume" in entry || materialAmount !== null
+                      : "fromLocationId" in entry || materialAmount !== null
                         ? "Quantity"
                         : isBpcPurchase
                             || isPlanBpc
                             || isPlanReaction
                             || activeTab === "Copy"
-                            || "runs" in entry
+                            || "countNeeded" in entry
                           ? "Runs"
                           : "Quantity";
                   const imageVariation =
                     planBlueprintVariation
-                    ?? ("imageVariation" in entry && entry.imageVariation
-                      ? entry.imageVariation === "icon" && isBlueprintName
+                    ?? (isCopyOfBpo || (isPlanBpc && entry.bpoCount > 0)
+                      ? "bp"
+                      : isBlueprintName
                         ? "bp"
-                        : entry.imageVariation === "icon" && isReactionFormulaName
+                        : isReactionFormulaName
                           ? "bpc"
-                          : entry.imageVariation
-                      : isCopyOfBpo || (isPlanBpc && entry.bpoCount > 0)
-                        ? "bp"
-                        : isBlueprintName
-                          ? "bp"
-                          : isReactionFormulaName
+                          : activeTab === "Manufacture"
+                              || activeTab === "React"
+                              || isPlanBpc
+                              || isBpcPurchase
+                              || isPlanReaction
+                              || activeTab === "Copy"
+                              || activeTab === "Invent"
                             ? "bpc"
-                            : activeTab === "Manufacture"
-                                || activeTab === "React"
-                                || isPlanBpc
-                                || isBpcPurchase
-                                || isPlanReaction
-                                || activeTab === "Copy"
-                                || activeTab === "Invent"
-                              ? "bpc"
-                              : "icon");
+                            : "icon");
                   const planCells =
-                    activeTab === "Plan"
-                      ? getPlanCells(entry as PlanResult["lists"]["planItems"][number])
-                      : null;
+                    activeTab === "Plan" ? getPlanCells(entry as ResponsePlanItem) : null;
                   const planHaulingQuantity =
-                    activeTab === "Plan"
-                      ? getPlanHaulingQuantity(entry as PlanResult["lists"]["planItems"][number])
+                    activeTab === "Plan" && "kind" in entry
+                      ? (entry as ResponsePlanItem).haulingQuantity
                       : 0;
                   const manufacturingEntry =
-                    activeTab === "Manufacture"
-                      ? (entry as PlanResult["lists"]["manufacturingJobs"][number])
-                      : null;
+                    activeTab === "Manufacture" ? (entry as ResponseManufacturingJob) : null;
                   const manufacturingDisplayedRuns = manufacturingEntry
                     ? showTotalManufacturingRunCounts
-                      ? manufacturingEntry.runs
+                      ? manufacturingEntry.countNeeded
                       : manufacturingEntry.runsAvailable
                     : 0;
                   const manufacturingDisplayedTime =
-                    manufacturingEntry && manufacturingEntry.runs > 0
+                    manufacturingEntry && manufacturingEntry.countNeeded > 0
                       ? (manufacturingEntry.totalTime * manufacturingDisplayedRuns)
-                        / manufacturingEntry.runs
+                        / manufacturingEntry.countNeeded
                       : 0;
                   return (
                     <Fragment key={`${activeTab}-${index}`}>
                       <div
-                        className={`${activeTab === "Plan" ? styles.planTableRow : styles.planRow} ${activeTab === "React" ? styles.reactionRow : activeTab === "Manufacture" ? styles.manufacturingRow : ""}`}
+                        className={`${activeTab === "Plan" ? styles.planTableRow : activeTab === "Copy" ? "grid grid-cols-[minmax(0,1fr)_minmax(74px,auto)_minmax(74px,auto)_minmax(90px,auto)] items-center gap-[13px] max-[640px]:grid-cols-3 max-[640px]:items-start max-[640px]:gap-y-2" : buyBpoEntry || isReactionFormulaBuy ? "grid grid-cols-[minmax(0,1fr)_minmax(150px,auto)_minmax(100px,auto)] items-center gap-[13px] max-[640px]:grid-cols-1 max-[640px]:items-start max-[640px]:gap-y-2" : styles.planRow} ${activeTab === "React" ? styles.reactionRow : activeTab === "Manufacture" ? styles.manufacturingRow : ""}`}
                       >
-                        <div className={styles.planTypeCell}>
+                        <div
+                          className={`${styles.planTypeCell} ${activeTab === "Copy" ? "max-[640px]:col-span-full max-[640px]:w-full" : buyBpoEntry || isReactionFormulaBuy ? "max-[640px]:col-span-1 max-[640px]:w-full" : ""}`}
+                        >
                           <TypeIdentity
                             name={name}
                             typeId={typeId}
@@ -2253,9 +2170,6 @@ function PlanList({
                             variation={imageVariation}
                             className={styles.planTypeIdentity}
                           />
-                          {bposInUse > 0 && (
-                            <Badge variant="outline">{formatBposInUse(bposInUse)}</Badge>
-                          )}
                         </div>
                         {activeTab === "React" && "inputs" in entry && (
                           <span className={styles.jobInputsTrigger}>
@@ -2310,6 +2224,70 @@ function PlanList({
                                 />
                               </strong>
                               <small>{formatDuration(manufacturingDisplayedTime)}</small>
+                            </span>
+                          </>
+                        ) : activeTab === "Buy" && buyBpoEntry ? (
+                          <>
+                            <span className="text-right font-mono text-[11px] leading-normal text-muted-foreground whitespace-nowrap max-[640px]:text-left max-[640px]:col-span-1 max-[640px]:w-full">
+                              BPO: {buyBpoEntry.bpoCount.toLocaleString()} /{" "}
+                              {buyBpoEntry.bposInUse.toLocaleString()} in use
+                            </span>
+                            <span
+                              className={`${styles.planRowAmount} max-[640px]:col-span-1 max-[640px]:w-full`}
+                            >
+                              <strong>
+                                <CopyableText
+                                  textToRender={`${buyBpoEntry.neededQuantity.toLocaleString()} runs needed`}
+                                  textToCopy={String(buyBpoEntry.neededQuantity)}
+                                  copyLabel="Runs needed"
+                                />
+                                <MarketBuyOrderIndicator quantity={marketBuyOrderQuantity} />
+                              </strong>
+                            </span>
+                          </>
+                        ) : activeTab === "Copy" && copyBpoEntry ? (
+                          <>
+                            <span
+                              className="text-right font-mono text-[12px] leading-normal text-foreground max-[640px]:relative max-[640px]:w-auto max-[640px]:pt-3.5 max-[640px]:text-left max-[640px]:before:absolute max-[640px]:before:top-0 max-[640px]:before:left-0 max-[640px]:before:block max-[640px]:before:font-mono max-[640px]:before:text-[9px] max-[640px]:before:tracking-[0.3px] max-[640px]:before:text-muted-foreground max-[640px]:before:uppercase max-[640px]:before:content-[attr(data-label)]"
+                              data-label="BPOs in use"
+                            >
+                              {formatOptionalCount(copyBpoEntry.bposInUse)}
+                            </span>
+                            <span
+                              className="text-right font-mono text-[12px] leading-normal text-foreground max-[640px]:relative max-[640px]:w-auto max-[640px]:pt-3.5 max-[640px]:text-left max-[640px]:before:absolute max-[640px]:before:top-0 max-[640px]:before:left-0 max-[640px]:before:block max-[640px]:before:font-mono max-[640px]:before:text-[9px] max-[640px]:before:tracking-[0.3px] max-[640px]:before:text-muted-foreground max-[640px]:before:uppercase max-[640px]:before:content-[attr(data-label)]"
+                              data-label="BPOs owned"
+                            >
+                              {formatOptionalCount(copyBpoEntry.bpoCount)}
+                            </span>
+                            <span
+                              className={`${styles.planRowAmount} max-[640px]:relative max-[640px]:w-auto max-[640px]:pt-3.5 max-[640px]:text-left max-[640px]:before:absolute max-[640px]:before:top-0 max-[640px]:before:left-0 max-[640px]:before:block max-[640px]:before:font-mono max-[640px]:before:text-[9px] max-[640px]:before:tracking-[0.3px] max-[640px]:before:text-muted-foreground max-[640px]:before:uppercase max-[640px]:before:content-[attr(data-label)]`}
+                              data-label="BPC runs"
+                            >
+                              <strong>
+                                <CopyableText
+                                  textToRender={`${copyBpoEntry.neededQuantity.toLocaleString()} needed`}
+                                  textToCopy={String(copyBpoEntry.neededQuantity)}
+                                  copyLabel="BPC runs needed"
+                                />
+                              </strong>
+                            </span>
+                          </>
+                        ) : isReactionFormulaBuy && reactionFormulaSummary ? (
+                          <>
+                            <span className="text-right font-mono text-[11px] leading-normal text-muted-foreground whitespace-nowrap max-[640px]:text-left max-[640px]:col-span-1 max-[640px]:w-full">
+                              Formulas: {reactionFormulaSummary.inUse.toLocaleString()} /{" "}
+                              {reactionFormulaSummary.owned.toLocaleString()} in use
+                            </span>
+                            <span
+                              className={`${styles.planRowAmount} max-[640px]:col-span-1 max-[640px]:w-full`}
+                            >
+                              <strong>
+                                <CopyableText
+                                  textToRender={`${materialAmount?.toLocaleString() ?? "0"} units`}
+                                  textToCopy={amountToCopy ?? "0"}
+                                  copyLabel={amountCopyLabel}
+                                />
+                              </strong>
                             </span>
                           </>
                         ) : (
@@ -2387,10 +2365,12 @@ function PlanList({
                                     )}
                                   </strong>
                                   <small>
-                                    {totalNeeded !== null && totalTime !== null && "runs" in entry
+                                    {totalNeeded !== null
+                                    && totalTime !== null
+                                    && "countNeeded" in entry
                                       ? formatDuration(
                                           totalNeeded > 0
-                                            ? (totalTime * totalNeeded) / entry.runs
+                                            ? (totalTime * totalNeeded) / entry.countNeeded
                                             : 0,
                                         )
                                       : "-"}
@@ -2398,13 +2378,16 @@ function PlanList({
                                 </span>
                               </span>
                             ) : (
-                              <strong>
-                                <CopyableText
-                                  textToRender={amount}
-                                  textToCopy={amountToCopy ?? amount}
-                                  copyLabel={amountCopyLabel}
-                                />
-                              </strong>
+                              <>
+                                <strong>
+                                  <CopyableText
+                                    textToRender={amount}
+                                    textToCopy={amountToCopy ?? amount}
+                                    copyLabel={amountCopyLabel}
+                                  />
+                                </strong>
+                                <MarketBuyOrderIndicator quantity={marketBuyOrderQuantity} />
+                              </>
                             )}
                             {detail && activeTab !== "React" && <small>{detail}</small>}
                           </span>
@@ -2428,11 +2411,12 @@ function AvailableSourceIcons({
   counts,
   haulingQuantity = 0,
 }: {
-  counts?: PlanSourceCounts;
+  counts?: PlanSourceCountsByLocation;
   haulingQuantity?: number;
 }) {
-  const icons = (Object.keys(counts ?? {}) as PlanSourceIcon[]).filter(
-    (icon) => (counts?.[icon] ?? 0) > 0,
+  const summedCounts = sumSourceCounts(counts);
+  const icons = (Object.keys(summedCounts) as PlanSourceIcon[]).filter(
+    (icon) => (summedCounts[icon] ?? 0) > 0,
   );
   if (!icons.length && haulingQuantity <= 0) return null;
   return (
@@ -2446,7 +2430,7 @@ function AvailableSourceIcons({
           reprocessing: Minimize2,
         };
         const Icon = sourceIcons[icon];
-        const quantity = counts?.[icon] ?? 0;
+        const quantity = summedCounts[icon] ?? 0;
         const sourceDescriptions: Record<PlanSourceIcon, string> = {
           market: "in Sell Orders",
           industry: "in Production",
@@ -2481,6 +2465,34 @@ function AvailableSourceIcons({
           <Truck size={14} strokeWidth={1.8} aria-hidden="true" />
         </span>
       )}
+    </span>
+  );
+}
+
+function sumSourceCounts(countsByLocation?: PlanSourceCountsByLocation): PlanSourceCounts {
+  const counts: PlanSourceCounts = {};
+  for (const sourceCounts of Object.values(countsByLocation ?? {})) {
+    for (const [source, quantity] of Object.entries(sourceCounts ?? {})) {
+      const sourceIcon = source as PlanSourceIcon;
+      counts[sourceIcon] = (counts[sourceIcon] ?? 0) + quantity;
+    }
+  }
+  return counts;
+}
+
+function MarketBuyOrderIndicator({ quantity }: { quantity: number }) {
+  if (quantity <= 0) return null;
+  const label = `${quantity.toLocaleString()} currently in market buy orders`;
+  return (
+    <span
+      className={styles.availableSourceIcon}
+      data-source="market"
+      data-tooltip={label}
+      aria-label={label}
+      role="img"
+      tabIndex={0}
+    >
+      <ChartLine size={14} strokeWidth={1.8} aria-hidden="true" />
     </span>
   );
 }

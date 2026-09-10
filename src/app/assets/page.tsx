@@ -16,6 +16,7 @@ import {
   saveExcludedLocationIds,
 } from "@/lib/planning/plannerPreferencesStore";
 import type { SdeLanguage } from "@/lib/reference/languages";
+import { AssemblyLineGroups } from "@/lib/reference/assemblyLineGroups";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import {
   filterClientAssetsForPlanning,
@@ -26,6 +27,7 @@ import {
 import { type KnownStructure } from "@/lib/planning/preferences";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import DialogBody from "@/components/DialogBody";
+import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
@@ -44,6 +46,7 @@ import {
 } from "../../components/ui/select";
 import {
   Combobox,
+  ComboboxCollection,
   ComboboxContent,
   ComboboxEmpty,
   ComboboxInput,
@@ -72,6 +75,7 @@ import {
   Plus,
   ShoppingCart,
   Trash2,
+  X,
 } from "lucide-react";
 import type { StockItem } from "@/lib/planning/types";
 
@@ -84,7 +88,7 @@ type PasteResult = {
   assembledVolume?: number;
   packagedVolume?: number;
   category?: StockItem["category"];
-  marketCategory?: string;
+  assemblyLineGroup?: string;
   error?: string;
 };
 type StockFilter =
@@ -92,7 +96,9 @@ type StockFilter =
   | { kind: "sales" }
   | { kind: "jobs" }
   | { kind: "category" | "market"; value: string };
+type AssetTypeFilter = { id: number; name: string };
 type StockSort = "alphabetical" | "totalVolume" | "totalCount";
+const assetTypeIdParam = "typeId";
 
 const stockSortOptions: Array<{ value: StockSort; label: string }> = [
   { value: "alphabetical", label: "Alphabetical" },
@@ -167,9 +173,7 @@ function stockLocationId(location: StockRecord) {
 export default function StockPage() {
   const { language } = useAppLanguage();
   const [locations, setLocations] = useState<StockRecord[]>([]);
-  const [assetTypeQuery, setAssetTypeQuery] = useState("");
   const [selectedAssetTypeId, setSelectedAssetTypeId] = useState<number | null>(null);
-  const [isAssetTypeFilterOpen, setIsAssetTypeFilterOpen] = useState(false);
   const [viewingFilter, setViewingFilter] = useState<StockFilter>({ kind: "all" });
   const [knownStructures, setKnownStructures] = useState<KnownStructure[]>([]);
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -179,7 +183,16 @@ export default function StockPage() {
   const [isHydratingVolumes, setIsHydratingVolumes] = useState(false);
   const [excludedLocationIds, setExcludedLocationIds] = useState<number[]>([]);
   const excludedLocationIdsRef = useRef<number[]>([]);
-  const assetTypeFilterAnchor = useComboboxAnchor();
+  useEffect(() => {
+    const handlePopState = () => {
+      const value = Number(new URLSearchParams(window.location.search).get(assetTypeIdParam));
+      const nextId = Number.isSafeInteger(value) && value > 0 ? value : null;
+      setSelectedAssetTypeId(nextId);
+    };
+    handlePopState();
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   useEffect(() => {
     void loadExcludedLocationIds().then((locationIds) => {
@@ -366,6 +379,13 @@ export default function StockPage() {
     };
   }, [isAddOpen, pasting, viewing]);
 
+  function updateAssetTypeUrl(typeId: number | null) {
+    const url = new URL(window.location.href);
+    if (typeId === null) url.searchParams.delete(assetTypeIdParam);
+    else url.searchParams.set(assetTypeIdParam, String(typeId));
+    window.history.replaceState({}, "", url);
+  }
+
   const sortedLocations = [...locations].sort((left, right) => {
     if (stockSort === "totalVolume") return stockTotalVolume(right) - stockTotalVolume(left);
     if (stockSort === "totalCount") return stockTotalCount(right) - stockTotalCount(left);
@@ -378,13 +398,22 @@ export default function StockPage() {
       location.items.map((item) => ({ id: item.typeId, name: item.name })),
     ),
   ).sort((left, right) => left.name.localeCompare(right.name));
-  const matchingAssetTypeOptions = assetTypeOptions.filter((option) =>
-    option.name.toLocaleLowerCase().includes(assetTypeQuery.trim().toLocaleLowerCase()),
-  );
+  const assetTypeNames = assetTypeOptions.map((option) => option.name);
+  const selectedAssetType =
+    assetTypeOptions.find((option) => option.id === selectedAssetTypeId) ?? null;
+  const assetTypeFilter: AssetTypeFilter | null =
+    selectedAssetTypeId === null
+      ? null
+      : {
+          id: selectedAssetTypeId,
+          name: selectedAssetType?.name ?? `Type ID ${selectedAssetTypeId}`,
+        };
+  const itemsForLocation = (location: StockRecord) =>
+    assetTypeFilter === null
+      ? location.items
+      : location.items.filter((item) => item.typeId === assetTypeFilter.id);
   const visibleLocations = sortedLocations.filter(
-    (location) =>
-      selectedAssetTypeId === null
-      || location.items.some((item) => item.typeId === selectedAssetTypeId),
+    (location) => itemsForLocation(location).length > 0,
   );
   async function addLocation(location: StockRecord) {
     if (locations.some((current) => locationKey(current) === locationKey(location))) {
@@ -450,66 +479,49 @@ export default function StockPage() {
             <h2>Asset locations</h2>
           </div>
           <div className={styles.locationControls}>
-            <label>
+            <Label>
               <span>FILTER BY TYPE</span>
-              <div className="min-w-48" ref={assetTypeFilterAnchor}>
+              <div className="min-w-48">
                 <Combobox
-                  open={isAssetTypeFilterOpen}
-                  inputValue={assetTypeQuery}
-                  onOpenChange={setIsAssetTypeFilterOpen}
-                  onInputValueChange={(value, eventDetails) => {
-                    if (eventDetails.reason !== "input-change") return;
-                    setAssetTypeQuery(value);
-                    setSelectedAssetTypeId(null);
-                    setIsAssetTypeFilterOpen(true);
-                  }}
+                  items={assetTypeNames}
+                  value={selectedAssetType?.name ?? null}
                   onValueChange={(value) => {
-                    const match = assetTypeOptions.find(
-                      (option) => String(option.id) === String(value),
-                    );
-                    if (!match) {
-                      setSelectedAssetTypeId(null);
-                      setAssetTypeQuery("");
-                      return;
-                    }
-                    setSelectedAssetTypeId(match.id);
-                    setAssetTypeQuery(match.name);
-                    setIsAssetTypeFilterOpen(false);
+                    const nextId =
+                      assetTypeOptions.find((option) => option.name === value)?.id ?? null;
+                    setSelectedAssetTypeId(nextId);
+                    updateAssetTypeUrl(nextId);
                   }}
                 >
                   <ComboboxInput
-                    showTrigger={false}
-                    showClear
                     placeholder="Search asset types"
                     aria-label="Filter locations by asset type"
+                    showClear
                   />
-                  <ComboboxContent anchor={assetTypeFilterAnchor}>
+                  <ComboboxContent>
+                    <ComboboxEmpty>No matching asset types.</ComboboxEmpty>
                     <ComboboxList>
-                      {matchingAssetTypeOptions.length > 0 ? (
-                        matchingAssetTypeOptions.map((option) => (
-                          <ComboboxItem key={option.id} value={String(option.id)}>
-                            {option.name}
+                      <ComboboxCollection>
+                        {(option) => (
+                          <ComboboxItem key={option} value={option}>
+                            {option}
                           </ComboboxItem>
-                        ))
-                      ) : (
-                        <ComboboxEmpty>No matching asset types.</ComboboxEmpty>
-                      )}
+                        )}
+                      </ComboboxCollection>
                     </ComboboxList>
                   </ComboboxContent>
                 </Combobox>
               </div>
-            </label>
-            <label>
+            </Label>
+            <Label>
               <span>SORT</span>
               <Select
-                aria-label="Sort asset locations"
                 value={stockSort}
                 onValueChange={(value) => {
                   if (value !== null) setStockSort(value as StockSort);
                 }}
                 items={stockSortOptions}
               >
-                <SelectTrigger size="sm">
+                <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -522,12 +534,12 @@ export default function StockPage() {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-            </label>
-            <span className={styles.panelDescription}>
+            </Label>
+            <Label className="self-center text-muted-foreground text-xs">
               {selectedAssetTypeId === null
-                ? `${locations.length} saved`
-                : `${visibleLocations.length} of ${locations.length} saved`}
-            </span>
+                ? `${locations.length} location${locations.length !== 1 ? "s" : ""}`
+                : `${visibleLocations.length} of ${locations.length} location${locations.length !== 1 ? "s" : ""}`}
+            </Label>
           </div>
         </div>
         {locations.length === 0 ? (
@@ -547,6 +559,7 @@ export default function StockPage() {
                 <StockLocationCard
                   key={locationKey(location)}
                   location={location}
+                  items={itemsForLocation(location)}
                   isVolumesLoading={isHydratingVolumes}
                   isIncluded={!excludedLocationIds.includes(stockLocationId(location))}
                   onView={openItems}
@@ -572,7 +585,12 @@ export default function StockPage() {
         <ViewItemsModal
           location={viewing}
           filter={viewingFilter}
+          assetTypeFilter={assetTypeFilter}
           onFilterChange={setViewingFilter}
+          onClearAssetTypeFilter={() => {
+            setSelectedAssetTypeId(null);
+            updateAssetTypeUrl(null);
+          }}
           onCancel={() => setViewing(null)}
         />
       )}
@@ -801,6 +819,7 @@ const stockCategories = [
 
 function StockLocationCard({
   location,
+  items,
   isVolumesLoading,
   isIncluded,
   onView,
@@ -809,6 +828,7 @@ function StockLocationCard({
   onIncludeChange,
 }: {
   location: StockRecord;
+  items: StockItem[];
   isVolumesLoading: boolean;
   isIncluded: boolean;
   onView: (location: StockRecord, filter?: StockFilter) => void;
@@ -816,34 +836,32 @@ function StockLocationCard({
   onRemove: () => void;
   onIncludeChange: (included: boolean) => void;
 }) {
-  const marketCategories = [
-    ...new Set(
-      location.items
-        .map((item) => item.marketCategory)
-        .filter(
-          (category) => category && category !== "Blueprints" && category !== "Reaction Formulas",
-        ),
-    ),
-  ] as string[];
-  const sellOrderCount = location.items.filter((item) => item.source === "marketOrder").length;
+  const assemblyLineGroups = AssemblyLineGroups
+    .groupBy(
+      items,
+      (item) =>
+        item.assemblyLineGroup === "Blueprints" || item.assemblyLineGroup === "Reaction Formulas"
+          ? undefined
+          : item.assemblyLineGroup,
+    )
+    .map((group) => group.assemblyLineGroup);
+  const sellOrderCount = items.filter((item) => item.source === "marketOrder").length;
   const installedJobCount = new Set(
-    location.items
-      .map((item) => item.jobId)
-      .filter((jobId): jobId is number => jobId !== undefined),
+    items.map((item) => item.jobId).filter((jobId): jobId is number => jobId !== undefined),
   ).size;
   const stockMetrics = [
     ...stockCategories.map((category) => {
-      const items = location.items.filter((item) =>
+      const categoryItems = items.filter((item) =>
         category.id === "bpc"
           ? isBlueprintStockItem(item)
           : (item.category ?? "item") === category.id,
       );
       return {
         ...category,
-        count: items.length,
+        count: categoryItems.length,
         detail: isVolumesLoading
           ? "Calculating..."
-          : formatVolume(items.reduce((total, item) => total + stockItemVolume(item), 0)),
+          : formatVolume(categoryItems.reduce((total, item) => total + stockItemVolume(item), 0)),
         filter: { kind: "category" as const, value: category.id },
       };
     }),
@@ -940,10 +958,10 @@ function StockLocationCard({
         )}
       </div>
       <div className={styles.stockMarketCategories}>
-        {marketCategories.length === 0 ? (
+        {assemblyLineGroups.length === 0 ? (
           <span>No market categories</span>
         ) : (
-          marketCategories.map((category) => (
+          assemblyLineGroups.map((category) => (
             <button
               type="button"
               key={category}
@@ -974,25 +992,30 @@ type StockTypeBucket = {
   bpcStockCount: number;
   bpcStockRuns: number;
   category: StockItem["category"];
-  marketCategory?: string;
+  assemblyLineGroup?: string;
 };
 
 function ViewItemsModal({
   location,
   filter,
+  assetTypeFilter,
   onFilterChange,
+  onClearAssetTypeFilter,
   onCancel,
 }: {
   location: StockRecord;
   filter: StockFilter;
+  assetTypeFilter: AssetTypeFilter | null;
   onFilterChange: (filter: StockFilter) => void;
+  onClearAssetTypeFilter: () => void;
   onCancel: () => void;
 }) {
   const filteredItems = location.items.filter((item) => {
+    if (assetTypeFilter !== null && item.typeId !== assetTypeFilter.id) return false;
     if (filter.kind === "all") return true;
     if (filter.kind === "sales") return item.source === "marketOrder";
     if (filter.kind === "jobs") return item.inBuild || item.jobId !== undefined;
-    if (filter.kind === "market") return item.marketCategory === filter.value;
+    if (filter.kind === "market") return item.assemblyLineGroup === filter.value;
     return filter.value === "bpc"
       ? isBlueprintStockItem(item)
       : (item.category ?? "item") === filter.value;
@@ -1028,7 +1051,7 @@ function ViewItemsModal({
           marketQuantity,
           ...blueprintSummary,
           category: item.category,
-          marketCategory: item.marketCategory,
+          assemblyLineGroup: item.assemblyLineGroup,
         },
       );
       continue;
@@ -1056,161 +1079,163 @@ function ViewItemsModal({
             ? filter.value
             : stockCategories.find((category) => category.id === filter.value)?.label;
   return (
-    <Dialog open onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{location.structureName}</DialogTitle>
-          <DialogDescription>
-            {location.systemName} · {title} · {buckets.length} item types
-          </DialogDescription>
-        </DialogHeader>
-        <DialogBody>
-          <div className={styles.stockViewFilters}>
-            <button
-              type="button"
-              className={filter.kind === "all" ? styles.stockFilterActive : ""}
-              onClick={() => onFilterChange({ kind: "all" })}
-            >
-              All
-            </button>
-            <button
-              type="button"
-              className={filter.kind === "sales" ? styles.stockFilterActive : ""}
-              onClick={() => onFilterChange({ kind: "sales" })}
-            >
-              Sales
-            </button>
-            <button
-              type="button"
-              className={filter.kind === "jobs" ? styles.stockFilterActive : ""}
-              onClick={() => onFilterChange({ kind: "jobs" })}
-            >
-              Jobs
-            </button>
-            {stockCategories.map((category) => (
-              <button
-                type="button"
-                className={
-                  filter.kind === "category" && filter.value === category.id
-                    ? styles.stockFilterActive
-                    : ""
-                }
-                key={category.id}
-                onClick={() => onFilterChange({ kind: "category", value: category.id })}
-              >
-                {category.label}
-              </button>
-            ))}
-          </div>
-          {buckets.length === 0 ? (
-            <Empty className={styles.emptyBuildList}>
-              <EmptyDescription>No items recorded at this location.</EmptyDescription>
-            </Empty>
-          ) : (
-            <div className={styles.stockList}>
-              {buckets.map(
-                (
-                  {
-                    item,
-                    stockQuantity,
-                    productionQuantity,
-                    marketQuantity,
-                    bpoCount,
-                    bpoInUseCount,
-                    bpcProductionCount,
-                    bpcProductionRuns,
-                    bpcStockCount,
-                    bpcStockRuns,
-                  },
-                  itemIndex,
-                ) => {
-                  const categoryLabel = item.marketCategory ?? item.category ?? "Item";
-                  const showCategory =
-                    filter.kind === "all"
-                    || (filter.kind === "category" && filter.value === "item");
-                  const isBlueprint = isBlueprintStockItem(item);
-                  const isReaction = item.category === "reactionformula";
-                  return (
-                    <div className={styles.stockRow} key={`${item.typeId}:${itemIndex}`}>
-                      <div className={styles.stockIdentityStack}>
-                        <TypeIdentity
-                          name={item.name}
-                          subline={showCategory ? categoryLabel : undefined}
-                          typeId={item.typeId}
-                          imageSize={40}
-                          className={styles.stockTypeIdentity}
-                          variation={item.category === "reactionformula" ? "bpc" : "icon"}
-                          blueprintType={
-                            isBlueprintStockItem(item) ? (bpoCount > 0 ? "bpo" : "bpc") : undefined
-                          }
-                        />
-                      </div>
-                      {isBlueprint ? (
-                        <div className={styles.stockAggregateList}>
-                          {bpoCount > 0 && (
-                            <span>
-                              <FileBox aria-hidden="true" />
-                              <b>{`${bpoInUseCount.toLocaleString()} / ${bpoCount.toLocaleString()}`}</b>
-                              <small>BPO in use</small>
-                            </span>
+    <ResponsiveDialogDrawer
+      open
+      onOpenChange={(open) => !open && onCancel()}
+      title={location.structureName}
+      description={`${location.systemName} · ${title} · ${buckets.length} item types`}
+      headerContent={
+        assetTypeFilter && (
+          <Button type="button" variant="outline" size="sm" onClick={onClearAssetTypeFilter}>
+            <X data-icon="inline-start" />
+            {`Remove filter for '${assetTypeFilter.name}'`}
+          </Button>
+        )
+      }
+    >
+      <div className={styles.stockViewFilters}>
+        <button
+          type="button"
+          className={filter.kind === "all" ? styles.stockFilterActive : ""}
+          onClick={() => onFilterChange({ kind: "all" })}
+        >
+          All
+        </button>
+        <button
+          type="button"
+          className={filter.kind === "sales" ? styles.stockFilterActive : ""}
+          onClick={() => onFilterChange({ kind: "sales" })}
+        >
+          Sales
+        </button>
+        <button
+          type="button"
+          className={filter.kind === "jobs" ? styles.stockFilterActive : ""}
+          onClick={() => onFilterChange({ kind: "jobs" })}
+        >
+          Jobs
+        </button>
+        {stockCategories.map((category) => (
+          <button
+            type="button"
+            className={
+              filter.kind === "category" && filter.value === category.id
+                ? styles.stockFilterActive
+                : ""
+            }
+            key={category.id}
+            onClick={() => onFilterChange({ kind: "category", value: category.id })}
+          >
+            {category.label}
+          </button>
+        ))}
+      </div>
+      {buckets.length === 0 ? (
+        <Empty className={styles.emptyBuildList}>
+          <EmptyDescription>No items recorded at this location.</EmptyDescription>
+        </Empty>
+      ) : (
+        <div className={styles.stockList}>
+          {buckets.map(
+            (
+              {
+                item,
+                stockQuantity,
+                productionQuantity,
+                marketQuantity,
+                bpoCount,
+                bpoInUseCount,
+                bpcProductionCount,
+                bpcProductionRuns,
+                bpcStockCount,
+                bpcStockRuns,
+              },
+              itemIndex,
+            ) => {
+              const categoryLabel = item.assemblyLineGroup ?? item.category ?? "Item";
+              const showCategory =
+                filter.kind === "all" || (filter.kind === "category" && filter.value === "item");
+              const isBlueprint = isBlueprintStockItem(item);
+              const isReaction = item.category === "reactionformula";
+              return (
+                <div className={styles.stockRow} key={`${item.typeId}:${itemIndex}`}>
+                  <div className={styles.stockIdentityStack}>
+                    <TypeIdentity
+                      name={item.name}
+                      subline={showCategory ? categoryLabel : undefined}
+                      typeId={item.typeId}
+                      imageSize={40}
+                      className={styles.stockTypeIdentity}
+                      variation={item.category === "reactionformula" ? "bpc" : "icon"}
+                      blueprintType={
+                        isBlueprintStockItem(item) ? (bpoCount > 0 ? "bpo" : "bpc") : undefined
+                      }
+                    />
+                  </div>
+                  {isBlueprint ? (
+                    <div className={styles.stockAggregateList}>
+                      {bpoCount > 0 && (
+                        <span>
+                          <FileBox aria-hidden="true" />
+                          <b>{`${bpoInUseCount.toLocaleString()} / ${bpoCount.toLocaleString()}`}</b>
+                          <small>BPO in use</small>
+                        </span>
+                      )}
+                      {bpcProductionCount > 0 && (
+                        <span>
+                          <Files aria-hidden="true" />
+                          <b>
+                            {`${bpcProductionRuns.toLocaleString()} Runs on ${bpcProductionCount.toLocaleString()} BPC`}
+                          </b>
+                          <small>In production</small>
+                        </span>
+                      )}
+                      <span>
+                        <Package aria-hidden="true" />
+                        <b>
+                          {`${bpcStockRuns.toLocaleString()} Runs on ${bpcStockCount.toLocaleString()} BPC`}
+                        </b>
+                        <small>Available</small>
+                      </span>
+                    </div>
+                  ) : (
+                    <div className={styles.stockAggregateList}>
+                      {productionQuantity > 0 && (
+                        <span>
+                          {isReaction ? (
+                            <Atom aria-hidden="true" />
+                          ) : (
+                            <Factory aria-hidden="true" />
                           )}
-                          {bpcProductionCount > 0 && (
-                            <span>
-                              <Files aria-hidden="true" />
-                              <b>
-                                {`${bpcProductionRuns.toLocaleString()} Runs on ${bpcProductionCount.toLocaleString()} BPC`}
-                              </b>
-                              <small>In production</small>
-                            </span>
-                          )}
-                          <span>
-                            <Package aria-hidden="true" />
-                            <b>
-                              {`${bpcStockRuns.toLocaleString()} Runs on ${bpcStockCount.toLocaleString()} BPC`}
-                            </b>
-                            <small>Available</small>
-                          </span>
-                        </div>
-                      ) : (
-                        <div className={styles.stockAggregateList}>
-                          {productionQuantity > 0 && (
-                            <span>
-                              {isReaction ? (
-                                <Atom aria-hidden="true" />
-                              ) : (
-                                <Factory aria-hidden="true" />
-                              )}
-                              <b>{productionQuantity.toLocaleString()}</b>
-                              <small>{isReaction ? "In use" : "In production"}</small>
-                            </span>
-                          )}
-                          <span
-                            className={`${styles.stockAggregateStock} ${
-                              isReaction ? styles.stockAggregateReactionStock : ""
-                            }`}
-                          >
-                            <Package aria-hidden="true" />
-                            <b>{stockQuantity.toLocaleString()}</b>
-                            <small>Available</small>
-                          </span>
-                          {marketQuantity > 0 && (
-                            <span>
-                              <ShoppingCart aria-hidden="true" />
-                              <b>{marketQuantity.toLocaleString()}</b>
-                              <small>On market</small>
-                            </span>
-                          )}
-                        </div>
+                          <b>{productionQuantity.toLocaleString()}</b>
+                          <small>{isReaction ? "In use" : "In production"}</small>
+                        </span>
+                      )}
+                      <span
+                        className={`${styles.stockAggregateStock} ${
+                          isReaction ? styles.stockAggregateReactionStock : ""
+                        }`}
+                      >
+                        <Package aria-hidden="true" />
+                        <b>{stockQuantity.toLocaleString()}</b>
+                        <small>Available</small>
+                      </span>
+                      {marketQuantity > 0 && (
+                        <span>
+                          <ShoppingCart aria-hidden="true" />
+                          <b>{marketQuantity.toLocaleString()}</b>
+                          <small>On market</small>
+                        </span>
                       )}
                     </div>
-                  );
-                },
-              )}
-            </div>
+                  )}
+                </div>
+              );
+            },
           )}
-        </DialogBody>
-      </DialogContent>
-    </Dialog>
+        </div>
+      )}
+    </ResponsiveDialogDrawer>
   );
 }
 
@@ -1268,7 +1293,7 @@ function StockPasteModal({
           assembledVolume: item.assembledVolume ?? 0,
           packagedVolume: item.packagedVolume,
           category: item.category ?? "item",
-          marketCategory: item.marketCategory,
+          assemblyLineGroup: item.assemblyLineGroup,
         }));
         const normalized = mergeItems([], imported);
         onImport(mode === "replace" ? normalized : mergeItems(location.items, normalized));
@@ -1397,7 +1422,7 @@ async function hydrateVolumes(records: StockRecord[], language: SdeLanguage) {
           || (item.isPackaged && item.packagedVolume === undefined)
           || item.techLevel === undefined
           || item.category === undefined
-          || item.marketCategory === undefined,
+          || item.assemblyLineGroup === undefined,
       )
       .map((item) => item.typeId),
   );
@@ -1421,7 +1446,7 @@ async function hydrateVolumes(records: StockRecord[], language: SdeLanguage) {
               packagedVolume: itemMetadata.packagedVolume,
               techLevel: itemMetadata.techLevel,
               category: item.category ?? itemMetadata.category ?? "item",
-              marketCategory: itemMetadata.marketCategory,
+              assemblyLineGroup: itemMetadata.assemblyLineGroup,
             }
           : item;
       });

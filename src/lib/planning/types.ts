@@ -1,4 +1,5 @@
 import type { SdeLanguage } from "@/lib/reference/languages";
+import type { AssemblyLineGroup, AssemblyLineGroups } from "@/lib/reference/assemblyLineGroups";
 import type { FacilityGroupBonus } from "./facilityBonuses";
 import type { ProductionGroupKey } from "./productionGroups";
 
@@ -146,12 +147,8 @@ export interface PlanStockItem extends StockItemBase {
   source?: "marketOrder";
 }
 
-export interface HaulPatch {
+export interface HaulPatch extends ResponseMaterial {
   key: string;
-  itemTypeId: number;
-  name?: string;
-  quantity: number;
-  volume?: number;
   fromLocationId: number;
   toLocationId: number;
   ownerType: StockOwnerType;
@@ -163,7 +160,7 @@ export interface StockItem extends PlanStockItem {
   assembledVolume?: number;
   packagedVolume?: number;
   techLevel?: number;
-  marketCategory?: string;
+  assemblyLineGroup?: string;
 }
 
 export interface StockContribution extends StockItemBase {
@@ -183,9 +180,7 @@ export interface BlueprintPrint {
 
 export interface PlanRequest {
   language?: SdeLanguage;
-  toBuild?: PlanBuildItem[];
-  stockpiles?: PlanStockpile[];
-  marketBuyOrderQuantities?: Record<string, number>;
+  stockpiles: PlanStockpile[];
   reprocessingEfficiencies?: Record<string, number>;
   assets?:
     | PlanStockItem[]
@@ -195,8 +190,6 @@ export interface PlanRequest {
         industry: PlanIndustryInput[];
         market: PlanMarketInput[];
       };
-  /** @deprecated Use the flat assets array for current planner inputs. */
-  stock?: PlanStockItem[];
   facilityTimeMultipliers?: {
     manufacturing: number;
     reactions: number;
@@ -223,13 +216,15 @@ export type PlannerStockpile = Omit<PlanStockpile, "items"> & { items: BuildItem
 export type PlannerRequest = Omit<PlanRequest, "toBuild" | "assets" | "stock" | "stockpiles"> & {
   items: BuildItem[];
   stock: PlanStockItem[];
-  stockpiles?: PlannerStockpile[];
+  stockpiles: PlannerStockpile[];
   groupAssignments?: Partial<Record<ProductionGroupKey, number>>;
   unresolvedAssetCount?: number;
 };
 
 export type PlanSourceIcon = "market" | "industry" | "invention" | "copying" | "reprocessing";
 export type PlanSourceCounts = Partial<Record<PlanSourceIcon, number>>;
+export type PlanSourceCountsByLocation = Partial<Record<number, PlanSourceCounts>>;
+export type PlanSourceCountsByType = Map<number, PlanSourceCountsByLocation>;
 export type PlanJobInputKind = "blueprint" | "material";
 export type PlanJobInputStatus = "ready" | "partial" | "blocked";
 
@@ -258,230 +253,201 @@ export type PlanSkillRequirement = {
   requiredLevel: number;
 };
 
-/** Detailed internal result used while allocating stock and merging stockpile plans. */
-export interface PlanResult {
-  metadata: {
-    generatedAt: string;
-    planId?: string;
-    unresolvedAssetCount?: number;
-    corporationAssetSources?: number[];
-    availableStockByTypeId?: Record<string, number>;
-  };
-  lists: {
-    planItems: Array<
-      | (PlanBucketContext & { kind: "material" } & PlanMaterial)
-      | (PlanBucketContext & {
-          kind: "bpc";
-          typeId: number;
-          name: string;
-          typeGroupId: number;
-          typeGroup: string;
-          unitVolume: number;
-          neededQuantity: number;
-          stockQuantity: number;
-          stockRuns: number;
-          buyQuantity: number;
-          bpoCount: number;
-          bposInUse?: number;
-          buildTime: number;
-          availableSourceCounts?: PlanSourceCounts;
-        })
-      | (PlanBucketContext & {
-          kind: "reaction";
-          typeId: number;
-          name: string;
-          runsNeeded: number;
-          availableQuantity: number;
-          availableSourceCounts?: PlanSourceCounts;
-        })
-    >;
-    materialsToBuy: PlanMaterial[];
-    bpcsNeeded: Array<
-      PlanBucketContext & {
-        typeId: number;
-        name: string;
-        typeGroupId: number;
-        typeGroup: string;
-        unitVolume: number;
-        quantity: number;
-        neededQuantity: number;
-        stockQuantity: number;
-        stockRuns: number;
-        buyQuantity: number;
-        bpoCount: number;
-        bposInUse?: number;
-        buildTime: number;
-        availableSourceCounts?: PlanSourceCounts;
-      }
-    >;
-    bpcsToBuy: Array<
-      PlanBucketContext & {
-        typeId: number;
-        name: string;
-        typeGroupId: number;
-        typeGroup: string;
-        unitVolume: number;
-        quantity: number;
-        neededQuantity: number;
-        stockQuantity: number;
-        stockRuns: number;
-        buyQuantity: number;
-        bpoCount: number;
-        bposInUse?: number;
-        buildTime: number;
-        availableSourceCounts?: PlanSourceCounts;
-      }
-    >;
-    inventionJobs: Array<
-      PlanBucketContext & { typeId: number; name: string; runs: number; locationId?: number }
-    >;
-    reactionJobs: Array<
-      PlanBucketContext & {
-        typeId: number;
-        name: string;
-        runs: number;
-        runsAvailable: number;
-        totalTime: number;
-        locationId?: number;
-        inputs: PlanJobInputs;
-      }
-    >;
-    manufacturingJobs: Array<
-      PlanBucketContext & {
-        typeId: number;
-        name: string;
-        runs: number;
-        runsAvailable: number;
-        totalTime: number;
-        locationId?: number;
-        inputs: PlanJobInputs;
-      }
-    >;
-    reprocessingJobs: Array<
-      PlanBucketContext & {
-        typeId: number;
-        name: string;
-        quantity: number;
-        efficiency: number;
-        locationId: number;
-      }
-    >;
-    skillsRequired: PlanSkillRequirement[];
-    haulingTasks: Array<{
-      itemTypeId: number;
-      name: string;
-      quantity: number;
-      productionQuantity?: number;
-      volume: number;
-      fromLocationId: number;
-      toLocationId: number;
-      ownerType?: "character" | "corporation";
-      ownerId?: number;
-    }>;
-  };
+interface ResponseMetadata {
+  generatedAt: string;
+  planId?: string;
+  unresolvedAssetCount?: number;
+  corporationAssetSources?: number[];
 }
 
-export type PlanMaterial = PlanBucketContext & {
+interface ResponseJob {
   typeId: number;
   name: string;
-  typeGroupId: number;
-  typeGroup: string;
+  countNeeded: number;
+}
+
+interface ResponseJobManufacturing extends ResponseJob {
+  inputs: PlanJobInputs;
+  runsAvailable: number;
+  totalTime: number;
+}
+
+interface ResponseJobReprocessing extends ResponseJob {
+  efficiency: number;
+}
+
+interface PlanJob extends ResponseJob {
+  locationId?: number;
+}
+
+interface PlanJobManufacturing extends PlanJob {
+  inputs: PlanJobInputs;
+  runsAvailable: number;
+  totalTime: number;
+  locationId?: number;
+}
+
+interface PlanJobReprocessing extends ResponseJobReprocessing {
+  locationId?: number;
+}
+
+export interface ResponseMaterial {
+  typeId: number;
+  typeName: string;
   unitVolume: number;
+  neededQuantity: number;
+}
+
+export type ResponseMaterialBucket<T extends ResponseMaterial = ResponseMaterial> =
+  AssemblyLineGroup<T>;
+
+export type ResponseHaulTask = ResponseMaterial & {
+  fromLocationId: number;
+  toLocationId: number;
+  ownerType?: "character" | "corporation";
+  ownerId?: number;
+};
+
+export type PlanHaulTask = ResponseHaulTask & {
+  source?: "production";
+};
+
+export interface ResponsePlanMaterial extends ResponseMaterial {
+  kind: "material";
+  requiredQuantity: number;
+  availableQuantity: number;
+  surplusQuantity: number;
+  availableSourceCounts?: PlanSourceCountsByLocation;
+  haulingQuantity: number;
+}
+
+export interface ResponsePlanBlueprint extends ResponseMaterial {
+  kind: "bpc";
+  requiredQuantity: number;
+  availableQuantity: number;
+  surplusQuantity: number;
+  availableSourceCounts?: PlanSourceCountsByLocation;
+  haulingQuantity: number;
+  bpoCount: number;
+  bposInUse: number;
+  buildTime: number;
+}
+
+export interface ResponsePlanReaction extends ResponseMaterial {
+  kind: "reaction";
+  requiredQuantity: number;
+  availableQuantity: number;
+  surplusQuantity: number;
+  availableSourceCounts?: PlanSourceCountsByLocation;
+  haulingQuantity: number;
+}
+
+export type ResponsePlanItem = ResponsePlanMaterial | ResponsePlanBlueprint | ResponsePlanReaction;
+
+export interface ResponseMaterialBuy extends ResponseMaterial {}
+
+export interface ResponseBlueprintBuy extends ResponseMaterialBuy {
+  bpoCount: number;
+  bposInUse: number;
+}
+
+export interface ResponseBlueprintCopy extends ResponseBlueprintBuy {}
+
+export interface ResponseLocationBucket<T> {
+  locationId?: number;
+  items: T[];
+}
+
+export type ResponseItem<T> = T extends unknown
+  ? Omit<T, "activityLocationId" | "stockpileLocationId" | "locationId">
+  : never;
+
+export interface ResponseHaulBucket {
+  fromLocationId: number;
+  toLocationId: number;
+  ownerType?: "character" | "corporation";
+  ownerId?: number;
+  items: ResponseMaterial[];
+}
+
+export interface ResponsePlanItems {
+  all: ResponsePlanItem[];
+  byActivityLocation: ResponseLocationBucket<ResponsePlanItem>[];
+}
+
+export interface PlanCalculationBase {
+  typeId: number;
+  unitVolume: number;
+  availableSourceCounts?: PlanSourceCountsByLocation;
+  activityLocationId?: number;
+  stockpileLocationId?: number;
+}
+
+export type PlanMaterial = PlanCalculationBase & {
   quantity: number;
   requiredQuantity: number;
   stockQuantity: number;
   availableStockQuantity: number;
   productionQuantity: number;
   reprocessingQuantity?: number;
-  buildQuantity: number;
   buyQuantity: number;
-  remainingStockQuantity: number;
   remainingProductionQuantity: number;
-  fromMarketOrder?: boolean;
-  availableSourceCounts?: PlanSourceCounts;
-  imageVariation?: "icon" | "bp" | "bpc";
-  locationId?: number;
 };
 
-export interface PlanMaterialBuyResponse {
-  typeId: number;
-  typeName: string;
-  typeGroupId: number;
-  typeGroup: string;
-  unitVolume: number;
+export type PlanCalculationBlueprint = PlanCalculationBase & {
   neededQuantity: number;
-  marketBuyOrderQuantity: number;
-}
-
-export interface PlanBlueprintPurchaseResponse extends PlanMaterialBuyResponse {
+  stockQuantity: number;
+  stockRuns: number;
+  buyQuantity: number;
   bpoCount: number;
-  bposInUse: number;
+  bposInUse?: number;
+  buildTime: number;
+};
+
+export type PlanCalculationReaction = PlanCalculationBase & {
+  runsNeeded: number;
+  availableQuantity: number;
+};
+
+export type PlanCalculationItem =
+  | (PlanMaterial & { kind: "material" })
+  | (PlanCalculationBlueprint & { kind: "bpc" })
+  | (PlanCalculationReaction & { kind: "reaction" });
+
+export interface PlanCalculationLists {
+  planItems: PlanCalculationItem[];
+  materialsToBuy: PlanMaterial[];
+  bpcsNeeded: PlanCalculationBlueprint[];
+  bpcsToBuy: PlanCalculationBlueprint[];
+  inventionJobs: PlanJob[];
+  reactionJobs: PlanJobManufacturing[];
+  manufacturingJobs: PlanJobManufacturing[];
+  reprocessingJobs: PlanJobReprocessing[];
+  skillsRequired: PlanSkillRequirement[];
+  haulingTasks: PlanHaulTask[];
 }
 
-export interface PlanBpcToCopyResponse extends PlanBlueprintPurchaseResponse {}
-
-export interface PlanBpoBuyResponse extends PlanBlueprintPurchaseResponse {}
-
-export type PlanMaterialPurchaseResponse = Omit<
-  PlanResult["lists"]["haulingTasks"][number],
-  "fromLocationId" | "toLocationId" | "ownerType" | "ownerId"
->;
-
-export interface PlanBucketContext {
-  stockpileId?: string;
-  stockpileName?: string;
-  buildLocationId?: number;
-  stockLocationId?: number;
+/** Calculation state retained only until the authoritative response is assembled. */
+export interface PlanCalculation {
+  metadata: ResponseMetadata;
+  lists: PlanCalculationLists;
+  availableSourceCountsByType?: PlanSourceCountsByType;
+  availableStockQuantitiesByLocationAndType?: Map<string, number>;
+  availableStockQuantitiesByType?: Map<number, number>;
 }
 
-export interface PlanContextBucket<T> {
-  context?: PlanBucketContext;
-  items: T[];
-}
-
-export type WithoutPlanBucketContext<T> = T extends unknown
-  ? Omit<T, keyof PlanBucketContext>
-  : never;
-
-export interface PlanHaulBucketResponse {
-  fromLocationId: number;
-  toLocationId: number;
-  ownerType?: "character" | "corporation";
-  ownerId?: number;
-  items: PlanMaterialPurchaseResponse[];
-}
-
-export type PlanResponse = Omit<PlanResult, "lists"> & {
-  lists: Omit<
-    PlanResult["lists"],
-    | "planItems"
-    | "materialsToBuy"
-    | "bpcsNeeded"
-    | "bpcsToBuy"
-    | "inventionJobs"
-    | "reactionJobs"
-    | "manufacturingJobs"
-    | "reprocessingJobs"
-    | "haulingTasks"
-  > & {
-    planItems: PlanContextBucket<
-      WithoutPlanBucketContext<PlanResult["lists"]["planItems"][number]>
-    >[];
-    materialsToBuy: PlanMaterialBuyResponse[];
-    bpcToCopy: PlanBpcToCopyResponse[];
-    bpoToBuy: PlanBpoBuyResponse[];
-    inventionJobs: PlanContextBucket<
-      WithoutPlanBucketContext<PlanResult["lists"]["inventionJobs"][number]>
-    >[];
-    reactionJobs: PlanContextBucket<
-      WithoutPlanBucketContext<PlanResult["lists"]["reactionJobs"][number]>
-    >[];
-    manufacturingJobs: PlanContextBucket<
-      WithoutPlanBucketContext<PlanResult["lists"]["manufacturingJobs"][number]>
-    >[];
-    reprocessingJobs: PlanContextBucket<
-      WithoutPlanBucketContext<PlanResult["lists"]["reprocessingJobs"][number]>
-    >[];
-    haulingTasks: PlanHaulBucketResponse[];
+export type PlanResponse = {
+  metadata: ResponseMetadata;
+  lists: {
+    planItems: ResponsePlanItems;
+    materialsToBuy: AssemblyLineGroups<ResponseMaterialBuy>;
+    bpcToCopy: ResponseLocationBucket<ResponseBlueprintCopy>[];
+    bpoToBuy: AssemblyLineGroups<ResponseBlueprintBuy>;
+    inventionJobs: ResponseLocationBucket<ResponseJob>[];
+    reactionJobs: ResponseLocationBucket<ResponseJobManufacturing>[];
+    manufacturingJobs: ResponseLocationBucket<ResponseJobManufacturing>[];
+    reprocessingJobs: ResponseLocationBucket<ResponseJobReprocessing>[];
+    haulingTasks: ResponseHaulBucket[];
+    skillsRequired: PlanSkillRequirement[];
   };
 };

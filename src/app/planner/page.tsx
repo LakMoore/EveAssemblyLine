@@ -7,8 +7,8 @@ import type {
   ClientPlanStockpile,
   PlanStockpileLocations,
   PlanResponse,
-  PlanResult,
   PlanStockItem,
+  ResponseHaulTask,
 } from "@/lib/planning/types";
 import { loadBuildList } from "@/lib/planning/buildListStore";
 import EveAuthorizationWarning from "@/components/EveAuthorizationWarning";
@@ -37,7 +37,7 @@ import {
   type ClientCorporationSource,
   type ClientJobsResponse,
 } from "@/lib/client/requestCache";
-import { loadPlanResult, savePlanResult } from "@/lib/planning/planResultStore";
+import { loadPlanResponse, savePlanResponse } from "@/lib/planning/planResultStore";
 import { createHaulItemExclusionKey, excludeHaulItemsFromStock } from "@/lib/planning/planView";
 import { loadHaulPatches, saveHaulPatches } from "@/lib/planning/haulPatchStore";
 import {
@@ -255,7 +255,7 @@ async function localizeItems(
         ? {
             ...item,
             name: localizedItem.name,
-            categoryName: localizedItem.marketCategory ?? "Unknown",
+            categoryName: localizedItem.assemblyLineGroup ?? "Unknown",
           }
         : item;
     });
@@ -378,7 +378,7 @@ function Planner() {
   });
 
   useEffect(() => {
-    void loadPlanResult().then((savedPlan) => {
+    void loadPlanResponse().then((savedPlan) => {
       if (savedPlan) {
         setPlan(savedPlan);
         setPlanStatus("Plan loaded from this browser");
@@ -699,7 +699,6 @@ function Planner() {
             assets: requestStock.map(
               ({ sourceLocationName: _sourceLocationName, ...item }) => item,
             ),
-            marketBuyOrderQuantities: clientAssets?.marketBuyOrderQuantities ?? {},
             facilityTimeMultipliers: {
               manufacturing: selectedManufacturingFacility?.manufacturingTimeMultiplier ?? 1,
               reactions: selectedReactionFacility?.reactionTimeMultiplier ?? 1,
@@ -736,7 +735,7 @@ function Planner() {
         return false;
       }
       const calculatedPlan = data as PlanResponse;
-      await savePlanResult(calculatedPlan);
+      await savePlanResponse(calculatedPlan);
       setPlan(calculatedPlan);
       await savePlannerLocations(locations);
       setPlanStatus("Plan updated just now");
@@ -795,11 +794,11 @@ function Planner() {
     }
   }
 
-  async function toggleHaulPatches(tasks: PlanResult["lists"]["haulingTasks"], patched: boolean) {
+  async function toggleHaulPatches(tasks: ResponseHaulTask[], patched: boolean) {
     const nextPatches = new Map(activeHaulPatches);
     const currentStock = getPlannerStock(clientAssets, includeStock, new Set(excludedLocationIds));
     for (const task of tasks) {
-      if (haulItemExclusion.has(createHaulItemExclusionKey(task.fromLocationId, task.itemTypeId))) {
+      if (haulItemExclusion.has(createHaulItemExclusionKey(task.fromLocationId, task.typeId))) {
         continue;
       }
       const taskPatches = createHaulPatchesForTask(task, currentStock, characterStatuses);
@@ -1821,6 +1820,7 @@ function Planner() {
         characterNamesById={characterNamesById}
         jobs={jobs}
         stock={stock}
+        marketBuyOrderQuantities={clientAssets?.marketBuyOrderQuantities}
         locations={locations}
         stockpiles={stockpiles}
         locationOptions={locationOptions}

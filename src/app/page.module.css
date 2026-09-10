@@ -1,3 +1,5 @@
+/* Actively reduce classes in this file, instead use tailwind in the components for structure and tokens from the theme for style */
+
 .shell .calculate {
   background: var(--action);
 }

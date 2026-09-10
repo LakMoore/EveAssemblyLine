@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isPlanResult } from "./planResultStore";
+import { isPlanResponse } from "./planResultStore";
 
 const planListNames = [
   "planItems",
@@ -18,10 +18,13 @@ const planListNames = [
 test("accepts a complete cached plan", () => {
   const plan = {
     metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
-    lists: Object.fromEntries(planListNames.map((name) => [name, []])),
+    lists: {
+      ...Object.fromEntries(planListNames.map((name) => [name, []])),
+      planItems: { all: [], byActivityLocation: [] },
+    },
   };
 
-  assert.equal(isPlanResult(plan), true);
+  assert.equal(isPlanResponse(plan), true);
 });
 
 test("rejects a cached plan with a missing output list", () => {
@@ -30,19 +33,22 @@ test("rejects a cached plan with a missing output list", () => {
     lists: Object.fromEntries(planListNames.slice(0, -1).map((name) => [name, []])),
   };
 
-  assert.equal(isPlanResult(plan), false);
+  assert.equal(isPlanResponse(plan), false);
 });
 
-test("rejects flat contextual output rows", () => {
+test("rejects legacy context output buckets", () => {
   const plan = {
     metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
     lists: {
       ...Object.fromEntries(planListNames.map((name) => [name, []])),
-      planItems: [{ stockpileId: "stockpile", items: [] }],
+      planItems: {
+        all: [{ context: { stockpileId: "stockpile" } }],
+        byActivityLocation: [],
+      },
     },
   };
 
-  assert.equal(isPlanResult(plan), false);
+  assert.equal(isPlanResponse(plan), false);
 });
 
 test("rejects haul buckets with legacy context", () => {
@@ -54,5 +60,50 @@ test("rejects haul buckets with legacy context", () => {
     },
   };
 
-  assert.equal(isPlanResult(plan), false);
+  assert.equal(isPlanResponse(plan), false);
+});
+
+test("accepts bucketed market purchase lists", () => {
+  const plan = {
+    metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
+    lists: {
+      ...Object.fromEntries(planListNames.map((name) => [name, []])),
+      planItems: { all: [], byActivityLocation: [] },
+      materialsToBuy: [
+        {
+          assemblyLineGroup: "Materials",
+          items: [
+            {
+              typeId: 34,
+              typeName: "Tritanium",
+              unitVolume: 0.01,
+              neededQuantity: 100,
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  assert.equal(isPlanResponse(plan), true);
+});
+
+test("rejects flat market purchase rows", () => {
+  const plan = {
+    metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
+    lists: {
+      ...Object.fromEntries(planListNames.map((name) => [name, []])),
+      planItems: { all: [], byActivityLocation: [] },
+      materialsToBuy: [
+        {
+          typeId: 34,
+          typeName: "Tritanium",
+          unitVolume: 0.01,
+          neededQuantity: 100,
+        },
+      ],
+    },
+  };
+
+  assert.equal(isPlanResponse(plan), false);
 });

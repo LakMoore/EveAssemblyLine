@@ -1,5 +1,10 @@
 import type { PlanningData } from "./planEngine";
-import type { PlanActivityLocations, PlanResult, PlanStockItem, PlannerRequest } from "./types";
+import type {
+  PlanActivityLocations,
+  PlanCalculation,
+  PlanStockItem,
+  PlannerRequest,
+} from "./types";
 import {
   getStockRootLocationId,
   isAvailableIndustryProductionOutput,
@@ -19,7 +24,7 @@ type CalculatePlanPass = (
   request: PlannerRequest,
   planningData: PlanningData,
   options?: { locations?: PlanActivityLocations },
-) => Promise<PlanResult>;
+) => Promise<PlanCalculation>;
 
 function activityLocations(stockpile: Stockpile): PlanActivityLocations {
   return {
@@ -62,45 +67,46 @@ function getOrdinaryStockByTypeId(stock: PlanStockItem[]) {
 
 function getInstallableInputQuantity(
   job:
-    | PlanResult["lists"]["manufacturingJobs"][number]
-    | PlanResult["lists"]["reactionJobs"][number],
+    | PlanCalculation["lists"]["manufacturingJobs"][number]
+    | PlanCalculation["lists"]["reactionJobs"][number],
   requiredQuantity: number,
   availableStockByTypeId: ReadonlyMap<number, number>,
 ) {
-  if (job.runs <= 0 || requiredQuantity <= 0) return 0;
+  if (job.countNeeded <= 0 || requiredQuantity <= 0) return 0;
   const materialInputs = job.inputs.materials.filter((input) => input.requiredQuantity > 0);
   const installableRuns = materialInputs.length
     ? Math.min(
-        job.runs,
+        job.countNeeded,
         ...materialInputs.map((input) =>
           Math.floor(
-            ((availableStockByTypeId.get(input.typeId) ?? 0) * job.runs) / input.requiredQuantity,
+            ((availableStockByTypeId.get(input.typeId) ?? 0) * job.countNeeded)
+              / input.requiredQuantity,
           ),
         ),
       )
-    : job.runs;
+    : job.countNeeded;
   if (installableRuns <= 0) return 0;
-  return Math.min(requiredQuantity, Math.ceil((requiredQuantity * installableRuns) / job.runs));
+  return Math.min(
+    requiredQuantity,
+    Math.ceil((requiredQuantity * installableRuns) / job.countNeeded),
+  );
 }
 
 /** Extracts the material and job-input demand used to reserve shared stock. */
 export function getPlanDemand(
-  result: PlanResult,
+  result: PlanCalculation,
   availableStockByTypeId = new Map<number, number>(),
 ): StockpileDemandResult {
   const demand = new Map<number, number>();
   const jobInputDemand = new Map<number, number>();
   const fullJobInputDemand = new Map<number, number>();
   for (const material of result.lists.materialsToBuy) {
-    demand.set(
-      material.typeId,
-      Math.max(
-        demand.get(material.typeId) ?? 0,
-        material.requiredQuantity,
-        material.quantity,
-        material.buyQuantity,
-      ),
+    const materialDemand = Math.max(
+      material.requiredQuantity,
+      material.quantity,
+      material.buyQuantity,
     );
+    demand.set(material.typeId, (demand.get(material.typeId) ?? 0) + materialDemand);
   }
   for (const job of [...result.lists.manufacturingJobs, ...result.lists.reactionJobs]) {
     for (const material of job.inputs.materials) {
@@ -163,7 +169,7 @@ export async function allocateStockpileStock(
       const result = await calculatePlanPass(
         {
           ...request,
-          stockpiles: undefined,
+          stockpiles: [],
           items: stockpile.items,
           stock: [],
           groupAssignments: stockpile.groupAssignments,
@@ -393,7 +399,7 @@ export async function allocateStockpileStock(
       calculatePlanPass(
         {
           ...request,
-          stockpiles: undefined,
+          stockpiles: [],
           items: stockpile.items,
           stock: ordinaryStockpileStock[stockpileIndex],
           reprocessingEfficiencies:
@@ -427,7 +433,7 @@ export async function allocateStockpileStock(
       const result = await calculatePlanPass(
         {
           ...request,
-          stockpiles: undefined,
+          stockpiles: [],
           items: stockpile.items,
           stock: correctedStockpileStock[stockpileIndex],
           reprocessingEfficiencies:
@@ -480,7 +486,7 @@ export async function allocateStockpileStock(
     const result = await calculatePlanPass(
       {
         ...request,
-        stockpiles: undefined,
+        stockpiles: [],
         items: stockpile.items,
         stock: finalSpecialStock[stockpileIndex],
         reprocessingEfficiencies:

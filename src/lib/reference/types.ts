@@ -7,7 +7,7 @@ export type TypeMetadata = {
   assembledVolume?: number;
   packagedVolume?: number;
   category?: "blueprint" | "reactionformula" | "item";
-  marketCategory?: string;
+  assemblyLineGroup?: string;
 };
 
 const metadataCache = new Map<string, Promise<TypeMetadata[]>>();

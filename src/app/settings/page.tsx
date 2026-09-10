@@ -505,7 +505,7 @@ function BuildBlacklistDialog({
         ...(item.category === "blueprint" || item.category === "reactionformula"
           ? { category: item.category }
           : {}),
-        ...(item.marketCategory ? { marketCategory: item.marketCategory } : {}),
+        ...(item.assemblyLineGroup ? { assemblyLineGroup: item.assemblyLineGroup } : {}),
       },
     ]);
   }
@@ -602,7 +602,7 @@ function BuildBlacklistDialog({
                 || item.category === "item"
                   ? { category: item.category }
                   : {}),
-                ...(item.marketCategory ? { marketCategory: item.marketCategory } : {}),
+                ...(item.assemblyLineGroup ? { assemblyLineGroup: item.assemblyLineGroup } : {}),
               })),
             )
           }
