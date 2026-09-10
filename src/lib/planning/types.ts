@@ -340,6 +340,8 @@ export interface ResponsePlanReaction extends ResponseMaterial {
   surplusQuantity: number;
   availableSourceCounts?: PlanSourceCountsByLocation;
   haulingQuantity: number;
+  bpoCount: number;
+  bposInUse: number;
 }
 
 export type ResponsePlanItem = ResponsePlanMaterial | ResponsePlanBlueprint | ResponsePlanReaction;
@@ -407,6 +409,8 @@ export type PlanCalculationBlueprint = PlanCalculationBase & {
 export type PlanCalculationReaction = PlanCalculationBase & {
   runsNeeded: number;
   availableQuantity: number;
+  bpoCount: number;
+  bposInUse: number;
 };
 
 export type PlanCalculationItem =

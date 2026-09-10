@@ -826,6 +826,8 @@ function mergeResponsePlanItems(
           ...existing,
           runsNeeded: existing.runsNeeded + entry.runsNeeded,
           availableQuantity: existing.availableQuantity + entry.availableQuantity,
+          bpoCount: existing.bpoCount + entry.bpoCount,
+          bposInUse: existing.bposInUse + entry.bposInUse,
           availableSourceCounts: mergeSourceCounts(existing.availableSourceCounts, sourceCounts),
         },
       );
@@ -916,7 +918,7 @@ function toResponsePlanItem(
       availableQuantity: entry.stockRuns,
       neededQuantity: Math.max(0, entry.neededQuantity - entry.stockRuns),
       surplusQuantity: Math.max(0, entry.stockRuns - entry.neededQuantity),
-      bpoCount: entry.bpoCount,
+      bpoCount: entry.bpoCount + (entry.bposInUse ?? 0),
       bposInUse: entry.bposInUse ?? 0,
       buildTime: entry.buildTime,
     };
@@ -926,6 +928,8 @@ function toResponsePlanItem(
     kind: "reaction",
     requiredQuantity: entry.runsNeeded,
     availableQuantity: entry.availableQuantity,
+    bpoCount: entry.bpoCount,
+    bposInUse: entry.bposInUse,
     neededQuantity: 0,
     surplusQuantity: 0,
   };
@@ -1517,13 +1521,25 @@ async function calculatePlanPass(
     (item) => item.category === "reactionformula",
   );
   const reactionFormulaStockByLocation = new Map<number, Map<number, number>>();
+  const reactionFormulaInUseByLocation = new Map<number, Map<number, number>>();
   for (const item of availableReactionFormulas) {
     const locationId = getStockRootLocationId(item);
     if (locationId === undefined) continue;
     const formulasAtLocation =
       reactionFormulaStockByLocation.get(locationId) ?? new Map<number, number>();
-    formulasAtLocation.set(item.typeId, (formulasAtLocation.get(item.typeId) ?? 0) + item.quantity);
-    reactionFormulaStockByLocation.set(locationId, formulasAtLocation);
+    if (!item.inUse) {
+      formulasAtLocation.set(
+        item.typeId,
+        (formulasAtLocation.get(item.typeId) ?? 0) + item.quantity,
+      );
+      reactionFormulaStockByLocation.set(locationId, formulasAtLocation);
+    }
+    if (item.inUse) {
+      const inUseAtLocation =
+        reactionFormulaInUseByLocation.get(locationId) ?? new Map<number, number>();
+      inUseAtLocation.set(item.typeId, (inUseAtLocation.get(item.typeId) ?? 0) + item.quantity);
+      reactionFormulaInUseByLocation.set(locationId, inUseAtLocation);
+    }
   }
   function getLocationQuantity(
     stock: Map<number, Map<number, number>>,
@@ -1590,9 +1606,7 @@ async function calculatePlanPass(
     const copyStock = blueprintCopyStock.get(blueprint._key);
     const availableBlueprintQuantity =
       activity === "reaction"
-        ? getLocationQuantity(reactionFormulaStockByLocation, locationId, blueprint._key) > 0
-          ? 1
-          : 0
+        ? getLocationQuantity(reactionFormulaStockByLocation, locationId, blueprint._key)
         : bpoCount > 0
           ? bpoCount
           : (copyStock?.runs ?? 0);
@@ -2137,11 +2151,16 @@ async function calculatePlanPass(
           },
         );
         const existingFormula = reactionFormulas.get(blueprint._key);
-        const formulaCount =
-          getLocationQuantity(reactionFormulaStockByLocation, activityLocationId, blueprint._key)
-          > 0
-            ? 1
-            : 0;
+        const formulaCount = getLocationQuantity(
+          reactionFormulaStockByLocation,
+          activityLocationId,
+          blueprint._key,
+        );
+        const formulaInUseCount = getLocationQuantity(
+          reactionFormulaInUseByLocation,
+          activityLocationId,
+          blueprint._key,
+        );
         reactionFormulas.set(
           blueprint._key,
           {
@@ -2156,6 +2175,8 @@ async function calculatePlanPass(
                 ? existingFormula.runsNeeded
                 : 0) + runsNeeded,
             availableQuantity: formulaCount,
+            bpoCount: formulaCount + formulaInUseCount,
+            bposInUse: formulaInUseCount,
             activityLocationId,
           },
         );
@@ -2891,12 +2912,15 @@ function mergeManufacturingJobs(entries: PlanCalculation["lists"]["manufacturing
 function mergeReactionJobInputs(entries: PlanJobInputs[]): PlanJobInputs {
   const merged = mergePlanJobInputs(entries);
   const blueprint = entries[0].blueprint;
-  const availableQuantity = entries.some((entry) => entry.blueprint.availableQuantity > 0) ? 1 : 0;
+  const availableQuantity = entries.reduce(
+    (total, entry) => total + entry.blueprint.availableQuantity,
+    0,
+  );
   const mergedBlueprint: PlanJobInput = {
     ...blueprint,
     availableQuantity,
     requiredQuantity: 1,
-    completionPercent: availableQuantity * 100,
+    completionPercent: Math.min(100, availableQuantity * 100),
     status: availableQuantity > 0 ? "ready" : "blocked",
   };
   return summarizePlanJobInputs(mergedBlueprint, merged.materials);

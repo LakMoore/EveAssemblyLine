@@ -41,6 +41,7 @@ import {
   type ClientCharacterStatus,
 } from "@/lib/client/requestCache";
 import styles from "../page.module.css";
+import { Label } from "@/components/ui/label";
 
 type Character = ClientCharacter;
 
@@ -716,7 +717,7 @@ export default function CharactersPage() {
                       </span>
                     </button>
                     <div className="flex min-w-44 flex-col items-end gap-2">
-                      Label className="flex items-center gap-2 text-xs">
+                      <Label className="flex items-center gap-2 text-xs">
                         <span>On Deployment</span>
                         <Switch
                           checked={character.onDeployment}
@@ -726,11 +727,11 @@ export default function CharactersPage() {
                           }}
                           aria-label={`On Deployment for ${character.characterName}`}
                         />
-                      </label>
+                      </Label>
                       {character.corpRefreshOptInEnabled
                         && character.hasDirectorRole
                         && character.canManageCorpRefreshOptIn && (
-                          Label className="flex items-center gap-2 text-xs">
+                          <Label className="flex items-center gap-2 text-xs">
                             <span>Corp refresh opt-in</span>
                             <Switch
                               checked={character.allowCorpRefreshOptIn}
@@ -740,7 +741,7 @@ export default function CharactersPage() {
                               }}
                               aria-label={`Allow ${character.characterName} corporation refresh opt-in`}
                             />
-                          </label>
+                          </Label>
                         )}
                       <span className={styles.characterActions}>
                         {hasAuthorizationError && !isRefreshing && (
@@ -1093,7 +1094,7 @@ export default function CharactersPage() {
                         {corporation.pilots.map((pilot) => pilot.characterName).join(" · ")}
                       </small>
                     </button>
-                    Label className="flex shrink-0 items-center gap-2 text-xs">
+                    <Label className="flex shrink-0 items-center gap-2 text-xs">
                       <span>Include in Refresh</span>
                       <Switch
                         checked={
@@ -1107,7 +1108,7 @@ export default function CharactersPage() {
                         }}
                         aria-label={`Include ${corporation.corporationName ?? `corporation ${corporation.corporationId}`} in refresh`}
                       />
-                    </label>
+                    </Label>
                   </div>
                   <ItemGroup className="grid w-full grid-cols-[repeat(auto-fit,minmax(6rem,1fr))] gap-3">
                     {(["assets", "blueprints", "structures", "jobs", "orders"] as const).map(

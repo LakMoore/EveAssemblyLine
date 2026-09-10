@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Fragment, type RefObject, useEffect, useRef, useState } from "react";
+import { Fragment, Suspense, type RefObject, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type {
   ClientPlanStockpile,
@@ -561,7 +561,15 @@ function getManufacturingSummary(
 }
 
 /** Renders the planner output header, bug-report dialog, and every output tab. */
-export default function PlannerResults({
+export default function PlannerResults(props: React.ComponentProps<typeof PlannerResultsContent>) {
+  return (
+    <Suspense fallback={null}>
+      <PlannerResultsContent {...props} />
+    </Suspense>
+  );
+}
+
+function PlannerResultsContent({
   language,
   plan,
   planStatus,

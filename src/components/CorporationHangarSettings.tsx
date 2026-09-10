@@ -41,6 +41,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { CheckCheck, ListX } from "lucide-react";
 import styles from "@/app/page.module.css";
+import { Label } from "./ui/label";
 
 type CorporationSourceGroup = {
   rootLocationId: number;
@@ -589,7 +590,7 @@ export default function CorporationHangarSettings() {
                                     : "No access"}
                               </span>
                             </div>
-                            Label className="flex shrink-0 items-center gap-2 text-xs">
+                            <Label className="flex shrink-0 items-center gap-2 text-xs">
                               <span>Direct hangar contents</span>
                               {savingSourceKey === directKey ? (
                                 <span className="inline-flex h-[18px] w-8 items-center justify-center">
@@ -607,7 +608,7 @@ export default function CorporationHangarSettings() {
                                   aria-label={`Select direct contents for ${source.label}`}
                                 />
                               )}
-                            </label>
+                            </Label>
                           </div>
                           {source.containers.length > 0 && (
                             <div className="flex flex-col gap-2 border-l border-border pl-4">
@@ -617,7 +618,7 @@ export default function CorporationHangarSettings() {
                               {source.containers.map((container) => {
                                 const containerKey = `${source.corporationId}:${source.rootLocationId}:${source.locationFlag}:container:${container.itemId}`;
                                 return (
-                                  Label
+                                  <Label
                                     className="flex min-w-0 items-center justify-between gap-3 text-sm"
                                     key={container.itemId}
                                   >
@@ -644,7 +645,7 @@ export default function CorporationHangarSettings() {
                                         aria-label={`Select ${container.name ?? `container ${container.itemId}`}`}
                                       />
                                     )}
-                                  </label>
+                                  </Label>
                                 );
                               })}
                             </div>

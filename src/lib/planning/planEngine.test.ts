@@ -1832,6 +1832,89 @@ test("uses reaction formulas held at a stockpile's reaction location", async () 
   );
 });
 
+test("reports total and in-use reaction formulas without collapsing availability", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      20,
+      [
+        {
+          typeId: reactionFormulaTypeId,
+          name: "Reaction Formula",
+          quantity: 28,
+          category: "reactionformula",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: reactionFormulaTypeId,
+          name: "Reaction Formula",
+          quantity: 54,
+          category: "reactionformula",
+          rootLocationId: alternateSourceLocationId,
+          inUse: true,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: reactionProductTypeId,
+            name: "Reaction Product",
+            quantity: 20,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        stockpiles: [
+          {
+            id: "reaction-counts",
+            name: "Reaction counts",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: alternateSourceLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: reactionProductTypeId,
+                name: "Reaction Product",
+                quantity: 20,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const reactionFormula = result.lists.planItems.find(
+    (entry) => entry.kind === "reaction" && entry.typeId === reactionFormulaTypeId,
+  );
+  const reactionJob = result.lists.reactionJobs.find(
+    (entry) => entry.typeId === reactionFormulaTypeId,
+  );
+
+  assert(reactionFormula && reactionFormula.kind === "reaction");
+  assert(reactionJob);
+  assert.equal(reactionFormula.availableQuantity, 28);
+  assert.equal(reactionFormula.bpoCount, 82);
+  assert.equal(reactionFormula.bposInUse, 54);
+  assert.equal(reactionJob.inputs.blueprint.availableQuantity, 28);
+
+  const response = await toPlanResponse(result);
+  const responseFormula = response.lists.planItems.all.find(
+    (entry) => entry.kind === "reaction" && entry.typeId === reactionFormulaTypeId,
+  );
+  assert(responseFormula && responseFormula.kind === "reaction");
+  assert.equal(responseFormula.availableQuantity, 28);
+  assert.equal(responseFormula.bpoCount, 82);
+  assert.equal(responseFormula.bposInUse, 54);
+});
+
 test("uses BPC runs held at a stockpile's manufacturing location", async () => {
   const result = await calculatePlanCalculation(
     request(
@@ -4814,7 +4897,7 @@ test("allocates reaction formulas at the reaction location to stockpile jobs", a
     (job) => job.typeId === reactionFormulaTypeId && job.locationId === manufacturingLocationId,
   );
   assert(reactionJob);
-  assert.equal(reactionJob.inputs.blueprint.availableQuantity, 1);
+  assert.equal(reactionJob.inputs.blueprint.availableQuantity, 2);
   assert.equal(reactionJob.inputs.blueprint.requiredQuantity, 1);
   const reactionPlanItem = result.lists.planItems.find(
     (entry) => entry.kind === "reaction" && entry.typeId === reactionFormulaTypeId,

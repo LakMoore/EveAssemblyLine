@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import styles from "./imagechecker.module.css";
+import { Label } from "@/components/ui/label";
 
 const variations = ["icon", "render", "bp", "bpc", "relic"] as const;
 type Variation = (typeof variations)[number];
@@ -142,7 +143,7 @@ export default function ImageCheckerPage() {
         >
           ←
         </Button>
-        Label className={styles.startField}>
+        <Label className={styles.startField}>
           <span>FIRST TYPE ID</span>
           <Input
             aria-label="First type ID"
@@ -153,7 +154,7 @@ export default function ImageCheckerPage() {
             value={startTypeId}
             onChange={(event) => setStartTypeId(event.target.value)}
           />
-        </label>
+        </Label>
         <Button type="submit" className={styles.loadButton} disabled={isLoading}>
           Load batch
         </Button>
