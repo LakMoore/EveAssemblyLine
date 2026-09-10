@@ -35,7 +35,55 @@ test("excludes every quantity from an excluded source and type", () => {
   ];
   const exclusions = new Map([[createHaulItemExclusionKey(60003760, 62553), 1055354926818]]);
 
-  assert.deepEqual(excludeHaulItemsFromStock(stock, exclusions), []);
+  assert.deepEqual(
+    excludeHaulItemsFromStock(
+      stock,
+      new Map([
+        [
+          createHaulItemExclusionKey(60003760, 62553),
+          {
+            destinationLocationId: 1055354926818,
+            neededQuantity: 500,
+            originalSourceQuantity: 120430,
+            retainedSourceQuantity: 0,
+          },
+        ],
+      ]),
+    ),
+    [],
+  );
+});
+
+test("retains local source stock while excluding a remote surplus haul", () => {
+  const key = createHaulItemExclusionKey(60003760, 62553, "corporation", 7);
+  const result = excludeHaulItemsFromStock(
+    [
+      {
+        typeId: 62553,
+        name: "Compressed Gneiss II-Grade",
+        quantity: 120430,
+        rootLocationId: 60003760,
+        category: "item",
+        ownerType: "corporation",
+        ownerId: 7,
+      },
+    ],
+    new Map([
+      [
+        key,
+        {
+          destinationLocationId: 1055354926818,
+          neededQuantity: 500,
+          originalSourceQuantity: 120430,
+          retainedSourceQuantity: 100000,
+          ownerType: "corporation",
+          ownerId: 7,
+        },
+      ],
+    ]),
+  );
+
+  assert.equal(result[0].quantity, 100000);
 });
 
 test("splits reaction runs across floor and ceiling allocations", () => {

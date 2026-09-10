@@ -13,6 +13,7 @@ import { categorizeType } from "@/lib/reference/category";
 import { AssemblyLineGroups } from "@/lib/reference/assemblyLineGroups";
 import { getProductionGroupReferences, productionGroupForType } from "./productionGroups";
 import {
+  PlanBuildItem,
   PlanJobInput,
   PlanJobInputs,
   PlanJobInputStatus,
@@ -765,11 +766,13 @@ function mergeResponsePlanItems(
   activityLocationId?: number,
 ): PlanCalculation["lists"]["planItems"] {
   const merged = new Map<string, PlanCalculation["lists"]["planItems"][number]>();
+  const sourceLocationByKey = new Map<string, number | undefined>();
   const mergeSourceCounts =
     activityLocationId === undefined ? mergePlanSourceCountsByMaximum : mergePlanSourceCounts;
   for (const entry of entries) {
     const sourceCounts = sourceCountsForLocation(entry.availableSourceCounts, activityLocationId);
     const key = `${entry.kind}:${entry.typeId}`;
+    const sourceLocationId = entry.stockpileLocationId ?? entry.activityLocationId;
     const existing = merged.get(key);
     if (!existing) {
       merged.set(
@@ -780,6 +783,7 @@ function mergeResponsePlanItems(
           availableSourceCounts: sourceCounts,
         },
       );
+      sourceLocationByKey.set(key, sourceLocationId);
       continue;
     }
     if (entry.kind === "material" && existing.kind === "material") {
@@ -820,17 +824,25 @@ function mergeResponsePlanItems(
       );
     }
     else if (entry.kind === "reaction" && existing.kind === "reaction") {
+      const sameSourceLocation = sourceLocationByKey.get(key) === sourceLocationId;
       merged.set(
         key,
         {
           ...existing,
           runsNeeded: existing.runsNeeded + entry.runsNeeded,
-          availableQuantity: existing.availableQuantity + entry.availableQuantity,
-          bpoCount: existing.bpoCount + entry.bpoCount,
-          bposInUse: existing.bposInUse + entry.bposInUse,
+          availableQuantity: sameSourceLocation
+            ? Math.max(existing.availableQuantity, entry.availableQuantity)
+            : existing.availableQuantity + entry.availableQuantity,
+          bpoCount: sameSourceLocation
+            ? Math.max(existing.bpoCount, entry.bpoCount)
+            : existing.bpoCount + entry.bpoCount,
+          bposInUse: sameSourceLocation
+            ? Math.max(existing.bposInUse, entry.bposInUse)
+            : existing.bposInUse + entry.bposInUse,
           availableSourceCounts: mergeSourceCounts(existing.availableSourceCounts, sourceCounts),
         },
       );
+      if (!sameSourceLocation) sourceLocationByKey.set(key, undefined);
     }
   }
   return [...merged.values()];
@@ -937,6 +949,7 @@ function toResponsePlanItem(
 
 /** Configures final-product hauling for a planning pass. */
 type PlanPassOptions = {
+  blockedInputStock?: PlanStockItem[];
   finalProductLocations?: Map<number, number>;
   locations?: PlanActivityLocations;
   reprocessing?: ReprocessingAllocation;
@@ -1015,6 +1028,7 @@ async function calculatePlanPass(
   options: PlanPassOptions = {},
 ): Promise<PlanCalculation> {
   const {
+    blockedInputStock,
     finalProductLocations,
     locations,
     reprocessing,
@@ -2343,6 +2357,48 @@ async function calculatePlanPass(
     }
   }
 
+  if (blockedInputStock) {
+    for (const sourceItem of blockedInputStock) {
+      let remainingQuantity = sourceItem.quantity;
+      const sourceLocationId = getStockRootLocationId(sourceItem);
+      if (remainingQuantity <= 0 || sourceLocationId === undefined) continue;
+      const destinationMaterials = [...materials.values()].filter(
+        (material) =>
+          material.typeId === sourceItem.typeId
+          && material.buyQuantity > 0
+          && material.activityLocationId !== undefined,
+      );
+      for (const material of destinationMaterials) {
+        if (remainingQuantity <= 0) break;
+        const hauledQuantity = remainingQuantity;
+        const creditedQuantity = Math.min(remainingQuantity, material.buyQuantity);
+        const destinationLocationId = material.activityLocationId!;
+        const sourceLot: StockLot = {
+          typeId: sourceItem.typeId,
+          quantity: hauledQuantity,
+          rootLocationId: sourceLocationId,
+          ownerType: sourceItem.ownerType,
+          ownerId: sourceItem.ownerId,
+          industryJobOutput: isIndustryProductionOutput(sourceItem),
+          volumePerUnit: sourceItem.isPackaged
+            ? (
+                typeRecords.get(sourceItem.typeId)?.packagedVolume
+                ?? typeRecords.get(sourceItem.typeId)?.volume
+                ?? 0
+              )
+            : (typeRecords.get(sourceItem.typeId)?.volume ?? 0),
+          sourceItem,
+        };
+        addHauling(sourceLot, hauledQuantity, destinationLocationId);
+        material.quantity = Math.max(0, material.quantity - creditedQuantity);
+        material.stockQuantity += creditedQuantity;
+        material.availableStockQuantity += creditedQuantity;
+        material.buyQuantity = Math.max(0, material.buyQuantity - creditedQuantity);
+        remainingQuantity -= hauledQuantity;
+      }
+    }
+  }
+
   const resolvedName = (typeId: number) => {
     const name = typeRecords.get(typeId)?.name;
     return name?.[language] ?? name?.en ?? fallbackByTypeId.get(typeId) ?? `Type ${typeId}`;
@@ -2506,7 +2562,7 @@ async function calculateStockpilePlan(
   const futureStockIndexes = new Set(
     futureCompressedMaterialStock.map((_, index) => request.stock.length + index),
   );
-  const stockpileStock = await allocateStockpileStock(
+  const stockpileAllocation = await allocateStockpileStock(
     planningRequest,
     stockpiles,
     planningData,
@@ -2524,18 +2580,25 @@ async function calculateStockpilePlan(
         ...planningRequest,
         stockpiles: [],
         items: stockpile.items,
-        stock: stockpileStock[stockpileIndex],
+        stock: stockpileAllocation.stockpileStock[stockpileIndex],
         reprocessingEfficiencies:
           stockpile.reprocessingEfficiencies ?? request.reprocessingEfficiencies,
         groupAssignments: stockpile.groupAssignments,
       },
       locations,
       planningData,
-      { finalProductLocations },
+      {
+        blockedInputStock: stockpileAllocation.blockedInputStock[stockpileIndex],
+        finalProductLocations,
+      },
     );
     stockpileResults.push(result);
   }
-  return mergeStockpileResults(stockpileResults, request.stock, request);
+  const mergedResult = mergeStockpileResults(stockpileResults, request.stock, request);
+  return restorePlanResourceCounts(
+    restorePlanStockQuantities(mergedResult, request.stock, request.items),
+    request.stock,
+  );
 }
 
 function mergeHaulingTasks(tasks: PlanCalculation["lists"]["haulingTasks"]) {
@@ -2611,6 +2674,125 @@ function capHaulingTasksToLocalStockpileSurplus(
       return cappedTask;
     })
     .filter((task) => task.neededQuantity > 0);
+}
+
+function countPlanBlueprints(
+  stock: PlanStockItem[],
+  typeId: number,
+  locationId: number,
+): { total: number; available: number; inUse: number } {
+  let total = 0;
+  let inUse = 0;
+  for (const item of stock) {
+    if (
+      item.category !== "blueprint"
+      || item.typeId !== typeId
+      || getStockRootLocationId(item) !== locationId
+    ) continue;
+    const bpoCount =
+      item.blueprintType === "bpo"
+        ? item.quantity
+        : (item.blueprintPrints?.filter((print) => print.type === "bpo").length ?? 0);
+    total += bpoCount;
+    if (item.inUse) inUse += bpoCount;
+  }
+  return { total, available: Math.max(0, total - inUse), inUse };
+}
+
+function countPlanReactionFormulas(
+  stock: PlanStockItem[],
+  typeId: number,
+  locationId: number,
+): { total: number; available: number; inUse: number } {
+  let total = 0;
+  let inUse = 0;
+  for (const item of stock) {
+    if (
+      item.category !== "reactionformula"
+      || item.typeId !== typeId
+      || getStockRootLocationId(item) !== locationId
+    ) continue;
+    total += item.quantity;
+    if (item.inUse) inUse += item.quantity;
+  }
+  return { total, available: Math.max(0, total - inUse), inUse };
+}
+
+function restorePlanStockQuantities(
+  result: PlanCalculation,
+  stock: PlanStockItem[],
+  buildItems: PlanBuildItem[],
+): PlanCalculation {
+  const buildTypeIds = new Set(buildItems.map((item) => item.typeId));
+  const availableStockQuantitiesByLocationAndType = new Map<string, number>();
+  const availableStockQuantitiesByType = new Map<number, number>();
+  for (const item of stock) {
+    if (
+      item.category !== "item"
+      || !isAvailableIndustryProductionOutput(item)
+      || (item.source === "marketOrder" && !buildTypeIds.has(item.typeId))
+    ) continue;
+    const locationId = getStockRootLocationId(item);
+    const locationKey = locationTypeKey(locationId, item.typeId);
+    availableStockQuantitiesByLocationAndType.set(
+      locationKey,
+      (availableStockQuantitiesByLocationAndType.get(locationKey) ?? 0) + item.quantity,
+    );
+    availableStockQuantitiesByType.set(
+      item.typeId,
+      (availableStockQuantitiesByType.get(item.typeId) ?? 0) + item.quantity,
+    );
+  }
+  for (const [key, quantity] of result.availableStockQuantitiesByLocationAndType ?? []) {
+    availableStockQuantitiesByLocationAndType.set(
+      key,
+      Math.max(availableStockQuantitiesByLocationAndType.get(key) ?? 0, quantity),
+    );
+  }
+  for (const [typeId, quantity] of result.availableStockQuantitiesByType ?? []) {
+    availableStockQuantitiesByType.set(
+      typeId,
+      Math.max(availableStockQuantitiesByType.get(typeId) ?? 0, quantity),
+    );
+  }
+  return {
+    ...result,
+    availableStockQuantitiesByLocationAndType,
+    availableStockQuantitiesByType,
+  };
+}
+
+function restorePlanResourceCounts(
+  result: PlanCalculation,
+  stock: PlanStockItem[],
+): PlanCalculation {
+  return {
+    ...result,
+    lists: {
+      ...result.lists,
+      planItems: result.lists.planItems.map((entry) => {
+        if (entry.activityLocationId === undefined) return entry;
+        if (entry.kind === "bpc") {
+          const counts = countPlanBlueprints(stock, entry.typeId, entry.activityLocationId);
+          return counts.total > 0
+            ? { ...entry, bpoCount: counts.available, bposInUse: counts.inUse }
+            : entry;
+        }
+        if (entry.kind === "reaction") {
+          const counts = countPlanReactionFormulas(stock, entry.typeId, entry.activityLocationId);
+          return counts.total > 0
+            ? {
+                ...entry,
+                availableQuantity: counts.available,
+                bpoCount: counts.total,
+                bposInUse: counts.inUse,
+              }
+            : entry;
+        }
+        return entry;
+      }),
+    },
+  };
 }
 
 /** Merge stockpile BPC requirements before calculating the shared shortage. */

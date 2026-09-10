@@ -38,7 +38,12 @@ import {
   type ClientJobsResponse,
 } from "@/lib/client/requestCache";
 import { loadPlanResponse, savePlanResponse } from "@/lib/planning/planResultStore";
-import { createHaulItemExclusionKey, excludeHaulItemsFromStock } from "@/lib/planning/planView";
+import {
+  createHaulItemExclusionKey,
+  excludeHaulItemsFromStock,
+  restoreExcludedHaulStockInPlan,
+  type HaulItemExclusion,
+} from "@/lib/planning/planView";
 import { loadHaulPatches, saveHaulPatches } from "@/lib/planning/haulPatchStore";
 import {
   applyHaulPatches,
@@ -172,10 +177,51 @@ function getPlannerStock(
   });
 }
 
+function getHaulSourceStock(stock: PlanStockItem[], task: ResponseHaulTask) {
+  return stock.filter(
+    (item) =>
+      item.typeId === task.typeId
+      && getStockLocationId(item) === task.fromLocationId
+      && item.category !== "blueprint"
+      && item.category !== "reactionformula"
+      && (
+        task.ownerType === undefined
+        || (item.ownerType === task.ownerType && item.ownerId === task.ownerId)
+      ),
+  );
+}
+
+function getRequiredSourceQuantity(plan: PlanResponse | null, task: ResponseHaulTask) {
+  const entries = plan?.lists.planItems.byActivityLocation
+    .filter((bucket) => bucket.locationId === task.fromLocationId)
+    .flatMap((bucket) => bucket.items)
+    .filter((entry) => entry.typeId === task.typeId);
+  if (!entries || entries.length === 0) return undefined;
+  return entries.reduce((total, entry) => total + entry.requiredQuantity, 0);
+}
+
+function getSingleStockOwner(stock: PlanStockItem[]) {
+  const owners = new Map<string, { ownerType: "character" | "corporation"; ownerId: number }>();
+  for (const item of stock) {
+    if (
+      (item.ownerType !== "character" && item.ownerType !== "corporation")
+      || item.ownerId === undefined
+    ) continue;
+    owners.set(
+      `${item.ownerType}:${item.ownerId}`,
+      {
+        ownerType: item.ownerType,
+        ownerId: item.ownerId,
+      },
+    );
+  }
+  return owners.size === 1 ? owners.values().next().value : undefined;
+}
+
 function retainCurrentHaulItemExclusions(
   assets: ClientAssetsResponse,
-  exclusions: ReadonlyMap<string, number>,
-): Map<string, number> {
+  exclusions: HaulItemExclusion,
+): HaulItemExclusion {
   const receivedAssets = assets.assets ?? [];
   if (receivedAssets.length === 0 || exclusions.size === 0) {
     return new Map(exclusions);
@@ -184,7 +230,19 @@ function retainCurrentHaulItemExclusions(
     receivedAssets.flatMap((item) =>
       item.rootLocationId === undefined
         ? []
-        : [createHaulItemExclusionKey(item.rootLocationId, item.typeId)],
+        : [
+            createHaulItemExclusionKey(item.rootLocationId, item.typeId),
+            ...(item.ownerType !== undefined && item.ownerId !== undefined
+              ? [
+                  createHaulItemExclusionKey(
+                    item.rootLocationId,
+                    item.typeId,
+                    item.ownerType,
+                    item.ownerId,
+                  ),
+                ]
+              : []),
+          ],
     ),
   );
   return new Map([...exclusions].filter(([key]) => assetKeys.has(key)));
@@ -361,7 +419,7 @@ function Planner() {
     ProductionGroupReference[]
   >([]);
   const [includeStock, setIncludeStock] = useState(true);
-  const [haulItemExclusion, setHaulItemExclusion] = useState<Map<string, number>>(() => new Map());
+  const [haulItemExclusion, setHaulItemExclusion] = useState<HaulItemExclusion>(() => new Map());
   const [haulPatches, setHaulPatches] = useState<Map<string, HaulPatch>>(() => new Map());
   const [haulPatchesLoaded, setHaulPatchesLoaded] = useState(false);
   const [corporationSources, setCorporationSources] = useState<ClientCorporationSource[]>([]);
@@ -633,7 +691,7 @@ function Planner() {
 
   async function submitPlan(
     exclusions: Set<number>,
-    itemExclusions: ReadonlyMap<string, number> = haulItemExclusion,
+    itemExclusions: HaulItemExclusion = haulItemExclusion,
     patches: ReadonlyMap<string, HaulPatch> = activeHaulPatches,
   ): Promise<boolean> {
     const plannerItems = stockpiles.flatMap((stockpile) => stockpile.items);
@@ -734,7 +792,7 @@ function Planner() {
         setPlanStatus("error" in data && data.error ? data.error : "Could not calculate plan");
         return false;
       }
-      const calculatedPlan = data as PlanResponse;
+      const calculatedPlan = restoreExcludedHaulStockInPlan(data as PlanResponse, itemExclusions);
       await savePlanResponse(calculatedPlan);
       setPlan(calculatedPlan);
       await savePlannerLocations(locations);
@@ -787,7 +845,52 @@ function Planner() {
     excluded: boolean,
   ) {
     const nextExclusions = new Map(haulItemExclusion);
-    if (excluded) nextExclusions.set(key, destinationLocationId);
+    if (excluded) {
+      const task = plan?.lists.haulingTasks
+        .flatMap((bucket) =>
+          bucket.items.map((item) => ({
+            ...item,
+            fromLocationId: bucket.fromLocationId,
+            toLocationId: bucket.toLocationId,
+            ...(bucket.ownerType ? { ownerType: bucket.ownerType } : {}),
+            ...(bucket.ownerId !== undefined ? { ownerId: bucket.ownerId } : {}),
+          })),
+        )
+        .find(
+          (entry) =>
+            createHaulItemExclusionKey(
+              entry.fromLocationId,
+              entry.typeId,
+              entry.ownerType,
+              entry.ownerId,
+            ) === key,
+        );
+      if (!task) return;
+      const sourceStock = getHaulSourceStock(
+        getPlannerStock(clientAssets, includeStock, new Set(excludedLocationIds)),
+        task,
+      );
+      const originalSourceQuantity = sourceStock.reduce((total, item) => total + item.quantity, 0);
+      const requiredSourceQuantity = getRequiredSourceQuantity(plan, task);
+      const retainedSourceQuantity =
+        requiredSourceQuantity === undefined
+          ? originalSourceQuantity
+          : Math.min(originalSourceQuantity, requiredSourceQuantity);
+      const owner =
+        task.ownerType && task.ownerId !== undefined
+          ? { ownerType: task.ownerType, ownerId: task.ownerId }
+          : getSingleStockOwner(sourceStock);
+      nextExclusions.set(
+        key,
+        {
+          destinationLocationId,
+          neededQuantity: task.neededQuantity,
+          originalSourceQuantity,
+          retainedSourceQuantity,
+          ...owner,
+        },
+      );
+    }
     else nextExclusions.delete(key);
     if (await submitPlan(new Set(excludedLocationIds), nextExclusions)) {
       setHaulItemExclusion(nextExclusions);

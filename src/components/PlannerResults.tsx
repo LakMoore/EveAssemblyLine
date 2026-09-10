@@ -205,7 +205,10 @@ function getStockLocationId(item: PlanStockItem) {
 type PublicHaulTask = ResponseHaulTask;
 
 function haulTaskKey(task: PublicHaulTask) {
-  return createHaulItemExclusionKey(task.fromLocationId, task.typeId);
+  if ("exclusionKey" in task && typeof task.exclusionKey === "string") {
+    return task.exclusionKey;
+  }
+  return createHaulItemExclusionKey(task.fromLocationId, task.typeId, task.ownerType, task.ownerId);
 }
 function flattenHaulBuckets(buckets: PlanResponse["lists"]["haulingTasks"]): PublicHaulTask[] {
   return buckets.flatMap((bucket) =>
@@ -238,25 +241,36 @@ type HaulStockItem = PlanStockItem & {
 
 type DisplayHaulTask = PublicHaulTask & {
   completed?: boolean;
+  exclusionKey?: string;
 };
 
 function haulTaskRenderKey(task: DisplayHaulTask) {
-  return `${task.fromLocationId}:${task.toLocationId}:${task.typeId}:${task.completed ? "completed" : "pending"}`;
+  return `${task.fromLocationId}:${task.toLocationId}:${task.typeId}:${task.ownerType ?? "unassigned"}:${task.ownerId ?? 0}:${task.completed ? "completed" : "pending"}`;
 }
 
 function getHaulTasksWithExclusions(
   tasks: PublicHaulTask[],
   stock: HaulStockItem[],
   exclusions: HaulItemExclusion,
-): PublicHaulTask[] {
+): DisplayHaulTask[] {
   const tasksByKey = new Map(tasks.map((task) => [haulTaskKey(task), task]));
-  const displayedTasks = tasks.filter((task) => !exclusions.has(haulTaskKey(task)));
+  const displayedTasks: DisplayHaulTask[] = tasks.filter(
+    (task) => !exclusions.has(haulTaskKey(task)),
+  );
   for (const [key, destinationLocationId] of exclusions) {
     const parsedKey = parseHaulItemExclusionKey(key);
     if (!parsedKey) continue;
+    const exclusion = destinationLocationId;
     const existingTask = tasksByKey.get(key);
     if (existingTask) {
-      displayedTasks.push({ ...existingTask, toLocationId: destinationLocationId });
+      displayedTasks.push({
+        ...existingTask,
+        toLocationId: exclusion.destinationLocationId,
+        neededQuantity: exclusion.neededQuantity,
+        exclusionKey: key,
+        ...(exclusion.ownerType ? { ownerType: exclusion.ownerType } : {}),
+        ...(exclusion.ownerId !== undefined ? { ownerId: exclusion.ownerId } : {}),
+      });
       continue;
     }
     const matchingStockItems = stock.filter(
@@ -264,7 +278,11 @@ function getHaulTasksWithExclusions(
         item.rootLocationId === parsedKey.sourceRootLocationId
         && item.typeId === parsedKey.itemTypeId
         && item.category !== "blueprint"
-        && item.category !== "reactionformula",
+        && item.category !== "reactionformula"
+        && (
+          parsedKey.ownerType === undefined
+          || (item.ownerType === parsedKey.ownerType && item.ownerId === parsedKey.ownerId)
+        ),
     );
     const stockItem = matchingStockItems.at(0);
     const quantity = matchingStockItems.reduce((total, item) => total + item.quantity, 0);
@@ -277,13 +295,19 @@ function getHaulTasksWithExclusions(
       },
       0,
     );
+    const owner =
+      exclusion.ownerType && exclusion.ownerId !== undefined
+        ? { ownerType: exclusion.ownerType, ownerId: exclusion.ownerId }
+        : {};
     displayedTasks.push({
       typeId: parsedKey.itemTypeId,
       typeName: stockItem?.name ?? `Type ${parsedKey.itemTypeId}`,
       unitVolume: quantity > 0 ? volume / quantity : 0,
-      neededQuantity: quantity,
+      neededQuantity: exclusion.neededQuantity,
       fromLocationId: parsedKey.sourceRootLocationId,
-      toLocationId: destinationLocationId,
+      toLocationId: exclusion.destinationLocationId,
+      exclusionKey: key,
+      ...owner,
     });
   }
   return displayedTasks;
@@ -296,7 +320,10 @@ function getHaulTasksWithPatches(
 ): DisplayHaulTask[] {
   const displayedTasks: DisplayHaulTask[] = [...tasks];
   const liveTaskKeys = new Set(
-    tasks.map((task) => `${task.fromLocationId}:${task.toLocationId}:${task.typeId}`),
+    tasks.map(
+      (task) =>
+        `${task.fromLocationId}:${task.toLocationId}:${task.typeId}:${task.ownerType ?? "unassigned"}:${task.ownerId ?? 0}`,
+    ),
   );
   const patchGroups = new Map<
     string,
@@ -307,11 +334,13 @@ function getHaulTasksWithPatches(
       typeName: string;
       unitVolume: number;
       neededQuantity: number;
+      ownerType?: "character" | "corporation";
+      ownerId?: number;
     }
   >();
 
   for (const patch of patches.values()) {
-    const routeKey = `${patch.fromLocationId}:${patch.toLocationId}:${patch.typeId}`;
+    const routeKey = `${patch.fromLocationId}:${patch.toLocationId}:${patch.typeId}:${patch.ownerType}:${patch.ownerId}`;
     const group = patchGroups.get(routeKey) ?? {
       fromLocationId: patch.fromLocationId,
       toLocationId: patch.toLocationId,
@@ -319,6 +348,8 @@ function getHaulTasksWithPatches(
       typeName: patch.typeName,
       unitVolume: patch.unitVolume,
       neededQuantity: 0,
+      ownerType: patch.ownerType,
+      ownerId: patch.ownerId,
     };
     const totalVolume =
       group.neededQuantity * group.unitVolume + patch.neededQuantity * patch.unitVolume;

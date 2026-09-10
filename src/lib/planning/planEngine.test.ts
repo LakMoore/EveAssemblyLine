@@ -1757,6 +1757,54 @@ test("reallocates material stock after reaction formulas are reserved", async ()
   assert.equal(silicates.stockQuantity > 0, true);
 });
 
+test("reports full located stock beyond the quantity allocated to stockpile demand", async () => {
+  const stockpiles = ["first", "second"].map((id) => ({
+    id,
+    name: id,
+    locations: {
+      stock: manufacturingLocationId,
+      manufacturing: manufacturingLocationId,
+      reactions: manufacturingLocationId,
+      reprocessing: reprocessingLocationId,
+      copying: manufacturingLocationId,
+      invention: manufacturingLocationId,
+    },
+    items: [
+      {
+        typeId: rifterTypeId,
+        name: "Rifter",
+        quantity: 1,
+        me: 0,
+        te: 0,
+        fromCompression: false,
+      },
+    ],
+  }));
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: tritaniumTypeId,
+          name: "Tritanium",
+          quantity: 100_000,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+      ],
+      { stockpiles },
+    ),
+  );
+  const response = await toPlanResponse(result);
+  const planItem = response.lists.planItems.byActivityLocation
+    .find((bucket) => bucket.locationId === manufacturingLocationId)
+    ?.items.find((item) => item.typeId === tritaniumTypeId);
+
+  assert(planItem && planItem.kind === "material");
+  assert.equal(planItem.availableQuantity, 100_000);
+  assert.equal(planItem.surplusQuantity, 36_000);
+});
+
 test("uses reaction formulas held at a stockpile's reaction location", async () => {
   const result = await calculatePlanCalculation(
     request(
@@ -2991,7 +3039,7 @@ test("does not reserve blocked manufacturing inputs before reaction demand", asy
   assert.equal(tritaniumHaul.neededQuantity, 1000);
 });
 
-test("lists remote Isogen as a purchase when destination manufacturing is blocked", async () => {
+test("hauls remote Isogen surplus when destination manufacturing is blocked", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -3063,16 +3111,15 @@ test("lists remote Isogen as a purchase when destination manufacturing is blocke
   assert(isogen);
   assert(manufacturingJob);
   assert.equal(manufacturingJob.runsAvailable, 0);
-  assert(isogen.buyQuantity > 0);
-  assert.equal(
-    result.lists.haulingTasks.some(
-      (task) =>
-        task.typeId === 37
-        && task.fromLocationId === alternateSourceLocationId
-        && task.toLocationId === manufacturingLocationId,
-    ),
-    false,
+  assert.equal(isogen.buyQuantity, 0);
+  const isogenHaul = result.lists.haulingTasks.find(
+    (task) =>
+      task.typeId === 37
+      && task.fromLocationId === alternateSourceLocationId
+      && task.toLocationId === manufacturingLocationId,
   );
+  assert(isogenHaul);
+  assert.equal(isogenHaul.neededQuantity, 500);
 });
 
 test("hauls remote mexallon for a reaction after blocked capital manufacturing", async () => {
@@ -4903,7 +4950,18 @@ test("allocates reaction formulas at the reaction location to stockpile jobs", a
     (entry) => entry.kind === "reaction" && entry.typeId === reactionFormulaTypeId,
   );
   assert(reactionPlanItem && reactionPlanItem.kind === "reaction");
-  assert.equal(reactionPlanItem.availableQuantity, 1);
+  assert.equal(reactionPlanItem.availableQuantity, 14);
+  assert.equal(reactionPlanItem.bpoCount, 14);
+  assert.equal(reactionPlanItem.bposInUse, 0);
+
+  const response = await toPlanResponse(result);
+  const responsePlanItem = response.lists.planItems.all.find(
+    (entry) => entry.kind === "reaction" && entry.typeId === reactionFormulaTypeId,
+  );
+  assert(responsePlanItem && responsePlanItem.kind === "reaction");
+  assert.equal(responsePlanItem.availableQuantity, 14);
+  assert.equal(responsePlanItem.bpoCount, 14);
+  assert.equal(responsePlanItem.bposInUse, 0);
 });
 
 test("does not reprocess or haul compressed stock when direct materials cover demand", async () => {
