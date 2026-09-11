@@ -308,13 +308,12 @@ export async function allocateStockpileStock(
           if (remaining <= 0) break;
           const item = request.stock[index];
           if (!canUseFutureStock(index, stockpileIndex)) continue;
+          const itemRootLocationId = getStockRootLocationId(item);
           if (
             preferActivityLocations
             && item.category !== "reactionformula"
-            && getStockRootLocationId(item) !== undefined
-            && !stockpileActivityLocations(stockpiles[stockpileIndex]).has(
-              getStockRootLocationId(item)!,
-            )
+            && itemRootLocationId !== undefined
+            && !stockpileActivityLocations(stockpiles[stockpileIndex]).has(itemRootLocationId)
           ) continue;
           if (
             item.category === "reactionformula"

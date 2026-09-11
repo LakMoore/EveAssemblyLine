@@ -1291,11 +1291,15 @@ function StockPasteModal({
       if (!response.ok) throw new Error(data.error ?? "Could not resolve the pasted assets.");
       const resolved = data.items ?? [];
       setResults(resolved);
-      if (resolved.length > 0 && resolved.every((item) => !item.error)) {
-        const imported = resolved.map((item) => ({
-          typeId: item.typeId!,
+      const importable = resolved.filter(
+        (item): item is PasteResult & { typeId: number; quantity: number } =>
+          item.error === undefined && item.typeId !== undefined && item.quantity !== undefined,
+      );
+      if (resolved.length > 0 && importable.length === resolved.length) {
+        const imported = importable.map((item) => ({
+          typeId: item.typeId,
           name: item.name,
-          quantity: item.quantity!,
+          quantity: item.quantity,
           assembledVolume: item.assembledVolume ?? 0,
           packagedVolume: item.packagedVolume,
           category: item.category ?? "item",

@@ -10,14 +10,14 @@ export async function GET(request: Request) {
     const session = await getSessionFromRequest(request);
     if (!session) return NextResponse.json({ authenticated: false, characters: [] });
     const characterIds = await getSessionCharacterIds(session);
-    const corporationSettings = await getCollectionCorporationSettings(session.collectionId!);
+    const corporationSettings = await getCollectionCorporationSettings(session.collectionId);
     const corporationSupport = new Map(
       corporationSettings.map((settings) => [settings.corporationId, settings.supportEnabled]),
     );
     const corpRefreshOptInEnabled = isCorpRefreshOptInEnabled();
-    const characters = (await Promise.all(characterIds.map((id) => getCharacter(id))))
-      .filter((record) => record !== null)
-      .map((record) => record!);
+    const characters = (await Promise.all(characterIds.map((id) => getCharacter(id)))).filter(
+      (record): record is NonNullable<typeof record> => record !== null,
+    );
     let corporationNames = new Map<number, string>();
     try {
       corporationNames = await fetchUniverseNames(

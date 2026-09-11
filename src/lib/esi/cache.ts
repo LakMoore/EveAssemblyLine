@@ -172,9 +172,9 @@ export async function getCorporationSourcePolicies(
 ): Promise<CorporationSourcePolicy[]> {
   const characters = await getCharactersByIds(characterIds);
   const attachedCorporations = new Set(
-    characters
-      .filter((character) => character.corporationId !== undefined)
-      .map((character) => character.corporationId!),
+    characters.flatMap((character) =>
+      character.corporationId === undefined ? [] : [character.corporationId],
+    ),
   );
   return settings
     .filter((entry) => entry.supportEnabled && attachedCorporations.has(entry.corporationId))
@@ -567,7 +567,8 @@ export async function getCorporationSourceCatalog(
             },
           );
         }
-        const entry = sourceEntries.get(key)!;
+        const entry = sourceEntries.get(key);
+        if (!entry) continue;
         if (
           asset.isSingleton
           && isCargoContainerType(asset.typeId, types, groups, marketGroups)
@@ -667,8 +668,11 @@ async function getCorporationProjection(
   const corporationIds = [
     ...new Set(
       characters
-        .filter((character) => character.hasDirectorRole && character.corporationId)
-        .map((character) => character.corporationId!),
+        .flatMap((character) =>
+          character.hasDirectorRole && character.corporationId !== undefined
+            ? [character.corporationId]
+            : [],
+        ),
     ),
   ];
   return { characters, corporationIds, policiesByCorporationId: new Map() };
@@ -1249,7 +1253,7 @@ export function getMarketOrderAssetDeductions(
 
 function refreshMarketOrderAdjustments(cache: OwnerCache, assetsLastModified?: string) {
   cache.marketOrderAssetDeductions = hasUsableMarketOrders(cache)
-    ? getMarketOrderAssetDeductions(cache.marketOrders!.lastBody, assetsLastModified)
+    ? getMarketOrderAssetDeductions(cache.marketOrders?.lastBody ?? [], assetsLastModified)
     : new Map();
 }
 
@@ -2756,7 +2760,7 @@ export async function getMarketOrderStock(
         continue;
       }
       hasUsableSource = true;
-      const orders = cache.marketOrders!.lastBody;
+      const orders = cache.marketOrders?.lastBody ?? [];
       for (const order of orders as MarketOrderRecord[]) {
         if (order.isBuyOrder || order.isCorporation || order.volumeRemain <= 0) continue;
         typeIds.add(order.typeId);
@@ -2785,7 +2789,7 @@ export async function getMarketOrderStock(
       continue;
     }
     hasUsableSource = true;
-    const orders = cache.marketOrders!.lastBody;
+    const orders = cache.marketOrders?.lastBody ?? [];
     const policy = projection.policiesByCorporationId.get(corporationId);
     const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
     const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
@@ -2849,7 +2853,7 @@ export async function getMarketOrderBuyQuantities(
       continue;
     }
     hasUsableSource = true;
-    addOrders(cache.marketOrders!.lastBody);
+    addOrders(cache.marketOrders?.lastBody ?? []);
   }
 
   const projection = await getCorporationProjection(characterIds, true, sessionId, policies);
@@ -2864,7 +2868,7 @@ export async function getMarketOrderBuyQuantities(
     const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
     const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
     addOrders(
-      cache.marketOrders!.lastBody.filter(
+      (cache.marketOrders?.lastBody ?? []).filter(
         (order) =>
           !policy
           || isCorporationLocationAccessible(

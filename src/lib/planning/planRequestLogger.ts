@@ -308,7 +308,8 @@ export async function cullPlanRequestLogs(
     }
     if (!apply) continue;
     try {
-      await bucket!.file(value.storagePath).delete({ ignoreNotFound: true });
+      if (!bucket) throw new Error("Plan request log storage is unavailable.");
+      await bucket.file(value.storagePath).delete({ ignoreNotFound: true });
       await document.ref.delete();
       loggerRuntime.entries.delete(value.requestId);
       result.deleted += 1;

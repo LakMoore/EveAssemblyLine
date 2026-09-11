@@ -338,7 +338,9 @@ function installedJobContributions(
     && productionRuns > 0
     && (!isProduction || productQuantityPerRun !== undefined)
   ) {
-    const outputQuantity = !isProduction ? productionRuns : productionRuns * productQuantityPerRun!;
+    const outputQuantity = !isProduction
+      ? productionRuns
+      : productionRuns * (productQuantityPerRun ?? 0);
     if (isCopying && job.licensedRuns !== undefined) {
       for (let index = 0; index < outputQuantity; index += 1) {
         contributions.push({
@@ -426,7 +428,10 @@ export async function GET(request: NextRequest) {
     session.sessionId,
     corporationPolicies,
   );
-  const facilitySettingsPromise = getCollectionFacilities(session.collectionId!);
+  if (!session.collectionId) {
+    return NextResponse.json({ error: "Session collection is unavailable." }, { status: 400 });
+  }
+  const facilitySettingsPromise = getCollectionFacilities(session.collectionId);
   markPhase("session");
   const [
     assets,
@@ -579,7 +584,7 @@ export async function GET(request: NextRequest) {
                 runs: blueprintInstance.runs,
                 me: blueprintInstance.me,
                 te: blueprintInstance.te,
-                type: blueprintType!,
+                type: blueprintInstance.quantity === -1 ? "bpo" : "bpc",
               },
             }
           : {}),
@@ -595,6 +600,10 @@ export async function GET(request: NextRequest) {
 
   // Jobs can contain the only usable copy of a blueprint. Preserve that installed blueprint even
   // when its asset record is unavailable or its structure metadata is only partially resolved.
+  const resolveRootLocation = (locationId: number) => {
+    const location = rootLocationsByItemId.get(locationId);
+    return location ? rootLocationFromAssetLocation(location) : undefined;
+  };
   for (const job of jobs) {
     const industryJobStatus = normalizeIndustryJobStatus(job.status);
     if (
@@ -621,14 +630,14 @@ export async function GET(request: NextRequest) {
     const preferredBlueprintLocation =
       facilitiesById.get(job.facilityId)
       ?? (blueprintInstance && rootLocationsByItemId.has(blueprintInstance.locationId)
-        ? rootLocationFromAssetLocation(rootLocationsByItemId.get(blueprintInstance.locationId)!)
+        ? resolveRootLocation(blueprintInstance.locationId)
         : undefined)
       ?? (blueprint && isDirectLocation(blueprint)
         ? rootLocationFromAssetLocation(blueprint.rootLocation)
         : rootLocationsByItemId.has(job.blueprintLocationId)
-          ? rootLocationFromAssetLocation(rootLocationsByItemId.get(job.blueprintLocationId)!)
+          ? resolveRootLocation(job.blueprintLocationId)
           : rootLocationsByItemId.has(job.locationId)
-            ? rootLocationFromAssetLocation(rootLocationsByItemId.get(job.locationId)!)
+            ? resolveRootLocation(job.locationId)
             : undefined);
     const blueprintLocation = preferredBlueprintLocation
       ?? facilitiesById.get(job.facilityId) ?? {
@@ -650,9 +659,9 @@ export async function GET(request: NextRequest) {
     )) {
       const location = facilitiesById.get(job.facilityId)
         ?? (rootLocationsByItemId.has(job.outputLocationId)
-          ? rootLocationFromAssetLocation(rootLocationsByItemId.get(job.outputLocationId)!)
+          ? resolveRootLocation(job.outputLocationId)
           : rootLocationsByItemId.has(job.locationId)
-            ? rootLocationFromAssetLocation(rootLocationsByItemId.get(job.locationId)!)
+            ? resolveRootLocation(job.locationId)
             : undefined) ?? {
           locationId: job.outputLocationId,
           kind: "anchored" as const,

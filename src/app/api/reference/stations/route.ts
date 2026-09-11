@@ -51,11 +51,11 @@ export async function GET(request: Request) {
     const rootLocations = session
       ? await getKnownMarketStructureLocations(characterIds, session.sessionId, facilities)
       : undefined;
-    const [station] = await resolveMarketStations(
-      [parsed.data.stationId!],
-      language,
-      rootLocations,
-    );
+    const stationId = parsed.data.stationId;
+    if (stationId === undefined) {
+      return NextResponse.json({ error: "A station ID is required." }, { status: 400 });
+    }
+    const [station] = await resolveMarketStations([stationId], language, rootLocations);
     return NextResponse.json({ station });
   }
   catch (error) {

@@ -241,12 +241,14 @@ void test("uses location buckets in the plan response", async () => {
 
   assert(planBucket);
   assert(manufacturingBucket);
+  assert(planBucket.items[0]);
+  assert(manufacturingBucket.items[0]);
   assert.equal(planBucket.locationId, manufacturingLocationId);
   assert.equal(manufacturingBucket.locationId, manufacturingLocationId);
   assert.equal("context" in planBucket, false);
   assert.equal("context" in manufacturingBucket, false);
-  assert.equal("activityLocationId" in planBucket.items[0]!, false);
-  assert.equal("stockpileId" in manufacturingBucket.items[0]!, false);
+  assert.equal("activityLocationId" in planBucket.items[0], false);
+  assert.equal("stockpileId" in manufacturingBucket.items[0], false);
 });
 
 void test("assigns direct final-product demand to the stockpile location", async () => {

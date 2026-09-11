@@ -33,12 +33,18 @@ function noStoreJson(body: unknown, status = 200) {
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return noStoreJson({ error: "Not authenticated." }, 401);
-  return noStoreJson({ settings: await getCollectionCorporationSettings(session.collectionId!) });
+  if (!session.collectionId) {
+    return noStoreJson({ error: "Session collection is unavailable." }, 400);
+  }
+  return noStoreJson({ settings: await getCollectionCorporationSettings(session.collectionId) });
 }
 
 export async function PUT(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return noStoreJson({ error: "Not authenticated." }, 401);
+  if (!session.collectionId) {
+    return noStoreJson({ error: "Session collection is unavailable." }, 400);
+  }
   const parsed = settingsSchema.safeParse(await request.json().catch(() => undefined));
   if (!parsed.success) {
     return noStoreJson({ error: "Corporation settings are invalid." }, 400);
@@ -51,7 +57,7 @@ export async function PUT(request: Request) {
     return noStoreJson({ error: "That corporation is not attached to this collection." }, 403);
   }
   try {
-    const settings = await saveCollectionCorporationSettings(session.collectionId!, parsed.data);
+    const settings = await saveCollectionCorporationSettings(session.collectionId, parsed.data);
     return noStoreJson({ settings });
   }
   catch (error) {

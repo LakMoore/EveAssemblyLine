@@ -9,7 +9,7 @@ const enabledStrictTypeScriptRules = [
   // Add one rule at a time as the codebase is cleaned up.
   "@typescript-eslint/no-floating-promises",
   "@typescript-eslint/no-unnecessary-condition",
-  // "@typescript-eslint/no-non-null-assertion",
+  "@typescript-eslint/no-non-null-assertion",
 ];
 
 const strictTypeScriptRules = Object.fromEntries(

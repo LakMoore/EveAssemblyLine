@@ -557,29 +557,35 @@ export function loadClientCorporationSettings(reload = false) {
   return corporationSettingsRequest;
 }
 
-export async function saveClientCorporationSettings(settings: ClientCorporationSettings) {
+export async function saveClientCorporationSettings(requestedSettings: ClientCorporationSettings) {
   const response = await fetch(
     "/api/auth/corp/settings",
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(settings),
+      body: JSON.stringify(requestedSettings),
     },
   );
   const data = (await response.json()) as {
-    settings?: ClientCorporationSettings;
-    error?: string;
+    settings?: unknown;
+    error?: unknown;
   };
-  if (!response.ok || !data.settings) {
-    throw new Error(data.error ?? "Could not save corporation settings.");
+  const errorMessage =
+    typeof data.error === "string" ? data.error : "Could not save corporation settings.";
+  if (!response.ok) {
+    throw new Error(errorMessage);
   }
+  if (typeof data.settings !== "object" || data.settings === null) {
+    throw new Error(errorMessage);
+  }
+  const settings = data.settings as ClientCorporationSettings;
   corporationSettingsResponse = [
     ...(corporationSettingsResponse ?? []).filter(
-      (entry) => entry.corporationId !== data.settings!.corporationId,
+      (entry) => entry.corporationId !== settings.corporationId,
     ),
-    data.settings,
+    settings,
   ];
-  return data.settings;
+  return settings;
 }
 
 export function loadClientCharacterState(reload = false): Promise<ClientCharacterState> {

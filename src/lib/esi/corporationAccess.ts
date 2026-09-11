@@ -94,7 +94,8 @@ export function getCorporationHangarPermissions(
       character.hasDirectorRole || character.corporationRoles?.includes("Director");
     for (const flag of corporationHangarFlags) {
       const roleNames = roleNamesByFlag[flag];
-      const permission = permissions.get(flag)!;
+      const permission = permissions.get(flag);
+      if (!permission) continue;
       permission.canTake ||= isDirector || roles.includes(roleNames.take);
       permission.canQuery ||= isDirector || roles.includes(roleNames.query);
       permission.canQuery ||= permission.canTake;

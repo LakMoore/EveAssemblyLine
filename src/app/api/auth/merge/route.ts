@@ -22,10 +22,11 @@ async function getPending(request: Request) {
   if (
     !session
     || !pending
+    || !mergeId
     || pending.sessionId !== session.sessionId
     || Date.parse(pending.expiresAt) < Date.now()
   ) return null;
-  return { session, mergeId: decodeURIComponent(mergeId!), pending };
+  return { session, mergeId: decodeURIComponent(mergeId), pending };
 }
 
 export async function GET(request: Request) {

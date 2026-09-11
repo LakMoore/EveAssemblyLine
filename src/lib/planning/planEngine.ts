@@ -1090,25 +1090,28 @@ async function calculatePlanPass(
     .filter(isUsableIndustryProductionOutput)
     .filter((item) => item.category !== "blueprint" && item.category !== "reactionformula")
     .filter((item) => item.source !== "marketOrder")
-    .filter((item): item is typeof item & { rootLocationId: number } =>
-      Number.isInteger(getStockRootLocationId(item)),
-    )
-    .map((item) => ({
-      typeId: item.typeId,
-      quantity: item.quantity,
-      rootLocationId: getStockRootLocationId(item)!,
-      ownerType: item.ownerType,
-      ownerId: item.ownerId,
-      industryJobOutput: isIndustryProductionOutput(item),
-      volumePerUnit: item.isPackaged
-        ? (
-            typeRecords.get(item.typeId)?.packagedVolume
-            ?? typeRecords.get(item.typeId)?.volume
-            ?? 0
-          )
-        : (typeRecords.get(item.typeId)?.volume ?? 0),
-      sourceItem: item,
-    }));
+    .flatMap((item) => {
+      const rootLocationId = getStockRootLocationId(item);
+      if (typeof rootLocationId !== "number" || !Number.isInteger(rootLocationId)) return [];
+      return [
+        {
+          typeId: item.typeId,
+          quantity: item.quantity,
+          rootLocationId,
+          ownerType: item.ownerType,
+          ownerId: item.ownerId,
+          industryJobOutput: isIndustryProductionOutput(item),
+          volumePerUnit: item.isPackaged
+            ? (
+                typeRecords.get(item.typeId)?.packagedVolume
+                ?? typeRecords.get(item.typeId)?.volume
+                ?? 0
+              )
+            : (typeRecords.get(item.typeId)?.volume ?? 0),
+          sourceItem: item,
+        },
+      ];
+    });
   const stockLotsByTypeId = new Map<number, StockLot[]>();
   const industryOutputLotsByTypeId = new Map<number, StockLot[]>();
   for (const lot of stockLots) {
@@ -1751,7 +1754,8 @@ async function calculatePlanPass(
     const pending = [...requiredSkillLevels.keys()];
     const expanded = new Set<number>();
     while (pending.length > 0) {
-      const skillId = pending.pop()!;
+      const skillId = pending.pop();
+      if (skillId === undefined) continue;
       if (expanded.has(skillId)) continue;
       expanded.add(skillId);
       for (const prerequisite of skillPrerequisites.get(skillId) ?? []) {
@@ -2006,14 +2010,18 @@ async function calculatePlanPass(
         activity = candidate.activity;
         const profile = activityProfile(typeId, candidate.activity);
         const activityLocationId = profile.locationId;
-        const productQuantity =
+        const productionActivity =
           candidate.activity === "manufacturing"
-            ? candidate.blueprint.activities.manufacturing!.products!.find(
-                (product) => product.typeID === typeId,
-              )!.quantity
-            : candidate.blueprint.activities.reaction!.products!.find(
-                (product) => product.typeID === typeId,
-              )!.quantity;
+            ? candidate.blueprint.activities.manufacturing
+            : candidate.blueprint.activities.reaction;
+        if (!productionActivity?.products) {
+          throw new Error(`Blueprint ${blueprint._key} has no ${candidate.activity} products.`);
+        }
+        const product = productionActivity.products.find((entry) => entry.typeID === typeId);
+        if (!product) {
+          throw new Error(`Blueprint ${blueprint._key} does not produce type ${typeId}.`);
+        }
+        const productQuantity = product.quantity;
         const runsNeeded = Math.ceil(quantity / productQuantity);
         const producedQuantity = runsNeeded * productQuantity;
         updateMaterial(
@@ -2041,6 +2049,10 @@ async function calculatePlanPass(
         usedRunsByBlueprint.set(blueprint._key, alreadyUsedRuns + runsFromStock);
 
         if (activity === "manufacturing") {
+          const manufacturingActivity = blueprint.activities.manufacturing;
+          if (!manufacturingActivity) {
+            throw new Error(`Blueprint ${blueprint._key} has no manufacturing activity.`);
+          }
           addRequiredSkills(blueprint.activities.manufacturing?.skills);
           const existing = manufacturingJobs.get(blueprint._key);
           const existingInputs = jobInputsByBlueprint.get(blueprint._key);
@@ -2074,7 +2086,7 @@ async function calculatePlanPass(
               ),
               totalTime:
                 (existing?.totalTime ?? 0)
-                + blueprint.activities.manufacturing!.time
+                + manufacturingActivity.time
                   * (1 - efficiency.te / 100)
                   * profile.timeMultiplier
                   * manufacturingSkillTimeMultiplier
@@ -2146,6 +2158,10 @@ async function calculatePlanPass(
           );
           return;
         }
+        const reactionActivity = blueprint.activities.reaction;
+        if (!reactionActivity) {
+          throw new Error(`Blueprint ${blueprint._key} has no reaction activity.`);
+        }
         addRequiredSkills(blueprint.activities.reaction?.skills);
         const existing = reactionJobs.get(blueprint._key);
         const existingInputs = jobInputsByBlueprint.get(blueprint._key);
@@ -2172,7 +2188,7 @@ async function calculatePlanPass(
             runsAvailable: (existing?.runsAvailable ?? 0) + installableRuns,
             totalTime:
               (existing?.totalTime ?? 0)
-              + blueprint.activities.reaction!.time
+              + reactionActivity.time
                 * (1 - efficiency.te / 100)
                 * profile.timeMultiplier
                 * reactionSkillTimeMultiplier
@@ -2393,7 +2409,8 @@ async function calculatePlanPass(
         if (remainingQuantity <= 0) break;
         const hauledQuantity = remainingQuantity;
         const creditedQuantity = Math.min(remainingQuantity, material.buyQuantity);
-        const destinationLocationId = material.activityLocationId!;
+        const destinationLocationId = material.activityLocationId;
+        if (destinationLocationId === undefined) continue;
         const sourceLot: StockLot = {
           typeId: sourceItem.typeId,
           quantity: hauledQuantity,

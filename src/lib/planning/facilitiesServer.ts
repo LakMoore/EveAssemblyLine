@@ -172,8 +172,9 @@ export async function calculateFacilities(
   const savedByLocationId = new Map(
     Object
       .values(settings.facilities)
-      .filter((facility) => facility.locationId !== undefined)
-      .map((facility) => [facility.locationId!, facility]),
+      .flatMap((facility) =>
+        facility.locationId === undefined ? [] : [[facility.locationId, facility] as const],
+      ),
   );
   const candidates = new Map<number | string, FacilityCandidate>();
   for (const root of roots.values()) {

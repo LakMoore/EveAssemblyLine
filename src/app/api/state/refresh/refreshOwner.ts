@@ -143,7 +143,8 @@ async function handleRefreshRequestInternal(
   else {
     profiler.start("loadAuthorizationCharacter");
     try {
-      const settings = await getCollectionCorporationSettings(session.collectionId!);
+      if (!session.collectionId) return json({ error: "Session collection is unavailable." }, 400);
+      const settings = await getCollectionCorporationSettings(session.collectionId);
       if (!settings.some((entry) => entry.corporationId === ownerId && entry.supportEnabled)) {
         return json(
           {

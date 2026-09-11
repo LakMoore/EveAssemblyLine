@@ -282,9 +282,13 @@ function selectSavedLocation(
   savedLocationId: number | undefined,
   defaultLocationId: number,
 ) {
-  return options.some((location) => location.locationId === savedLocationId)
-    ? savedLocationId!
-    : (options[0]?.locationId ?? defaultLocationId);
+  if (
+    savedLocationId !== undefined
+    && options.some((location) => location.locationId === savedLocationId)
+  ) {
+    return savedLocationId;
+  }
+  return options[0]?.locationId ?? defaultLocationId;
 }
 
 function ScrollTopButton({
@@ -1252,25 +1256,28 @@ function Planner() {
           location.activities[group.activity === "reaction" ? "reactions" : "manufacturing"]
           && location.buildTypeGroups[group.key] !== undefined,
       )
-      .map((location) => {
-        const bonus = location.buildTypeGroups[group.key]!;
-        return {
-          locationId: location.locationId,
-          name: location.name,
-          kind: location.locationType,
-          baseYield: location.baseYield,
-          baseManufacturingMe: location.baseManufacturingMe,
-          baseReactionMe: location.baseReactionMe,
-          sizeId: location.sizeId,
-          materialPercentage:
-            group.activity === "manufacturing"
-              ? bonus.manufacturingMaterialPercentage
-              : bonus.reactionMaterialPercentage,
-          timePercentage:
-            group.activity === "manufacturing"
-              ? bonus.manufacturingTimePercentage
-              : bonus.reactionTimePercentage,
-        };
+      .flatMap((location) => {
+        const bonus = location.buildTypeGroups[group.key];
+        if (!bonus) return [];
+        return [
+          {
+            locationId: location.locationId,
+            name: location.name,
+            kind: location.locationType,
+            baseYield: location.baseYield,
+            baseManufacturingMe: location.baseManufacturingMe,
+            baseReactionMe: location.baseReactionMe,
+            sizeId: location.sizeId,
+            materialPercentage:
+              group.activity === "manufacturing"
+                ? bonus.manufacturingMaterialPercentage
+                : bonus.reactionMaterialPercentage,
+            timePercentage:
+              group.activity === "manufacturing"
+                ? bonus.manufacturingTimePercentage
+                : bonus.reactionTimePercentage,
+          },
+        ];
       })
       .sort(
         (left, right) =>

@@ -47,22 +47,19 @@ type EsiRateLimitHeaders = {
 };
 
 function getEsiRateLimitHeaders(headers: Headers): EsiRateLimitHeaders {
+  const getHeader = (name: string) => headers.get(name) ?? undefined;
   return {
-    ...(headers.get("x-ratelimit-group")
-      ? { rateLimitGroup: headers.get("x-ratelimit-group")! }
+    ...(getHeader("x-ratelimit-group") ? { rateLimitGroup: getHeader("x-ratelimit-group") } : {}),
+    ...(getHeader("x-ratelimit-limit") ? { rateLimitLimit: getHeader("x-ratelimit-limit") } : {}),
+    ...(getHeader("x-ratelimit-remaining")
+      ? { rateLimitRemaining: getHeader("x-ratelimit-remaining") }
       : {}),
-    ...(headers.get("x-ratelimit-limit")
-      ? { rateLimitLimit: headers.get("x-ratelimit-limit")! }
+    ...(getHeader("x-ratelimit-used") ? { rateLimitUsed: getHeader("x-ratelimit-used") } : {}),
+    ...(getHeader("x-esi-error-limit-remain")
+      ? { errorLimitRemaining: getHeader("x-esi-error-limit-remain") }
       : {}),
-    ...(headers.get("x-ratelimit-remaining")
-      ? { rateLimitRemaining: headers.get("x-ratelimit-remaining")! }
-      : {}),
-    ...(headers.get("x-ratelimit-used") ? { rateLimitUsed: headers.get("x-ratelimit-used")! } : {}),
-    ...(headers.get("x-esi-error-limit-remain")
-      ? { errorLimitRemaining: headers.get("x-esi-error-limit-remain")! }
-      : {}),
-    ...(headers.get("x-esi-error-limit-reset")
-      ? { errorLimitReset: headers.get("x-esi-error-limit-reset")! }
+    ...(getHeader("x-esi-error-limit-reset")
+      ? { errorLimitReset: getHeader("x-esi-error-limit-reset") }
       : {}),
   };
 }
@@ -374,8 +371,8 @@ async function requestEsiAttempt<T>(
           currentTokenSet.accessToken !== tokenSet.accessToken
           || currentTokenSet.accessTokenExpiresAt !== tokenSet.accessTokenExpiresAt
         );
-      if (tokenChanged) {
-        tokenContexts.set(currentTokenSet, context!);
+      if (tokenChanged && context) {
+        tokenContexts.set(currentTokenSet, context);
         return requestEsiAttempt<T>(
           path,
           currentTokenSet,
@@ -647,11 +644,11 @@ export async function fetchCorporationBlueprints(record: CharacterTokenRecord, e
     etag,
     { paginated: true },
   );
+  const corporationId = record.corporationId;
   return {
     blueprints:
-      result.data?.map((blueprint) =>
-        mapBlueprintInstance(blueprint, "corporation", record.corporationId!),
-      ) ?? null,
+      result.data?.map((blueprint) => mapBlueprintInstance(blueprint, "corporation", corporationId))
+      ?? null,
     headers: result.headers,
     notModified: result.notModified,
   };
@@ -701,9 +698,9 @@ export async function fetchCorporationAssets(record: CharacterTokenRecord, etag?
     etag,
     { paginated: true },
   );
+  const corporationId = record.corporationId;
   return {
-    assets:
-      result.data?.map((asset) => mapAsset(asset, "corporation", record.corporationId!)) ?? null,
+    assets: result.data?.map((asset) => mapAsset(asset, "corporation", corporationId)) ?? null,
     token,
     headers: result.headers,
     notModified: result.notModified,
@@ -813,6 +810,7 @@ export async function fetchCharacterIndustryJobs(record: CharacterTokenRecord, e
     etag,
     { paginated: false },
   );
+  const corporationId = record.corporationId;
   return {
     jobs:
       result.data === null
@@ -858,13 +856,14 @@ export async function fetchCorporationIndustryJobs(record: CharacterTokenRecord,
     etag,
     { paginated: false },
   );
+  const corporationId = record.corporationId;
   return {
     jobs:
       result.data === null
         ? null
         : result.data
             .filter((job) => job.status !== "cancelled" && job.status !== "reverted")
-            .map((job) => mapIndustryJob(job, "corporation", record.corporationId!)),
+            .map((job) => mapIndustryJob(job, "corporation", corporationId)),
     headers: result.headers,
     notModified: result.notModified,
   };
@@ -918,10 +917,10 @@ export async function fetchCorporationMarketOrders(record: CharacterTokenRecord,
     etag,
     { paginated: true },
   );
+  const corporationId = record.corporationId;
   return {
     orders:
-      result.data?.map((order) => mapMarketOrder(order, "corporation", record.corporationId!))
-      ?? null,
+      result.data?.map((order) => mapMarketOrder(order, "corporation", corporationId)) ?? null,
     token,
     headers: result.headers,
     notModified: result.notModified,

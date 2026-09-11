@@ -561,7 +561,11 @@ export default function CharactersPage() {
   }
 
   const corporations = [
-    ...new Set(characters.map((character) => character.corporationId).filter(Boolean)),
+    ...new Set(
+      characters.flatMap((character) =>
+        character.corporationId === undefined ? [] : [character.corporationId],
+      ),
+    ),
   ].map((corporationId) => {
     const pilots = characters.filter((character) => character.corporationId === corporationId);
     const eligible = pilots.filter((character) => character.hasDirectorRole);
@@ -572,7 +576,7 @@ export default function CharactersPage() {
       )
       .filter((status) => status.corporationId === corporationId);
     return {
-      corporationId: corporationId!,
+      corporationId,
       corporationName: pilots[0]?.corporationName,
       pilots,
       eligible,

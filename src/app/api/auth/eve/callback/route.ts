@@ -80,7 +80,7 @@ export async function GET(request: Request) {
       await savePendingMerge(
         mergeId,
         {
-          sessionId: existingSession!.sessionId,
+          sessionId: existingSession.sessionId,
           targetCollectionId: currentCollectionId,
           sourceCollectionId: characterCollection.collectionId,
           characterId: identity.characterId,

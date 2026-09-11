@@ -435,7 +435,8 @@ export async function getCollections(): Promise<CharacterCollectionRecord[]> {
   return normalizeCollections(stored, characters);
 }
 
-export async function getCollection(collectionId: string) {
+export async function getCollection(collectionId?: string) {
+  if (!collectionId) return null;
   const storage = await initStorage();
   const stored = (await storage.getItem("collections")) as CharacterCollectionRecord[] | undefined;
   const collection = stored?.find((record) => record.collectionId === collectionId);
@@ -563,7 +564,8 @@ export async function getCollectionFacilities(
 }
 
 /** Returns normalized corporation support and planning-source settings for a collection. */
-export async function getCollectionCorporationSettings(collectionId: string) {
+export async function getCollectionCorporationSettings(collectionId?: string) {
+  if (!collectionId) return [];
   return normalizeCorporationSettings((await getCollection(collectionId))?.corporationSettings);
 }
 

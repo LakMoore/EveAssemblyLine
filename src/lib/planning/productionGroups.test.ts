@@ -64,12 +64,16 @@ function effectRecord(): DogmaEffectsRecord {
   };
 }
 
-const mediumShips = productionGroupDefinitions.find(
-  (definition) => definition.targetFilterId === 7,
-)!;
-const smallShips = productionGroupDefinitions.find(
-  (definition) => definition.targetFilterId === 5,
-)!;
+const mediumShips =
+  productionGroupDefinitions.find((definition) => definition.targetFilterId === 7)
+  ?? (() => {
+    throw new Error("Medium ships production group is missing.");
+  })();
+const smallShips =
+  productionGroupDefinitions.find((definition) => definition.targetFilterId === 5)
+  ?? (() => {
+    throw new Error("Small ships production group is missing.");
+  })();
 
 void test("resolves target-filter memberships and localized group names", () => {
   const references = getProductionGroupReferences(
