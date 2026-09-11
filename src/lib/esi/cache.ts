@@ -667,12 +667,11 @@ async function getCorporationProjection(
   }
   const corporationIds = [
     ...new Set(
-      characters
-        .flatMap((character) =>
-          character.hasDirectorRole && character.corporationId !== undefined
-            ? [character.corporationId]
-            : [],
-        ),
+      characters.flatMap((character) =>
+        character.hasDirectorRole && character.corporationId !== undefined
+          ? [character.corporationId]
+          : [],
+      ),
     ),
   ];
   return { characters, corporationIds, policiesByCorporationId: new Map() };

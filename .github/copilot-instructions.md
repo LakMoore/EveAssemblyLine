@@ -16,6 +16,29 @@ The repository is currently an early prototype, not a completed implementation o
 
 Do not present prototype data as live EVE data. When replacing a mock path, keep the UI usable and make loading, unauthenticated, stale, rate-limited, and error states explicit.
 
+# UI review workflow
+
+When a task creates or modifies UI code, invoke the `ui-reviewer` custom agent before considering the task complete.
+
+UI code includes:
+- `.tsx` files;
+- files under `app/` and `components/`;
+- Tailwind class changes;
+- shadcn/ui component changes;
+- CSS, theme, and design-token changes.
+
+Required workflow:
+
+1. Implement the requested change.
+2. Run formatting, linting, type checking, and relevant tests.
+3. Invoke the `ui-reviewer` subagent with the changed files and diff.
+4. Fix valid reviewer findings.
+5. Run validation again.
+6. Report any intentionally accepted findings.
+
+Do not perform a broad repository review. The reviewer should inspect changed files and only the surrounding code needed to understand them.
+
+
 ## Working rules
 
 - Create well commented and easily readable code.
