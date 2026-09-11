@@ -2627,14 +2627,16 @@ function PlanList({
                               <span
                                 className={`${styles.planRowAmount} max-[640px]:col-span-1 max-[640px]:w-full`}
                               >
-                                <strong>
-                                  <CopyableText
-                                    textToRender={`${buyBpoEntry.neededQuantity.toLocaleString()} runs needed`}
-                                    textToCopy={String(buyBpoEntry.neededQuantity)}
-                                    copyLabel="Runs needed"
-                                  />
+                                <span className={styles.planRowMarketAmount}>
                                   <MarketBuyOrderIndicator quantity={marketBuyOrderQuantity} />
-                                </strong>
+                                  <strong>
+                                    <CopyableText
+                                      textToRender={`${buyBpoEntry.neededQuantity.toLocaleString()} runs needed`}
+                                      textToCopy={String(buyBpoEntry.neededQuantity)}
+                                      copyLabel="Runs needed"
+                                    />
+                                  </strong>
+                                </span>
                               </span>
                             </>
                           ) : activeTab === "Copy" && copyBpoEntry ? (
@@ -2780,7 +2782,8 @@ function PlanList({
                                   </span>
                                 </span>
                               ) : (
-                                <>
+                                <span className={styles.planRowMarketAmount}>
+                                  <MarketBuyOrderIndicator quantity={marketBuyOrderQuantity} />
                                   <strong>
                                     <CopyableText
                                       textToRender={amount}
@@ -2788,8 +2791,7 @@ function PlanList({
                                       copyLabel={amountCopyLabel}
                                     />
                                   </strong>
-                                  <MarketBuyOrderIndicator quantity={marketBuyOrderQuantity} />
-                                </>
+                                </span>
                               )}
                               {detail && activeTab !== "React" && <small>{detail}</small>}
                             </span>

@@ -39,23 +39,26 @@ Treat existing shadcn components as the default building blocks. Do not recreate
 
 Check every changed file for:
 
-1. Whether an existing shadcn/ui component should have been used.
-2. Whether raw interactive elements were introduced where a shared component exists:
+1. Creation of new CSS classes where tailwind could be used instead.
+2. Introduction of new CSS modules where tailwind could be used instead.
+3. Whether an existing shadcn/ui component should have been used.
+4. Whether raw interactive elements were introduced where a shared component exists:
    - `<button>` instead of `<Button>`.
    - `<input>` instead of `<Input>`.
    - `<textarea>` instead of `<Textarea>`.
    - `<label>` instead of `<Label>` or the project's preferred field-label component.
    - Raw checkbox, radio, switch, select, dialog, card, or form-field markup where a shared component exists.
-3. Whether CSS modules, `<style jsx>`, CSS-in-JS, or inline style objects were introduced unnecessarily.
-4. That existing theme tokens were used instead of hardcoded colours, radii, shadows, or typography.
-5. Whether repeated Tailwind class combinations should be extracted into a reusable component or variant.
-6. Whether arbitrary Tailwind values are justified.
-7. Whether `cva` or an existing variant pattern should be used for component variants.
-8. Whether conditional and caller-provided class names are merged with `cn()`.
-9. Whether generated shadcn primitives were modified at all.
-10. Whether the implementation matches neighbouring components and existing project patterns.
-11. Whether selector hooks and arbitrary descendant variants are necessary, shallow, and clearly named.
-12. Whether accessibility semantics were preserved.
+5. Whether CSS modules, `<style jsx>`, CSS-in-JS, or inline style objects were introduced unnecessarily.
+6. That existing theme tokens were used instead of hardcoded colours, radii, shadows, or typography.
+7. Whether repeated Tailwind class combinations should be extracted into a reusable component or variant.
+8. Whether arbitrary Tailwind values are justified.
+9. Whether `cva` or an existing variant pattern should be used for component variants.
+10. Whether conditional and caller-provided class names are merged with `cn()`.
+11. Whether generated shadcn primitives were modified at all.
+12. Whether the implementation matches neighbouring components and existing project patterns.
+13. Whether selector hooks and arbitrary descendant variants are necessary, shallow, and clearly named.
+14. Whether accessibility semantics were preserved.
+15. Opportunities to retire existing page and component CSS in favor of tailwind classes and theme tokens.
 
 ## Important exceptions
 

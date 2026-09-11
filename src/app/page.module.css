@@ -2773,6 +2773,13 @@
   color: var(--foreground);
 }
 
+.planRowMarketAmount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .planRowAmount strong {
   font: 12px "DM Mono";
   white-space: nowrap;
