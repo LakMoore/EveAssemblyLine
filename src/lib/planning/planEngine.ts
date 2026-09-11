@@ -1355,7 +1355,7 @@ async function calculatePlanPass(
     }
     return consumed;
   }
-  const demandOnlyOutputByType = request.stock
+  const demandOnlyOutputByType = [...request.stock, ...(blockedInputStock ?? [])]
     .filter(
       (item) =>
         isIndustryProductionOutput(item)
@@ -1969,7 +1969,7 @@ async function calculatePlanPass(
           }
           candidate = await buildBlueprint;
         }
-        if (!candidate?.blueprint) quantity -= consumeDemandOnlyOutput(typeId, quantity);
+        quantity -= consumeDemandOnlyOutput(typeId, quantity);
         if (quantity <= 0) return;
 
         const available = producedParts.get(typeId) ?? 0;

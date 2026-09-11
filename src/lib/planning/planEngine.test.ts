@@ -1205,6 +1205,140 @@ void test("uses output from an active industry job as committed availability", a
   assert.deepEqual(result.lists.haulingTasks, []);
 });
 
+void test("deducts in-build final products before scheduling more production", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      180,
+      [
+        {
+          typeId: 21019,
+          name: "Capital Capacitor Battery",
+          quantity: 45,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+          inBuild: true,
+          inBuildQuantity: 45,
+          jobId: 2101901,
+          activityName: "Manufacturing",
+          industryJobStatus: "active",
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: 21019,
+            name: "Capital Capacitor Battery",
+            quantity: 180,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const manufacturingJob = result.lists.manufacturingJobs.find((job) => job.typeId === 21020);
+  const response = await toPlanResponse(result);
+  const planItem = response.lists.planItems.all.find((item) => item.typeId === 21019);
+
+  assert(manufacturingJob);
+  assert(planItem);
+  assert.equal(manufacturingJob.countNeeded, 135);
+  assert.equal(planItem.availableQuantity, 45);
+  assert.equal(planItem.neededQuantity, 135);
+  assert.equal(planItem.surplusQuantity, 0);
+});
+
+void test("deducts blocked in-build output from intermediate production demand", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: 21019,
+          name: "Capital Capacitor Battery",
+          quantity: 45,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+          inBuild: true,
+          inBuildQuantity: 45,
+          jobId: 2101902,
+          activityName: "Manufacturing",
+          industryJobStatus: "active",
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "intermediate-in-build",
+            name: "Intermediate in-build",
+            locations: {
+              stock: manufacturingLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: 37605,
+                name: "Mino",
+                quantity: 3,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+              {
+                typeId: 28606,
+                name: "Capital Component Consumer",
+                quantity: 15,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "second-stockpile",
+            name: "Second stockpile",
+            locations: {
+              stock: alternateSourceLocationId,
+              manufacturing: alternateSourceLocationId,
+              reactions: alternateSourceLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: alternateSourceLocationId,
+              invention: alternateSourceLocationId,
+            },
+            items: [
+              {
+                typeId: rifterTypeId,
+                name: "Rifter",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const response = await toPlanResponse(result);
+  const planItem = response.lists.planItems.all.find((item) => item.typeId === 21019);
+  const manufacturingJob = result.lists.manufacturingJobs.find(
+    (job) => job.typeId === 21020 && job.locationId === manufacturingLocationId,
+  );
+
+  assert(planItem);
+  assert(manufacturingJob);
+  assert.equal(manufacturingJob.countNeeded, 135);
+  assert.equal(planItem.neededQuantity, 135);
+  assert.equal(planItem.surplusQuantity, 0);
+});
+
 void test("reports aggregate industry source counts for multiple active outputs", async () => {
   const result = await calculatePlanCalculation(
     request(
