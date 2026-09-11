@@ -1399,7 +1399,7 @@ function Planner() {
               ))
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-4 border-t pt-4">
+          <div className="flex flex-wrap items-center gap-4 border-t pt-4 sm:justify-between">
             <Label className="flex items-center gap-2 text-sm">
               <Switch
                 aria-label="Include assets"
@@ -1410,6 +1410,7 @@ function Planner() {
             </Label>
             <span className="text-sm text-muted-foreground">{selectedSourceLabel}</span>
             <Button
+              className="flex-1 sm:flex-0"
               type="button"
               variant="outline"
               nativeButton={false}
@@ -1419,6 +1420,7 @@ function Planner() {
               Edit sources
             </Button>
             <Button
+              className="flex-1 sm:flex-0"
               type="button"
               variant="outline"
               disabled={excludedLocationIds.length === 0}
@@ -2052,7 +2054,7 @@ function PlannerStockpileSummary({
 
   return (
     <article className="grid min-w-0 gap-3 border p-4">
-      <div className="flex min-w-0 flex-wrap items-start gap-3">
+      <div className="flex min-w-0 flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-start">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
             <h3 className="truncate text-base font-medium">{stockpile.name}</h3>
@@ -2064,8 +2066,8 @@ function PlannerStockpileSummary({
             units
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-8">
-          <div className="flex items-center gap-3">
+        <div className="flex w-full min-w-0 flex-col items-stretch gap-2 sm:w-auto sm:shrink-0 sm:flex-row sm:items-center sm:gap-8">
+          <div className="flex w-full flex-col items-center gap-2 sm:w-auto sm:flex-row sm:gap-3">
             <AvatarGroup>
               {productAvatarItems.map((item) => (
                 <Avatar key={item.typeId} size="lg">
@@ -2089,13 +2091,23 @@ function PlannerStockpileSummary({
                 <AvatarGroupCount>+{remainingProductCount}</AvatarGroupCount>
               )}
             </AvatarGroup>
-            <Button type="button" variant="outline" onClick={onEditItems}>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              onClick={onEditItems}
+            >
               <ClipboardList data-icon="inline-start" aria-hidden="true" />
               Edit items
             </Button>
           </div>
-          <div className="flex items-center gap-2">
-            <Button type="button" variant="outline" onClick={onEditDetails}>
+          <div className="flex w-full items-center gap-2 sm:w-auto">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              onClick={onEditDetails}
+            >
               <Pencil data-icon="inline-start" aria-hidden="true" />
               Edit details
             </Button>
@@ -2104,6 +2116,7 @@ function PlannerStockpileSummary({
             type="button"
             variant="destructive"
             size="icon"
+            className="self-end sm:self-auto"
             onClick={onRemove}
             aria-label={`Remove ${stockpile.name}`}
           >

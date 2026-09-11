@@ -2389,36 +2389,6 @@
   order: 10;
 }
 
-.reactionPlanActions {
-  justify-content: flex-start;
-}
-
-.reactionPlanControls,
-.reactionDisplayControls,
-.planViewControls {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: auto;
-}
-
-.reactionPlanControls {
-  flex-wrap: nowrap;
-}
-
-.reactionPlanControls > label {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-
-.reactionDisplayControls {
-  min-height: 32px;
-}
-
-.reactionCopyButton {
-  margin-left: auto;
-}
-
 .reactionSummary span {
   display: flex;
   flex-direction: column;
@@ -2438,38 +2408,29 @@
   overflow-wrap: anywhere;
 }
 
-.modeSelect {
-  flex: 0 1 190px;
-  min-width: 170px;
-}
-
-.runCountSelect {
-  flex: 0 1 125px;
-  min-width: 125px;
-}
-
-.maxJobHours {
-  width: 100px;
-}
-
-.hoursControl {
-  display: flex;
-  flex: 0 0 150px;
-  align-items: center;
-  gap: 8px;
-}
-
-.hoursControl > label {
-  flex: 0 0 auto;
-  width: auto;
-}
-
 .reactionTableHeader,
 .reactionRow {
   display: grid;
-  grid-template-columns: minmax(190px, 1.9fr) minmax(90px, 0.78fr) repeat(4, minmax(60px, 0.55fr));
   gap: 13px;
   align-items: center;
+}
+
+.reactionTableHeader {
+  grid-template-columns:
+    32px
+    minmax(190px, 1.9fr)
+    minmax(90px, 0.78fr)
+    repeat(4, minmax(60px, 0.55fr))
+    16px;
+}
+
+.reactionRow {
+  grid-template-columns:
+    auto
+    minmax(190px, 1.9fr)
+    minmax(90px, 0.78fr)
+    repeat(4, minmax(60px, 0.55fr))
+    auto;
 }
 
 .manufacturingTableHeader,
@@ -2480,13 +2441,21 @@
     minmax(90px, 0.78fr)
     minmax(70px, 0.55fr)
     minmax(95px, 0.7fr)
-    minmax(110px, 0.78fr);
+    minmax(110px, 0.78fr)
+    auto;
   gap: 13px;
   align-items: center;
 }
 
 .manufacturingTableHeader {
-  padding: 8px 0 2px;
+  grid-template-columns:
+    minmax(190px, 1.9fr)
+    minmax(90px, 0.78fr)
+    minmax(70px, 0.55fr)
+    minmax(95px, 0.7fr)
+    minmax(110px, 0.78fr)
+    16px;
+  padding-block: 8px 2px;
   color: var(--muted-foreground);
   font: 10px "DM Mono";
   letter-spacing: 0.5px;
@@ -2540,7 +2509,7 @@
   text-align: right;
 }
 
-.reactionTableHeader > :first-child {
+.reactionTableHeader > :nth-child(2) {
   text-align: left;
 }
 
@@ -2559,7 +2528,7 @@
   cursor: pointer;
 }
 
-.reactionTableHeader > :first-child {
+.reactionTableHeader > :nth-child(2) {
   justify-content: flex-start;
 }
 
@@ -2637,97 +2606,6 @@
   border-top: 1px solid var(--border);
 }
 
-.haulRow {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  gap: 13px;
-  align-items: center;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.haulRowDisabled {
-  opacity: 0.48;
-}
-
-.haulRowCompleted {
-  opacity: 0.48;
-}
-
-.haulRowCompleted .haulRowPatch {
-  opacity: 1;
-}
-
-.haulRowSwitch {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 18.4px;
-}
-
-.haulRow .planTypeIdentity {
-  grid-column: 2;
-}
-
-.haulRowAmount {
-  grid-column: 3;
-}
-
-.haulRowPatch {
-  display: inline-flex;
-  grid-column: 4;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-}
-
-.haulRowAmount {
-  display: grid;
-  justify-items: end;
-  color: var(--foreground);
-  font: 12px "DM Mono";
-  white-space: nowrap;
-}
-
-.haulRowAmount small {
-  margin-top: 4px;
-  color: var(--muted-foreground);
-  font: 10px "DM Mono";
-}
-
-@media (max-width: 640px) {
-  .haulRow {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    row-gap: 8px;
-  }
-
-  .haulRow .planTypeIdentity {
-    grid-column: 1 / 3;
-    grid-row: 1;
-    width: 100%;
-    min-width: 0;
-  }
-
-  .haulRowSwitch {
-    grid-column: 1;
-    grid-row: 2;
-  }
-
-  .haulRowAmount {
-    grid-column: 2 / -1;
-    grid-row: 2;
-    justify-self: end;
-    text-align: right;
-  }
-
-  .haulRowPatch {
-    grid-column: 3;
-    grid-row: 1;
-    justify-self: end;
-  }
-}
-
 .planTableHeader,
 .planTableRow {
   display: grid;
@@ -2752,8 +2630,7 @@
 }
 
 .planTableRow {
-  padding: 11px 0;
-  border-top: 1px solid var(--border);
+  padding-block: 11px;
 }
 
 .planTableCell {
@@ -2915,14 +2792,6 @@
 }
 
 @media (max-width: 640px) {
-  .planActions {
-    flex-direction: column;
-  }
-
-  .reactionPlanControls {
-    flex-wrap: wrap;
-  }
-
   .reactionTableHeader {
     display: none;
   }
@@ -2959,19 +2828,9 @@
     text-transform: uppercase;
   }
 
-  .planActions > label,
   .reactionSummary {
     width: 100%;
     min-width: 0;
-  }
-
-  .planActions .copyButton {
-    width: 100%;
-  }
-
-  .reactionPlanActions .reactionCopyButton {
-    width: 100%;
-    margin-left: 0;
   }
 
   .manufacturingTableHeader,
@@ -2990,6 +2849,16 @@
     align-items: start;
   }
 
+  .reactionRow {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .reactionRow > :last-child,
+  .manufacturingRow > :last-child {
+    grid-column: 2;
+    justify-self: end;
+  }
+
   .planRow .planTypeCell,
   .planRow .planRowAmount {
     grid-column: 1;
@@ -3006,9 +2875,18 @@
   }
 
   .reactionRow .jobInputsTrigger {
-    grid-column: 1;
+    grid-column: 1 / -1;
     width: 100%;
     justify-self: start;
+  }
+
+  .reactionRow .jobInputsTrigger > button,
+  .manufacturingRow .manufacturingInputsCell > button {
+    width: 100%;
+  }
+
+  .reactionRow .planRowAmount {
+    grid-column: 1 / -1;
   }
 
   .manufacturingRow {
@@ -3054,6 +2932,70 @@
 
   .planRowRunCalcs::after {
     content: none;
+  }
+}
+
+@media (min-width: 641px) {
+  @container planner-results (max-width: 900px) {
+    .reactionTableHeader {
+      display: none;
+    }
+
+    .reactionRow {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .reactionRow > :last-child {
+      grid-column: 2;
+      justify-self: end;
+    }
+
+    .reactionRow .jobInputsTrigger,
+    .reactionRow .planRowAmount {
+      grid-column: 1 / -1;
+      width: 100%;
+    }
+
+    .reactionRow .jobInputsTrigger {
+      justify-self: start;
+    }
+
+    .reactionRow .jobInputsTrigger > button,
+    .reactionRow .planRowAmount,
+    .reactionCells {
+      width: 100%;
+    }
+
+    .reactionRow .planRowAmount {
+      display: block;
+    }
+
+    .reactionCells {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 13px;
+    }
+
+    .reactionCells > * {
+      position: relative;
+      align-items: flex-start;
+      justify-content: flex-start;
+      padding-top: 14px;
+      text-align: left;
+    }
+
+    .reactionCells > *::before {
+      position: absolute;
+      top: 0;
+      left: 0;
+      display: block;
+      margin-bottom: 3px;
+      color: var(--muted-foreground);
+      content: attr(data-label);
+      font: 9px "DM Mono";
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+    }
   }
 }
 
@@ -3599,7 +3541,6 @@
 .pageIntro,
 .stats,
 .panelHeader,
-.resultsHeader,
 .rule {
   display: flex;
   justify-content: space-between;
@@ -4053,6 +3994,10 @@
   border: 1px solid var(--line);
   padding: 25px;
   box-shadow: 0 10px 30px #0002;
+}
+
+.results {
+  container: planner-results / inline-size;
 }
 
 .content > .panel:first-of-type {
@@ -4574,12 +4519,6 @@
   }
 }
 
-.resultsHeaderMeta {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
 .requiredSkillCount {
   color: var(--lime);
   font: 10px "DM Mono";
@@ -4721,31 +4660,6 @@
 .emptyResult p {
   font-size: 11px;
   margin-top: 7px;
-}
-
-.planActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: flex-end;
-  padding: 14px 0 10px;
-}
-
-.reactionPlanActions {
-  column-gap: 18px;
-}
-
-.planActions > label {
-  flex: 0 0 auto;
-  align-self: center;
-  min-width: 0;
-  width: auto;
-}
-
-.copyButton {
-  border: 1px solid #2b5260;
-  background: transparent;
-  color: var(--cyan);
 }
 
 .buildItemIdentity {

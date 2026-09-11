@@ -971,7 +971,7 @@ function Results({
   }
   return (
     <section className={styles.results}>
-      <div className={styles.resultsHeader}>
+      <div className="flex items-center justify-between max-[640px]:flex-col max-[640px]:items-start max-[640px]:gap-3.5">
         <div>
           <p className={styles.kicker}>02 / OUTPUT</p>
           <h2>Compression result</h2>

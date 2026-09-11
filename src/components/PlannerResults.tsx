@@ -32,8 +32,8 @@ import CopyableText from "@/components/CopyableText";
 import JobInputsResponsive, {
   getJobInputsCompletionPercent,
 } from "@/components/JobInputsResponsive";
+import ResultRow from "@/components/ResultRow";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
-import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { toast } from "@/components/ui/toast";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -68,7 +68,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -510,6 +509,7 @@ function buildReactionSchedule(
   showTotalRunCounts: boolean,
   mode: ReactionScheduleMode,
   availableReactionSlots: number,
+  enabledJobKeys: ReadonlySet<string>,
   maxJobHours: number,
 ): Map<string, ReactionSchedule[]> {
   const rows = jobs.map((job) => {
@@ -525,17 +525,18 @@ function buildReactionSchedule(
     const runs = showTotalRunCounts ? job.countNeeded : job.runsAvailable;
     return { job, blueprintCount, runs, maxInstalls: Math.min(blueprintCount, Math.max(0, runs)) };
   });
+  const enabledRows = rows.filter((row) => enabledJobKeys.has(reactionJobKey(row.job)));
   const installs = new Map<string, number>();
   if (mode === "available-slots") {
     let remainingSlots = Math.max(0, availableReactionSlots);
-    for (const row of rows.slice().sort((left, right) => right.runs - left.runs)) {
+    for (const row of enabledRows.slice().sort((left, right) => right.runs - left.runs)) {
       if (remainingSlots <= 0) break;
       const count = Math.min(1, row.maxInstalls);
       installs.set(reactionJobKey(row.job), count);
       remainingSlots -= count;
     }
     while (remainingSlots > 0) {
-      const candidates = rows
+      const candidates = enabledRows
         .filter((row) => (installs.get(reactionJobKey(row.job)) ?? 0) < row.maxInstalls)
         .sort((left, right) => {
           const leftRuns = Math.ceil(
@@ -558,8 +559,10 @@ function buildReactionSchedule(
       const perRunTime = job.countNeeded > 0 ? job.totalTime / job.countNeeded : 0;
       const timeLimitedRuns =
         maxJobHours > 0 && perRunTime > 0 ? Math.floor((maxJobHours * 3600) / perRunTime) : runs;
-      const installCount =
-        mode === "available-slots"
+      const isEnabled = enabledJobKeys.has(reactionJobKey(job));
+      const installCount = !isEnabled
+        ? 0
+        : mode === "available-slots"
           ? (installs.get(reactionJobKey(job)) ?? 0)
           : timeLimitedRuns > 0
             ? Math.min(blueprintCount, Math.ceil(runs / timeLimitedRuns))
@@ -767,12 +770,15 @@ function PlannerResultsContent({
   const ActiveTabIcon = tabs.find((tab) => tab.value === activeTab)?.icon ?? ClipboardList;
   return (
     <div className={styles.results}>
-      <div className={styles.resultsHeader} ref={resultsHeaderRef}>
+      <div
+        className="flex items-center justify-between max-[640px]:flex-col max-[640px]:items-start max-[640px]:gap-3.5"
+        ref={resultsHeaderRef}
+      >
         <div>
-          <p className={styles.panelKicker}>03 / OUTPUT</p>
+          <p className={styles.panelKicker}>02 / OUTPUT</p>
           <h2>Plan breakdown</h2>
         </div>
-        <div className={styles.resultsHeaderMeta}>
+        <div className="flex items-center gap-4 max-[640px]:w-full max-[640px]:flex-col max-[640px]:items-stretch max-[640px]:gap-2.5">
           {plan && (
             <span className={styles.requiredSkillCount}>
               {plan.lists.skillsRequired.length.toLocaleString()} skills required
@@ -783,6 +789,7 @@ function PlannerResultsContent({
               type="button"
               variant="outline"
               size="sm"
+              className="max-[640px]:w-full"
               onClick={() => setIsBugReportOpen(true)}
             >
               <Bug aria-hidden="true" />
@@ -820,7 +827,6 @@ function PlannerResultsContent({
       </Dialog>
       <Tabs value={activeTab} onValueChange={selectTab}>
         <TabsList
-          variant="line"
           className={`${styles.desktopTabList} w-full max-w-full justify-start overflow-x-auto overflow-y-hidden`}
         >
           {tabs.map(({ value, icon: Icon }) => (
@@ -966,6 +972,10 @@ function PlanList({
   const [planViewMode, setPlanViewMode] = useState<PlanViewMode>("build-location");
   const [reactionScheduleMode, setReactionScheduleMode] =
     useState<ReactionScheduleMode>("available-slots");
+  const [disabledReactionJobKeysByPlan, setDisabledReactionJobKeysByPlan] = useState<
+    Record<string, ReadonlySet<string>>
+  >({});
+  const planStateKey = plan.metadata.planId ?? "current";
   const [maxJobHours, setMaxJobHours] = useState("24");
   const [reactionSort, setReactionSort] = useState<ReactionSort>({
     key: "type",
@@ -1030,6 +1040,17 @@ function PlanList({
     ),
     haulPatches,
   );
+  const disabledReactionJobKeys = disabledReactionJobKeysByPlan[planStateKey] ?? new Set<string>();
+
+  function setReactionJobEnabled(job: ResponseReactionJob, enabled: boolean) {
+    const key = reactionJobKey(job);
+    setDisabledReactionJobKeysByPlan((current) => {
+      const next = new Set(current[planStateKey] ?? []);
+      if (enabled) next.delete(key);
+      else next.add(key);
+      return { ...current, [planStateKey]: next };
+    });
+  }
   const copyPlanItems = planItemsByActivityLocation.filter(
     (entry): entry is Extract<ResponsePlanItem, { kind: "bpc" }> =>
       entry.kind === "bpc" && entry.bpoCount > 0 && entry.neededQuantity > 0,
@@ -1130,6 +1151,11 @@ function PlanList({
     showTotalRunCounts,
     reactionScheduleMode,
     availableReactionSlots,
+    new Set(
+      reactionJobs
+        .filter((job) => !disabledReactionJobKeys.has(reactionJobKey(job)))
+        .map(reactionJobKey),
+    ),
     Number(maxJobHours),
   );
   const reactionSummary = reactionJobs.reduce(
@@ -1525,11 +1551,12 @@ function PlanList({
     <>
       {activeTab !== "Haul" && (
         <div
-          className={`${styles.planActions} ${activeTab === "React" ? styles.reactionPlanActions : ""}`}
+          className={`flex flex-wrap gap-2.5 py-3.5 pb-2.5 max-[640px]:items-stretch max-[640px]:flex-col ${activeTab === "React" ? "justify-start gap-x-[18px]" : "justify-end"}`}
         >
           {activeTab === "Buy" && (
             <Button
               variant="outline"
+              className="max-[640px]:w-full"
               onClick={() => void sendToCompress()}
               disabled={materialBuyEntries.length === 0}
             >
@@ -1539,8 +1566,10 @@ function PlanList({
           )}
           {activeTab === "React" && (
             <>
-              <div className={styles.reactionPlanControls}>
-                <Label htmlFor="reaction-schedule-mode">Plan Type:</Label>
+              <div className="flex w-auto flex-nowrap items-center gap-2.5 max-[640px]:flex-wrap">
+                <Label className="shrink-0 whitespace-nowrap" htmlFor="reaction-schedule-mode">
+                  Plan Type:
+                </Label>
                 <Select
                   value={reactionScheduleMode}
                   onValueChange={(value) => setReactionScheduleMode(value as ReactionScheduleMode)}
@@ -1548,7 +1577,7 @@ function PlanList({
                   <SelectTrigger
                     id="reaction-schedule-mode"
                     aria-label="Reaction scheduling mode"
-                    className={styles.modeSelect}
+                    className="flex-[0_1_190px] min-w-[170px]"
                   >
                     <SelectValue>
                       {reactionScheduleMode === "max-job-length"
@@ -1562,7 +1591,7 @@ function PlanList({
                   </SelectContent>
                 </Select>
                 {reactionScheduleMode === "max-job-length" && (
-                  <div className={styles.hoursControl}>
+                  <div className="flex flex-[0_0_150px] items-center gap-2">
                     <Input
                       id="max-reaction-job-hours"
                       type="number"
@@ -1571,13 +1600,13 @@ function PlanList({
                       value={maxJobHours}
                       onChange={(event) => setMaxJobHours(event.target.value)}
                       aria-label="Maximum reaction job length in hours"
-                      className={styles.maxJobHours}
+                      className="w-[100px]"
                     />
                     <Label htmlFor="max-reaction-job-hours">Hours</Label>
                   </div>
                 )}
               </div>
-              <div className={styles.reactionDisplayControls}>
+              <div className="flex min-h-8 w-auto items-center gap-2.5">
                 <Label htmlFor="reaction-run-count-mode">Show</Label>
                 <Select
                   value={showTotalRunCounts ? "total" : "installable"}
@@ -1586,7 +1615,7 @@ function PlanList({
                   <SelectTrigger
                     id="reaction-run-count-mode"
                     aria-label="Reaction run count display"
-                    className={styles.runCountSelect}
+                    className="flex-[0_1_125px] min-w-[125px]"
                   >
                     <SelectValue>{showTotalRunCounts ? "Total" : "Installable"}</SelectValue>
                   </SelectTrigger>
@@ -1645,7 +1674,7 @@ function PlanList({
               <Button
                 type="button"
                 variant="outline"
-                className={styles.reactionCopyButton}
+                className="ml-auto max-[640px]:ml-0 max-[640px]:w-full"
                 onClick={copyList}
               >
                 <CopyIcon aria-hidden="true" />
@@ -1654,7 +1683,7 @@ function PlanList({
             </>
           )}
           {activeTab === "Manufacture" && (
-            <div className={`${styles.reactionDisplayControls} mr-auto`}>
+            <div className="mr-auto flex min-h-8 w-auto items-center gap-2.5">
               <Label htmlFor="manufacturing-run-count-mode">Show</Label>
               <Select
                 value={showTotalManufacturingRunCounts ? "total" : "installable"}
@@ -1663,7 +1692,7 @@ function PlanList({
                 <SelectTrigger
                   id="manufacturing-run-count-mode"
                   aria-label="Manufacturing run count display"
-                  className={styles.runCountSelect}
+                  className="flex-[0_1_125px] min-w-[125px]"
                 >
                   <SelectValue>
                     {showTotalManufacturingRunCounts ? "Total" : "Installable"}
@@ -1719,36 +1748,40 @@ function PlanList({
             </div>
           )}
           {activeTab === "Plan" && (
-            <div className={styles.planViewControls}>
-              <Label htmlFor="plan-type">TYPE</Label>
-              <Combobox
-                items={planTypeOptions.map((option) => option.name)}
-                value={selectedType?.name ?? null}
-                onValueChange={(value) => {
-                  const nextTypeId =
-                    planTypeOptions.find((option) => option.name === value)?.id ?? null;
-                  onSelectedTypeIdChange(nextTypeId);
-                }}
-              >
-                <ComboboxInput
-                  id="plan-type"
-                  placeholder="Filter by type"
-                  aria-label="Filter plan by asset type"
-                  showClear
-                />
-                <ComboboxContent>
-                  <ComboboxEmpty>No matching asset types.</ComboboxEmpty>
-                  <ComboboxList>
-                    <ComboboxCollection>
-                      {(option) => (
-                        <ComboboxItem key={option} value={option}>
-                          {option}
-                        </ComboboxItem>
-                      )}
-                    </ComboboxCollection>
-                  </ComboboxList>
-                </ComboboxContent>
-              </Combobox>
+            <div className="flex w-auto items-center gap-2.5 max-[640px]:w-full max-[640px]:flex-col max-[640px]:items-stretch">
+              <Label className="max-[640px]:self-start" htmlFor="plan-type">
+                TYPE
+              </Label>
+              <div className="min-w-0 max-[640px]:w-full max-[640px]:overflow-hidden">
+                <Combobox
+                  items={planTypeOptions.map((option) => option.name)}
+                  value={selectedType?.name ?? null}
+                  onValueChange={(value) => {
+                    const nextTypeId =
+                      planTypeOptions.find((option) => option.name === value)?.id ?? null;
+                    onSelectedTypeIdChange(nextTypeId);
+                  }}
+                >
+                  <ComboboxInput
+                    id="plan-type"
+                    placeholder="Filter by type"
+                    aria-label="Filter plan by asset type"
+                    showClear
+                  />
+                  <ComboboxContent>
+                    <ComboboxEmpty>No matching asset types.</ComboboxEmpty>
+                    <ComboboxList>
+                      <ComboboxCollection>
+                        {(option) => (
+                          <ComboboxItem key={option} value={option}>
+                            {option}
+                          </ComboboxItem>
+                        )}
+                      </ComboboxCollection>
+                    </ComboboxList>
+                  </ComboboxContent>
+                </Combobox>
+              </div>
               <Label htmlFor="plan-view-mode">VIEW</Label>
               <Select
                 value={planViewMode}
@@ -1757,7 +1790,7 @@ function PlanList({
                 <SelectTrigger
                   id="plan-view-mode"
                   aria-label="Plan view mode"
-                  className={styles.modeSelect}
+                  className="flex-[0_1_190px] min-w-[170px] max-[640px]:w-full max-[640px]:min-w-0"
                 >
                   <SelectValue>
                     {planViewMode === "build-location" ? "By Build Location" : "All Items"}
@@ -1774,6 +1807,7 @@ function PlanList({
             <Button
               type="button"
               variant="outline"
+              className="max-[640px]:w-full"
               onClick={copyList}
               disabled={activeTab === "Buy" && materialBuyEntries.length === 0}
             >
@@ -1797,7 +1831,8 @@ function PlanList({
         </div>
       )}
       {activeTab === "React" && (
-        <div className={styles.reactionTableHeader}>
+        <div className={`${styles.reactionTableHeader} px-2`}>
+          <span aria-hidden="true" />
           <button
             type="button"
             className={styles.reactionSortButton}
@@ -1878,10 +1913,11 @@ function PlanList({
                 <ArrowDown aria-hidden="true" />
               ))}
           </button>
+          <span aria-hidden="true" />
         </div>
       )}
       {activeTab === "Manufacture" && (
-        <div className={styles.manufacturingTableHeader}>
+        <div className={`${styles.manufacturingTableHeader} px-2`}>
           <button
             type="button"
             className={styles.reactionSortButton}
@@ -1941,6 +1977,7 @@ function PlanList({
                 <ArrowDown aria-hidden="true" />
               ))}
           </button>
+          <span aria-hidden="true" />
         </div>
       )}
       {activeTab === "Copy" && (
@@ -2100,86 +2137,58 @@ function PlanList({
                   const isExcluded = haulItemExclusion.has(key);
                   const isPatched = isHaulTaskPatched(task, haulPatches);
                   return (
-                    <div
-                      className={`${styles.haulRow} ${isExcluded ? styles.haulRowDisabled : ""} ${isPatched ? styles.haulRowCompleted : ""}`}
+                    <ResultRow
                       key={haulTaskRenderKey(task)}
+                      name={task.typeName}
+                      typeId={task.typeId}
+                      imageSize={40}
+                      linkPath="planner"
+                      linkIcon={ClipboardList}
+                      linkSearchParams={{ tab: "Plan" }}
+                      navigateInPlace
+                      showSwitch
+                      switchChecked={!isExcluded}
+                      switchPending={togglingHaulItemKey === key}
+                      switchDisabled={isPatched || togglingHaulItemKey !== null}
+                      switchTooltip="Include in haul plan?"
+                      onSwitchChange={(checked) => {
+                        setTogglingHaulItemKey(key);
+                        void onToggleHaulItemExclusion(key, task.toLocationId, !checked).finally(
+                          () => setTogglingHaulItemKey(null),
+                        );
+                      }}
+                      showCheckbox
+                      checkboxChecked={isPatched}
+                      checkboxPending={togglingHaulPatchKey === key}
+                      checkboxDisabled={
+                        isExcluded
+                        || togglingHaulPatchGroupKey !== null
+                        || togglingHaulPatchKey !== null
+                      }
+                      checkboxTooltip="Mark as moved"
+                      onCheckboxChange={(checked) => {
+                        setTogglingHaulPatchKey(key);
+                        void onToggleHaulPatches([task], checked).finally(() => {
+                          setTogglingHaulPatchKey(null);
+                        });
+                      }}
+                      className={`${isExcluded || isPatched ? "opacity-50" : ""} max-[640px]:grid-cols-[auto_minmax(0,1fr)_auto] max-[640px]:items-start max-[640px]:gap-y-2`}
+                      switchClassName="max-[640px]:col-start-1 max-[640px]:row-start-2"
+                      identityClassName="max-[640px]:col-span-2 max-[640px]:row-start-1 max-[640px]:w-full"
+                      checkboxClassName="max-[640px]:col-start-3 max-[640px]:row-start-1"
                     >
-                      <span className={styles.haulRowSwitch}>
-                        {togglingHaulItemKey === key ? (
-                          <Spinner aria-hidden="true" />
-                        ) : (
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <Switch
-                                  aria-label="Include in haul plan?"
-                                  checked={!isExcluded}
-                                  disabled={isPatched || togglingHaulItemKey !== null}
-                                  onCheckedChange={(checked) => {
-                                    setTogglingHaulItemKey(key);
-                                    void onToggleHaulItemExclusion(
-                                      key,
-                                      task.toLocationId,
-                                      !checked,
-                                    ).finally(() => setTogglingHaulItemKey(null));
-                                  }}
-                                />
-                              }
-                            />
-                            <TooltipContent>Include in haul plan?</TooltipContent>
-                          </Tooltip>
-                        )}
-                      </span>
-                      <TypeIdentity
-                        name={task.typeName}
-                        typeId={task.typeId}
-                        imageSize={40}
-                        linkPath="planner"
-                        linkIcon={ClipboardList}
-                        linkSearchParams={{ tab: "Plan" }}
-                        navigateInPlace
-                        className={styles.planTypeIdentity}
-                      />
-                      <span className={styles.haulRowAmount}>
+                      <span className="col-start-3 grid justify-items-end whitespace-nowrap text-right font-mono text-xs max-[640px]:col-start-2 max-[640px]:col-end-[-1] max-[640px]:row-start-2">
                         <CopyableText
                           textToRender={`${task.neededQuantity.toLocaleString()} units`}
                           textToCopy={String(task.neededQuantity)}
                           copyLabel="Quantity"
                         />
-                        <small>
+                        <small className="mt-1 text-[10px] text-muted-foreground">
                           {Math.ceil(task.neededQuantity * task.unitVolume).toLocaleString()} m
                           <sup>3</sup>
                         </small>
                       </span>
-                      <span className={styles.haulRowPatch}>
-                        {togglingHaulPatchKey === key ? (
-                          <Spinner aria-hidden="true" />
-                        ) : (
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <Checkbox
-                                  aria-label={`Mark ${task.typeName} as moved`}
-                                  checked={isPatched}
-                                  disabled={
-                                    isExcluded
-                                    || togglingHaulPatchGroupKey !== null
-                                    || togglingHaulPatchKey !== null
-                                  }
-                                  onCheckedChange={(checked) => {
-                                    setTogglingHaulPatchKey(key);
-                                    void onToggleHaulPatches([task], checked).finally(() => {
-                                      setTogglingHaulPatchKey(null);
-                                    });
-                                  }}
-                                />
-                              }
-                            />
-                            <TooltipContent>Haul completed?</TooltipContent>
-                          </Tooltip>
-                        )}
-                      </span>
-                    </div>
+                    </ResultRow>
                   );
                 })}
               </div>
@@ -2333,6 +2342,10 @@ function PlanList({
                       activeTab === "React" && "inputs" in entry && "locationId" in entry
                         ? getReactionFormulaCount(entry as ResponseReactionJob, stock)
                         : 0;
+                    const reactionJob =
+                      activeTab === "React" && "inputs" in entry
+                        ? (entry as ResponseReactionJob)
+                        : null;
                     const precedingRuns = rowSchedules
                       .slice(0, reactionIndex)
                       .reduce((total, schedule) => total + schedule.totalRuns, 0);
@@ -2469,24 +2482,30 @@ function PlanList({
                         : 0;
                     return (
                       <Fragment key={`${activeTab}-${index}`}>
-                        <div
+                        <ResultRow
+                          name={name}
+                          typeId={typeId}
+                          imageSize={40}
+                          variation={imageVariation}
+                          linkPath={activeTab === "Plan" ? "assets" : "planner"}
+                          linkIcon={activeTab === "Plan" ? undefined : ClipboardList}
+                          linkSearchParams={activeTab === "Plan" ? undefined : { tab: "Plan" }}
+                          navigateInPlace={activeTab !== "Plan"}
+                          showSwitch={reactionJob !== null}
+                          switchChecked={
+                            reactionJob
+                              ? !disabledReactionJobKeys.has(reactionJobKey(reactionJob))
+                              : undefined
+                          }
+                          switchTooltip="Include in reaction schedule?"
+                          onSwitchChange={(checked) => {
+                            if (reactionJob) setReactionJobEnabled(reactionJob, checked);
+                          }}
+                          showCheckbox={activeTab === "React" || activeTab === "Manufacture"}
+                          checkboxTooltip="Installed?"
+                          identityClassName={`${styles.planTypeIdentity} ${activeTab === "Copy" ? "max-[640px]:col-span-full max-[640px]:w-full" : ""}`}
                           className={`${activeTab === "Plan" ? styles.planTableRow : activeTab === "Copy" ? "grid grid-cols-[minmax(0,1fr)_minmax(74px,auto)_minmax(74px,auto)_minmax(90px,auto)] items-center gap-[13px] max-[640px]:grid-cols-3 max-[640px]:items-start max-[640px]:gap-y-2" : buyBpoEntry || isReactionFormulaBuy ? "grid grid-cols-[minmax(0,1fr)_minmax(150px,auto)_minmax(100px,auto)] items-center gap-[13px] max-[640px]:grid-cols-1 max-[640px]:items-start max-[640px]:gap-y-2" : styles.planRow} ${activeTab === "React" ? styles.reactionRow : activeTab === "Manufacture" ? styles.manufacturingRow : ""}`}
                         >
-                          <div
-                            className={`${styles.planTypeCell} ${activeTab === "Copy" ? "max-[640px]:col-span-full max-[640px]:w-full" : buyBpoEntry || isReactionFormulaBuy ? "max-[640px]:col-span-1 max-[640px]:w-full" : ""}`}
-                          >
-                            <TypeIdentity
-                              name={name}
-                              typeId={typeId}
-                              imageSize={40}
-                              variation={imageVariation}
-                              linkPath={activeTab === "Plan" ? "assets" : "planner"}
-                              linkIcon={activeTab === "Plan" ? undefined : ClipboardList}
-                              linkSearchParams={activeTab === "Plan" ? undefined : { tab: "Plan" }}
-                              navigateInPlace={activeTab !== "Plan"}
-                              className={styles.planTypeIdentity}
-                            />
-                          </div>
                           {activeTab === "React" && "inputs" in entry && (
                             <span className={styles.jobInputsTrigger}>
                               <JobInputsResponsive inputs={reactionInputs ?? entry.inputs} />
@@ -2711,10 +2730,7 @@ function PlanList({
                               {detail && activeTab !== "React" && <small>{detail}</small>}
                             </span>
                           )}
-                        </div>
-                        {activeTab !== "Plan" && index < rows.length - 1 && (
-                          <hr className={styles.planRowSeparator} />
-                        )}
+                        </ResultRow>
                       </Fragment>
                     );
                   })}
