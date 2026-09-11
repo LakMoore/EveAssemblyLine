@@ -7,6 +7,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -15,12 +16,12 @@ import {
   Drawer,
   DrawerContent,
   DrawerDescription,
+  DrawerFooter,
   DrawerHeader,
   DrawerTitle,
   DrawerTrigger,
 } from "@/components/ui/drawer";
 import { cn } from "@/lib/utils";
-import DialogBody from "./DialogBody";
 
 export type ResponsiveDialogDrawerProps = {
   trigger?: ReactElement;
@@ -30,11 +31,8 @@ export type ResponsiveDialogDrawerProps = {
   description?: ReactNode;
   headerContent?: ReactNode;
   drawerClassName?: string;
-  drawerBodyClassName?: string;
-  drawerContentClassName?: string;
   drawerFooterContent?: ReactNode;
   dialogClassName?: string;
-  dialogBodyClassName?: string;
   dialogFooterContent?: ReactNode;
   children: ReactNode;
 };
@@ -63,11 +61,8 @@ export default function ResponsiveDialogDrawer({
   description,
   headerContent,
   drawerClassName,
-  drawerBodyClassName,
-  drawerContentClassName,
   drawerFooterContent,
   dialogClassName,
-  dialogBodyClassName,
   dialogFooterContent,
   children,
 }: ResponsiveDialogDrawerProps) {
@@ -79,7 +74,7 @@ export default function ResponsiveDialogDrawer({
         {trigger && <DrawerTrigger render={trigger} />}
         <DrawerContent
           className={cn(
-            "h-[70vh] border border-popover shadow-xl [--drawer-bleed-background:transparent] [--drawer-inset:--spacing(2)]",
+            "max-h-[85vh] border border-popover shadow-xl [--drawer-bleed-background:transparent] [--drawer-inset:--spacing(2)]",
             drawerClassName,
           )}
         >
@@ -88,10 +83,10 @@ export default function ResponsiveDialogDrawer({
             {description && <DrawerDescription>{description}</DrawerDescription>}
             {headerContent}
           </DrawerHeader>
-          <ScrollArea className={cn("flex-1 overflow-y-auto p-4", drawerBodyClassName)}>
-            <div className={cn("px-4", drawerContentClassName)}>{children}</div>
+          <ScrollArea className="min-h-0 flex-1 overflow-y-auto p-4 pr-5">
+            <div className="py-2">{children}</div>
           </ScrollArea>
-          {drawerFooterContent}
+          <DrawerFooter>{drawerFooterContent}</DrawerFooter>
         </DrawerContent>
       </Drawer>
     );
@@ -100,14 +95,18 @@ export default function ResponsiveDialogDrawer({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {trigger && <DialogTrigger render={trigger} />}
-      <DialogContent className={dialogClassName}>
+      <DialogContent
+        className={cn("max-h-[85vh]", dialogClassName)}
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}
           {headerContent}
         </DialogHeader>
-        <DialogBody className={dialogBodyClassName}>{children}</DialogBody>
-        {dialogFooterContent}
+        <ScrollArea className="-mx-4 no-scrollbar max-h-[50vh] overflow-y-auto px-4">
+          <div className="py-2">{children}</div>
+        </ScrollArea>
+        <DialogFooter>{dialogFooterContent}</DialogFooter>
       </DialogContent>
     </Dialog>
   );

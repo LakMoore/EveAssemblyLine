@@ -715,17 +715,12 @@ function PlannerStockpileDialogLayout({
         onOpenChange={onOpenChange}
         title={title}
         description={description}
-        drawerClassName="h-[80vh]"
-        drawerBodyClassName="pr-5"
-        drawerContentClassName="py-4"
         drawerFooterContent={
           <DrawerFooter className="flex-row justify-between sm:!justify-between">
             {actionButtons}
             {standardFooterActions}
           </DrawerFooter>
         }
-        dialogClassName="max-h-[90vh] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-4xl"
-        dialogBodyClassName=""
         dialogFooterContent={
           <DialogFooter className="flex-row justify-between sm:!justify-between">
             {actionButtons}
