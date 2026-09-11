@@ -56,7 +56,7 @@ export default function PlanLogReview() {
           <h2 id="plan-log-heading" className="text-lg font-semibold">
             Plan request log
           </h2>
-          <p className="text-muted-foreground text-sm">
+          <p className="text-sm text-muted-foreground">
             Retained request and response bodies for reproducing reported plans.
           </p>
         </div>
@@ -77,7 +77,7 @@ export default function PlanLogReview() {
       )}
       {page?.logs.length ? (
         <div className="overflow-x-auto border">
-          <table className="w-full min-w-[760px] text-left text-sm">
+          <table className="w-full min-w-190 text-left text-sm">
             <thead className="border-b text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">Time</th>
@@ -89,7 +89,7 @@ export default function PlanLogReview() {
             <tbody>
               {page.logs.map((log) => (
                 <tr key={log.id} className="border-b last:border-0">
-                  <td className="whitespace-nowrap px-4 py-3">
+                  <td className="px-4 py-3 whitespace-nowrap">
                     {new Date(log.requestedAt).toLocaleString()}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs">

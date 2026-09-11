@@ -1578,7 +1578,7 @@ function PlanList({
     <>
       {activeTab !== "Haul" && (
         <div
-          className={`flex flex-wrap gap-2.5 py-3.5 pb-2.5 max-[640px]:items-stretch max-[640px]:flex-col ${activeTab === "React" ? "justify-start gap-x-[18px]" : "justify-end"}`}
+          className={`flex flex-wrap gap-2.5 py-3.5 pb-2.5 max-[640px]:flex-col max-[640px]:items-stretch ${activeTab === "React" ? "justify-start gap-x-[18px]" : "justify-end"}`}
         >
           {activeTab === "Buy" && (
             <Button
@@ -1604,7 +1604,7 @@ function PlanList({
                   <SelectTrigger
                     id="reaction-schedule-mode"
                     aria-label="Reaction scheduling mode"
-                    className="flex-[0_1_190px] min-w-[170px]"
+                    className="min-w-[170px] flex-[0_1_190px]"
                   >
                     <SelectValue>
                       {reactionScheduleMode === "max-job-length"
@@ -1627,7 +1627,7 @@ function PlanList({
                       value={maxJobHours}
                       onChange={(event) => setMaxJobHours(event.target.value)}
                       aria-label="Maximum reaction job length in hours"
-                      className="w-[100px]"
+                      className="w-25"
                     />
                     <Label htmlFor="max-reaction-job-hours">Hours</Label>
                   </div>
@@ -1642,7 +1642,7 @@ function PlanList({
                   <SelectTrigger
                     id="reaction-run-count-mode"
                     aria-label="Reaction run count display"
-                    className="flex-[0_1_125px] min-w-[125px]"
+                    className="min-w-[125px] flex-[0_1_125px]"
                   >
                     <SelectValue>{showTotalRunCounts ? "Total" : "Installable"}</SelectValue>
                   </SelectTrigger>
@@ -1719,7 +1719,7 @@ function PlanList({
                 <SelectTrigger
                   id="manufacturing-run-count-mode"
                   aria-label="Manufacturing run count display"
-                  className="flex-[0_1_125px] min-w-[125px]"
+                  className="min-w-[125px] flex-[0_1_125px]"
                 >
                   <SelectValue>
                     {showTotalManufacturingRunCounts ? "Total" : "Installable"}
@@ -1794,7 +1794,7 @@ function PlanList({
                     placeholder="Filter by type"
                     aria-label="Filter plan by asset type"
                     showClear
-                    className="[&>input]:!text-xs max-[640px]:w-full"
+                    className="max-[640px]:w-full [&>input]:text-xs!"
                   />
                   <ComboboxContent>
                     <ComboboxEmpty>No matching asset types.</ComboboxEmpty>
@@ -2030,7 +2030,7 @@ function PlanList({
               key={`${group.fromLocationId}:${group.toLocationId}:${group.ownerType ?? "unassigned"}:${group.ownerId ?? 0}`}
             >
               <header className="flex min-h-14 w-full min-w-0 flex-col justify-between py-3 md:grid md:grid-cols-[auto_minmax(0,1fr)_auto_auto] md:items-center md:gap-y-0">
-                <strong className="shrink-0 whitespace-nowrap min-w-14">
+                <strong className="min-w-14 shrink-0 whitespace-nowrap">
                   {getHaulGroupVolume(group.tasks).toLocaleString()} m<sup>3</sup>
                 </strong>
                 <div className="flex min-w-0 flex-col gap-1 md:ml-2 md:gap-0">
@@ -2073,7 +2073,7 @@ function PlanList({
                 )}
                 <span className="flex min-w-0 items-center justify-between gap-2 md:justify-end">
                   {group.ownerType !== undefined && group.ownerId !== undefined && (
-                    <strong className="flex min-w-0 items-center gap-2 ml-4">
+                    <strong className="ml-4 flex min-w-0 items-center gap-2">
                       <Tooltip>
                         <TooltipTrigger
                           render={
@@ -2209,7 +2209,7 @@ function PlanList({
                       identityClassName="max-[640px]:col-span-2 max-[640px]:row-start-1 max-[640px]:w-full"
                       checkboxClassName="max-[640px]:col-start-3 max-[640px]:row-start-1"
                     >
-                      <span className="col-start-3 grid justify-items-end whitespace-nowrap text-right font-mono text-xs max-[640px]:col-start-2 max-[640px]:col-end-[-1] max-[640px]:row-start-2">
+                      <span className="col-start-3 grid justify-items-end text-right font-mono text-xs whitespace-nowrap max-[640px]:col-start-2 max-[640px]:-col-end-1 max-[640px]:row-start-2">
                         <CopyableText
                           textToRender={`${task.neededQuantity.toLocaleString()} units`}
                           textToCopy={String(task.neededQuantity)}
@@ -2270,10 +2270,10 @@ function PlanList({
                   <h3 className={styles.locationGroupHeader}>
                     <CollapsibleTrigger
                       type="button"
-                      className="flex min-w-0 min-h-10 flex-1 items-center justify-between gap-3 border-0 bg-transparent p-0 text-left font-inherit uppercase text-inherit"
+                      className="flex min-h-10 min-w-0 flex-1 items-center justify-between gap-3 border-0 bg-transparent p-0 text-left font-[inherit] text-inherit uppercase"
                       aria-label="Toggle group"
                     >
-                      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
+                      <span className="min-w-0 truncate">
                         {categoryGroupedTab
                           ? locationId
                           : (
@@ -2620,7 +2620,7 @@ function PlanList({
                             </>
                           ) : activeTab === "Buy" && buyBpoEntry ? (
                             <>
-                              <span className="text-right font-mono text-[11px] leading-normal text-muted-foreground whitespace-nowrap max-[640px]:text-left max-[640px]:col-span-1 max-[640px]:w-full">
+                              <span className="text-right font-mono text-[11px] leading-normal whitespace-nowrap text-muted-foreground max-[640px]:col-span-1 max-[640px]:w-full max-[640px]:text-left">
                                 BPO: {buyBpoEntry.bpoCount.toLocaleString()} /{" "}
                                 {buyBpoEntry.bposInUse.toLocaleString()} in use
                               </span>
@@ -2666,7 +2666,7 @@ function PlanList({
                             </>
                           ) : isReactionFormulaBuy && reactionFormulaSummary ? (
                             <>
-                              <span className="text-right font-mono text-[11px] leading-normal text-muted-foreground whitespace-nowrap max-[640px]:text-left max-[640px]:col-span-1 max-[640px]:w-full">
+                              <span className="text-right font-mono text-[11px] leading-normal whitespace-nowrap text-muted-foreground max-[640px]:col-span-1 max-[640px]:w-full max-[640px]:text-left">
                                 Formulas: {reactionFormulaSummary.inUse.toLocaleString()} /{" "}
                                 {reactionFormulaSummary.owned.toLocaleString()} in use
                               </span>
@@ -2687,7 +2687,8 @@ function PlanList({
                               {activeTab === "React" ? (
                                 <span className={styles.reactionCells}>
                                   <span
-                                    className={`${styles.reactionAvailableCell} result-row-content`}
+                                    className={styles.reactionAvailableCell}
+                                    data-result-row-content
                                     data-label="BPs available"
                                   >
                                     {additionalInstallCount > 0
@@ -2719,13 +2720,15 @@ function PlanList({
                                     </strong>
                                   </span>
                                   <span
-                                    className={`${styles.reactionValue} result-row-content`}
+                                    className={styles.reactionValue}
+                                    data-result-row-content
                                     data-label="Suggested installs"
                                   >
                                     <strong>{suggestedInstallCount.toLocaleString()}</strong>
                                   </span>
                                   <span
-                                    className={`${styles.reactionValue} result-row-content`}
+                                    className={styles.reactionValue}
+                                    data-result-row-content
                                     data-label="Suggested runs"
                                   >
                                     <strong>
@@ -2746,7 +2749,8 @@ function PlanList({
                                     </small>
                                   </span>
                                   <span
-                                    className={`${styles.reactionValue} result-row-content`}
+                                    className={styles.reactionValue}
+                                    data-result-row-content
                                     data-label="Total needed"
                                   >
                                     <strong>

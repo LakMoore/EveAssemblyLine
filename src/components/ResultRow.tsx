@@ -77,7 +77,7 @@ export default function ResultRow({
       {showNarrowLabel && (
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute right-full top-1/2 hidden -translate-y-1/2 mr-2 whitespace-nowrap font-mono text-[9px] font-normal uppercase text-muted-foreground max-[900px]:block"
+          className="pointer-events-none absolute top-1/2 right-full mr-2 hidden -translate-y-1/2 font-mono text-[9px] font-normal whitespace-nowrap text-muted-foreground uppercase max-[900px]:block"
         >
           {tooltip}
         </span>
@@ -96,8 +96,8 @@ export default function ResultRow({
       data-installed={installed || undefined}
       data-selected={selected || undefined}
       className={cn(
-        "group/result-row grid min-h-14 min-w-0 items-center gap-[13px] border-b border-border px-2 py-2.5 transition-colors hover:bg-muted/50 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:hover:bg-accent data-[installed=true]:hover:bg-transparent data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50",
-        "data-[installed=true]:[&>*:not(.contents)]:opacity-50 data-[installed=true]:[&_.contents>*]:opacity-50 data-[installed=true]:[&_.result-row-content]:opacity-50",
+        "group/result-row grid min-h-14 min-w-0 items-center gap-[13px] border-b border-border px-2 py-2.5 transition-colors hover:bg-muted/50 data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[installed=true]:hover:bg-transparent data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:hover:bg-accent",
+        "data-[installed=true]:**:data-result-row-content:opacity-50 data-[installed=true]:[&_.contents>*]:opacity-50 data-[installed=true]:[&>*:not(.contents)]:opacity-50",
         showSwitch && showCheckbox
           ? "grid-cols-[auto_minmax(0,1fr)_auto_auto]"
           : showSwitch

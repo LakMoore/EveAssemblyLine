@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parsePasteList } from "./pasteList";
 
-test("parses the first two columns of game-export TSV and removes total rows", () => {
+void test("parses the first two columns of game-export TSV and removes total rows", () => {
   const text = [
     "Amber Mykoserocin\t1665\t-\t-",
     "Atmospheric Gases\t5800\t20,000.00\t400,000.00",
@@ -20,7 +20,7 @@ test("parses the first two columns of game-export TSV and removes total rows", (
   );
 });
 
-test("keeps parsing the existing one-item-per-line format", () => {
+void test("keeps parsing the existing one-item-per-line format", () => {
   assert.deepEqual(
     parsePasteList("Raven 2\nVargur 1"),
     [

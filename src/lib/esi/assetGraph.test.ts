@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { retainAssetAncestors } from "./assetGraph";
 
-test("retains query-only container ancestors for accessible assets", () => {
+void test("retains query-only container ancestors for accessible assets", () => {
   const assets = [
     { itemId: 10, locationId: 1 },
     { itemId: 1, locationId: 100 },
@@ -17,7 +17,7 @@ test("retains query-only container ancestors for accessible assets", () => {
   );
 });
 
-test("does not add unrelated inaccessible assets", () => {
+void test("does not add unrelated inaccessible assets", () => {
   const assets = [
     { itemId: 10, locationId: 1 },
     { itemId: 20, locationId: 2 },

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { AssemblyLineGroups } from "./assemblyLineGroups";
 
-test("groups items in first-seen AssemblyLine group order", () => {
+void test("groups items in first-seen AssemblyLine group order", () => {
   const groups = AssemblyLineGroups.groupBy(
     [
       { typeId: 2, group: "Ships" },

@@ -26,7 +26,7 @@ const character: CharacterTokenRecord = {
   personalAuth: token,
 };
 
-test("maps character role locations from the ESI response", async (t) => {
+void test("maps character role locations from the ESI response", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -53,7 +53,7 @@ test("maps character role locations from the ESI response", async (t) => {
   );
 });
 
-test("checks corporation membership before fetching roles and reuses cached responses", async (t) => {
+void test("checks corporation membership before fetching roles and reuses cached responses", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -106,7 +106,7 @@ test("checks corporation membership before fetching roles and reuses cached resp
   assert.match(requests[2], /\/characters\/4201\/roles\/$/);
 });
 
-test("treats a corporation member-list authorization failure as no access", async (t) => {
+void test("treats a corporation member-list authorization failure as no access", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -139,7 +139,7 @@ test("treats a corporation member-list authorization failure as no access", asyn
   assert.equal(result.roles, null);
 });
 
-test("sends the cached ETag for a non-paginated endpoint", async (t) => {
+void test("sends the cached ETag for a non-paginated endpoint", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -179,7 +179,7 @@ test("sends the cached ETag for a non-paginated endpoint", async (t) => {
   assert.equal(result.headers.get("expires"), "Wed, 26 Aug 2026 17:00:00 GMT");
 });
 
-test("sends the cached ETag for corporation structures", async (t) => {
+void test("sends the cached ETag for corporation structures", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -213,7 +213,7 @@ test("sends the cached ETag for corporation structures", async (t) => {
   assert.equal(request.headers.get("if-none-match"), "old-etag");
 });
 
-test("fetches active industry jobs and excludes unusable terminal jobs", async (t) => {
+void test("fetches active industry jobs and excludes unusable terminal jobs", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -270,7 +270,7 @@ test("fetches active industry jobs and excludes unusable terminal jobs", async (
   );
 });
 
-test("fetches completed corporation industry jobs", async (t) => {
+void test("fetches completed corporation industry jobs", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -294,7 +294,7 @@ test("fetches completed corporation industry jobs", async (t) => {
   );
 });
 
-test("returns response metadata for a 304 without fetching another page", async (t) => {
+void test("returns response metadata for a 304 without fetching another page", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -330,7 +330,7 @@ test("returns response metadata for a 304 without fetching another page", async 
   assert.equal(result.headers.get("last-modified"), "Wed, 26 Aug 2026 16:55:00 GMT");
 });
 
-test("aggregates all pages while preserving first-page metadata", async (t) => {
+void test("aggregates all pages while preserving first-page metadata", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -373,7 +373,7 @@ test("aggregates all pages while preserving first-page metadata", async (t) => {
   assert.equal(result.notModified, false);
 });
 
-test("maps current ship and location responses", async (t) => {
+void test("maps current ship and location responses", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -419,7 +419,7 @@ test("maps current ship and location responses", async (t) => {
   );
 });
 
-test("treats a 420 error-limit response as rate limited", async (t) => {
+void test("treats a 420 error-limit response as rate limited", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -446,7 +446,7 @@ test("treats a 420 error-limit response as rate limited", async (t) => {
   );
 });
 
-test("requires current-location scopes before making an ESI request", async (t) => {
+void test("requires current-location scopes before making an ESI request", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;

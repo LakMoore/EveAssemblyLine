@@ -27,7 +27,7 @@ function asset(typeId: number, quantity: number, stationId = jita.stationId): As
   };
 }
 
-test("calculates a volume-weighted price and seven-calendar-day volume", () => {
+void test("calculates a volume-weighted price and seven-calendar-day volume", () => {
   const metrics = calculateSevenDayMarketMetrics(
     [
       { date: "2026-08-28", average: 10, volume: 70 },
@@ -43,7 +43,7 @@ test("calculates a volume-weighted price and seven-calendar-day volume", () => {
   assert.ok(Math.abs(metrics.priceStandardDeviation - Math.sqrt(200 / 9)) < 1e-10);
 });
 
-test("groups only positive stock held at configured stations", () => {
+void test("groups only positive stock held at configured stations", () => {
   const grouped = groupMarketStationStock(
     [asset(34, 10), asset(34, 5), asset(35, 8, 60_008_494), asset(36, 0)],
     [jita],
@@ -55,7 +55,7 @@ test("groups only positive stock held at configured stations", () => {
   );
 });
 
-test("groups stock held at a configured resolved structure", () => {
+void test("groups stock held at a configured resolved structure", () => {
   const structureId = 1_000_000_000_001;
   const structureAsset = asset(34, 7, structureId);
   structureAsset.rootLocation = {
@@ -70,7 +70,7 @@ test("groups stock held at a configured resolved structure", () => {
   );
 });
 
-test("requires a sell/buy margin and average above max buy by more than one deviation", () => {
+void test("requires a sell/buy margin and average above max buy by more than one deviation", () => {
   const stock = [
     { stationId: jita.stationId, regionId: jita.regionId, typeId: 34, quantity: 10 },
     { stationId: jita.stationId, regionId: jita.regionId, typeId: 35, quantity: 2 },
@@ -106,7 +106,7 @@ test("requires a sell/buy margin and average above max buy by more than one devi
   assert.equal(signals[0].maxBuyPrice, 90);
 });
 
-test("requires both daily market value and on-hand sell value to meet the threshold", () => {
+void test("requires both daily market value and on-hand sell value to meet the threshold", () => {
   const stock = [
     { stationId: jita.stationId, regionId: jita.regionId, typeId: 34, quantity: 50_000 },
     { stationId: jita.stationId, regionId: jita.regionId, typeId: 35, quantity: 10_000 },

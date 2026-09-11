@@ -20,7 +20,7 @@ function candidate(overrides: Partial<ReprocessingCandidate> = {}): Reprocessing
   };
 }
 
-test("excludes production surplus from net reprocessing requirements", () => {
+void test("excludes production surplus from net reprocessing requirements", () => {
   assert.deepEqual(
     getNetReprocessingRequirements([
       {
@@ -46,14 +46,14 @@ test("excludes production surplus from net reprocessing requirements", () => {
   );
 });
 
-test("does not allocate reprocessable stock without a material shortage", () => {
+void test("does not allocate reprocessable stock without a material shortage", () => {
   const result = allocateReprocessing(new Map(), [candidate()]);
 
   assert.deepEqual(result.consumedOwned, new Map());
   assert.deepEqual(result.producedMaterials, new Map());
 });
 
-test("allocates only the complete portions needed to cover a shortage", () => {
+void test("allocates only the complete portions needed to cover a shortage", () => {
   const result = allocateReprocessing(new Map([[34, 500]]), [candidate()]);
 
   assert.deepEqual(result.consumedOwned, new Map([[62516, 200]]));
@@ -61,7 +61,7 @@ test("allocates only the complete portions needed to cover a shortage", () => {
   assert.deepEqual(result.remainingRequirements, new Map([[34, 0]]));
 });
 
-test("prefers the candidate that covers demand with less collateral output", () => {
+void test("prefers the candidate that covers demand with less collateral output", () => {
   const result = allocateReprocessing(
     new Map([[34, 1_000]]),
     [
@@ -86,7 +86,7 @@ test("prefers the candidate that covers demand with less collateral output", () 
   assert.deepEqual(result.remainingRequirements, new Map([[34, 0]]));
 });
 
-test("does not consume owned portions beyond the material shortage", () => {
+void test("does not consume owned portions beyond the material shortage", () => {
   const result = allocateReprocessing(
     new Map([[34, 500]]),
     [candidate({ availableQuantity: 1_000 })],
@@ -97,7 +97,7 @@ test("does not consume owned portions beyond the material shortage", () => {
   assert.deepEqual(result.remainingRequirements, new Map([[34, 0]]));
 });
 
-test("selects only the complete portions needed for the largest shortage", () => {
+void test("selects only the complete portions needed for the largest shortage", () => {
   const result = allocateReprocessing(
     new Map([[37, 6_004]]),
     [
@@ -134,7 +134,7 @@ test("selects only the complete portions needed for the largest shortage", () =>
   );
 });
 
-test("uses mixed yields to satisfy several shortages", () => {
+void test("uses mixed yields to satisfy several shortages", () => {
   const result = allocateReprocessing(
     new Map([
       [34, 150],
@@ -161,7 +161,7 @@ test("uses mixed yields to satisfy several shortages", () => {
   );
 });
 
-test("prefers stock already at the reprocessing location", () => {
+void test("prefers stock already at the reprocessing location", () => {
   const result = allocateReprocessing(
     new Map([[34, 400]]),
     [
@@ -174,7 +174,7 @@ test("prefers stock already at the reprocessing location", () => {
   assert.deepEqual(result.readyToReprocess, new Map([[62516, 100]]));
 });
 
-test("rescores candidates after exhausting locally held portions", () => {
+void test("rescores candidates after exhausting locally held portions", () => {
   const result = allocateReprocessing(
     new Map([[34, 800]]),
     [
@@ -192,7 +192,7 @@ test("rescores candidates after exhausting locally held portions", () => {
   );
 });
 
-test("prioritizes owned candidates when mixed sources are supplied", () => {
+void test("prioritizes owned candidates when mixed sources are supplied", () => {
   const result = allocateReprocessing(
     new Map([[34, 1_000]]),
     [
@@ -205,7 +205,7 @@ test("prioritizes owned candidates when mixed sources are supplied", () => {
   assert.deepEqual(result.consumedPurchases, new Map([[62520, 100]]));
 });
 
-test("reprocesses every complete portion of a committed purchase", () => {
+void test("reprocesses every complete portion of a committed purchase", () => {
   const result = reprocessCommittedPurchases([
     candidate({ availableQuantity: 250, source: "purchase" }),
   ]);
@@ -214,7 +214,7 @@ test("reprocesses every complete portion of a committed purchase", () => {
   assert.deepEqual(result.producedMaterials, new Map([[34, 800]]));
 });
 
-test("aggregates fractional gas yields before rounding to whole units", () => {
+void test("aggregates fractional gas yields before rounding to whole units", () => {
   const gas = candidate({
     typeId: 62377,
     availableQuantity: 106,

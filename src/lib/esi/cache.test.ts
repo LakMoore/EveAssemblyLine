@@ -74,7 +74,7 @@ function corporationRecord(locationId: number, itemId = 400, locationFlag = "Cor
   return { itemId, locationId, locationFlag };
 }
 
-test("includes direct hangar contents without including nested container contents", () => {
+void test("includes direct hangar contents without including nested container contents", () => {
   const policy = sourcePolicy({
     directHangars: [{ rootLocationId: 700, locationFlag: "CorpSAG1" }],
   });
@@ -116,7 +116,7 @@ test("includes direct hangar contents without including nested container content
   );
 });
 
-test("includes corporations represented by non-director attached characters", () => {
+void test("includes corporations represented by non-director attached characters", () => {
   assert.deepEqual(
     getCorporationIdsForCharacters([
       { corporationId: 900 },
@@ -127,7 +127,7 @@ test("includes corporations represented by non-director attached characters", ()
   );
 });
 
-test("includes every nested level below a selected container", () => {
+void test("includes every nested level below a selected container", () => {
   const policy = sourcePolicy({ containerItemIds: [200] });
 
   assert.equal(
@@ -162,7 +162,7 @@ test("includes every nested level below a selected container", () => {
   );
 });
 
-test("preserves the selected hangar through an office folder parent", () => {
+void test("preserves the selected hangar through an office folder parent", () => {
   const policy = sourcePolicy({ containerItemIds: [200] });
   const roles = [
     {
@@ -214,7 +214,7 @@ test("preserves the selected hangar through an office folder parent", () => {
   );
 });
 
-test("does not classify container blueprints as physical containers", async () => {
+void test("does not classify container blueprints as physical containers", async () => {
   const [types, groups, marketGroups] = await Promise.all([
     getTypesByIds([27309, 32858, 33011]),
     getGroups(),
@@ -226,7 +226,7 @@ test("does not classify container blueprints as physical containers", async () =
   assert.equal(isCargoContainerType(33011, types, groups, marketGroups), true);
 });
 
-test("allows query-only access for blueprints but not materials", () => {
+void test("allows query-only access for blueprints but not materials", () => {
   const queryOnlyRoles = [
     {
       ...corporationRoles[0],
@@ -260,7 +260,7 @@ test("allows query-only access for blueprints but not materials", () => {
   );
 });
 
-test("shares corporation cache status with non-director attached characters", async () => {
+void test("shares corporation cache status with non-director attached characters", async () => {
   const characters = [
     {
       characterId: 9101,
@@ -300,7 +300,7 @@ test("shares corporation cache status with non-director attached characters", as
   );
 });
 
-test("hides a selected root when no character can query it", () => {
+void test("hides a selected root when no character can query it", () => {
   const inaccessibleRoles = [
     {
       ...corporationRoles[0],
@@ -324,7 +324,7 @@ test("hides a selected root when no character can query it", () => {
   );
 });
 
-test("preserves selected container IDs during settings normalization", () => {
+void test("preserves selected container IDs during settings normalization", () => {
   assert.deepEqual(
     normalizeCorporationSettings([
       {
@@ -338,7 +338,7 @@ test("preserves selected container IDs during settings normalization", () => {
   );
 });
 
-test("uses a slow cache for public character data and a shorter member-list cache", () => {
+void test("uses a slow cache for public character data and a shorter member-list cache", () => {
   assert.equal(getEsiTtlMs("/characters/42/", null, null), 24 * 60 * 60 * 1000);
   assert.equal(
     getEsiTtlMs("/corporations/777/members/?character_id=42", null, null),
@@ -346,7 +346,7 @@ test("uses a slow cache for public character data and a shorter member-list cach
   );
 });
 
-test("uses only response Last-Modified and Expires metadata", () => {
+void test("uses only response Last-Modified and Expires metadata", () => {
   const previous = setFresh(
     { value: "old" },
     new Headers({
@@ -373,7 +373,7 @@ test("uses only response Last-Modified and Expires metadata", () => {
   assert.equal(current.etag, "new-etag");
 });
 
-test("does not preserve Last-Modified when the response omits it", () => {
+void test("does not preserve Last-Modified when the response omits it", () => {
   const current = setFresh(
     [],
     new Headers({ expires: "Wed, 26 Aug 2026 17:00:00 GMT" }),
@@ -390,7 +390,7 @@ test("does not preserve Last-Modified when the response omits it", () => {
   assert.equal(current.expires, "2026-08-26T17:00:00.000Z");
 });
 
-test("blocks a current ship ID without requiring a location snapshot", () => {
+void test("blocks a current ship ID without requiring a location snapshot", () => {
   const knownItemIds = getKnownNonStructureItemIds(new Set([100]), 200);
 
   assert.equal(knownItemIds.has(100), true);
@@ -398,7 +398,7 @@ test("blocks a current ship ID without requiring a location snapshot", () => {
   assert.equal(knownItemIds.has(300), false);
 });
 
-test("preserves Last-Modified when a 304 response omits it", () => {
+void test("preserves Last-Modified when a 304 response omits it", () => {
   const current = setFresh(
     [],
     new Headers({ expires: "Wed, 26 Aug 2026 17:00:00 GMT" }),
@@ -418,11 +418,11 @@ test("preserves Last-Modified when a 304 response omits it", () => {
   assert.equal(current.expires, "2026-08-26T17:00:00.000Z");
 });
 
-test("expiry takes precedence when determining stale status", () => {
+void test("expiry takes precedence when determining stale status", () => {
   assert.equal(endpointDataStatus("2026-08-26T16:59:59.000Z", "2020-01-01T00:00:00.000Z"), "stale");
 });
 
-test("deducts each newer sell order once using its original quantity", () => {
+void test("deducts each newer sell order once using its original quantity", () => {
   const orders = [
     {
       orderId: 1,
@@ -465,7 +465,7 @@ test("deducts each newer sell order once using its original quantity", () => {
   assert.deepEqual([...second], [...first]);
 });
 
-test("builds an undocked current ship with a solar-system root", () => {
+void test("builds an undocked current ship with a solar-system root", () => {
   const asset = buildCurrentShipAsset(
     {
       characterId: 42,
@@ -491,13 +491,13 @@ test("builds an undocked current ship with a solar-system root", () => {
   );
 });
 
-test("only includes assets from haulable ship holds in planning stock", () => {
+void test("only includes assets from haulable ship holds in planning stock", () => {
   assert.equal(isHaulableShipHoldAsset({ locationFlag: "Cargo" }), true);
   assert.equal(isHaulableShipHoldAsset({ locationFlag: "SpecializedMiningHold" }), false);
   assert.equal(isHaulableShipHoldAsset({ locationFlag: "DroneBay" }), false);
 });
 
-test("builds a docked current ship with its known system", () => {
+void test("builds a docked current ship with its known system", () => {
   const asset = buildCurrentShipAsset(
     {
       characterId: 42,

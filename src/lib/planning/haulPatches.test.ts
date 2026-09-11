@@ -29,7 +29,7 @@ function stockItem(overrides: Partial<PlanStockItem> = {}): PlanStockItem {
   };
 }
 
-test("moves stock between locations without creating negative quantities", () => {
+void test("moves stock between locations without creating negative quantities", () => {
   const result = applyHaulPatches(
     [stockItem(), stockItem({ quantity: 30, ownerId: 202 })],
     [patch],
@@ -45,7 +45,7 @@ test("moves stock between locations without creating negative quantities", () =>
   );
 });
 
-test("caps a patch at available owner stock", () => {
+void test("caps a patch at available owner stock", () => {
   const result = applyHaulPatches([stockItem({ quantity: 25 })], [patch]);
 
   assert.deepEqual(
@@ -54,7 +54,7 @@ test("caps a patch at available owner stock", () => {
   );
 });
 
-test("splits a mixed-owner haul into owner-specific patches", () => {
+void test("splits a mixed-owner haul into owner-specific patches", () => {
   const task = {
     typeId: 34,
     typeName: "Tritanium",
@@ -85,7 +85,7 @@ test("splits a mixed-owner haul into owner-specific patches", () => {
   );
 });
 
-test("invalidates only after the matching owner asset snapshot advances", () => {
+void test("invalidates only after the matching owner asset snapshot advances", () => {
   const statuses = [
     {
       characterId: 101,

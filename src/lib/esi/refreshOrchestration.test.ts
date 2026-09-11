@@ -7,7 +7,7 @@ import {
   type RefreshUnit,
 } from "./refreshOrchestration";
 
-test("creates one personal unit per character and one corporation unit per eligible corporation", () => {
+void test("creates one personal unit per character and one corporation unit per eligible corporation", () => {
   const units = buildRefreshUnits([
     {
       characterId: 10,
@@ -63,7 +63,7 @@ test("creates one personal unit per character and one corporation unit per eligi
   );
 });
 
-test("creates a corporation unit for an opted-in non-director collection", () => {
+void test("creates a corporation unit for an opted-in non-director collection", () => {
   const units = buildRefreshUnits([
     {
       characterId: 20,
@@ -79,7 +79,7 @@ test("creates a corporation unit for an opted-in non-director collection", () =>
   );
 });
 
-test("runs each unit once, limits concurrency, and reports partial failures", async () => {
+void test("runs each unit once, limits concurrency, and reports partial failures", async () => {
   const units: RefreshUnit[] = [
     { key: "character:1", kind: "character", ownerId: 1 },
     { key: "character:1", kind: "character", ownerId: 1 },
@@ -120,7 +120,7 @@ test("runs each unit once, limits concurrency, and reports partial failures", as
   assert.deepEqual(settled.sort(), ["character:1:true", "character:2:false", "corporation:3:true"]);
 });
 
-test("coalesces overlapping work for the same owner across sessions", async () => {
+void test("coalesces overlapping work for the same owner across sessions", async () => {
   const coordinator = new RefreshCoordinator();
   let calls = 0;
   const result = { refreshed: true };
@@ -144,7 +144,7 @@ test("coalesces overlapping work for the same owner across sessions", async () =
   assert.equal(calls, 1);
 });
 
-test("shares an in-flight failure with every caller", async () => {
+void test("shares an in-flight failure with every caller", async () => {
   const coordinator = new RefreshCoordinator();
   const failure = new Error("refresh failed");
   let release!: () => void;
@@ -165,7 +165,7 @@ test("shares an in-flight failure with every caller", async () => {
   await assert.rejects(second, failure);
 });
 
-test("allows a unit to run again after its previous refresh settles", async () => {
+void test("allows a unit to run again after its previous refresh settles", async () => {
   const coordinator = new RefreshCoordinator();
   let calls = 0;
 

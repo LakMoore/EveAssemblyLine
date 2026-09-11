@@ -40,11 +40,11 @@ export default function CalculateButton({
         ) : (
           <Icon data-icon="inline-start" aria-hidden="true" />
         )}
-        <span className="whitespace-normal text-sm leading-tight max-[640px]:text-xs">
+        <span className="text-sm leading-tight whitespace-normal max-[640px]:text-xs">
           {isLoading ? loadingLabel : label}
         </span>
       </span>
-      <b className="text-[var(--action-accent)]" aria-hidden="true">
+      <b className="text-(--action-accent)" aria-hidden="true">
         →
       </b>
     </Button>

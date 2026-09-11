@@ -8,7 +8,7 @@ import {
   splitReactionJobInputs,
 } from "./planView";
 
-test("round-trips haul item exclusion keys", () => {
+void test("round-trips haul item exclusion keys", () => {
   const key = createHaulItemExclusionKey(60003760, 62553);
 
   assert.equal(key, "60003760:62553");
@@ -23,7 +23,7 @@ test("round-trips haul item exclusion keys", () => {
   assert.equal(parseHaulItemExclusionKey("60003760:62553:84600"), null);
 });
 
-test("excludes every quantity from an excluded source and type", () => {
+void test("excludes every quantity from an excluded source and type", () => {
   const stock = [
     {
       typeId: 62553,
@@ -54,7 +54,7 @@ test("excludes every quantity from an excluded source and type", () => {
   );
 });
 
-test("retains local source stock while excluding a remote surplus haul", () => {
+void test("retains local source stock while excluding a remote surplus haul", () => {
   const key = createHaulItemExclusionKey(60003760, 62553, "corporation", 7);
   const result = excludeHaulItemsFromStock(
     [
@@ -86,7 +86,7 @@ test("retains local source stock while excluding a remote surplus haul", () => {
   assert.equal(result[0].quantity, 100000);
 });
 
-test("splits reaction runs across floor and ceiling allocations", () => {
+void test("splits reaction runs across floor and ceiling allocations", () => {
   assert.deepEqual(
     splitReactionRunAllocations(22, 3, 5),
     [
@@ -106,7 +106,7 @@ test("splits reaction runs across floor and ceiling allocations", () => {
   );
 });
 
-test("keeps exact reaction coverage in one row", () => {
+void test("keeps exact reaction coverage in one row", () => {
   assert.deepEqual(
     splitReactionRunAllocations(21, 3, 5),
     [
@@ -120,7 +120,7 @@ test("keeps exact reaction coverage in one row", () => {
   );
 });
 
-test("uses exactly two rows for a mismatch regardless of install count", () => {
+void test("uses exactly two rows for a mismatch regardless of install count", () => {
   const allocations = splitReactionRunAllocations(22, 4, 6);
 
   assert.equal(allocations.length, 2);
@@ -143,7 +143,7 @@ test("uses exactly two rows for a mismatch regardless of install count", () => {
   );
 });
 
-test("recalculates split reaction inputs and carries availability forward", () => {
+void test("recalculates split reaction inputs and carries availability forward", () => {
   const inputs = {
     blueprint: {
       kind: "blueprint" as const,

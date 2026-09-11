@@ -29,7 +29,7 @@ const candidates: CompressionCandidate[] = [
   },
 ];
 
-test("compresses exact Tritanium into one compressed Veldspar", () => {
+void test("compresses exact Tritanium into one compressed Veldspar", () => {
   const result = compressMaterials(
     [{ typeId: 34, name: "Tritanium", quantity: 400 }],
     candidates,
@@ -55,7 +55,7 @@ test("compresses exact Tritanium into one compressed Veldspar", () => {
   assert.deepEqual(result.surplus, []);
 });
 
-test("selects exact mixed-ore quantities for Tritanium and Pyerite", () => {
+void test("selects exact mixed-ore quantities for Tritanium and Pyerite", () => {
   const result = compressMaterials(
     [
       { typeId: 34, name: "Tritanium", quantity: 150 },
@@ -71,7 +71,7 @@ test("selects exact mixed-ore quantities for Tritanium and Pyerite", () => {
   assert.deepEqual(result.surplus, []);
 });
 
-test("excludes batch-compressed ore", () => {
+void test("excludes batch-compressed ore", () => {
   const result = compressMaterials(
     [{ typeId: 34, name: "Tritanium", quantity: 420 }],
     [
@@ -88,7 +88,7 @@ test("excludes batch-compressed ore", () => {
   assert.deepEqual(result.toBuy, [{ typeId: 34, name: "Tritanium", quantity: 420, ignored: true }]);
 });
 
-test("keeps minerals without a matching recipe in the buy list", () => {
+void test("keeps minerals without a matching recipe in the buy list", () => {
   const result = compressMaterials(
     [{ typeId: 35, name: "Pyerite", quantity: 1 }],
     candidates.slice(0, 1),
@@ -97,7 +97,7 @@ test("keeps minerals without a matching recipe in the buy list", () => {
   assert.deepEqual(result.toBuy, [{ typeId: 35, name: "Pyerite", quantity: 1, ignored: true }]);
 });
 
-test("keeps fractional gas output instead of discarding compressed gas", () => {
+void test("keeps fractional gas output instead of discarding compressed gas", () => {
   const result = compressMaterials(
     [{ typeId: 28694, name: "Amber Mykoserocin", quantity: 1 }],
     [
@@ -138,7 +138,7 @@ test("keeps fractional gas output instead of discarding compressed gas", () => {
   );
 });
 
-test("does not exceed a candidate's market volume limit", () => {
+void test("does not exceed a candidate's market volume limit", () => {
   const result = compressMaterials(
     [{ typeId: 34, name: "Tritanium", quantity: 800 }],
     [
@@ -156,7 +156,7 @@ test("does not exceed a candidate's market volume limit", () => {
   assert.deepEqual(result.toBuy, [{ typeId: 34, name: "Tritanium", quantity: 800, ignored: true }]);
 });
 
-test("excludes candidates with zero market volume", () => {
+void test("excludes candidates with zero market volume", () => {
   const result = compressMaterials(
     [{ typeId: 34, name: "Tritanium", quantity: 400 }],
     [

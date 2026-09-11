@@ -7,7 +7,7 @@ import {
   normalizeClientAssetsResponse,
 } from "./requestCache";
 
-test("requires the complete asset snapshot before using the local cache", () => {
+void test("requires the complete asset snapshot before using the local cache", () => {
   assert.equal(
     isCompleteClientAssetsResponse({
       assets: [],
@@ -24,7 +24,7 @@ test("requires the complete asset snapshot before using the local cache", () => 
   );
 });
 
-test("groups each market order at its source location once", () => {
+void test("groups each market order at its source location once", () => {
   const locations = groupClientAssetsByLocation({
     facilities: [
       {
@@ -77,7 +77,7 @@ test("groups each market order at its source location once", () => {
   );
 });
 
-test("groups anchored assets under their solar system", () => {
+void test("groups anchored assets under their solar system", () => {
   const locations = groupClientAssetsByLocation({
     facilities: [],
     assets: [
@@ -113,7 +113,7 @@ test("groups anchored assets under their solar system", () => {
   );
 });
 
-test("normalizes structure names and hides legacy raw location labels", () => {
+void test("normalizes structure names and hides legacy raw location labels", () => {
   const normalized = normalizeClientAssetsResponse({
     facilities: [],
     corporationSources: [
@@ -144,7 +144,7 @@ test("normalizes structure names and hides legacy raw location labels", () => {
   assert.equal("locations" in normalized, false);
 });
 
-test("matches direct corporation assets by their resolved root location", () => {
+void test("matches direct corporation assets by their resolved root location", () => {
   const filtered = filterClientAssetsForPlanning({
     corporationSources: [
       {
@@ -178,7 +178,7 @@ test("matches direct corporation assets by their resolved root location", () => 
   assert.equal(filtered.assets?.length, 1);
 });
 
-test("keeps reaction formulas from selected corporation containers", () => {
+void test("keeps reaction formulas from selected corporation containers", () => {
   const filtered = filterClientAssetsForPlanning({
     corporationSources: [
       {

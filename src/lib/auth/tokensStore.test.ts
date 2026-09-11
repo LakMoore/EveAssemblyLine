@@ -25,12 +25,12 @@ function character(
   };
 }
 
-test("does not select a non-opted-in Director when opt-in is enabled", () => {
+void test("does not select a non-opted-in Director when opt-in is enabled", () => {
   const selected = selectCorporationDirector([character(10)], 100, 20, true);
   assert.equal(selected, null);
 });
 
-test("selects the lowest opted-in Director for a non-Director refresh", () => {
+void test("selects the lowest opted-in Director for a non-Director refresh", () => {
   const selected = selectCorporationDirector(
     [
       character(20, { allowCorpRefreshOptIn: true }),
@@ -43,17 +43,17 @@ test("selects the lowest opted-in Director for a non-Director refresh", () => {
   assert.equal(selected?.characterId, 10);
 });
 
-test("selects any eligible Director when opt-in is disabled", () => {
+void test("selects any eligible Director when opt-in is disabled", () => {
   const selected = selectCorporationDirector([character(20), character(10)], 100, 30, false);
   assert.equal(selected?.characterId, 10);
 });
 
-test("allows a Director to use their own token without opting in", () => {
+void test("allows a Director to use their own token without opting in", () => {
   const selected = selectCorporationDirector([character(10)], 100, 10, true);
   assert.equal(selected?.characterId, 10);
 });
 
-test("does not bypass scope checks for a Director's own refresh", () => {
+void test("does not bypass scope checks for a Director's own refresh", () => {
   const selected = selectCorporationDirector(
     [character(10, { personalAuth: { ...character(10).personalAuth, scopes: [] } })],
     100,

@@ -115,7 +115,7 @@ function industryOutputStock(
   };
 }
 
-test("build blacklist forces a buildable item to be purchased", async () => {
+void test("build blacklist forces a buildable item to be purchased", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -149,7 +149,7 @@ test("build blacklist forces a buildable item to be purchased", async () => {
   );
 });
 
-test("reports the explicit unresolved asset count", async () => {
+void test("reports the explicit unresolved asset count", async () => {
   const result = await calculatePlanCalculation(
     request(
       1,
@@ -163,7 +163,7 @@ test("reports the explicit unresolved asset count", async () => {
   assert.equal(result.metadata.unresolvedAssetCount, 3);
 });
 
-test("returns aggregate material purchases in the plan response", async () => {
+void test("returns aggregate material purchases in the plan response", async () => {
   const planRequest = request(
     33_750,
     [
@@ -212,7 +212,7 @@ test("returns aggregate material purchases in the plan response", async () => {
   assert.equal(publicResponse.lists.materialsToBuy[0].items[0].neededQuantity, 450);
 });
 
-test("uses location buckets in the plan response", async () => {
+void test("uses location buckets in the plan response", async () => {
   const result = await calculatePlanCalculation(
     request(
       1,
@@ -249,7 +249,7 @@ test("uses location buckets in the plan response", async () => {
   assert.equal("stockpileId" in manufacturingBucket.items[0]!, false);
 });
 
-test("assigns direct final-product demand to the stockpile location", async () => {
+void test("assigns direct final-product demand to the stockpile location", async () => {
   const result = await calculatePlanCalculation(
     request(
       25,
@@ -291,7 +291,7 @@ test("assigns direct final-product demand to the stockpile location", async () =
   assert.equal(material.stockpileLocationId, sourceLocationId);
 });
 
-test("keeps same-type activity and stockpile demands in separate rows", async () => {
+void test("keeps same-type activity and stockpile demands in separate rows", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -382,7 +382,7 @@ test("keeps same-type activity and stockpile demands in separate rows", async ()
   assert.equal(stockpileBucket.items.filter((item) => item.typeId === tritaniumTypeId).length, 1);
 });
 
-test("filters available source counts by plan-item location", async () => {
+void test("filters available source counts by plan-item location", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -487,7 +487,7 @@ test("filters available source counts by plan-item location", async () => {
   );
 });
 
-test("filters hauling quantities by plan-item destination location", async () => {
+void test("filters hauling quantities by plan-item destination location", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -567,7 +567,7 @@ test("filters hauling quantities by plan-item destination location", async () =>
   assert.equal(secondTritanium.haulingQuantity, 1);
 });
 
-test("buy blacklist keeps a buildable item on the manufacturing path", async () => {
+void test("buy blacklist keeps a buildable item on the manufacturing path", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -601,7 +601,7 @@ test("buy blacklist keeps a buildable item on the manufacturing path", async () 
   assert.equal(rifter.buyQuantity, 0);
 });
 
-test("uses co-located corporation material stock for manufacturing", async () => {
+void test("uses co-located corporation material stock for manufacturing", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -643,7 +643,7 @@ test("uses co-located corporation material stock for manufacturing", async () =>
   assert.equal(material.buyQuantity, 0);
 });
 
-test("plans invention attempts and materials for a missing T2 BPC", async () => {
+void test("plans invention attempts and materials for a missing T2 BPC", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -694,7 +694,7 @@ test("plans invention attempts and materials for a missing T2 BPC", async () => 
   assert.equal(requiredSkills.get(3426), 5);
 });
 
-test("merges invention jobs by location and blueprint type", async () => {
+void test("merges invention jobs by location and blueprint type", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -794,7 +794,7 @@ test("merges invention jobs by location and blueprint type", async () => {
   );
 });
 
-test("uses an available T2 BPC without scheduling invention", async () => {
+void test("uses an available T2 BPC without scheduling invention", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -832,7 +832,7 @@ test("uses an available T2 BPC without scheduling invention", async () => {
   assert.equal(blueprint.buyQuantity, 0);
 });
 
-test("reports BPO count and BPC runs separately for manufacturing", async () => {
+void test("reports BPO count and BPC runs separately for manufacturing", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -877,7 +877,7 @@ test("reports BPO count and BPC runs separately for manufacturing", async () => 
   assert.equal(job.inputs.bpcRuns, 7);
 });
 
-test("applies assigned manufacturing group facility modifiers", async () => {
+void test("applies assigned manufacturing group facility modifiers", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -931,7 +931,7 @@ test("applies assigned manufacturing group facility modifiers", async () => {
   assert.equal(tritaniumPlanItem.activityLocationId, alternateSourceLocationId);
 });
 
-test("requires one unit of manufacturing material per run after bonuses", async () => {
+void test("requires one unit of manufacturing material per run after bonuses", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -979,7 +979,7 @@ test("requires one unit of manufacturing material per run after bonuses", async 
   assert.equal(powerCoreMaterial.requiredQuantity, 27);
 });
 
-test("applies assigned reaction group facility modifiers", async () => {
+void test("applies assigned reaction group facility modifiers", async () => {
   const result = await calculatePlanCalculation(
     request(
       20,
@@ -1073,7 +1073,7 @@ test("applies assigned reaction group facility modifiers", async () => {
   );
 });
 
-test("allocates reaction material at an assigned reaction facility", async () => {
+void test("allocates reaction material at an assigned reaction facility", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -1159,7 +1159,7 @@ test("allocates reaction material at an assigned reaction facility", async () =>
   assert.equal(material.buyQuantity, 100);
 });
 
-test("combines global facility and skill time multipliers", async () => {
+void test("combines global facility and skill time multipliers", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -1187,7 +1187,7 @@ test("combines global facility and skill time multipliers", async () => {
   assert.equal(job.totalTime, 2_400);
 });
 
-test("uses output from an active industry job as committed availability", async () => {
+void test("uses output from an active industry job as committed availability", async () => {
   const result = await calculatePlanCalculation(
     request(100, [industryOutputStock("active", manufacturingLocationId)]),
   );
@@ -1203,7 +1203,7 @@ test("uses output from an active industry job as committed availability", async 
   assert.deepEqual(result.lists.haulingTasks, []);
 });
 
-test("reports aggregate industry source counts for multiple active outputs", async () => {
+void test("reports aggregate industry source counts for multiple active outputs", async () => {
   const result = await calculatePlanCalculation(
     request(
       570,
@@ -1233,7 +1233,7 @@ test("reports aggregate industry source counts for multiple active outputs", asy
   );
 });
 
-test("restores industry source counts across multiple stockpiles", async () => {
+void test("restores industry source counts across multiple stockpiles", async () => {
   const stockpile = (id: string, locationId: number, quantity: number) => ({
     id,
     name: id,
@@ -1291,7 +1291,7 @@ test("restores industry source counts across multiple stockpiles", async () => {
   );
 });
 
-test("does not count cancelled or reverted industry output as available stock", async () => {
+void test("does not count cancelled or reverted industry output as available stock", async () => {
   for (const status of ["cancelled", "reverted"] as const) {
     const result = await calculatePlanCalculation(
       request(100, [industryOutputStock(status, manufacturingLocationId)]),
@@ -1306,7 +1306,7 @@ test("does not count cancelled or reverted industry output as available stock", 
   }
 });
 
-test("uses paused industry output for demand but not installable job inputs", async () => {
+void test("uses paused industry output for demand but not installable job inputs", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -1342,7 +1342,7 @@ test("uses paused industry output for demand but not installable job inputs", as
   assert.equal(tritaniumInput.status, "blocked");
 });
 
-test("deduplicates repeated blueprint print IDs when counting BPC runs", async () => {
+void test("deduplicates repeated blueprint print IDs when counting BPC runs", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -1387,7 +1387,7 @@ test("deduplicates repeated blueprint print IDs when counting BPC runs", async (
   assert.equal(blueprint.buyQuantity, 1);
 });
 
-test("counts physical stock and active output toward plan availability", async () => {
+void test("counts physical stock and active output toward plan availability", async () => {
   const result = await calculatePlanCalculation(
     request(
       150,
@@ -1415,7 +1415,7 @@ test("counts physical stock and active output toward plan availability", async (
   assert.equal((tritanium.availableSourceCounts?.[manufacturingLocationId] ?? {}).industry, 20);
 });
 
-test("tracks production-origin haul quantity separately from stock haul quantity", async () => {
+void test("tracks production-origin haul quantity separately from stock haul quantity", async () => {
   const result = await calculatePlanCalculation(
     request(
       110,
@@ -1477,7 +1477,7 @@ test("tracks production-origin haul quantity separately from stock haul quantity
   assert.equal(stockHaul.source, undefined);
 });
 
-test("counts active output toward availability in stockpiled plans", async () => {
+void test("counts active output toward availability in stockpiled plans", async () => {
   const result = await calculatePlanCalculation(
     request(
       150,
@@ -1531,7 +1531,7 @@ test("counts active output toward availability in stockpiled plans", async () =>
   assert.equal((tritanium.availableSourceCounts?.[manufacturingLocationId] ?? {}).industry, 20);
 });
 
-test("allocates matching market orders and active output across stockpiles", async () => {
+void test("allocates matching market orders and active output across stockpiles", async () => {
   const locations = (stock: number) => ({
     stock,
     manufacturing: manufacturingLocationId,
@@ -1613,7 +1613,7 @@ test("allocates matching market orders and active output across stockpiles", asy
   );
 });
 
-test("uses remote active output for a stockpile final product", async () => {
+void test("uses remote active output for a stockpile final product", async () => {
   const result = await calculatePlanCalculation(
     request(
       150,
@@ -1658,7 +1658,7 @@ test("uses remote active output for a stockpile final product", async () => {
   assert.deepEqual(result.lists.haulingTasks, []);
 });
 
-test("ignores empty stockpiles when calculating a plan", async () => {
+void test("ignores empty stockpiles when calculating a plan", async () => {
   const stock = [industryOutputStock("active", manufacturingLocationId, "Manufacturing", 20)];
   const populatedStockpile = {
     id: "populated-stockpile",
@@ -1708,14 +1708,14 @@ test("ignores empty stockpiles when calculating a plan", async () => {
   );
 });
 
-test("requires a populated stockpile for plan calculation", async () => {
+void test("requires a populated stockpile for plan calculation", async () => {
   await assert.rejects(
     () => calculatePlanCalculation(request(10, [], { stockpiles: [] })),
     /at least one populated stockpile/,
   );
 });
 
-test("reallocates shared stock after intermediate inventory reduces stockpile demand", async () => {
+void test("reallocates shared stock after intermediate inventory reduces stockpile demand", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -1810,7 +1810,7 @@ test("reallocates shared stock after intermediate inventory reduces stockpile de
   );
 });
 
-test("reallocates material stock after reaction formulas are reserved", async () => {
+void test("reallocates material stock after reaction formulas are reserved", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -1893,7 +1893,7 @@ test("reallocates material stock after reaction formulas are reserved", async ()
   assert.equal(silicates.stockQuantity > 0, true);
 });
 
-test("reports full located stock beyond the quantity allocated to stockpile demand", async () => {
+void test("reports full located stock beyond the quantity allocated to stockpile demand", async () => {
   const stockpiles = ["first", "second"].map((id) => ({
     id,
     name: id,
@@ -1941,7 +1941,7 @@ test("reports full located stock beyond the quantity allocated to stockpile dema
   assert.equal(planItem.surplusQuantity, 36_000);
 });
 
-test("uses reaction formulas held at a stockpile's reaction location", async () => {
+void test("uses reaction formulas held at a stockpile's reaction location", async () => {
   const result = await calculatePlanCalculation(
     request(
       20,
@@ -2016,7 +2016,7 @@ test("uses reaction formulas held at a stockpile's reaction location", async () 
   );
 });
 
-test("reports total and in-use reaction formulas without collapsing availability", async () => {
+void test("reports total and in-use reaction formulas without collapsing availability", async () => {
   const result = await calculatePlanCalculation(
     request(
       20,
@@ -2099,7 +2099,7 @@ test("reports total and in-use reaction formulas without collapsing availability
   assert.equal(responseFormula.bposInUse, 54);
 });
 
-test("uses BPC runs held at a stockpile's manufacturing location", async () => {
+void test("uses BPC runs held at a stockpile's manufacturing location", async () => {
   const result = await calculatePlanCalculation(
     request(
       1,
@@ -2160,7 +2160,7 @@ test("uses BPC runs held at a stockpile's manufacturing location", async () => {
   assert.equal(blueprint.buyQuantity, 0);
 });
 
-test("does not strand shared BPC stock in a stockpile covered by item stock", async () => {
+void test("does not strand shared BPC stock in a stockpile covered by item stock", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -2243,7 +2243,7 @@ test("does not strand shared BPC stock in a stockpile covered by item stock", as
   assert.equal(blueprint.buyQuantity, 0);
 });
 
-test("shares BPC runs across stockpiles when aggregate stock covers demand", async () => {
+void test("shares BPC runs across stockpiles when aggregate stock covers demand", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -2322,7 +2322,7 @@ test("shares BPC runs across stockpiles when aggregate stock covers demand", asy
   );
 });
 
-test("uses BPO-backed BPC runs to cover another stockpile's purchase requirement", async () => {
+void test("uses BPO-backed BPC runs to cover another stockpile's purchase requirement", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -2399,7 +2399,7 @@ test("uses BPO-backed BPC runs to cover another stockpile's purchase requirement
   );
 });
 
-test("shares assets across stockpiles without merging identical destination plans", async () => {
+void test("shares assets across stockpiles without merging identical destination plans", async () => {
   const firstActivityLocationId = manufacturingLocationId;
   const secondActivityLocationId = 21;
   const result = await calculatePlanCalculation(
@@ -2484,7 +2484,7 @@ test("shares assets across stockpiles without merging identical destination plan
   assert.equal(sharedHaul.fromLocationId, sourceLocationId);
 });
 
-test("reports transferred stock as local availability", async () => {
+void test("reports transferred stock as local availability", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -2567,7 +2567,7 @@ test("reports transferred stock as local availability", async () => {
   assert.equal(transfer.neededQuantity, 100);
 });
 
-test("hauls all remote stock needed for future material demand", async () => {
+void test("hauls all remote stock needed for future material demand", async () => {
   const materialTypeId = 57457;
   const sourceLocationId = 1055354982663;
   const destinationLocationId = 1055354926818;
@@ -2645,7 +2645,7 @@ test("hauls all remote stock needed for future material demand", async () => {
   assert.equal(destinationViewMaterial.availableQuantity, 88200);
 });
 
-test("reserves a stockpile's local assets before remote stockpiles can use them", async () => {
+void test("reserves a stockpile's local assets before remote stockpiles can use them", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -2722,7 +2722,7 @@ test("reserves a stockpile's local assets before remote stockpiles can use them"
   );
 });
 
-test("does not transfer partially stocked finished products between stockpiles", async () => {
+void test("does not transfer partially stocked finished products between stockpiles", async () => {
   const finishedProductTypeId = 57457;
   const result = await calculatePlanCalculation(
     request(
@@ -2804,7 +2804,7 @@ test("does not transfer partially stocked finished products between stockpiles",
   );
 });
 
-test("caps finished-product transfers at the source stockpile overage", async () => {
+void test("caps finished-product transfers at the source stockpile overage", async () => {
   const finishedProductTypeId = 57457;
   const result = await calculatePlanCalculation(
     request(
@@ -2880,7 +2880,7 @@ test("caps finished-product transfers at the source stockpile overage", async ()
   assert.equal(transfer.neededQuantity, 40);
 });
 
-test("uses activity-location stock before stockpile stock-location stock", async () => {
+void test("uses activity-location stock before stockpile stock-location stock", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -2975,7 +2975,7 @@ test("uses activity-location stock before stockpile stock-location stock", async
   );
 });
 
-test("keeps activity stock for another demand before hauling it away", async () => {
+void test("keeps activity stock for another demand before hauling it away", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -3031,7 +3031,7 @@ test("keeps activity stock for another demand before hauling it away", async () 
   );
 });
 
-test("reserves stock for manufacturing inputs before direct stockpile demand", async () => {
+void test("reserves stock for manufacturing inputs before direct stockpile demand", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -3133,7 +3133,7 @@ test("reserves stock for manufacturing inputs before direct stockpile demand", a
   assert.equal(tritaniumInput.status, "ready");
 });
 
-test("does not reserve blocked manufacturing inputs before reaction demand", async () => {
+void test("does not reserve blocked manufacturing inputs before reaction demand", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -3253,7 +3253,7 @@ test("does not reserve blocked manufacturing inputs before reaction demand", asy
   assert.equal(tritaniumHaul.neededQuantity, 1000);
 });
 
-test("hauls remote Isogen surplus when destination manufacturing is blocked", async () => {
+void test("hauls remote Isogen surplus when destination manufacturing is blocked", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -3336,7 +3336,7 @@ test("hauls remote Isogen surplus when destination manufacturing is blocked", as
   assert.equal(isogenHaul.neededQuantity, 500);
 });
 
-test("hauls remote mexallon for a reaction after blocked capital manufacturing", async () => {
+void test("hauls remote mexallon for a reaction after blocked capital manufacturing", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -3495,7 +3495,7 @@ test("hauls remote mexallon for a reaction after blocked capital manufacturing",
   assert.equal(mexallonHaul.neededQuantity, 600);
 });
 
-test("reserves fuel blocks for reaction inputs before direct stockpile demand", async () => {
+void test("reserves fuel blocks for reaction inputs before direct stockpile demand", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -3601,7 +3601,7 @@ test("reserves fuel blocks for reaction inputs before direct stockpile demand", 
   assert.equal(reactionJob.inputs.status, "ready");
 });
 
-test("combines haul tasks with the same type and route", async () => {
+void test("combines haul tasks with the same type and route", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -3697,7 +3697,7 @@ test("combines haul tasks with the same type and route", async () => {
   assert.equal(matchingHauls[0]?.neededQuantity, 64000);
 });
 
-test("merges shared haul routes across ownership sources", async () => {
+void test("merges shared haul routes across ownership sources", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -3815,7 +3815,7 @@ test("merges shared haul routes across ownership sources", async () => {
   );
 });
 
-test("hauls ready manufactured stock to the stockpile stock location", async () => {
+void test("hauls ready manufactured stock to the stockpile stock location", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -3857,7 +3857,7 @@ test("hauls ready manufactured stock to the stockpile stock location", async () 
   assert.equal(outputHaul.neededQuantity, 100);
 });
 
-test("hauls ordinary final-product stock to the stockpile stock location", async () => {
+void test("hauls ordinary final-product stock to the stockpile stock location", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -3910,7 +3910,7 @@ test("hauls ordinary final-product stock to the stockpile stock location", async
   assert.equal(outputHaul.neededQuantity, 100);
 });
 
-test("reserves final-location stock before build-location output for a stockpile", async () => {
+void test("reserves final-location stock before build-location output for a stockpile", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -3964,7 +3964,7 @@ test("reserves final-location stock before build-location output for a stockpile
   assert.equal(outputHaul.neededQuantity, 28);
 });
 
-test("does not move final-destination stock to the manufacturing location", async () => {
+void test("does not move final-destination stock to the manufacturing location", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -4010,7 +4010,7 @@ test("does not move final-destination stock to the manufacturing location", asyn
   assert.deepEqual(result.lists.haulingTasks, []);
 });
 
-test("plans input delivery and ready output delivery as separate hauls", async () => {
+void test("plans input delivery and ready output delivery as separate hauls", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -4106,7 +4106,7 @@ test("plans input delivery and ready output delivery as separate hauls", async (
   );
 });
 
-test("uses sell orders only from the selected market location", async () => {
+void test("uses sell orders only from the selected market location", async () => {
   const result = await calculatePlanCalculation(
     request(
       100,
@@ -4131,7 +4131,7 @@ test("uses sell orders only from the selected market location", async () => {
   assert.equal(tritanium.buyQuantity, 100);
 });
 
-test("uses ready and delivered manufacturing and reaction output locally", async () => {
+void test("uses ready and delivered manufacturing and reaction output locally", async () => {
   for (const status of ["ready", "delivered"] as const) {
     for (const activityName of ["Manufacturing", "Reactions"]) {
       const result = await calculatePlanCalculation(
@@ -4150,7 +4150,7 @@ test("uses ready and delivered manufacturing and reaction output locally", async
   }
 });
 
-test("does not use remote active output as a future job input", async () => {
+void test("does not use remote active output as a future job input", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -4186,7 +4186,7 @@ test("does not use remote active output as a future job input", async () => {
   assert.deepEqual(result.lists.haulingTasks, []);
 });
 
-test("reports manufacturing blueprint and material inputs", async () => {
+void test("reports manufacturing blueprint and material inputs", async () => {
   const result = await calculatePlanCalculation(
     request(
       1,
@@ -4234,7 +4234,7 @@ test("reports manufacturing blueprint and material inputs", async () => {
   assert.equal(tritanium.completionPercent, 100);
 });
 
-test("requires buying copies when the owned BPO is in use", async () => {
+void test("requires buying copies when the owned BPO is in use", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -4293,7 +4293,7 @@ test("requires buying copies when the owned BPO is in use", async () => {
   );
 });
 
-test("routes all runs to copying when an available BPO has no print metadata", async () => {
+void test("routes all runs to copying when an available BPO has no print metadata", async () => {
   const requiredRuns = 11;
   const result = await calculatePlanCalculation(
     request(
@@ -4353,7 +4353,7 @@ test("routes all runs to copying when an available BPO has no print metadata", a
   assert.equal(Object.keys(response.lists.bpcToCopy[0]?.items[0] ?? {}).length, 6);
 });
 
-test("reports installable runs for 10 Rifters and 10 Amarr Shuttles", async () => {
+void test("reports installable runs for 10 Rifters and 10 Amarr Shuttles", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -4473,7 +4473,7 @@ test("reports installable runs for 10 Rifters and 10 Amarr Shuttles", async () =
   assert.equal(shuttleJob.inputs.status, "ready");
 });
 
-test("reserves only installable runs before the next manufacturing step", async () => {
+void test("reserves only installable runs before the next manufacturing step", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -4558,7 +4558,7 @@ test("reserves only installable runs before the next manufacturing step", async 
   assert.equal(tritanium.availableQuantity, 0);
 });
 
-test("reports total available BPC runs for manufacturing inputs", async () => {
+void test("reports total available BPC runs for manufacturing inputs", async () => {
   const result = await calculatePlanCalculation(
     request(
       88,
@@ -4600,7 +4600,7 @@ test("reports total available BPC runs for manufacturing inputs", async () => {
   assert.equal(job.inputs.blueprint.completionPercent, 100);
 });
 
-test("reports reaction formula and material inputs", async () => {
+void test("reports reaction formula and material inputs", async () => {
   const result = await calculatePlanCalculation(
     request(
       20,
@@ -4660,7 +4660,7 @@ test("reports reaction formula and material inputs", async () => {
   assert.equal(job.inputs.status, "ready");
 });
 
-test("builds Carbon Polymers through its reaction formula", async () => {
+void test("builds Carbon Polymers through its reaction formula", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -4722,7 +4722,7 @@ test("builds Carbon Polymers through its reaction formula", async () => {
   assert.equal(reactionJob.inputs.status, "ready");
 });
 
-test("does not buy a buildable reaction product when output rounding covers demand", async () => {
+void test("does not buy a buildable reaction product when output rounding covers demand", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -4801,7 +4801,7 @@ test("does not buy a buildable reaction product when output rounding covers dema
   assert.equal(material.buyQuantity, 0);
 });
 
-test("accumulates installable reaction runs across repeated expansions", async () => {
+void test("accumulates installable reaction runs across repeated expansions", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -4866,7 +4866,7 @@ test("accumulates installable reaction runs across repeated expansions", async (
   assert.equal(job.runsAvailable, 2);
 });
 
-test("merges reaction jobs by reaction location and formula type", async () => {
+void test("merges reaction jobs by reaction location and formula type", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -4952,7 +4952,7 @@ test("merges reaction jobs by reaction location and formula type", async () => {
   );
 });
 
-test("merges manufacturing jobs by blueprint type across stockpiles", async () => {
+void test("merges manufacturing jobs by blueprint type across stockpiles", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -5021,7 +5021,7 @@ test("merges manufacturing jobs by blueprint type across stockpiles", async () =
   assert.equal("buildLocationId" in manufacturingJob, false);
 });
 
-test("keeps manufacturing jobs separate across build locations", async () => {
+void test("keeps manufacturing jobs separate across build locations", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -5089,7 +5089,7 @@ test("keeps manufacturing jobs separate across build locations", async () => {
   );
 });
 
-test("allocates reaction formulas at the reaction location to stockpile jobs", async () => {
+void test("allocates reaction formulas at the reaction location to stockpile jobs", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -5178,7 +5178,7 @@ test("allocates reaction formulas at the reaction location to stockpile jobs", a
   assert.equal(responsePlanItem.bposInUse, 0);
 });
 
-test("does not reprocess or haul compressed stock when direct materials cover demand", async () => {
+void test("does not reprocess or haul compressed stock when direct materials cover demand", async () => {
   const result = await calculatePlanCalculation(
     request(
       400,
@@ -5199,7 +5199,7 @@ test("does not reprocess or haul compressed stock when direct materials cover de
   assert.deepEqual(result.lists.haulingTasks, []);
 });
 
-test("hauls only complete compressed portions needed by the plan", async () => {
+void test("hauls only complete compressed portions needed by the plan", async () => {
   const result = await calculatePlanCalculation(
     request(
       500,
@@ -5235,7 +5235,7 @@ test("hauls only complete compressed portions needed by the plan", async () => {
   assert.equal(compressedVeldspar.availableStockQuantity, 250);
 });
 
-test("hauls Gneiss when remote direct stock leaves a material shortage", async () => {
+void test("hauls Gneiss when remote direct stock leaves a material shortage", async () => {
   const compressedGneissTypeId = 62553;
   const result = await calculatePlanCalculation(
     request(
@@ -5278,7 +5278,7 @@ test("hauls Gneiss when remote direct stock leaves a material shortage", async (
   assert.equal(gneissHaul.toLocationId, reprocessingLocationId);
 });
 
-test("lists only selected stock already at the refinery for immediate reprocessing", async () => {
+void test("lists only selected stock already at the refinery for immediate reprocessing", async () => {
   const result = await calculatePlanCalculation(
     request(
       500,
@@ -5298,7 +5298,7 @@ test("lists only selected stock already at the refinery for immediate reprocessi
   );
 });
 
-test("credits committed compressed purchases before considering owned stock", async () => {
+void test("credits committed compressed purchases before considering owned stock", async () => {
   const result = await calculatePlanCalculation(
     request(
       800,
@@ -5338,7 +5338,7 @@ test("credits committed compressed purchases before considering owned stock", as
   );
 });
 
-test("shares future materials from compressed purchases across stockpiles", async () => {
+void test("shares future materials from compressed purchases across stockpiles", async () => {
   const result = await calculatePlanCalculation(
     request(
       0,
@@ -5420,7 +5420,7 @@ test("shares future materials from compressed purchases across stockpiles", asyn
   );
 });
 
-test("retains an incomplete committed purchase without crediting an unusable portion", async () => {
+void test("retains an incomplete committed purchase without crediting an unusable portion", async () => {
   const result = await calculatePlanCalculation(
     request(
       400,
@@ -5455,7 +5455,7 @@ test("retains an incomplete committed purchase without crediting an unusable por
   assert.equal(tritanium.buyQuantity, 400);
 });
 
-test("uses owned reprocessable stock after committed purchases leave a shortage", async () => {
+void test("uses owned reprocessable stock after committed purchases leave a shortage", async () => {
   const result = await calculatePlanCalculation(
     request(
       800,
@@ -5497,7 +5497,7 @@ test("uses owned reprocessable stock after committed purchases leave a shortage"
   );
 });
 
-test("credits aggregate fractional gas output against the raw material buy quantity", async () => {
+void test("credits aggregate fractional gas output against the raw material buy quantity", async () => {
   const result = await calculatePlanCalculation(
     request(
       100,
@@ -5539,7 +5539,7 @@ test("credits aggregate fractional gas output against the raw material buy quant
   assert.equal(rawGas.buyQuantity, 0);
 });
 
-test("makes refinery compressed stock available as reprocessed material", async () => {
+void test("makes refinery compressed stock available as reprocessed material", async () => {
   const result = await calculatePlanCalculation(
     request(
       100,
@@ -5577,7 +5577,7 @@ test("makes refinery compressed stock available as reprocessed material", async 
   assert.equal(rawGas.buyQuantity, 0);
 });
 
-test("consumes owned compressed gas surplus and hauls it to the refinery", async () => {
+void test("consumes owned compressed gas surplus and hauls it to the refinery", async () => {
   const result = await calculatePlanCalculation(
     request(
       7_240,
@@ -5635,7 +5635,7 @@ test("consumes owned compressed gas surplus and hauls it to the refinery", async
   assert.equal(compressedHaul.toLocationId, reprocessingLocationId);
 });
 
-test("falls back to 50 percent when no efficiency snapshot is supplied", async () => {
+void test("falls back to 50 percent when no efficiency snapshot is supplied", async () => {
   const result = await calculatePlanCalculation(request(300, [compressedStock(250)]));
   const refineryHaul = result.lists.haulingTasks.find(
     (task) => task.typeId === compressedVeldsparTypeId,
@@ -5644,7 +5644,7 @@ test("falls back to 50 percent when no efficiency snapshot is supplied", async (
   assert.equal(refineryHaul?.neededQuantity, 200);
 });
 
-test("reserves compressed stock that is required directly by the plan", async () => {
+void test("reserves compressed stock that is required directly by the plan", async () => {
   const result = await calculatePlanCalculation(
     request(
       400,
@@ -5679,7 +5679,7 @@ test("reserves compressed stock that is required directly by the plan", async ()
   );
 });
 
-test("applies demand-limited allocation to metal scraps", async () => {
+void test("applies demand-limited allocation to metal scraps", async () => {
   const metalScrapsTypeId = 15331;
   const result = await calculatePlanCalculation(
     request(

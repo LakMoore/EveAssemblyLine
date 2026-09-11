@@ -71,7 +71,7 @@ const smallShips = productionGroupDefinitions.find(
   (definition) => definition.targetFilterId === 5,
 )!;
 
-test("resolves target-filter memberships and localized group names", () => {
+void test("resolves target-filter memberships and localized group names", () => {
   const references = getProductionGroupReferences(
     new Map<number, IndustryTargetFiltersRecord>([
       [7, { _key: 7, groupIDs: [26], name: "Medium T1 Ships" }],
@@ -94,7 +94,7 @@ test("resolves target-filter memberships and localized group names", () => {
   );
 });
 
-test("applies a rig only to its matching group and scales low-security bonuses", () => {
+void test("applies a rig only to its matching group and scales low-security bonuses", () => {
   const structure = dogmaRecord([
     { attributeID: 2600, value: 1 },
     { attributeID: 2601, value: 1 },
@@ -142,7 +142,7 @@ test("applies a rig only to its matching group and scales low-security bonuses",
   assert.equal(bonuses.smallShips.manufacturingTimeMultiplier, 1);
 });
 
-test("applies a broad Ships rig to every ship subgroup", () => {
+void test("applies a broad Ships rig to every ship subgroup", () => {
   const structure = dogmaRecord([{ attributeID: 2600, value: 0.99 }]);
   const rig = dogmaRecord([
     { attributeID: 2356, value: 1.9 },

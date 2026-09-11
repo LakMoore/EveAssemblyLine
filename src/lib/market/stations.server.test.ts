@@ -30,7 +30,7 @@ const stations: MarketStationSearchOption[] = [
   },
 ];
 
-test("matches every partial station-name term and ranks prefix matches first", () => {
+void test("matches every partial station-name term and ranks prefix matches first", () => {
   const matches = filterMarketStationOptions([stations[2], stations[1], stations[0]], "jita navy");
 
   assert.deepEqual(
@@ -40,11 +40,11 @@ test("matches every partial station-name term and ranks prefix matches first", (
   assert.equal(filterMarketStationOptions(stations, "amarr")[0].stationId, 60_008_494);
 });
 
-test("limits station search results", () => {
+void test("limits station search results", () => {
   assert.equal(filterMarketStationOptions(stations, "moon", 1).length, 1);
 });
 
-test("includes only structures resolved from cached asset roots", () => {
+void test("includes only structures resolved from cached asset roots", () => {
   const rootLocations = new Map<number, AssetLocation>([
     [
       1_000_000_000_001,
@@ -79,7 +79,7 @@ test("includes only structures resolved from cached asset roots", () => {
   );
 });
 
-test("retains persisted resolved structures and excludes persisted NPC stations", async () => {
+void test("retains persisted resolved structures and excludes persisted NPC stations", async () => {
   const structureId = 1_050_827_868_452;
   const locations = await getKnownMarketStructureLocations(
     [],

@@ -7,7 +7,7 @@ import {
   isCorporationHangarFlag,
 } from "./corporationAccess";
 
-test("maps corporation divisions to asset location flags", () => {
+void test("maps corporation divisions to asset location flags", () => {
   assert.equal(corporationHangarFlagForDivision(0), "CorpDeliveries");
   assert.equal(corporationHangarFlagForDivision(1), "CorpSAG1");
   assert.equal(corporationHangarFlagForDivision(7), "CorpSAG7");
@@ -18,7 +18,7 @@ test("maps corporation divisions to asset location flags", () => {
   assert.equal(isCorporationHangarFlag("Hangar"), false);
 });
 
-test("uses HQ and other-location roles for non-directors", () => {
+void test("uses HQ and other-location roles for non-directors", () => {
   const characters = [
     {
       corporationId: 42,
@@ -53,7 +53,7 @@ test("uses HQ and other-location roles for non-directors", () => {
   assert.equal(elsewhere.get("CorpSAG2")?.canQuery, true);
 });
 
-test("deduplicates permissions across collection characters and grants directors all access", () => {
+void test("deduplicates permissions across collection characters and grants directors all access", () => {
   const permissions = getCorporationHangarPermissions(
     [
       {

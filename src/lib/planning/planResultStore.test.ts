@@ -15,7 +15,7 @@ const planListNames = [
   "haulingTasks",
 ] as const;
 
-test("accepts a complete cached plan", () => {
+void test("accepts a complete cached plan", () => {
   const plan = {
     metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
     lists: {
@@ -27,7 +27,7 @@ test("accepts a complete cached plan", () => {
   assert.equal(isPlanResponse(plan), true);
 });
 
-test("rejects a cached plan with a missing output list", () => {
+void test("rejects a cached plan with a missing output list", () => {
   const plan = {
     metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
     lists: Object.fromEntries(planListNames.slice(0, -1).map((name) => [name, []])),
@@ -36,7 +36,7 @@ test("rejects a cached plan with a missing output list", () => {
   assert.equal(isPlanResponse(plan), false);
 });
 
-test("rejects legacy context output buckets", () => {
+void test("rejects legacy context output buckets", () => {
   const plan = {
     metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
     lists: {
@@ -51,7 +51,7 @@ test("rejects legacy context output buckets", () => {
   assert.equal(isPlanResponse(plan), false);
 });
 
-test("rejects haul buckets with legacy context", () => {
+void test("rejects haul buckets with legacy context", () => {
   const plan = {
     metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
     lists: {
@@ -63,7 +63,7 @@ test("rejects haul buckets with legacy context", () => {
   assert.equal(isPlanResponse(plan), false);
 });
 
-test("accepts bucketed market purchase lists", () => {
+void test("accepts bucketed market purchase lists", () => {
   const plan = {
     metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
     lists: {
@@ -88,7 +88,7 @@ test("accepts bucketed market purchase lists", () => {
   assert.equal(isPlanResponse(plan), true);
 });
 
-test("rejects flat market purchase rows", () => {
+void test("rejects flat market purchase rows", () => {
   const plan = {
     metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
     lists: {
