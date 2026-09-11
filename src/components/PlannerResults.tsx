@@ -780,7 +780,7 @@ function PlannerResultsContent({
     <div className={styles.results}>
       <div
         id="plan-breakdown"
-        className="flex items-center justify-between max-[640px]:flex-col max-[640px]:items-start max-[640px]:gap-3.5"
+        className="mb-4 flex items-center justify-between max-[640px]:flex-col max-[640px]:items-start max-[640px]:gap-3.5"
         ref={resultsHeaderRef}
       >
         <div>
@@ -977,6 +977,9 @@ function PlanList({
   const [togglingHaulPatchKey, setTogglingHaulPatchKey] = useState<string | null>(null);
   const [togglingHaulPatchGroupKey, setTogglingHaulPatchGroupKey] = useState<string | null>(null);
   const [selectedResultRowKey, setSelectedResultRowKey] = useState<string | null>(null);
+  const [installedResultRowKeysByPlan, setInstalledResultRowKeysByPlan] = useState<
+    Record<string, ReadonlySet<string>>
+  >({});
   const [showTotalRunCounts, setShowTotalRunCounts] = useState(false);
   const [showTotalManufacturingRunCounts, setShowTotalManufacturingRunCounts] = useState(false);
   const [planViewMode, setPlanViewMode] = useState<PlanViewMode>("build-location");
@@ -1051,9 +1054,19 @@ function PlanList({
     haulPatches,
   );
   const disabledReactionJobKeys = disabledReactionJobKeysByPlan[planStateKey] ?? new Set<string>();
+  const installedResultRowKeys = installedResultRowKeysByPlan[planStateKey] ?? new Set<string>();
 
   function toggleSelectedResultRow(rowKey: string) {
     setSelectedResultRowKey((current) => (current === rowKey ? null : rowKey));
+  }
+
+  function setResultRowInstalled(rowKey: string, installed: boolean) {
+    setInstalledResultRowKeysByPlan((current) => {
+      const next = new Set(current[planStateKey] ?? []);
+      if (installed) next.add(rowKey);
+      else next.delete(rowKey);
+      return { ...current, [planStateKey]: next };
+    });
   }
 
   function setReactionJobEnabled(job: ResponseReactionJob, enabled: boolean) {
@@ -1781,6 +1794,7 @@ function PlanList({
                     placeholder="Filter by type"
                     aria-label="Filter plan by asset type"
                     showClear
+                    className="[&>input]:!text-xs max-[640px]:w-full"
                   />
                   <ComboboxContent>
                     <ComboboxEmpty>No matching asset types.</ComboboxEmpty>
@@ -1804,7 +1818,7 @@ function PlanList({
                 <SelectTrigger
                   id="plan-view-mode"
                   aria-label="Plan view mode"
-                  className="flex-[0_1_190px] min-w-[170px] max-[640px]:w-full max-[640px]:min-w-0"
+                  className="max-[640px]:w-full"
                 >
                   <SelectValue>
                     {planViewMode === "build-location" ? "By Build Location" : "All Items"}
@@ -2499,6 +2513,9 @@ function PlanList({
                           / manufacturingEntry.countNeeded
                         : 0;
                     const rowKey = `${activeTab}:${locationId ?? "unlocated"}:${typeId}:${reactionIndex}`;
+                    const isInstalled =
+                      (activeTab === "React" || activeTab === "Manufacture")
+                      && installedResultRowKeys.has(rowKey);
                     return (
                       <Fragment key={`${activeTab}-${index}`}>
                         <ResultRow
@@ -2511,9 +2528,11 @@ function PlanList({
                           linkSearchParams={activeTab === "Plan" ? undefined : { tab: "Plan" }}
                           linkHash={activeTab === "Plan" ? undefined : "plan-breakdown"}
                           navigateInPlace={activeTab !== "Plan"}
-                          selected={selectedResultRowKey === rowKey}
-                          onClick={() => toggleSelectedResultRow(rowKey)}
+                          installed={isInstalled}
+                          selected={!isInstalled && selectedResultRowKey === rowKey}
+                          onClick={isInstalled ? undefined : () => toggleSelectedResultRow(rowKey)}
                           showSwitch={reactionJob !== null}
+                          switchDisabled={isInstalled}
                           switchChecked={
                             reactionJob
                               ? !disabledReactionJobKeys.has(reactionJobKey(reactionJob))
@@ -2524,7 +2543,9 @@ function PlanList({
                             if (reactionJob) setReactionJobEnabled(reactionJob, checked);
                           }}
                           showCheckbox={activeTab === "React" || activeTab === "Manufacture"}
+                          checkboxChecked={isInstalled}
                           checkboxTooltip="Installed?"
+                          onCheckboxChange={(checked) => setResultRowInstalled(rowKey, checked)}
                           identityClassName={`${styles.planTypeIdentity} ${activeTab === "Copy" ? "max-[640px]:col-span-full max-[640px]:w-full" : ""}`}
                           className={`${activeTab === "Plan" ? styles.planTableRow : activeTab === "Copy" ? "grid grid-cols-[minmax(0,1fr)_minmax(74px,auto)_minmax(74px,auto)_minmax(90px,auto)] items-center gap-[13px] max-[640px]:grid-cols-3 max-[640px]:items-start max-[640px]:gap-y-2" : buyBpoEntry || isReactionFormulaBuy ? "grid grid-cols-[minmax(0,1fr)_minmax(150px,auto)_minmax(100px,auto)] items-center gap-[13px] max-[640px]:grid-cols-1 max-[640px]:items-start max-[640px]:gap-y-2" : styles.planRow} ${activeTab === "React" ? styles.reactionRow : activeTab === "Manufacture" ? styles.manufacturingRow : ""}`}
                         >
@@ -2666,7 +2687,7 @@ function PlanList({
                               {activeTab === "React" ? (
                                 <span className={styles.reactionCells}>
                                   <span
-                                    className={styles.reactionAvailableCell}
+                                    className={`${styles.reactionAvailableCell} result-row-content`}
                                     data-label="BPs available"
                                   >
                                     {additionalInstallCount > 0
@@ -2698,13 +2719,13 @@ function PlanList({
                                     </strong>
                                   </span>
                                   <span
-                                    className={styles.reactionValue}
+                                    className={`${styles.reactionValue} result-row-content`}
                                     data-label="Suggested installs"
                                   >
                                     <strong>{suggestedInstallCount.toLocaleString()}</strong>
                                   </span>
                                   <span
-                                    className={styles.reactionValue}
+                                    className={`${styles.reactionValue} result-row-content`}
                                     data-label="Suggested runs"
                                   >
                                     <strong>
@@ -2724,7 +2745,10 @@ function PlanList({
                                       {installTime !== null ? formatDuration(installTime) : "-"}
                                     </small>
                                   </span>
-                                  <span className={styles.reactionValue} data-label="Total needed">
+                                  <span
+                                    className={`${styles.reactionValue} result-row-content`}
+                                    data-label="Total needed"
+                                  >
                                     <strong>
                                       {totalNeeded === null ? (
                                         "-"
