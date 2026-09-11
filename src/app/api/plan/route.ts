@@ -479,7 +479,7 @@ function withPlanId(body: unknown, planId: string): unknown {
   };
 }
 
-/** Calculates and logs one plan request before returning its response. */
+/** Calculates and schedules logging for one plan request before returning its response. */
 export async function POST(request: Request) {
   const planId = randomUUID();
   const requestedAt = new Date().toISOString();
@@ -491,7 +491,7 @@ export async function POST(request: Request) {
   }
   catch {
     const responseBody = { planId, error: "The plan request was not valid JSON." };
-    await logPlanRequest({
+    logPlanRequest({
       id: planId,
       requestedAt,
       sessionCollectionId: session?.collectionId,
@@ -518,7 +518,7 @@ export async function POST(request: Request) {
       }
     });
   }
-  await logPlanRequest({
+  logPlanRequest({
     id: planId,
     requestedAt,
     sessionCollectionId: session?.collectionId,

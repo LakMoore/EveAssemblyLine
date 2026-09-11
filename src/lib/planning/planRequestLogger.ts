@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
+import { after } from "next/server";
 import { discordLogger } from "@/lib/discordLogger";
 import { getFirebaseApp } from "@/lib/storage";
 
@@ -83,7 +84,11 @@ function getStorageBucket() {
 
 function parseStoredBlob(value: Buffer, id: string): PlanRequestLog | undefined {
   try {
-    const parsed = JSON.parse(gunzipSync(value).toString("utf8")) as {
+    const content =
+      value[0] === 0x1f && value[1] === 0x8b
+        ? gunzipSync(value).toString("utf8")
+        : value.toString("utf8");
+    const parsed = JSON.parse(content) as {
       requestId?: unknown;
       rawRequestBody?: unknown;
       rawResponseBody?: unknown;
@@ -178,8 +183,8 @@ async function persistPlanRequestLog(entry: PlanRequestLog): Promise<void> {
   }
 }
 
-/** Assigns an ID and persists the log before the plan response is returned. */
-export async function logPlanRequest(entry: PlanRequestLogInput): Promise<string> {
+/** Assigns an ID and schedules durable persistence without delaying the plan response. */
+export function logPlanRequest(entry: PlanRequestLogInput): string {
   const id = entry.id ?? randomUUID();
   const completeEntry: PlanRequestLog = {
     ...entry,
@@ -188,7 +193,7 @@ export async function logPlanRequest(entry: PlanRequestLogInput): Promise<string
     sizeBytes: 0,
   };
   remember(completeEntry);
-  await persistPlanRequestLog(completeEntry);
+  after(() => persistPlanRequestLog(completeEntry));
   return id;
 }
 

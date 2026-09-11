@@ -35,7 +35,7 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/your-webhook-id/your-webhoo
 
 Use a dedicated service account with access limited to the required Firestore database and Cloud Storage bucket. The service account needs Firestore read/write access and permission to create, read, and delete objects in the plan-log bucket. Never expose these variables to the browser or commit them.
 
-`DISCORD_WEBHOOK_URL` is optional. When configured, server-side persistence errors are sent to Discord before the plan request completes. Configure the same value as a runtime secret for App Hosting.
+`DISCORD_WEBHOOK_URL` is optional. When configured, server-side persistence errors are sent to Discord from the request lifecycle callback. Configure the same value as a runtime secret for App Hosting.
 
 The Firestore database must be created in the Firebase project before the first authenticated request. Existing `data/` files are intentionally not migrated; they contain disposable pre-Firestore state and will be abandoned on deployment.
 

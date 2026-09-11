@@ -596,6 +596,7 @@ export function toPlanResponse(
         resolveTypeName,
         result.availableSourceCountsByType?.get(entry.typeId),
         result.availableStockQuantitiesByType?.get(entry.typeId),
+        false,
       ),
     );
     const planItemsByActivityLocation = new Map<
@@ -630,6 +631,7 @@ export function toPlanResponse(
                       locationTypeKey(locationId, entry.typeId),
                     ) ?? 0
                   ),
+              true,
             ),
           ),
         }),
@@ -882,6 +884,7 @@ function toResponsePlanItem(
   resolveTypeName: (typeId: number) => string,
   availableSourceCountsOverride?: PlanSourceCountsByLocation,
   availableQuantityOverride?: number,
+  includeHaulingQuantity = false,
 ): ResponsePlanItem {
   const haulingQuantity = haulingTasks
     .filter(
@@ -901,7 +904,7 @@ function toResponsePlanItem(
   if (entry.kind === "material") {
     const availableQuantity =
       (availableQuantityOverride ?? entry.availableStockQuantity)
-      + (availableQuantityOverride !== undefined ? haulingQuantity : 0);
+      + (includeHaulingQuantity ? haulingQuantity : 0);
     const plannedProductionQuantity = Math.max(
       0,
       entry.productionQuantity - (entry.reprocessingQuantity ?? 0),
@@ -2392,10 +2395,76 @@ async function calculatePlanPass(
         addHauling(sourceLot, hauledQuantity, destinationLocationId);
         material.quantity = Math.max(0, material.quantity - creditedQuantity);
         material.stockQuantity += creditedQuantity;
-        material.availableStockQuantity += creditedQuantity;
         material.buyQuantity = Math.max(0, material.buyQuantity - creditedQuantity);
         remainingQuantity -= hauledQuantity;
       }
+    }
+  }
+
+  const demandByLocationAndType = new Map<string, number>();
+  for (const material of materials.values()) {
+    if (material.activityLocationId === undefined) continue;
+    const key = locationTypeKey(material.activityLocationId, material.typeId);
+    demandByLocationAndType.set(
+      key,
+      (demandByLocationAndType.get(key) ?? 0) + material.requiredQuantity,
+    );
+  }
+  const plannedFutureHaulByLot = new Map<StockLot, number>();
+  const plannedOutboundByLocationAndType = new Map<string, number>();
+  for (const material of materials.values()) {
+    const destinationLocationId = material.activityLocationId;
+    if (destinationLocationId === undefined || material.requiredQuantity <= 0) continue;
+    const localQuantity = getLocationQuantity(
+      stockByLocationAndType,
+      destinationLocationId,
+      material.typeId,
+    );
+    const inboundQuantity = [...haulingByKey.values()]
+      .filter(
+        (task) =>
+          task.typeId === material.typeId
+          && task.toLocationId === destinationLocationId
+          && task.source !== "production",
+      )
+      .reduce((total, task) => total + task.neededQuantity, 0);
+    let remainingDemand = Math.max(0, material.requiredQuantity - localQuantity - inboundQuantity);
+    if (remainingDemand <= 0) continue;
+
+    for (const lot of stockLotsByTypeId.get(material.typeId) ?? []) {
+      if (
+        remainingDemand <= 0
+        || lot.industryJobOutput
+        || lot.rootLocationId === destinationLocationId
+      ) continue;
+      const plannedQuantity = plannedFutureHaulByLot.get(lot) ?? 0;
+      const sourceKey = locationTypeKey(lot.rootLocationId, lot.typeId);
+      const sourceDemand = demandByLocationAndType.get(sourceKey) ?? 0;
+      const existingOutbound = [...haulingByKey.values()]
+        .filter(
+          (task) =>
+            task.typeId === lot.typeId
+            && task.fromLocationId === lot.rootLocationId
+            && task.source !== "production",
+        )
+        .reduce((total, task) => total + task.neededQuantity, 0);
+      const plannedOutbound = plannedOutboundByLocationAndType.get(sourceKey) ?? 0;
+      const sourceSurplus = Math.max(
+        0,
+        (stockByLocationAndType.get(lot.rootLocationId)?.get(lot.typeId) ?? 0)
+          - sourceDemand
+          - existingOutbound,
+      );
+      const availableQuantity = Math.min(
+        Math.max(0, lot.quantity - plannedQuantity),
+        Math.max(0, sourceSurplus - plannedOutbound),
+      );
+      const hauledQuantity = Math.min(availableQuantity, remainingDemand);
+      if (hauledQuantity <= 0) continue;
+      addHauling(lot, hauledQuantity, destinationLocationId);
+      plannedFutureHaulByLot.set(lot, plannedQuantity + hauledQuantity);
+      plannedOutboundByLocationAndType.set(sourceKey, plannedOutbound + hauledQuantity);
+      remainingDemand -= hauledQuantity;
     }
   }
 

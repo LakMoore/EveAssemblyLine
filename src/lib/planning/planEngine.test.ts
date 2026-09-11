@@ -2519,6 +2519,84 @@ test("reports transferred stock as local availability", async () => {
   assert.equal(transfer.neededQuantity, 100);
 });
 
+test("hauls all remote stock needed for future material demand", async () => {
+  const materialTypeId = 57457;
+  const sourceLocationId = 1055354982663;
+  const destinationLocationId = 1055354926818;
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: materialTypeId,
+          name: "Reinforced Carbon Fiber",
+          quantity: 88200,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: 37605,
+            name: "Mino",
+            quantity: 3,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        stockpiles: [
+          {
+            id: "future-remote-material",
+            name: "Future remote material",
+            locations: {
+              stock: destinationLocationId,
+              manufacturing: destinationLocationId,
+              reactions: sourceLocationId,
+              reprocessing: sourceLocationId,
+              copying: destinationLocationId,
+              invention: destinationLocationId,
+            },
+            items: [
+              {
+                typeId: 37605,
+                name: "Mino",
+                quantity: 3,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const transfer = result.lists.haulingTasks.find(
+    (task) =>
+      task.typeId === materialTypeId
+      && task.fromLocationId === sourceLocationId
+      && task.toLocationId === destinationLocationId,
+  );
+
+  assert(transfer);
+  assert.equal(transfer.neededQuantity, 88200);
+
+  const response = await toPlanResponse(result);
+  const allViewMaterial = response.lists.planItems.all.find(
+    (item) => item.typeId === materialTypeId,
+  );
+  const destinationViewMaterial = response.lists.planItems.byActivityLocation
+    .find((bucket) => bucket.locationId === destinationLocationId)
+    ?.items.find((item) => item.typeId === materialTypeId);
+
+  assert(allViewMaterial);
+  assert(destinationViewMaterial);
+  assert.equal(allViewMaterial.availableQuantity, 88200);
+  assert.equal(destinationViewMaterial.availableQuantity, 88200);
+});
+
 test("reserves a stockpile's local assets before remote stockpiles can use them", async () => {
   const result = await calculatePlanCalculation(
     request(
