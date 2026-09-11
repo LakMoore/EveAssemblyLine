@@ -95,9 +95,7 @@ export default function ResponsiveDialogDrawer({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {trigger && <DialogTrigger render={trigger} />}
-      <DialogContent
-        className={cn("max-h-[85vh]", dialogClassName)}
-      >
+      <DialogContent className={cn("max-h-[85vh]", dialogClassName)}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}

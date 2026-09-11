@@ -63,6 +63,20 @@ type StockLot = {
   sourceItem: PlanStockItem;
 };
 
+/** Calculates material demand after modifiers, enforcing one unit per material per run. */
+function requiredMaterialQuantity(
+  activity: "manufacturing" | "reaction",
+  materialQuantity: number,
+  runs: number,
+  efficiency: Efficiency,
+  materialMultiplier: number,
+): number {
+  if (runs <= 0) return 0;
+  const efficiencyMultiplier = activity === "manufacturing" ? 1 - efficiency.me / 100 : 1;
+  const adjustedQuantityPerRun = materialQuantity * efficiencyMultiplier * materialMultiplier;
+  return Math.max(1, Math.ceil(adjustedQuantityPerRun)) * runs;
+}
+
 /** Builds a job-input group and derives its aggregate completion state. */
 function summarizePlanJobInputs(
   blueprint: PlanJobInput,
@@ -1601,11 +1615,13 @@ async function calculatePlanPass(
   ): PlanJobInputs {
     const activityData = blueprint.activities[activity];
     const materials = (activityData?.materials ?? []).map((material) => {
-      const requiredQuantity =
-        activity === "manufacturing"
-          ? Math.ceil(material.quantity * runs * (1 - efficiency.me / 100))
-          : material.quantity * runs;
-      const adjustedRequiredQuantity = Math.ceil(requiredQuantity * materialMultiplier);
+      const adjustedRequiredQuantity = requiredMaterialQuantity(
+        activity,
+        material.quantity,
+        runs,
+        efficiency,
+        materialMultiplier,
+      );
       const availableQuantity = getLocationQuantity(
         jobAvailableByLocationAndType,
         locationId,
@@ -2072,11 +2088,12 @@ async function calculatePlanPass(
             "expand.materials",
             async () => {
               for (const material of blueprint.activities.manufacturing?.materials ?? []) {
-                const materialQuantity = Math.ceil(
-                  material.quantity
-                    * runsNeeded
-                    * (1 - efficiency.me / 100)
-                    * profile.materialMultiplier,
+                const materialQuantity = requiredMaterialQuantity(
+                  "manufacturing",
+                  material.quantity,
+                  runsNeeded,
+                  efficiency,
+                  profile.materialMultiplier,
                 );
                 await expand(
                   material.typeID,
@@ -2087,15 +2104,12 @@ async function calculatePlanPass(
                   false,
                   activityLocationId,
                   undefined,
-                  Math.ceil(
-                    (
-                      material.quantity
-                      * runsNeeded
-                      * (1 - efficiency.me / 100)
-                      * profile.materialMultiplier
-                      * materialInstallableRuns
-                    )
-                      / runsNeeded,
+                  requiredMaterialQuantity(
+                    "manufacturing",
+                    material.quantity,
+                    materialInstallableRuns,
+                    efficiency,
+                    profile.materialMultiplier,
                   ),
                   activityLocationId,
                   undefined,
@@ -2210,21 +2224,25 @@ async function calculatePlanPass(
             for (const material of blueprint.activities.reaction?.materials ?? []) {
               await expand(
                 material.typeID,
-                Math.ceil(material.quantity * runsNeeded * profile.materialMultiplier),
+                requiredMaterialQuantity(
+                  "reaction",
+                  material.quantity,
+                  runsNeeded,
+                  efficiency,
+                  profile.materialMultiplier,
+                ),
                 typeName(material.typeID, `Type ${material.typeID}`),
                 nextStack,
                 defaultEfficiency,
                 false,
                 activityLocationId,
                 undefined,
-                Math.ceil(
-                  (
-                    material.quantity
-                    * runsNeeded
-                    * profile.materialMultiplier
-                    * materialInstallableRuns
-                  )
-                    / runsNeeded,
+                requiredMaterialQuantity(
+                  "reaction",
+                  material.quantity,
+                  materialInstallableRuns,
+                  efficiency,
+                  profile.materialMultiplier,
                 ),
                 activityLocationId,
                 undefined,

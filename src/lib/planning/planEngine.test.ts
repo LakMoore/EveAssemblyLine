@@ -931,6 +931,54 @@ test("applies assigned manufacturing group facility modifiers", async () => {
   assert.equal(tritaniumPlanItem.activityLocationId, alternateSourceLocationId);
 });
 
+test("requires one unit of manufacturing material per run after bonuses", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [],
+      {
+        items: [
+          {
+            typeId: 21019,
+            name: "Capital Capacitor Battery",
+            quantity: 27,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        groupAssignments: { capitalComponents: alternateSourceLocationId },
+        facilityProfiles: [
+          {
+            locationId: alternateSourceLocationId,
+            sizeId: 1,
+            buildTypeGroups: {
+              capitalComponents: {
+                manufacturingMaterialMultiplier: 0.9,
+                manufacturingMaterialPercentage: 10,
+                manufacturingTimeMultiplier: 1,
+                manufacturingTimePercentage: 0,
+                reactionMaterialMultiplier: 1,
+                reactionMaterialPercentage: 0,
+                reactionTimeMultiplier: 1,
+                reactionTimePercentage: 0,
+              },
+            },
+          },
+        ],
+      },
+    ),
+  );
+  const job = result.lists.manufacturingJobs.find((entry) => entry.typeId === 21020);
+  assert(job);
+  const powerCore = job.inputs.materials.find((input) => input.typeId === 2872);
+  assert(powerCore);
+  assert.equal(powerCore.requiredQuantity, 27);
+  const powerCoreMaterial = result.lists.materialsToBuy.find((item) => item.typeId === 2872);
+  assert(powerCoreMaterial);
+  assert.equal(powerCoreMaterial.requiredQuantity, 27);
+});
+
 test("applies assigned reaction group facility modifiers", async () => {
   const result = await calculatePlanCalculation(
     request(
