@@ -26,6 +26,7 @@ type ResultRowProps = Omit<ComponentProps<typeof TypeIdentity>, "name" | "typeId
   checkboxDisabled?: boolean;
   disabled?: boolean;
   selected?: boolean;
+  onClick?: () => void;
   className?: string;
   identityClassName?: string;
   switchClassName?: string;
@@ -51,6 +52,7 @@ export default function ResultRow({
   checkboxDisabled = false,
   disabled = false,
   selected = false,
+  onClick,
   className,
   identityClassName,
   switchClassName,
@@ -100,6 +102,7 @@ export default function ResultRow({
         "last:border-b-0",
         className,
       )}
+      onClick={onClick}
     >
       {showSwitch
         && controlTooltip(

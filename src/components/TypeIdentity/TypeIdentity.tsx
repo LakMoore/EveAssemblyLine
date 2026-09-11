@@ -20,6 +20,7 @@ type TypeIdentityProps = {
   linkPath?: string | null;
   linkIcon?: LucideIcon;
   linkSearchParams?: Record<string, string>;
+  linkHash?: string;
   navigateInPlace?: boolean;
   className?: string;
 };
@@ -35,6 +36,7 @@ export default function TypeIdentity({
   linkPath = "assets",
   linkIcon: LinkIcon = PackageSearch,
   linkSearchParams,
+  linkHash,
   navigateInPlace = false,
   className,
 }: TypeIdentityProps) {
@@ -47,7 +49,7 @@ export default function TypeIdentity({
       : `/${linkPath}?${new URLSearchParams({
           ...linkSearchParams,
           typeId: String(typeId),
-        }).toString()}`;
+        }).toString()}${linkHash ? `#${encodeURIComponent(linkHash)}` : ""}`;
 
   return (
     <div className={cn(styles.identity, "items-center", className)}>

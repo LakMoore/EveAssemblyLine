@@ -1,10 +1,12 @@
 "use client";
 
 import type { PlanJobInput, PlanJobInputs, PlanJobInputStatus } from "@/lib/planning/types";
+import ResultRow from "@/components/ResultRow";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { ClipboardList } from "lucide-react";
 
 function statusLabel(status: PlanJobInputStatus) {
   return status === "ready" ? "Ready" : status === "partial" ? "Partial" : "Blocked";
@@ -27,15 +29,20 @@ export function getJobInputsCompletionPercent(inputs: PlanJobInputs): number {
 
 function InputRow({ input }: { input: PlanJobInput }) {
   return (
-    <div className="grid grid-cols-[37px_minmax(0,1fr)_auto] items-center gap-x-2 border-t border-border/60 py-2 first:border-t-0">
-      <TypeIdentity
-        name={input.name}
-        typeId={input.typeId}
-        imageSize={28}
-        subline={`•\t${input.availableQuantity.toLocaleString()} / ${input.requiredQuantity.toLocaleString()} available`}
-        className="col-span-2 min-w-0 [&>span]:min-w-0"
-      />
-      <div className="col-start-3 row-start-1 flex shrink-0 items-center gap-2 self-center">
+    <ResultRow
+      name={input.name}
+      typeId={input.typeId}
+      imageSize={28}
+      subline={`•\t${input.availableQuantity.toLocaleString()} / ${input.requiredQuantity.toLocaleString()} available`}
+      linkPath="planner"
+      linkIcon={ClipboardList}
+      linkSearchParams={{ tab: "Plan" }}
+      linkHash="plan-breakdown"
+      navigateInPlace
+      className="min-h-0 border-t border-b-0 border-border/60 py-2 first:border-t-0"
+      identityClassName="[&>span]:min-w-0"
+    >
+      <div className="flex shrink-0 items-center gap-2 self-center">
         <span className={cn("font-mono", statusClassName(input.status))}>
           {input.completionPercent}%
         </span>
@@ -49,12 +56,26 @@ function InputRow({ input }: { input: PlanJobInput }) {
           )}
         />
       </div>
-    </div>
+    </ResultRow>
   );
 }
 
 /** Renders the authoritative inputs and readiness state for an industry job. */
-export default function JobInputsResponsive({ inputs }: { inputs: PlanJobInputs }) {
+export default function JobInputsResponsive({
+  inputs,
+  name,
+  typeId,
+  variation,
+  installableRuns,
+  totalRuns,
+}: {
+  inputs: PlanJobInputs;
+  name: string;
+  typeId: number;
+  variation?: "icon" | "render" | "bp" | "bpc";
+  installableRuns: number;
+  totalRuns: number;
+}) {
   const completionPercent = getJobInputsCompletionPercent(inputs);
   const status: PlanJobInputStatus =
     completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked";
@@ -64,7 +85,7 @@ export default function JobInputsResponsive({ inputs }: { inputs: PlanJobInputs 
         <button
           type="button"
           className={cn(
-            "inline-flex h-6 items-center gap-1 border px-2 text-[10px] font-semibold tracking-[0.08em] uppercase transition-colors hover:brightness-125",
+            "inline-flex h-6 items-center justify-center gap-1 border px-2 text-[10px] font-semibold tracking-[0.08em] uppercase transition-colors hover:brightness-125",
             statusClassName(status),
           )}
         >
@@ -75,11 +96,37 @@ export default function JobInputsResponsive({ inputs }: { inputs: PlanJobInputs 
       title="Job inputs"
       description="Material availability for this job."
       headerContent={
-        <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
-          <p className="font-semibold">{completionPercent}% ready</p>
-          <Badge variant="outline" className={statusClassName(status)}>
-            {statusLabel(status)}
-          </Badge>
+        <div className="flex flex-col gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <TypeIdentity
+              name={name}
+              typeId={typeId}
+              variation={variation}
+              imageSize={40}
+              linkPath="planner"
+              linkIcon={ClipboardList}
+              linkSearchParams={{ tab: "Plan" }}
+              linkHash="plan-breakdown"
+              navigateInPlace
+              className="min-w-0 flex-1"
+            />
+            <div className="grid shrink-0 grid-cols-2 gap-x-4 text-right font-mono text-xs">
+              <span>
+                <strong className="block">{installableRuns.toLocaleString()}</strong>
+                <small className="text-[9px] text-muted-foreground uppercase">Installable</small>
+              </span>
+              <span>
+                <strong className="block">{totalRuns.toLocaleString()}</strong>
+                <small className="text-[9px] text-muted-foreground uppercase">Total</small>
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+            <p className="font-semibold">{completionPercent}% ready</p>
+            <Badge variant="outline" className={statusClassName(status)}>
+              {statusLabel(status)}
+            </Badge>
+          </div>
         </div>
       }
     >

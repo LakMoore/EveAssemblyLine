@@ -695,6 +695,14 @@ function PlannerResultsContent({
     return () => window.removeEventListener("popstate", applyUrlState);
   }, [pathname, searchParams]);
 
+  useEffect(() => {
+    if (activeTab !== "Plan" || window.location.hash !== "#plan-breakdown") return;
+    const frame = window.requestAnimationFrame(() => {
+      resultsHeaderRef.current?.scrollIntoView({ block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTab, selectedTypeId]);
+
   function updatePlannerUrl(tab: PlannerTab, typeId: number | null) {
     const url = new URL(window.location.href);
     url.searchParams.set(plannerTabParam, tab);
@@ -771,6 +779,7 @@ function PlannerResultsContent({
   return (
     <div className={styles.results}>
       <div
+        id="plan-breakdown"
         className="flex items-center justify-between max-[640px]:flex-col max-[640px]:items-start max-[640px]:gap-3.5"
         ref={resultsHeaderRef}
       >
@@ -967,6 +976,7 @@ function PlanList({
   const [togglingHaulItemKey, setTogglingHaulItemKey] = useState<string | null>(null);
   const [togglingHaulPatchKey, setTogglingHaulPatchKey] = useState<string | null>(null);
   const [togglingHaulPatchGroupKey, setTogglingHaulPatchGroupKey] = useState<string | null>(null);
+  const [selectedResultRowKey, setSelectedResultRowKey] = useState<string | null>(null);
   const [showTotalRunCounts, setShowTotalRunCounts] = useState(false);
   const [showTotalManufacturingRunCounts, setShowTotalManufacturingRunCounts] = useState(false);
   const [planViewMode, setPlanViewMode] = useState<PlanViewMode>("build-location");
@@ -1041,6 +1051,10 @@ function PlanList({
     haulPatches,
   );
   const disabledReactionJobKeys = disabledReactionJobKeysByPlan[planStateKey] ?? new Set<string>();
+
+  function toggleSelectedResultRow(rowKey: string) {
+    setSelectedResultRowKey((current) => (current === rowKey ? null : rowKey));
+  }
 
   function setReactionJobEnabled(job: ResponseReactionJob, enabled: boolean) {
     const key = reactionJobKey(job);
@@ -2134,6 +2148,7 @@ function PlanList({
               <div className={styles.haulGroupRows}>
                 {group.tasks.map((task) => {
                   const key = haulTaskKey(task);
+                  const rowKey = `Haul:${key}`;
                   const isExcluded = haulItemExclusion.has(key);
                   const isPatched = isHaulTaskPatched(task, haulPatches);
                   return (
@@ -2145,7 +2160,10 @@ function PlanList({
                       linkPath="planner"
                       linkIcon={ClipboardList}
                       linkSearchParams={{ tab: "Plan" }}
+                      linkHash="plan-breakdown"
                       navigateInPlace
+                      selected={selectedResultRowKey === rowKey}
+                      onClick={() => toggleSelectedResultRow(rowKey)}
                       showSwitch
                       switchChecked={!isExcluded}
                       switchPending={togglingHaulItemKey === key}
@@ -2480,6 +2498,7 @@ function PlanList({
                         ? (manufacturingEntry.totalTime * manufacturingDisplayedRuns)
                           / manufacturingEntry.countNeeded
                         : 0;
+                    const rowKey = `${activeTab}:${locationId ?? "unlocated"}:${typeId}:${reactionIndex}`;
                     return (
                       <Fragment key={`${activeTab}-${index}`}>
                         <ResultRow
@@ -2490,7 +2509,10 @@ function PlanList({
                           linkPath={activeTab === "Plan" ? "assets" : "planner"}
                           linkIcon={activeTab === "Plan" ? undefined : ClipboardList}
                           linkSearchParams={activeTab === "Plan" ? undefined : { tab: "Plan" }}
+                          linkHash={activeTab === "Plan" ? undefined : "plan-breakdown"}
                           navigateInPlace={activeTab !== "Plan"}
+                          selected={selectedResultRowKey === rowKey}
+                          onClick={() => toggleSelectedResultRow(rowKey)}
                           showSwitch={reactionJob !== null}
                           switchChecked={
                             reactionJob
@@ -2508,12 +2530,26 @@ function PlanList({
                         >
                           {activeTab === "React" && "inputs" in entry && (
                             <span className={styles.jobInputsTrigger}>
-                              <JobInputsResponsive inputs={reactionInputs ?? entry.inputs} />
+                              <JobInputsResponsive
+                                inputs={reactionInputs ?? entry.inputs}
+                                name={name}
+                                typeId={typeId}
+                                variation={imageVariation}
+                                installableRuns={entry.runsAvailable}
+                                totalRuns={entry.countNeeded}
+                              />
                             </span>
                           )}
                           {activeTab === "Manufacture" && "inputs" in entry && (
                             <span className={styles.manufacturingInputsCell}>
-                              <JobInputsResponsive inputs={entry.inputs} />
+                              <JobInputsResponsive
+                                inputs={entry.inputs}
+                                name={name}
+                                typeId={typeId}
+                                variation={imageVariation}
+                                installableRuns={entry.runsAvailable}
+                                totalRuns={entry.countNeeded}
+                              />
                             </span>
                           )}
                           {activeTab === "Plan" ? (
