@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { Fragment, Suspense, type RefObject, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type {
@@ -30,6 +29,12 @@ import CopyableText from "@/components/CopyableText";
 import JobInputsResponsive, {
   getJobInputsCompletionPercent,
 } from "@/components/JobInputsResponsive";
+import {
+  PlannerActivityControls,
+  PlannerActivityTableHeader,
+  type ManufacturingSort,
+  type ReactionSort,
+} from "@/components/PlannerActivityControls";
 import PlannerHaulTab, {
   haulTaskKey,
   type DisplayHaulTask,
@@ -37,9 +42,7 @@ import PlannerHaulTab, {
 } from "@/components/PlannerHaulTab";
 import ResultRow from "@/components/ResultRow";
 import PlannerSkillsTab, { type PlannerSkillCharacter } from "@/components/PlannerSkillsTab";
-import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import { toast } from "@/components/ui/toast";
-import { Badge } from "@/components/ui/badge";
 import {
   Avatar,
   AvatarFallback,
@@ -72,16 +75,13 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { eveCharacterPortraitUrl, eveTypeImageUrl } from "@/lib/eve/imageServer";
+import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import styles from "@/app/page.module.css";
 import {
-  ArrowDown,
-  ArrowUp,
   Atom,
   Brain,
   Bug,
   ChartLine,
-  Check,
   ChevronDown,
   ClipboardList,
   Copy as CopyIcon,
@@ -93,8 +93,6 @@ import {
   TestTubes,
   ShoppingCart,
   Truck,
-  UsersRound,
-  X,
   type LucideIcon,
 } from "lucide-react";
 
@@ -142,9 +140,6 @@ type ReactionSchedule = {
   availableBlueprints: number;
 };
 type ReactionCoverage = { installable: number; total: number };
-type ReactionSortKey = "type" | "inputs" | "suggestedRuns" | "totalNeeded";
-type ReactionSort = { key: ReactionSortKey; direction: "asc" | "desc" };
-type ManufacturingSort = { key: "type" | "inputs" | "runs"; direction: "asc" | "desc" };
 type PlanViewMode = "all" | "build-location";
 type ResponseReactionJob = PlanResponse["lists"]["reactionJobs"][number]["items"][number] & {
   locationId?: number;
@@ -409,36 +404,6 @@ function getActivitySlotCharacters(
       return name && availableSlots > 0 ? [{ characterId: id, name, availableSlots }] : [];
     })
     .sort((left, right) => left.name.localeCompare(right.name));
-}
-
-function ActivitySlotCharacters({ characters }: { characters: ActivitySlotCharacter[] }) {
-  return (
-    <div className="flex flex-col gap-2">
-      {characters.length > 0 ? (
-        characters.map((character) => (
-          <div
-            className="grid grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 border-t border-border/60 py-2 first:border-t-0"
-            key={character.characterId}
-          >
-            <Image
-              src={eveCharacterPortraitUrl(character.characterId, 64)}
-              alt={`${character.name} portrait`}
-              width={32}
-              height={32}
-              className="size-8 rounded-none"
-            />
-            <span className="min-w-0 truncate font-medium">{character.name}</span>
-            <Badge variant="outline">
-              {character.availableSlots.toLocaleString()} slot
-              {character.availableSlots === 1 ? "" : "s"}
-            </Badge>
-          </div>
-        ))
-      ) : (
-        <p className="py-4 text-muted-foreground">No characters have available reaction slots.</p>
-      )}
-    </div>
-  );
 }
 
 function ScrollTopButton({
@@ -1486,188 +1451,29 @@ function PlanList({
               <span>Send to Compress</span>
             </Button>
           )}
-          {activeTab === "React" && (
-            <>
-              <div className="flex w-auto flex-nowrap items-center gap-2.5 max-[640px]:flex-wrap">
-                <Label className="shrink-0 whitespace-nowrap" htmlFor="reaction-schedule-mode">
-                  Plan Type:
-                </Label>
-                <Select
-                  value={reactionScheduleMode}
-                  onValueChange={(value) => setReactionScheduleMode(value as ReactionScheduleMode)}
-                >
-                  <SelectTrigger
-                    id="reaction-schedule-mode"
-                    aria-label="Reaction scheduling mode"
-                    className="min-w-[170px] flex-[0_1_190px]"
-                  >
-                    <SelectValue>
-                      {reactionScheduleMode === "max-job-length"
-                        ? "Max job length"
-                        : "Solve for available slots"}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="available-slots">Solve for available slots</SelectItem>
-                    <SelectItem value="max-job-length">Max job length</SelectItem>
-                  </SelectContent>
-                </Select>
-                {reactionScheduleMode === "max-job-length" && (
-                  <div className="flex flex-[0_0_150px] items-center gap-2">
-                    <Input
-                      id="max-reaction-job-hours"
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={maxJobHours}
-                      onChange={(event) => setMaxJobHours(event.target.value)}
-                      aria-label="Maximum reaction job length in hours"
-                      className="w-25"
-                    />
-                    <Label htmlFor="max-reaction-job-hours">Hours</Label>
-                  </div>
-                )}
-              </div>
-              <div className="flex min-h-8 w-auto items-center gap-2.5">
-                <Label htmlFor="reaction-run-count-mode">Show</Label>
-                <Select
-                  value={showTotalRunCounts ? "total" : "installable"}
-                  onValueChange={(value) => setShowTotalRunCounts(value === "total")}
-                >
-                  <SelectTrigger
-                    id="reaction-run-count-mode"
-                    aria-label="Reaction run count display"
-                    className="min-w-[125px] flex-[0_1_125px]"
-                  >
-                    <SelectValue>{showTotalRunCounts ? "Total" : "Installable"}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="installable">Installable</SelectItem>
-                    <SelectItem value="total">Total</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </>
-          )}
-          {activeTab === "React" && (
-            <>
-              <div className={styles.reactionSummary}>
-                <span>
-                  <strong className="flex items-center gap-1">
-                    {availableReactionSlots.toLocaleString()}
-                    <ResponsiveDialogDrawer
-                      trigger={
-                        <button
-                          type="button"
-                          className="inline-flex size-5 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
-                          aria-label="View characters with available reaction slots"
-                          title="View characters with available reaction slots"
-                        >
-                          <UsersRound className="size-4" aria-hidden="true" />
-                        </button>
-                      }
-                      title="Reaction slots by character"
-                      description="Characters with available reaction slots."
-                    >
-                      <ActivitySlotCharacters characters={reactionSlotCharacters} />
-                    </ResponsiveDialogDrawer>
-                  </strong>
-                  <small>AVAILABLE SLOTS</small>
-                </span>
-                <span>
-                  <strong>{reactionSummary.installs.toLocaleString()}</strong>
-                  <small>SUGGESTED INSTALLS</small>
-                </span>
-                <span>
-                  <strong>{formatDuration(reactionSummary.maxTime)}</strong>
-                  <small>MAX JOB LENGTH</small>
-                </span>
-                <span>
-                  <strong>
-                    {formatCoverage(reactionCoverage.installable, totalInstallableReactionRuns)}
-                  </strong>
-                  <small>INSTALLABLE COVERAGE</small>
-                </span>
-                <span>
-                  <strong>{formatCoverage(reactionCoverage.total, totalReactionRuns)}</strong>
-                  <small>TOTAL COVERAGE</small>
-                </span>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                className="ml-auto max-[640px]:ml-0 max-[640px]:w-full"
-                onClick={copyList}
-              >
-                <CopyIcon aria-hidden="true" />
-                {copyStatus || "Copy list"}
-              </Button>
-            </>
-          )}
-          {activeTab === "Manufacture" && (
-            <div className="mr-auto flex min-h-8 w-auto items-center gap-2.5">
-              <Label htmlFor="manufacturing-run-count-mode">Show</Label>
-              <Select
-                value={showTotalManufacturingRunCounts ? "total" : "installable"}
-                onValueChange={(value) => setShowTotalManufacturingRunCounts(value === "total")}
-              >
-                <SelectTrigger
-                  id="manufacturing-run-count-mode"
-                  aria-label="Manufacturing run count display"
-                  className="min-w-[125px] flex-[0_1_125px]"
-                >
-                  <SelectValue>
-                    {showTotalManufacturingRunCounts ? "Total" : "Installable"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="installable">Installable</SelectItem>
-                  <SelectItem value="total">Total</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-          {activeTab === "Manufacture" && (
-            <div className={styles.reactionSummary}>
-              <span>
-                <strong className="flex items-center gap-1">
-                  {availableManufacturingSlots.toLocaleString()}
-                  <ResponsiveDialogDrawer
-                    trigger={
-                      <button
-                        type="button"
-                        className="inline-flex size-5 items-center justify-center text-muted-foreground transition-colors hover:text-foreground"
-                        aria-label="View characters with available manufacturing slots"
-                        title="View characters with available manufacturing slots"
-                      >
-                        <UsersRound className="size-4" aria-hidden="true" />
-                      </button>
-                    }
-                    title="Manufacturing slots by character"
-                    description="Characters with available manufacturing slots."
-                  >
-                    <ActivitySlotCharacters characters={manufacturingSlotCharacters} />
-                  </ResponsiveDialogDrawer>
-                </strong>
-                <small>AVAILABLE SLOTS</small>
-              </span>
-              <span>
-                <strong>{manufacturingSummary.installs.toLocaleString()}</strong>
-                <small>SUGGESTED INSTALLS</small>
-              </span>
-              <span>
-                <strong>{formatDuration(manufacturingSummary.maxTime)}</strong>
-                <small>MAX JOB LENGTH</small>
-              </span>
-              <span>
-                <strong>{manufacturingSummary.installableCoverage}</strong>
-                <small>INSTALLABLE COVERAGE</small>
-              </span>
-              <span>
-                <strong>{manufacturingSummary.totalCoverage}</strong>
-                <small>TOTAL COVERAGE</small>
-              </span>
-            </div>
+          {(activeTab === "React" || activeTab === "Manufacture") && (
+            <PlannerActivityControls
+              activity={activeTab}
+              reactionScheduleMode={reactionScheduleMode}
+              onReactionScheduleModeChange={setReactionScheduleMode}
+              maxJobHours={maxJobHours}
+              onMaxJobHoursChange={setMaxJobHours}
+              showTotalRunCounts={showTotalRunCounts}
+              onShowTotalRunCountsChange={setShowTotalRunCounts}
+              showTotalManufacturingRunCounts={showTotalManufacturingRunCounts}
+              onShowTotalManufacturingRunCountsChange={setShowTotalManufacturingRunCounts}
+              availableReactionSlots={availableReactionSlots}
+              reactionSlotCharacters={reactionSlotCharacters}
+              reactionSummary={reactionSummary}
+              reactionCoverage={reactionCoverage}
+              totalInstallableReactionRuns={totalInstallableReactionRuns}
+              totalReactionRuns={totalReactionRuns}
+              availableManufacturingSlots={availableManufacturingSlots}
+              manufacturingSlotCharacters={manufacturingSlotCharacters}
+              manufacturingSummary={manufacturingSummary}
+              copyStatus={copyStatus}
+              onCopyList={() => void copyList()}
+            />
           )}
           {activeTab === "Plan" && (
             <div className="flex w-auto items-center gap-2.5 max-[640px]:w-full max-[640px]:flex-col max-[640px]:items-stretch">
@@ -1753,155 +1559,24 @@ function PlanList({
           ))}
         </div>
       )}
-      {activeTab === "React" && (
-        <div className={`${styles.reactionTableHeader} px-2`}>
-          <span aria-hidden="true" />
-          <button
-            type="button"
-            className={styles.reactionSortButton}
-            aria-label={`Sort reactions by Type${reactionSort.key === "type" ? `, currently ${reactionSort.direction}ending` : ""}`}
-            onClick={() =>
-              setReactionSort((current) => ({
-                key: "type",
-                direction: current.key === "type" && current.direction === "asc" ? "desc" : "asc",
-              }))
-            }
-          >
-            Type
-            {reactionSort.key === "type"
-              && (reactionSort.direction === "asc" ? (
-                <ArrowUp aria-hidden="true" />
-              ) : (
-                <ArrowDown aria-hidden="true" />
-              ))}
-          </button>
-          <button
-            type="button"
-            className={`${styles.reactionSortButton} ${styles.inputsSortHeader}`}
-            aria-label={`Sort reactions by Inputs${reactionSort.key === "inputs" ? `, currently ${reactionSort.direction}ending` : ""}`}
-            onClick={() =>
-              setReactionSort((current) => ({
-                key: "inputs",
-                direction: current.key === "inputs" && current.direction === "asc" ? "desc" : "asc",
-              }))
-            }
-          >
-            % inputs
-            {reactionSort.key === "inputs"
-              && (reactionSort.direction === "asc" ? (
-                <ArrowUp aria-hidden="true" />
-              ) : (
-                <ArrowDown aria-hidden="true" />
-              ))}
-          </button>
-          <span>BPs available</span>
-          <span>Suggested installs</span>
-          <button
-            type="button"
-            className={styles.reactionSortButton}
-            aria-label={`Sort reactions by Suggested runs${reactionSort.key === "suggestedRuns" ? `, currently ${reactionSort.direction}ending` : ""}`}
-            onClick={() =>
-              setReactionSort((current) => ({
-                key: "suggestedRuns",
-                direction:
-                  current.key === "suggestedRuns" && current.direction === "asc" ? "desc" : "asc",
-              }))
-            }
-          >
-            Suggested runs
-            {reactionSort.key === "suggestedRuns"
-              && (reactionSort.direction === "asc" ? (
-                <ArrowUp aria-hidden="true" />
-              ) : (
-                <ArrowDown aria-hidden="true" />
-              ))}
-          </button>
-          <button
-            type="button"
-            className={styles.reactionSortButton}
-            aria-label={`Sort reactions by Total needed${reactionSort.key === "totalNeeded" ? `, currently ${reactionSort.direction}ending` : ""}`}
-            onClick={() =>
-              setReactionSort((current) => ({
-                key: "totalNeeded",
-                direction:
-                  current.key === "totalNeeded" && current.direction === "asc" ? "desc" : "asc",
-              }))
-            }
-          >
-            Total needed
-            {reactionSort.key === "totalNeeded"
-              && (reactionSort.direction === "asc" ? (
-                <ArrowUp aria-hidden="true" />
-              ) : (
-                <ArrowDown aria-hidden="true" />
-              ))}
-          </button>
-          <span aria-hidden="true" />
-        </div>
-      )}
-      {activeTab === "Manufacture" && (
-        <div className={`${styles.manufacturingTableHeader} px-2`}>
-          <button
-            type="button"
-            className={styles.reactionSortButton}
-            aria-label={`Sort manufacturing jobs by Type${manufacturingSort.key === "type" ? `, currently ${manufacturingSort.direction}ending` : ""}`}
-            onClick={() =>
-              setManufacturingSort((current) => ({
-                key: "type",
-                direction: current.key === "type" && current.direction === "asc" ? "desc" : "asc",
-              }))
-            }
-          >
-            Type
-            {manufacturingSort.key === "type"
-              && (manufacturingSort.direction === "asc" ? (
-                <ArrowUp aria-hidden="true" />
-              ) : (
-                <ArrowDown aria-hidden="true" />
-              ))}
-          </button>
-          <button
-            type="button"
-            className={`${styles.reactionSortButton} ${styles.inputsSortHeader}`}
-            aria-label={`Sort manufacturing jobs by % inputs${manufacturingSort.key === "inputs" ? `, currently ${manufacturingSort.direction}ending` : ""}`}
-            onClick={() =>
-              setManufacturingSort((current) => ({
-                key: "inputs",
-                direction: current.key === "inputs" && current.direction === "asc" ? "desc" : "asc",
-              }))
-            }
-          >
-            % inputs
-            {manufacturingSort.key === "inputs"
-              && (manufacturingSort.direction === "asc" ? (
-                <ArrowUp aria-hidden="true" />
-              ) : (
-                <ArrowDown aria-hidden="true" />
-              ))}
-          </button>
-          <span>BPO count</span>
-          <span>BPC runs</span>
-          <button
-            type="button"
-            className={styles.reactionSortButton}
-            aria-label={`Sort manufacturing jobs by Run count${manufacturingSort.key === "runs" ? `, currently ${manufacturingSort.direction}ending` : ""}`}
-            onClick={() =>
-              setManufacturingSort((current) => ({
-                key: "runs",
-                direction: current.key === "runs" && current.direction === "asc" ? "desc" : "asc",
-              }))
-            }
-          >
-            Run count
-            {manufacturingSort.key === "runs"
-              && (manufacturingSort.direction === "asc" ? (
-                <ArrowUp aria-hidden="true" />
-              ) : (
-                <ArrowDown aria-hidden="true" />
-              ))}
-          </button>
-          <span aria-hidden="true" />
-        </div>
+      {(activeTab === "React" || activeTab === "Manufacture") && (
+        <PlannerActivityTableHeader
+          activity={activeTab}
+          reactionSort={reactionSort}
+          onReactionSortChange={(key) =>
+            setReactionSort((current) => ({
+              key,
+              direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
+            }))
+          }
+          manufacturingSort={manufacturingSort}
+          onManufacturingSortChange={(key) =>
+            setManufacturingSort((current) => ({
+              key,
+              direction: current.key === key && current.direction === "asc" ? "desc" : "asc",
+            }))
+          }
+        />
       )}
       {activeTab === "Copy" && (
         <>

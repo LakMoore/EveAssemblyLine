@@ -38,7 +38,9 @@ export default function PlannerSkillsTab({
             Connect a character and refresh status to compare trained skills.
           </EmptyDescription>
         </Empty>
-      ) : characters.every((character) => character.skills.length === 0) ? (
+      ) : characters.every(
+          (character) => character.skillsAvailable && character.skills.length === 0,
+        ) ? (
         <Empty className={styles.emptyResult}>
           <div className={styles.resultGlyph}>✓</div>
           <strong>All characters meet the requirements</strong>
