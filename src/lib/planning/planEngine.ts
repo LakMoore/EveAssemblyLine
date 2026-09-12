@@ -33,6 +33,7 @@ import {
   ResponsePlanItems,
   ResponseMaterial,
   ResponseItem,
+  StockOwnerType,
 } from "./types";
 import {
   allocateReprocessing,
@@ -2878,10 +2879,7 @@ async function calculateStockpilePlan(
   }
   const mergedResult = mergeStockpileResults(stockpileResults, request.stock, request);
   return restorePlanResourceCounts(
-    restorePlanSourceCounts(
-      restorePlanStockQuantities(mergedResult, request.stock, request.items),
-      request.stock,
-    ),
+    restorePlanSourceCounts(restorePlanStockQuantities(mergedResult, request), request.stock),
     request.stock,
   );
 }
@@ -3006,12 +3004,49 @@ function countPlanReactionFormulas(
 
 function restorePlanStockQuantities(
   result: PlanCalculation,
-  stock: PlanStockItem[],
-  buildItems: PlanBuildItem[],
+  request: PlannerRequest,
 ): PlanCalculation {
+  const { stock, items: buildItems } = request;
   const buildTypeIds = new Set(buildItems.map((item) => item.typeId));
+  const demandLocationsByType = new Map<number, Set<number>>();
+  for (const entry of result.lists.planItems) {
+    if (entry.kind !== "material" || entry.requiredQuantity <= 0) continue;
+    const locationId = entry.stockpileLocationId ?? entry.activityLocationId;
+    if (locationId === undefined) continue;
+    const locations = demandLocationsByType.get(entry.typeId) ?? new Set<number>();
+    locations.add(locationId);
+    demandLocationsByType.set(entry.typeId, locations);
+  }
+  const canUseSourceForDemand = (
+    typeId: number,
+    sourceLocationId: number | undefined,
+    ownerType?: StockOwnerType,
+    ownerId?: number,
+  ) => {
+    const demandLocations = demandLocationsByType.get(typeId);
+    if (sourceLocationId === undefined || !demandLocations || demandLocations.size === 0) {
+      return true;
+    }
+    return [...demandLocations].some((destinationLocationId) => {
+      if (sourceLocationId === destinationLocationId) return true;
+      return !(request.haulExclusions ?? []).some(
+        (exclusion) =>
+          exclusion.typeId === typeId
+          && exclusion.fromLocationId === sourceLocationId
+          && exclusion.toLocationId === destinationLocationId
+          && (
+            exclusion.ownerType === undefined
+            || (exclusion.ownerType === ownerType && exclusion.ownerId === ownerId)
+          ),
+      );
+    });
+  };
+  const canUseStockForDemand = (item: PlanStockItem) =>
+    canUseSourceForDemand(item.typeId, getStockRootLocationId(item), item.ownerType, item.ownerId);
   const availableStockQuantitiesByLocationAndType = new Map<string, number>();
   const availableStockQuantitiesByType = new Map<number, number>();
+  const excludedStockQuantitiesByLocationAndType = new Map<string, number>();
+  const excludedStockQuantitiesByType = new Map<number, number>();
   for (const item of stock) {
     if (
       item.category !== "item"
@@ -3020,6 +3055,17 @@ function restorePlanStockQuantities(
     ) continue;
     const locationId = getStockRootLocationId(item);
     const locationKey = locationTypeKey(locationId, item.typeId);
+    if (!canUseStockForDemand(item)) {
+      excludedStockQuantitiesByLocationAndType.set(
+        locationKey,
+        (excludedStockQuantitiesByLocationAndType.get(locationKey) ?? 0) + item.quantity,
+      );
+      excludedStockQuantitiesByType.set(
+        item.typeId,
+        (excludedStockQuantitiesByType.get(item.typeId) ?? 0) + item.quantity,
+      );
+      continue;
+    }
     availableStockQuantitiesByLocationAndType.set(
       locationKey,
       (availableStockQuantitiesByLocationAndType.get(locationKey) ?? 0) + item.quantity,
@@ -3030,19 +3076,70 @@ function restorePlanStockQuantities(
     );
   }
   for (const [key, quantity] of result.availableStockQuantitiesByLocationAndType ?? []) {
+    const separatorIndex = key.lastIndexOf(":");
+    const sourceLocationValue = key.slice(0, separatorIndex);
+    const typeId = Number(key.slice(separatorIndex + 1));
+    const sourceLocationId =
+      sourceLocationValue === "unlocated" ? undefined : Number(sourceLocationValue);
+    if (
+      !Number.isSafeInteger(typeId)
+      || (sourceLocationId !== undefined && !Number.isSafeInteger(sourceLocationId))
+    ) continue;
+    const locationKey = locationTypeKey(sourceLocationId, typeId);
+    const eligibleQuantity = Math.max(
+      0,
+      quantity - (excludedStockQuantitiesByLocationAndType.get(locationKey) ?? 0),
+    );
     availableStockQuantitiesByLocationAndType.set(
       key,
-      Math.max(availableStockQuantitiesByLocationAndType.get(key) ?? 0, quantity),
+      Math.max(availableStockQuantitiesByLocationAndType.get(key) ?? 0, eligibleQuantity),
+    );
+  }
+  const restoredStockQuantitiesByType = new Map<number, number>();
+  for (const [key, quantity] of availableStockQuantitiesByLocationAndType) {
+    const separatorIndex = key.lastIndexOf(":");
+    const typeId = Number(key.slice(separatorIndex + 1));
+    if (!Number.isSafeInteger(typeId)) continue;
+    restoredStockQuantitiesByType.set(
+      typeId,
+      (restoredStockQuantitiesByType.get(typeId) ?? 0) + quantity,
     );
   }
   for (const [typeId, quantity] of result.availableStockQuantitiesByType ?? []) {
+    if (restoredStockQuantitiesByType.has(typeId)) continue;
     availableStockQuantitiesByType.set(
       typeId,
-      Math.max(availableStockQuantitiesByType.get(typeId) ?? 0, quantity),
+      demandLocationsByType.has(typeId)
+        ? 0
+        : Math.max(availableStockQuantitiesByType.get(typeId) ?? 0, quantity),
     );
   }
+  for (const [typeId, quantity] of restoredStockQuantitiesByType) {
+    availableStockQuantitiesByType.set(typeId, quantity);
+  }
+  const materialsToBuy = result.lists.materialsToBuy.map((entry) => {
+    const excludedQuantity = excludedStockQuantitiesByType.get(entry.typeId) ?? 0;
+    if (excludedQuantity <= 0) return entry;
+    const availableStockQuantity = Math.max(0, entry.availableStockQuantity - excludedQuantity);
+    const plannedProductionQuantity = Math.max(
+      0,
+      entry.productionQuantity - (entry.reprocessingQuantity ?? 0),
+    );
+    return {
+      ...entry,
+      availableStockQuantity,
+      buyQuantity: Math.max(
+        entry.buyQuantity,
+        entry.requiredQuantity - availableStockQuantity - plannedProductionQuantity,
+      ),
+    };
+  });
   return {
     ...result,
+    lists: {
+      ...result.lists,
+      materialsToBuy,
+    },
     availableStockQuantitiesByLocationAndType,
     availableStockQuantitiesByType,
   };

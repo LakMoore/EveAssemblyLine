@@ -582,6 +582,133 @@ void test("filters hauling quantities by plan-item destination location", async 
   assert.equal(secondTritanium.availableQuantity, 1);
 });
 
+void test("buys excluded remote stock for blacklisted products", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      276,
+      [
+        {
+          typeId: oxygenFuelBlockTypeId,
+          name: "Oxygen Fuel Block",
+          quantity: 276,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: oxygenFuelBlockTypeId,
+            name: "Oxygen Fuel Block",
+            quantity: 276,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        settings: {
+          ...request(0, []).settings,
+          buildBlacklist: [oxygenFuelBlockTypeId],
+        },
+        haulExclusions: [
+          {
+            typeId: oxygenFuelBlockTypeId,
+            fromLocationId: sourceLocationId,
+            toLocationId: manufacturingLocationId,
+          },
+        ],
+      },
+    ),
+  );
+
+  const material = result.lists.materialsToBuy.find(
+    (entry) => entry.typeId === oxygenFuelBlockTypeId,
+  );
+  assert(material);
+  assert.equal(material.requiredQuantity, 276);
+  assert.equal(material.stockQuantity, 0);
+  assert.equal(material.buyQuantity, 276);
+
+  const response = await toPlanResponse(result);
+  const purchase = response.lists.materialsToBuy
+    .flatMap((group) => group.items)
+    .find((entry) => entry.typeId === oxygenFuelBlockTypeId);
+  const planItem = response.lists.planItems.all.find(
+    (entry) => entry.typeId === oxygenFuelBlockTypeId,
+  );
+  assert(purchase);
+  assert.equal(purchase.neededQuantity, 276);
+  assert(planItem);
+  assert.equal(planItem.availableQuantity, 0);
+  assert.equal(planItem.neededQuantity, 276);
+});
+
+void test("does not merge excluded remote stock into aggregate availability", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      150,
+      [
+        {
+          typeId: oxygenFuelBlockTypeId,
+          name: "Oxygen Fuel Block",
+          quantity: 5892,
+          category: "item",
+          rootLocationId: sourceLocationId,
+          ownerType: "character",
+          ownerId: 2117405992,
+        },
+        {
+          typeId: oxygenFuelBlockTypeId,
+          name: "Oxygen Fuel Block",
+          quantity: 12,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+          ownerType: "character",
+          ownerId: 2117405992,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: oxygenFuelBlockTypeId,
+            name: "Oxygen Fuel Block",
+            quantity: 150,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        settings: {
+          ...request(0, []).settings,
+          buildBlacklist: [oxygenFuelBlockTypeId],
+        },
+        haulExclusions: [
+          {
+            typeId: oxygenFuelBlockTypeId,
+            fromLocationId: sourceLocationId,
+            toLocationId: manufacturingLocationId,
+            ownerType: "character",
+            ownerId: 2117405992,
+          },
+        ],
+      },
+    ),
+  );
+
+  const response = await toPlanResponse(result);
+  const planItem = response.lists.planItems.all.find(
+    (entry) => entry.typeId === oxygenFuelBlockTypeId,
+  );
+  assert(planItem);
+  assert.equal(planItem.availableQuantity, 12);
+  assert.equal(planItem.neededQuantity, 138);
+  const purchase = response.lists.materialsToBuy
+    .flatMap((group) => group.items)
+    .find((entry) => entry.typeId === oxygenFuelBlockTypeId);
+  assert(purchase);
+  assert.equal(purchase.neededQuantity, 138);
+});
+
 void test("buy blacklist keeps a buildable item on the manufacturing path", async () => {
   const result = await calculatePlanCalculation(
     request(
