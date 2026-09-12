@@ -6,6 +6,7 @@ export type ClientEndpointRecord<T = unknown> = {
   key: string;
   url: string;
   data: T;
+  etag?: string;
   returnedAt: string;
   refreshAt: string | null;
 };
@@ -62,10 +63,17 @@ export function loadEndpointRecord<T>(key: string) {
   );
 }
 
-export async function saveEndpointResponse<T>(key: string, url: string, data: T) {
+export async function saveEndpointResponse<T>(key: string, url: string, data: T, etag?: string) {
   const returnedAt = new Date().toISOString();
   const refreshAt = await loadLastRefreshAt();
-  const record: ClientEndpointRecord<T> = { key, url, data, returnedAt, refreshAt };
+  const record: ClientEndpointRecord<T> = {
+    key,
+    url,
+    data,
+    ...(etag ? { etag } : {}),
+    returnedAt,
+    refreshAt,
+  };
   const database = await getPlanningDatabase();
   return new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(endpointCacheStoreName, "readwrite");

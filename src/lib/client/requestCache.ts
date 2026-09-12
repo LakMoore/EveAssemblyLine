@@ -448,39 +448,56 @@ export function loadClientAssets(language: SdeLanguage, reload = false) {
   if (!reload && cached && isCompleteClientAssetsResponse(cached)) return Promise.resolve(cached);
 
   const query = new URLSearchParams({ language });
-  const loadCachedStock = !reload
-    ? loadEndpointRecord<ClientAssetsResponse>("state/assets").then((record) => {
-        if (!record) return null;
-        try {
-          const cachedLanguage = new URL(record.url, window.location.origin).searchParams.get(
-            "language",
-          );
-          if (cachedLanguage !== language) return null;
+  const url = `/api/state/assets?${query.toString()}`;
+  const loadCachedRecord = loadEndpointRecord<ClientAssetsResponse>("state/assets").then(
+    (record) => {
+      if (!record) return null;
+      try {
+        const cachedLanguage = new URL(record.url, window.location.origin).searchParams.get(
+          "language",
+        );
+        if (cachedLanguage !== language) return null;
+      }
+      catch {
+        return null;
+      }
+      return {
+        data: isCompleteClientAssetsResponse(record.data)
+          ? normalizeClientAssetsResponse(record.data)
+          : undefined,
+        etag: record.etag,
+      };
+    },
+  );
+  const request = loadCachedRecord
+    .then(async (cachedRecord) => {
+      if (!reload && cachedRecord?.data) {
+        assetsResponses.set(key, cachedRecord.data);
+        return cachedRecord.data;
+      }
+
+      const requestOptions: RequestInit = {
+        cache: "no-store",
+        ...(cachedRecord?.etag ? { headers: { "If-None-Match": cachedRecord.etag } } : {}),
+      };
+      let response = await fetch(url, requestOptions);
+      if (response.status === 304) {
+        if (cachedRecord?.data) {
+          assetsResponses.set(key, cachedRecord.data);
+          return cachedRecord.data;
         }
-        catch {
-          return null;
-        }
-        if (!isCompleteClientAssetsResponse(record.data)) return null;
-        const data = normalizeClientAssetsResponse(record.data);
-        assetsResponses.set(key, data);
-        return data;
-      })
-    : Promise.resolve(null);
-  const request = loadCachedStock
-    .then((cachedStock) => {
-      if (cachedStock) return cachedStock;
-      return fetch(
-        `/api/state/assets?${query.toString()}`,
-        {
-          cache: "no-store",
-        },
-      ).then(async (response) => {
-        const data = normalizeClientAssetsResponse((await response.json()) as ClientAssetsResponse);
-        if (!response.ok) throw new Error("Could not load assets.");
-        await saveEndpointResponse("state/assets", `/api/state/assets?${query.toString()}`, data);
-        assetsResponses.set(key, data);
-        return data;
-      });
+        response = await fetch(url, { cache: "no-store" });
+      }
+      const data = normalizeClientAssetsResponse((await response.json()) as ClientAssetsResponse);
+      if (!response.ok) throw new Error("Could not load assets.");
+      await saveEndpointResponse(
+        "state/assets",
+        url,
+        data,
+        response.headers.get("etag") ?? undefined,
+      );
+      assetsResponses.set(key, data);
+      return data;
     })
     .finally(() => assetsRequests.delete(key));
   assetsRequests.set(key, request);

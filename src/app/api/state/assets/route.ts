@@ -46,6 +46,7 @@ import {
   calculateFacilities,
   type FacilityCalculationContext,
 } from "@/lib/planning/facilitiesServer";
+import { createEtag, matchesIfNoneMatch } from "@/lib/server/etag";
 import { createTimingScope, flattenTimingPhases, logTiming } from "@/lib/server/timing";
 
 type RootLocation = {
@@ -730,7 +731,29 @@ export async function GET(request: NextRequest) {
       },
     );
   }
-  const response = NextResponse.json(payload);
+  const body = JSON.stringify(payload);
+  const etag = createEtag(body);
+  const response = matchesIfNoneMatch(request.headers.get("if-none-match"), etag)
+    ? new NextResponse(
+        null,
+        {
+          status: 304,
+          headers: {
+            "Cache-Control": "no-store",
+            ETag: etag,
+          },
+        },
+      )
+    : new NextResponse(
+        body,
+        {
+          headers: {
+            "Cache-Control": "no-store",
+            "Content-Type": "application/json; charset=utf-8",
+            ETag: etag,
+          },
+        },
+      );
   if (profilingEnabled) {
     const timingHeader = [
       `total;dur=${timingProfile.totalMs}`,
