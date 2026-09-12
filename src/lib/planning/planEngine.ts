@@ -667,6 +667,7 @@ export function toPlanResponse(
         typeName: task.typeName,
         unitVolume: task.unitVolume,
         neededQuantity: task.neededQuantity,
+        ...(task.inBuildQuantity !== undefined ? { inBuildQuantity: task.inBuildQuantity } : {}),
       };
       const existingItem = bucket.items.find((candidate) => candidate.typeId === item.typeId);
       if (existingItem) {
@@ -675,6 +676,8 @@ export function toPlanResponse(
           + item.neededQuantity * item.unitVolume;
         existingItem.neededQuantity += item.neededQuantity;
         existingItem.unitVolume = totalVolume / existingItem.neededQuantity;
+        existingItem.inBuildQuantity =
+          (existingItem.inBuildQuantity ?? 0) + (item.inBuildQuantity ?? 0);
       }
       else bucket.items.push(item);
       haulBuckets.set(key, bucket);
@@ -1190,6 +1193,9 @@ async function calculatePlanPass(
     const totalVolume = task.neededQuantity * task.unitVolume + quantity * lot.volumePerUnit;
     task.neededQuantity += quantity;
     task.unitVolume = totalVolume / task.neededQuantity;
+    if (lot.industryJobOutput) {
+      task.inBuildQuantity = (task.inBuildQuantity ?? 0) + quantity;
+    }
     haulingByKey.set(key, task);
   }
   function consumeTrackedStock(
@@ -1592,12 +1598,14 @@ async function calculatePlanPass(
     name: string,
     availableQuantity: number,
     requiredQuantity: number,
+    inBuildQuantity = 0,
   ): PlanJobInput {
     return {
       kind,
       typeId,
       name,
       availableQuantity,
+      ...(inBuildQuantity > 0 ? { inBuildQuantity } : {}),
       requiredQuantity,
       completionPercent:
         requiredQuantity <= 0
@@ -1630,12 +1638,17 @@ async function calculatePlanPass(
         locationId,
         material.typeID,
       );
+      const inBuildQuantity = Math.min(
+        availableQuantity,
+        getLocationQuantity(industryOutputByLocationAndType, locationId, material.typeID),
+      );
       return inputItem(
         "material",
         material.typeID,
         typeName(material.typeID, `Type ${material.typeID}`),
         availableQuantity,
         adjustedRequiredQuantity,
+        inBuildQuantity,
       );
     });
     const bpoCount = blueprintOriginalCounts.get(blueprint._key) ?? 0;
@@ -1682,6 +1695,7 @@ async function calculatePlanPass(
           material.name,
           previous?.availableQuantity ?? material.availableQuantity,
           (previous?.requiredQuantity ?? 0) + material.requiredQuantity,
+          Math.max(previous?.inBuildQuantity ?? 0, material.inBuildQuantity ?? 0),
         ),
       );
     }
@@ -1693,6 +1707,7 @@ async function calculatePlanPass(
       reusableBlueprint
         ? Math.max(existing.blueprint.requiredQuantity, next.blueprint.requiredQuantity)
         : existing.blueprint.requiredQuantity + next.blueprint.requiredQuantity,
+      Math.max(existing.blueprint.inBuildQuantity ?? 0, next.blueprint.inBuildQuantity ?? 0),
     );
     return summarizePlanJobInputs(
       blueprint,
@@ -2725,6 +2740,7 @@ function mergeHaulingTasks(tasks: PlanCalculation["lists"]["haulingTasks"]) {
         existing.neededQuantity * existing.unitVolume + task.neededQuantity * task.unitVolume;
       existing.neededQuantity += task.neededQuantity;
       existing.unitVolume = totalVolume / existing.neededQuantity;
+      existing.inBuildQuantity = (existing.inBuildQuantity ?? 0) + (task.inBuildQuantity ?? 0);
       continue;
     }
     mergedByRoute.set(key, { ...task });
@@ -3142,6 +3158,7 @@ function mergePlanSourceCountsByMaximum(
 function mergePlanJobInputEntries(entries: PlanJobInput[]): PlanJobInput {
   const first = entries[0];
   const availableQuantity = entries.reduce((total, entry) => total + entry.availableQuantity, 0);
+  const inBuildQuantity = entries.reduce((total, entry) => total + (entry.inBuildQuantity ?? 0), 0);
   const requiredQuantity = entries.reduce((total, entry) => total + entry.requiredQuantity, 0);
   const completionPercent =
     requiredQuantity <= 0
@@ -3150,6 +3167,7 @@ function mergePlanJobInputEntries(entries: PlanJobInput[]): PlanJobInput {
   return {
     ...first,
     availableQuantity,
+    ...(inBuildQuantity > 0 ? { inBuildQuantity } : {}),
     requiredQuantity,
     completionPercent,
     status:

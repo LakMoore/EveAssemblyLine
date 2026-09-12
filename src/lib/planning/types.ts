@@ -233,6 +233,7 @@ export interface PlanJobInput {
   typeId: number;
   name: string;
   availableQuantity: number;
+  inBuildQuantity?: number;
   requiredQuantity: number;
   completionPercent: number;
   status: PlanJobInputStatus;
@@ -296,6 +297,7 @@ export interface ResponseMaterial {
   typeName: string;
   unitVolume: number;
   neededQuantity: number;
+  inBuildQuantity?: number;
 }
 
 export type ResponseMaterialBucket<T extends ResponseMaterial = ResponseMaterial> =

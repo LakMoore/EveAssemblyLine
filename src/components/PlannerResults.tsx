@@ -2210,11 +2210,33 @@ function PlanList({
                       checkboxClassName="max-[640px]:col-start-3 max-[640px]:row-start-1"
                     >
                       <span className="col-start-3 grid justify-items-end text-right font-mono text-xs whitespace-nowrap max-[640px]:col-start-2 max-[640px]:-col-end-1 max-[640px]:row-start-2">
-                        <CopyableText
-                          textToRender={`${task.neededQuantity.toLocaleString()} units`}
-                          textToCopy={String(task.neededQuantity)}
-                          copyLabel="Quantity"
-                        />
+                        <span className="flex items-center justify-end gap-2">
+                          {task.inBuildQuantity !== undefined && task.inBuildQuantity > 0 && (
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <span
+                                    aria-label={
+                                      task.inBuildQuantity.toLocaleString()
+                                      + " ready industry output"
+                                    }
+                                    className="inline-flex items-center text-[#72d3b1]"
+                                  >
+                                    <Factory size={14} strokeWidth={1.8} aria-hidden="true" />
+                                  </span>
+                                }
+                              />
+                              <TooltipContent>
+                                {task.inBuildQuantity.toLocaleString() + " ready industry output"}
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+                          <CopyableText
+                            textToRender={`${task.neededQuantity.toLocaleString()} units`}
+                            textToCopy={String(task.neededQuantity)}
+                            copyLabel="Quantity"
+                          />
+                        </span>
                         <small className="mt-1 text-[10px] text-muted-foreground">
                           {Math.ceil(task.neededQuantity * task.unitVolume).toLocaleString()} m
                           <sup>3</sup>

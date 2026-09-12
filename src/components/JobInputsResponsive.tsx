@@ -5,8 +5,9 @@ import ResultRow from "@/components/ResultRow";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { ClipboardList } from "lucide-react";
+import { ClipboardList, Factory } from "lucide-react";
 
 function statusLabel(status: PlanJobInputStatus) {
   return status === "ready" ? "Ready" : status === "partial" ? "Partial" : "Blocked";
@@ -43,6 +44,25 @@ function InputRow({ input }: { input: PlanJobInput }) {
       identityClassName="[&>span]:min-w-0"
     >
       <div className="flex shrink-0 items-center gap-2 self-center">
+        {input.inBuildQuantity !== undefined && input.inBuildQuantity > 0 && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  aria-label={
+                    input.inBuildQuantity.toLocaleString() + " available from industry output"
+                  }
+                  className="text-muted-foreground"
+                >
+                  <Factory size={14} strokeWidth={1.8} aria-hidden="true" />
+                </span>
+              }
+            />
+            <TooltipContent>
+              {input.inBuildQuantity.toLocaleString() + " available from ready industry output"}
+            </TooltipContent>
+          </Tooltip>
+        )}
         <span className={cn("font-mono", statusClassName(input.status))}>
           {input.completionPercent}%
         </span>

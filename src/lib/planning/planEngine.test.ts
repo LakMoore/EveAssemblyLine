@@ -1609,6 +1609,7 @@ void test("tracks production-origin haul quantity separately from stock haul qua
   assert(stockHaul);
   assert.equal(productionHaul.neededQuantity, 100);
   assert.equal(productionHaul.source, "production");
+  assert.equal(productionHaul.inBuildQuantity, 100);
   assert.equal(stockHaul.neededQuantity, 10);
   assert.equal(stockHaul.source, undefined);
 });
@@ -4283,6 +4284,37 @@ void test("uses ready and delivered manufacturing and reaction output locally", 
       assert.equal(tritanium.availableSourceCounts, undefined);
       assert.deepEqual(result.lists.haulingTasks, []);
     }
+  }
+});
+
+void test("uses completed industry output as a local job input", async () => {
+  for (const status of ["ready", "delivered"] as const) {
+    const result = await calculatePlanCalculation(
+      request(
+        0,
+        [industryOutputStock(status, manufacturingLocationId)],
+        {
+          items: [
+            {
+              typeId: rifterTypeId,
+              name: "Rifter",
+              quantity: 1,
+              me: 0,
+              te: 0,
+              fromCompression: false,
+            },
+          ],
+        },
+      ),
+    );
+    const job = result.lists.manufacturingJobs.find(
+      (entry) => entry.typeId === rifterBlueprintTypeId,
+    );
+    assert(job);
+    const input = job.inputs.materials.find((material) => material.typeId === tritaniumTypeId);
+    assert(input);
+    assert.equal(input.availableQuantity, 100);
+    assert.equal(input.inBuildQuantity, 100);
   }
 });
 

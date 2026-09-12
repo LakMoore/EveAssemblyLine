@@ -46,6 +46,7 @@ export function createHaulPatch(
     typeName: task.typeName,
     unitVolume: task.unitVolume,
     neededQuantity: task.neededQuantity,
+    ...(task.inBuildQuantity !== undefined ? { inBuildQuantity: task.inBuildQuantity } : {}),
     fromLocationId: task.fromLocationId,
     toLocationId: task.toLocationId,
     ...owner,
@@ -73,6 +74,7 @@ export function createHaulPatchesForTask(
     {
       ownerType: StockOwnerType;
       ownerId: number;
+      inBuildQuantity: number;
       quantity: number;
     }
   >();
@@ -92,23 +94,28 @@ export function createHaulPatchesForTask(
     const current = availableByOwner.get(key) ?? {
       ownerType: item.ownerType,
       ownerId: item.ownerId,
+      inBuildQuantity: 0,
       quantity: 0,
     };
+    current.inBuildQuantity += Math.min(item.quantity, item.inBuildQuantity ?? 0);
     current.quantity += item.quantity;
     availableByOwner.set(key, current);
   }
 
   let remaining = task.neededQuantity;
+  let remainingInBuild = task.inBuildQuantity ?? 0;
   const patches: HaulPatch[] = [];
   for (const available of [...availableByOwner.values()].sort(
     (left, right) => left.ownerType.localeCompare(right.ownerType) || left.ownerId - right.ownerId,
   )) {
     if (remaining <= 0) break;
+    const inBuildQuantity = Math.min(available.inBuildQuantity, remainingInBuild);
     const quantity = Math.min(available.quantity, remaining);
     const patch = createHaulPatch(
       {
         ...task,
         neededQuantity: quantity,
+        ...(task.inBuildQuantity !== undefined ? { inBuildQuantity } : {}),
         unitVolume: task.unitVolume,
         ownerType: available.ownerType,
         ownerId: available.ownerId,
@@ -116,6 +123,7 @@ export function createHaulPatchesForTask(
       getOwnerAssetsLastModified(statuses, available.ownerType, available.ownerId),
     );
     if (patch) patches.push(patch);
+    remainingInBuild -= inBuildQuantity;
     remaining -= quantity;
   }
   return patches;
@@ -150,6 +158,7 @@ export function applyHaulPatches(
 ): PlanStockItem[] {
   const workingStock = stock.map((item) => ({ ...item }));
   for (const patch of patches) {
+    let remainingInBuild = patch.inBuildQuantity ?? 0;
     let remaining = patch.neededQuantity;
     const sourceItems = workingStock.filter(
       (item) =>
@@ -163,7 +172,14 @@ export function applyHaulPatches(
     for (const sourceItem of sourceItems) {
       if (remaining <= 0) break;
       const moved = Math.min(sourceItem.quantity, remaining);
+      const movedInBuild = Math.min(sourceItem.inBuildQuantity ?? 0, moved, remainingInBuild);
+      if (movedInBuild > 0) {
+        const remainingSourceInBuild = (sourceItem.inBuildQuantity ?? 0) - movedInBuild;
+        if (remainingSourceInBuild > 0) sourceItem.inBuildQuantity = remainingSourceInBuild;
+        else delete sourceItem.inBuildQuantity;
+      }
       sourceItem.quantity -= moved;
+      remainingInBuild -= movedInBuild;
       remaining -= moved;
 
       const destinationItem = workingStock.find(
@@ -175,11 +191,17 @@ export function applyHaulPatches(
           && item.category === sourceItem.category,
       );
       if (destinationItem) {
+        if (movedInBuild > 0) {
+          destinationItem.inBuildQuantity = (destinationItem.inBuildQuantity ?? 0) + movedInBuild;
+        }
         destinationItem.quantity += moved;
       }
       else {
+        const sourceWithoutInBuildQuantity = { ...sourceItem };
+        delete sourceWithoutInBuildQuantity.inBuildQuantity;
         workingStock.push({
-          ...sourceItem,
+          ...sourceWithoutInBuildQuantity,
+          ...(movedInBuild > 0 ? { inBuildQuantity: movedInBuild } : {}),
           quantity: moved,
           locationId: patch.toLocationId,
           rootLocationId: patch.toLocationId,

@@ -85,6 +85,25 @@ void test("splits a mixed-owner haul into owner-specific patches", () => {
   );
 });
 
+void test("moves in-build quantity with a completed haul", () => {
+  const result = applyHaulPatches(
+    [stockItem({ inBuild: true, inBuildQuantity: 80 })],
+    [{ ...patch, neededQuantity: 50, inBuildQuantity: 50 }],
+  );
+
+  assert.deepEqual(
+    result.map(({ quantity, inBuildQuantity, rootLocationId }) => ({
+      quantity,
+      inBuildQuantity,
+      rootLocationId,
+    })),
+    [
+      { quantity: 50, inBuildQuantity: 30, rootLocationId: 10 },
+      { quantity: 50, inBuildQuantity: 50, rootLocationId: 20 },
+    ],
+  );
+});
+
 void test("invalidates only after the matching owner asset snapshot advances", () => {
   const statuses = [
     {
