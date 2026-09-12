@@ -10,6 +10,9 @@ const amberMykoserocinTypeId = 28694;
 const compressedAmberMykoserocinTypeId = 62377;
 const rifterTypeId = 587;
 const rifterBlueprintTypeId = 691;
+const capitalComputerSystemBlueprintTypeId = 21036;
+const capitalComputerSystemTypeId = 21035;
+const grapheneNanoribbonsTypeId = 30309;
 const capitalDroneBayBlueprintTypeId = 21030;
 const capRechargerTypeId = 2032;
 const capRechargerBlueprintTypeId = 2033;
@@ -2837,6 +2840,158 @@ void test("reports transferred stock as local availability", async () => {
   assert.equal(material.stockQuantity, 300);
   assert.equal(material.buyQuantity, 0);
   assert.equal(transfer.neededQuantity, 100);
+});
+
+void test("does not count hauled stock twice in aggregate purchases", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: capitalComputerSystemBlueprintTypeId,
+          name: "Capital Computer System Blueprint",
+          quantity: 3,
+          category: "blueprint",
+          rootLocationId: sourceLocationId,
+          blueprintType: "bpc",
+          blueprintPrints: [40, 41, 42].map((itemId, index) => ({
+            itemId,
+            type: "bpc" as const,
+            runs: index < 2 ? 40 : 5,
+          })),
+        },
+        {
+          typeId: 38,
+          name: "Nocxium",
+          quantity: 7_006,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+        {
+          typeId: 46163,
+          name: "Graphene Nanoribbons Reaction Formula",
+          quantity: 5,
+          category: "reactionformula",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: 4051,
+          name: "Reaction Material A",
+          quantity: 25,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: 30375,
+          name: "Reaction Material B",
+          quantity: 500,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: 30376,
+          name: "Reaction Material C",
+          quantity: 500,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+      ],
+      {
+        items: [],
+        facilityProfiles: [
+          {
+            locationId: sourceLocationId,
+            sizeId: 1,
+            buildTypeGroups: {
+              capitalComponents: {
+                manufacturingMaterialMultiplier: 0.9,
+                manufacturingMaterialPercentage: 10,
+                manufacturingTimeMultiplier: 1,
+                manufacturingTimePercentage: 0,
+                reactionMaterialMultiplier: 1,
+                reactionMaterialPercentage: 0,
+                reactionTimeMultiplier: 1,
+                reactionTimePercentage: 0,
+              },
+            },
+          },
+        ],
+        stockpiles: [
+          {
+            id: "split-location-demand",
+            name: "Split location demand",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: sourceLocationId,
+              reactions: alternateSourceLocationId,
+              reprocessing: alternateSourceLocationId,
+              copying: sourceLocationId,
+              invention: sourceLocationId,
+            },
+            groupAssignments: { capitalComponents: sourceLocationId },
+            items: [
+              {
+                typeId: capitalComputerSystemTypeId,
+                name: "Capital Computer System",
+                quantity: 10,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+              {
+                typeId: grapheneNanoribbonsTypeId,
+                name: "Graphene Nanoribbons",
+                quantity: 600,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const material = result.lists.materialsToBuy.find((item) => item.typeId === 38);
+  const transfer = result.lists.haulingTasks.find(
+    (task) =>
+      task.typeId === 38
+      && task.fromLocationId === sourceLocationId
+      && task.toLocationId === alternateSourceLocationId,
+  );
+
+  assert(material);
+  assert(transfer);
+  assert.equal(material.requiredQuantity, 12_130);
+  assert.equal(material.stockQuantity, 2_000);
+  assert.equal(material.buyQuantity, 5_124);
+  assert.equal(transfer.neededQuantity, 2_000);
+
+  const response = await toPlanResponse(result);
+  const sourceLocationItems = response.lists.planItems.byActivityLocation.find(
+    (bucket) => bucket.locationId === sourceLocationId,
+  );
+  const destinationLocationItems = response.lists.planItems.byActivityLocation.find(
+    (bucket) => bucket.locationId === alternateSourceLocationId,
+  );
+  const sourceMaterial = sourceLocationItems?.items.find(
+    (item) => item.kind === "material" && item.typeId === 38,
+  );
+  const destinationMaterial = destinationLocationItems?.items.find(
+    (item) => item.kind === "material" && item.typeId === 38,
+  );
+  const responsePurchase = response.lists.materialsToBuy
+    .flatMap((group) => group.items)
+    .find((item) => item.typeId === 38);
+
+  assert(sourceMaterial);
+  assert(destinationMaterial);
+  assert(responsePurchase);
+  assert.equal(sourceMaterial.availableQuantity, 5_006);
+  assert.equal(sourceMaterial.neededQuantity, 5_124);
+  assert.equal(destinationMaterial.availableQuantity, 2_000);
+  assert.equal(destinationMaterial.neededQuantity, 0);
+  assert.equal(responsePurchase.neededQuantity, 5_124);
 });
 
 void test("hauls all remote stock needed for future material demand", async () => {

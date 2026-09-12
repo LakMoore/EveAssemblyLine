@@ -911,6 +911,16 @@ function toResponsePlanItem(
         && activityLocationIds.has(task.toLocationId),
     )
     .reduce((total, task) => total + task.neededQuantity, 0);
+  const outboundHaulingQuantity = includeHaulingQuantity
+    ? haulingTasks
+        .filter(
+          (task) =>
+            task.typeId === entry.typeId
+            && task.source !== "production"
+            && activityLocationIds.has(task.fromLocationId),
+        )
+        .reduce((total, task) => total + task.neededQuantity, 0)
+    : 0;
   const identity = {
     typeId: entry.typeId,
     typeName: resolveTypeName(entry.typeId),
@@ -920,8 +930,10 @@ function toResponsePlanItem(
   };
   if (entry.kind === "material") {
     const availableQuantity =
-      (availableQuantityOverride ?? entry.availableStockQuantity)
-      + (includeHaulingQuantity ? haulingQuantity : 0);
+      Math.max(
+        0,
+        (availableQuantityOverride ?? entry.availableStockQuantity) - outboundHaulingQuantity,
+      ) + (includeHaulingQuantity ? haulingQuantity : 0);
     const plannedProductionQuantity = Math.max(
       0,
       entry.productionQuantity - (entry.reprocessingQuantity ?? 0),
@@ -2693,7 +2705,6 @@ async function calculatePlanPass(
       return task;
     })
     .filter((task) => task.neededQuantity > 0);
-
   const materialsToBuy = [...materials.values()];
   const bpcRequirements = [...bpcs.values()];
   const bpcsNeeded = bpcRequirements.filter(
@@ -3159,12 +3170,14 @@ function mergeBpcBuyEntries(entries: PlanCalculation["lists"]["bpcsToBuy"]) {
 /** Merges stockpile material requirements before calculating the shared shortage. */
 function mergeMaterialBuyEntries(entries: PlanCalculation["lists"]["materialsToBuy"]) {
   const mergedByType = new Map<number, PlanCalculation["lists"]["materialsToBuy"][number]>();
+  const mergedTypes = new Set<number>();
   for (const entry of entries) {
     const existing = mergedByType.get(entry.typeId);
     if (!existing) {
       mergedByType.set(entry.typeId, { ...entry });
       continue;
     }
+    mergedTypes.add(entry.typeId);
     mergedByType.set(
       entry.typeId,
       {
@@ -3186,17 +3199,34 @@ function mergeMaterialBuyEntries(entries: PlanCalculation["lists"]["materialsToB
       },
     );
   }
-  return [...mergedByType.values()];
+  return [...mergedByType.values()].map((entry) =>
+    mergedTypes.has(entry.typeId) && entry.reprocessingQuantity === 0 && entry.buyQuantity > 0
+      ? { ...entry, buyQuantity: calculateMergedMaterialBuyQuantity(entry) }
+      : entry,
+  );
+}
+
+function calculateMergedMaterialBuyQuantity(
+  entry: PlanCalculation["lists"]["materialsToBuy"][number],
+) {
+  return Math.max(
+    0,
+    entry.requiredQuantity
+      - entry.availableStockQuantity
+      - Math.max(0, entry.productionQuantity - (entry.reprocessingQuantity ?? 0)),
+  );
 }
 
 function mergeMaterialRowsWithinPass(entries: PlanCalculation["lists"]["materialsToBuy"]) {
   const mergedByType = new Map<number, PlanCalculation["lists"]["materialsToBuy"][number]>();
+  const mergedTypes = new Set<number>();
   for (const entry of entries) {
     const existing = mergedByType.get(entry.typeId);
     if (!existing) {
       mergedByType.set(entry.typeId, { ...entry });
       continue;
     }
+    mergedTypes.add(entry.typeId);
     const merged = {
       ...existing,
       quantity: existing.quantity + entry.quantity,
@@ -3221,7 +3251,11 @@ function mergeMaterialRowsWithinPass(entries: PlanCalculation["lists"]["material
     delete merged.stockpileLocationId;
     mergedByType.set(entry.typeId, merged);
   }
-  return [...mergedByType.values()];
+  return [...mergedByType.values()].map((entry) =>
+    mergedTypes.has(entry.typeId) && entry.reprocessingQuantity === 0 && entry.buyQuantity > 0
+      ? { ...entry, buyQuantity: calculateMergedMaterialBuyQuantity(entry) }
+      : entry,
+  );
 }
 
 /** Adds purchases for destination shortages that remote usable stock cannot satisfy. */
