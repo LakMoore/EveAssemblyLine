@@ -24,7 +24,6 @@ import {
   createHaulItemExclusionKey,
   parseHaulItemExclusionKey,
   splitReactionRunAllocations,
-  splitReactionJobInputs,
   type HaulItemExclusion,
 } from "@/lib/planning/planView";
 import { isHaulTaskPatched } from "@/lib/planning/haulPatches";
@@ -1127,8 +1126,7 @@ function PlanList({
     | DisplayHaulTask;
   type ReactionDisplayRow = {
     entry: PlanListEntry;
-    reactionPlan: ReactionSchedule | null;
-    reactionIndex: number;
+    reactionPlans: ReactionSchedule[];
   };
   const locationGroups = new Map<number | undefined, PlanListEntry[]>();
   if (locationGroupedTab) {
@@ -2256,13 +2254,7 @@ function PlanList({
                 activeTab === "React" && "inputs" in entry
                   ? (reactionSchedule.get(reactionJobKey(entry as ResponseReactionJob)) ?? [])
                   : [];
-              return schedules.length > 0
-                ? schedules.map((reactionPlan, reactionIndex) => ({
-                    entry,
-                    reactionPlan,
-                    reactionIndex,
-                  }))
-                : [{ entry, reactionPlan: null, reactionIndex: 0 }];
+              return [{ entry, reactionPlans: schedules }];
             });
             const groupAvatarRows = displayRows
               .filter(
@@ -2351,11 +2343,8 @@ function PlanList({
                   </h3>
                 )}
                 <CollapsibleContent>
-                  {displayRows.map(({ entry, reactionPlan, reactionIndex }, index, rows) => {
-                    const rowSchedules =
-                      activeTab === "React" && "inputs" in entry
-                        ? (reactionSchedule.get(reactionJobKey(entry as ResponseReactionJob)) ?? [])
-                        : [];
+                  {displayRows.map(({ entry, reactionPlans }, index) => {
+                    const rowSchedules = reactionPlans;
                     const typeId = entry.typeId;
                     const name = getEntryName(entry);
                     const marketBuyOrderQuantity =
@@ -2397,32 +2386,19 @@ function PlanList({
                       activeTab === "React" && "inputs" in entry
                         ? (entry as ResponseReactionJob)
                         : null;
-                    const precedingRuns = rowSchedules
-                      .slice(0, reactionIndex)
-                      .reduce((total, schedule) => total + schedule.totalRuns, 0);
-                    const reactionInputs =
-                      activeTab === "React"
-                      && reactionPlan !== null
-                      && rowSchedules.length > 1
-                      && "inputs" in entry
-                      && "countNeeded" in entry
-                        ? splitReactionJobInputs(
-                            entry.inputs,
-                            entry.countNeeded,
-                            reactionPlan.totalRuns,
-                            precedingRuns,
-                          )
-                        : "inputs" in entry
-                          ? entry.inputs
-                          : null;
+                    const reactionInputs = "inputs" in entry ? entry.inputs : null;
+                    const reactionPlan = rowSchedules.length > 0 ? rowSchedules[0] : null;
                     const targetRuns = reactionPlan?.runs ?? null;
                     const suggestedInstallCount = reactionPlan?.installs ?? 0;
                     const installTime = reactionPlan?.time ?? totalTime;
+                    const reactionMetricRows: Array<ReactionSchedule | null> =
+                      rowSchedules.length > 0 ? rowSchedules : [null];
+                    const isSplitReactionRow = rowSchedules.length > 1;
                     const totalNeeded =
                       activeTab === "React" && "countNeeded" in entry && "runsAvailable" in entry
                         ? showTotalRunCounts
                           ? entry.countNeeded
-                          : (reactionPlan?.totalRuns ?? entry.runsAvailable)
+                          : entry.runsAvailable
                         : null;
                     const scheduledRuns = rowSchedules.reduce(
                       (total, schedule) => total + schedule.totalRuns,
@@ -2531,7 +2507,7 @@ function PlanList({
                         ? (manufacturingEntry.totalTime * manufacturingDisplayedRuns)
                           / manufacturingEntry.countNeeded
                         : 0;
-                    const rowKey = `${activeTab}:${locationId ?? "unlocated"}:${typeId}:${reactionIndex}`;
+                    const rowKey = `${activeTab}:${locationId ?? "unlocated"}:${typeId}`;
                     const isInstalled =
                       (activeTab === "React" || activeTab === "Manufacture")
                       && installedResultRowKeys.has(rowKey);
@@ -2566,7 +2542,7 @@ function PlanList({
                           checkboxTooltip="Installed?"
                           onCheckboxChange={(checked) => setResultRowInstalled(rowKey, checked)}
                           identityClassName={`${styles.planTypeIdentity} ${activeTab === "Copy" ? "max-[640px]:col-span-full max-[640px]:w-full" : ""}`}
-                          className={`${activeTab === "Plan" ? styles.planTableRow : activeTab === "Copy" ? "grid grid-cols-[minmax(0,1fr)_minmax(74px,auto)_minmax(74px,auto)_minmax(90px,auto)] items-center gap-[13px] max-[640px]:grid-cols-3 max-[640px]:items-start max-[640px]:gap-y-2" : buyBpoEntry || isReactionFormulaBuy ? "grid grid-cols-[minmax(0,1fr)_minmax(150px,auto)_minmax(100px,auto)] items-center gap-[13px] max-[640px]:grid-cols-1 max-[640px]:items-start max-[640px]:gap-y-2" : styles.planRow} ${activeTab === "React" ? styles.reactionRow : activeTab === "Manufacture" ? styles.manufacturingRow : ""}`}
+                          className={`${activeTab === "Plan" ? styles.planTableRow : activeTab === "Copy" ? "grid grid-cols-[minmax(0,1fr)_minmax(74px,auto)_minmax(74px,auto)_minmax(90px,auto)] items-center gap-[13px] max-[640px]:grid-cols-3 max-[640px]:items-start max-[640px]:gap-y-2" : buyBpoEntry || isReactionFormulaBuy ? "grid grid-cols-[minmax(0,1fr)_minmax(150px,auto)_minmax(100px,auto)] items-center gap-[13px] max-[640px]:grid-cols-1 max-[640px]:items-start max-[640px]:gap-y-2" : styles.planRow} ${activeTab === "React" ? styles.reactionRow : activeTab === "Manufacture" ? styles.manufacturingRow : ""} ${isSplitReactionRow ? "items-start!" : ""}`}
                         >
                           {activeTab === "React" && "inputs" in entry && (
                             <span className={styles.jobInputsTrigger}>
@@ -2713,7 +2689,6 @@ function PlanList({
                                     data-label="BPs available"
                                   >
                                     {additionalInstallCount > 0
-                                      && reactionIndex === 0
                                       && !addedReactionBuildItems.has(typeId) && (
                                         <Button
                                           type="button"
@@ -2734,40 +2709,61 @@ function PlanList({
                                           Buy +{additionalInstallCount.toLocaleString()}
                                         </Button>
                                       )}
-                                    <strong>
-                                      {(
-                                        reactionPlan?.availableBlueprints ?? reactionFormulaCount
-                                      ).toLocaleString()}
-                                    </strong>
+                                    <strong>{reactionFormulaCount.toLocaleString()}</strong>
                                   </span>
                                   <span
-                                    className={styles.reactionValue}
+                                    className={`${styles.reactionValue} ${isSplitReactionRow ? "gap-2!" : ""}`}
                                     data-result-row-content
                                     data-label="Suggested installs"
                                   >
-                                    <strong>{suggestedInstallCount.toLocaleString()}</strong>
+                                    {reactionMetricRows.map((schedule, scheduleIndex) => (
+                                      <span
+                                        className={`${styles.reactionValue} ${scheduleIndex > 0 ? "self-stretch border-t border-border/60 pt-1" : ""}`}
+                                        key={`${typeId}-installs-${scheduleIndex}`}
+                                        role="group"
+                                        aria-label={`Solution ${scheduleIndex + 1}: ${schedule?.installs ?? 0} suggested installs`}
+                                      >
+                                        <strong>
+                                          {(schedule?.installs ?? 0).toLocaleString()}
+                                        </strong>
+                                        {rowSchedules.length > 1 && (
+                                          <small aria-hidden="true" className="invisible">
+                                            -
+                                          </small>
+                                        )}
+                                      </span>
+                                    ))}
                                   </span>
                                   <span
-                                    className={styles.reactionValue}
+                                    className={`${styles.reactionValue} ${isSplitReactionRow ? "gap-2!" : ""}`}
                                     data-result-row-content
                                     data-label="Suggested runs"
                                   >
-                                    <strong>
-                                      {targetRuns === null ? (
-                                        "-"
-                                      ) : targetRuns > 0 ? (
-                                        <CopyableText
-                                          textToRender={targetRuns.toLocaleString()}
-                                          textToCopy={String(targetRuns)}
-                                          copyLabel="Suggested runs"
-                                        />
-                                      ) : (
-                                        targetRuns.toLocaleString()
-                                      )}
-                                    </strong>
-                                    <small>
-                                      {installTime !== null ? formatDuration(installTime) : "-"}
-                                    </small>
+                                    {reactionMetricRows.map((schedule, scheduleIndex) => (
+                                      <span
+                                        className={`${styles.reactionValue} ${scheduleIndex > 0 ? "self-stretch border-t border-border/60 pt-1" : ""}`}
+                                        key={`${typeId}-runs-${scheduleIndex}`}
+                                        role="group"
+                                        aria-label={`Solution ${scheduleIndex + 1}: ${schedule === null ? "no suggested runs" : `${schedule.runs} suggested runs`}`}
+                                      >
+                                        <strong>
+                                          {schedule === null ? (
+                                            "-"
+                                          ) : schedule.runs > 0 ? (
+                                            <CopyableText
+                                              textToRender={schedule.runs.toLocaleString()}
+                                              textToCopy={String(schedule.runs)}
+                                              copyLabel={`Suggested runs for solution ${scheduleIndex + 1}`}
+                                            />
+                                          ) : (
+                                            schedule.runs.toLocaleString()
+                                          )}
+                                        </strong>
+                                        <small>
+                                          {schedule === null ? "-" : formatDuration(schedule.time)}
+                                        </small>
+                                      </span>
+                                    ))}
                                   </span>
                                   <span
                                     className={styles.reactionValue}
