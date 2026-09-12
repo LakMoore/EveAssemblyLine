@@ -4487,6 +4487,24 @@ void test("does not use remote active output as a future job input", async () =>
     0,
   );
   assert.deepEqual(result.lists.haulingTasks, []);
+
+  const response = await toPlanResponse(result);
+  const sourceBucket = response.lists.planItems.byActivityLocation.find(
+    (bucket) => bucket.locationId === sourceLocationId,
+  );
+  const sourceTritanium = sourceBucket?.items.find((item) => item.typeId === tritaniumTypeId);
+
+  assert(sourceTritanium);
+  assert.equal(sourceTritanium.availableQuantity, 100);
+  assert.equal(sourceTritanium.requiredQuantity, 0);
+  assert.equal(sourceTritanium.neededQuantity, 0);
+  assert.equal(sourceTritanium.surplusQuantity, 100);
+  assert.deepEqual(
+    sourceTritanium.availableSourceCounts,
+    {
+      [sourceLocationId]: { industry: 100 },
+    },
+  );
 });
 
 void test("reports manufacturing blueprint and material inputs", async () => {

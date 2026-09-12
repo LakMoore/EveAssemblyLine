@@ -2710,6 +2710,41 @@ async function calculatePlanPass(
     ...[...bpcs.values()].map((bpc) => ({ kind: "bpc" as const, ...bpc })),
     ...reactionFormulas.values(),
   ];
+  for (const stockItem of request.stock) {
+    if (
+      !isIndustryProductionOutput(stockItem)
+      || !isAvailableIndustryProductionOutput(stockItem)
+      || isUsableIndustryProductionOutput(stockItem)
+    ) continue;
+    const locationId = getStockRootLocationId(stockItem);
+    if (
+      locationId === undefined
+      || planItems.some(
+        (entry) =>
+          entry.kind === "material"
+          && entry.typeId === stockItem.typeId
+          && (entry.stockpileLocationId ?? entry.activityLocationId) === locationId,
+      )
+    ) continue;
+    planItems.push({
+      kind: "material",
+      typeId: stockItem.typeId,
+      unitVolume:
+        typeRecords.get(stockItem.typeId)?.packagedVolume
+        ?? typeRecords.get(stockItem.typeId)?.volume
+        ?? 0,
+      availableSourceCounts: sourceMetadata(stockItem.typeId)?.counts,
+      activityLocationId: locationId,
+      quantity: 0,
+      requiredQuantity: 0,
+      stockQuantity: 0,
+      availableStockQuantity: totalStock.get(stockItem.typeId) ?? 0,
+      productionQuantity: 0,
+      reprocessingQuantity: 0,
+      buyQuantity: 0,
+      remainingProductionQuantity: 0,
+    });
+  }
   const availableSourceCountsByType: PlanSourceCountsByType = new Map();
   for (const entry of planItems) {
     const mergedSourceCounts = mergePlanSourceCountsByMaximum(
