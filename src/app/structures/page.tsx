@@ -47,12 +47,10 @@ import {
 } from "@/lib/reference/structureTypes";
 import { loadStructures, saveStructures } from "@/lib/planning/structureStore";
 import {
-  emptyFacilitySettings,
   facilitySettingsKey,
   facilitySettingsName,
   supportsReactionSettings,
-  type FacilitySettingsEntry,
-  type FacilitySettingsPayload,
+  type Facility,
 } from "@/lib/planning/facilities";
 import { formatLocationName } from "@/lib/reference/locationName";
 import { publishFacilities, facilitySettingsFromStructures } from "@/lib/planning/facilitiesStore";
@@ -199,7 +197,7 @@ export default function LocationsPage() {
   });
   const [rigTypeIdsByName, setRigTypeIdsByName] = useState<Record<string, number>>({});
   const [rigNamesByTypeId, setRigNamesByTypeId] = useState<Record<number, string>>({});
-  const [facilities, setFacilities] = useState<FacilitySettingsPayload>(emptyFacilitySettings);
+  const [facilities, setFacilities] = useState<Facility[]>([]);
   const [esiStructures, setEsiStructures] = useState<EsiStructure[]>([]);
   const [esiConnected, setEsiConnected] = useState(false);
   const [esiRateLimitedUntil, setEsiRateLimitedUntil] = useState<string | null>(null);
@@ -262,7 +260,7 @@ export default function LocationsPage() {
       try {
         const data = await loadClientAssets(language);
         const facilities = data.facilities ?? [];
-        setFacilities(data.settings ?? emptyFacilitySettings);
+        setFacilities(facilities);
         const facilitiesByLocationId = new Map(
           facilities.map((facility) => [facility.id, facility]),
         );
@@ -368,9 +366,10 @@ export default function LocationsPage() {
     name: string,
   ) {
     if (!systemId) return undefined;
-    const entry: FacilitySettingsEntry | undefined =
-      facilities.facilities[facilitySettingsKey(systemId, facilitySettingsName(systemName, name))];
-    return entry;
+    const key = facilitySettingsKey(systemId, facilitySettingsName(systemName, name));
+    return facilities.find(
+      (facility) => facilitySettingsKey(facility.systemId, facility.name) === key,
+    );
   }
 
   function sharedRigNames(
@@ -682,8 +681,16 @@ export default function LocationsPage() {
             }));
             void saveStructures(structures);
             void publishFacilities(facilitySettingsFromStructures(structures)).then(
-              async (nextFacilities) => {
-                setFacilities(nextFacilities);
+              async (nextSettings) => {
+                setFacilities((currentFacilities) =>
+                  currentFacilities.map((facility) => {
+                    const key = facilitySettingsKey(facility.systemId, facility.name);
+                    if (!Object.prototype.hasOwnProperty.call(nextSettings.facilities, key)) {
+                      return facility;
+                    }
+                    return { ...facility, rigTypeIds: nextSettings.facilities[key].rigTypeIds };
+                  }),
+                );
                 if (rigConfigurationChanged) {
                   await refreshAllPlannerStockpileEfficiencies(language);
                 }

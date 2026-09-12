@@ -713,8 +713,6 @@ export async function GET(request: NextRequest) {
     ] as PlanStockItem[],
     marketBuyOrderQuantities: marketBuyOrderQuantities ?? {},
     facilities: facilityResponse.facilities,
-    settings: facilityResponse.settings,
-    productionGroups: facilityResponse.productionGroups,
     corporationSources,
   };
   const timingProfile = timing.complete();

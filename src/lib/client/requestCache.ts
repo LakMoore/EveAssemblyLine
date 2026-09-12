@@ -1,14 +1,12 @@
 import type { PlanStockItem, StockItem } from "@/lib/planning/types";
-import type { Facility, FacilitySettingsPayload } from "@/lib/planning/facilities";
-import type { ProductionGroupReference } from "@/lib/planning/productionGroups";
+import type { Facility } from "@/lib/planning/facilities";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import { formatLocationName, normalizeLocationName } from "@/lib/reference/locationName";
 import { loadEndpointRecord, saveEndpointResponse } from "./refreshCache";
 
 export type ClientSession = {
   authenticated?: boolean;
-  characters?: ClientCharacter[];
-  state?: ClientCharacterState;
+  characters?: Array<ClientCharacter & ClientCharacterStatus>;
 };
 
 export type ClientCharacterState = { characters?: ClientCharacterStatus[] };
@@ -33,8 +31,6 @@ export type ClientAssetsResponse = {
   assets?: StockItem[];
   marketBuyOrderQuantities?: Record<string, number>;
   facilities?: Facility[];
-  settings?: FacilitySettingsPayload;
-  productionGroups?: ProductionGroupReference[];
   filteredLocationIds?: number[];
   corporationSources?: ClientCorporationSource[];
 };
@@ -57,14 +53,20 @@ function normalizeClientLocationName(
 }
 
 export function normalizeClientAssetsResponse(data: ClientAssetsResponse): ClientAssetsResponse {
-  const { locations: _legacyLocations, ...response } = data as ClientAssetsResponse & {
+  const {
+    locations: _legacyLocations,
+    settings: _legacySettings,
+    productionGroups: _legacyProductionGroups,
+    ...response
+  } = data as ClientAssetsResponse & {
     locations?: unknown;
+    settings?: unknown;
+    productionGroups?: unknown;
   };
   return {
     ...response,
     assets: response.assets ?? [],
     facilities: response.facilities ?? [],
-    productionGroups: response.productionGroups ?? [],
     corporationSources: (response.corporationSources ?? []).map((source) => ({
       ...source,
       ...(source.rootLocation?.name
@@ -89,9 +91,7 @@ export function isCompleteClientAssetsResponse(value: unknown): value is ClientA
   return (
     Array.isArray(response.assets)
     && Array.isArray(response.facilities)
-    && Array.isArray(response.productionGroups)
     && Array.isArray(response.corporationSources)
-    && response.settings !== undefined
   );
 }
 
@@ -589,7 +589,9 @@ export async function saveClientCorporationSettings(requestedSettings: ClientCor
 }
 
 export function loadClientCharacterState(reload = false): Promise<ClientCharacterState> {
-  return loadClientSession(reload).then((session) => session.state ?? { characters: [] });
+  return loadClientSession(reload).then((session) => ({
+    characters: session.characters ?? [],
+  }));
 }
 
 export function invalidateClientCharacterData() {

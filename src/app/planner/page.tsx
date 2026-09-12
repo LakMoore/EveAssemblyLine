@@ -131,6 +131,7 @@ import {
 } from "@/components/PlannerStockpileEditor";
 import type { FacilityGroupBonus } from "@/lib/planning/facilityBonuses";
 import type { ProductionGroupKey, ProductionGroupReference } from "@/lib/planning/productionGroups";
+import { fetchProductionGroups } from "@/lib/reference/productionGroups";
 
 type StockpileEditorMode = "details" | "items";
 type PlanLocationOption = {
@@ -664,9 +665,10 @@ function Planner() {
   useEffect(() => {
     let cancelled = false;
     async function loadLocationOptions(reload = false) {
-      const [data, storedLocations] = await Promise.all([
+      const [data, storedLocations, productionGroups] = await Promise.all([
         loadClientAssets(language, reload).catch(() => null),
         loadPlannerLocations(),
+        fetchProductionGroups(language).catch(() => []),
       ]);
       if (cancelled) return;
       if (data) {
@@ -736,7 +738,7 @@ function Planner() {
         ),
       };
       setLocationOptions(options);
-      setProductionGroupReferences(data?.productionGroups ?? []);
+      setProductionGroupReferences(productionGroups);
       setLocations(nextLocations);
       void savePlannerLocations(nextLocations);
     }

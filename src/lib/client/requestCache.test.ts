@@ -12,16 +12,11 @@ void test("requires the complete asset snapshot before using the local cache", (
     isCompleteClientAssetsResponse({
       assets: [],
       facilities: [],
-      settings: { lastModified: "", facilities: {} },
-      productionGroups: [],
       corporationSources: [],
     }),
     true,
   );
-  assert.equal(
-    isCompleteClientAssetsResponse({ assets: [], facilities: [], productionGroups: [] }),
-    false,
-  );
+  assert.equal(isCompleteClientAssetsResponse({ assets: [], facilities: [] }), false);
 });
 
 void test("groups each market order at its source location once", () => {

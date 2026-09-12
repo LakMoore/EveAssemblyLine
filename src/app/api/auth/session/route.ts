@@ -63,10 +63,16 @@ export async function GET(request: Request) {
       }),
     );
     const state = await getStateStatus(characterIds, session.sessionId, characters);
+    const stateByCharacterId = new Map(
+      state.characters.map((character) => [character.characterId, character]),
+    );
+    const responseCharacters = projectedCharacters.map((character) => ({
+      ...character,
+      ...stateByCharacterId.get(character.characterId),
+    }));
     return NextResponse.json({
-      authenticated: projectedCharacters.length > 0,
-      characters: projectedCharacters,
-      state,
+      authenticated: responseCharacters.length > 0,
+      characters: responseCharacters,
     });
   }
   catch {

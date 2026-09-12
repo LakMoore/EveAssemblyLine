@@ -11,7 +11,7 @@ import {
 import type { KnownStructure } from "./preferences";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import { loadEndpointRecord, saveEndpointResponse } from "@/lib/client/refreshCache";
-import { loadClientAssets, loadClientSession } from "@/lib/client/requestCache";
+import { loadClientSession } from "@/lib/client/requestCache";
 
 const localStorageKey = "assembly-line-facilities";
 
@@ -54,16 +54,6 @@ export async function fetchFacilityResponse(
 ): Promise<FacilityResponse | null> {
   const cacheKey = `facilities:${language}`;
   try {
-    const assets = await loadClientAssets(language, reload);
-    if (assets.facilities && assets.settings && assets.productionGroups) {
-      const response: FacilityResponse = {
-        facilities: assets.facilities,
-        settings: normalizeFacilitySettings(assets.settings),
-        productionGroups: assets.productionGroups,
-      };
-      await saveEndpointResponse(cacheKey, `/api/facilities?language=${language}`, response);
-      return response;
-    }
     const cached = await loadCachedFacilityResponse(language);
     if (!reload && cached) return cached;
     if (!(await loadClientSession()).authenticated) return cached;
