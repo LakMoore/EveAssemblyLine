@@ -30,7 +30,6 @@ import JobInputsResponsive, {
   getJobInputsCompletionPercent,
 } from "@/components/JobInputsResponsive";
 import {
-  PlannerActivityControls,
   PlannerActivityTableHeader,
   type ManufacturingSort,
   type ReactionSort,
@@ -40,31 +39,15 @@ import PlannerHaulTab, {
   type DisplayHaulTask,
   type PlannerHaulGroup,
 } from "@/components/PlannerHaulTab";
+import PlannerListToolbar, { PlannerCopyHeader } from "@/components/PlannerListToolbar";
+import PlannerResultGroupHeader from "@/components/PlannerResultGroupHeader";
 import ResultRow from "@/components/ResultRow";
 import PlannerSkillsTab, { type PlannerSkillCharacter } from "@/components/PlannerSkillsTab";
 import { toast } from "@/components/ui/toast";
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarGroup,
-  AvatarGroupCount,
-  AvatarImage,
-} from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Combobox,
-  ComboboxCollection,
-  ComboboxContent,
-  ComboboxEmpty,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-} from "@/components/ui/combobox";
 import {
   Select,
   SelectContent,
@@ -75,7 +58,6 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import styles from "@/app/page.module.css";
 import {
   Atom,
@@ -85,8 +67,6 @@ import {
   ChevronDown,
   ClipboardList,
   Copy as CopyIcon,
-  ChevronsDownUp,
-  ChevronsUpDown,
   Factory,
   Minimize2,
   Microscope,
@@ -1437,119 +1417,43 @@ function PlanList({
   return (
     <>
       {activeTab !== "Haul" && (
-        <div
-          className={`flex flex-wrap gap-2.5 py-3.5 pb-2.5 max-[640px]:flex-col max-[640px]:items-stretch ${activeTab === "React" ? "justify-start gap-x-[18px]" : "justify-end"}`}
-        >
-          {activeTab === "Buy" && (
-            <Button
-              variant="outline"
-              className="max-[640px]:w-full"
-              onClick={() => void sendToCompress()}
-              disabled={materialBuyEntries.length === 0}
-            >
-              <Minimize2 aria-hidden="true" />
-              <span>Send to Compress</span>
-            </Button>
-          )}
-          {(activeTab === "React" || activeTab === "Manufacture") && (
-            <PlannerActivityControls
-              activity={activeTab}
-              reactionScheduleMode={reactionScheduleMode}
-              onReactionScheduleModeChange={setReactionScheduleMode}
-              maxJobHours={maxJobHours}
-              onMaxJobHoursChange={setMaxJobHours}
-              showTotalRunCounts={showTotalRunCounts}
-              onShowTotalRunCountsChange={setShowTotalRunCounts}
-              showTotalManufacturingRunCounts={showTotalManufacturingRunCounts}
-              onShowTotalManufacturingRunCountsChange={setShowTotalManufacturingRunCounts}
-              availableReactionSlots={availableReactionSlots}
-              reactionSlotCharacters={reactionSlotCharacters}
-              reactionSummary={reactionSummary}
-              reactionCoverage={reactionCoverage}
-              totalInstallableReactionRuns={totalInstallableReactionRuns}
-              totalReactionRuns={totalReactionRuns}
-              availableManufacturingSlots={availableManufacturingSlots}
-              manufacturingSlotCharacters={manufacturingSlotCharacters}
-              manufacturingSummary={manufacturingSummary}
-              copyStatus={copyStatus}
-              onCopyList={() => void copyList()}
-            />
-          )}
-          {activeTab === "Plan" && (
-            <div className="flex w-auto items-center gap-2.5 max-[640px]:w-full max-[640px]:flex-col max-[640px]:items-stretch">
-              <Label className="max-[640px]:self-start" htmlFor="plan-type">
-                TYPE
-              </Label>
-              <div className="min-w-0 max-[640px]:w-full max-[640px]:overflow-hidden">
-                <Combobox
-                  items={planTypeOptions.map((option) => option.name)}
-                  value={selectedType?.name ?? null}
-                  onValueChange={(value) => {
-                    const nextTypeId =
-                      planTypeOptions.find((option) => option.name === value)?.id ?? null;
-                    onSelectedTypeIdChange(nextTypeId);
-                  }}
-                >
-                  <ComboboxInput
-                    id="plan-type"
-                    placeholder="Filter by type"
-                    aria-label="Filter plan by asset type"
-                    showClear
-                    className="max-[640px]:w-full [&>input]:text-xs!"
-                  />
-                  <ComboboxContent>
-                    <ComboboxEmpty>No matching asset types.</ComboboxEmpty>
-                    <ComboboxList>
-                      <ComboboxCollection>
-                        {(option) => (
-                          <ComboboxItem key={option} value={option}>
-                            {option}
-                          </ComboboxItem>
-                        )}
-                      </ComboboxCollection>
-                    </ComboboxList>
-                  </ComboboxContent>
-                </Combobox>
-              </div>
-              <Label htmlFor="plan-view-mode">VIEW</Label>
-              <Select
-                value={planViewMode}
-                onValueChange={(value) => setPlanViewMode(value as PlanViewMode)}
-              >
-                <SelectTrigger
-                  id="plan-view-mode"
-                  aria-label="Plan view mode"
-                  className="max-[640px]:w-full"
-                >
-                  <SelectValue>
-                    {planViewMode === "build-location" ? "By Build Location" : "All Items"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Items</SelectItem>
-                  <SelectItem value="build-location">By Build Location</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-          {activeTab !== "React" && (
-            <Button
-              type="button"
-              variant="outline"
-              className="max-[640px]:w-full"
-              onClick={copyList}
-              disabled={activeTab === "Buy" && materialBuyEntries.length === 0}
-            >
-              <CopyIcon aria-hidden="true" />
-              {copyStatus
-                || (activeTab === "Plan"
-                  ? "Copy table"
-                  : activeTab === "Buy"
-                    ? "Multibuy Materials"
-                    : "Copy list")}
-            </Button>
-          )}
-        </div>
+        <PlannerListToolbar
+          activeTab={activeTab}
+          materialBuyEntryCount={materialBuyEntries.length}
+          onSendToCompress={() => void sendToCompress()}
+          activityControls={
+            activeTab === "React" || activeTab === "Manufacture"
+              ? {
+                  reactionScheduleMode,
+                  onReactionScheduleModeChange: setReactionScheduleMode,
+                  maxJobHours,
+                  onMaxJobHoursChange: setMaxJobHours,
+                  showTotalRunCounts,
+                  onShowTotalRunCountsChange: setShowTotalRunCounts,
+                  showTotalManufacturingRunCounts,
+                  onShowTotalManufacturingRunCountsChange: setShowTotalManufacturingRunCounts,
+                  availableReactionSlots,
+                  reactionSlotCharacters,
+                  reactionSummary,
+                  reactionCoverage,
+                  totalInstallableReactionRuns,
+                  totalReactionRuns,
+                  availableManufacturingSlots,
+                  manufacturingSlotCharacters,
+                  manufacturingSummary,
+                  copyStatus,
+                  onCopyList: () => void copyList(),
+                }
+              : undefined
+          }
+          planTypeOptions={planTypeOptions}
+          selectedTypeName={selectedType?.name}
+          onSelectedTypeIdChange={onSelectedTypeIdChange}
+          planViewMode={planViewMode}
+          onPlanViewModeChange={setPlanViewMode}
+          copyStatus={copyStatus}
+          onCopyList={() => void copyList()}
+        />
       )}
       {activeTab === "Plan" && (
         <div className={styles.planTableHeader} ref={planListHeaderRef}>
@@ -1579,18 +1483,7 @@ function PlanList({
         />
       )}
       {activeTab === "Copy" && (
-        <>
-          <div className={styles.copySummary}>
-            <strong>{formatDuration(maxCopyBuildTime)}</strong>
-            <span>MAX BUILD TIME</span>
-          </div>
-          <div className="grid grid-cols-[minmax(0,1fr)_minmax(74px,auto)_minmax(74px,auto)_minmax(90px,auto)] items-center gap-[13px] py-2.5 pb-1.5 text-right font-mono text-[9px] leading-normal tracking-[0.3px] text-muted-foreground uppercase max-[640px]:hidden [&>span:first-child]:text-left">
-            <span>Type</span>
-            <span>BPOs in use</span>
-            <span>BPOs owned</span>
-            <span>BPC runs</span>
-          </div>
-        </>
+        <PlannerCopyHeader maxBuildTime={maxCopyBuildTime} formatDuration={formatDuration} />
       )}
       {activeTab === "Haul" ? (
         <PlannerHaulTab
@@ -1638,7 +1531,19 @@ function PlanList({
                   ? -1
                   : 1,
               )
-              .slice(0, 5);
+              .slice(0, 5)
+              .map(({ entry }) => ({
+                typeId: entry.typeId,
+                name: getEntryName(entry),
+                imageVariation:
+                  "kind" in entry
+                    ? entry.kind === "bpc"
+                      ? ("bpc" as const)
+                      : entry.kind === "reaction"
+                        ? ("bp" as const)
+                        : ("icon" as const)
+                    : ("icon" as const),
+              }));
             return (
               <Collapsible
                 className="group/plan-group"
@@ -1649,69 +1554,33 @@ function PlanList({
                 }
               >
                 {(locationGroupedTab || categoryGroupedTab) && (
-                  <h3 className={styles.locationGroupHeader}>
-                    <CollapsibleTrigger
-                      type="button"
-                      className="flex min-h-10 min-w-0 flex-1 items-center justify-between gap-3 border-0 bg-transparent p-0 text-left font-[inherit] text-inherit uppercase"
-                      aria-label="Toggle group"
-                    >
-                      <span className="min-w-0 truncate">
-                        {categoryGroupedTab
-                          ? locationId
-                          : (
-                              locationNamesById.get(Number(locationId ?? 0))
-                              ?? locationId
-                              ?? "Location unavailable"
-                            )}
-                      </span>
-                      <AvatarGroup className="ml-auto hidden group-data-closed/plan-group:flex">
-                        {groupAvatarRows.map(({ entry }, index) => (
-                          <Avatar key={`${entry.typeId}-${index}`} size="lg">
-                            <AvatarImage
-                              className="bg-muted"
-                              src={eveTypeImageUrl(
-                                entry.typeId,
-                                "kind" in entry
-                                  ? entry.kind === "bpc"
-                                    ? "bpc"
-                                    : entry.kind === "reaction"
-                                      ? "bp"
-                                      : "icon"
-                                  : "icon",
-                                64,
-                              )}
-                              alt={`${getEntryName(entry)} icon`}
-                            />
-                            <AvatarFallback>{getEntryName(entry).slice(0, 2)}</AvatarFallback>
-                          </Avatar>
-                        ))}
-                        {displayRows.length - groupAvatarRows.length > 0 && (
-                          <AvatarGroupCount>
-                            +{displayRows.length - groupAvatarRows.length}
-                          </AvatarGroupCount>
-                        )}
-                      </AvatarGroup>
-                      {isGroupOpen ? <ChevronsDownUp /> : <ChevronsUpDown />}
-                    </CollapsibleTrigger>
-                    {categoryGroupedTab && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="shrink-0 normal-case"
-                        onClick={() =>
-                          void copyGroupMultibuy(
-                            String(locationId),
-                            entries as unknown as PlanBuyEntry[],
+                  <PlannerResultGroupHeader
+                    label={
+                      categoryGroupedTab
+                        ? String(locationId)
+                        : (
+                            locationNamesById.get(Number(locationId ?? 0))
+                            ?? String(locationId ?? "Location unavailable")
                           )
-                        }
-                      >
-                        <CopyIcon aria-hidden="true" />
-                        {groupCopyStatus?.category === String(locationId)
-                          ? groupCopyStatus.label
-                          : "Copy Group Multibuy"}
-                      </Button>
-                    )}
-                  </h3>
+                    }
+                    isOpen={isGroupOpen}
+                    avatarRows={groupAvatarRows}
+                    remainingCount={displayRows.length - groupAvatarRows.length}
+                    onCopyGroup={
+                      categoryGroupedTab
+                        ? () =>
+                            void copyGroupMultibuy(
+                              String(locationId),
+                              entries as unknown as PlanBuyEntry[],
+                            )
+                        : undefined
+                    }
+                    copyLabel={
+                      groupCopyStatus?.category === String(locationId)
+                        ? groupCopyStatus.label
+                        : "Copy Group Multibuy"
+                    }
+                  />
                 )}
                 <CollapsibleContent>
                   {displayRows.map(({ entry, reactionPlans }, index) => {
