@@ -1965,6 +1965,7 @@ async function calculatePlanPass(
     stockConsumptionQuantity = quantity,
     demandActivityLocationId?: number,
     demandStockpileLocationId?: number,
+    consumeBuildableStock = false,
   ) {
     let phase = "stock";
     let activity = "unknown";
@@ -2040,6 +2041,39 @@ async function calculatePlanPass(
             buildBlueprintsByTypeId.set(typeId, buildBlueprint);
           }
           candidate = await buildBlueprint;
+        }
+        if (candidate?.blueprint && consumeBuildableStock) {
+          let additionalStockConsumed = 0;
+          const additionalFinalProductStockConsumed =
+            finalProductLocationId === undefined
+              ? 0
+              : consumeAvailableStock(typeId, quantity, finalProductLocationId, true);
+          additionalStockConsumed += additionalFinalProductStockConsumed;
+          quantity -= additionalFinalProductStockConsumed;
+          const additionalStandardConsumed = consumeAvailableStock(
+            typeId,
+            quantity,
+            activityRootLocationId,
+            false,
+            finalProductLocationId,
+          );
+          additionalStockConsumed += additionalStandardConsumed;
+          quantity -= additionalStandardConsumed;
+          if (additionalStockConsumed > 0) {
+            const existingMaterial = getMaterial(
+              typeId,
+              demandActivityLocationId,
+              demandStockpileLocationId,
+            );
+            updateMaterial(
+              typeId,
+              {
+                stockQuantity: (existingMaterial?.stockQuantity ?? 0) + additionalStockConsumed,
+              },
+              demandActivityLocationId,
+              demandStockpileLocationId,
+            );
+          }
         }
         quantity -= consumeDemandOnlyOutput(typeId, quantity);
         if (quantity <= 0) return;
@@ -2201,6 +2235,7 @@ async function calculatePlanPass(
                   ),
                   activityLocationId,
                   undefined,
+                  true,
                 );
               }
             },
@@ -2318,15 +2353,16 @@ async function calculatePlanPass(
           "expand.materials",
           async () => {
             for (const material of blueprint.activities.reaction?.materials ?? []) {
+              const materialQuantity = requiredMaterialQuantity(
+                "reaction",
+                material.quantity,
+                runsNeeded,
+                efficiency,
+                profile.materialMultiplier,
+              );
               await expand(
                 material.typeID,
-                requiredMaterialQuantity(
-                  "reaction",
-                  material.quantity,
-                  runsNeeded,
-                  efficiency,
-                  profile.materialMultiplier,
-                ),
+                materialQuantity,
                 typeName(material.typeID, `Type ${material.typeID}`),
                 nextStack,
                 defaultEfficiency,

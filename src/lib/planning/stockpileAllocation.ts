@@ -1,4 +1,5 @@
 import type { PlanningData } from "./planEngine";
+import { getBuildBlueprintByProductTypeId } from "@/cache/services/sdeCache";
 import type {
   PlanActivityLocations,
   PlanCalculation,
@@ -203,6 +204,19 @@ export async function allocateStockpileStock(
   const fullJobInputDemandByStockpile = stockpileDemandResults.map(
     ({ fullJobInputDemand }) => fullJobInputDemand,
   );
+  const fullJobInputTypeIds = new Set(
+    fullJobInputDemandByStockpile.flatMap((demand) => [...demand.keys()]),
+  );
+  const buildableTypeIds = new Set(
+    (
+      await Promise.all(
+        [...fullJobInputTypeIds].map(async (typeId) => {
+          const candidate = await getBuildBlueprintByProductTypeId(typeId);
+          return candidate?.blueprint ? typeId : undefined;
+        }),
+      )
+    ).filter((typeId): typeId is number => typeId !== undefined),
+  );
   let remainingDemand = demandByStockpile.map((demand) => new Map(demand));
   let remainingStock = request.stock.map((item) =>
     isAllocatableOrdinaryStock(item) ? item.quantity : 0,
@@ -396,12 +410,22 @@ export async function allocateStockpileStock(
         );
       },
     );
+    const reservableJobInputDemandByStockpile = jobInputDemandByStockpile.map(
+      (demand, stockpileIndex) => {
+        const reservableDemand = new Map(demand);
+        for (const [typeId, quantity] of fullJobInputDemandByStockpile[stockpileIndex]) {
+          if (!buildableTypeIds.has(typeId)) continue;
+          reservableDemand.set(typeId, Math.max(reservableDemand.get(typeId) ?? 0, quantity));
+        }
+        return reservableDemand;
+      },
+    );
     allocateTypes(
-      new Set(jobInputDemandByStockpile.flatMap((demand) => [...demand.keys()])),
-      jobInputDemandByStockpile,
+      new Set(reservableJobInputDemandByStockpile.flatMap((demand) => [...demand.keys()])),
+      reservableJobInputDemandByStockpile,
       true,
     );
-    const allocatedJobInputDemandByStockpile = jobInputDemandByStockpile.map(
+    const allocatedJobInputDemandByStockpile = reservableJobInputDemandByStockpile.map(
       (demand, stockpileIndex) =>
         new Map(
           [...demand].map(([typeId, quantity]) => [

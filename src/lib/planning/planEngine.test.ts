@@ -10,6 +10,7 @@ const amberMykoserocinTypeId = 28694;
 const compressedAmberMykoserocinTypeId = 62377;
 const rifterTypeId = 587;
 const rifterBlueprintTypeId = 691;
+const capitalDroneBayBlueprintTypeId = 21030;
 const capRechargerTypeId = 2032;
 const capRechargerBlueprintTypeId = 2033;
 const capRechargerInventionBlueprintTypeId = 1196;
@@ -1256,6 +1257,131 @@ void test("deducts in-build final products before scheduling more production", a
   assert.equal(planItem.availableQuantity, 45);
   assert.equal(planItem.neededQuantity, 135);
   assert.equal(planItem.surplusQuantity, 0);
+});
+
+void test("reports no build or surplus when available intermediate stock covers demand", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: 21029,
+          name: "Capital Drone Bay",
+          quantity: 15,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: 37605,
+            name: "Minokawa",
+            quantity: 3,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const response = await toPlanResponse(result);
+  const planItem = response.lists.planItems.all.find((item) => item.typeId === 21029);
+  const calculationItem = result.lists.planItems.find((item) => item.typeId === 21029);
+  const capitalDroneBayJob = result.lists.manufacturingJobs.find(
+    (job) => job.typeId === capitalDroneBayBlueprintTypeId,
+  );
+
+  assert(planItem);
+  assert(calculationItem?.kind === "material");
+  assert.equal(capitalDroneBayJob, undefined);
+  assert.equal(calculationItem.stockQuantity, 15);
+  assert.equal(calculationItem.productionQuantity, 0);
+  assert.equal(planItem.availableQuantity, 15);
+  assert.equal(planItem.requiredQuantity, 15);
+  assert.equal(planItem.neededQuantity, 0);
+  assert.equal(planItem.surplusQuantity, 0);
+});
+
+void test("reserves available buildable intermediate stock before manufacturing fan-out", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: 21029,
+          name: "Capital Drone Bay",
+          quantity: 15,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: 37605,
+            name: "Minokawa",
+            quantity: 3,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        stockpiles: [
+          {
+            id: "capital-stockpile",
+            name: "Capital stockpile",
+            locations: {
+              stock: manufacturingLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: 37605,
+                name: "Minokawa",
+                quantity: 3,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "other-stockpile",
+            name: "Other stockpile",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: sourceLocationId,
+              reactions: sourceLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: sourceLocationId,
+              invention: sourceLocationId,
+            },
+            items: [
+              {
+                typeId: tritaniumTypeId,
+                name: "Tritanium",
+                quantity: 100,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const capitalDroneBayJob = result.lists.manufacturingJobs.find(
+    (job) => job.typeId === capitalDroneBayBlueprintTypeId,
+  );
+
+  assert.equal(capitalDroneBayJob, undefined);
 });
 
 void test("deducts blocked in-build output from intermediate production demand", async () => {
