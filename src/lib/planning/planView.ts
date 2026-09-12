@@ -1,16 +1,13 @@
 import type {
   PlanJobInput,
   PlanJobInputs,
+  PlanHaulExclusion,
   PlanResponse,
-  PlanStockItem,
   StockOwnerType,
 } from "@/lib/planning/types";
 
 export interface HaulItemExclusionDetails {
-  destinationLocationId: number;
   neededQuantity: number;
-  originalSourceQuantity: number;
-  retainedSourceQuantity: number;
   ownerType?: StockOwnerType;
   ownerId?: number;
 }
@@ -21,143 +18,137 @@ export type HaulItemExclusion = ReadonlyMap<string, HaulItemExclusionDetails>;
 export function createHaulItemExclusionKey(
   sourceRootLocationId: number,
   itemTypeId: number,
+  destinationLocationId: number,
   ownerType?: StockOwnerType,
   ownerId?: number,
 ): string {
   const ownerKey =
     ownerType !== undefined && ownerId !== undefined ? `:${ownerType}:${ownerId}` : "";
-  return `${sourceRootLocationId}:${itemTypeId}${ownerKey}`;
+  return `${sourceRootLocationId}:${itemTypeId}:${destinationLocationId}${ownerKey}`;
 }
 
-/** Parses a haul exclusion key into the source and type it represents. */
+/** Parses a haul exclusion key into the source, type, and destination it represents. */
 export function parseHaulItemExclusionKey(key: string): {
   sourceRootLocationId: number;
   itemTypeId: number;
+  destinationLocationId: number;
   ownerType?: StockOwnerType;
   ownerId?: number;
 } | null {
   const parts = key.split(":");
-  if (parts.length !== 2 && parts.length !== 4) return null;
+  if (parts.length !== 3 && parts.length !== 5) return null;
   const sourceRootLocationId = Number(parts[0]);
   const itemTypeId = Number(parts[1]);
+  const destinationLocationId = Number(parts[2]);
   if (
     !Number.isSafeInteger(sourceRootLocationId)
     || !Number.isSafeInteger(itemTypeId)
+    || !Number.isSafeInteger(destinationLocationId)
     || sourceRootLocationId <= 0
     || itemTypeId <= 0
+    || destinationLocationId <= 0
   ) {
     return null;
   }
-  if (parts.length === 2) return { sourceRootLocationId, itemTypeId };
-  const ownerId = Number(parts[3]);
+  if (parts.length === 3) return { sourceRootLocationId, itemTypeId, destinationLocationId };
+  const ownerId = Number(parts[4]);
   if (
-    (parts[2] !== "character" && parts[2] !== "corporation")
+    (parts[3] !== "character" && parts[3] !== "corporation")
     || !Number.isSafeInteger(ownerId)
     || ownerId <= 0
   ) return null;
   return {
     sourceRootLocationId,
     itemTypeId,
-    ownerType: parts[2],
+    destinationLocationId,
+    ownerType: parts[3],
     ownerId,
   };
 }
 
-/** Reduces excluded source stock to the amount needed by local production. */
-export function excludeHaulItemsFromStock(
-  stock: readonly PlanStockItem[],
-  exclusions: HaulItemExclusion,
-): PlanStockItem[] {
-  const remainingByKey = new Map<string, number>();
-  for (const [key, exclusion] of exclusions) {
-    if (parseHaulItemExclusionKey(key)) {
-      remainingByKey.set(key, Math.max(0, exclusion.retainedSourceQuantity));
-    }
-  }
-
-  return stock.flatMap((item) => {
-    if (
-      item.rootLocationId === undefined
-      || item.category === "blueprint"
-      || item.category === "reactionformula"
-    ) return [item];
-    const matchingEntry = [...exclusions.entries()].find(([key, exclusion]) => {
-      const parsed = parseHaulItemExclusionKey(key);
-      return (
-        parsed !== null
-        && parsed.sourceRootLocationId === item.rootLocationId
-        && parsed.itemTypeId === item.typeId
-        && (
-          parsed.ownerType === undefined
-          || (item.ownerType === parsed.ownerType && item.ownerId === parsed.ownerId)
-        )
-        && exclusion.retainedSourceQuantity >= 0
-      );
-    });
-    if (!matchingEntry) return [item];
-
-    const [key] = matchingEntry;
-    const remaining = remainingByKey.get(key) ?? 0;
-    const retainedQuantity = Math.min(item.quantity, remaining);
-    remainingByKey.set(key, remaining - retainedQuantity);
-    return retainedQuantity > 0 ? [{ ...item, quantity: retainedQuantity }] : [];
+/** Converts UI haul exclusions into the route-scoped planner request contract. */
+export function toPlanHaulExclusions(exclusions: HaulItemExclusion): PlanHaulExclusion[] {
+  return [...exclusions].flatMap(([key]) => {
+    const parsed = parseHaulItemExclusionKey(key);
+    if (!parsed) return [];
+    return [
+      {
+        typeId: parsed.itemTypeId,
+        fromLocationId: parsed.sourceRootLocationId,
+        toLocationId: parsed.destinationLocationId,
+        ...(parsed.ownerType ? { ownerType: parsed.ownerType } : {}),
+        ...(parsed.ownerId !== undefined ? { ownerId: parsed.ownerId } : {}),
+      },
+    ];
   });
 }
-
-/** Restores excluded source surplus in plan presentation without changing buy quantities. */
-export function restoreExcludedHaulStockInPlan(
+/** Removes excluded haul quantities from a cached response until the next calculation completes. */
+export function applyHaulItemExclusionsToPlan(
   plan: PlanResponse,
   exclusions: HaulItemExclusion,
 ): PlanResponse {
-  const restoredByType = new Map<number, number>();
-  const restoredByLocationAndType = new Map<string, number>();
-  for (const [key, exclusion] of exclusions) {
-    const parsed = parseHaulItemExclusionKey(key);
-    if (!parsed) continue;
-    const restoredQuantity = Math.max(
-      0,
-      exclusion.originalSourceQuantity - exclusion.retainedSourceQuantity,
-    );
-    if (restoredQuantity <= 0) continue;
-    restoredByType.set(
-      parsed.itemTypeId,
-      Math.max(restoredByType.get(parsed.itemTypeId) ?? 0, restoredQuantity),
-    );
-    const locationKey = `${parsed.sourceRootLocationId}:${parsed.itemTypeId}`;
-    restoredByLocationAndType.set(
-      locationKey,
-      Math.max(restoredByLocationAndType.get(locationKey) ?? 0, restoredQuantity),
-    );
+  const excludedByType = new Map<number, number>();
+  const excludedByLocationAndType = new Map<string, number>();
+  for (const bucket of plan.lists.haulingTasks) {
+    for (const item of bucket.items) {
+      const key = createHaulItemExclusionKey(
+        bucket.fromLocationId,
+        item.typeId,
+        bucket.toLocationId,
+        bucket.ownerType,
+        bucket.ownerId,
+      );
+      if (!exclusions.has(key)) continue;
+      excludedByType.set(item.typeId, (excludedByType.get(item.typeId) ?? 0) + item.neededQuantity);
+      const locationKey = `${bucket.toLocationId}:${item.typeId}`;
+      excludedByLocationAndType.set(
+        locationKey,
+        (excludedByLocationAndType.get(locationKey) ?? 0) + item.neededQuantity,
+      );
+    }
   }
-  if (restoredByType.size === 0) return plan;
+  if (excludedByType.size === 0) return plan;
 
-  const restoreEntry = (
+  const updateEntry = (
     entry: PlanResponse["lists"]["planItems"]["all"][number],
-    restoredQuantity: number,
-  ) => ({
-    ...entry,
-    availableQuantity: entry.availableQuantity + restoredQuantity,
-    surplusQuantity: entry.surplusQuantity + restoredQuantity,
-  });
+    quantity: number,
+    includeHaulingAvailability: boolean,
+  ) => {
+    const availableQuantity =
+      includeHaulingAvailability && entry.kind === "material"
+        ? Math.max(0, entry.availableQuantity - quantity)
+        : entry.availableQuantity;
+    return {
+      ...entry,
+      haulingQuantity: Math.max(0, entry.haulingQuantity - quantity),
+      availableQuantity,
+      ...(includeHaulingAvailability && entry.kind === "material"
+        ? {
+            neededQuantity: Math.max(0, entry.neededQuantity + quantity - entry.surplusQuantity),
+            surplusQuantity: Math.max(0, entry.surplusQuantity - quantity),
+          }
+        : {}),
+    };
+  };
   return {
     ...plan,
     lists: {
       ...plan.lists,
       planItems: {
         all: plan.lists.planItems.all.map((entry) =>
-          restoredByType.has(entry.typeId)
-            ? restoreEntry(entry, restoredByType.get(entry.typeId) ?? 0)
-            : entry,
+          updateEntry(entry, excludedByType.get(entry.typeId) ?? 0, false),
         ),
         byActivityLocation: plan.lists.planItems.byActivityLocation.map((bucket) => ({
           ...bucket,
-          items: bucket.items.map((entry) => {
-            const restoredQuantity =
+          items: bucket.items.map((entry) =>
+            updateEntry(
+              entry,
               bucket.locationId === undefined
                 ? 0
-                : (restoredByLocationAndType.get(`${bucket.locationId}:${entry.typeId}`) ?? 0);
-            return restoredQuantity > 0 ? restoreEntry(entry, restoredQuantity) : entry;
-          }),
+                : (excludedByLocationAndType.get(`${bucket.locationId}:${entry.typeId}`) ?? 0),
+              bucket.locationId !== undefined,
+            ),
+          ),
         })),
       },
     },

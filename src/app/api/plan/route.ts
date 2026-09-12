@@ -40,6 +40,23 @@ const facilityTimeMultipliersSchema = z.object({
   reactions: z.number().finite().min(0).max(1),
 });
 const skillTimeMultipliersSchema = facilityTimeMultipliersSchema;
+const planHaulExclusionSchema = z
+  .object({
+    typeId: z.number().int().positive(),
+    fromLocationId: z.number().int().positive(),
+    toLocationId: z.number().int().positive(),
+    ownerType: z.enum(["character", "corporation"]).optional(),
+    ownerId: z.number().int().positive().optional(),
+  })
+  .superRefine((exclusion, context) => {
+    if ((exclusion.ownerType === undefined) !== (exclusion.ownerId === undefined)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Haul exclusion owner type and ID must be provided together.",
+      });
+    }
+  });
+const planHaulExclusionsSchema = z.array(planHaulExclusionSchema).max(5000);
 const planBuildItemSchema = z.object({
   typeId: z.number().int().positive(),
   quantity: z.number().finite().positive(),
@@ -221,6 +238,14 @@ export async function calculatePlanRequest(body: unknown): Promise<Response> {
       );
     }
     input.reprocessingEfficiencies = parsedEfficiencies.data;
+    const parsedHaulExclusions = planHaulExclusionsSchema.safeParse(input.haulExclusions ?? []);
+    if (!parsedHaulExclusions.success) {
+      return NextResponse.json(
+        { error: "Haul exclusions must contain valid source and destination routes." },
+        { status: 400 },
+      );
+    }
+    input.haulExclusions = parsedHaulExclusions.data;
     if (input.facilityTimeMultipliers !== undefined) {
       const parsedMultipliers = facilityTimeMultipliersSchema.safeParse(
         input.facilityTimeMultipliers,

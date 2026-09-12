@@ -222,7 +222,13 @@ function haulTaskKey(task: PublicHaulTask) {
   if ("exclusionKey" in task && typeof task.exclusionKey === "string") {
     return task.exclusionKey;
   }
-  return createHaulItemExclusionKey(task.fromLocationId, task.typeId, task.ownerType, task.ownerId);
+  return createHaulItemExclusionKey(
+    task.fromLocationId,
+    task.typeId,
+    task.toLocationId,
+    task.ownerType,
+    task.ownerId,
+  );
 }
 function flattenHaulBuckets(buckets: PlanResponse["lists"]["haulingTasks"]): PublicHaulTask[] {
   return buckets.flatMap((bucket) =>
@@ -275,15 +281,14 @@ function getHaulTasksWithExclusions(
   const displayedTasks: DisplayHaulTask[] = tasks.filter(
     (task) => !exclusions.has(haulTaskKey(task)),
   );
-  for (const [key, destinationLocationId] of exclusions) {
+  for (const [key, exclusion] of exclusions) {
     const parsedKey = parseHaulItemExclusionKey(key);
     if (!parsedKey) continue;
-    const exclusion = destinationLocationId;
     const existingTask = tasksByKey.get(key);
     if (existingTask) {
       displayedTasks.push({
         ...existingTask,
-        toLocationId: exclusion.destinationLocationId,
+        toLocationId: parsedKey.destinationLocationId,
         neededQuantity: exclusion.neededQuantity,
         exclusionKey: key,
         ...(exclusion.ownerType ? { ownerType: exclusion.ownerType } : {}),
@@ -323,7 +328,7 @@ function getHaulTasksWithExclusions(
       unitVolume: quantity > 0 ? volume / quantity : 0,
       neededQuantity: exclusion.neededQuantity,
       fromLocationId: parsedKey.sourceRootLocationId,
-      toLocationId: exclusion.destinationLocationId,
+      toLocationId: parsedKey.destinationLocationId,
       exclusionKey: key,
       ...owner,
     });
@@ -659,11 +664,7 @@ function PlannerResultsContent({
   onAddBuildItem: (item: { name: string; typeId: number; quantity: number }) => void;
   onExcludeHaulStockpile: (fromLocationId: number) => Promise<void>;
   haulItemExclusion: HaulItemExclusion;
-  onToggleHaulItemExclusion: (
-    key: string,
-    destinationLocationId: number,
-    excluded: boolean,
-  ) => Promise<void>;
+  onToggleHaulItemExclusion: (key: string, excluded: boolean) => Promise<void>;
   haulPatches: ReadonlyMap<string, HaulPatch>;
   onToggleHaulPatches: (tasks: ResponseHaulTask[], patched: boolean) => Promise<void>;
 }) {
@@ -953,11 +954,7 @@ function PlanList({
   onExcludeHaulStockpile: (fromLocationId: number) => Promise<void>;
   stockpileLocations: ReadonlySet<number>;
   haulItemExclusion: HaulItemExclusion;
-  onToggleHaulItemExclusion: (
-    key: string,
-    destinationLocationId: number,
-    excluded: boolean,
-  ) => Promise<void>;
+  onToggleHaulItemExclusion: (key: string, excluded: boolean) => Promise<void>;
   haulPatches: ReadonlyMap<string, HaulPatch>;
   onToggleHaulPatches: (tasks: ResponseHaulTask[], patched: boolean) => Promise<void>;
   selectedTypeId: number | null;
@@ -2185,8 +2182,8 @@ function PlanList({
                       switchTooltip="Include in haul plan?"
                       onSwitchChange={(checked) => {
                         setTogglingHaulItemKey(key);
-                        void onToggleHaulItemExclusion(key, task.toLocationId, !checked).finally(
-                          () => setTogglingHaulItemKey(null),
+                        void onToggleHaulItemExclusion(key, !checked).finally(() =>
+                          setTogglingHaulItemKey(null),
                         );
                       }}
                       showCheckbox

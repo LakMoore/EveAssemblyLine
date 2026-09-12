@@ -83,7 +83,7 @@ export default function ResultRow({
         </span>
       )}
       <Tooltip>
-        <TooltipTrigger render={control} />
+        <TooltipTrigger render={<span title={tooltip}>{control}</span>} />
         <TooltipContent>{tooltip}</TooltipContent>
       </Tooltip>
     </span>

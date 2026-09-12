@@ -199,6 +199,7 @@ export interface PlanRequest {
     manufacturing: number;
     reactions: number;
   };
+  haulExclusions?: PlanHaulExclusion[];
   settings: {
     includeCorporationAssets: boolean;
     personalSellOrdersAsStock: boolean;
@@ -309,6 +310,14 @@ export type ResponseHaulTask = ResponseMaterial & {
   ownerType?: "character" | "corporation";
   ownerId?: number;
 };
+
+export interface PlanHaulExclusion {
+  typeId: number;
+  fromLocationId: number;
+  toLocationId: number;
+  ownerType?: StockOwnerType;
+  ownerId?: number;
+}
 
 export type PlanHaulTask = ResponseHaulTask & {
   source?: "production";

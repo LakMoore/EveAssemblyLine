@@ -2,88 +2,46 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createHaulItemExclusionKey,
-  excludeHaulItemsFromStock,
+  applyHaulItemExclusionsToPlan,
   parseHaulItemExclusionKey,
+  toPlanHaulExclusions,
   splitReactionRunAllocations,
   splitReactionJobInputs,
 } from "./planView";
 
 void test("round-trips haul item exclusion keys", () => {
-  const key = createHaulItemExclusionKey(60003760, 62553);
+  const key = createHaulItemExclusionKey(60003760, 62553, 1055354926818);
 
-  assert.equal(key, "60003760:62553");
+  assert.equal(key, "60003760:62553:1055354926818");
   assert.deepEqual(
     parseHaulItemExclusionKey(key),
     {
       sourceRootLocationId: 60003760,
       itemTypeId: 62553,
+      destinationLocationId: 1055354926818,
     },
   );
   assert.equal(parseHaulItemExclusionKey("invalid"), null);
-  assert.equal(parseHaulItemExclusionKey("60003760:62553:84600"), null);
+  assert.equal(parseHaulItemExclusionKey("60003760:62553:84600:corporation"), null);
 });
 
-void test("excludes every quantity from an excluded source and type", () => {
-  const stock = [
-    {
-      typeId: 62553,
-      name: "Compressed Gneiss II-Grade",
-      quantity: 120430,
-      rootLocationId: 60003760,
-      category: "item" as const,
-    },
-  ];
-  const exclusions = new Map([[createHaulItemExclusionKey(60003760, 62553), 1055354926818]]);
+void test("converts route-scoped exclusions for the planner request", () => {
+  const key = createHaulItemExclusionKey(60003760, 62553, 1055354926818, "corporation", 7);
 
   assert.deepEqual(
-    excludeHaulItemsFromStock(
-      stock,
-      new Map([
-        [
-          createHaulItemExclusionKey(60003760, 62553),
-          {
-            destinationLocationId: 1055354926818,
-            neededQuantity: 500,
-            originalSourceQuantity: 120430,
-            retainedSourceQuantity: 0,
-          },
-        ],
-      ]),
+    toPlanHaulExclusions(
+      new Map([[key, { neededQuantity: 500, ownerType: "corporation", ownerId: 7 }]]),
     ),
-    [],
-  );
-});
-
-void test("retains local source stock while excluding a remote surplus haul", () => {
-  const key = createHaulItemExclusionKey(60003760, 62553, "corporation", 7);
-  const result = excludeHaulItemsFromStock(
     [
       {
         typeId: 62553,
-        name: "Compressed Gneiss II-Grade",
-        quantity: 120430,
-        rootLocationId: 60003760,
-        category: "item",
+        fromLocationId: 60003760,
+        toLocationId: 1055354926818,
         ownerType: "corporation",
         ownerId: 7,
       },
     ],
-    new Map([
-      [
-        key,
-        {
-          destinationLocationId: 1055354926818,
-          neededQuantity: 500,
-          originalSourceQuantity: 120430,
-          retainedSourceQuantity: 100000,
-          ownerType: "corporation",
-          ownerId: 7,
-        },
-      ],
-    ]),
   );
-
-  assert.equal(result[0].quantity, 100000);
 });
 
 void test("splits reaction runs across floor and ceiling allocations", () => {
@@ -193,4 +151,58 @@ void test("recalculates split reaction inputs and carries availability forward",
       status: "partial",
     },
   );
+});
+
+void test("reconciles excluded cached haul quantities by destination", () => {
+  const excludedKey = createHaulItemExclusionKey(40, 34, 20);
+  const material = (
+    requiredQuantity: number,
+    availableQuantity: number,
+    haulingQuantity: number,
+  ) => ({
+    typeId: 34,
+    typeName: "Tritanium",
+    unitVolume: 0.01,
+    kind: "material" as const,
+    requiredQuantity,
+    availableQuantity,
+    neededQuantity: 0,
+    surplusQuantity: 0,
+    haulingQuantity,
+  });
+  const plan = {
+    lists: {
+      haulingTasks: [
+        {
+          fromLocationId: 40,
+          toLocationId: 20,
+          items: [{ typeId: 34, typeName: "Tritanium", unitVolume: 0.01, neededQuantity: 42 }],
+        },
+        {
+          fromLocationId: 40,
+          toLocationId: 50,
+          items: [{ typeId: 34, typeName: "Tritanium", unitVolume: 0.01, neededQuantity: 8 }],
+        },
+      ],
+      planItems: {
+        all: [material(50, 0, 50)],
+        byActivityLocation: [
+          { locationId: 20, items: [material(42, 42, 42)] },
+          { locationId: 50, items: [material(8, 8, 8)] },
+        ],
+      },
+    },
+  } as Parameters<typeof applyHaulItemExclusionsToPlan>[0];
+  const reconciled = applyHaulItemExclusionsToPlan(
+    plan,
+    new Map([[excludedKey, { neededQuantity: 42 }]]),
+  );
+  const firstDestination = reconciled.lists.planItems.byActivityLocation[0].items[0];
+  const secondDestination = reconciled.lists.planItems.byActivityLocation[1].items[0];
+  assert.equal(reconciled.lists.planItems.all[0].haulingQuantity, 8);
+  assert.equal(firstDestination.availableQuantity, 0);
+  assert.equal(firstDestination.neededQuantity, 42);
+  assert.equal(firstDestination.haulingQuantity, 0);
+  assert.equal(secondDestination.availableQuantity, 8);
+  assert.equal(secondDestination.haulingQuantity, 8);
 });

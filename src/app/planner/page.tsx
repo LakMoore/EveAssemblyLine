@@ -18,6 +18,8 @@ import {
 } from "@/lib/planning/plannerStockpilesStore";
 import { loadStructures } from "@/lib/planning/structureStore";
 import {
+  loadHaulItemExclusions,
+  saveHaulItemExclusions,
   loadBuildBlacklist,
   loadExcludedLocationIds,
   loadPlannerLocations,
@@ -40,8 +42,9 @@ import {
 import { loadPlanResponse, savePlanResponse } from "@/lib/planning/planResultStore";
 import {
   createHaulItemExclusionKey,
-  excludeHaulItemsFromStock,
-  restoreExcludedHaulStockInPlan,
+  parseHaulItemExclusionKey,
+  applyHaulItemExclusionsToPlan,
+  toPlanHaulExclusions,
   type HaulItemExclusion,
 } from "@/lib/planning/planView";
 import { loadHaulPatches, saveHaulPatches } from "@/lib/planning/haulPatchStore";
@@ -207,47 +210,6 @@ function getReconciledExcludedLocationIds(
   return excludedLocationIds.filter((locationId) => !stockpileLocations.has(locationId));
 }
 
-function getHaulSourceStock(stock: PlanStockItem[], task: ResponseHaulTask) {
-  return stock.filter(
-    (item) =>
-      item.typeId === task.typeId
-      && getStockLocationId(item) === task.fromLocationId
-      && item.category !== "blueprint"
-      && item.category !== "reactionformula"
-      && (
-        task.ownerType === undefined
-        || (item.ownerType === task.ownerType && item.ownerId === task.ownerId)
-      ),
-  );
-}
-
-function getRequiredSourceQuantity(plan: PlanResponse | null, task: ResponseHaulTask) {
-  const entries = plan?.lists.planItems.byActivityLocation
-    .filter((bucket) => bucket.locationId === task.fromLocationId)
-    .flatMap((bucket) => bucket.items)
-    .filter((entry) => entry.typeId === task.typeId);
-  if (!entries || entries.length === 0) return undefined;
-  return entries.reduce((total, entry) => total + entry.requiredQuantity, 0);
-}
-
-function getSingleStockOwner(stock: PlanStockItem[]) {
-  const owners = new Map<string, { ownerType: "character" | "corporation"; ownerId: number }>();
-  for (const item of stock) {
-    if (
-      (item.ownerType !== "character" && item.ownerType !== "corporation")
-      || item.ownerId === undefined
-    ) continue;
-    owners.set(
-      `${item.ownerType}:${item.ownerId}`,
-      {
-        ownerType: item.ownerType,
-        ownerId: item.ownerId,
-      },
-    );
-  }
-  return owners.size === 1 ? owners.values().next().value : undefined;
-}
-
 function retainCurrentHaulItemExclusions(
   assets: ClientAssetsResponse,
   exclusions: HaulItemExclusion,
@@ -256,26 +218,23 @@ function retainCurrentHaulItemExclusions(
   if (receivedAssets.length === 0 || exclusions.size === 0) {
     return new Map(exclusions);
   }
-  const assetKeys = new Set(
-    receivedAssets.flatMap((item) =>
-      item.rootLocationId === undefined
-        ? []
-        : [
-            createHaulItemExclusionKey(item.rootLocationId, item.typeId),
-            ...(item.ownerType !== undefined && item.ownerId !== undefined
-              ? [
-                  createHaulItemExclusionKey(
-                    item.rootLocationId,
-                    item.typeId,
-                    item.ownerType,
-                    item.ownerId,
-                  ),
-                ]
-              : []),
-          ],
-    ),
+  return new Map(
+    [...exclusions].filter(([key]) => {
+      const parsed = parseHaulItemExclusionKey(key);
+      return (
+        parsed !== null
+        && receivedAssets.some(
+          (item) =>
+            item.rootLocationId === parsed.sourceRootLocationId
+            && item.typeId === parsed.itemTypeId
+            && (
+              parsed.ownerType === undefined
+              || (item.ownerType === parsed.ownerType && item.ownerId === parsed.ownerId)
+            ),
+        )
+      );
+    }),
   );
-  return new Map([...exclusions].filter(([key]) => assetKeys.has(key)));
 }
 
 function selectSavedLocation(
@@ -474,12 +433,15 @@ function Planner() {
   });
 
   useEffect(() => {
-    void loadPlanResponse().then((savedPlan) => {
-      if (savedPlan) {
-        setPlan(savedPlan);
-        setPlanStatus("Plan loaded from this browser");
-      }
-    });
+    void Promise
+      .all([loadPlanResponse(), loadHaulItemExclusions()])
+      .then(([savedPlan, savedExclusions]) => {
+        setHaulItemExclusion(savedExclusions);
+        if (savedPlan) {
+          setPlan(applyHaulItemExclusionsToPlan(savedPlan, savedExclusions));
+          setPlanStatus("Plan loaded from this browser");
+        }
+      });
   }, []);
 
   useEffect(() => {
@@ -794,10 +756,7 @@ function Planner() {
       const selectedReactionFacility = locationOptions.find(
         (location) => location.locationId === primaryStockpileLocations.reactions,
       );
-      const requestStock = applyHaulPatches(
-        excludeHaulItemsFromStock(workingAssets, itemExclusions),
-        [...patches.values()],
-      );
+      const requestStock = applyHaulPatches(workingAssets, [...patches.values()]);
       const planningCharacter = characterStatuses.find(
         (character) => character.characterId === planningCharacterId,
       );
@@ -827,6 +786,7 @@ function Planner() {
               sizeId: location.sizeId,
               buildTypeGroups: location.buildTypeGroups,
             })),
+            haulExclusions: toPlanHaulExclusions(itemExclusions),
             assets: requestStock.map(
               ({ sourceLocationName: _sourceLocationName, ...item }) => item,
             ),
@@ -865,7 +825,7 @@ function Planner() {
         setPlanStatus("error" in data && data.error ? data.error : "Could not calculate plan");
         return false;
       }
-      const calculatedPlan = restoreExcludedHaulStockInPlan(data as PlanResponse, itemExclusions);
+      const calculatedPlan = applyHaulItemExclusionsToPlan(data as PlanResponse, itemExclusions);
       await savePlanResponse(calculatedPlan);
       setPlan(calculatedPlan);
       await savePlannerLocations(locations);
@@ -912,11 +872,7 @@ function Planner() {
     await savePromise;
   }
 
-  async function toggleHaulItemExclusion(
-    key: string,
-    destinationLocationId: number,
-    excluded: boolean,
-  ) {
+  async function toggleHaulItemExclusion(key: string, excluded: boolean) {
     const nextExclusions = new Map(haulItemExclusion);
     if (excluded) {
       const task = plan?.lists.haulingTasks
@@ -934,39 +890,25 @@ function Planner() {
             createHaulItemExclusionKey(
               entry.fromLocationId,
               entry.typeId,
+              entry.toLocationId,
               entry.ownerType,
               entry.ownerId,
             ) === key,
         );
       if (!task) return;
-      const sourceStock = getHaulSourceStock(
-        getPlannerStock(clientAssets, includeStock, new Set(excludedLocationIds)),
-        task,
-      );
-      const originalSourceQuantity = sourceStock.reduce((total, item) => total + item.quantity, 0);
-      const requiredSourceQuantity = getRequiredSourceQuantity(plan, task);
-      const retainedSourceQuantity =
-        requiredSourceQuantity === undefined
-          ? originalSourceQuantity
-          : Math.min(originalSourceQuantity, requiredSourceQuantity);
-      const owner =
-        task.ownerType && task.ownerId !== undefined
-          ? { ownerType: task.ownerType, ownerId: task.ownerId }
-          : getSingleStockOwner(sourceStock);
       nextExclusions.set(
         key,
         {
-          destinationLocationId,
           neededQuantity: task.neededQuantity,
-          originalSourceQuantity,
-          retainedSourceQuantity,
-          ...owner,
+          ...(task.ownerType ? { ownerType: task.ownerType } : {}),
+          ...(task.ownerId !== undefined ? { ownerId: task.ownerId } : {}),
         },
       );
     }
     else nextExclusions.delete(key);
     if (await submitPlan(new Set(excludedLocationIds), nextExclusions)) {
       setHaulItemExclusion(nextExclusions);
+      await saveHaulItemExclusions(nextExclusions);
     }
   }
 
@@ -974,7 +916,17 @@ function Planner() {
     const nextPatches = new Map(activeHaulPatches);
     const currentStock = getPlannerStock(clientAssets, includeStock, new Set(excludedLocationIds));
     for (const task of tasks) {
-      if (haulItemExclusion.has(createHaulItemExclusionKey(task.fromLocationId, task.typeId))) {
+      if (
+        haulItemExclusion.has(
+          createHaulItemExclusionKey(
+            task.fromLocationId,
+            task.typeId,
+            task.toLocationId,
+            task.ownerType,
+            task.ownerId,
+          ),
+        )
+      ) {
         continue;
       }
       const taskPatches = createHaulPatchesForTask(task, currentStock, characterStatuses);

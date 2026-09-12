@@ -1153,6 +1153,36 @@ async function calculatePlanPass(
     ]),
   );
   const haulingByKey = new Map<string, PlanHaulTask>();
+  function isHaulExcluded(
+    typeId: number,
+    fromLocationId: number,
+    toLocationId: number | undefined,
+    ownerType?: "character" | "corporation",
+    ownerId?: number,
+  ) {
+    if (toLocationId === undefined || fromLocationId === toLocationId) return false;
+    return (
+      request.haulExclusions?.some(
+        (exclusion) =>
+          exclusion.typeId === typeId
+          && exclusion.fromLocationId === fromLocationId
+          && exclusion.toLocationId === toLocationId
+          && (
+            exclusion.ownerType === undefined
+            || (exclusion.ownerType === ownerType && exclusion.ownerId === ownerId)
+          ),
+      ) ?? false
+    );
+  }
+  function canUseLotForDestination(lot: StockLot, destinationRootLocationId: number | undefined) {
+    return !isHaulExcluded(
+      lot.typeId,
+      lot.rootLocationId,
+      destinationRootLocationId,
+      lot.ownerType,
+      lot.ownerId,
+    );
+  }
   const reprocessingLocationId = locations?.reprocessing ?? locations?.manufacturing;
   const preferredActivityLocationIds = new Set([
     ...getPreferredActivityLocationIds(locations),
@@ -1166,6 +1196,13 @@ async function calculatePlanPass(
     if (
       quantity <= 0
       || destinationRootLocationId === undefined
+      || isHaulExcluded(
+        lot.typeId,
+        lot.rootLocationId,
+        destinationRootLocationId,
+        lot.ownerType,
+        lot.ownerId,
+      )
       || !preferredActivityLocationIds.has(destinationRootLocationId)
       || lot.rootLocationId === destinationRootLocationId
     ) return;
@@ -1209,6 +1246,7 @@ async function calculatePlanPass(
     const candidateLots = (stockLotsByTypeId.get(typeId) ?? [])
       .filter((lot) => lot.quantity > 0)
       .filter((lot) => (source === "inBuild" ? lot.industryJobOutput : !lot.industryJobOutput))
+      .filter((lot) => canUseLotForDestination(lot, destinationRootLocationId))
       .filter(
         (lot) =>
           source !== "inBuild"
@@ -1247,7 +1285,20 @@ async function calculatePlanPass(
       ),
     );
   }
-  function getMaterialInstallableRuns(inputs: PlanJobInputs, requestedRuns: number) {
+  function getDestinationStockQuantity(
+    typeId: number,
+    destinationRootLocationId: number | undefined,
+  ) {
+    return (stockLotsByTypeId.get(typeId) ?? [])
+      .filter((lot) => !lot.industryJobOutput)
+      .filter((lot) => canUseLotForDestination(lot, destinationRootLocationId))
+      .reduce((total, lot) => total + lot.quantity, 0);
+  }
+  function getMaterialInstallableRuns(
+    inputs: PlanJobInputs,
+    requestedRuns: number,
+    destinationRootLocationId: number | undefined,
+  ) {
     if (requestedRuns <= 0) return 0;
     const materialInputs = inputs.materials.filter((input) => input.requiredQuantity > 0);
     if (materialInputs.length === 0) return requestedRuns;
@@ -1255,7 +1306,8 @@ async function calculatePlanPass(
       requestedRuns,
       ...materialInputs.map((input) =>
         Math.floor(
-          ((standardStock.get(input.typeId) ?? 0) * requestedRuns) / input.requiredQuantity,
+          (getDestinationStockQuantity(input.typeId, destinationRootLocationId) * requestedRuns)
+            / input.requiredQuantity,
         ),
       ),
     );
@@ -1309,10 +1361,14 @@ async function calculatePlanPass(
   ) {
     const totalAvailable = standardStock.get(typeId) ?? 0;
     const totalInBuild = industryOutputByType.get(typeId) ?? 0;
-    const inBuildAvailable = allowRemoteInBuild
-      ? totalInBuild
-      : getInBuildStock(typeId, destinationRootLocationId);
-    const inStockAvailable = Math.max(0, totalAvailable - totalInBuild);
+    const inBuildAvailable = (industryOutputLotsByTypeId.get(typeId) ?? [])
+      .filter((lot) => allowRemoteInBuild || lot.rootLocationId === destinationRootLocationId)
+      .filter((lot) => canUseLotForDestination(lot, destinationRootLocationId))
+      .reduce((total, lot) => total + lot.quantity, 0);
+    const inStockAvailable = (stockLotsByTypeId.get(typeId) ?? [])
+      .filter((lot) => !lot.industryJobOutput)
+      .filter((lot) => canUseLotForDestination(lot, destinationRootLocationId))
+      .reduce((total, lot) => total + lot.quantity, 0);
     const consumed = Math.min(quantity, inStockAvailable + inBuildAvailable);
     if (consumed <= 0) return 0;
 
@@ -1334,6 +1390,7 @@ async function calculatePlanPass(
       const outputLots = (industryOutputLotsByTypeId.get(typeId) ?? [])
         .filter((lot) => lot.quantity > 0)
         .filter((lot) => allowRemoteInBuild || lot.rootLocationId === destinationRootLocationId)
+        .filter((lot) => canUseLotForDestination(lot, destinationRootLocationId))
         .sort(
           (left, right) =>
             Number(left.rootLocationId !== destinationRootLocationId)
@@ -2080,7 +2137,11 @@ async function calculatePlanPass(
             profile.materialMultiplier,
           );
           const installableRuns = getInstallableRuns(jobInputs, runsNeeded);
-          const materialInstallableRuns = getMaterialInstallableRuns(jobInputs, runsNeeded);
+          const materialInstallableRuns = getMaterialInstallableRuns(
+            jobInputs,
+            runsNeeded,
+            activityLocationId,
+          );
           reserveJobInputDemand(jobInputs, runsNeeded, materialInstallableRuns, activityLocationId);
           reserveJobInputAvailability(jobInputs, runsNeeded, activityLocationId);
           const mergedJobInputs = mergeJobInputs(
@@ -2189,7 +2250,11 @@ async function calculatePlanPass(
           profile.materialMultiplier,
         );
         const installableRuns = getInstallableRuns(jobInputs, runsNeeded);
-        const materialInstallableRuns = getMaterialInstallableRuns(jobInputs, runsNeeded);
+        const materialInstallableRuns = getMaterialInstallableRuns(
+          jobInputs,
+          runsNeeded,
+          activityLocationId,
+        );
         reserveJobInputDemand(jobInputs, runsNeeded, materialInstallableRuns, activityLocationId);
         reserveJobInputAvailability(jobInputs, runsNeeded, activityLocationId);
         const mergedJobInputs = mergeJobInputs(existingInputs, jobInputs, false);
@@ -2426,6 +2491,15 @@ async function calculatePlanPass(
         const creditedQuantity = Math.min(remainingQuantity, material.buyQuantity);
         const destinationLocationId = material.activityLocationId;
         if (destinationLocationId === undefined) continue;
+        if (
+          isHaulExcluded(
+            sourceItem.typeId,
+            sourceLocationId,
+            destinationLocationId,
+            sourceItem.ownerType,
+            sourceItem.ownerId,
+          )
+        ) continue;
         const sourceLot: StockLot = {
           typeId: sourceItem.typeId,
           quantity: hauledQuantity,
@@ -2486,6 +2560,13 @@ async function calculatePlanPass(
         remainingDemand <= 0
         || lot.industryJobOutput
         || lot.rootLocationId === destinationLocationId
+        || isHaulExcluded(
+          lot.typeId,
+          lot.rootLocationId,
+          destinationLocationId,
+          lot.ownerType,
+          lot.ownerId,
+        )
       ) continue;
       const plannedQuantity = plannedFutureHaulByLot.get(lot) ?? 0;
       const sourceKey = locationTypeKey(lot.rootLocationId, lot.typeId);

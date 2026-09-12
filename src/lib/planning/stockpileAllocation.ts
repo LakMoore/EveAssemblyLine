@@ -210,6 +210,22 @@ export async function allocateStockpileStock(
   const allocations = stockpiles.map(() => new Map<number, number>());
   const canUseFutureStock = (stockIndex: number, stockpileIndex: number) =>
     stockpiles[stockpileIndex].kind !== "special" || !futureStockIndexes.has(stockIndex);
+  const canUseStockForStockpile = (item: PlanStockItem, stockpileIndex: number) => {
+    const sourceLocationId = getStockRootLocationId(item);
+    if (sourceLocationId === undefined) return true;
+    const destinationLocationId = stockpiles[stockpileIndex].locations.stock;
+    if (sourceLocationId === destinationLocationId) return true;
+    return !(request.haulExclusions ?? []).some(
+      (exclusion) =>
+        exclusion.typeId === item.typeId
+        && exclusion.fromLocationId === sourceLocationId
+        && exclusion.toLocationId === destinationLocationId
+        && (
+          exclusion.ownerType === undefined
+          || (exclusion.ownerType === item.ownerType && exclusion.ownerId === item.ownerId)
+        ),
+    );
+  };
   const allocate = (stockIndex: number, stockpileIndex: number, quantity: number) => {
     if (quantity <= 0) return;
     const current = allocations[stockpileIndex].get(stockIndex) ?? 0;
@@ -257,6 +273,7 @@ export async function allocateStockpileStock(
           if (
             remainingStock[index] <= 0
             || !matchingLocation
+            || !canUseStockForStockpile(item, stockpileIndex)
             || (
               preferActivityLocations
               && item.category !== "reactionformula"
@@ -310,18 +327,21 @@ export async function allocateStockpileStock(
           if (!canUseFutureStock(index, stockpileIndex)) continue;
           const itemRootLocationId = getStockRootLocationId(item);
           if (
-            preferActivityLocations
-            && item.category !== "reactionformula"
-            && itemRootLocationId !== undefined
-            && !stockpileActivityLocations(stockpiles[stockpileIndex]).has(itemRootLocationId)
-          ) continue;
-          if (
-            item.category === "reactionformula"
-            && getStockRootLocationId(item) !== stockpiles[stockpileIndex].locations.reactions
-          ) continue;
-          if (
-            item.source === "marketOrder"
-            && getStockRootLocationId(item) !== stockpiles[stockpileIndex].locations.stock
+            !canUseStockForStockpile(item, stockpileIndex)
+            || (
+              preferActivityLocations
+              && item.category !== "reactionformula"
+              && itemRootLocationId !== undefined
+              && !stockpileActivityLocations(stockpiles[stockpileIndex]).has(itemRootLocationId)
+            )
+            || (
+              item.category === "reactionformula"
+              && getStockRootLocationId(item) !== stockpiles[stockpileIndex].locations.reactions
+            )
+            || (
+              item.source === "marketOrder"
+              && getStockRootLocationId(item) !== stockpiles[stockpileIndex].locations.stock
+            )
           ) continue;
           const quantity = Math.min(remainingStock[index], remaining);
           allocate(index, stockpileIndex, quantity);

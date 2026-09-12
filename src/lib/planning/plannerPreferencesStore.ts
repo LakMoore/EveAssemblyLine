@@ -5,7 +5,13 @@ import {
   type PlannerSettings,
   type PlannerLocations,
 } from "./preferences";
+import {
+  parseHaulItemExclusionKey,
+  type HaulItemExclusion,
+  type HaulItemExclusionDetails,
+} from "./planView";
 import type { TypeMetadata } from "@/lib/reference/types";
+const haulItemExclusionsKey = "haul-item-exclusions";
 
 const locationsKey = "locations";
 const buildBlacklistKey = "build-blacklist";
@@ -159,4 +165,70 @@ function readLegacyBuildBlacklist(): TypeMetadata[] | null {
   catch {
     return null;
   }
+}
+function isStoredHaulItemExclusion(value: unknown): value is [string, HaulItemExclusionDetails] {
+  if (!Array.isArray(value) || value.length !== 2 || typeof value[0] !== "string") return false;
+  const details = value[1];
+  if (!details || typeof details !== "object") return false;
+  const candidate = details as Record<string, unknown>;
+  return (
+    parseHaulItemExclusionKey(value[0]) !== null
+    && typeof candidate.neededQuantity === "number"
+    && Number.isFinite(candidate.neededQuantity)
+    && candidate.neededQuantity > 0
+    && (
+      candidate.ownerType === undefined
+      || candidate.ownerType === "character"
+      || candidate.ownerType === "corporation"
+    )
+    && (
+      candidate.ownerId === undefined
+      || (
+        typeof candidate.ownerId === "number"
+        && Number.isSafeInteger(candidate.ownerId)
+        && candidate.ownerId > 0
+      )
+    )
+    && (candidate.ownerType === undefined) === (candidate.ownerId === undefined)
+  );
+}
+
+/** Loads persisted route-scoped haul exclusions from IndexedDB. */
+export async function loadHaulItemExclusions(): Promise<HaulItemExclusion> {
+  try {
+    const database = await getPlanningDatabase();
+    return await new Promise<HaulItemExclusion>((resolve, reject) => {
+      const request = database
+        .transaction(plannerPreferencesStoreName, "readonly")
+        .objectStore(plannerPreferencesStoreName)
+        .get(haulItemExclusionsKey);
+      request.onsuccess = () => {
+        const entries = Array.isArray(request.result)
+          ? request.result.filter(isStoredHaulItemExclusion)
+          : [];
+        resolve(new Map(entries));
+      };
+      request.onerror = () => reject(request.error ?? new Error("Could not load haul exclusions."));
+    });
+  }
+  catch {
+    return new Map();
+  }
+}
+
+/** Replaces persisted route-scoped haul exclusions in IndexedDB. */
+export async function saveHaulItemExclusions(exclusions: HaulItemExclusion): Promise<void> {
+  try {
+    const database = await getPlanningDatabase();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(plannerPreferencesStoreName, "readwrite");
+      transaction
+        .objectStore(plannerPreferencesStoreName)
+        .put([...exclusions.entries()], haulItemExclusionsKey);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("Could not save haul exclusions."));
+    });
+  }
+  catch {}
 }

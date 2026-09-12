@@ -497,7 +497,7 @@ void test("filters hauling quantities by plan-item destination location", async 
         {
           typeId: tritaniumTypeId,
           name: "Tritanium",
-          quantity: 2,
+          quantity: 100,
           category: "item",
           rootLocationId: sourceLocationId,
         },
@@ -550,6 +550,13 @@ void test("filters hauling quantities by plan-item destination location", async 
             ],
           },
         ],
+        haulExclusions: [
+          {
+            typeId: tritaniumTypeId,
+            fromLocationId: sourceLocationId,
+            toLocationId: manufacturingLocationId,
+          },
+        ],
       },
     ),
   );
@@ -565,8 +572,10 @@ void test("filters hauling quantities by plan-item destination location", async 
 
   assert(firstTritanium);
   assert(secondTritanium);
-  assert.equal(firstTritanium.haulingQuantity, 1);
+  assert.equal(firstTritanium.haulingQuantity, 0);
+  assert.equal(firstTritanium.availableQuantity, 0);
   assert.equal(secondTritanium.haulingQuantity, 1);
+  assert.equal(secondTritanium.availableQuantity, 1);
 });
 
 void test("buy blacklist keeps a buildable item on the manufacturing path", async () => {
