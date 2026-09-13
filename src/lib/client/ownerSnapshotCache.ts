@@ -4,7 +4,6 @@ import type {
   BlueprintInstanceRecord,
   IndustryJobRecord,
 } from "@/lib/auth/model";
-import type { PlanStockItem } from "@/lib/planning/types";
 import { getPlanningDatabase, ownerSnapshotStoreName } from "@/lib/planning/planningDatabase";
 
 export type ClientOwner = {
@@ -26,7 +25,12 @@ type ClientOwnerSnapshotAsset = Omit<
   hangarId: number | null;
   rootLocation?: ClientOwnerSnapshotAsset | ClientOwnerSnapshotLocation;
 };
-type ClientOwnerSnapshotStockItem = Omit<PlanStockItem, "name">;
+type ClientOwnerSnapshotMarketOrder = {
+  typeId: number;
+  locationId: number;
+  buyOrderQuantity: number;
+  sellOrderQuantity: number;
+};
 type ClientOwnerSnapshotJob = {
   jobId: number;
   characterId: number;
@@ -45,57 +49,86 @@ type ClientOwnerSnapshotJob = {
   blueprintTypeId: number;
   productTypeId?: number;
 };
+type ClientOwnerSnapshotShipItem = Omit<
+  ClientOwnerSnapshotAsset,
+  "ownerType" | "ownerId" | "rootLocation"
+> & {
+  isAmmo: boolean;
+};
 type ClientOwnerSnapshotShip = {
   itemId: number;
   typeId: number;
+  name?: string;
   systemId?: number;
   isInSpace?: boolean;
   pilotId?: number;
+  ownerType: "character" | "corporation";
+  ownerId: number;
+  rootLocation?: ClientOwnerSnapshotLocation;
+  items: ClientOwnerSnapshotShipItem[];
+};
+
+export type ClientOwnerSnapshotSlice<T extends readonly unknown[]> = {
+  eTag: string;
+  data: T;
+};
+
+export type ClientOwnerSnapshotResponseSlice<T extends readonly unknown[]> = {
+  eTag: string;
+  isEmpty: boolean;
+  isModified: boolean;
+  data?: T;
 };
 
 export type ClientOwnerSnapshot = {
-  schemaVersion: 1;
+  schemaVersion: 4;
   owner: ClientOwner;
-  assets: ClientOwnerSnapshotAsset[];
-  industryJobs: IndustryJobRecord[];
-  blueprintInstances: BlueprintInstanceRecord[];
-  rootLocations: Array<{ itemId: number; location: ClientOwnerSnapshotLocation }>;
-  corporationSources: Array<{
-    corporationId: number;
-    rootLocationId: number;
-    locationFlag: string;
-    label?: string;
-    rootLocation?: ClientOwnerSnapshotSourceLocation;
-    canTake: boolean;
-    canQuery: boolean;
-    selected: boolean;
-    containerItemIds: number[];
-    containers?: Array<{
-      itemId: number;
-      name?: string;
-      locationId: number;
+  assets: ClientOwnerSnapshotSlice<ClientOwnerSnapshotAsset[]>;
+  industryJobs: ClientOwnerSnapshotSlice<IndustryJobRecord[]>;
+  blueprintInstances: ClientOwnerSnapshotSlice<BlueprintInstanceRecord[]>;
+  rootLocations: ClientOwnerSnapshotSlice<
+    Array<{ itemId: number; location: ClientOwnerSnapshotLocation }>
+  >;
+  corporationSources: ClientOwnerSnapshotSlice<
+    Array<{
+      corporationId: number;
       rootLocationId: number;
+      locationFlag: string;
+      label?: string;
+      rootLocation?: ClientOwnerSnapshotSourceLocation;
+      canTake: boolean;
+      canQuery: boolean;
       selected: boolean;
-    }>;
-  }>;
-  jobs: {
-    slotUsage: Record<
-      string,
-      {
-        slots: Record<string, number>;
-        availableSlots: Record<string, number>;
-      }
-    >;
-    jobs: ClientOwnerSnapshotJob[];
-  };
-  marketOrders: {
-    marketOrderStock: ClientOwnerSnapshotStockItem[] | null;
-    marketBuyOrderQuantities: Record<string, number> | null;
-  };
-  ships: {
-    assets: ClientOwnerSnapshotAsset[];
-    ships: ClientOwnerSnapshotShip[];
-  };
+      containerItemIds: number[];
+      containers?: Array<{
+        itemId: number;
+        name?: string;
+        locationId: number;
+        rootLocationId: number;
+        selected: boolean;
+      }>;
+    }>
+  >;
+  jobs: ClientOwnerSnapshotSlice<ClientOwnerSnapshotJob[]>;
+  marketOrders: ClientOwnerSnapshotSlice<ClientOwnerSnapshotMarketOrder[]>;
+  ships: ClientOwnerSnapshotSlice<ClientOwnerSnapshotShip[]>;
+};
+
+export type ClientOwnerSnapshotResponse = {
+  schemaVersion: 4;
+  owner: ClientOwner;
+  assets: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["assets"]["data"]>;
+  industryJobs: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["industryJobs"]["data"]>;
+  blueprintInstances: ClientOwnerSnapshotResponseSlice<
+    ClientOwnerSnapshot["blueprintInstances"]["data"]
+  >;
+  rootLocations: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["rootLocations"]["data"]>;
+  corporationSources: ClientOwnerSnapshotResponseSlice<
+    ClientOwnerSnapshot["corporationSources"]["data"]
+  >;
+  jobs: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["jobs"]["data"]>;
+  marketOrders: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["marketOrders"]["data"]>;
+  ships: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["ships"]["data"]>;
 };
 
 type OwnerSnapshotRecord = {
@@ -192,6 +225,46 @@ function isSnapshotAsset(value: unknown, depth = 0): value is ClientOwnerSnapsho
   );
 }
 
+function isSnapshotShipItem(value: unknown): value is ClientOwnerSnapshotShipItem {
+  return (
+    isRecord(value)
+    && isPositiveInteger(value.itemId)
+    && isPositiveInteger(value.typeId)
+    && isNonNegativeNumber(value.quantity)
+    && isPositiveInteger(value.locationId)
+    && isPositiveInteger(value.containerId)
+    && (value.rootLocationId === null || isPositiveInteger(value.rootLocationId))
+    && (value.hangarId === null || isPositiveInteger(value.hangarId))
+    && ["facility", "station", "solar_system", "item", "structure", "container", "other"].includes(
+      String(value.locationType),
+    )
+    && typeof value.locationFlag === "string"
+    && typeof value.isSingleton === "boolean"
+    && typeof value.isAmmo === "boolean"
+    && isOptional(value.inUse, (candidate) => typeof candidate === "boolean")
+    && isOptional(value.runCount, (candidate) => Number.isSafeInteger(candidate))
+    && isOptional(value.me, isNonNegativeNumber)
+    && isOptional(value.te, isNonNegativeNumber)
+  );
+}
+
+function isSnapshotShip(value: unknown): value is ClientOwnerSnapshotShip {
+  return (
+    isRecord(value)
+    && isPositiveInteger(value.itemId)
+    && isPositiveInteger(value.typeId)
+    && isOptional(value.name, (name) => typeof name === "string")
+    && (value.systemId === undefined || isPositiveInteger(value.systemId))
+    && (value.isInSpace === undefined || typeof value.isInSpace === "boolean")
+    && (value.pilotId === undefined || isPositiveInteger(value.pilotId))
+    && (value.ownerType === "character" || value.ownerType === "corporation")
+    && isPositiveInteger(value.ownerId)
+    && isOptional(value.rootLocation, isSnapshotLocation)
+    && Array.isArray(value.items)
+    && value.items.every((item) => isSnapshotShipItem(item))
+  );
+}
+
 function isIndustryJob(value: unknown): value is IndustryJobRecord {
   return (
     isRecord(value)
@@ -238,10 +311,24 @@ function isBlueprintInstance(value: unknown): value is BlueprintInstanceRecord {
   );
 }
 
-function isNumberRecord(value: unknown) {
+function isSnapshotSlice<T extends readonly unknown[]>(
+  value: unknown,
+  isData: (candidate: unknown) => candidate is T,
+): value is ClientOwnerSnapshotSlice<T> {
+  return isRecord(value) && typeof value.eTag === "string" && isData(value.data);
+}
+
+function isSnapshotResponseSlice<T extends readonly unknown[]>(
+  value: unknown,
+  isData: (candidate: unknown) => candidate is T,
+): value is ClientOwnerSnapshotResponseSlice<T> {
   return (
     isRecord(value)
-    && Object.values(value).every((entry) => typeof entry === "number" && Number.isFinite(entry))
+    && typeof value.eTag === "string"
+    && value.eTag.length > 0
+    && typeof value.isEmpty === "boolean"
+    && typeof value.isModified === "boolean"
+    && (value.isModified ? isData(value.data) : value.data === undefined)
   );
 }
 
@@ -265,73 +352,13 @@ function isSnapshotJob(value: unknown) {
   );
 }
 
-function isSnapshotStockItem(value: unknown) {
+function isSnapshotMarketOrder(value: unknown): value is ClientOwnerSnapshotMarketOrder {
   return (
     isRecord(value)
     && isPositiveInteger(value.typeId)
-    && isNonNegativeNumber(value.quantity)
-    && (
-      value.ownerType === undefined
-      || value.ownerType === "character"
-      || value.ownerType === "corporation"
-    )
-    && (value.ownerId === undefined || isPositiveInteger(value.ownerId))
-    && isOptional(value.locationId, isPositiveInteger)
-    && isOptional(value.rootLocationId, isPositiveInteger)
-    && isOptional(value.isPackaged, (candidate) => typeof candidate === "boolean")
-    && isOptional(value.inBuild, (candidate) => typeof candidate === "boolean")
-    && isOptional(value.inUse, (candidate) => typeof candidate === "boolean")
-    && isOptional(value.jobId, isPositiveInteger)
-    && isOptional(
-      value.industryJobStatus,
-      (candidate) =>
-        ["active", "cancelled", "delivered", "paused", "ready", "reverted"].includes(
-          String(candidate),
-        ),
-    )
-    && isOptional(value.blueprintRunsAtInstall, isNonNegativeNumber)
-    && isOptional(value.licensedRuns, isNonNegativeNumber)
-    && isOptional(value.blueprintType, (candidate) => candidate === "bpo" || candidate === "bpc")
-    && isOptional(value.activityName, (candidate) => typeof candidate === "string")
-    && isOptional(value.jobRuns, isNonNegativeNumber)
-    && isOptional(value.me, isNonNegativeNumber)
-    && isOptional(value.te, isNonNegativeNumber)
-    && isOptional(value.sourceLocationId, isPositiveInteger)
-    && isOptional(
-      value.sourceLocationKind,
-      (candidate) => ["station", "structure", "anchored"].includes(String(candidate)),
-    )
-    && isOptional(value.sourceSystemId, isPositiveInteger)
-    && isOptional(
-      value.category,
-      (candidate) => ["blueprint", "reactionformula", "item"].includes(String(candidate)),
-    )
-    && isOptional(value.inBuildQuantity, isNonNegativeNumber)
-    && isOptional(value.source, (candidate) => candidate === "marketOrder")
-    && isOptional(
-      value.blueprintPrints,
-      (candidate) =>
-        Array.isArray(candidate)
-        && candidate.every(
-          (print) =>
-            isRecord(print)
-            && isPositiveInteger(print.itemId)
-            && isNonNegativeNumber(print.runs)
-            && (print.type === "bpo" || print.type === "bpc")
-            && isOptional(print.me, isNonNegativeNumber)
-            && isOptional(print.te, isNonNegativeNumber)
-            && isOptional(print.activity, (activity) => typeof activity === "string"),
-        ),
-    )
-    && isOptional(
-      value.corporationSource,
-      (candidate) =>
-        isRecord(candidate)
-        && isPositiveInteger(candidate.rootLocationId)
-        && typeof candidate.locationFlag === "string"
-        && Array.isArray(candidate.containerItemIds)
-        && candidate.containerItemIds.every((itemId) => isPositiveInteger(itemId)),
-    )
+    && isPositiveInteger(value.locationId)
+    && isNonNegativeNumber(value.buyOrderQuantity)
+    && isNonNegativeNumber(value.sellOrderQuantity)
   );
 }
 
@@ -342,86 +369,214 @@ export function isCompleteClientOwnerSnapshot(value: unknown): value is ClientOw
   const marketOrders = value.marketOrders;
   const ships = value.ships;
   return (
-    value.schemaVersion === 1
+    value.schemaVersion === 4
     && isRecord(owner)
     && isPositiveInteger(owner.id)
     && (owner.kind === "character" || owner.kind === "corporation")
-    && Array.isArray(value.assets)
-    && value.assets.every((asset) => isSnapshotAsset(asset))
-    && Array.isArray(value.industryJobs)
-    && value.industryJobs.every((job) => isIndustryJob(job))
-    && Array.isArray(value.blueprintInstances)
-    && value.blueprintInstances.every((blueprint) => isBlueprintInstance(blueprint))
-    && Array.isArray(value.rootLocations)
-    && value.rootLocations.every(
-      (entry) =>
-        isRecord(entry) && isPositiveInteger(entry.itemId) && isSnapshotLocation(entry.location),
+    && isSnapshotSlice(
+      value.assets,
+      (data): data is ClientOwnerSnapshotAsset[] =>
+        Array.isArray(data) && data.every((asset) => isSnapshotAsset(asset)),
     )
-    && Array.isArray(value.corporationSources)
-    && value.corporationSources.every(
-      (source) =>
-        isRecord(source)
-        && isPositiveInteger(source.corporationId)
-        && isPositiveInteger(source.rootLocationId)
-        && typeof source.locationFlag === "string"
-        && isOptional(source.label, (candidate) => typeof candidate === "string")
-        && isOptional(source.rootLocation, isSnapshotSourceLocation)
-        && typeof source.canTake === "boolean"
-        && typeof source.canQuery === "boolean"
-        && typeof source.selected === "boolean"
-        && Array.isArray(source.containerItemIds)
-        && source.containerItemIds.every((itemId) => isPositiveInteger(itemId))
-        && isOptional(
-          source.containers,
-          (containers) =>
-            Array.isArray(containers)
-            && containers.every(
-              (container) =>
-                isRecord(container)
-                && isPositiveInteger(container.itemId)
-                && isOptional(container.name, (name) => typeof name === "string")
-                && isPositiveInteger(container.locationId)
-                && isPositiveInteger(container.rootLocationId)
-                && typeof container.selected === "boolean",
+    && isSnapshotSlice(
+      value.industryJobs,
+      (data): data is IndustryJobRecord[] =>
+        Array.isArray(data) && data.every((job) => isIndustryJob(job)),
+    )
+    && isSnapshotSlice(
+      value.blueprintInstances,
+      (data): data is BlueprintInstanceRecord[] =>
+        Array.isArray(data) && data.every((blueprint) => isBlueprintInstance(blueprint)),
+    )
+    && isSnapshotSlice(
+      value.rootLocations,
+      (data): data is ClientOwnerSnapshot["rootLocations"]["data"] =>
+        Array.isArray(data)
+        && data.every(
+          (entry) =>
+            isRecord(entry)
+            && isPositiveInteger(entry.itemId)
+            && isSnapshotLocation(entry.location),
+        ),
+    )
+    && isSnapshotSlice(
+      value.corporationSources,
+      (data): data is ClientOwnerSnapshot["corporationSources"]["data"] =>
+        Array.isArray(data)
+        && data.every(
+          (source) =>
+            isRecord(source)
+            && isPositiveInteger(source.corporationId)
+            && isPositiveInteger(source.rootLocationId)
+            && typeof source.locationFlag === "string"
+            && isOptional(source.label, (candidate) => typeof candidate === "string")
+            && isOptional(source.rootLocation, isSnapshotSourceLocation)
+            && typeof source.canTake === "boolean"
+            && typeof source.canQuery === "boolean"
+            && typeof source.selected === "boolean"
+            && Array.isArray(source.containerItemIds)
+            && source.containerItemIds.every((itemId) => isPositiveInteger(itemId))
+            && isOptional(
+              source.containers,
+              (containers) =>
+                Array.isArray(containers)
+                && containers.every(
+                  (container) =>
+                    isRecord(container)
+                    && isPositiveInteger(container.itemId)
+                    && isOptional(container.name, (name) => typeof name === "string")
+                    && isPositiveInteger(container.locationId)
+                    && isPositiveInteger(container.rootLocationId)
+                    && typeof container.selected === "boolean",
+                ),
             ),
         ),
     )
-    && isRecord(jobs)
-    && isRecord(jobs.slotUsage)
-    && Object
-      .values(jobs.slotUsage)
-      .every(
-        (usage) =>
-          isRecord(usage) && isNumberRecord(usage.slots) && isNumberRecord(usage.availableSlots),
-      )
-    && Array.isArray(jobs.jobs)
-    && jobs.jobs.every((job) => isSnapshotJob(job))
-    && isRecord(marketOrders)
-    && (
-      marketOrders.marketOrderStock === null
-      || (
-        Array.isArray(marketOrders.marketOrderStock)
-        && marketOrders.marketOrderStock.every((item) => isSnapshotStockItem(item))
-      )
+    && isSnapshotSlice(
+      jobs,
+      (data): data is ClientOwnerSnapshotJob[] =>
+        Array.isArray(data) && data.every((job) => isSnapshotJob(job)),
     )
-    && (
-      marketOrders.marketBuyOrderQuantities === null
-      || isNumberRecord(marketOrders.marketBuyOrderQuantities)
+    && isSnapshotSlice(
+      marketOrders,
+      (data): data is ClientOwnerSnapshotMarketOrder[] =>
+        Array.isArray(data) && data.every((order) => isSnapshotMarketOrder(order)),
     )
-    && isRecord(ships)
-    && Array.isArray(ships.assets)
-    && ships.assets.every((asset) => isSnapshotAsset(asset))
-    && Array.isArray(ships.ships)
-    && ships.ships.every(
-      (ship) =>
-        isRecord(ship)
-        && isPositiveInteger(ship.itemId)
-        && isPositiveInteger(ship.typeId)
-        && (ship.systemId === undefined || isPositiveInteger(ship.systemId))
-        && (ship.isInSpace === undefined || typeof ship.isInSpace === "boolean")
-        && (ship.pilotId === undefined || isPositiveInteger(ship.pilotId)),
+    && isSnapshotSlice(
+      ships,
+      (data): data is ClientOwnerSnapshotShip[] =>
+        Array.isArray(data) && data.every((ship) => isSnapshotShip(ship)),
     )
   );
+}
+
+/** Validates the partial per-slice response returned by an owner refresh. */
+export function isCompleteClientOwnerSnapshotResponse(
+  value: unknown,
+): value is ClientOwnerSnapshotResponse {
+  if (!isRecord(value)) return false;
+  const owner = value.owner;
+  return (
+    value.schemaVersion === 4
+    && isRecord(owner)
+    && isPositiveInteger(owner.id)
+    && (owner.kind === "character" || owner.kind === "corporation")
+    && isSnapshotResponseSlice(
+      value.assets,
+      (data): data is ClientOwnerSnapshot["assets"]["data"] =>
+        Array.isArray(data) && data.every((asset) => isSnapshotAsset(asset)),
+    )
+    && isSnapshotResponseSlice(
+      value.industryJobs,
+      (data): data is ClientOwnerSnapshot["industryJobs"]["data"] =>
+        Array.isArray(data) && data.every((job) => isIndustryJob(job)),
+    )
+    && isSnapshotResponseSlice(
+      value.blueprintInstances,
+      (data): data is ClientOwnerSnapshot["blueprintInstances"]["data"] =>
+        Array.isArray(data) && data.every((blueprint) => isBlueprintInstance(blueprint)),
+    )
+    && isSnapshotResponseSlice(
+      value.rootLocations,
+      (data): data is ClientOwnerSnapshot["rootLocations"]["data"] =>
+        Array.isArray(data)
+        && data.every(
+          (entry) =>
+            isRecord(entry)
+            && isPositiveInteger(entry.itemId)
+            && isSnapshotLocation(entry.location),
+        ),
+    )
+    && isSnapshotResponseSlice(
+      value.corporationSources,
+      (data): data is ClientOwnerSnapshot["corporationSources"]["data"] =>
+        Array.isArray(data)
+        && data.every(
+          (source) =>
+            isRecord(source)
+            && isPositiveInteger(source.corporationId)
+            && isPositiveInteger(source.rootLocationId)
+            && typeof source.locationFlag === "string"
+            && isOptional(source.label, (candidate) => typeof candidate === "string")
+            && isOptional(source.rootLocation, isSnapshotSourceLocation)
+            && typeof source.canTake === "boolean"
+            && typeof source.canQuery === "boolean"
+            && typeof source.selected === "boolean"
+            && Array.isArray(source.containerItemIds)
+            && source.containerItemIds.every((itemId) => isPositiveInteger(itemId)),
+        ),
+    )
+    && isSnapshotResponseSlice(
+      value.jobs,
+      (data): data is ClientOwnerSnapshot["jobs"]["data"] =>
+        Array.isArray(data) && data.every((job) => isSnapshotJob(job)),
+    )
+    && isSnapshotResponseSlice(
+      value.marketOrders,
+      (data): data is ClientOwnerSnapshot["marketOrders"]["data"] =>
+        Array.isArray(data) && data.every((order) => isSnapshotMarketOrder(order)),
+    )
+    && isSnapshotResponseSlice(
+      value.ships,
+      (data): data is ClientOwnerSnapshot["ships"]["data"] =>
+        Array.isArray(data) && data.every((ship) => isSnapshotShip(ship)),
+    )
+  );
+}
+
+/** Returns the persisted etags that can be sent with the next owner refresh. */
+export function getOwnerSnapshotETags(snapshot: ClientOwnerSnapshot) {
+  return {
+    assets: snapshot.assets.eTag,
+    blueprintInstances: snapshot.blueprintInstances.eTag,
+    corporationSources: snapshot.corporationSources.eTag,
+    industryJobs: snapshot.industryJobs.eTag,
+    jobs: snapshot.jobs.eTag,
+    marketOrders: snapshot.marketOrders.eTag,
+    rootLocations: snapshot.rootLocations.eTag,
+    ships: snapshot.ships.eTag,
+  };
+}
+
+function mergeSnapshotSlice<T extends readonly unknown[]>(
+  previous: ClientOwnerSnapshotSlice<T> | null,
+  response: ClientOwnerSnapshotResponseSlice<T>,
+) {
+  if (!response.isModified) {
+    if (!previous || previous.eTag !== response.eTag) {
+      throw new Error("Refresh returned an unchanged slice without a matching cached snapshot.");
+    }
+    return previous;
+  }
+  if (response.data === undefined) {
+    throw new Error("Refresh returned a modified slice without data.");
+  }
+  return { eTag: response.eTag, data: response.data };
+}
+
+/** Merges a partial refresh response with the previously persisted owner snapshot. */
+export function mergeOwnerSnapshot(
+  previous: ClientOwnerSnapshot | null,
+  response: ClientOwnerSnapshotResponse,
+): ClientOwnerSnapshot {
+  return {
+    schemaVersion: 4,
+    owner: response.owner,
+    assets: mergeSnapshotSlice(previous?.assets ?? null, response.assets),
+    industryJobs: mergeSnapshotSlice(previous?.industryJobs ?? null, response.industryJobs),
+    blueprintInstances: mergeSnapshotSlice(
+      previous?.blueprintInstances ?? null,
+      response.blueprintInstances,
+    ),
+    rootLocations: mergeSnapshotSlice(previous?.rootLocations ?? null, response.rootLocations),
+    corporationSources: mergeSnapshotSlice(
+      previous?.corporationSources ?? null,
+      response.corporationSources,
+    ),
+    jobs: mergeSnapshotSlice(previous?.jobs ?? null, response.jobs),
+    marketOrders: mergeSnapshotSlice(previous?.marketOrders ?? null, response.marketOrders),
+    ships: mergeSnapshotSlice(previous?.ships ?? null, response.ships),
+  };
 }
 
 function readRecord(key: string) {

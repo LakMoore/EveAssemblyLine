@@ -13,10 +13,38 @@ export type MarketOrderOptions = {
   myCorporationSellOrdersAsStock: boolean;
 };
 
-export type OwnerMarketOrdersResponse = {
-  marketOrderStock: PlanStockItem[] | null;
-  marketBuyOrderQuantities: Record<string, number> | null;
+export type OwnerMarketOrder = {
+  typeId: number;
+  locationId: number;
+  buyOrderQuantity: number;
+  sellOrderQuantity: number;
 };
+
+export type OwnerMarketOrdersResponse = OwnerMarketOrder[];
+
+function combineMarketOrders(
+  sellOrders: PlanStockItem[] | null,
+  buyOrders: Awaited<ReturnType<typeof getMarketOrderBuyQuantities>>,
+): OwnerMarketOrdersResponse {
+  const orders = new Map<string, OwnerMarketOrder>();
+  const getOrder = (typeId: number, locationId: number) => {
+    const key = `${typeId}:${locationId}`;
+    const existing = orders.get(key);
+    if (existing) return existing;
+    const order = { typeId, locationId, buyOrderQuantity: 0, sellOrderQuantity: 0 };
+    orders.set(key, order);
+    return order;
+  };
+
+  for (const item of sellOrders ?? []) {
+    if (item.sourceLocationId === undefined) continue;
+    getOrder(item.typeId, item.sourceLocationId).sellOrderQuantity += item.quantity;
+  }
+  for (const item of buyOrders ?? []) {
+    getOrder(item.typeId, item.locationId).buyOrderQuantity += item.quantity;
+  }
+  return [...orders.values()];
+}
 
 /** Builds market-order stock for one attached character. */
 export async function getMarketOrdersForCharacter(
@@ -43,7 +71,7 @@ export async function getMarketOrdersForCharacter(
       { includeCorporationOrders: false },
     ),
   ]);
-  return { marketOrderStock, marketBuyOrderQuantities };
+  return combineMarketOrders(marketOrderStock, marketBuyOrderQuantities);
 }
 
 /** Builds source-filtered market-order stock for one authorized corporation. */
@@ -72,5 +100,5 @@ export async function getMarketOrdersForCorporation(
       { includePersonalOrders: false },
     ),
   ]);
-  return { marketOrderStock, marketBuyOrderQuantities };
+  return combineMarketOrders(marketOrderStock, marketBuyOrderQuantities);
 }

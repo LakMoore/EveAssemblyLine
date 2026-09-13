@@ -20,6 +20,24 @@ import { getEsiRateLimitUntil } from "@/lib/esi/client";
 import { getOwnerSnapshot, type OwnerSnapshot } from "@/lib/data/ownerSnapshot";
 
 const refreshIdSchema = z.coerce.number().int().positive();
+const refreshRequestSchema = z
+  .object({
+    eTags: z
+      .object({
+        assets: z.string().min(1).optional(),
+        blueprintInstances: z.string().min(1).optional(),
+        corporationSources: z.string().min(1).optional(),
+        industryJobs: z.string().min(1).optional(),
+        jobs: z.string().min(1).optional(),
+        marketOrders: z.string().min(1).optional(),
+        rootLocations: z.string().min(1).optional(),
+        ships: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional()
+      .default({}),
+  })
+  .strict();
 
 const responseOptions = {
   headers: { "Cache-Control": "no-store" },
@@ -97,6 +115,16 @@ async function handleRefreshRequestInternal(
   if (!parsedId.success) return json({ error: "Invalid refresh request." }, 400);
 
   const ownerId = parsedId.data;
+  let previousETags: Parameters<typeof getOwnerSnapshot>[3] = {};
+  try {
+    const body = await request.json();
+    const parsedBody = refreshRequestSchema.safeParse(body);
+    if (!parsedBody.success) return json({ error: "Invalid refresh request." }, 400);
+    previousETags = parsedBody.data.eTags;
+  }
+  catch {
+    return json({ error: "Invalid refresh request." }, 400);
+  }
   let characterIds: number[] = [];
   let authorizationCharacter: NonNullable<Awaited<ReturnType<typeof getCharacter>>> | null = null;
   let corporationPolicies: Awaited<ReturnType<typeof getCorporationSourcePolicies>> = [];
@@ -240,6 +268,7 @@ async function handleRefreshRequestInternal(
           allCorporationSellOrdersAsStock: true,
           myCorporationSellOrdersAsStock: true,
         },
+        previousETags,
       );
     }
     catch (error) {

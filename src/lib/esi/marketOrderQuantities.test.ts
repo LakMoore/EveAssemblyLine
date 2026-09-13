@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { MarketOrderRecord } from "@/lib/auth/model";
-import { addMarketBuyOrderQuantities } from "./marketOrderQuantities";
+import {
+  addMarketBuyOrderQuantities,
+  addMarketBuyOrderQuantitiesByLocation,
+} from "./marketOrderQuantities";
 
 function order(orderId: number, typeId: number, volumeRemain: number): MarketOrderRecord {
   return {
@@ -43,4 +46,27 @@ void test("keeps corporation orders out of the character-scoped quantity map", (
   );
 
   assert.deepEqual([...quantities], []);
+});
+
+void test("groups buy orders by type and location", () => {
+  const quantities = new Map();
+  const seenOrderIds = new Set<number>();
+
+  addMarketBuyOrderQuantitiesByLocation(
+    quantities,
+    [
+      order(104, 62377, 100),
+      { ...order(105, 62377, 50), locationId: 60000002 },
+      order(106, 62377, 25),
+    ],
+    seenOrderIds,
+  );
+
+  assert.deepEqual(
+    [...quantities.values()],
+    [
+      { typeId: 62377, locationId: 60000001, quantity: 125 },
+      { typeId: 62377, locationId: 60000002, quantity: 50 },
+    ],
+  );
 });

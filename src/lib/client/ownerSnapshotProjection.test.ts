@@ -3,14 +3,19 @@ import test from "node:test";
 import {
   projectOwnerSnapshotsToClientAssets,
   projectOwnerSnapshotsToClientJobs,
+  projectOwnerSnapshotsToClientShips,
 } from "./ownerSnapshotProjection";
 import type { ClientOwnerSnapshot } from "./ownerSnapshotCache";
 import { filterClientAssetsForPlanning } from "./requestCache";
 
+function slice<T>(data: T) {
+  return { eTag: "test", data };
+}
+
 const snapshot: ClientOwnerSnapshot = {
-  schemaVersion: 1,
+  schemaVersion: 4,
   owner: { kind: "corporation", id: 900 },
-  assets: [
+  assets: slice([
     {
       itemId: 44,
       typeId: 34,
@@ -32,11 +37,11 @@ const snapshot: ClientOwnerSnapshot = {
         resolved: true,
       },
     },
-  ],
-  industryJobs: [],
-  blueprintInstances: [],
-  rootLocations: [],
-  corporationSources: [
+  ]),
+  industryJobs: slice([]),
+  blueprintInstances: slice([]),
+  rootLocations: slice([]),
+  corporationSources: slice([
     {
       corporationId: 900,
       rootLocationId: 600,
@@ -64,11 +69,115 @@ const snapshot: ClientOwnerSnapshot = {
         },
       ],
     },
-  ],
-  jobs: { slotUsage: {}, jobs: [] },
-  marketOrders: { marketOrderStock: null, marketBuyOrderQuantities: null },
-  ships: { assets: [], ships: [] },
+  ]),
+  jobs: slice([]),
+  marketOrders: slice([]),
+  ships: slice([]),
 };
+
+void test("projects ship ownership and nested fitting items", () => {
+  const shipSnapshot: ClientOwnerSnapshot = {
+    ...snapshot,
+    ships: slice([
+      {
+        itemId: 100,
+        typeId: 200,
+        name: "Bait Corax",
+        ownerType: "character",
+        ownerId: 123,
+        systemId: 30000142,
+        rootLocation: {
+          locationId: 600,
+          kind: "station",
+          name: "Jita IV - Moon 4",
+          systemId: 30000142,
+          resolved: true,
+        },
+        items: [
+          {
+            itemId: 101,
+            typeId: 34,
+            quantity: 2,
+            locationId: 100,
+            containerId: 100,
+            rootLocationId: 600,
+            hangarId: 600,
+            locationType: "item",
+            locationFlag: "HiSlot0",
+            isSingleton: true,
+            isAmmo: false,
+          },
+        ],
+      },
+    ]),
+  };
+  const result = projectOwnerSnapshotsToClientShips(
+    [shipSnapshot],
+    {
+      metadata: [
+        {
+          typeId: 34,
+          name: "Tritanium",
+          assembledVolume: 0.01,
+          packagedVolume: 0.01,
+          category: "item",
+          assemblyLineGroup: "standard",
+        },
+        {
+          typeId: 200,
+          name: "Test Frigate",
+          assembledVolume: 1,
+          packagedVolume: 1,
+          category: "item",
+          assemblyLineGroup: "standard",
+        },
+      ],
+      systemNames: new Map([[30000142, "Jita"]]),
+    },
+  );
+
+  assert.deepEqual(
+    result.ships?.[0],
+    {
+      itemId: 100,
+      typeId: 200,
+      name: "Bait Corax",
+      systemId: 30000142,
+      systemName: "Jita",
+      pilotName: undefined,
+      locationName: "Jita",
+      ownerType: "character",
+      ownerId: 123,
+      rootLocation: {
+        locationId: 600,
+        kind: "station",
+        name: "Jita IV - Moon 4",
+        systemId: 30000142,
+        resolved: true,
+      },
+      items: [
+        {
+          itemId: 101,
+          typeId: 34,
+          name: "Tritanium",
+          quantity: 2,
+          locationId: 100,
+          locationType: "item",
+          locationFlag: "HiSlot0",
+          isSingleton: true,
+          isAmmo: false,
+        },
+      ],
+    },
+  );
+  assert.deepEqual(
+    result.types,
+    [
+      { typeId: 200, name: "Test Frigate" },
+      { typeId: 34, name: "Tritanium" },
+    ],
+  );
+});
 
 void test("projects stable owner assets into enriched client assets", () => {
   const result = projectOwnerSnapshotsToClientAssets(
@@ -151,8 +260,8 @@ void test("projects stable owner assets into enriched client assets", () => {
 void test("falls back to legacy container IDs when needed", () => {
   const legacySnapshot = {
     ...snapshot,
-    corporationSources: snapshot.corporationSources.map(
-      ({ containers: _containers, ...source }) => source,
+    corporationSources: slice(
+      snapshot.corporationSources.data.map(({ containers: _containers, ...source }) => source),
     ),
   };
   const result = projectOwnerSnapshotsToClientAssets([legacySnapshot], { metadata: [] });
@@ -173,9 +282,9 @@ void test("falls back to legacy container IDs when needed", () => {
 void test("associates nested assets with their corporation container source", () => {
   const nestedSnapshot: ClientOwnerSnapshot = {
     ...snapshot,
-    assets: [
+    assets: slice([
       {
-        ...snapshot.assets[0],
+        ...snapshot.assets.data[0],
         itemId: 45,
         locationId: 44,
         containerId: 44,
@@ -183,10 +292,10 @@ void test("associates nested assets with their corporation container source", ()
         hangarId: 700,
         locationFlag: "Unlocked",
       },
-    ],
-    corporationSources: [
+    ]),
+    corporationSources: slice([
       {
-        ...snapshot.corporationSources[0],
+        ...snapshot.corporationSources.data[0],
         rootLocationId: 700,
         locationFlag: "CorpSAG3",
         containerItemIds: [44],
@@ -200,7 +309,7 @@ void test("associates nested assets with their corporation container source", ()
           },
         ],
       },
-    ],
+    ]),
   };
   const result = projectOwnerSnapshotsToClientAssets([nestedSnapshot], { metadata: [] });
 
@@ -218,17 +327,17 @@ void test("associates nested assets with their corporation container source", ()
 void test("filters assets from an unselected container when a sibling is selected", () => {
   const nestedSnapshot: ClientOwnerSnapshot = {
     ...snapshot,
-    assets: [
+    assets: slice([
       {
-        ...snapshot.assets[0],
+        ...snapshot.assets.data[0],
         itemId: 45,
         locationId: 44,
         containerId: 44,
       },
-    ],
-    corporationSources: [
+    ]),
+    corporationSources: slice([
       {
-        ...snapshot.corporationSources[0],
+        ...snapshot.corporationSources.data[0],
         containerItemIds: [44, 45],
         containers: [
           {
@@ -247,7 +356,7 @@ void test("filters assets from an unselected container when a sibling is selecte
           },
         ],
       },
-    ],
+    ]),
   };
   const result = projectOwnerSnapshotsToClientAssets([nestedSnapshot], { metadata: [] });
 
@@ -265,16 +374,16 @@ void test("filters assets from an unselected container when a sibling is selecte
 void test("projects blueprint instance runs for asset aggregation", () => {
   const blueprintSnapshot: ClientOwnerSnapshot = {
     ...snapshot,
-    assets: [
+    assets: slice([
       {
-        ...snapshot.assets[0],
+        ...snapshot.assets.data[0],
         typeId: 41583,
         quantity: 1,
       },
-    ],
-    blueprintInstances: [
+    ]),
+    blueprintInstances: slice([
       {
-        itemId: snapshot.assets[0].itemId,
+        itemId: snapshot.assets.data[0].itemId,
         typeId: 41583,
         locationId: 44,
         locationFlag: "CorpSAG1",
@@ -285,7 +394,7 @@ void test("projects blueprint instance runs for asset aggregation", () => {
         ownerType: "corporation",
         ownerId: 900,
       },
-    ],
+    ]),
   };
   const result = projectOwnerSnapshotsToClientAssets(
     [blueprintSnapshot],
@@ -311,8 +420,8 @@ void test("projects blueprint instance runs for asset aggregation", () => {
 void test("projects job output and remaining blueprint runs without an asset record", () => {
   const jobSnapshot: ClientOwnerSnapshot = {
     ...snapshot,
-    assets: [],
-    industryJobs: [
+    assets: slice([]),
+    industryJobs: slice([
       {
         jobId: 700,
         activityId: 1,
@@ -334,28 +443,25 @@ void test("projects job output and remaining blueprint runs without an asset rec
         startDate: "2026-01-01T00:00:00.000Z",
         status: "active",
       },
-    ],
-    jobs: {
-      slotUsage: {},
-      jobs: [
-        {
-          jobId: 700,
-          characterId: 1,
-          ownerId: 900,
-          ownerType: "corporation",
-          activityId: 1,
-          status: "active",
-          runs: 30,
-          outputQuantity: 30,
-          startDate: "2026-01-01T00:00:00.000Z",
-          endDate: "2026-01-02T00:00:00.000Z",
-          facilityId: 600,
-          outputLocationId: 44,
-          blueprintTypeId: 21018,
-          productTypeId: 21017,
-        },
-      ],
-    },
+    ]),
+    jobs: slice([
+      {
+        jobId: 700,
+        characterId: 1,
+        ownerId: 900,
+        ownerType: "corporation",
+        activityId: 1,
+        status: "active",
+        runs: 30,
+        outputQuantity: 30,
+        startDate: "2026-01-01T00:00:00.000Z",
+        endDate: "2026-01-02T00:00:00.000Z",
+        facilityId: 600,
+        outputLocationId: 44,
+        blueprintTypeId: 21018,
+        productTypeId: 21017,
+      },
+    ]),
   };
   const result = projectOwnerSnapshotsToClientAssets(
     [jobSnapshot],
@@ -384,8 +490,8 @@ void test("projects job output and remaining blueprint runs without an asset rec
 void test("keeps a running reaction job formula classified as a reaction formula", () => {
   const reactionSnapshot: ClientOwnerSnapshot = {
     ...snapshot,
-    assets: [],
-    industryJobs: [
+    assets: slice([]),
+    industryJobs: slice([
       {
         jobId: 701,
         activityId: 9,
@@ -407,28 +513,25 @@ void test("keeps a running reaction job formula classified as a reaction formula
         startDate: "2026-01-01T00:00:00.000Z",
         status: "active",
       },
-    ],
-    jobs: {
-      slotUsage: {},
-      jobs: [
-        {
-          jobId: 701,
-          characterId: 1,
-          ownerId: 900,
-          ownerType: "corporation",
-          activityId: 9,
-          status: "active",
-          runs: 30,
-          outputQuantity: 30,
-          startDate: "2026-01-01T00:00:00.000Z",
-          endDate: "2026-01-02T00:00:00.000Z",
-          facilityId: 600,
-          outputLocationId: 44,
-          blueprintTypeId: 46170,
-          productTypeId: 46169,
-        },
-      ],
-    },
+    ]),
+    jobs: slice([
+      {
+        jobId: 701,
+        characterId: 1,
+        ownerId: 900,
+        ownerType: "corporation",
+        activityId: 9,
+        status: "active",
+        runs: 30,
+        outputQuantity: 30,
+        startDate: "2026-01-01T00:00:00.000Z",
+        endDate: "2026-01-02T00:00:00.000Z",
+        facilityId: 600,
+        outputLocationId: 44,
+        blueprintTypeId: 46170,
+        productTypeId: 46169,
+      },
+    ]),
   };
   const result = projectOwnerSnapshotsToClientAssets(
     [reactionSnapshot],
@@ -450,14 +553,14 @@ void test("keeps a running reaction job formula classified as a reaction formula
 void test("does not inherit selected containers for a corporation hangar destination", () => {
   const jobSnapshot: ClientOwnerSnapshot = {
     ...snapshot,
-    assets: [],
-    corporationSources: [
+    assets: slice([]),
+    corporationSources: slice([
       {
-        ...snapshot.corporationSources[0],
+        ...snapshot.corporationSources.data[0],
         containerItemIds: [44, 45],
         selected: false,
         containers: [
-          ...(snapshot.corporationSources[0].containers ?? []),
+          ...(snapshot.corporationSources.data[0].containers ?? []),
           {
             itemId: 45,
             name: "Selected Sibling Can",
@@ -467,8 +570,8 @@ void test("does not inherit selected containers for a corporation hangar destina
           },
         ],
       },
-    ],
-    industryJobs: [
+    ]),
+    industryJobs: slice([
       {
         jobId: 700,
         activityId: 1,
@@ -490,28 +593,25 @@ void test("does not inherit selected containers for a corporation hangar destina
         startDate: "2026-01-01T00:00:00.000Z",
         status: "active",
       },
-    ],
-    jobs: {
-      slotUsage: {},
-      jobs: [
-        {
-          jobId: 700,
-          characterId: 1,
-          ownerId: 900,
-          ownerType: "corporation",
-          activityId: 1,
-          status: "active",
-          runs: 30,
-          outputQuantity: 30,
-          startDate: "2026-01-01T00:00:00.000Z",
-          endDate: "2026-01-02T00:00:00.000Z",
-          facilityId: 600,
-          outputLocationId: 600,
-          blueprintTypeId: 21018,
-          productTypeId: 21017,
-        },
-      ],
-    },
+    ]),
+    jobs: slice([
+      {
+        jobId: 700,
+        characterId: 1,
+        ownerId: 900,
+        ownerType: "corporation",
+        activityId: 1,
+        status: "active",
+        runs: 30,
+        outputQuantity: 30,
+        startDate: "2026-01-01T00:00:00.000Z",
+        endDate: "2026-01-02T00:00:00.000Z",
+        facilityId: 600,
+        outputLocationId: 600,
+        blueprintTypeId: 21018,
+        productTypeId: 21017,
+      },
+    ]),
   };
   const result = projectOwnerSnapshotsToClientAssets(
     [jobSnapshot],
@@ -534,21 +634,12 @@ void test("counts corporation jobs against the installing character's slots", ()
   const characterSnapshot: ClientOwnerSnapshot = {
     ...snapshot,
     owner: { kind: "character", id: characterId },
-    jobs: {
-      slotUsage: {
-        [characterId]: {
-          slots: { Manufacturing: 2, Science: 0, Reactions: 0 },
-          availableSlots: { Manufacturing: 10, Science: 10, Reactions: 10 },
-        },
-      },
-      jobs: [],
-    },
+    jobs: slice([]),
   };
   const corporationSnapshot: ClientOwnerSnapshot = {
     ...snapshot,
-    jobs: {
-      slotUsage: {},
-      jobs: Array.from(
+    jobs: slice(
+      Array.from(
         { length: 4 },
         (_, index) => ({
           jobId: index + 1,
@@ -566,7 +657,7 @@ void test("counts corporation jobs against the installing character's slots", ()
           blueprintTypeId: 100,
         }),
       ),
-    },
+    ),
   };
 
   const result = projectOwnerSnapshotsToClientJobs([characterSnapshot, corporationSnapshot], []);
@@ -574,32 +665,25 @@ void test("counts corporation jobs against the installing character's slots", ()
   assert.deepEqual(
     result.slotUsage?.[String(characterId)],
     {
-      slots: { Manufacturing: 6, Science: 0, Reactions: 0 },
-      availableSlots: { Manufacturing: 10, Science: 10, Reactions: 10 },
+      slots: { Manufacturing: 4 },
+      availableSlots: {},
     },
   );
 });
 
-void test("preserves market order source location names", () => {
+void test("projects normalized market order quantities", () => {
   const result = projectOwnerSnapshotsToClientAssets(
     [
       {
         ...snapshot,
-        marketOrders: {
-          marketOrderStock: [
-            {
-              typeId: 34,
-              quantity: 25,
-              sourceLocationId: 600,
-              sourceLocationName: "Jita IV - Moon 4",
-              sourceLocationKind: "station",
-              sourceSystemId: 30000142,
-              sourceSystemName: "Jita",
-              source: "marketOrder",
-            },
-          ],
-          marketBuyOrderQuantities: null,
-        },
+        marketOrders: slice([
+          {
+            typeId: 34,
+            locationId: 600,
+            buyOrderQuantity: 0,
+            sellOrderQuantity: 25,
+          },
+        ]),
       },
     ],
     { metadata: [] },
@@ -607,6 +691,6 @@ void test("preserves market order source location names", () => {
 
   const projectedMarketOrder = result.assets?.[1];
   assert.ok(projectedMarketOrder);
-  assert.equal(projectedMarketOrder.sourceLocationName, "Jita IV - Moon 4");
-  assert.equal(projectedMarketOrder.sourceSystemName, "Jita");
+  assert.equal(projectedMarketOrder.sourceLocationId, 600);
+  assert.equal(projectedMarketOrder.quantity, 25);
 });

@@ -1,19 +1,25 @@
+import { createHash } from "node:crypto";
 import type {
   AssetLocation,
   AssetRecord,
   BlueprintInstanceRecord,
   IndustryJobRecord,
 } from "@/lib/auth/model";
-import type { PlanStockItem } from "@/lib/planning/types";
 import { getAssetsForCharacter, getAssetsForCorporation, type OwnerAssetData } from "./assets";
 import { getJobsForCharacter, getJobsForCorporation, type OwnerJobsResponse } from "./jobs";
 import {
   getMarketOrdersForCharacter,
   getMarketOrdersForCorporation,
   type MarketOrderOptions,
+  type OwnerMarketOrder,
   type OwnerMarketOrdersResponse,
 } from "./marketOrders";
-import { getShipsForCharacter, getShipsForCorporation, type OwnerShipsResponse } from "./ships";
+import {
+  getShipsForCharacter,
+  getShipsForCorporation,
+  type OwnerShipItem,
+  type OwnerShipsResponse,
+} from "./ships";
 import type { DataOwner, OwnerDataContext } from "./types";
 
 export type OwnerSnapshotLocation = AssetLocation;
@@ -31,8 +37,6 @@ export type OwnerSnapshotAsset = Omit<
   rootLocation?: OwnerSnapshotAsset | OwnerSnapshotLocation;
 };
 
-export type OwnerSnapshotStockItem = Omit<PlanStockItem, "name">;
-
 export type OwnerSnapshotJob = Omit<
   NonNullable<OwnerJobsResponse["jobs"]>[number],
   "activity" | "outputLocationName" | "blueprintTypeName" | "productTypeName"
@@ -40,11 +44,22 @@ export type OwnerSnapshotJob = Omit<
 
 export type OwnerSnapshotShip = Omit<
   NonNullable<OwnerShipsResponse["ships"]>[number],
-  "name" | "systemName" | "pilotName" | "locationName"
->;
+  "systemName" | "pilotName" | "locationName" | "items"
+> & {
+  items: OwnerSnapshotShipItem[];
+};
 
-export type OwnerSnapshot = {
-  schemaVersion: 1;
+export type OwnerSnapshotShipItem = Omit<
+  OwnerShipItem,
+  "name" | "containerId" | "rootLocationId" | "hangarId"
+> & {
+  containerId: number;
+  rootLocationId: number | null;
+  hangarId: number | null;
+};
+
+export type OwnerSnapshotData = {
+  schemaVersion: 4;
   owner: DataOwner;
   assets: OwnerSnapshotAsset[];
   industryJobs: IndustryJobRecord[];
@@ -68,18 +83,40 @@ export type OwnerSnapshot = {
       selected: boolean;
     }>;
   }>;
-  jobs: {
-    slotUsage: OwnerJobsResponse["slotUsage"];
-    jobs: OwnerSnapshotJob[];
-  };
-  marketOrders: {
-    marketOrderStock: OwnerSnapshotStockItem[] | null;
-    marketBuyOrderQuantities: Record<string, number> | null;
-  };
-  ships: {
-    assets: OwnerSnapshotAsset[];
-    ships: OwnerSnapshotShip[];
-  };
+  jobs: OwnerSnapshotJob[];
+  marketOrders: OwnerMarketOrder[];
+  ships: OwnerSnapshotShip[];
+};
+
+export type OwnerSnapshotSlice<T extends readonly unknown[]> = {
+  eTag: string;
+  isEmpty: boolean;
+  isModified: boolean;
+  data?: T;
+};
+
+export type OwnerSnapshotEtags = Partial<{
+  assets: string;
+  blueprintInstances: string;
+  corporationSources: string;
+  industryJobs: string;
+  jobs: string;
+  marketOrders: string;
+  rootLocations: string;
+  ships: string;
+}>;
+
+export type OwnerSnapshot = {
+  schemaVersion: 4;
+  owner: DataOwner;
+  assets: OwnerSnapshotSlice<OwnerSnapshotData["assets"]>;
+  blueprintInstances: OwnerSnapshotSlice<OwnerSnapshotData["blueprintInstances"]>;
+  corporationSources: OwnerSnapshotSlice<OwnerSnapshotData["corporationSources"]>;
+  industryJobs: OwnerSnapshotSlice<OwnerSnapshotData["industryJobs"]>;
+  jobs: OwnerSnapshotSlice<OwnerSnapshotData["jobs"]>;
+  marketOrders: OwnerSnapshotSlice<OwnerSnapshotData["marketOrders"]>;
+  rootLocations: OwnerSnapshotSlice<OwnerSnapshotData["rootLocations"]>;
+  ships: OwnerSnapshotSlice<OwnerSnapshotData["ships"]>;
 };
 
 function snapshotLocation(location: AssetLocation): OwnerSnapshotLocation {
@@ -136,46 +173,45 @@ function snapshotAssets(data: OwnerAssetData) {
   };
 }
 
-function snapshotJobs(data: OwnerJobsResponse): OwnerSnapshot["jobs"] {
-  return {
-    slotUsage: data.slotUsage,
-    jobs: data.jobs.map(
-      ({
-        activity: _activity,
-        outputLocationName: _outputLocationName,
-        blueprintTypeName: _blueprintTypeName,
-        productTypeName: _productTypeName,
-        ...job
-      }) => job,
-    ),
-  };
+function snapshotJobs(data: OwnerJobsResponse): OwnerSnapshotData["jobs"] {
+  return data.jobs.map(
+    ({
+      activity: _activity,
+      outputLocationName: _outputLocationName,
+      blueprintTypeName: _blueprintTypeName,
+      productTypeName: _productTypeName,
+      ...job
+    }) => job,
+  );
 }
 
-function snapshotStockItem(item: PlanStockItem): OwnerSnapshotStockItem {
+function snapshotMarketOrders(data: OwnerMarketOrdersResponse): OwnerSnapshotData["marketOrders"] {
+  return data;
+}
+
+function snapshotShipItem(item: OwnerShipItem): OwnerSnapshotShipItem {
   const { name: _name, ...stableItem } = item;
-  return stableItem;
-}
-
-function snapshotMarketOrders(data: OwnerMarketOrdersResponse): OwnerSnapshot["marketOrders"] {
   return {
-    marketOrderStock: data.marketOrderStock?.map(snapshotStockItem) ?? null,
-    marketBuyOrderQuantities: data.marketBuyOrderQuantities,
+    ...stableItem,
+    containerId: item.containerId ?? item.locationId,
+    rootLocationId: item.rootLocationId ?? null,
+    hangarId: item.hangarId ?? null,
   };
 }
 
-function snapshotShips(data: OwnerShipsResponse): OwnerSnapshot["ships"] {
-  return {
-    assets: data.assets.map(snapshotAsset),
-    ships: data.ships.map(
-      ({
-        name: _name,
-        systemName: _systemName,
-        pilotName: _pilotName,
-        locationName: _locationName,
-        ...ship
-      }) => ship,
-    ),
-  };
+function snapshotShips(data: OwnerShipsResponse): OwnerSnapshotData["ships"] {
+  return data.ships.map(
+    ({
+      systemName: _systemName,
+      pilotName: _pilotName,
+      locationName: _locationName,
+      items,
+      ...ship
+    }) => ({
+      ...ship,
+      items: items.map(snapshotShipItem),
+    }),
+  );
 }
 
 function buildOwnerSnapshot(
@@ -184,9 +220,9 @@ function buildOwnerSnapshot(
   jobs: OwnerJobsResponse,
   marketOrders: OwnerMarketOrdersResponse,
   ships: OwnerShipsResponse,
-): OwnerSnapshot {
+): OwnerSnapshotData {
   return {
-    schemaVersion: 1,
+    schemaVersion: 4,
     owner,
     ...snapshotAssets(assets),
     jobs: snapshotJobs(jobs),
@@ -195,11 +231,69 @@ function buildOwnerSnapshot(
   };
 }
 
+function createETag(data: unknown) {
+  return createHash("sha256").update(JSON.stringify(data)).digest("hex");
+}
+
+function createSnapshotSlice<T extends readonly unknown[]>(
+  data: T,
+  previousETag: string | undefined,
+  isEmpty: boolean,
+) {
+  const eTag = createETag(data);
+  const isModified = isEmpty || previousETag !== eTag;
+  return {
+    eTag,
+    isEmpty,
+    isModified,
+    ...(isModified ? { data } : {}),
+  } satisfies OwnerSnapshotSlice<T>;
+}
+
+function snapshotResponse(
+  data: OwnerSnapshotData,
+  previousETags: OwnerSnapshotEtags,
+): OwnerSnapshot {
+  return {
+    schemaVersion: data.schemaVersion,
+    owner: data.owner,
+    assets: createSnapshotSlice(data.assets, previousETags.assets, data.assets.length === 0),
+    blueprintInstances: createSnapshotSlice(
+      data.blueprintInstances,
+      previousETags.blueprintInstances,
+      data.blueprintInstances.length === 0,
+    ),
+    corporationSources: createSnapshotSlice(
+      data.corporationSources,
+      previousETags.corporationSources,
+      data.corporationSources.length === 0,
+    ),
+    industryJobs: createSnapshotSlice(
+      data.industryJobs,
+      previousETags.industryJobs,
+      data.industryJobs.length === 0,
+    ),
+    jobs: createSnapshotSlice(data.jobs, previousETags.jobs, data.jobs.length === 0),
+    marketOrders: createSnapshotSlice(
+      data.marketOrders,
+      previousETags.marketOrders,
+      data.marketOrders.length === 0,
+    ),
+    rootLocations: createSnapshotSlice(
+      data.rootLocations,
+      previousETags.rootLocations,
+      data.rootLocations.length === 0,
+    ),
+    ships: createSnapshotSlice(data.ships, previousETags.ships, data.ships.length === 0),
+  };
+}
+
 /** Builds a stable, owner-scoped snapshot from already-authorized providers. */
 export async function getOwnerSnapshot(
   owner: DataOwner,
   context: OwnerDataContext,
   marketOrderOptions: MarketOrderOptions,
+  previousETags: OwnerSnapshotEtags = {},
 ): Promise<OwnerSnapshot> {
   if (owner.kind === "character") {
     const [assets, jobs, marketOrders, ships] = await Promise.all([
@@ -208,7 +302,10 @@ export async function getOwnerSnapshot(
       getMarketOrdersForCharacter(owner.id, context, marketOrderOptions),
       getShipsForCharacter(owner.id, context),
     ]);
-    return buildOwnerSnapshot(owner, assets, jobs, marketOrders, ships);
+    return snapshotResponse(
+      buildOwnerSnapshot(owner, assets, jobs, marketOrders, ships),
+      previousETags,
+    );
   }
 
   const [assets, jobs, marketOrders, ships] = await Promise.all([
@@ -217,5 +314,8 @@ export async function getOwnerSnapshot(
     getMarketOrdersForCorporation(owner.id, context, marketOrderOptions),
     getShipsForCorporation(owner.id, context),
   ]);
-  return buildOwnerSnapshot(owner, assets, jobs, marketOrders, ships);
+  return snapshotResponse(
+    buildOwnerSnapshot(owner, assets, jobs, marketOrders, ships),
+    previousETags,
+  );
 }

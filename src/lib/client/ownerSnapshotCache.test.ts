@@ -1,23 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  getOwnerSnapshotETags,
   isCompleteClientOwnerSnapshot,
+  mergeOwnerSnapshot,
   ownerSnapshotKey,
   ownerSnapshotScope,
   type ClientOwnerSnapshot,
+  type ClientOwnerSnapshotResponse,
 } from "./ownerSnapshotCache";
 
+function slice<T>(data: T) {
+  return { eTag: "test", data };
+}
+
 const completeSnapshot = {
-  schemaVersion: 1,
+  schemaVersion: 4,
   owner: { kind: "character", id: 123 },
-  assets: [],
-  industryJobs: [],
-  blueprintInstances: [],
-  rootLocations: [],
-  corporationSources: [],
-  jobs: { slotUsage: {}, jobs: [] },
-  marketOrders: { marketOrderStock: null, marketBuyOrderQuantities: null },
-  ships: { assets: [], ships: [] },
+  assets: slice([]),
+  industryJobs: slice([]),
+  blueprintInstances: slice([]),
+  rootLocations: slice([]),
+  corporationSources: slice([]),
+  jobs: slice([]),
+  marketOrders: slice([]),
+  ships: slice([]),
 } satisfies ClientOwnerSnapshot;
 
 void test("keys snapshots by owner kind and ID", () => {
@@ -38,11 +45,72 @@ void test("accepts complete owner snapshots", () => {
   assert.equal(isCompleteClientOwnerSnapshot(completeSnapshot), true);
 });
 
+void test("merges modified slices and retains unchanged cached data", () => {
+  const response = {
+    schemaVersion: 4,
+    owner: completeSnapshot.owner,
+    assets: { eTag: completeSnapshot.assets.eTag, isEmpty: false, isModified: false },
+    industryJobs: {
+      eTag: "industry-jobs",
+      isEmpty: true,
+      isModified: true,
+      data: [],
+    },
+    blueprintInstances: {
+      eTag: completeSnapshot.blueprintInstances.eTag,
+      isEmpty: true,
+      isModified: false,
+    },
+    rootLocations: {
+      eTag: completeSnapshot.rootLocations.eTag,
+      isEmpty: true,
+      isModified: false,
+    },
+    corporationSources: {
+      eTag: completeSnapshot.corporationSources.eTag,
+      isEmpty: true,
+      isModified: false,
+    },
+    jobs: {
+      eTag: completeSnapshot.jobs.eTag,
+      isEmpty: true,
+      isModified: false,
+    },
+    marketOrders: {
+      eTag: completeSnapshot.marketOrders.eTag,
+      isEmpty: true,
+      isModified: false,
+    },
+    ships: {
+      eTag: completeSnapshot.ships.eTag,
+      isEmpty: true,
+      isModified: false,
+    },
+  } satisfies ClientOwnerSnapshotResponse;
+  const merged = mergeOwnerSnapshot(completeSnapshot, response);
+
+  assert.equal(merged.assets.data, completeSnapshot.assets.data);
+  assert.deepEqual(merged.industryJobs, { eTag: "industry-jobs", data: [] });
+  assert.deepEqual(
+    getOwnerSnapshotETags(merged),
+    {
+      assets: "test",
+      blueprintInstances: "test",
+      corporationSources: "test",
+      industryJobs: "industry-jobs",
+      jobs: "test",
+      marketOrders: "test",
+      rootLocations: "test",
+      ships: "test",
+    },
+  );
+});
+
 void test("accepts corporation container selection metadata", () => {
   assert.equal(
     isCompleteClientOwnerSnapshot({
       ...completeSnapshot,
-      corporationSources: [
+      corporationSources: slice([
         {
           corporationId: 900,
           rootLocationId: 60000001,
@@ -60,7 +128,7 @@ void test("accepts corporation container selection metadata", () => {
             },
           ],
         },
-      ],
+      ]),
     }),
     true,
   );
@@ -74,10 +142,7 @@ void test("rejects incomplete owner snapshots", () => {
 void test("rejects malformed nested snapshot records", () => {
   const malformed = {
     ...completeSnapshot,
-    jobs: {
-      slotUsage: { "123": { slots: [], availableSlots: {} } },
-      jobs: [],
-    },
+    jobs: slice([{}]),
   };
   assert.equal(isCompleteClientOwnerSnapshot(malformed), false);
 });
@@ -85,24 +150,18 @@ void test("rejects malformed nested snapshot records", () => {
 void test("rejects malformed preserved optional fields", () => {
   const malformedStock = {
     ...completeSnapshot,
-    marketOrders: {
-      marketOrderStock: [
-        {
-          typeId: 34,
-          quantity: 1,
-          corporationSource: {
-            rootLocationId: 60000001,
-            locationFlag: "CorpSAG1",
-            containerItemIds: ["bad"],
-          },
-        },
-      ],
-      marketBuyOrderQuantities: null,
-    },
+    marketOrders: slice([
+      {
+        typeId: 34,
+        locationId: 60000001,
+        buyOrderQuantity: "bad",
+        sellOrderQuantity: 0,
+      },
+    ]),
   };
   const malformedAsset = {
     ...completeSnapshot,
-    assets: [
+    assets: slice([
       {
         itemId: 1,
         typeId: 34,
@@ -115,11 +174,20 @@ void test("rejects malformed preserved optional fields", () => {
         ownerId: 123,
         inUse: "yes",
       },
-    ],
+    ]),
   };
   const malformedShip = {
     ...completeSnapshot,
-    ships: { assets: [], ships: [{ itemId: 1, typeId: 34, isInSpace: "yes" }] },
+    ships: slice([
+      {
+        itemId: 1,
+        typeId: 34,
+        ownerType: "character",
+        ownerId: 123,
+        items: [],
+        isInSpace: "yes",
+      },
+    ]),
   };
   assert.equal(isCompleteClientOwnerSnapshot(malformedStock), false);
   assert.equal(isCompleteClientOwnerSnapshot(malformedAsset), false);

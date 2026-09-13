@@ -4,13 +4,14 @@ import type { TypeMetadata } from "@/lib/reference/types";
 import type {
   ClientAssetsResponse,
   ClientCorporationSource,
+  ClientIndustrySlots,
   ClientJobsResponse,
   ClientShipsResponse,
 } from "./requestCache";
 import type { ClientOwnerSnapshot } from "./ownerSnapshotCache";
 
-type SnapshotAsset = ClientOwnerSnapshot["assets"][number];
-type SnapshotLocation = ClientOwnerSnapshot["rootLocations"][number]["location"];
+type SnapshotAsset = ClientOwnerSnapshot["assets"]["data"][number];
+type SnapshotLocation = ClientOwnerSnapshot["rootLocations"]["data"][number]["location"];
 
 export type OwnerSnapshotProjectionOptions = {
   metadata: readonly TypeMetadata[];
@@ -30,7 +31,7 @@ function findRootLocation(snapshot: ClientOwnerSnapshot, asset: SnapshotAsset) {
     locationOrAsset = locationOrAsset.rootLocation;
     depth += 1;
   }
-  return snapshot.rootLocations.find((entry) => entry.itemId === asset.itemId)?.location;
+  return snapshot.rootLocations.data.find((entry) => entry.itemId === asset.itemId)?.location;
 }
 
 function sourceLocationKind(location: SnapshotLocation | undefined) {
@@ -74,7 +75,7 @@ function slotCategory(activityId: number) {
 }
 
 function locationName(snapshot: ClientOwnerSnapshot, locationId: number) {
-  const location = snapshot.rootLocations.find(
+  const location = snapshot.rootLocations.data.find(
     (entry) => entry.location.locationId === locationId,
   )?.location;
   return sourceLocationName(location) ?? `Location ${locationId}`;
@@ -87,13 +88,13 @@ function corporationSourceForAsset(
 ) {
   if (asset.ownerType !== "corporation" || rootLocationId === undefined) return undefined;
   const source =
-    snapshot.corporationSources.find(
+    snapshot.corporationSources.data.find(
       (candidate) =>
         candidate.corporationId === asset.ownerId
         && candidate.containerItemIds.includes(asset.containerId)
         && candidate.canQuery,
     )
-    ?? snapshot.corporationSources.find(
+    ?? snapshot.corporationSources.data.find(
       (candidate) =>
         candidate.corporationId === asset.ownerId
         && candidate.rootLocationId === rootLocationId
@@ -124,7 +125,7 @@ function projectAsset(
   const quantity = category === "blueprint" && asset.quantity === -1 ? 1 : asset.quantity;
   const blueprintInstance =
     category === "blueprint"
-      ? snapshot.blueprintInstances.find((instance) => instance.itemId === asset.itemId)
+      ? snapshot.blueprintInstances.data.find((instance) => instance.itemId === asset.itemId)
       : undefined;
   const blueprintPrint: BlueprintPrint | undefined = blueprintInstance
     ? {
@@ -175,45 +176,39 @@ function projectMarketOrderStock(
   snapshot: ClientOwnerSnapshot,
   metadataByTypeId: Map<number, TypeMetadata>,
 ): StockItem[] {
-  return (
-    snapshot.marketOrders.marketOrderStock?.map((item) => {
-      const metadata = metadataByTypeId.get(item.typeId);
-      const rootLocationId = item.rootLocationId ?? item.sourceLocationId;
-      const systemId = item.sourceSystemId;
-      return {
-        ...item,
-        name: metadata?.name ?? `Type ${item.typeId}`,
-        rootLocationId,
-        sourceLocationName:
-          item.sourceLocationName
-          ?? (item.sourceLocationKind === "anchored"
-            ? `System ${systemId ?? rootLocationId ?? item.typeId}`
-            : item.sourceLocationKind === "structure"
-              ? "Structure details unavailable"
-              : "Station details unavailable"),
-        sourceSystemName:
-          item.sourceSystemName ?? (systemId === undefined ? undefined : `System ${systemId}`),
-        category: metadata?.category ?? "item",
-        ...(metadata?.isShip !== undefined ? { isShip: metadata.isShip } : {}),
-        ...(metadata?.isCargoContainer !== undefined
-          ? { isCargoContainer: metadata.isCargoContainer }
-          : {}),
-        assembledVolume: metadata?.assembledVolume,
-        packagedVolume: metadata?.packagedVolume,
-        techLevel: metadata?.techLevel,
-        assemblyLineGroup: metadata?.assemblyLineGroup,
-        source: "marketOrder" as const,
-      };
-    }) ?? []
-  );
+  return snapshot.marketOrders.data.flatMap((order) => {
+    if (order.sellOrderQuantity <= 0) return [];
+    const item = {
+      typeId: order.typeId,
+      quantity: order.sellOrderQuantity,
+      sourceLocationId: order.locationId,
+    };
+    const metadata = metadataByTypeId.get(item.typeId);
+    const rootLocationId = item.sourceLocationId;
+    return {
+      ...item,
+      name: metadata?.name ?? `Type ${item.typeId}`,
+      rootLocationId,
+      category: metadata?.category ?? "item",
+      ...(metadata?.isShip !== undefined ? { isShip: metadata.isShip } : {}),
+      ...(metadata?.isCargoContainer !== undefined
+        ? { isCargoContainer: metadata.isCargoContainer }
+        : {}),
+      assembledVolume: metadata?.assembledVolume,
+      packagedVolume: metadata?.packagedVolume,
+      techLevel: metadata?.techLevel,
+      assemblyLineGroup: metadata?.assemblyLineGroup,
+      source: "marketOrder" as const,
+    };
+  });
 }
 
 function corporationSourceForJob(
   snapshot: ClientOwnerSnapshot,
-  job: ClientOwnerSnapshot["jobs"]["jobs"][number],
+  job: ClientOwnerSnapshot["jobs"]["data"][number],
 ) {
   if (job.ownerType !== "corporation") return undefined;
-  const source = snapshot.corporationSources.find(
+  const source = snapshot.corporationSources.data.find(
     (candidate) =>
       candidate.corporationId === job.ownerId
       && candidate.containerItemIds.includes(job.outputLocationId)
@@ -229,7 +224,7 @@ function corporationSourceForJob(
 }
 
 function jobLocation(
-  job: ClientOwnerSnapshot["jobs"]["jobs"][number],
+  job: ClientOwnerSnapshot["jobs"]["data"][number],
   options: OwnerSnapshotProjectionOptions,
 ) {
   const facility = options.facilities?.find((candidate) => Number(candidate.id) === job.facilityId);
@@ -248,10 +243,10 @@ function projectIndustryJobAssets(
   options: OwnerSnapshotProjectionOptions,
 ): StockItem[] {
   const assets: StockItem[] = [];
-  for (const job of snapshot.jobs.jobs) {
+  for (const job of snapshot.jobs.data) {
     const status = job.status.toLowerCase();
     if (status === "cancelled" || status === "reverted" || status === "delivered") continue;
-    const jobRecord = snapshot.industryJobs.find((candidate) => candidate.jobId === job.jobId);
+    const jobRecord = snapshot.industryJobs.data.find((candidate) => candidate.jobId === job.jobId);
     const location = jobLocation(job, options);
     const corporationSource = corporationSourceForJob(snapshot, job);
     const metadata =
@@ -284,8 +279,10 @@ function projectIndustryJobAssets(
       });
     }
     if (!jobRecord) continue;
-    const blueprintAsset = snapshot.assets.find((asset) => asset.itemId === jobRecord.blueprintId);
-    const blueprintInstance = snapshot.blueprintInstances.find(
+    const blueprintAsset = snapshot.assets.data.find(
+      (asset) => asset.itemId === jobRecord.blueprintId,
+    );
+    const blueprintInstance = snapshot.blueprintInstances.data.find(
       (instance) =>
         instance.itemId === jobRecord.blueprintId
         && instance.ownerType === job.ownerType
@@ -367,7 +364,7 @@ function projectCorporationSources(
 ): ClientCorporationSource[] {
   const sources = new Map<string, ClientCorporationSource>();
   for (const snapshot of snapshots) {
-    for (const source of snapshot.corporationSources) {
+    for (const source of snapshot.corporationSources.data) {
       const key = `${source.corporationId}:${source.rootLocationId}:${source.locationFlag}`;
       if (sources.has(key)) continue;
       const containers =
@@ -405,13 +402,13 @@ export function projectOwnerSnapshotsToClientAssets(
   const metadataByTypeId = metadataMap(options.metadata);
   const marketBuyOrderQuantities: Record<string, number> = {};
   const assets = snapshots.flatMap((snapshot) => {
-    for (const [typeId, quantity] of Object.entries(
-      snapshot.marketOrders.marketBuyOrderQuantities ?? {},
-    )) {
-      marketBuyOrderQuantities[typeId] = (marketBuyOrderQuantities[typeId] ?? 0) + quantity;
+    for (const order of snapshot.marketOrders.data) {
+      const typeId = String(order.typeId);
+      marketBuyOrderQuantities[typeId] =
+        (marketBuyOrderQuantities[typeId] ?? 0) + order.buyOrderQuantity;
     }
     return [
-      ...snapshot.assets.map((asset) => projectAsset(snapshot, asset, metadataByTypeId)),
+      ...snapshot.assets.data.map((asset) => projectAsset(snapshot, asset, metadataByTypeId)),
       ...projectIndustryJobAssets(snapshot, metadataByTypeId, options),
       ...projectMarketOrderStock(snapshot, metadataByTypeId),
     ];
@@ -428,20 +425,28 @@ export function projectOwnerSnapshotsToClientAssets(
 export function projectOwnerSnapshotsToClientJobs(
   snapshots: readonly ClientOwnerSnapshot[],
   metadata: readonly TypeMetadata[],
+  industrySlots: ReadonlyMap<number, ClientIndustrySlots> = new Map(),
 ): ClientJobsResponse {
   const metadataByTypeId = metadataMap(metadata);
   const slotUsage: NonNullable<ClientJobsResponse["slotUsage"]> = {};
+  const countedJobIds = new Set<number>();
   for (const snapshot of snapshots) {
-    for (const [characterId, usage] of Object.entries(snapshot.jobs.slotUsage)) {
-      if (Object.hasOwn(slotUsage, characterId)) continue;
-      slotUsage[characterId] = {
-        slots: { ...usage.slots },
-        availableSlots: { ...usage.availableSlots },
+    for (const job of snapshot.jobs.data) {
+      if (job.status.toLowerCase() !== "active" || countedJobIds.has(job.jobId)) continue;
+      countedJobIds.add(job.jobId);
+      const category = slotCategory(job.activityId);
+      if (category === undefined) continue;
+      const characterId = String(job.characterId);
+      const usage = slotUsage[characterId] ?? {
+        slots: {},
+        availableSlots: industrySlots.get(job.characterId) ?? {},
       };
+      usage.slots[category] = (usage.slots[category] ?? 0) + 1;
+      slotUsage[characterId] = usage;
     }
   }
   const jobs = snapshots.flatMap((snapshot) =>
-    snapshot.jobs.jobs.map((job) => ({
+    snapshot.jobs.data.map((job) => ({
       ...job,
       activity: activityName(job.activityId),
       outputLocationName: locationName(snapshot, job.outputLocationId),
@@ -450,59 +455,47 @@ export function projectOwnerSnapshotsToClientJobs(
         job.productTypeId === undefined ? undefined : metadataByTypeId.get(job.productTypeId)?.name,
     })),
   );
-  const countedJobIds = new Set<number>();
-  for (const job of snapshots.flatMap((snapshot) => snapshot.jobs.jobs)) {
-    if (
-      job.ownerType !== "corporation"
-      || job.status.toLowerCase() !== "active"
-      || countedJobIds.has(job.jobId)
-    ) continue;
-    countedJobIds.add(job.jobId);
-    const category = slotCategory(job.activityId);
-    const characterId = String(job.characterId);
-    if (category === undefined || !Object.hasOwn(slotUsage, characterId)) continue;
-    const usage = slotUsage[characterId];
-    usage.slots[category] = (usage.slots[category] ?? 0) + 1;
-  }
   return { slotUsage, jobs };
 }
 
 /** Projects owner-scoped ships and fitting assets into the existing ships page response contract. */
 export function projectOwnerSnapshotsToClientShips(
   snapshots: readonly ClientOwnerSnapshot[],
-  options: Pick<OwnerSnapshotProjectionOptions, "metadata" | "characterNames">,
+  options: Pick<OwnerSnapshotProjectionOptions, "metadata" | "characterNames"> & {
+    systemNames?: ReadonlyMap<number, string>;
+  },
 ): ClientShipsResponse {
   const metadataByTypeId = metadataMap(options.metadata);
-  const assets = snapshots.flatMap((snapshot) =>
-    snapshot.ships.assets.map((asset) => {
-      const rootLocation = findRootLocation(snapshot, asset);
-      return {
-        itemId: asset.itemId,
-        typeId: asset.typeId,
-        name: metadataByTypeId.get(asset.typeId)?.name,
-        quantity: asset.quantity,
-        locationId: asset.locationId,
-        locationType: asset.locationType,
-        locationFlag: asset.locationFlag,
-        isSingleton: asset.isSingleton,
-        ownerType: asset.ownerType,
-        ownerId: asset.ownerId,
-        rootLocation,
-      };
-    }),
-  );
   const ships = snapshots.flatMap((snapshot) =>
-    snapshot.ships.ships.map((ship) => ({
+    snapshot.ships.data.map((ship) => ({
       ...ship,
-      name: metadataByTypeId.get(ship.typeId)?.name,
-      systemName: ship.systemId === undefined ? undefined : `System ${ship.systemId}`,
+      name: ship.name ?? metadataByTypeId.get(ship.typeId)?.name,
+      systemName:
+        ship.systemId === undefined
+          ? undefined
+          : (options.systemNames?.get(ship.systemId) ?? `System ${ship.systemId}`),
       pilotName: ship.pilotId === undefined ? undefined : options.characterNames?.get(ship.pilotId),
-      locationName: ship.systemId === undefined ? undefined : `System ${ship.systemId}`,
+      locationName:
+        ship.systemId === undefined
+          ? undefined
+          : (options.systemNames?.get(ship.systemId) ?? `System ${ship.systemId}`),
+      items: ship.items.map((item) => ({
+        itemId: item.itemId,
+        typeId: item.typeId,
+        name: metadataByTypeId.get(item.typeId)?.name,
+        quantity: item.quantity,
+        locationId: item.locationId,
+        locationType: item.locationType,
+        locationFlag: item.locationFlag,
+        isSingleton: item.isSingleton,
+        isAmmo: item.isAmmo,
+      })),
     })),
   );
-  const typeIds = [...new Set(ships.map((ship) => ship.typeId))];
+  const typeIds = [
+    ...new Set(ships.flatMap((ship) => [ship.typeId, ...ship.items.map((item) => item.typeId)])),
+  ];
   return {
-    assets,
     ships,
     types: typeIds.map((typeId) => ({
       typeId,

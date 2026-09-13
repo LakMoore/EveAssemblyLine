@@ -37,7 +37,14 @@ import {
   refreshDependentEndpoints,
   saveLastRefreshAt,
 } from "@/lib/client/refreshCache";
-import { saveOwnerSnapshot, type ClientOwnerSnapshot } from "@/lib/client/ownerSnapshotCache";
+import {
+  getOwnerSnapshotETags,
+  isCompleteClientOwnerSnapshotResponse,
+  loadOwnerSnapshot,
+  mergeOwnerSnapshot,
+  saveOwnerSnapshot,
+  type ClientOwnerSnapshot,
+} from "@/lib/client/ownerSnapshotCache";
 import { loadCompressOptions } from "@/lib/planning/reprocessingClient";
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import {
@@ -481,13 +488,26 @@ export default function AppShell({ children }: { children: ReactNode }) {
       const results = await runRefreshUnits(
         units,
         async (unit) => {
-          const response = await fetch(`/api/state/refresh/${unit.kind}/${unit.ownerId}`);
+          const owner = { kind: unit.kind, id: unit.ownerId } as const;
+          const cachedSnapshot = snapshotScope
+            ? await loadOwnerSnapshot(owner, snapshotScope)
+            : null;
+          const response = await fetch(
+            `/api/state/refresh/${unit.kind}/${unit.ownerId}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                eTags: cachedSnapshot ? getOwnerSnapshotETags(cachedSnapshot.snapshot) : {},
+              }),
+            },
+          );
           const data = (await response.json()) as {
             success?: boolean;
             rateLimitedUntil?: string | null;
             error?: string;
             errors?: string[];
-            ownerSnapshot?: ClientOwnerSnapshot;
+            ownerSnapshot?: unknown;
           };
           if (!response.ok || data.success !== true) {
             throw new Error(
@@ -499,11 +519,21 @@ export default function AppShell({ children }: { children: ReactNode }) {
             );
           }
           if (data.ownerSnapshot && snapshotScope) {
-            try {
-              await saveOwnerSnapshot(data.ownerSnapshot, snapshotScope);
-              ownerSnapshots.push(data.ownerSnapshot);
+            if (!isCompleteClientOwnerSnapshotResponse(data.ownerSnapshot)) {
+              throw new Error("Refresh returned an invalid owner snapshot.");
             }
-            catch {}
+            if (
+              data.ownerSnapshot.owner.kind !== owner.kind
+              || data.ownerSnapshot.owner.id !== owner.id
+            ) {
+              throw new Error("Refresh returned an owner snapshot for the wrong owner.");
+            }
+            const mergedSnapshot = mergeOwnerSnapshot(
+              cachedSnapshot?.snapshot ?? null,
+              data.ownerSnapshot,
+            );
+            await saveOwnerSnapshot(mergedSnapshot, snapshotScope);
+            ownerSnapshots.push(mergedSnapshot);
           }
         },
         {

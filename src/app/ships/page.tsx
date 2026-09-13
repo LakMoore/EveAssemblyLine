@@ -1,17 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { loadClientShips, type ClientShipsResponse } from "@/lib/client/requestCache";
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import styles from "../page.module.css";
 import { ArrowRight, X } from "lucide-react";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 
-type ShipAsset = NonNullable<ClientShipsResponse["assets"]>[number];
+type ShipAsset = NonNullable<ClientShipsResponse["ships"]>[number]["items"][number];
 type ShipSummary = NonNullable<ClientShipsResponse["ships"]>[number];
 type TypeName = Map<number, string>;
 const shipItemIdParam = "shipItemId";
@@ -90,14 +90,6 @@ export default function ShipsPage() {
 
   const typeNames = useMemo<TypeName>(
     () => new Map((data?.types ?? []).map((type) => [type.typeId, type.name])),
-    [data],
-  );
-  const assetsByItemId = useMemo(
-    () => new Map((data?.assets ?? []).map((asset) => [asset.itemId, asset])),
-    [data],
-  );
-  const shipItemIds = useMemo(
-    () => new Set((data?.ships ?? []).map((ship) => ship.itemId)),
     [data],
   );
   const shipsByItemId = useMemo(
@@ -209,6 +201,7 @@ export default function ShipsPage() {
                   </div>
                   <TypeIdentity
                     name={shipDisplayName}
+                    typeName={ship.name ? shipTypeName : undefined}
                     typeId={ship.typeId}
                     variation="render"
                     imageSize={shipThumbnailSize}
@@ -266,6 +259,7 @@ export default function ShipsPage() {
                   >
                     <TypeIdentity
                       name={shipDisplayName}
+                      typeName={ship.name ? shipTypeName : undefined}
                       typeId={ship.typeId}
                       variation="render"
                       imageSize={shipThumbnailSize}
@@ -283,8 +277,6 @@ export default function ShipsPage() {
       {selectedShip && (
         <ShipContentsModal
           ship={selectedShip}
-          assetsByItemId={assetsByItemId}
-          shipItemIds={shipItemIds}
           shipsByItemId={shipsByItemId}
           typeNames={typeNames}
           onClose={closeShipModal}
@@ -297,23 +289,17 @@ export default function ShipsPage() {
 
 function ShipContentsModal({
   ship,
-  assetsByItemId,
-  shipItemIds,
   shipsByItemId,
   typeNames,
   onClose,
   onSelectShip,
 }: {
   ship: ShipSummary;
-  assetsByItemId: Map<number, ShipAsset>;
-  shipItemIds: Set<number>;
   shipsByItemId: Map<number, ShipSummary>;
   typeNames: TypeName;
   onClose: () => void;
   onSelectShip: (ship: ShipSummary) => void;
 }) {
-  const modalRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     const previousBodyOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -323,25 +309,21 @@ function ShipContentsModal({
     };
   }, []);
 
-  useEffect(() => {
-    modalRef.current?.scrollTo({ top: 0 });
-  }, [ship.itemId]);
-
   const groups = new Map<string, { label: string; order: number; assets: ShipAsset[] }>();
-  const containedAssets = [...assetsByItemId.values()].filter((asset) => {
-    if (asset.itemId === ship.itemId) return false;
+  const itemsByItemId = new Map(ship.items.map((item) => [item.itemId, item]));
+  const shipItemIds = new Set(shipsByItemId.keys());
+  const containedAssets = ship.items.filter((asset) => {
     const visited = new Set<number>();
-    let current: ShipAsset | undefined = assetsByItemId.get(asset.locationId);
-    let nearestShipId: number | undefined;
-    while (current && !visited.has(current.itemId)) {
-      if (shipItemIds.has(current.itemId)) {
-        nearestShipId = current.itemId;
-        break;
-      }
-      visited.add(current.itemId);
-      current = assetsByItemId.get(current.locationId);
+    let locationId = asset.locationId;
+    while (!visited.has(locationId)) {
+      if (locationId === ship.itemId) return true;
+      if (shipItemIds.has(locationId)) return false;
+      visited.add(locationId);
+      const parent = itemsByItemId.get(locationId);
+      if (!parent) return false;
+      locationId = parent.locationId;
     }
-    return nearestShipId === ship.itemId;
+    return false;
   });
   const weaponBySlotFlag = new Map<string, ShipAsset>();
   for (const asset of containedAssets) {
@@ -384,93 +366,89 @@ function ShipContentsModal({
   const shipDisplayName = ship.name ? `${ship.name} - ${shipTypeName}` : shipTypeName;
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent ref={modalRef} className={styles.shipModal}>
+    <ResponsiveDialogDrawer
+      open
+      onOpenChange={(open) => !open && onClose()}
+      dialogClassName={styles.shipModal}
+      drawerClassName={styles.shipModal}
+      title={
         <div className={styles.panelHeader}>
           <div className={styles.shipModalHeading}>
             <p className={styles.panelKicker}>SHIP FITTING</p>
-            <DialogTitle>
-              <TypeIdentity
-                name={shipDisplayName}
-                typeId={ship.typeId}
-                variation="render"
-                imageSize={54}
-                className={styles.shipModalIdentity}
-              />
-            </DialogTitle>
+            <TypeIdentity
+              name={shipDisplayName}
+              typeName={ship.name ? shipTypeName : undefined}
+              typeId={ship.typeId}
+              variation="render"
+              imageSize={54}
+              className={styles.shipModalIdentity}
+            />
             <p className={styles.shipModalSystem}>
               {ship.systemName ?? "Unknown system"} · ITEM ID {ship.itemId}
             </p>
           </div>
         </div>
-        <div className="no-scrollbar max-h-[70vh] overflow-y-auto overscroll-contain">
-          {orderedGroups.length === 0 ? (
-            <Empty className={styles.shipsEmpty}>
-              <EmptyDescription>No contained assets.</EmptyDescription>
-            </Empty>
-          ) : (
-            <div className={styles.shipAssetGroups}>
-              {orderedGroups.map((group) => (
-                <section key={group.label} className={styles.shipAssetGroup}>
-                  <h3>{group.label}</h3>
-                  {group.assets.map((asset) => (
-                    <div className={styles.shipAssetRow} key={asset.itemId}>
-                      <div className={styles.shipAssetLoadout}>
-                        <div className={styles.shipAssetItem}>
-                          <TypeIdentity
-                            name={
-                              asset.name ?? typeNames.get(asset.typeId) ?? `Type ${asset.typeId}`
-                            }
-                            typeName={asset.name ? typeNames.get(asset.typeId) : undefined}
-                            typeId={asset.typeId}
-                            imageSize={32}
-                          />
-                          {asset.quantity > 1 && (
-                            <span className={styles.shipAssetQuantity}>
-                              ×{asset.quantity.toLocaleString()}
-                            </span>
-                          )}
-                        </div>
-                        {(ammoByWeaponId.get(asset.itemId) ?? []).map((ammo) => (
-                          <div className={styles.shipAssetItem} key={ammo.itemId}>
-                            <TypeIdentity
-                              name={
-                                ammo.name ?? typeNames.get(ammo.typeId) ?? `Type ${ammo.typeId}`
-                              }
-                              typeName={ammo.name ? typeNames.get(ammo.typeId) : undefined}
-                              typeId={ammo.typeId}
-                              imageSize={32}
-                            />
-                            {ammo.quantity > 1 && (
-                              <span className={styles.shipAssetQuantity}>
-                                ×{ammo.quantity.toLocaleString()}
-                              </span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                      {shipsByItemId.has(asset.itemId) && (
-                        <button
-                          type="button"
-                          className={`actionButton ${styles.importButton}`}
-                          title="View ship fitting"
-                          onClick={() => {
-                            const nestedShip = shipsByItemId.get(asset.itemId);
-                            if (nestedShip) onSelectShip(nestedShip);
-                          }}
-                        >
-                          <span>VIEW FITTING</span>
-                          <ArrowRight aria-hidden="true" />
-                        </button>
+      }
+    >
+      {orderedGroups.length === 0 ? (
+        <Empty className={styles.shipsEmpty}>
+          <EmptyDescription>No contained assets.</EmptyDescription>
+        </Empty>
+      ) : (
+        <div className={styles.shipAssetGroups}>
+          {orderedGroups.map((group) => (
+            <section key={group.label} className={styles.shipAssetGroup}>
+              <h3>{group.label}</h3>
+              {group.assets.map((asset) => (
+                <div className={styles.shipAssetRow} key={asset.itemId}>
+                  <div className={styles.shipAssetLoadout}>
+                    <div className={styles.shipAssetItem}>
+                      <TypeIdentity
+                        name={asset.name ?? typeNames.get(asset.typeId) ?? `Type ${asset.typeId}`}
+                        typeId={asset.typeId}
+                        imageSize={32}
+                      />
+                      {asset.quantity > 1 && (
+                        <span className={styles.shipAssetQuantity}>
+                          ×{asset.quantity.toLocaleString()}
+                        </span>
                       )}
                     </div>
-                  ))}
-                </section>
+                    {(ammoByWeaponId.get(asset.itemId) ?? []).map((ammo) => (
+                      <div className={styles.shipAssetItem} key={ammo.itemId}>
+                        <TypeIdentity
+                          name={ammo.name ?? typeNames.get(ammo.typeId) ?? `Type ${ammo.typeId}`}
+                          typeId={ammo.typeId}
+                          imageSize={32}
+                        />
+                        {ammo.quantity > 1 && (
+                          <span className={styles.shipAssetQuantity}>
+                            ×{ammo.quantity.toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {shipsByItemId.has(asset.itemId) && (
+                    <button
+                      type="button"
+                      className={`actionButton ${styles.importButton}`}
+                      title="View ship fitting"
+                      onClick={() => {
+                        const nestedShip = shipsByItemId.get(asset.itemId);
+                        if (nestedShip) onSelectShip(nestedShip);
+                      }}
+                    >
+                      <span>VIEW FITTING</span>
+                      <ArrowRight aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
               ))}
-            </div>
-          )}
+            </section>
+          ))}
         </div>
-      </DialogContent>
-    </Dialog>
+      )}
+    </ResponsiveDialogDrawer>
   );
 }

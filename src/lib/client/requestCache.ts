@@ -309,40 +309,44 @@ export function groupClientAssetsByLocation(data: ClientAssetsResponse) {
   return [...facilityLocations, ...anchoredLocations];
 }
 
-export type ClientShipsResponse = {
-  assets?: Array<{
-    itemId: number;
-    typeId: number;
-    name?: string;
-    quantity: number;
+export type ClientShipItem = {
+  itemId: number;
+  typeId: number;
+  name?: string;
+  quantity: number;
+  locationId: number;
+  locationType: string;
+  locationFlag: string;
+  isSingleton: boolean;
+  isAmmo: boolean;
+};
+
+export type ClientShip = {
+  itemId: number;
+  typeId: number;
+  name?: string;
+  systemId?: number;
+  systemName?: string;
+  isInSpace?: boolean;
+  pilotId?: number;
+  pilotName?: string;
+  locationName?: string;
+  ownerType: "character" | "corporation";
+  ownerId: number;
+  rootLocation?: {
     locationId: number;
-    locationType: string;
-    locationFlag: string;
-    isSingleton: boolean;
-    isAmmo?: boolean;
-    ownerType: "character" | "corporation";
-    ownerId: number;
-    rootLocation?: {
-      locationId: number;
-      kind: "station" | "structure" | "solar_system";
-      name?: string;
-      typeId?: number;
-      systemId?: number;
-      regionId?: number;
-      resolved: boolean;
-    };
-  }>;
-  ships?: Array<{
-    itemId: number;
-    typeId: number;
+    kind: "station" | "structure" | "solar_system";
     name?: string;
+    typeId?: number;
     systemId?: number;
-    systemName?: string;
-    isInSpace?: boolean;
-    pilotId?: number;
-    pilotName?: string;
-    locationName?: string;
-  }>;
+    regionId?: number;
+    resolved: boolean;
+  };
+  items: ClientShipItem[];
+};
+
+export type ClientShipsResponse = {
+  ships?: ClientShip[];
   types?: Array<{ typeId: number; name: string }>;
 };
 
@@ -375,6 +379,12 @@ export type ClientJobsResponse = {
     productTypeId?: number;
     productTypeName?: string;
   }>;
+};
+
+export type ClientIndustrySlots = {
+  Manufacturing: number;
+  Reactions: number;
+  Science: number;
 };
 
 export type ClientCharacter = {
@@ -410,6 +420,7 @@ export type ClientCorporationSettings = {
 export type ClientCharacterStatus = {
   characterId: number;
   assets?: ClientEndpointStatus;
+  industrySlots?: ClientIndustrySlots;
   skills?: ClientEndpointStatus & {
     body?: Array<{ skillId: number; activeSkillLevel: number }> | null;
   };
@@ -589,9 +600,9 @@ export async function loadClientOwnerSnapshotAssets(
   const typeIds = [
     ...new Set(
       snapshots.flatMap((snapshot) => [
-        ...snapshot.assets.map((asset) => asset.typeId),
-        ...(snapshot.marketOrders.marketOrderStock ?? []).map((item) => item.typeId),
-        ...snapshot.jobs.jobs.flatMap((job) => [job.blueprintTypeId, job.productTypeId ?? 0]),
+        ...snapshot.assets.data.map((asset) => asset.typeId),
+        ...snapshot.marketOrders.data.map((order) => order.typeId),
+        ...snapshot.jobs.data.flatMap((job) => [job.blueprintTypeId, job.productTypeId ?? 0]),
       ]),
     ),
   ].filter((typeId) => typeId > 0);
@@ -627,6 +638,26 @@ function loadClientFacilities(language: SdeLanguage, reload = false) {
   return request;
 }
 
+async function loadClientSystemNames(systemIds: readonly number[]) {
+  const entries = await Promise.all(
+    systemIds.map(async (systemId) => {
+      const response = await fetch(
+        `/api/reference/systems?systemId=${systemId}&language=en`,
+        { cache: "no-store" },
+      );
+      if (!response.ok) return undefined;
+      const data = (await response.json()) as {
+        item?: { systemId?: number; name?: string } | null;
+      };
+      if (data.item?.systemId !== systemId || !data.item.name) return undefined;
+      return [systemId, data.item.name] as const;
+    }),
+  );
+  return new Map(
+    entries.filter((entry): entry is readonly [number, string] => entry !== undefined),
+  );
+}
+
 export function loadClientShips(reload = false) {
   if (reload) shipsResponse = undefined;
   if (!reload && shipsResponse) return Promise.resolve(shipsResponse);
@@ -638,17 +669,41 @@ export function loadClientShips(reload = false) {
       ]);
       const typeIds = [
         ...new Set(
-          snapshots.flatMap((snapshot) => snapshot.ships.ships.map((ship) => ship.typeId)),
+          snapshots.flatMap((snapshot) =>
+            snapshot.ships.data.flatMap((ship) => [
+              ship.typeId,
+              ...ship.items.map((item) => item.typeId),
+            ]),
+          ),
         ),
       ];
-      const metadata = await fetchTypeMetadata(typeIds, "en");
+      const systemIds = [
+        ...new Set(
+          snapshots.flatMap((snapshot) =>
+            snapshot.ships.data.flatMap((ship) =>
+              ship.systemId === undefined ? [] : [ship.systemId],
+            ),
+          ),
+        ),
+      ];
+      const [metadata, systemNames] = await Promise.all([
+        fetchTypeMetadata(typeIds, "en"),
+        loadClientSystemNames(systemIds),
+      ]);
       const characterNames = new Map(
         (session.characters ?? []).map((character) => [
           character.characterId,
           character.characterName,
         ]),
       );
-      const data = projectOwnerSnapshotsToClientShips(snapshots, { metadata, characterNames });
+      const data = projectOwnerSnapshotsToClientShips(
+        snapshots,
+        {
+          metadata,
+          characterNames,
+          systemNames,
+        },
+      );
       shipsResponse = data;
       return data;
     })().finally(() => {
@@ -662,17 +717,25 @@ export function loadClientJobs(reload = false) {
   if (!reload && jobsResponse) return Promise.resolve(jobsResponse);
   if (jobsRequest) return jobsRequest;
   jobsRequest = (async () => {
-    const snapshots = await loadClientOwnerSnapshots(reload);
+    const [snapshots, state] = await Promise.all([
+      loadClientOwnerSnapshots(reload),
+      loadClientCharacterState(reload),
+    ]);
     const typeIds = [
       ...new Set(
         snapshots.flatMap((snapshot) =>
-          snapshot.jobs.jobs.flatMap((job) => [job.blueprintTypeId, job.productTypeId ?? 0]),
+          snapshot.jobs.data.flatMap((job) => [job.blueprintTypeId, job.productTypeId ?? 0]),
         ),
       ),
     ].filter((typeId) => typeId > 0);
     const metadata = await fetchTypeMetadata(typeIds, "en");
+    const industrySlots = new Map(
+      (state.characters ?? []).flatMap((character) =>
+        character.industrySlots ? [[character.characterId, character.industrySlots] as const] : [],
+      ),
+    );
     const data = snapshots.length
-      ? projectOwnerSnapshotsToClientJobs(snapshots, metadata)
+      ? projectOwnerSnapshotsToClientJobs(snapshots, metadata, industrySlots)
       : emptyJobsResponse;
     jobsResponse = data;
     return data;

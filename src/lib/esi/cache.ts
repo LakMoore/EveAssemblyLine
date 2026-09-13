@@ -66,7 +66,10 @@ import {
 } from "./corporationAccess";
 import { formatLocationName, normalizeLocationName } from "@/lib/reference/locationName";
 import { retainAssetAncestors } from "./assetGraph";
-import { addMarketBuyOrderQuantities } from "./marketOrderQuantities";
+import {
+  addMarketBuyOrderQuantitiesByLocation,
+  type MarketOrderBuyQuantity,
+} from "./marketOrderQuantities";
 
 export type EndpointStatus = "fresh" | "cached" | "stale" | "rate_limited" | "error";
 export type EndpointCache<T> = {
@@ -2865,10 +2868,10 @@ export async function getMarketOrderBuyQuantities(
     includePersonalOrders?: boolean;
     includeCorporationOrders?: boolean;
   } = {},
-): Promise<Record<string, number> | null> {
+): Promise<MarketOrderBuyQuantity[] | null> {
   const includePersonalOrders = options.includePersonalOrders ?? true;
   const includeCorporationOrders = options.includeCorporationOrders ?? true;
-  const quantities = new Map<number, number>();
+  const quantities = new Map<string, MarketOrderBuyQuantity>();
   const seenOrderIds = new Set<number>();
   let hasUsableSource = false;
   let hasUnavailableSource = false;
@@ -2881,7 +2884,7 @@ export async function getMarketOrderBuyQuantities(
         continue;
       }
       hasUsableSource = true;
-      addMarketBuyOrderQuantities(
+      addMarketBuyOrderQuantitiesByLocation(
         quantities,
         cache.marketOrders?.lastBody ?? [],
         seenOrderIds,
@@ -2902,7 +2905,7 @@ export async function getMarketOrderBuyQuantities(
       const policy = projection.policiesByCorporationId.get(corporationId);
       const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
       const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
-      addMarketBuyOrderQuantities(
+      addMarketBuyOrderQuantitiesByLocation(
         quantities,
         (cache.marketOrders?.lastBody ?? []).filter(
           (order) =>
@@ -2920,9 +2923,7 @@ export async function getMarketOrderBuyQuantities(
   }
 
   if (!hasUsableSource && hasUnavailableSource) return null;
-  return Object.fromEntries(
-    [...quantities].map(([typeId, quantity]) => [String(typeId), quantity]),
-  );
+  return [...quantities.values()];
 }
 
 export async function getBlueprintInstances(
@@ -2965,6 +2966,7 @@ export async function getStateStatus(
   characters?: CharacterTokenRecord[],
 ) {
   const records = characters ?? (await getCharactersByIds(characterIds));
+  const industrySlots = await getCharacterIndustrySlots(characterIds, sessionId);
   const characterById = new Map(records.map((character) => [character.characterId, character]));
   const corporationsByCharacter = new Map<number, number[]>();
   for (const character of records) {
@@ -2977,6 +2979,11 @@ export async function getStateStatus(
     characters: characterIds.map((characterId) => ({
       characterId,
       onDeployment: characterById.get(characterId)?.onDeployment ?? false,
+      industrySlots: industrySlots.get(characterId) ?? {
+        Manufacturing: 1,
+        Reactions: 1,
+        Science: 1,
+      },
       assets: toClientEndpointStatus(
         getCache(characterCaches, characterId, sessionId).allAssetsRaw,
       ) ?? {
