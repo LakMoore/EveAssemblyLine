@@ -601,7 +601,7 @@ export default function CorporationHangarSettings() {
                               ) : (
                                 <Switch
                                   checked={source.selected}
-                                  disabled={!source.canQuery}
+                                  disabled={savingSourceKey !== null || !source.canQuery}
                                   onCheckedChange={(checked) => {
                                     void setCorporationSourceSelected(source, "direct", checked);
                                   }}
@@ -634,6 +634,7 @@ export default function CorporationHangarSettings() {
                                     ) : (
                                       <Switch
                                         checked={container.selected}
+                                        disabled={savingSourceKey !== null}
                                         onCheckedChange={(checked) => {
                                           void setCorporationSourceSelected(
                                             source,

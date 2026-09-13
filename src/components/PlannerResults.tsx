@@ -673,12 +673,12 @@ function PlannerResultsContent({
     ),
   ];
   const locationNamesById = new Map([
-    ...locationOptions.map((option) => [option.locationId, option.name] as const),
     ...stock.flatMap((item) =>
       item.rootLocationId !== undefined && item.sourceLocationName
         ? [[item.rootLocationId, item.sourceLocationName] as const]
         : [],
     ),
+    ...locationOptions.map((option) => [option.locationId, option.name] as const),
   ]);
 
   async function copyPlanId() {
@@ -1588,7 +1588,9 @@ function PlanList({
                     const typeId = entry.typeId;
                     const name = getEntryName(entry);
                     const marketBuyOrderQuantity =
-                      activeTab === "Buy" ? (marketBuyOrderQuantities?.[String(typeId)] ?? 0) : 0;
+                      activeTab === "Buy" || activeTab === "Plan"
+                        ? (marketBuyOrderQuantities?.[String(typeId)] ?? 0)
+                        : 0;
                     const isPlanBpc = "kind" in entry && entry.kind === "bpc";
                     const isBpcPurchase = activeTab === "Buy" && "bpoCount" in entry;
                     const buyBpoEntry = isBpcPurchase && "bpoCount" in entry ? entry : null;
@@ -1826,6 +1828,9 @@ function PlanList({
                                         }
                                         haulingQuantity={planHaulingQuantity}
                                       />
+                                    )}
+                                    {column === "Buy/Build" && (
+                                      <MarketBuyOrderIndicator quantity={marketBuyOrderQuantity} />
                                     )}
                                     {planCells[column]}
                                   </span>

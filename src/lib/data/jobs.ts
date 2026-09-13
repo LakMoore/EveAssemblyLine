@@ -253,6 +253,7 @@ async function buildJobsResponse(
         characterId: job.installerId,
         ownerId: job.ownerId,
         ownerType: job.ownerType,
+        activityId: job.activityId,
         activity: activityNames[job.activityId] ?? "Industry job",
         status: job.status,
         runs: job.runs,

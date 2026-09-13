@@ -66,6 +66,7 @@ import {
 } from "./corporationAccess";
 import { formatLocationName, normalizeLocationName } from "@/lib/reference/locationName";
 import { retainAssetAncestors } from "./assetGraph";
+import { addMarketBuyOrderQuantities } from "./marketOrderQuantities";
 
 export type EndpointStatus = "fresh" | "cached" | "stale" | "rate_limited" | "error";
 export type EndpointCache<T> = {
@@ -192,24 +193,31 @@ function corporationSourceRoot(
   rawAssetsByItemId: ReadonlyMap<number, AssetRecord>,
 ) {
   const visited = new Set<number>();
-  let sourceLocationFlag = isCorporationHangarFlag(locationFlag) ? locationFlag : undefined;
-  let current = rawAssetsByItemId.get(locationId);
+  const directParent = rawAssetsByItemId.get(locationId);
+  let source =
+    !directParent && isCorporationHangarFlag(locationFlag)
+      ? { rootLocationId: locationId, locationFlag }
+      : undefined;
+  let current = directParent;
   while (current && !visited.has(current.itemId)) {
     visited.add(current.itemId);
     if (isCorporationHangarFlag(current.locationFlag)) {
-      sourceLocationFlag = current.locationFlag;
-    }
-    if (!rawAssetsByItemId.has(current.locationId)) {
       return {
         rootLocationId: current.locationId,
-        locationFlag: sourceLocationFlag,
+        locationFlag: current.locationFlag,
       };
+    }
+    if (!rawAssetsByItemId.has(current.locationId)) {
+      return (
+        source
+        ?? (isCorporationHangarFlag(locationFlag)
+          ? { rootLocationId: current.locationId, locationFlag }
+          : undefined)
+      );
     }
     current = rawAssetsByItemId.get(current.locationId);
   }
-  return isCorporationHangarFlag(locationFlag)
-    ? { rootLocationId: locationId, locationFlag: sourceLocationFlag }
-    : undefined;
+  return source;
 }
 
 function isDescendantOfContainer(
@@ -385,7 +393,7 @@ export function getCorporationLocationSource(
 ) {
   for (const asset of rawAssetsByItemId.values()) {
     const source = corporationSourceRoot(asset.locationId, asset.locationFlag, rawAssetsByItemId);
-    if (source?.rootLocationId === locationId && source.locationFlag) {
+    if (source?.rootLocationId === locationId) {
       return {
         rootLocationId: source.rootLocationId,
         locationFlag: "",
@@ -405,7 +413,7 @@ function isCorporationLocationAccessible(
 ) {
   for (const asset of rawAssetsByItemId.values()) {
     const source = corporationSourceRoot(asset.locationId, asset.locationFlag, rawAssetsByItemId);
-    if (!source || source.rootLocationId !== locationId || !source.locationFlag) continue;
+    if (!source || source.rootLocationId !== locationId) continue;
     const permission = getCorporationHangarPermissions(
       characters,
       policy.corporationId,
@@ -1433,6 +1441,15 @@ async function cacheResolvedAssets(
     token,
     knownNonStructureItemIds,
   );
+  const indexedAssetsByItemId = new Map(indexedAssets.map((asset) => [asset.itemId, asset]));
+
+  function addLocationIds(asset: AssetRecord): AssetRecord {
+    return {
+      ...asset,
+      ...resolveAssetLocationIds(asset, indexedAssetsByItemId, rootLocationsByItemId),
+    };
+  }
+
   const inferredRoots = new Map<number, Promise<AssetLocation | null>>();
 
   function inferRoot(locationId: number, asset: AssetRecord) {
@@ -1447,10 +1464,10 @@ async function cacheResolvedAssets(
   const resolvedStockAssets = await Promise.all(
     [...assetIndexes.stockAssetsByItemId.values()].map(async (asset) => {
       const cachedRoot = rootLocationsByItemId.get(asset.locationId);
-      if (cachedRoot) return { ...asset, rootLocation: cachedRoot };
+      if (cachedRoot) return addLocationIds({ ...asset, rootLocation: cachedRoot });
       try {
         const rootLocation = await inferRoot(asset.locationId, asset);
-        return rootLocation ? { ...asset, rootLocation } : asset;
+        return addLocationIds(rootLocation ? { ...asset, rootLocation } : asset);
       }
       catch (error) {
         console.warn(
@@ -1461,7 +1478,7 @@ async function cacheResolvedAssets(
             error,
           },
         );
-        return asset;
+        return addLocationIds(asset);
       }
     }),
   );
@@ -1472,20 +1489,25 @@ async function cacheResolvedAssets(
   }
   const resolvedByItemId = new Map(resolvedStockAssets.map((asset) => [asset.itemId, asset]));
 
-  cache.allAssetsRaw = setFresh(namedAssets, headers, previous, preserveLastModified);
+  cache.allAssetsRaw = setFresh(
+    namedAssets.map(addLocationIds),
+    headers,
+    previous,
+    preserveLastModified,
+  );
   cache.assetItemIds = assetItemIds;
   cache.stockAssetsByItemId = resolvedByItemId;
   cache.rootLocationsByItemId = rootLocationsByItemId;
   const resolvedShipAssets = await Promise.all(
     [...assetIndexes.shipAssetsByItemId.values()].map(async (asset) => {
       const cachedRoot = rootLocationsByItemId.get(asset.locationId);
-      if (cachedRoot) return { ...asset, rootLocation: cachedRoot };
+      if (cachedRoot) return addLocationIds({ ...asset, rootLocation: cachedRoot });
       try {
         const rootLocation = await inferRoot(asset.locationId, asset);
-        return rootLocation ? { ...asset, rootLocation } : asset;
+        return addLocationIds(rootLocation ? { ...asset, rootLocation } : asset);
       }
       catch {
-        return asset;
+        return addLocationIds(asset);
       }
     }),
   );
@@ -1630,6 +1652,43 @@ async function getRealParent(
     };
   }
   return null;
+}
+
+export type AssetLocationIds = {
+  containerId: number;
+  rootLocationId: number | null;
+  hangarId: number | null;
+};
+
+/** Resolves the immediate container, outermost item, and station/structure for an asset. */
+export function resolveAssetLocationIds(
+  asset: AssetRecord,
+  assetsByItemId: ReadonlyMap<number, AssetRecord>,
+  rootLocationsByItemId: ReadonlyMap<number, AssetLocation>,
+): AssetLocationIds {
+  const containerId = asset.locationId;
+  const visited = new Set<number>();
+  let currentLocationId = containerId;
+  let hangarId: number | null = null;
+
+  while (!visited.has(currentLocationId)) {
+    visited.add(currentLocationId);
+    const parent = assetsByItemId.get(currentLocationId);
+    if (!parent) break;
+    hangarId = currentLocationId;
+    currentLocationId = parent.locationId;
+  }
+
+  const rootLocation =
+    rootLocationsByItemId.get(containerId)
+    ?? (asset.rootLocation && "kind" in asset.rootLocation ? asset.rootLocation : undefined);
+  const rootLocationId =
+    rootLocation?.locationId
+    ?? (asset.locationType === "station" || asset.locationType === "structure"
+      ? asset.locationId
+      : null);
+
+  return { containerId, rootLocationId, hangarId };
 }
 
 async function resolveRootLocations(
@@ -2810,14 +2869,9 @@ export async function getMarketOrderBuyQuantities(
   const includePersonalOrders = options.includePersonalOrders ?? true;
   const includeCorporationOrders = options.includeCorporationOrders ?? true;
   const quantities = new Map<number, number>();
+  const seenOrderIds = new Set<number>();
   let hasUsableSource = false;
   let hasUnavailableSource = false;
-  const addOrders = (orders: readonly MarketOrderRecord[]) => {
-    for (const order of orders) {
-      if (!order.isBuyOrder || order.volumeRemain <= 0) continue;
-      quantities.set(order.typeId, (quantities.get(order.typeId) ?? 0) + order.volumeRemain);
-    }
-  };
 
   if (includePersonalOrders) {
     for (const characterId of characterIds) {
@@ -2827,7 +2881,12 @@ export async function getMarketOrderBuyQuantities(
         continue;
       }
       hasUsableSource = true;
-      addOrders(cache.marketOrders?.lastBody ?? []);
+      addMarketBuyOrderQuantities(
+        quantities,
+        cache.marketOrders?.lastBody ?? [],
+        seenOrderIds,
+        { includeCorporationOrders: false },
+      );
     }
   }
 
@@ -2843,7 +2902,8 @@ export async function getMarketOrderBuyQuantities(
       const policy = projection.policiesByCorporationId.get(corporationId);
       const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
       const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
-      addOrders(
+      addMarketBuyOrderQuantities(
+        quantities,
         (cache.marketOrders?.lastBody ?? []).filter(
           (order) =>
             !policy
@@ -2854,6 +2914,7 @@ export async function getMarketOrderBuyQuantities(
               rawAssetsByItemId,
             ),
         ),
+        seenOrderIds,
       );
     }
   }

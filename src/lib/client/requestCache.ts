@@ -1,11 +1,22 @@
 import type { PlanStockItem, StockItem } from "@/lib/planning/types";
-import type { Facility } from "@/lib/planning/facilities";
+import type { Facility, FacilityResponse } from "@/lib/planning/facilities";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import { formatLocationName, normalizeLocationName } from "@/lib/reference/locationName";
-import { loadEndpointRecord, saveEndpointResponse } from "./refreshCache";
+import { fetchTypeMetadata } from "@/lib/reference/types";
+import {
+  loadOwnerSnapshots,
+  type ClientOwner,
+  type ClientOwnerSnapshot,
+} from "./ownerSnapshotCache";
+import {
+  projectOwnerSnapshotsToClientAssets,
+  projectOwnerSnapshotsToClientJobs,
+  projectOwnerSnapshotsToClientShips,
+} from "./ownerSnapshotProjection";
 
 export type ClientSession = {
   authenticated?: boolean;
+  snapshotScope?: string;
   characters?: Array<ClientCharacter & ClientCharacterStatus>;
 };
 
@@ -25,6 +36,7 @@ export type ClientRefreshEventDetail = {
   }>;
   corporationSources?: ClientCorporationSource[];
   ships?: ClientShipsResponse | null;
+  ownerSnapshots?: ClientOwnerSnapshot[];
 };
 
 export type ClientAssetsResponse = {
@@ -82,6 +94,35 @@ export function normalizeClientAssetsResponse(data: ClientAssetsResponse): Clien
           }
         : {}),
     })),
+  };
+}
+
+export function applyCorporationSettings(
+  data: ClientAssetsResponse,
+  settings: readonly ClientCorporationSettings[],
+): ClientAssetsResponse {
+  const settingsByCorporationId = new Map(settings.map((entry) => [entry.corporationId, entry]));
+  return {
+    ...data,
+    corporationSources: (data.corporationSources ?? []).map((source) => {
+      const corporationSettings = settingsByCorporationId.get(source.corporationId);
+      if (!corporationSettings) return source;
+      const selectedDirectHangar = corporationSettings.directHangars.some(
+        (entry) =>
+          entry.rootLocationId === source.rootLocationId
+          && entry.locationFlag === source.locationFlag,
+      );
+      const selectedContainerIds = new Set(corporationSettings.containerItemIds);
+      return {
+        ...source,
+        selected: corporationSettings.supportEnabled && selectedDirectHangar,
+        containers: source.containers.map((container) => ({
+          ...container,
+          selected:
+            corporationSettings.supportEnabled && selectedContainerIds.has(container.itemId),
+        })),
+      };
+    }),
   };
 }
 
@@ -394,111 +435,68 @@ export type ClientEndpointStatus = {
 
 let sessionRequest: Promise<ClientSession> | undefined;
 const assetsRequests = new Map<string, Promise<ClientAssetsResponse>>();
-const assetsResponses = new Map<string, ClientAssetsResponse>();
+const assetsResponses = new Map<string, { scope: string; data: ClientAssetsResponse }>();
+let assetsCacheGeneration = 0;
+const facilitiesRequests = new Map<string, Promise<Facility[]>>();
+const facilitiesResponses = new Map<string, Facility[]>();
 let shipsRequest: Promise<ClientShipsResponse> | undefined;
 let shipsResponse: ClientShipsResponse | undefined;
 let jobsRequest: Promise<ClientJobsResponse> | undefined;
 let jobsResponse: ClientJobsResponse | undefined;
 let corporationSettingsRequest: Promise<ClientCorporationSettings[]> | undefined;
 let corporationSettingsResponse: ClientCorporationSettings[] | undefined;
+let ownerSnapshotsRequest: Promise<ClientOwnerSnapshot[]> | undefined;
+let ownerSnapshotsScope: string | undefined;
 
 const emptyJobsResponse: ClientJobsResponse = { slotUsage: {}, jobs: [] };
 
-function loadJson<T>(
-  url: string,
-  endpointKey: string,
-  pending: Promise<T> | undefined,
-  setPending: (value: Promise<T> | undefined) => void,
-  shouldSave = () => true,
-) {
-  if (pending) return pending;
-  const request = fetch(url, { cache: "no-store" })
-    .then(async (response) => {
-      const data = (await response.json()) as T;
-      if (!response.ok) throw new Error(`Could not load ${url}.`);
-      if (shouldSave()) await saveEndpointResponse(endpointKey, url, data);
-      return data;
-    })
-    .catch((error) => {
-      setPending(undefined);
-      throw error;
-    });
-  setPending(request);
-  return request;
-}
-
 export function loadClientSession(reload = false) {
-  if (reload) sessionRequest = undefined;
-  sessionRequest
-    ??= fetch("/api/auth/session")
+  if (reload) {
+    sessionRequest = undefined;
+  }
+  if (!sessionRequest) {
+    const request = fetch("/api/auth/session")
       .then((response) => response.json() as Promise<ClientSession>)
       .catch((error) => {
-        sessionRequest = undefined;
+        if (sessionRequest === request) sessionRequest = undefined;
         throw error;
       });
+    sessionRequest = request;
+  }
   return sessionRequest;
+}
+
+function invalidateClientAssetRequests() {
+  assetsCacheGeneration += 1;
+  assetsRequests.clear();
+  assetsResponses.clear();
 }
 
 export function loadClientAssets(language: SdeLanguage, reload = false) {
   const key = language;
+  if (reload) {
+    invalidateClientAssetRequests();
+  }
   const pending = assetsRequests.get(key);
-  if (pending) return pending;
-  const cached = assetsResponses.get(key);
-  if (!reload && cached && isCompleteClientAssetsResponse(cached)) return Promise.resolve(cached);
-
-  const query = new URLSearchParams({ language });
-  const url = `/api/state/assets?${query.toString()}`;
-  const loadCachedRecord = loadEndpointRecord<ClientAssetsResponse>("state/assets").then(
-    (record) => {
-      if (!record) return null;
-      try {
-        const cachedLanguage = new URL(record.url, window.location.origin).searchParams.get(
-          "language",
-        );
-        if (cachedLanguage !== language) return null;
+  if (!reload && pending) return pending;
+  const generation = assetsCacheGeneration;
+  let request: Promise<ClientAssetsResponse>;
+  request = loadClientSession(reload)
+    .then(async (session) => {
+      const scope = session.authenticated ? session.snapshotScope : undefined;
+      const cachedResponse = assetsResponses.get(key);
+      if (!reload && scope && cachedResponse?.scope === scope) return cachedResponse.data;
+      const data = await loadClientOwnerSnapshotAssets(language, [], reload);
+      const settings = await loadClientCorporationSettings();
+      const resolvedData = applyCorporationSettings(data, settings);
+      if (scope && generation === assetsCacheGeneration) {
+        assetsResponses.set(key, { scope, data: resolvedData });
       }
-      catch {
-        return null;
-      }
-      return {
-        data: isCompleteClientAssetsResponse(record.data)
-          ? normalizeClientAssetsResponse(record.data)
-          : undefined,
-        etag: record.etag,
-      };
-    },
-  );
-  const request = loadCachedRecord
-    .then(async (cachedRecord) => {
-      if (!reload && cachedRecord?.data) {
-        assetsResponses.set(key, cachedRecord.data);
-        return cachedRecord.data;
-      }
-
-      const requestOptions: RequestInit = {
-        cache: "no-store",
-        ...(cachedRecord?.etag ? { headers: { "If-None-Match": cachedRecord.etag } } : {}),
-      };
-      let response = await fetch(url, requestOptions);
-      if (response.status === 304) {
-        if (cachedRecord?.data) {
-          assetsResponses.set(key, cachedRecord.data);
-          return cachedRecord.data;
-        }
-        response = await fetch(url, { cache: "no-store" });
-      }
-      const data = normalizeClientAssetsResponse((await response.json()) as ClientAssetsResponse);
-      if (!response.ok) throw new Error("Could not load assets.");
-      await saveEndpointResponse(
-        "state/assets",
-        url,
-        data,
-        response.headers.get("etag") ?? undefined,
-      );
-      assetsResponses.set(key, data);
-      return data;
+      return resolvedData;
     })
-    .finally(() => assetsRequests.delete(key));
+    .finally(() => {
+      if (assetsRequests.get(key) === request) assetsRequests.delete(key);
+    });
   assetsRequests.set(key, request);
   return request;
 }
@@ -507,40 +505,167 @@ export function clearClientAssetsCache(language: SdeLanguage) {
   assetsResponses.delete(language);
 }
 
+/** Returns the unique character and supported corporation owners in a client session. */
+export function getClientOwnerSnapshotOwners(session: ClientSession): ClientOwner[] {
+  const characterOwners = (session.characters ?? []).map((character) => ({
+    kind: "character" as const,
+    id: character.characterId,
+  }));
+  const corporationOwners = [
+    ...new Set(
+      (session.characters ?? [])
+        .filter(
+          (character) =>
+            character.corporationId !== undefined && character.corporationSupportEnabled === true,
+        )
+        .map((character) => character.corporationId),
+    ),
+  ]
+    .filter((id): id is number => id !== undefined)
+    .map((id) => ({ kind: "corporation" as const, id }));
+  return [...characterOwners, ...corporationOwners];
+}
+
+/** Loads the complete owner snapshots currently cached for the authenticated collection. */
+export function loadClientOwnerSnapshots(reload = false) {
+  if (reload) {
+    ownerSnapshotsRequest = undefined;
+    ownerSnapshotsScope = undefined;
+  }
+  return loadClientSession(reload).then(async (session) => {
+    if (!session.authenticated || !session.snapshotScope) return [];
+    if (ownerSnapshotsRequest && ownerSnapshotsScope === session.snapshotScope) {
+      return ownerSnapshotsRequest;
+    }
+    const owners = getClientOwnerSnapshotOwners(session);
+    const request = loadOwnerSnapshots(owners, session.snapshotScope)
+      .then((records) => records.map((record) => record.snapshot))
+      .finally(() => {
+        if (ownerSnapshotsRequest === request) ownerSnapshotsRequest = undefined;
+      });
+    ownerSnapshotsScope = session.snapshotScope;
+    ownerSnapshotsRequest = request;
+    return request;
+  });
+}
+
+/** Reports whether any expected owner snapshot predates the last completed refresh. */
+export async function ownerSnapshotsNeedRefresh(refreshAt: string | null) {
+  if (!refreshAt) return false;
+  const session = await loadClientSession();
+  if (!session.authenticated || !session.snapshotScope) return false;
+  const owners = getClientOwnerSnapshotOwners(session);
+  const records = await loadOwnerSnapshots(owners, session.snapshotScope);
+  const refreshTimestamp = Date.parse(refreshAt);
+  return (
+    records.length < owners.length
+    || records.some((record) => {
+      const savedTimestamp = Date.parse(record.savedAt);
+      return !Number.isFinite(savedTimestamp) || savedTimestamp < refreshTimestamp;
+    })
+  );
+}
+
+/** Loads owner snapshots and enriches them into the client asset contract. */
+export async function loadClientOwnerSnapshotAssets(
+  language: SdeLanguage,
+  facilities: readonly Facility[] = [],
+  reload = false,
+) {
+  const snapshots = await loadClientOwnerSnapshots(reload);
+  const session = await loadClientSession();
+  if (!session.authenticated) {
+    return { assets: [], facilities: [], corporationSources: [] } satisfies ClientAssetsResponse;
+  }
+  const resolvedFacilities =
+    facilities.length > 0 ? [...facilities] : await loadClientFacilities(language, reload);
+  const typeIds = [
+    ...new Set(
+      snapshots.flatMap((snapshot) => [
+        ...snapshot.assets.map((asset) => asset.typeId),
+        ...(snapshot.marketOrders.marketOrderStock ?? []).map((item) => item.typeId),
+      ]),
+    ),
+  ];
+  const metadata = await fetchTypeMetadata(typeIds, language);
+  return projectOwnerSnapshotsToClientAssets(
+    snapshots,
+    {
+      metadata,
+      facilities: resolvedFacilities,
+    },
+  );
+}
+
+function loadClientFacilities(language: SdeLanguage, reload = false) {
+  const pending = facilitiesRequests.get(language);
+  if (!reload && pending) return pending;
+  if (!reload) {
+    const cached = facilitiesResponses.get(language);
+    if (cached) return Promise.resolve(cached);
+  }
+  const request = fetch(`/api/facilities?language=${language}`, { cache: "no-store" })
+    .then(async (response) => {
+      const data = (await response.json()) as FacilityResponse;
+      if (!response.ok) throw new Error("Could not load facilities.");
+      const facilities = data.facilities;
+      facilitiesResponses.set(language, facilities);
+      return facilities;
+    })
+    .finally(() => {
+      if (facilitiesRequests.get(language) === request) facilitiesRequests.delete(language);
+    });
+  facilitiesRequests.set(language, request);
+  return request;
+}
+
 export function loadClientShips(reload = false) {
+  if (reload) shipsResponse = undefined;
   if (!reload && shipsResponse) return Promise.resolve(shipsResponse);
   shipsRequest
-    ??= fetch("/api/state/ships", { cache: "no-store" })
-      .then(async (response) => {
-        const data = (await response.json()) as ClientShipsResponse;
-        if (!response.ok) throw new Error("Could not load ships.");
-        await saveEndpointResponse("state/ships", "/api/state/ships", data);
-        shipsResponse = data;
-        return data;
-      })
-      .finally(() => {
-        shipsRequest = undefined;
-      });
+    ??= (async () => {
+      const [session, snapshots] = await Promise.all([
+        loadClientSession(reload),
+        loadClientOwnerSnapshots(reload),
+      ]);
+      const typeIds = [
+        ...new Set(
+          snapshots.flatMap((snapshot) => snapshot.ships.ships.map((ship) => ship.typeId)),
+        ),
+      ];
+      const metadata = await fetchTypeMetadata(typeIds, "en");
+      const characterNames = new Map(
+        (session.characters ?? []).map((character) => [
+          character.characterId,
+          character.characterName,
+        ]),
+      );
+      const data = projectOwnerSnapshotsToClientShips(snapshots, { metadata, characterNames });
+      shipsResponse = data;
+      return data;
+    })().finally(() => {
+      shipsRequest = undefined;
+    });
   return shipsRequest;
 }
 
 export function loadClientJobs(reload = false) {
+  if (reload) jobsResponse = undefined;
   if (!reload && jobsResponse) return Promise.resolve(jobsResponse);
   if (jobsRequest) return jobsRequest;
   jobsRequest = (async () => {
-    if (!reload) {
-      const cached = await loadEndpointRecord<ClientJobsResponse>("state/jobs");
-      if (cached) {
-        jobsResponse = cached.data;
-        return cached.data;
-      }
-      jobsResponse = emptyJobsResponse;
-      return emptyJobsResponse;
-    }
-    const response = await fetch("/api/state/jobs", { cache: "no-store" });
-    const data = (await response.json()) as ClientJobsResponse;
-    if (!response.ok) throw new Error("Could not load industry jobs.");
-    await saveEndpointResponse("state/jobs", "/api/state/jobs", data);
+    const snapshots = await loadClientOwnerSnapshots(reload);
+    const typeIds = [
+      ...new Set(
+        snapshots.flatMap((snapshot) =>
+          snapshot.jobs.jobs.flatMap((job) => [job.blueprintTypeId, job.productTypeId ?? 0]),
+        ),
+      ),
+    ].filter((typeId) => typeId > 0);
+    const metadata = await fetchTypeMetadata(typeIds, "en");
+    const data = snapshots.length
+      ? projectOwnerSnapshotsToClientJobs(snapshots, metadata)
+      : emptyJobsResponse;
     jobsResponse = data;
     return data;
   })().finally(() => {
@@ -611,9 +736,12 @@ export function loadClientCharacterState(reload = false): Promise<ClientCharacte
 }
 
 export function invalidateClientCharacterData() {
+  invalidateClientAssetRequests();
   sessionRequest = undefined;
   corporationSettingsResponse = undefined;
   corporationSettingsRequest = undefined;
+  ownerSnapshotsRequest = undefined;
+  ownerSnapshotsScope = undefined;
   jobsRequest = undefined;
   jobsResponse = undefined;
 }

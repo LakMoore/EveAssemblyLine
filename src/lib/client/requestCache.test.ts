@@ -2,10 +2,58 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   filterClientAssetsForPlanning,
+  getClientOwnerSnapshotOwners,
   groupClientAssetsByLocation,
   isCompleteClientAssetsResponse,
   normalizeClientAssetsResponse,
+  applyCorporationSettings,
 } from "./requestCache";
+
+void test("deduplicates supported corporation snapshot owners", () => {
+  const owners = getClientOwnerSnapshotOwners({
+    characters: [
+      {
+        characterId: 1,
+        characterName: "One",
+        onDeployment: false,
+        corporationId: 900,
+        corporationRoles: [],
+        rolesAtBase: [],
+        rolesAtHq: [],
+        rolesAtOther: [],
+        hasDirectorRole: false,
+        allowCorpRefreshOptIn: false,
+        hasAccountantRole: false,
+        hasTraderRole: false,
+        corporationSupportEnabled: true,
+      },
+      {
+        characterId: 2,
+        characterName: "Two",
+        onDeployment: false,
+        corporationId: 900,
+        corporationRoles: [],
+        rolesAtBase: [],
+        rolesAtHq: [],
+        rolesAtOther: [],
+        hasDirectorRole: false,
+        allowCorpRefreshOptIn: false,
+        hasAccountantRole: false,
+        hasTraderRole: false,
+        corporationSupportEnabled: true,
+      },
+    ],
+  });
+
+  assert.deepEqual(
+    owners,
+    [
+      { kind: "character", id: 1 },
+      { kind: "character", id: 2 },
+      { kind: "corporation", id: 900 },
+    ],
+  );
+});
 
 void test("requires the complete asset snapshot before using the local cache", () => {
   assert.equal(
@@ -17,6 +65,47 @@ void test("requires the complete asset snapshot before using the local cache", (
     true,
   );
   assert.equal(isCompleteClientAssetsResponse({ assets: [], facilities: [] }), false);
+});
+
+void test("reapplies saved corporation source selections to owner snapshot assets", () => {
+  const resolved = applyCorporationSettings(
+    {
+      assets: [],
+      facilities: [],
+      corporationSources: [
+        {
+          corporationId: 900,
+          rootLocationId: 600,
+          locationFlag: "CorpSAG1",
+          label: "Industry",
+          canTake: true,
+          canQuery: true,
+          selected: false,
+          containers: [
+            {
+              itemId: 44,
+              locationId: 44,
+              rootLocationId: 600,
+              selected: false,
+            },
+          ],
+        },
+      ],
+    },
+    [
+      {
+        corporationId: 900,
+        supportEnabled: true,
+        directHangars: [{ rootLocationId: 600, locationFlag: "CorpSAG1" }],
+        containerItemIds: [44],
+      },
+    ],
+  );
+
+  const resolvedSource = resolved.corporationSources?.[0];
+  assert.ok(resolvedSource);
+  assert.equal(resolvedSource.selected, true);
+  assert.equal(resolvedSource.containers[0]?.selected, true);
 });
 
 void test("groups each market order at its source location once", () => {

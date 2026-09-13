@@ -6,6 +6,7 @@ import {
   getCharacter,
   getCollectionCorporationSettings,
 } from "@/lib/auth/tokensStore";
+import { getCorporationSourcePolicies } from "@/lib/esi/cache";
 import { RefreshCoordinator, type RefreshUnit } from "@/lib/esi/refreshOrchestration";
 import {
   copyRefreshCache,
@@ -16,6 +17,7 @@ import {
   type RefreshProfiler,
 } from "@/lib/esi/cache";
 import { getEsiRateLimitUntil } from "@/lib/esi/client";
+import { getOwnerSnapshot, type OwnerSnapshot } from "@/lib/data/ownerSnapshot";
 
 const refreshIdSchema = z.coerce.number().int().positive();
 
@@ -95,37 +97,15 @@ async function handleRefreshRequestInternal(
   if (!parsedId.success) return json({ error: "Invalid refresh request." }, 400);
 
   const ownerId = parsedId.data;
-  let characterIds: number[];
-  profiler.start("loadCollectionCharacterIds");
-  try {
-    characterIds = await getSessionCharacterIds(session);
-  }
-  catch {
-    return json({ error: "ESI is not connected." }, 401);
-  }
-  finally {
-    profiler.end("loadCollectionCharacterIds");
-  }
-  if (characterIds.length === 0) return json({ error: "ESI is not connected." }, 401);
-
-  const requesterCharacterId =
-    kind === "corporation"
-    && session.authenticatedCharacterId !== undefined
-    && characterIds.includes(session.authenticatedCharacterId)
-      ? session.authenticatedCharacterId
-      : undefined;
-
-  if (kind === "character" && !characterIds.includes(ownerId)) {
-    return json({ error: "Character is not attached to this session." }, 403);
-  }
-
+  let characterIds: number[] = [];
   let authorizationCharacter: NonNullable<Awaited<ReturnType<typeof getCharacter>>> | null = null;
+  let corporationPolicies: Awaited<ReturnType<typeof getCorporationSourcePolicies>> = [];
   let unit: RefreshUnit;
   if (kind === "character") {
     profiler.start("loadCharacter");
     try {
       const character = await getCharacter(ownerId);
-      if (!character) return json({ error: "Character is not attached to this session." }, 403);
+      if (!character) return json({ error: "Character is unavailable." }, 404);
       authorizationCharacter = character;
     }
     catch {
@@ -134,6 +114,7 @@ async function handleRefreshRequestInternal(
     finally {
       profiler.end("loadCharacter");
     }
+    characterIds = [ownerId];
     unit = {
       key: `character:${ownerId}`,
       kind,
@@ -141,6 +122,23 @@ async function handleRefreshRequestInternal(
     };
   }
   else {
+    profiler.start("loadCollectionCharacterIds");
+    try {
+      characterIds = await getSessionCharacterIds(session);
+    }
+    catch {
+      return json({ error: "ESI is not connected." }, 401);
+    }
+    finally {
+      profiler.end("loadCollectionCharacterIds");
+    }
+    if (characterIds.length === 0) return json({ error: "ESI is not connected." }, 401);
+
+    const requesterCharacterId =
+      session.authenticatedCharacterId !== undefined
+      && characterIds.includes(session.authenticatedCharacterId)
+        ? session.authenticatedCharacterId
+        : undefined;
     profiler.start("loadAuthorizationCharacter");
     try {
       if (!session.collectionId) return json({ error: "Session collection is unavailable." }, 400);
@@ -198,11 +196,64 @@ async function handleRefreshRequestInternal(
   finally {
     profiler.end("refresh");
   }
+  let ownerSnapshot: OwnerSnapshot | undefined;
+  let snapshotError: unknown;
+  if (!refreshError) {
+    if (kind === "corporation") {
+      profiler.start("loadCorporationPolicies");
+      try {
+        const settings = session.collectionId
+          ? await getCollectionCorporationSettings(session.collectionId)
+          : [];
+        corporationPolicies = (
+          await getCorporationSourcePolicies(characterIds, settings, session.sessionId)
+        ).filter((policy) => policy.corporationId === ownerId);
+        if (corporationPolicies.length === 0) {
+          return json(
+            {
+              error: "Corporation source policy is unavailable for this refresh.",
+              code: "CORPORATION_POLICY_UNAVAILABLE",
+            },
+            403,
+          );
+        }
+      }
+      catch {
+        return json({ error: "ESI is not connected." }, 401);
+      }
+      finally {
+        profiler.end("loadCorporationPolicies");
+      }
+    }
+    profiler.start("snapshot");
+    try {
+      ownerSnapshot = await getOwnerSnapshot(
+        { kind, id: ownerId },
+        {
+          sessionId: session.sessionId,
+          characterIds,
+          corporationPolicies,
+          authorizationCharacterId: authorizationCharacter.characterId,
+        },
+        {
+          personalSellOrdersAsStock: true,
+          allCorporationSellOrdersAsStock: true,
+          myCorporationSellOrdersAsStock: true,
+        },
+      );
+    }
+    catch (error) {
+      snapshotError = error;
+    }
+    finally {
+      profiler.end("snapshot");
+    }
+  }
   profiler.start("status");
   try {
-    const errors = refreshError
-      ? [refreshError instanceof Error ? refreshError.message : "Refresh failed."]
-      : [];
+    const errors = [refreshError, snapshotError]
+      .filter((error) => error !== undefined)
+      .map((error) => (error instanceof Error ? error.message : "Refresh failed."));
     const uniqueErrors = [...new Set(errors)];
     return json({
       success: uniqueErrors.length === 0,
@@ -211,6 +262,7 @@ async function handleRefreshRequestInternal(
       errors: uniqueErrors,
       refreshedAt: new Date().toISOString(),
       rateLimitedUntil: getEsiRateLimitUntil(),
+      ...(ownerSnapshot ? { ownerSnapshot } : {}),
     });
   }
   finally {

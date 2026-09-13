@@ -6,7 +6,12 @@ export type ClientEndpointRecord<T = unknown> = {
   key: string;
   url: string;
   data: T;
+  scope?: string;
   etag?: string;
+  generation?: {
+    epoch: string;
+    value: number;
+  };
   returnedAt: string;
   refreshAt: string | null;
 };
@@ -14,15 +19,15 @@ export type ClientEndpointRecord<T = unknown> = {
 export const refreshDependentEndpoints = {
   welcome: [],
   public: [],
-  planner: ["state/assets", "state/jobs", "compress/options"],
+  planner: ["owner-assets", "owner-jobs", "compress/options"],
   appraise: [],
-  signals: ["state/assets"],
-  compress: ["state/assets", "compress/options"],
-  assets: ["state/assets"],
-  jobs: ["state/jobs"],
-  ships: ["state/ships"],
-  structures: ["state/assets"],
-  corpHangars: ["state/assets"],
+  signals: ["owner-assets"],
+  compress: ["owner-assets", "compress/options"],
+  assets: ["owner-assets"],
+  jobs: ["owner-jobs"],
+  ships: ["owner-ships"],
+  structures: ["owner-assets"],
+  corpHangars: ["owner-assets"],
   characters: [],
   settings: [],
   imagechecker: [],
@@ -63,21 +68,43 @@ export function loadEndpointRecord<T>(key: string) {
   );
 }
 
-export async function saveEndpointResponse<T>(key: string, url: string, data: T, etag?: string) {
+export async function saveEndpointResponse<T>(
+  key: string,
+  url: string,
+  data: T,
+  etag?: string,
+  scope?: string,
+  generation?: { epoch: string; value: number },
+) {
   const returnedAt = new Date().toISOString();
   const refreshAt = await loadLastRefreshAt();
   const record: ClientEndpointRecord<T> = {
     key,
     url,
     data,
+    ...(scope ? { scope } : {}),
     ...(etag ? { etag } : {}),
+    ...(generation === undefined ? {} : { generation }),
     returnedAt,
     refreshAt,
   };
   const database = await getPlanningDatabase();
   return new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(endpointCacheStoreName, "readwrite");
-    transaction.objectStore(endpointCacheStoreName).put(record, `endpoint:${key}`);
+    const store = transaction.objectStore(endpointCacheStoreName);
+    const existingRequest = store.get(`endpoint:${key}`);
+    existingRequest.onsuccess = () => {
+      const existing = existingRequest.result as ClientEndpointRecord | undefined;
+      if (
+        generation !== undefined
+        && existing?.generation?.epoch === generation.epoch
+        && existing.generation.value > generation.value
+      ) {
+        return;
+      }
+      store.put(record, `endpoint:${key}`);
+    };
+    existingRequest.onerror = () => transaction.abort();
     transaction.oncomplete = () => resolve();
     transaction.onerror = () =>
       reject(transaction.error ?? new Error("Could not save endpoint response."));

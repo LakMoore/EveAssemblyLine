@@ -9,15 +9,17 @@ import {
   getMarketOrderAssetDeductions,
   getKnownNonStructureItemIds,
   isCorporationRecordAllowed,
+  isCorporationRecordAccessible,
   isCargoContainerType,
   isHaulableShipHoldAsset,
+  resolveAssetLocationIds,
   setFresh,
   toClientEndpointStatus,
 } from "./cache";
 import { getGroups, getMarketGroups, getTypesByIds } from "@/cache/services/sdeCache";
 import { normalizeCorporationSettings } from "@/lib/auth/tokensStore";
 import { getCorporationHangarPermissions } from "./corporationAccess";
-import type { CorporationCollectionSettings } from "@/lib/auth/model";
+import type { AssetRecord, CorporationCollectionSettings } from "@/lib/auth/model";
 
 const corporationPolicy: CorporationCollectionSettings = {
   corporationId: 900,
@@ -66,6 +68,57 @@ const corporationAssets = new Map([
     },
   ],
 ]);
+
+void test("resolves asset container, hangar, and root location IDs", () => {
+  const hangar = {
+    itemId: 700,
+    typeId: 100,
+    quantity: 1,
+    locationId: 600,
+    locationType: "station",
+    locationFlag: "CorpSAG1",
+    isSingleton: true,
+    ownerType: "corporation",
+    ownerId: 900,
+  } satisfies AssetRecord;
+  const nestedContainer = {
+    ...hangar,
+    itemId: 800,
+    typeId: 101,
+    locationId: hangar.itemId,
+    locationType: "item",
+  } satisfies AssetRecord;
+  const asset = {
+    ...hangar,
+    itemId: 900,
+    typeId: 102,
+    locationId: nestedContainer.itemId,
+    locationType: "item",
+    isSingleton: false,
+  } satisfies AssetRecord;
+  const rootLocation = {
+    locationId: 600,
+    kind: "station" as const,
+    resolved: true,
+  };
+
+  assert.deepEqual(
+    resolveAssetLocationIds(
+      asset,
+      new Map<number, AssetRecord>([
+        [hangar.itemId, hangar],
+        [nestedContainer.itemId, nestedContainer],
+        [asset.itemId, asset],
+      ]),
+      new Map([[nestedContainer.itemId, rootLocation]]),
+    ),
+    {
+      containerId: nestedContainer.itemId,
+      rootLocationId: rootLocation.locationId,
+      hangarId: hangar.itemId,
+    },
+  );
+});
 
 function sourcePolicy(overrides: Partial<typeof corporationPolicy> = {}) {
   return { ...corporationPolicy, ...overrides };
@@ -270,6 +323,127 @@ void test("allows query-only access for blueprints but not materials", () => {
       corporationAssets,
     ),
     false,
+  );
+});
+
+void test("limits refresh access to the hangars visible to non-directors", () => {
+  const roles = [
+    {
+      ...corporationRoles[0],
+      corporationRoles: [],
+      rolesAtOther: ["Hangar_Take_2", "Hangar_Query_2"],
+    },
+  ] satisfies Parameters<typeof getCorporationHangarPermissions>[0];
+  const assets = new Map([
+    [
+      700,
+      {
+        itemId: 700,
+        typeId: 1,
+        quantity: 1,
+        locationId: 800,
+        locationType: "item" as const,
+        locationFlag: "CorpSAG2",
+        isSingleton: true,
+        ownerType: "corporation" as const,
+        ownerId: 900,
+      },
+    ],
+  ]);
+
+  assert.equal(
+    isCorporationRecordAccessible(
+      corporationRecord(700, 401, "CorpSAG2"),
+      sourcePolicy(),
+      roles,
+      new Set(),
+      assets,
+    ),
+    true,
+  );
+  assert.equal(
+    isCorporationRecordAccessible(
+      corporationRecord(900, 402, "CorpSAG3"),
+      sourcePolicy(),
+      roles,
+      new Set(),
+      assets,
+    ),
+    false,
+  );
+});
+
+void test("uses the hangar location rather than an outer asset for HQ roles", () => {
+  const roles = [
+    {
+      ...corporationRoles[0],
+      corporationRoles: [],
+      rolesAtHq: [],
+      rolesAtOther: ["Hangar_Take_2"],
+    },
+  ] satisfies Parameters<typeof getCorporationHangarPermissions>[0];
+  const assets = new Map([
+    [
+      200,
+      {
+        itemId: 200,
+        typeId: 1,
+        quantity: 1,
+        locationId: 700,
+        locationType: "item" as const,
+        locationFlag: "CorpSAG2",
+        isSingleton: true,
+        ownerType: "corporation" as const,
+        ownerId: 900,
+      },
+    ],
+    [
+      700,
+      {
+        itemId: 700,
+        typeId: 1,
+        quantity: 1,
+        locationId: 600,
+        locationType: "item" as const,
+        locationFlag: "OfficeFolder",
+        isSingleton: true,
+        ownerType: "corporation" as const,
+        ownerId: 900,
+      },
+    ],
+  ]);
+
+  assert.equal(
+    isCorporationRecordAccessible(
+      { itemId: 300, locationId: 200, locationFlag: "AutoFit" },
+      { ...sourcePolicy(), headquartersId: 700 },
+      roles,
+      new Set(),
+      assets,
+    ),
+    false,
+  );
+});
+
+void test("gives a same-corporation director access to every hangar", () => {
+  const directorRoles = [
+    {
+      ...corporationRoles[0],
+      corporationRoles: ["Director"],
+      rolesAtOther: [],
+      hasDirectorRole: true,
+    },
+  ] satisfies Parameters<typeof getCorporationHangarPermissions>[0];
+
+  assert.equal(
+    isCorporationRecordAccessible(
+      corporationRecord(700, 401, "CorpSAG7"),
+      sourcePolicy(),
+      directorRoles,
+      new Set(),
+      corporationAssets,
+    ),
+    true,
   );
 });
 

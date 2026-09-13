@@ -5,6 +5,7 @@ import {
   facilitySettingsName,
   normalizeFacilitySettings,
   supportsReactionSettings,
+  type Facility,
   type FacilityResponse,
   type FacilitySettingsPayload,
 } from "./facilities";
@@ -34,17 +35,13 @@ function cacheFacilities(payload: FacilitySettingsPayload) {
   catch {}
 }
 
-export async function fetchFacilities(): Promise<FacilitySettingsPayload> {
-  const cached = loadCachedFacilities();
+export async function fetchFacilities(): Promise<Facility[]> {
   try {
-    if (!(await loadClientSession()).authenticated) return cached;
-    const serverPayload = (await fetchFacilityResponse())?.settings;
-    if (!serverPayload) return cached;
-    cacheFacilities(serverPayload);
-    return serverPayload;
+    if (!(await loadClientSession()).authenticated) return [];
+    return (await fetchFacilityResponse())?.facilities ?? [];
   }
   catch {
-    return cached;
+    return [];
   }
 }
 
@@ -183,13 +180,9 @@ export async function publishFacilities(
       },
     );
     if (!response.ok) return payload;
-    const responseBody = (await response.json()) as FacilityResponse | FacilitySettingsPayload;
-    const merged = normalizeFacilitySettings(
-      "settings" in responseBody ? responseBody.settings : responseBody,
-    );
-    cacheFacilities(merged);
+    const responseBody = (await response.json()) as FacilityResponse;
     await saveEndpointResponse("facilities", "/api/facilities", responseBody);
-    return merged;
+    return payload;
   }
   catch {
     return payload;

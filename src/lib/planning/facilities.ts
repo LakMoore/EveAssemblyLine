@@ -109,7 +109,6 @@ export interface ActivitiesResponse extends ActivitiesRequest {
 
 export type FacilityResponse = {
   facilities: Facility[];
-  settings: FacilitySettingsPayload;
   productionGroups: ProductionGroupReference[];
 };
 

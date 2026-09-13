@@ -100,6 +100,9 @@ export interface AssetRecord {
   isSingleton: boolean;
   ownerType: "character" | "corporation";
   ownerId: number;
+  containerId?: number;
+  rootLocationId?: number | null;
+  hangarId?: number | null;
   rootLocation?: AssetRecord | AssetLocation;
 }
 

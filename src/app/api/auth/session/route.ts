@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
 import { getCharacter, getCollectionCorporationSettings } from "@/lib/auth/tokensStore";
@@ -70,9 +71,18 @@ export async function GET(request: Request) {
       ...character,
       ...stateByCharacterId.get(character.characterId),
     }));
+    const snapshotScope = createHash("sha256")
+      .update(
+        `${session.collectionId}:${session.sessionId}:${characterIds
+          .slice()
+          .sort((left, right) => left - right)
+          .join(",")}`,
+      )
+      .digest("hex");
     return NextResponse.json({
       authenticated: responseCharacters.length > 0,
       characters: responseCharacters,
+      snapshotScope,
     });
   }
   catch {

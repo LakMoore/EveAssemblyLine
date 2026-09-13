@@ -1,0 +1,462 @@
+import type { Facility } from "@/lib/planning/facilities";
+import type { BlueprintPrint, StockItem } from "@/lib/planning/types";
+import type { TypeMetadata } from "@/lib/reference/types";
+import type {
+  ClientAssetsResponse,
+  ClientCorporationSource,
+  ClientJobsResponse,
+  ClientShipsResponse,
+} from "./requestCache";
+import type { ClientOwnerSnapshot } from "./ownerSnapshotCache";
+
+type SnapshotAsset = ClientOwnerSnapshot["assets"][number];
+type SnapshotLocation = ClientOwnerSnapshot["rootLocations"][number]["location"];
+
+export type OwnerSnapshotProjectionOptions = {
+  metadata: readonly TypeMetadata[];
+  facilities?: readonly Facility[];
+  characterNames?: ReadonlyMap<number, string>;
+};
+
+function isSnapshotLocation(value: SnapshotAsset["rootLocation"]): value is SnapshotLocation {
+  return Boolean(value && "kind" in value);
+}
+
+function findRootLocation(snapshot: ClientOwnerSnapshot, asset: SnapshotAsset) {
+  let locationOrAsset = asset.rootLocation;
+  let depth = 0;
+  while (locationOrAsset && depth < 20) {
+    if (isSnapshotLocation(locationOrAsset)) return locationOrAsset;
+    locationOrAsset = locationOrAsset.rootLocation;
+    depth += 1;
+  }
+  return snapshot.rootLocations.find((entry) => entry.itemId === asset.itemId)?.location;
+}
+
+function sourceLocationKind(location: SnapshotLocation | undefined) {
+  if (!location) return undefined;
+  return location.kind === "solar_system" ? ("anchored" as const) : location.kind;
+}
+
+function sourceLocationName(location: SnapshotLocation | undefined) {
+  if (!location) return undefined;
+  if (location.kind === "solar_system") return `System ${location.systemId ?? location.locationId}`;
+  if (location.name) return location.name;
+  return location.kind === "structure"
+    ? "Structure details unavailable"
+    : "Station details unavailable";
+}
+
+function metadataMap(metadata: readonly TypeMetadata[]) {
+  return new Map(metadata.map((entry) => [entry.typeId, entry]));
+}
+
+function activityName(activityId: number) {
+  return (
+    (
+      {
+        1: "Manufacturing",
+        3: "Time research",
+        4: "Material research",
+        5: "Copying",
+        8: "Invention",
+        9: "Reactions",
+      } as Record<number, string>
+    )[activityId] ?? "Industry job"
+  );
+}
+
+function locationName(snapshot: ClientOwnerSnapshot, locationId: number) {
+  const location = snapshot.rootLocations.find(
+    (entry) => entry.location.locationId === locationId,
+  )?.location;
+  return sourceLocationName(location) ?? `Location ${locationId}`;
+}
+
+function corporationSourceForAsset(
+  snapshot: ClientOwnerSnapshot,
+  asset: SnapshotAsset,
+  rootLocationId: number | undefined,
+) {
+  if (asset.ownerType !== "corporation" || rootLocationId === undefined) return undefined;
+  const source =
+    snapshot.corporationSources.find(
+      (candidate) =>
+        candidate.corporationId === asset.ownerId
+        && candidate.containerItemIds.includes(asset.containerId)
+        && candidate.canQuery,
+    )
+    ?? snapshot.corporationSources.find(
+      (candidate) =>
+        candidate.corporationId === asset.ownerId
+        && candidate.rootLocationId === rootLocationId
+        && candidate.locationFlag === asset.locationFlag,
+    );
+  if (!source) return undefined;
+  return {
+    rootLocationId: source.rootLocationId,
+    locationFlag: source.locationFlag,
+    containerItemIds: source.containerItemIds,
+  };
+}
+
+function projectAsset(
+  snapshot: ClientOwnerSnapshot,
+  asset: SnapshotAsset,
+  metadataByTypeId: Map<number, TypeMetadata>,
+): StockItem {
+  const metadata = metadataByTypeId.get(asset.typeId);
+  const rootLocation = findRootLocation(snapshot, asset);
+  const rootLocationId = asset.rootLocationId ?? rootLocation?.locationId ?? undefined;
+  const systemId =
+    rootLocation?.systemId
+    ?? (rootLocation?.kind === "solar_system" ? rootLocation.locationId : undefined);
+  const category = metadata?.category ?? "item";
+  const quantity = category === "blueprint" && asset.quantity === -1 ? 1 : asset.quantity;
+  const blueprintInstance =
+    category === "blueprint"
+      ? snapshot.blueprintInstances.find((instance) => instance.itemId === asset.itemId)
+      : undefined;
+  const blueprintPrint: BlueprintPrint | undefined = blueprintInstance
+    ? {
+        itemId: blueprintInstance.itemId,
+        runs: blueprintInstance.runs,
+        type: asset.quantity === -1 ? "bpo" : "bpc",
+        me: blueprintInstance.me,
+        te: blueprintInstance.te,
+      }
+    : undefined;
+  return {
+    typeId: asset.typeId,
+    name: metadata?.name ?? `Type ${asset.typeId}`,
+    quantity,
+    locationId: asset.locationId,
+    rootLocationId,
+    sourceLocationName: sourceLocationName(rootLocation),
+    sourceLocationKind: sourceLocationKind(rootLocation),
+    sourceSystemId: systemId,
+    sourceSystemName: systemId === undefined ? undefined : `System ${systemId}`,
+    ownerType: asset.ownerType,
+    ownerId: asset.ownerId,
+    inUse: asset.inUse,
+    me: asset.me,
+    te: asset.te,
+    category,
+    assembledVolume: metadata?.assembledVolume,
+    packagedVolume: metadata?.packagedVolume,
+    techLevel: metadata?.techLevel,
+    assemblyLineGroup: metadata?.assemblyLineGroup,
+    ...(category === "blueprint"
+      ? { blueprintType: asset.quantity === -1 ? ("bpo" as const) : ("bpc" as const) }
+      : {}),
+    ...(asset.runCount !== undefined ? { blueprintRunsAtInstall: asset.runCount } : {}),
+    ...(blueprintPrint ? { blueprintPrints: [blueprintPrint] } : {}),
+    ...(corporationSourceForAsset(snapshot, asset, rootLocationId)
+      ? { corporationSource: corporationSourceForAsset(snapshot, asset, rootLocationId) }
+      : {}),
+  };
+}
+
+function projectMarketOrderStock(
+  snapshot: ClientOwnerSnapshot,
+  metadataByTypeId: Map<number, TypeMetadata>,
+): StockItem[] {
+  return (
+    snapshot.marketOrders.marketOrderStock?.map((item) => {
+      const metadata = metadataByTypeId.get(item.typeId);
+      const rootLocationId = item.rootLocationId ?? item.sourceLocationId;
+      const systemId = item.sourceSystemId;
+      return {
+        ...item,
+        name: metadata?.name ?? `Type ${item.typeId}`,
+        rootLocationId,
+        sourceLocationName:
+          item.sourceLocationName
+          ?? (item.sourceLocationKind === "anchored"
+            ? `System ${systemId ?? rootLocationId ?? item.typeId}`
+            : item.sourceLocationKind === "structure"
+              ? "Structure details unavailable"
+              : "Station details unavailable"),
+        sourceSystemName:
+          item.sourceSystemName ?? (systemId === undefined ? undefined : `System ${systemId}`),
+        category: metadata?.category ?? "item",
+        assembledVolume: metadata?.assembledVolume,
+        packagedVolume: metadata?.packagedVolume,
+        techLevel: metadata?.techLevel,
+        assemblyLineGroup: metadata?.assemblyLineGroup,
+        source: "marketOrder" as const,
+      };
+    }) ?? []
+  );
+}
+
+function corporationSourceForJob(
+  snapshot: ClientOwnerSnapshot,
+  job: ClientOwnerSnapshot["jobs"]["jobs"][number],
+) {
+  if (job.ownerType !== "corporation") return undefined;
+  const source = snapshot.corporationSources.find(
+    (candidate) =>
+      candidate.corporationId === job.ownerId
+      && (
+        candidate.containerItemIds.includes(job.outputLocationId)
+        || candidate.rootLocationId === job.facilityId
+      )
+      && candidate.canQuery,
+  );
+  if (!source) return undefined;
+  return {
+    rootLocationId: source.rootLocationId,
+    locationFlag: source.locationFlag,
+    containerItemIds: source.containerItemIds,
+  };
+}
+
+function jobLocation(
+  job: ClientOwnerSnapshot["jobs"]["jobs"][number],
+  options: OwnerSnapshotProjectionOptions,
+) {
+  const facility = options.facilities?.find((candidate) => Number(candidate.id) === job.facilityId);
+  return {
+    rootLocationId: job.facilityId,
+    sourceLocationName: facility?.name,
+    sourceLocationKind: facility?.locationType,
+    sourceSystemId: facility?.systemId,
+    sourceSystemName: facility?.systemName,
+  };
+}
+
+function projectIndustryJobAssets(
+  snapshot: ClientOwnerSnapshot,
+  metadataByTypeId: Map<number, TypeMetadata>,
+  options: OwnerSnapshotProjectionOptions,
+): StockItem[] {
+  const assets: StockItem[] = [];
+  for (const job of snapshot.jobs.jobs) {
+    const status = job.status.toLowerCase();
+    if (status === "cancelled" || status === "reverted" || status === "delivered") continue;
+    const jobRecord = snapshot.industryJobs.find((candidate) => candidate.jobId === job.jobId);
+    const location = jobLocation(job, options);
+    const corporationSource = corporationSourceForJob(snapshot, job);
+    const metadata =
+      job.productTypeId === undefined ? undefined : metadataByTypeId.get(job.productTypeId);
+    if (job.productTypeId !== undefined && job.outputQuantity > 0) {
+      assets.push({
+        typeId: job.productTypeId,
+        name: metadata?.name ?? `Type ${job.productTypeId}`,
+        quantity: job.outputQuantity,
+        locationId: job.outputLocationId,
+        ...location,
+        ownerType: job.ownerType,
+        ownerId: job.ownerId,
+        inBuild: true,
+        inBuildQuantity: job.outputQuantity,
+        jobId: job.jobId,
+        industryJobStatus: status === "paused" ? "paused" : "active",
+        jobRuns: job.runs,
+        licensedRuns: job.outputRunsPerCopy,
+        category: metadata?.category ?? "item",
+        assembledVolume: metadata?.assembledVolume,
+        packagedVolume: metadata?.packagedVolume,
+        techLevel: metadata?.techLevel,
+        assemblyLineGroup: metadata?.assemblyLineGroup,
+        activityName: activityName(job.activityId),
+        ...(corporationSource ? { corporationSource } : {}),
+      });
+    }
+    if (!jobRecord) continue;
+    const blueprintAsset = snapshot.assets.find((asset) => asset.itemId === jobRecord.blueprintId);
+    const blueprintInstance = snapshot.blueprintInstances.find(
+      (instance) =>
+        instance.itemId === jobRecord.blueprintId
+        && instance.ownerType === job.ownerType
+        && instance.ownerId === job.ownerId,
+    );
+    const isCopying = jobRecord.activityId === 5;
+    const installedRunCount =
+      blueprintInstance?.runs
+      ?? blueprintAsset?.runCount
+      ?? (jobRecord.licensedRuns !== undefined && jobRecord.licensedRuns > 0
+        ? jobRecord.licensedRuns
+        : undefined);
+    const isBpo =
+      blueprintInstance?.quantity === -1
+      || (blueprintInstance === undefined && installedRunCount === -1)
+      || (
+        blueprintInstance === undefined
+        && installedRunCount === undefined
+        && (jobRecord.activityId === 1 || isCopying)
+        && (jobRecord.licensedRuns === undefined || jobRecord.licensedRuns <= 0)
+      );
+    const installedRuns =
+      jobRecord.installedRuns ?? Math.floor(jobRecord.runs * (jobRecord.probability ?? 1));
+    const remainingRuns = isBpo
+      ? -1
+      : installedRunCount === undefined
+        ? 0
+        : Math.max(0, installedRunCount - installedRuns);
+    if (!isBpo && remainingRuns <= 0 && job.productTypeId !== undefined) continue;
+    const blueprintMetadata = metadataByTypeId.get(job.blueprintTypeId);
+    assets.push({
+      typeId: job.blueprintTypeId,
+      name: blueprintMetadata?.name ?? `Type ${job.blueprintTypeId}`,
+      quantity: 1,
+      locationId: job.outputLocationId,
+      ...location,
+      ownerType: job.ownerType,
+      ownerId: job.ownerId,
+      inBuild: true,
+      inUse: true,
+      jobId: job.jobId,
+      industryJobStatus: status === "paused" ? "paused" : "active",
+      jobRuns: job.runs,
+      licensedRuns: job.outputRunsPerCopy,
+      category: "blueprint",
+      assembledVolume: blueprintMetadata?.assembledVolume,
+      packagedVolume: blueprintMetadata?.packagedVolume,
+      techLevel: blueprintMetadata?.techLevel,
+      assemblyLineGroup: blueprintMetadata?.assemblyLineGroup,
+      blueprintType: isBpo ? "bpo" : "bpc",
+      blueprintPrints: [
+        {
+          itemId: jobRecord.blueprintId,
+          runs: remainingRuns,
+          type: isBpo ? "bpo" : "bpc",
+          me: blueprintInstance?.me ?? blueprintAsset?.me,
+          te: blueprintInstance?.te ?? blueprintAsset?.te,
+          activity: activityName(job.activityId),
+        },
+      ],
+      ...(corporationSource ? { corporationSource } : {}),
+    });
+  }
+  return assets;
+}
+
+function projectCorporationSources(
+  snapshots: readonly ClientOwnerSnapshot[],
+): ClientCorporationSource[] {
+  const sources = new Map<string, ClientCorporationSource>();
+  for (const snapshot of snapshots) {
+    for (const source of snapshot.corporationSources) {
+      const key = `${source.corporationId}:${source.rootLocationId}:${source.locationFlag}`;
+      if (sources.has(key)) continue;
+      const containers =
+        source.containers
+        ?? source.containerItemIds.map((itemId) => ({
+          itemId,
+          locationId: source.rootLocationId,
+          rootLocationId: source.rootLocationId,
+          selected: true,
+        }));
+      sources.set(
+        key,
+        {
+          corporationId: source.corporationId,
+          rootLocationId: source.rootLocationId,
+          locationFlag: source.locationFlag,
+          label: source.label ?? (source.locationFlag || "Hangar"),
+          ...(source.rootLocation ? { rootLocation: { ...source.rootLocation } } : {}),
+          canTake: source.canTake,
+          canQuery: source.canQuery,
+          selected: source.selected,
+          containers: containers.map((container) => ({ ...container })),
+        },
+      );
+    }
+  }
+  return [...sources.values()];
+}
+
+/** Projects cached owner snapshots into the enriched client asset contract. */
+export function projectOwnerSnapshotsToClientAssets(
+  snapshots: readonly ClientOwnerSnapshot[],
+  options: OwnerSnapshotProjectionOptions,
+): ClientAssetsResponse {
+  const metadataByTypeId = metadataMap(options.metadata);
+  const marketBuyOrderQuantities: Record<string, number> = {};
+  const assets = snapshots.flatMap((snapshot) => {
+    for (const [typeId, quantity] of Object.entries(
+      snapshot.marketOrders.marketBuyOrderQuantities ?? {},
+    )) {
+      marketBuyOrderQuantities[typeId] = (marketBuyOrderQuantities[typeId] ?? 0) + quantity;
+    }
+    return [
+      ...snapshot.assets.map((asset) => projectAsset(snapshot, asset, metadataByTypeId)),
+      ...projectIndustryJobAssets(snapshot, metadataByTypeId, options),
+      ...projectMarketOrderStock(snapshot, metadataByTypeId),
+    ];
+  });
+  return {
+    assets,
+    facilities: [...(options.facilities ?? [])],
+    corporationSources: projectCorporationSources(snapshots),
+    marketBuyOrderQuantities,
+  };
+}
+
+/** Projects owner-scoped jobs into the existing jobs page response contract. */
+export function projectOwnerSnapshotsToClientJobs(
+  snapshots: readonly ClientOwnerSnapshot[],
+  metadata: readonly TypeMetadata[],
+): ClientJobsResponse {
+  const metadataByTypeId = metadataMap(metadata);
+  const slotUsage = Object.fromEntries(
+    snapshots.flatMap((snapshot) => Object.entries(snapshot.jobs.slotUsage)),
+  );
+  const jobs = snapshots.flatMap((snapshot) =>
+    snapshot.jobs.jobs.map((job) => ({
+      ...job,
+      activity: activityName(job.activityId),
+      outputLocationName: locationName(snapshot, job.outputLocationId),
+      blueprintTypeName: metadataByTypeId.get(job.blueprintTypeId)?.name,
+      productTypeName:
+        job.productTypeId === undefined ? undefined : metadataByTypeId.get(job.productTypeId)?.name,
+    })),
+  );
+  return { slotUsage, jobs };
+}
+
+/** Projects owner-scoped ships and fitting assets into the existing ships page response contract. */
+export function projectOwnerSnapshotsToClientShips(
+  snapshots: readonly ClientOwnerSnapshot[],
+  options: Pick<OwnerSnapshotProjectionOptions, "metadata" | "characterNames">,
+): ClientShipsResponse {
+  const metadataByTypeId = metadataMap(options.metadata);
+  const assets = snapshots.flatMap((snapshot) =>
+    snapshot.ships.assets.map((asset) => {
+      const rootLocation = findRootLocation(snapshot, asset);
+      return {
+        itemId: asset.itemId,
+        typeId: asset.typeId,
+        name: metadataByTypeId.get(asset.typeId)?.name,
+        quantity: asset.quantity,
+        locationId: asset.locationId,
+        locationType: asset.locationType,
+        locationFlag: asset.locationFlag,
+        isSingleton: asset.isSingleton,
+        ownerType: asset.ownerType,
+        ownerId: asset.ownerId,
+        rootLocation,
+      };
+    }),
+  );
+  const ships = snapshots.flatMap((snapshot) =>
+    snapshot.ships.ships.map((ship) => ({
+      ...ship,
+      name: metadataByTypeId.get(ship.typeId)?.name,
+      systemName: ship.systemId === undefined ? undefined : `System ${ship.systemId}`,
+      pilotName: ship.pilotId === undefined ? undefined : options.characterNames?.get(ship.pilotId),
+      locationName: ship.systemId === undefined ? undefined : `System ${ship.systemId}`,
+    })),
+  );
+  const typeIds = [...new Set(ships.map((ship) => ship.typeId))];
+  return {
+    assets,
+    ships,
+    types: typeIds.map((typeId) => ({
+      typeId,
+      name: metadataByTypeId.get(typeId)?.name ?? `Type ${typeId}`,
+    })),
+  };
+}

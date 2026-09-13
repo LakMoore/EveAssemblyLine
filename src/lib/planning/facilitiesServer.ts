@@ -20,7 +20,6 @@ import { getCollectionCorporationSettings } from "@/lib/auth/tokensStore";
 import { fetchIndustrySystems, fetchStationMetadata } from "@/lib/esi/client";
 import {
   emptyActivitiesRequest,
-  normalizeFacilitySettings,
   supportsReactionSettings,
   type ActivitiesResponse,
   type FacilityResponse,
@@ -458,7 +457,7 @@ export async function calculateFacilities(
   });
   markPhase("calculateFacilities");
   timingScope.complete();
-  return { facilities, settings: normalizeFacilitySettings(settings), productionGroups };
+  return { facilities, productionGroups };
 }
 
 async function loadFacilityCalculationContext(

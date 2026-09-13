@@ -20,6 +20,7 @@ import {
   groupClientAssetsByLocation,
   loadClientCharacterState,
   loadClientJobs,
+  ownerSnapshotsNeedRefresh,
   loadClientSession,
   loadClientShips,
   loadClientAssets,
@@ -35,6 +36,7 @@ import {
   refreshDependentEndpoints,
   saveLastRefreshAt,
 } from "@/lib/client/refreshCache";
+import { saveOwnerSnapshot, type ClientOwnerSnapshot } from "@/lib/client/ownerSnapshotCache";
 import { loadCompressOptions } from "@/lib/planning/reprocessingClient";
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import {
@@ -237,6 +239,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [isSidebarReady, setIsSidebarReady] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [characters, setCharacters] = useState<CharacterSummary[]>([]);
+  const [snapshotScope, setSnapshotScope] = useState<string>();
   const [isRefreshingData, setIsRefreshingData] = useState(false);
   const [refreshProgress, setRefreshProgress] = useState<{
     completed: number;
@@ -330,20 +333,35 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     loadClientSession()
-      .then((data: { authenticated?: boolean; characters?: CharacterSummary[] }) => {
-        setAuthenticated(Boolean(data.authenticated));
-        setCharacters(data.characters ?? []);
-      })
+      .then(
+        (data: {
+          authenticated?: boolean;
+          snapshotScope?: string;
+          characters?: CharacterSummary[];
+        }) => {
+          setAuthenticated(Boolean(data.authenticated));
+          setSnapshotScope(data.snapshotScope);
+          setCharacters(data.characters ?? []);
+        },
+      )
       .catch(() => {
         setAuthenticated(false);
+        setSnapshotScope(undefined);
         setCharacters([]);
       });
     const handleCorporationSettingsChanged = () => {
       void loadClientSession(true)
-        .then((data: { authenticated?: boolean; characters?: CharacterSummary[] }) => {
-          setAuthenticated(Boolean(data.authenticated));
-          setCharacters(data.characters ?? []);
-        })
+        .then(
+          (data: {
+            authenticated?: boolean;
+            snapshotScope?: string;
+            characters?: CharacterSummary[];
+          }) => {
+            setAuthenticated(Boolean(data.authenticated));
+            setSnapshotScope(data.snapshotScope);
+            setCharacters(data.characters ?? []);
+          },
+        )
         .catch(() => undefined);
     };
     window.addEventListener(
@@ -456,6 +474,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     let corporationSources: ClientCorporationSource[] | undefined;
     let assetsResponse: ClientAssetsResponse | undefined;
     let stateResponse: ClientCharacterState | undefined;
+    const ownerSnapshots: ClientOwnerSnapshot[] = [];
     let refreshSucceeded = false;
     try {
       const results = await runRefreshUnits(
@@ -467,6 +486,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
             rateLimitedUntil?: string | null;
             error?: string;
             errors?: string[];
+            ownerSnapshot?: ClientOwnerSnapshot;
           };
           if (!response.ok || data.success !== true) {
             throw new Error(
@@ -476,6 +496,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   ? `Refresh is rate limited until ${new Date(data.rateLimitedUntil).toLocaleString()}.`
                   : "Could not refresh ESI data."),
             );
+          }
+          if (data.ownerSnapshot && snapshotScope) {
+            try {
+              await saveOwnerSnapshot(data.ownerSnapshot, snapshotScope);
+              ownerSnapshots.push(data.ownerSnapshot);
+            }
+            catch {}
           }
         },
         {
@@ -501,13 +528,13 @@ export default function AppShell({ children }: { children: ReactNode }) {
       let jobsResponse;
       let shipsResponse;
       const [loadedJobs, loadedShips, loadedAssets, loadedState] = await Promise.all([
-        requiredEndpoints.has("state/jobs")
+        requiredEndpoints.has("owner-jobs")
           ? loadClientJobs(true).catch(() => undefined)
           : Promise.resolve(undefined),
-        requiredEndpoints.has("state/ships")
+        requiredEndpoints.has("owner-ships")
           ? loadClientShips(true).catch(() => undefined)
           : Promise.resolve(undefined),
-        requiredEndpoints.has("state/assets")
+        requiredEndpoints.has("owner-assets")
           ? loadClientAssets(language, true).catch(() => undefined)
           : Promise.resolve(undefined),
         loadClientCharacterState(true).catch(() => undefined),
@@ -547,6 +574,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
               corporationSources,
               ships: shipsResponse ?? null,
               jobs: jobsResponse ?? null,
+              ownerSnapshots,
             },
           },
         ),
@@ -571,7 +599,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         ),
       );
     }
-  }, [activePage, authenticated, characters, language]);
+  }, [activePage, authenticated, characters, language, snapshotScope]);
 
   useEffect(() => {
     if (!authenticated || characters.length === 0 || activePage === "imagechecker") return;
@@ -585,16 +613,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
         const stale = await Promise.all(
           endpoints.map(async (endpoint) => ({
             endpoint,
-            stale: await endpointNeedsRefresh(endpoint, refreshAt),
+            stale: endpoint.startsWith("owner-")
+              ? await ownerSnapshotsNeedRefresh(refreshAt)
+              : await endpointNeedsRefresh(endpoint, refreshAt),
           })),
         );
         const staleEndpoints = new Set(
           stale.filter((entry) => entry.stale).map((entry) => entry.endpoint),
         );
         const [loadedAssets] = await Promise.all([
-          staleEndpoints.has("state/assets") ? loadClientAssets(language, true) : Promise.resolve(),
-          staleEndpoints.has("state/jobs") ? loadClientJobs(true) : Promise.resolve(),
-          staleEndpoints.has("state/ships") ? loadClientShips(true) : Promise.resolve(),
+          staleEndpoints.has("owner-assets") ? loadClientAssets(language, true) : Promise.resolve(),
+          staleEndpoints.has("owner-jobs") ? loadClientJobs(true) : Promise.resolve(),
+          staleEndpoints.has("owner-ships") ? loadClientShips(true) : Promise.resolve(),
           staleEndpoints.has("compress/options")
             ? loadCompressOptions(language, true)
             : Promise.resolve(),
