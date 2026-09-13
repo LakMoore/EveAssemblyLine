@@ -17,6 +17,7 @@ import { usePathname } from "next/navigation";
 import { isSdeLanguage, sdeLanguages, type SdeLanguage } from "@/lib/reference/languages";
 import { replaceEsiStock } from "@/lib/planning/stockStore";
 import {
+  filterClientAssetsForPlanning,
   groupClientAssetsByLocation,
   loadClientCharacterState,
   loadClientJobs,
@@ -548,7 +549,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       if (loadedAssets) {
         assetsResponse = loadedAssets;
         corporationSources = loadedAssets.corporationSources;
-        assetLocations = groupClientAssetsByLocation(loadedAssets);
+        assetLocations = groupClientAssetsByLocation(filterClientAssetsForPlanning(loadedAssets));
         await replaceEsiStock(
           assetLocations.map((location) => ({
             systemId: location.systemId ?? 0,

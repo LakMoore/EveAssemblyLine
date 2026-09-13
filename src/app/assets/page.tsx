@@ -78,6 +78,7 @@ import {
   X,
 } from "lucide-react";
 import type { StockItem } from "@/lib/planning/types";
+import { volumeForItem } from "@/lib/planning/volume";
 
 type StructureOption = { id: string; name: string };
 type SystemOption = { id: number; name: string };
@@ -120,12 +121,7 @@ function formatVolume(volume: number) {
 }
 
 function stockItemVolume(item: StockItem) {
-  return (
-    item.quantity
-    * (item.isPackaged
-      ? (item.packagedVolume ?? item.assembledVolume ?? 0)
-      : (item.assembledVolume ?? 0))
-  );
+  return volumeForItem(item);
 }
 
 function isBlueprintStockItem(item: StockItem) {
@@ -1455,7 +1451,7 @@ async function hydrateVolumes(records: StockRecord[], language: SdeLanguage) {
               assembledVolume: itemMetadata.assembledVolume ?? 0,
               packagedVolume: itemMetadata.packagedVolume,
               techLevel: itemMetadata.techLevel,
-              category: item.category ?? itemMetadata.category ?? "item",
+              category: itemMetadata.category ?? item.category ?? "item",
               assemblyLineGroup: itemMetadata.assemblyLineGroup,
             }
           : item;

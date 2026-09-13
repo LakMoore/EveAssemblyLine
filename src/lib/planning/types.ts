@@ -114,6 +114,8 @@ export interface StockItemBase {
   locationId?: number;
   rootLocationId?: number;
   isPackaged?: boolean;
+  isShip?: boolean;
+  isCargoContainer?: boolean;
   ownerType?: StockOwnerType;
   ownerId?: number;
   inBuild?: boolean;

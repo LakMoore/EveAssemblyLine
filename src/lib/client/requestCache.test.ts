@@ -197,6 +197,75 @@ void test("groups anchored assets under their solar system", () => {
   );
 });
 
+void test("excludes assembled ships and containers from location volume", () => {
+  const locations = groupClientAssetsByLocation({
+    facilities: [
+      {
+        id: 1,
+        name: "Jita",
+        locationType: "station",
+        typeId: 52678,
+        systemId: 30000142,
+        sizeId: 0,
+        systemCostIndices: {},
+        activities: {
+          reprocessing: { available: true },
+          manufacturing: {
+            available: true,
+            standard: { available: true },
+            capital: { available: false },
+          },
+          reactions: {
+            available: true,
+            biochemical: { available: true },
+            composite: { available: true },
+            hybrid: { available: true },
+          },
+          meResearch: { available: true },
+          teResearch: { available: true },
+          invention: { available: true },
+          copying: { available: true },
+        },
+        buildTypeGroups: {},
+        services: [],
+        rigTypeIds: [],
+        settingsLastModified: "",
+      },
+    ],
+    assets: [
+      {
+        typeId: 34,
+        name: "Tritanium",
+        quantity: 2,
+        isPackaged: true,
+        assembledVolume: 10,
+        packagedVolume: 3,
+        rootLocationId: 1,
+      },
+      {
+        typeId: 100,
+        name: "Cargo Container",
+        quantity: 1,
+        isPackaged: false,
+        assembledVolume: 500,
+        isCargoContainer: true,
+        rootLocationId: 1,
+      },
+      {
+        typeId: 200,
+        name: "Capital Ship",
+        quantity: 1,
+        isPackaged: false,
+        assembledVolume: 1_000_000,
+        isShip: true,
+        rootLocationId: 1,
+      },
+    ],
+  });
+
+  assert.equal(locations[0]?.totalVolume, 6);
+});
+
 void test("normalizes structure names and hides legacy raw location labels", () => {
   const normalized = normalizeClientAssetsResponse({
     facilities: [],
@@ -254,6 +323,142 @@ void test("matches direct corporation assets by their resolved root location", (
           rootLocationId: 200,
           locationFlag: "CorpSAG3",
           containerItemIds: [],
+        },
+      },
+    ],
+  });
+
+  assert.equal(filtered.assets?.length, 1);
+});
+
+void test("hides a corporation job output in an unselected destination container", () => {
+  const filtered = filterClientAssetsForPlanning({
+    corporationSources: [
+      {
+        corporationId: 900,
+        rootLocationId: 100,
+        locationFlag: "CorpSAG6",
+        label: "Hangar 6",
+        canTake: true,
+        canQuery: true,
+        selected: true,
+        containers: [
+          {
+            itemId: 701,
+            name: "Output Can",
+            locationId: 100,
+            rootLocationId: 100,
+            selected: false,
+          },
+        ],
+      },
+    ],
+    assets: [
+      {
+        typeId: 11478,
+        name: "Job Output",
+        quantity: 1,
+        locationId: 701,
+        rootLocationId: 100,
+        ownerType: "corporation",
+        ownerId: 900,
+        inBuild: true,
+        jobId: 700,
+      },
+      {
+        typeId: 11477,
+        name: "Job Blueprint",
+        quantity: 1,
+        locationId: 701,
+        rootLocationId: 100,
+        ownerType: "corporation",
+        ownerId: 900,
+        inBuild: true,
+        inUse: true,
+        jobId: 700,
+        category: "blueprint",
+      },
+    ],
+  });
+
+  assert.deepEqual(filtered.assets, []);
+});
+
+void test("hides a corporation job output when its source cannot be taken", () => {
+  const filtered = filterClientAssetsForPlanning({
+    corporationSources: [
+      {
+        corporationId: 900,
+        rootLocationId: 100,
+        locationFlag: "CorpSAG6",
+        label: "Hangar 6",
+        canTake: false,
+        canQuery: true,
+        selected: true,
+        containers: [
+          {
+            itemId: 701,
+            name: "Output Can",
+            locationId: 100,
+            rootLocationId: 100,
+            selected: true,
+          },
+        ],
+      },
+    ],
+    assets: [
+      {
+        typeId: 11478,
+        name: "Job Output",
+        quantity: 1,
+        locationId: 701,
+        rootLocationId: 100,
+        ownerType: "corporation",
+        ownerId: 900,
+        inBuild: true,
+        jobId: 700,
+        corporationSource: {
+          rootLocationId: 100,
+          locationFlag: "CorpSAG6",
+          containerItemIds: [701],
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(filtered.assets, []);
+});
+
+void test("selecting an outer corporation container includes nested assets", () => {
+  const filtered = filterClientAssetsForPlanning({
+    corporationSources: [
+      {
+        corporationId: 900,
+        rootLocationId: 100,
+        locationFlag: "CorpSAG6",
+        label: "Hangar 6",
+        canTake: true,
+        canQuery: true,
+        selected: false,
+        containers: [
+          { itemId: 700, locationId: 100, rootLocationId: 100, selected: true },
+          { itemId: 701, locationId: 700, rootLocationId: 100, selected: false },
+        ],
+      },
+    ],
+    assets: [
+      {
+        typeId: 34,
+        name: "Tritanium",
+        quantity: 1,
+        locationId: 701,
+        rootLocationId: 100,
+        ownerType: "corporation",
+        ownerId: 900,
+        corporationSource: {
+          rootLocationId: 100,
+          locationFlag: "CorpSAG6",
+          containerItemIds: [701],
         },
       },
     ],

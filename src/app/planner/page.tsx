@@ -635,7 +635,7 @@ function Planner() {
       if (cancelled) return;
       if (data) {
         setHaulItemExclusion((current) => retainCurrentHaulItemExclusions(data, current));
-        const assetLocations = groupClientAssetsByLocation(data);
+        const assetLocations = groupClientAssetsByLocation(filterClientAssetsForPlanning(data));
         setCachedAssetLocations(
           assetLocations
             .filter((location) => location.locationType !== "anchored")

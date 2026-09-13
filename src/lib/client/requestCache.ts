@@ -3,6 +3,7 @@ import type { Facility, FacilityResponse } from "@/lib/planning/facilities";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import { formatLocationName, normalizeLocationName } from "@/lib/reference/locationName";
 import { fetchTypeMetadata } from "@/lib/reference/types";
+import { volumeForItem } from "@/lib/planning/volume";
 import {
   loadOwnerSnapshots,
   type ClientOwner,
@@ -150,6 +151,19 @@ export function filterClientAssetsForPlanning(data: ClientAssetsResponse): Clien
         .map((container) => container.itemId),
     ),
   );
+  let expanded = true;
+  while (expanded) {
+    expanded = false;
+    for (const source of data.corporationSources ?? []) {
+      for (const container of source.containers) {
+        if (selectedContainers.has(container.itemId)) continue;
+        if (selectedContainers.has(container.locationId)) {
+          selectedContainers.add(container.itemId);
+          expanded = true;
+        }
+      }
+    }
+  }
   const selectedSourceLocations = new Set(
     (data.corporationSources ?? [])
       .filter((source) => source.selected)
@@ -160,6 +174,27 @@ export function filterClientAssetsForPlanning(data: ClientAssetsResponse): Clien
     assets: (data.assets ?? []).filter((item) => {
       if (item.ownerType !== "corporation") return true;
       const source = item.corporationSource;
+      const sourceDetails =
+        source === undefined
+          ? undefined
+          : (data.corporationSources ?? []).find(
+              (entry) =>
+                entry.corporationId === item.ownerId
+                && entry.rootLocationId === source.rootLocationId
+                && entry.locationFlag === source.locationFlag,
+            );
+      if (
+        sourceDetails
+        && !sourceDetails.canTake
+        && item.category !== "blueprint"
+        && item.category !== "reactionformula"
+      ) return false;
+      if (item.inBuild && item.jobId !== undefined && item.locationId !== undefined) {
+        const outputContainer = (data.corporationSources ?? [])
+          .flatMap((candidate) => candidate.containers)
+          .find((container) => container.itemId === item.locationId);
+        if (outputContainer) return selectedContainers.has(outputContainer.itemId);
+      }
       if (!source) {
         return Boolean(
           item.inBuild
@@ -170,18 +205,6 @@ export function filterClientAssetsForPlanning(data: ClientAssetsResponse): Clien
         );
       }
       const sourceKey = `${item.ownerId}:${source.rootLocationId}:${source.locationFlag}`;
-      const sourceDetails = (data.corporationSources ?? []).find(
-        (entry) =>
-          entry.corporationId === item.ownerId
-          && entry.rootLocationId === source.rootLocationId
-          && entry.locationFlag === source.locationFlag,
-      );
-      if (
-        sourceDetails
-        && !sourceDetails.canTake
-        && item.category !== "blueprint"
-        && item.category !== "reactionformula"
-      ) return false;
       const itemRootSourceKey =
         item.rootLocationId === undefined
           ? undefined
@@ -253,15 +276,7 @@ export function groupClientAssetsByLocation(data: ClientAssetsResponse) {
         personalAssetCount: items.filter((item) => item.ownerType !== "corporation").length,
         corporationAssetCount: items.filter((item) => item.ownerType === "corporation").length,
         totalCount: items.reduce((total, item) => total + item.quantity, 0),
-        totalVolume: items.reduce(
-          (total, item) =>
-            total
-            + item.quantity
-              * (item.isPackaged
-                ? (item.packagedVolume ?? item.assembledVolume ?? 0)
-                : (item.assembledVolume ?? 0)),
-          0,
-        ),
+        totalVolume: items.reduce((total, item) => total + volumeForItem(item), 0),
         items,
       };
     });
@@ -288,15 +303,7 @@ export function groupClientAssetsByLocation(data: ClientAssetsResponse) {
     personalAssetCount: items.filter((item) => item.ownerType !== "corporation").length,
     corporationAssetCount: items.filter((item) => item.ownerType === "corporation").length,
     totalCount: items.reduce((total, item) => total + item.quantity, 0),
-    totalVolume: items.reduce(
-      (total, item) =>
-        total
-        + item.quantity
-          * (item.isPackaged
-            ? (item.packagedVolume ?? item.assembledVolume ?? 0)
-            : (item.assembledVolume ?? 0)),
-      0,
-    ),
+    totalVolume: items.reduce((total, item) => total + volumeForItem(item), 0),
     items,
   }));
   return [...facilityLocations, ...anchoredLocations];
@@ -584,9 +591,10 @@ export async function loadClientOwnerSnapshotAssets(
       snapshots.flatMap((snapshot) => [
         ...snapshot.assets.map((asset) => asset.typeId),
         ...(snapshot.marketOrders.marketOrderStock ?? []).map((item) => item.typeId),
+        ...snapshot.jobs.jobs.flatMap((job) => [job.blueprintTypeId, job.productTypeId ?? 0]),
       ]),
     ),
-  ];
+  ].filter((typeId) => typeId > 0);
   const metadata = await fetchTypeMetadata(typeIds, language);
   return projectOwnerSnapshotsToClientAssets(
     snapshots,

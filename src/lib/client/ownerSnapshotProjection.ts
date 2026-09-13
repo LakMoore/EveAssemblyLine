@@ -66,6 +66,13 @@ function activityName(activityId: number) {
   );
 }
 
+function slotCategory(activityId: number) {
+  if (activityId === 1) return "Manufacturing";
+  if (activityId === 9) return "Reactions";
+  if ([3, 4, 5, 8].includes(activityId)) return "Science";
+  return undefined;
+}
+
 function locationName(snapshot: ClientOwnerSnapshot, locationId: number) {
   const location = snapshot.rootLocations.find(
     (entry) => entry.location.locationId === locationId,
@@ -96,7 +103,9 @@ function corporationSourceForAsset(
   return {
     rootLocationId: source.rootLocationId,
     locationFlag: source.locationFlag,
-    containerItemIds: source.containerItemIds,
+    containerItemIds: source.containerItemIds.includes(asset.containerId)
+      ? [asset.containerId]
+      : [],
   };
 }
 
@@ -139,6 +148,11 @@ function projectAsset(
     ownerType: asset.ownerType,
     ownerId: asset.ownerId,
     inUse: asset.inUse,
+    isPackaged: !asset.isSingleton,
+    ...(metadata?.isShip !== undefined ? { isShip: metadata.isShip } : {}),
+    ...(metadata?.isCargoContainer !== undefined
+      ? { isCargoContainer: metadata.isCargoContainer }
+      : {}),
     me: asset.me,
     te: asset.te,
     category,
@@ -180,6 +194,10 @@ function projectMarketOrderStock(
         sourceSystemName:
           item.sourceSystemName ?? (systemId === undefined ? undefined : `System ${systemId}`),
         category: metadata?.category ?? "item",
+        ...(metadata?.isShip !== undefined ? { isShip: metadata.isShip } : {}),
+        ...(metadata?.isCargoContainer !== undefined
+          ? { isCargoContainer: metadata.isCargoContainer }
+          : {}),
         assembledVolume: metadata?.assembledVolume,
         packagedVolume: metadata?.packagedVolume,
         techLevel: metadata?.techLevel,
@@ -198,17 +216,15 @@ function corporationSourceForJob(
   const source = snapshot.corporationSources.find(
     (candidate) =>
       candidate.corporationId === job.ownerId
-      && (
-        candidate.containerItemIds.includes(job.outputLocationId)
-        || candidate.rootLocationId === job.facilityId
-      )
+      && candidate.containerItemIds.includes(job.outputLocationId)
       && candidate.canQuery,
   );
   if (!source) return undefined;
+  const outputIsContainer = source.containerItemIds.includes(job.outputLocationId);
   return {
     rootLocationId: source.rootLocationId,
     locationFlag: source.locationFlag,
-    containerItemIds: source.containerItemIds,
+    containerItemIds: outputIsContainer ? [job.outputLocationId] : [],
   };
 }
 
@@ -251,11 +267,14 @@ function projectIndustryJobAssets(
         ownerId: job.ownerId,
         inBuild: true,
         inBuildQuantity: job.outputQuantity,
+        isPackaged: false,
         jobId: job.jobId,
         industryJobStatus: status === "paused" ? "paused" : "active",
         jobRuns: job.runs,
         licensedRuns: job.outputRunsPerCopy,
         category: metadata?.category ?? "item",
+        isShip: metadata?.isShip,
+        isCargoContainer: metadata?.isCargoContainer,
         assembledVolume: metadata?.assembledVolume,
         packagedVolume: metadata?.packagedVolume,
         techLevel: metadata?.techLevel,
@@ -295,8 +314,14 @@ function projectIndustryJobAssets(
       : installedRunCount === undefined
         ? 0
         : Math.max(0, installedRunCount - installedRuns);
-    if (!isBpo && remainingRuns <= 0 && job.productTypeId !== undefined) continue;
+    if (
+      !isBpo
+      && remainingRuns <= 0
+      && job.productTypeId !== undefined
+      && (jobRecord.activityId === 1 || isCopying)
+    ) continue;
     const blueprintMetadata = metadataByTypeId.get(job.blueprintTypeId);
+    const blueprintCategory = blueprintMetadata?.category ?? "item";
     assets.push({
       typeId: job.blueprintTypeId,
       name: blueprintMetadata?.name ?? `Type ${job.blueprintTypeId}`,
@@ -311,22 +336,26 @@ function projectIndustryJobAssets(
       industryJobStatus: status === "paused" ? "paused" : "active",
       jobRuns: job.runs,
       licensedRuns: job.outputRunsPerCopy,
-      category: "blueprint",
+      category: blueprintCategory,
       assembledVolume: blueprintMetadata?.assembledVolume,
       packagedVolume: blueprintMetadata?.packagedVolume,
       techLevel: blueprintMetadata?.techLevel,
       assemblyLineGroup: blueprintMetadata?.assemblyLineGroup,
-      blueprintType: isBpo ? "bpo" : "bpc",
-      blueprintPrints: [
-        {
-          itemId: jobRecord.blueprintId,
-          runs: remainingRuns,
-          type: isBpo ? "bpo" : "bpc",
-          me: blueprintInstance?.me ?? blueprintAsset?.me,
-          te: blueprintInstance?.te ?? blueprintAsset?.te,
-          activity: activityName(job.activityId),
-        },
-      ],
+      ...(blueprintCategory === "blueprint"
+        ? {
+            blueprintType: isBpo ? ("bpo" as const) : ("bpc" as const),
+            blueprintPrints: [
+              {
+                itemId: jobRecord.blueprintId,
+                runs: remainingRuns,
+                type: isBpo ? ("bpo" as const) : ("bpc" as const),
+                me: blueprintInstance?.me ?? blueprintAsset?.me,
+                te: blueprintInstance?.te ?? blueprintAsset?.te,
+                activity: activityName(job.activityId),
+              },
+            ],
+          }
+        : {}),
       ...(corporationSource ? { corporationSource } : {}),
     });
   }
@@ -401,9 +430,16 @@ export function projectOwnerSnapshotsToClientJobs(
   metadata: readonly TypeMetadata[],
 ): ClientJobsResponse {
   const metadataByTypeId = metadataMap(metadata);
-  const slotUsage = Object.fromEntries(
-    snapshots.flatMap((snapshot) => Object.entries(snapshot.jobs.slotUsage)),
-  );
+  const slotUsage: NonNullable<ClientJobsResponse["slotUsage"]> = {};
+  for (const snapshot of snapshots) {
+    for (const [characterId, usage] of Object.entries(snapshot.jobs.slotUsage)) {
+      if (Object.hasOwn(slotUsage, characterId)) continue;
+      slotUsage[characterId] = {
+        slots: { ...usage.slots },
+        availableSlots: { ...usage.availableSlots },
+      };
+    }
+  }
   const jobs = snapshots.flatMap((snapshot) =>
     snapshot.jobs.jobs.map((job) => ({
       ...job,
@@ -414,6 +450,20 @@ export function projectOwnerSnapshotsToClientJobs(
         job.productTypeId === undefined ? undefined : metadataByTypeId.get(job.productTypeId)?.name,
     })),
   );
+  const countedJobIds = new Set<number>();
+  for (const job of snapshots.flatMap((snapshot) => snapshot.jobs.jobs)) {
+    if (
+      job.ownerType !== "corporation"
+      || job.status.toLowerCase() !== "active"
+      || countedJobIds.has(job.jobId)
+    ) continue;
+    countedJobIds.add(job.jobId);
+    const category = slotCategory(job.activityId);
+    const characterId = String(job.characterId);
+    if (category === undefined || !Object.hasOwn(slotUsage, characterId)) continue;
+    const usage = slotUsage[characterId];
+    usage.slots[category] = (usage.slots[category] ?? 0) + 1;
+  }
   return { slotUsage, jobs };
 }
 

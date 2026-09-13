@@ -29,6 +29,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
+  filterClientAssetsForPlanning,
   groupClientAssetsByLocation,
   invalidateClientCharacterData,
   loadClientCharacterState,
@@ -213,7 +214,7 @@ async function reloadStockAfterCharacterRemoval() {
   const savedLanguage = window.localStorage.getItem(languageStorageKey);
   const language: SdeLanguage = isSdeLanguage(savedLanguage) ? savedLanguage : "en";
   const assetsData = await loadClientAssets(language, true);
-  const assetLocations = groupClientAssetsByLocation(assetsData);
+  const assetLocations = groupClientAssetsByLocation(filterClientAssetsForPlanning(assetsData));
   await replaceEsiStock(
     assetLocations.map((location) => ({
       systemId: location.systemId,

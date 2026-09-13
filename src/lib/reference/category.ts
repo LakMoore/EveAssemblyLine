@@ -59,3 +59,24 @@ export function categorizeType(
 
   return { category, assemblyLineGroup };
 }
+
+/** Returns whether an SDE type is a cargo container or belongs to its category tree. */
+export function isCargoContainerType(
+  type: CategorizedType | undefined,
+  groupById: Map<number, GroupsRecord>,
+  marketGroupById: Map<number, MarketGroupsRecord>,
+) {
+  const group = groupById.get(type?.groupID ?? -1);
+  if (group?.categoryID === blueprintCategoryId) return false;
+  if (group?.categoryID === 2) return true;
+  let marketGroup =
+    type?.marketGroupID === undefined ? undefined : marketGroupById.get(type.marketGroupID);
+  while (marketGroup) {
+    if (marketGroup.name.en === "Cargo Containers") return true;
+    marketGroup =
+      marketGroup.parentGroupID === undefined
+        ? undefined
+        : marketGroupById.get(marketGroup.parentGroupID);
+  }
+  return false;
+}

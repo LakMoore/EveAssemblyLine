@@ -6,6 +6,8 @@ export type TypeMetadata = {
   techLevel?: number;
   assembledVolume?: number;
   packagedVolume?: number;
+  isShip?: boolean;
+  isCargoContainer?: boolean;
   category?: "blueprint" | "reactionformula" | "item";
   assemblyLineGroup?: string;
 };

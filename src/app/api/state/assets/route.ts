@@ -6,7 +6,6 @@ import {
   getCorporationSourcePolicies,
   getMarketOrderStock,
   getCorporationAssetSource,
-  getCorporationLocationSource,
   getMarketOrderBuyQuantities,
 } from "@/lib/esi/cache";
 import { getAssetsForCharacter, getAssetsForCorporation } from "@/lib/data/assets";
@@ -21,7 +20,7 @@ import {
   getTypesByIds,
 } from "@/cache/services/sdeCache";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
-import { categorizeType } from "@/lib/reference/category";
+import { categorizeType, isCargoContainerType } from "@/lib/reference/category";
 import { formatLocationName, normalizeLocationName } from "@/lib/reference/locationName";
 import type {
   AssetLocation,
@@ -36,6 +35,7 @@ import type {
   StockContribution,
   StockItem,
 } from "@/lib/planning/types";
+import { volumeForItem } from "@/lib/planning/volume";
 import {
   calculateFacilities,
   type FacilityCalculationContext,
@@ -146,6 +146,7 @@ function addStockContribution(
   types: Awaited<ReturnType<typeof getTypesByIds>>,
   groups: Awaited<ReturnType<typeof getGroups>>,
   marketGroups: Awaited<ReturnType<typeof getMarketGroups>>,
+  shipTypeIds: Set<number>,
   language: SdeLanguage,
   systems: Awaited<ReturnType<typeof getSystems>>,
 ) {
@@ -157,6 +158,8 @@ function addStockContribution(
     groups,
   );
   const category = categorized.category;
+  const isShip = shipTypeIds.has(contribution.typeId);
+  const isCargoContainer = isCargoContainerType(type, groups, marketGroups);
   const systemName = location.systemId ? systems.get(location.systemId)?.name.en : undefined;
   const displayName = location.name
     ? location.kind === "structure"
@@ -211,6 +214,8 @@ function addStockContribution(
     ownerType: contribution.ownerType,
     ...(contribution.ownerId !== undefined ? { ownerId: contribution.ownerId } : {}),
     isPackaged: contribution.isPackaged,
+    isShip,
+    isCargoContainer,
     assembledVolume: type?.volume ?? 0,
     packagedVolume: type?.packagedVolume,
     techLevel: type?.techLevel,
@@ -250,8 +255,14 @@ function addStockContribution(
   bucket.items.set(itemKey, item);
   bucket.totalCount += contribution.quantity;
   bucket.totalVolume
-    += contribution.quantity
-    * (contribution.isPackaged ? (type?.packagedVolume ?? type?.volume ?? 0) : (type?.volume ?? 0));
+    += volumeForItem({
+      quantity: contribution.quantity,
+      isPackaged: contribution.isPackaged,
+      assembledVolume: type?.volume,
+      packagedVolume: type?.packagedVolume,
+      isShip,
+      isCargoContainer,
+    });
   buckets.set(location.locationId, bucket);
 }
 
@@ -587,6 +598,7 @@ export async function GET(request: NextRequest) {
       types,
       groups,
       marketGroups,
+      shipTypeIds,
       language,
       systems,
     );
@@ -669,19 +681,14 @@ export async function GET(request: NextRequest) {
           rootLocationId: job.facilityId,
           ...(job.ownerType === "corporation"
             ? {
-                corporationSource:
-                  getCorporationAssetSource(
-                    {
-                      itemId: job.outputLocationId,
-                      locationId: job.outputLocationId,
-                      locationFlag: "OfficeFolder",
-                    },
-                    rawAssetsByCorporationId.get(job.ownerId) ?? new Map<number, AssetRecord>(),
-                  )
-                  ?? getCorporationLocationSource(
-                    job.facilityId,
-                    rawAssetsByCorporationId.get(job.ownerId) ?? new Map<number, AssetRecord>(),
-                  ),
+                corporationSource: getCorporationAssetSource(
+                  {
+                    itemId: job.outputLocationId,
+                    locationId: job.outputLocationId,
+                    locationFlag: "OfficeFolder",
+                  },
+                  rawAssetsByCorporationId.get(job.ownerId) ?? new Map<number, AssetRecord>(),
+                ),
               }
             : {}),
         },
@@ -689,6 +696,7 @@ export async function GET(request: NextRequest) {
         types,
         groups,
         marketGroups,
+        shipTypeIds,
         language,
         systems,
       );

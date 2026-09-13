@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getGroups, getMarketGroups, getTypes } from "@/cache/services/sdeCache";
+import { getGroups, getMarketGroups, getShipTypeIds, getTypes } from "@/cache/services/sdeCache";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
-import { categorizeType, type ItemCategory } from "@/lib/reference/category";
+import { categorizeType, isCargoContainerType, type ItemCategory } from "@/lib/reference/category";
 
 const typeMetadataRequestSchema = z.object({
   language: z.string().optional(),
@@ -19,10 +19,11 @@ const itemNameRequestSchema = z.object({
 });
 
 async function resolveTypeMetadata(typeIds: number[], language: SdeLanguage) {
-  const [typeById, marketGroupById, groupById] = await Promise.all([
+  const [typeById, marketGroupById, groupById, shipTypeIds] = await Promise.all([
     getTypes(),
     getMarketGroups(),
     getGroups(),
+    getShipTypeIds(),
   ]);
   return typeIds.flatMap((typeId) => {
     const item = typeById.get(typeId);
@@ -33,6 +34,8 @@ async function resolveTypeMetadata(typeIds: number[], language: SdeLanguage) {
         techLevel: item.techLevel,
         assembledVolume: item.volume ?? 0,
         packagedVolume: item.packagedVolume,
+        isShip: shipTypeIds.has(item._key),
+        isCargoContainer: isCargoContainerType(item, groupById, marketGroupById),
         ...categorizeType(item, language, marketGroupById, groupById),
         name: item.name[language] ?? item.name.en,
       },
@@ -107,10 +110,11 @@ export async function POST(request: Request) {
     const requestedLanguage = itemRequest.data.language ?? null;
     const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
 
-    const [typeById, marketGroupById, groupById] = await Promise.all([
+    const [typeById, marketGroupById, groupById, shipTypeIds] = await Promise.all([
       getTypes(),
       getMarketGroups(),
       getGroups(),
+      getShipTypeIds(),
     ]);
     const byName = new Map<
       string,
@@ -119,6 +123,8 @@ export async function POST(request: Request) {
         name: string;
         assembledVolume: number;
         packagedVolume?: number;
+        isShip?: boolean;
+        isCargoContainer?: boolean;
         category: ItemCategory;
         assemblyLineGroup?: string;
       }
@@ -134,6 +140,8 @@ export async function POST(request: Request) {
             name,
             assembledVolume: item.volume ?? 0,
             packagedVolume: item.packagedVolume,
+            isShip: shipTypeIds.has(item._key),
+            isCargoContainer: isCargoContainerType(item, groupById, marketGroupById),
             ...categorizeType(item, language, marketGroupById, groupById),
           },
         );

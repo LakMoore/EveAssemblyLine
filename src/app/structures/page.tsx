@@ -35,6 +35,7 @@ import {
 } from "@/lib/planning/preferences";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import {
+  filterClientAssetsForPlanning,
   groupClientAssetsByLocation,
   loadClientAssets,
   loadClientSession,
@@ -264,7 +265,7 @@ export default function LocationsPage() {
         const facilitiesByLocationId = new Map(
           facilities.map((facility) => [facility.id, facility]),
         );
-        const locations = groupClientAssetsByLocation(data)
+        const locations = groupClientAssetsByLocation(filterClientAssetsForPlanning(data))
           .filter(
             (
               location,
