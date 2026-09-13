@@ -125,12 +125,15 @@ type CharacterOption = {
   implants: number[];
 };
 type ImplantOption = { id: string; name: string; level: number; typeId?: number };
-type CompressOptions = {
-  locations: CompressOption[];
-  characters: CharacterOption[];
+type CompressOptionsData = {
+  characterImplants: Partial<Record<string, number[]>>;
   implants: ImplantOption[];
   relevantSkillIds: number[];
   scrapMetalSkillId?: number;
+};
+type CompressOptions = CompressOptionsData & {
+  locations: CompressOption[];
+  characters: CharacterOption[];
 };
 
 function variation(
@@ -205,6 +208,7 @@ function CompressContent() {
   const [options, setOptions] = useState<CompressOptions>({
     locations: [],
     characters: [],
+    characterImplants: {},
     implants: [],
     relevantSkillIds: [],
   });
@@ -238,7 +242,7 @@ function CompressContent() {
       .all([
         loadCompressSettings(),
         loadClientSession(isRefreshLoad),
-        loadEndpointRecord<CompressOptions>("compress/options"),
+        loadEndpointRecord<Partial<CompressOptionsData>>("compress/options"),
         loadClientAssets(language, isRefreshLoad).catch(() => null),
         loadStructures().catch(() => []),
       ])
@@ -246,7 +250,16 @@ function CompressContent() {
         const characterState = session.authenticated ? await loadClientCharacterState() : null;
         const loadedFacilities = cachedAssets?.facilities ?? [];
         let loadedOptions = cachedOptions?.data;
-        if (isRefreshLoad || !loadedOptions) {
+        const cachedCharacterImplants =
+          loadedOptions && Object.hasOwn(loadedOptions, "characterImplants")
+            ? loadedOptions.characterImplants
+            : undefined;
+        const hasCachedCharacterImplants =
+          cachedCharacterImplants !== undefined
+          && (session.characters ?? []).every((character) =>
+            Object.hasOwn(cachedCharacterImplants, String(character.characterId)),
+          );
+        if (isRefreshLoad || !loadedOptions || !hasCachedCharacterImplants) {
           const optionsResponse = await fetch(
             "/api/compress/options",
             {
@@ -262,6 +275,10 @@ function CompressContent() {
           if (!optionsResponse.ok) throw new Error("Could not load compression options.");
           await saveEndpointResponse("compress/options", "/api/compress/options", loadedOptions);
         }
+        if (!loadedOptions.characterImplants) {
+          throw new Error("Compression options did not include character implants.");
+        }
+        const characterImplants = loadedOptions.characterImplants;
         const normalizedItems = mergeCompressItems(
           Array.isArray(loadedSettings.items) ? loadedSettings.items : [],
         );
@@ -317,8 +334,11 @@ function CompressContent() {
             ? loadedSettings.marketId
             : "jita",
         };
-        const characters = loadedOptions.characters.map((character) => ({
-          ...character,
+        const characters = (session.characters ?? []).map((character) => ({
+          id: `character:${character.characterId}`,
+          characterId: character.characterId,
+          name: character.characterName,
+          implants: characterImplants[String(character.characterId)] ?? [],
           skills: Object.fromEntries(
             (
               characterState?.characters?.find(
@@ -327,7 +347,14 @@ function CompressContent() {
             ).map((skill) => [String(skill.skillId), skill.activeSkillLevel]),
           ),
         }));
-        setOptions({ ...loadedOptions, characters, locations: loadedLocations });
+        setOptions({
+          ...loadedOptions,
+          characterImplants,
+          implants: loadedOptions.implants ?? [],
+          relevantSkillIds: loadedOptions.relevantSkillIds ?? [],
+          characters,
+          locations: loadedLocations,
+        });
         setSettings(normalizedSettings);
         setItems(normalizedSettings.items);
         void saveCompressSettings(normalizedSettings);

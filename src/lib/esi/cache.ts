@@ -74,7 +74,6 @@ export type EndpointCache<T> = {
   lastModified?: string;
   lastUpdated?: string;
   expires?: string;
-  nextRefreshAllowed?: string;
   rateLimitedUntil?: string;
   error?: string;
   reauthorizeRequired?: boolean;
@@ -90,7 +89,7 @@ export type StructureLocationSource = {
 
 export function toClientEndpointStatus<T>(cache: EndpointCache<T> | undefined) {
   if (!cache) return undefined;
-  const { lastBody, ...status } = cache;
+  const { lastBody, etag: _etag, ...status } = cache;
   return {
     ...status,
     hasBody: lastBody !== null && lastBody !== undefined,
@@ -720,12 +719,12 @@ async function refreshBlueprintInstances(
 ) {
   if (
     cache.blueprintInstances
-    && cache.blueprintInstances.nextRefreshAllowed
-    && Date.parse(cache.blueprintInstances.nextRefreshAllowed) > Date.now()
+    && cache.blueprintInstances.expires
+    && Date.parse(cache.blueprintInstances.expires) > Date.now()
   ) {
     cache.blueprintInstances.status = endpointDataStatus(
       cache.blueprintInstances.lastModified,
-      cache.blueprintInstances.nextRefreshAllowed,
+      cache.blueprintInstances.expires,
     );
     return cache.blueprintInstances;
   }
@@ -739,13 +738,10 @@ async function refreshBlueprintInstances(
 
 /** Refreshes the character's current location and reports whether its body changed. */
 async function refreshCurrentLocation(cache: OwnerCache, character: CharacterTokenRecord) {
-  if (
-    cache.currentLocation?.nextRefreshAllowed
-    && Date.parse(cache.currentLocation.nextRefreshAllowed) > Date.now()
-  ) {
+  if (cache.currentLocation?.expires && Date.parse(cache.currentLocation.expires) > Date.now()) {
     cache.currentLocation.status = endpointDataStatus(
       cache.currentLocation.lastModified,
-      cache.currentLocation.nextRefreshAllowed,
+      cache.currentLocation.expires,
     );
     return false;
   }
@@ -765,13 +761,10 @@ async function refreshCurrentLocation(cache: OwnerCache, character: CharacterTok
 
 /** Refreshes the character's current ship and reports whether its body changed. */
 async function refreshCurrentShip(cache: OwnerCache, character: CharacterTokenRecord) {
-  if (
-    cache.currentShip?.nextRefreshAllowed
-    && Date.parse(cache.currentShip.nextRefreshAllowed) > Date.now()
-  ) {
+  if (cache.currentShip?.expires && Date.parse(cache.currentShip.expires) > Date.now()) {
     cache.currentShip.status = endpointDataStatus(
       cache.currentShip.lastModified,
-      cache.currentShip.nextRefreshAllowed,
+      cache.currentShip.expires,
     );
     return false;
   }
@@ -991,22 +984,18 @@ export function setFresh<T>(
     headers?.get("last-modified"),
     preserveLastModified ? previous?.lastModified : undefined,
   );
-  const nextRefreshAllowed = normalizeUtcTimestamp(headers?.get("expires"));
+  const expires = normalizeUtcTimestamp(headers?.get("expires"));
   return {
     lastBody: body,
     etag: headers?.get("etag") ?? previous?.etag,
     lastModified,
     lastUpdated: new Date().toISOString(),
-    expires: nextRefreshAllowed,
-    nextRefreshAllowed,
-    status: endpointDataStatus(lastModified, nextRefreshAllowed),
+    expires,
+    status: endpointDataStatus(lastModified, expires),
   };
 }
-export function endpointDataStatus(
-  lastModified?: string,
-  nextRefreshAllowed?: string,
-): EndpointStatus {
-  if (nextRefreshAllowed && Date.parse(nextRefreshAllowed) <= Date.now()) return "stale";
+export function endpointDataStatus(lastModified?: string, expires?: string): EndpointStatus {
+  if (expires && Date.parse(expires) <= Date.now()) return "stale";
   if (lastModified && Date.now() - Date.parse(lastModified) <= 2 * 60 * 1000) return "fresh";
   return "cached";
 }
@@ -1284,11 +1273,7 @@ async function refreshIndustryJobs(
   assetsLastModified: string | undefined,
   blueprintsLastModified: string | undefined,
 ) {
-  if (
-    !cache.jobs
-    || !cache.jobs.nextRefreshAllowed
-    || Date.parse(cache.jobs.nextRefreshAllowed) <= Date.now()
-  ) {
+  if (!cache.jobs || !cache.jobs.expires || Date.parse(cache.jobs.expires) <= Date.now()) {
     const jobs = await fetchJobs(character, cache.jobs?.etag);
     cache.jobs =
       jobs.notModified && cache.jobs
@@ -1296,7 +1281,7 @@ async function refreshIndustryJobs(
         : setFresh(jobs.jobs ?? [], jobs.headers, cache.jobs);
   }
   else {
-    cache.jobs.status = endpointDataStatus(cache.jobs.lastModified, cache.jobs.nextRefreshAllowed);
+    cache.jobs.status = endpointDataStatus(cache.jobs.lastModified, cache.jobs.expires);
   }
   try {
     await refreshJobAdjustments(
@@ -1807,19 +1792,12 @@ export async function refreshCharacterState(
   }
   profiler.start("clones");
   try {
-    if (
-      !cache.clones
-      || !cache.clones.nextRefreshAllowed
-      || Date.parse(cache.clones.nextRefreshAllowed) <= Date.now()
-    ) {
+    if (!cache.clones || !cache.clones.expires || Date.parse(cache.clones.expires) <= Date.now()) {
       const clones = await fetchCharacterClones(character);
       cache.clones = setFresh(clones.data, clones.headers, cache.clones);
     }
     else {
-      cache.clones.status = endpointDataStatus(
-        cache.clones.lastModified,
-        cache.clones.nextRefreshAllowed,
-      );
+      cache.clones.status = endpointDataStatus(cache.clones.lastModified, cache.clones.expires);
     }
   }
   catch (error) {
@@ -1833,11 +1811,7 @@ export async function refreshCharacterState(
   }
   profiler.start("skills");
   try {
-    if (
-      !cache.skills
-      || !cache.skills.nextRefreshAllowed
-      || Date.parse(cache.skills.nextRefreshAllowed) <= Date.now()
-    ) {
+    if (!cache.skills || !cache.skills.expires || Date.parse(cache.skills.expires) <= Date.now()) {
       const skills = await fetchCharacterSkills(character, cache.skills?.etag);
       cache.skills =
         skills.notModified && cache.skills
@@ -1845,10 +1819,7 @@ export async function refreshCharacterState(
           : setFresh(skills.skills ?? [], skills.headers, cache.skills);
     }
     else {
-      cache.skills.status = endpointDataStatus(
-        cache.skills.lastModified,
-        cache.skills.nextRefreshAllowed,
-      );
+      cache.skills.status = endpointDataStatus(cache.skills.lastModified, cache.skills.expires);
     }
   }
   catch (error) {
@@ -1876,10 +1847,7 @@ export async function refreshCharacterState(
   }
   profiler.start("assets");
   try {
-    if (
-      !cache.allAssetsRaw?.nextRefreshAllowed
-      || Date.parse(cache.allAssetsRaw.nextRefreshAllowed) <= Date.now()
-    ) {
+    if (!cache.allAssetsRaw?.expires || Date.parse(cache.allAssetsRaw.expires) <= Date.now()) {
       const result = await fetchCharacterAssets(character, cache.allAssetsRaw?.etag);
       if (result.notModified && cache.allAssetsRaw) {
         await cacheResolvedAssets(
@@ -1894,7 +1862,7 @@ export async function refreshCharacterState(
         assetsRebuilt = true;
         cache.allAssetsRaw.status = endpointDataStatus(
           cache.allAssetsRaw.lastModified,
-          cache.allAssetsRaw.nextRefreshAllowed,
+          cache.allAssetsRaw.expires,
         );
       }
       else if (result.assets) {
@@ -1953,8 +1921,8 @@ export async function refreshCharacterState(
     if (
       cache.marketOrders?.status === "stale"
       || !cache.marketOrders
-      || !cache.marketOrders.nextRefreshAllowed
-      || Date.parse(cache.marketOrders.nextRefreshAllowed) <= Date.now()
+      || !cache.marketOrders.expires
+      || Date.parse(cache.marketOrders.expires) <= Date.now()
     ) {
       const orders = await fetchCharacterMarketOrders(character, getUsableMarketOrdersEtag(cache));
       if (orders.notModified && cache.marketOrders) {
@@ -1966,7 +1934,7 @@ export async function refreshCharacterState(
         );
         cache.marketOrders.status = endpointDataStatus(
           cache.marketOrders.lastModified,
-          cache.marketOrders.nextRefreshAllowed,
+          cache.marketOrders.expires,
         );
       }
       else if (orders.notModified) {
@@ -1979,7 +1947,7 @@ export async function refreshCharacterState(
     else {
       cache.marketOrders.status = endpointDataStatus(
         cache.marketOrders.lastModified,
-        cache.marketOrders.nextRefreshAllowed,
+        cache.marketOrders.expires,
       );
     }
     refreshMarketOrderAdjustments(cache, cache.allAssetsRaw?.lastModified);
@@ -2017,8 +1985,8 @@ async function refreshCorporationCache(
   try {
     if (
       !corpCache.publicInfo
-      || !corpCache.publicInfo.nextRefreshAllowed
-      || Date.parse(corpCache.publicInfo.nextRefreshAllowed) <= Date.now()
+      || !corpCache.publicInfo.expires
+      || Date.parse(corpCache.publicInfo.expires) <= Date.now()
     ) {
       const publicInfo = await fetchCorporationPublicInfo(character, corpCache.publicInfo?.etag);
       corpCache.publicInfo =
@@ -2029,7 +1997,7 @@ async function refreshCorporationCache(
     else {
       corpCache.publicInfo.status = endpointDataStatus(
         corpCache.publicInfo.lastModified,
-        corpCache.publicInfo.nextRefreshAllowed,
+        corpCache.publicInfo.expires,
       );
     }
     corpSummary.publicInfo = corpCache.publicInfo;
@@ -2048,8 +2016,8 @@ async function refreshCorporationCache(
   try {
     if (
       !corpCache.divisions
-      || !corpCache.divisions.nextRefreshAllowed
-      || Date.parse(corpCache.divisions.nextRefreshAllowed) <= Date.now()
+      || !corpCache.divisions.expires
+      || Date.parse(corpCache.divisions.expires) <= Date.now()
     ) {
       const divisions = await fetchCorporationDivisions(character, corpCache.divisions?.etag);
       corpCache.divisions =
@@ -2060,7 +2028,7 @@ async function refreshCorporationCache(
     else {
       corpCache.divisions.status = endpointDataStatus(
         corpCache.divisions.lastModified,
-        corpCache.divisions.nextRefreshAllowed,
+        corpCache.divisions.expires,
       );
     }
     corpSummary.divisions = corpCache.divisions;
@@ -2079,8 +2047,8 @@ async function refreshCorporationCache(
   try {
     if (
       !corpCache.structures
-      || !corpCache.structures.nextRefreshAllowed
-      || Date.parse(corpCache.structures.nextRefreshAllowed) <= Date.now()
+      || !corpCache.structures.expires
+      || Date.parse(corpCache.structures.expires) <= Date.now()
     ) {
       const structures = await fetchCorporationStructures(character, corpCache.structures?.etag);
       corpCache.structures =
@@ -2091,7 +2059,7 @@ async function refreshCorporationCache(
     else {
       corpCache.structures.status = endpointDataStatus(
         corpCache.structures.lastModified,
-        corpCache.structures.nextRefreshAllowed,
+        corpCache.structures.expires,
       );
     }
     corpSummary.structures = corpCache.structures;
@@ -2109,8 +2077,8 @@ async function refreshCorporationCache(
   profiler.start("assets");
   try {
     if (
-      !corpCache.allAssetsRaw?.nextRefreshAllowed
-      || Date.parse(corpCache.allAssetsRaw.nextRefreshAllowed) <= Date.now()
+      !corpCache.allAssetsRaw?.expires
+      || Date.parse(corpCache.allAssetsRaw.expires) <= Date.now()
     ) {
       const result = await fetchCorporationAssets(character, corpCache.allAssetsRaw?.etag);
       if (result.notModified && corpCache.allAssetsRaw) {
@@ -2125,7 +2093,7 @@ async function refreshCorporationCache(
         );
         corpCache.allAssetsRaw.status = endpointDataStatus(
           corpCache.allAssetsRaw.lastModified,
-          corpCache.allAssetsRaw.nextRefreshAllowed,
+          corpCache.allAssetsRaw.expires,
         );
       }
       else if (result.assets) {
@@ -2200,8 +2168,8 @@ async function refreshCorporationCache(
     if (
       corpCache.marketOrders?.status === "stale"
       || !corpCache.marketOrders
-      || !corpCache.marketOrders.nextRefreshAllowed
-      || Date.parse(corpCache.marketOrders.nextRefreshAllowed) <= Date.now()
+      || !corpCache.marketOrders.expires
+      || Date.parse(corpCache.marketOrders.expires) <= Date.now()
     ) {
       const orders = await fetchCorporationMarketOrders(
         character,
@@ -2216,7 +2184,7 @@ async function refreshCorporationCache(
         );
         corpCache.marketOrders.status = endpointDataStatus(
           corpCache.marketOrders.lastModified,
-          corpCache.marketOrders.nextRefreshAllowed,
+          corpCache.marketOrders.expires,
         );
       }
       else if (orders.notModified) {
@@ -2229,7 +2197,7 @@ async function refreshCorporationCache(
     else {
       corpCache.marketOrders.status = endpointDataStatus(
         corpCache.marketOrders.lastModified,
-        corpCache.marketOrders.nextRefreshAllowed,
+        corpCache.marketOrders.expires,
       );
     }
     refreshMarketOrderAdjustments(corpCache, corpCache.allAssetsRaw?.lastModified);
@@ -2834,7 +2802,13 @@ export async function getMarketOrderBuyQuantities(
   characterIds: number[],
   sessionId = "default",
   policies?: readonly CorporationSourcePolicy[],
+  options: {
+    includePersonalOrders?: boolean;
+    includeCorporationOrders?: boolean;
+  } = {},
 ): Promise<Record<string, number> | null> {
+  const includePersonalOrders = options.includePersonalOrders ?? true;
+  const includeCorporationOrders = options.includeCorporationOrders ?? true;
   const quantities = new Map<number, number>();
   let hasUsableSource = false;
   let hasUnavailableSource = false;
@@ -2845,39 +2819,43 @@ export async function getMarketOrderBuyQuantities(
     }
   };
 
-  for (const characterId of characterIds) {
-    const cache = getCache(characterCaches, characterId, sessionId);
-    if (!hasUsableMarketOrders(cache)) {
-      hasUnavailableSource = true;
-      continue;
+  if (includePersonalOrders) {
+    for (const characterId of characterIds) {
+      const cache = getCache(characterCaches, characterId, sessionId);
+      if (!hasUsableMarketOrders(cache)) {
+        hasUnavailableSource = true;
+        continue;
+      }
+      hasUsableSource = true;
+      addOrders(cache.marketOrders?.lastBody ?? []);
     }
-    hasUsableSource = true;
-    addOrders(cache.marketOrders?.lastBody ?? []);
   }
 
-  const projection = await getCorporationProjection(characterIds, true, sessionId, policies);
-  for (const corporationId of projection.corporationIds) {
-    const cache = getCache(corporationCaches, corporationId, sessionId);
-    if (!hasUsableMarketOrders(cache)) {
-      hasUnavailableSource = true;
-      continue;
+  if (includeCorporationOrders) {
+    const projection = await getCorporationProjection(characterIds, true, sessionId, policies);
+    for (const corporationId of projection.corporationIds) {
+      const cache = getCache(corporationCaches, corporationId, sessionId);
+      if (!hasUsableMarketOrders(cache)) {
+        hasUnavailableSource = true;
+        continue;
+      }
+      hasUsableSource = true;
+      const policy = projection.policiesByCorporationId.get(corporationId);
+      const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
+      const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+      addOrders(
+        (cache.marketOrders?.lastBody ?? []).filter(
+          (order) =>
+            !policy
+            || isCorporationLocationAccessible(
+              order.locationId,
+              policy,
+              projection.characters,
+              rawAssetsByItemId,
+            ),
+        ),
+      );
     }
-    hasUsableSource = true;
-    const policy = projection.policiesByCorporationId.get(corporationId);
-    const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
-    const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
-    addOrders(
-      (cache.marketOrders?.lastBody ?? []).filter(
-        (order) =>
-          !policy
-          || isCorporationLocationAccessible(
-            order.locationId,
-            policy,
-            projection.characters,
-            rawAssetsByItemId,
-          ),
-      ),
-    );
   }
 
   if (!hasUsableSource && hasUnavailableSource) return null;

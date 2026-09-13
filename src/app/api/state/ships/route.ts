@@ -1,87 +1,41 @@
 import { NextResponse } from "next/server";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
-import { getShipAssets } from "@/lib/esi/cache";
-import { getCharacter } from "@/lib/auth/tokensStore";
-import {
-  getMarketGroups,
-  getShipTypeIds,
-  getStations,
-  getSystems,
-  getTypesByIds,
-} from "@/cache/services/sdeCache";
-
-function isAmmunitionType(
-  typeId: number,
-  types: Awaited<ReturnType<typeof getTypesByIds>>,
-  marketGroups: Awaited<ReturnType<typeof getMarketGroups>>,
-) {
-  let marketGroupId = types.get(typeId)?.marketGroupID;
-  while (marketGroupId !== undefined) {
-    const marketGroup = marketGroups.get(marketGroupId);
-    if (!marketGroup) return false;
-    if (marketGroup.name.en === "Ammunition & Charges") return true;
-    marketGroupId = marketGroup.parentGroupID;
-  }
-  return false;
-}
+import { getCollectionCorporationSettings } from "@/lib/auth/tokensStore";
+import { getCorporationSourcePolicies } from "@/lib/esi/cache";
+import { getShipsForCharacter, getShipsForCorporation } from "@/lib/data/ships";
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session) return NextResponse.json({ error: "Not authenticated." }, { status: 401 });
-  const characterIds = await getSessionCharacterIds(session);
 
-  const [assets, shipTypeIds, stations, systems, marketGroups, characters] = await Promise.all([
-    getShipAssets(characterIds, true, session.sessionId),
-    getShipTypeIds(),
-    getStations(),
-    getSystems(),
-    getMarketGroups(),
-    Promise.all(characterIds.map((id) => getCharacter(id))),
-  ]);
-  const characterNamesById = new Map(
-    characters
-      .filter((character) => character !== null)
-      .map((character) => [character.characterId, character.characterName]),
+  const characterIds = await getSessionCharacterIds(session);
+  const corporationSettings = session.collectionId
+    ? await getCollectionCorporationSettings(session.collectionId)
+    : [];
+  const corporationPolicies = await getCorporationSourcePolicies(
+    characterIds,
+    corporationSettings,
+    session.sessionId,
   );
-  const types = await getTypesByIds([...new Set(assets.map((asset) => asset.typeId))]);
-  const annotatedAssets = assets.map((asset) => ({
-    ...asset,
-    isAmmo: isAmmunitionType(asset.typeId, types, marketGroups),
-  }));
-  const ships = annotatedAssets
-    .filter((asset) => asset.isSingleton && shipTypeIds.has(asset.typeId))
-    .map((asset) => {
-      const root =
-        asset.rootLocation && "kind" in asset.rootLocation ? asset.rootLocation : undefined;
-      const station = asset.locationType === "station" ? stations.get(asset.locationId) : undefined;
-      const systemId =
-        root?.systemId
-        ?? station?.solarSystemID
-        ?? (asset.locationType === "solar_system" ? asset.locationId : undefined);
-      const systemName = systemId === undefined ? undefined : systems.get(systemId)?.name.en;
-      const isInSpace = asset.locationFlag === "Pilot" && asset.locationType === "solar_system";
-      return {
-        itemId: asset.itemId,
-        typeId: asset.typeId,
-        name: asset.name,
-        systemId,
-        systemName,
-        ...(isInSpace
-          ? {
-              isInSpace: true,
-              pilotId: asset.ownerId,
-              pilotName: characterNamesById.get(asset.ownerId) ?? `Character ${asset.ownerId}`,
-              locationName: systemName ?? `System ${systemId}`,
-            }
-          : {}),
-      };
-    });
+  const context = {
+    sessionId: session.sessionId,
+    characterIds,
+    corporationPolicies,
+  };
+  const characterResponses = await Promise.all(
+    characterIds.map((characterId) => getShipsForCharacter(characterId, context)),
+  );
+  const corporationResponses = await Promise.all(
+    corporationPolicies.map((policy) => getShipsForCorporation(policy.corporationId, context)),
+  );
+  const ownerResponses = [...characterResponses, ...corporationResponses];
   return NextResponse.json({
-    assets: annotatedAssets,
-    ships,
-    types: [...types.values()].map((type) => ({
-      typeId: type._key,
-      name: type.name.en,
-    })),
+    assets: ownerResponses.flatMap((response) => response.assets),
+    ships: ownerResponses.flatMap((response) => response.ships),
+    types: [
+      ...new Map(
+        ownerResponses.flatMap((response) => response.types).map((type) => [type.typeId, type]),
+      ).values(),
+    ],
   });
 }

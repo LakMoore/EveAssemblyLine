@@ -197,7 +197,7 @@ function hasExpiredEndpoint(statuses: ClientCharacterStatus[]) {
       const lastUpdated = Date.parse(endpoint.lastUpdated ?? "");
       const recentlyUpdated =
         Number.isFinite(lastUpdated) && lastUpdated <= now && now - lastUpdated <= 2 * 60 * 1000;
-      const expiresAt = Date.parse(endpoint.expires ?? endpoint.nextRefreshAllowed ?? "");
+      const expiresAt = Date.parse(endpoint.expires ?? "");
       const isExpired = Number.isFinite(expiresAt) && expiresAt <= now;
       return endpoint.status === "stale" || (isExpired && !recentlyUpdated);
     });

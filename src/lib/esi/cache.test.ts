@@ -12,6 +12,7 @@ import {
   isCargoContainerType,
   isHaulableShipHoldAsset,
   setFresh,
+  toClientEndpointStatus,
 } from "./cache";
 import { getGroups, getMarketGroups, getTypesByIds } from "@/cache/services/sdeCache";
 import { normalizeCorporationSettings } from "@/lib/auth/tokensStore";
@@ -73,6 +74,18 @@ function sourcePolicy(overrides: Partial<typeof corporationPolicy> = {}) {
 function corporationRecord(locationId: number, itemId = 400, locationFlag = "CorpSAG1") {
   return { itemId, locationId, locationFlag };
 }
+
+void test("does not expose internal endpoint metadata to clients", () => {
+  assert.deepEqual(
+    toClientEndpointStatus({
+      lastBody: [],
+      etag: "private-etag",
+      expires: "2026-08-26T17:00:00.000Z",
+      status: "fresh",
+    }),
+    { expires: "2026-08-26T17:00:00.000Z", status: "fresh", hasBody: true },
+  );
+});
 
 void test("includes direct hangar contents without including nested container contents", () => {
   const policy = sourcePolicy({
@@ -369,7 +382,6 @@ void test("uses only response Last-Modified and Expires metadata", () => {
   assert.ok(current.lastUpdated);
   assert.ok(Date.parse(current.lastUpdated) <= Date.now());
   assert.equal(current.expires, "2026-08-26T17:00:00.000Z");
-  assert.equal(current.nextRefreshAllowed, "2026-08-26T17:00:00.000Z");
   assert.equal(current.etag, "new-etag");
 });
 
@@ -381,7 +393,6 @@ void test("does not preserve Last-Modified when the response omits it", () => {
       lastBody: [],
       lastModified: "2026-08-26T16:00:00.000Z",
       expires: "2026-08-26T16:30:00.000Z",
-      nextRefreshAllowed: "2026-08-26T16:30:00.000Z",
       status: "stale",
     },
   );
@@ -406,7 +417,6 @@ void test("preserves Last-Modified when a 304 response omits it", () => {
       lastBody: [],
       lastModified: "2026-08-26T16:00:00.000Z",
       expires: "2026-08-26T16:30:00.000Z",
-      nextRefreshAllowed: "2026-08-26T16:30:00.000Z",
       status: "stale",
     },
     true,

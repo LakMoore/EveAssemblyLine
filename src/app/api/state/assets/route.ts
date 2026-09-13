@@ -3,19 +3,13 @@ import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/sessio
 import { getCollectionCorporationSettings } from "@/lib/auth/tokensStore";
 import { getCollectionFacilities } from "@/lib/auth/tokensStore";
 import {
-  getAllAssetsRaw,
-  getCorporationSourceCatalog,
   getCorporationSourcePolicies,
-  getResolvedAssetIndex,
-  getResolvedAssets,
-  getBlueprintInstances,
-  getRootLocationsByItemId,
-  getRunningIndustryJobs,
   getMarketOrderStock,
   getCorporationAssetSource,
   getCorporationLocationSource,
   getMarketOrderBuyQuantities,
 } from "@/lib/esi/cache";
+import { getAssetsForCharacter, getAssetsForCorporation } from "@/lib/data/assets";
 import type { Facility } from "@/lib/planning/facilities";
 import {
   getGroups,
@@ -409,11 +403,17 @@ export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const requestedLanguage = url.searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
-  const corporationSourcesPromise = getCorporationSourceCatalog(
+  const ownerDataContext = {
+    sessionId: session.sessionId,
     characterIds,
     corporationPolicies,
-    session.sessionId,
-  );
+  };
+  const ownerAssetDataPromise = Promise.all([
+    ...characterIds.map((characterId) => getAssetsForCharacter(characterId, ownerDataContext)),
+    ...corporationPolicies.map((policy) =>
+      getAssetsForCorporation(policy.corporationId, ownerDataContext),
+    ),
+  ]);
   const marketStockPromise = getMarketOrderStock(
     characterIds,
     {
@@ -435,36 +435,34 @@ export async function GET(request: NextRequest) {
   const facilitySettingsPromise = getCollectionFacilities(session.collectionId);
   markPhase("session");
   const [
-    assets,
-    rawAssets,
-    jobs,
-    blueprintInstances,
+    ownerAssetData,
     shipTypeIds,
     groups,
     marketGroups,
     stations,
     systems,
-    rootLocationsByItemId,
-    corporationSources,
     marketStock,
     marketBuyOrderQuantities,
     facilitySettings,
   ] = await Promise.all([
-    getResolvedAssets(characterIds, true, session.sessionId, corporationPolicies),
-    getAllAssetsRaw(characterIds, true, session.sessionId, corporationPolicies),
-    getRunningIndustryJobs(characterIds, true, session.sessionId, corporationPolicies),
-    getBlueprintInstances(characterIds, true, session.sessionId, corporationPolicies),
+    ownerAssetDataPromise,
     getShipTypeIds(),
     getGroups(),
     getMarketGroups(),
     getStations(),
     getSystems(),
-    getRootLocationsByItemId(characterIds, true, session.sessionId, corporationPolicies),
-    corporationSourcesPromise,
     marketStockPromise,
     marketBuyOrderQuantitiesPromise,
     facilitySettingsPromise,
   ]);
+  const assets = ownerAssetData.flatMap((data) => data.assets);
+  const rawAssets = ownerAssetData.flatMap((data) => data.rawAssets);
+  const jobs = ownerAssetData.flatMap((data) => data.jobs);
+  const blueprintInstances = ownerAssetData.flatMap((data) => data.blueprintInstances);
+  const rootLocationsByItemId = new Map(
+    ownerAssetData.flatMap((data) => [...data.rootLocationsByItemId.entries()]),
+  );
+  const corporationSources = ownerAssetData.flatMap((data) => data.corporationSources);
   markPhase("data");
   const facilityResponse = await calculateFacilities(
     request,
@@ -519,12 +517,7 @@ export async function GET(request: NextRequest) {
       }
     }),
   );
-  const allAssetIndex = await getResolvedAssetIndex(
-    characterIds,
-    true,
-    session.sessionId,
-    corporationPolicies,
-  );
+  const allAssetIndex = new Map(assets.map((asset) => [asset.itemId, asset]));
   markPhase("indexes");
   const blueprintInstancesByOwnerAndItemId = new Map(
     blueprintInstances.map((blueprint) => [

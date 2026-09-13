@@ -387,7 +387,6 @@ export type ClientEndpointStatus = {
   lastModified?: string;
   lastUpdated?: string;
   expires?: string;
-  nextRefreshAllowed?: string;
   rateLimitedUntil?: string;
   error?: string;
   reauthorizeRequired?: boolean;

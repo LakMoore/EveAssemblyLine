@@ -10,12 +10,6 @@ import { loadCompressSettings } from "./compressSettingsStore";
 import type { FacilityResponse } from "./facilities";
 import { loadPlannerStockpiles, savePlannerStockpiles } from "./plannerStockpilesStore";
 
-type CharacterOption = {
-  id: string;
-  characterId: number;
-  implants: number[];
-};
-
 type ImplantOption = {
   id: string;
   typeId?: number;
@@ -23,7 +17,7 @@ type ImplantOption = {
 };
 
 type CompressOptions = {
-  characters: CharacterOption[];
+  characterImplants: Partial<Record<string, number[]>>;
   implants: ImplantOption[];
   relevantSkillIds: number[];
 };
@@ -35,7 +29,7 @@ export function loadCompressOptions(language: SdeLanguage, reload = false) {
   if (compressOptionsRequest) return compressOptionsRequest;
   compressOptionsRequest = (async () => {
     const cached = reload ? null : await loadEndpointRecord<CompressOptions>("compress/options");
-    if (cached) return cached.data;
+    if (cached && Object.hasOwn(cached.data, "characterImplants")) return cached.data;
     const response = await fetch(
       "/api/compress/options",
       {
@@ -64,8 +58,11 @@ async function selectedSkillLevels(options: CompressOptions, characterId: string
     const level = characterId === "all-iv" ? 4 : 5;
     return Object.fromEntries(options.relevantSkillIds.map((id) => [String(id), level]));
   }
-  const selectedCharacter = options.characters.find((character) => character.id === characterId);
-  if (!selectedCharacter || !(await loadClientSession()).authenticated) return {};
+  const session = await loadClientSession();
+  const selectedCharacter = (session.characters ?? []).find(
+    (character) => `character:${character.characterId}` === characterId,
+  );
+  if (!selectedCharacter || !session.authenticated) return {};
   const state = await loadClientCharacterState();
   return Object.fromEntries(
     (
@@ -96,8 +93,8 @@ export async function loadPlannerReprocessingEfficiencies(
     (facility) => facility.id === reprocessingLocationId,
   );
   const selectedImplant = options.implants.find((implant) => implant.id === settings.implantId);
-  const selectedCharacter = options.characters.find(
-    (character) => character.id === settings.characterId,
+  const selectedCharacter = (await loadClientSession()).characters?.find(
+    (character) => `character:${character.characterId}` === settings.characterId,
   );
   const structureTypeId =
     selectedFacility?.locationType === "structure" ? selectedFacility.typeId : 0;
@@ -107,7 +104,12 @@ export async function loadPlannerReprocessingEfficiencies(
       : [];
   const implantAllowed =
     selectedImplant?.typeId === undefined
-    || selectedCharacter?.implants.includes(selectedImplant.typeId) === true;
+    || (
+      selectedCharacter
+      && options.characterImplants[String(selectedCharacter.characterId)]?.includes(
+        selectedImplant.typeId,
+      ) === true
+    );
   const response = await fetch(
     "/api/compress/efficiencies",
     {

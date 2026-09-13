@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/session";
 import { getCollectionCorporationSettings } from "@/lib/auth/tokensStore";
-import { getCorporationSourcePolicies, getMarketOrderStock } from "@/lib/esi/cache";
+import { getCorporationSourcePolicies } from "@/lib/esi/cache";
+import {
+  getMarketOrdersForCharacter,
+  getMarketOrdersForCorporation,
+  type MarketOrderOptions,
+} from "@/lib/data/marketOrders";
 
 export async function GET(request: NextRequest) {
   const session = await getSessionFromRequest(request);
@@ -21,18 +26,36 @@ export async function GET(request: NextRequest) {
     .map(Number)
     .filter((id) => Number.isInteger(id) && sessionCharacterIds.includes(id));
   const characterIds = requested.length > 0 ? requested : sessionCharacterIds;
-  const marketOrderStock = await getMarketOrderStock(
-    characterIds,
-    {
-      personalSellOrdersAsStock: url.searchParams.get("personalSellOrdersAsStock") === "true",
-      allCorporationSellOrdersAsStock:
-        url.searchParams.get("allCorporationSellOrdersAsStock") === "true",
-      myCorporationSellOrdersAsStock:
-        url.searchParams.get("myCorporationSellOrdersAsStock") === "true",
-    },
-    session.sessionId,
+  const options: MarketOrderOptions = {
+    personalSellOrdersAsStock: url.searchParams.get("personalSellOrdersAsStock") === "true",
+    allCorporationSellOrdersAsStock:
+      url.searchParams.get("allCorporationSellOrdersAsStock") === "true",
+    myCorporationSellOrdersAsStock:
+      url.searchParams.get("myCorporationSellOrdersAsStock") === "true",
+  };
+  const context = {
+    sessionId: session.sessionId,
+    characterIds: sessionCharacterIds,
     corporationPolicies,
+  };
+  const characterResponses = await Promise.all(
+    characterIds.map((characterId) => getMarketOrdersForCharacter(characterId, context, options)),
   );
+  const corporationResponses =
+    options.allCorporationSellOrdersAsStock || options.myCorporationSellOrdersAsStock
+      ? await Promise.all(
+          corporationPolicies.map((policy) =>
+            getMarketOrdersForCorporation(policy.corporationId, context, options),
+          ),
+        )
+      : [];
+  const ownerResponses = [...characterResponses, ...corporationResponses];
+  const hasUsableMarketOrderSource = ownerResponses.some(
+    (response) => response.marketOrderStock !== null,
+  );
+  const marketOrderStock = hasUsableMarketOrderSource
+    ? ownerResponses.flatMap((response) => response.marketOrderStock ?? [])
+    : null;
   if (marketOrderStock === null) {
     return NextResponse.json(
       { error: "Market order data is not currently available from ESI." },

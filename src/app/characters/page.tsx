@@ -57,7 +57,6 @@ type EndpointStatus = {
   lastModified?: string;
   lastUpdated?: string;
   expires?: string;
-  nextRefreshAllowed?: string;
   rateLimitedUntil?: string;
   error?: string;
   reauthorizeRequired?: boolean;
@@ -74,7 +73,7 @@ function formatDate(value?: string) {
 
 function renderedStatus(status: EndpointStatus | undefined): EndpointStatus | undefined {
   if (!status || status.status === "error" || status.status === "rate_limited") return status;
-  const expiresAt = Date.parse(status.expires ?? status.nextRefreshAllowed ?? "");
+  const expiresAt = Date.parse(status.expires ?? "");
   const updatedAt = Date.parse(status.lastUpdated ?? "");
   const now = Date.now();
   const recentlyModified =
@@ -93,11 +92,7 @@ function statusLabel(status: EndpointStatus | undefined, noAccess = false) {
     return currentStatus.reauthorizeRequired ? "Reauthorize required" : "Refresh failed";
   }
   if (!currentStatus || !currentStatus.hasBody) return "Refresh required";
-  if (
-    currentStatus.status !== "rate_limited"
-    && !currentStatus.expires
-    && !currentStatus.nextRefreshAllowed
-  ) return "Refresh required";
+  if (currentStatus.status !== "rate_limited" && !currentStatus.expires) return "Refresh required";
   if (currentStatus.status === "fresh") return "Fresh";
   if (currentStatus.status === "stale") return "Stale";
   if (currentStatus.status === "rate_limited") return "Rate limited";
@@ -126,8 +121,8 @@ function availabilityLabel(status?: EndpointStatus) {
   if (status.status === "rate_limited" && status.rateLimitedUntil) {
     return `Available ${formatDate(status.rateLimitedUntil)}`;
   }
-  if (!status.expires && !status.nextRefreshAllowed) return "Refresh required";
-  const blockedUntil = status.rateLimitedUntil ?? status.nextRefreshAllowed;
+  if (!status.expires) return "Refresh required";
+  const blockedUntil = status.rateLimitedUntil ?? status.expires;
   if (blockedUntil && Date.parse(blockedUntil) > Date.now()) {
     return `Available ${formatDate(blockedUntil)}`;
   }
@@ -137,10 +132,10 @@ function availabilityLabel(status?: EndpointStatus) {
 function compactAvailabilityText(status?: EndpointStatus) {
   if (!status) return "Not loaded";
   if (status.status === "error") return "Refresh failed";
-  if (!status.expires && !status.nextRefreshAllowed && !status.rateLimitedUntil) {
+  if (!status.expires && !status.rateLimitedUntil) {
     return "Refresh required";
   }
-  const availableAt = status.rateLimitedUntil ?? status.nextRefreshAllowed ?? status.expires;
+  const availableAt = status.rateLimitedUntil ?? status.expires;
   const availableAtTime = Date.parse(availableAt ?? "");
   if (Number.isFinite(availableAtTime) && availableAtTime > Date.now()) {
     const minutes = Math.max(1, Math.ceil((availableAtTime - Date.now()) / 60_000));
@@ -164,7 +159,7 @@ function compactAvailabilityLabel(status?: EndpointStatus) {
 
 function expiryLabel(status?: EndpointStatus) {
   if (!status) return "Expires unavailable";
-  const expiresAt = status.expires ?? status.nextRefreshAllowed;
+  const expiresAt = status.expires;
   return expiresAt ? `Expires ${formatDate(expiresAt)}` : "Expires unavailable";
 }
 

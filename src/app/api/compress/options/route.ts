@@ -180,13 +180,11 @@ async function getOptions(
     }),
   );
   markPhase("structures");
-  const characters = await Promise.all(
+  const characterImplants = await Promise.all(
     records.map(async (record) => {
       const clones = await fetchCharacterClones(record).catch(() => ({ data: null }));
       return {
-        id: `character:${record.characterId}`,
         characterId: record.characterId,
-        name: record.characterName,
         implants: [
           ...new Set(
             (clones.data?.clones ?? []).find(
@@ -208,7 +206,9 @@ async function getOptions(
       level: implantLevels[name],
     };
   });
-  const cloneImplantIds = [...new Set(characters.flatMap((character) => character.implants))];
+  const cloneImplantIds = [
+    ...new Set(characterImplants.flatMap((character) => character.implants)),
+  ];
   const cloneImplants = cloneImplantIds
     .filter((typeId) => !implantNames.some((implant) => implant.typeId === typeId))
     .map((typeId) => ({
@@ -306,7 +306,9 @@ async function getOptions(
     );
   }
   const response = NextResponse.json({
-    characters,
+    characterImplants: Object.fromEntries(
+      characterImplants.map((character) => [String(character.characterId), character.implants]),
+    ),
     relevantSkillIds,
     implants: [{ id: "none", name: "No implant", level: 0 }, ...implantNames, ...cloneImplants],
   });
