@@ -429,6 +429,12 @@ export function projectOwnerSnapshotsToClientJobs(
 ): ClientJobsResponse {
   const metadataByTypeId = metadataMap(metadata);
   const slotUsage: NonNullable<ClientJobsResponse["slotUsage"]> = {};
+  for (const [characterId, availableSlots] of industrySlots) {
+    slotUsage[String(characterId)] = {
+      slots: {},
+      availableSlots: { ...availableSlots },
+    };
+  }
   const countedJobIds = new Set<number>();
   for (const snapshot of snapshots) {
     for (const job of snapshot.jobs.data) {

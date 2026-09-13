@@ -1,5 +1,6 @@
 import {
   getBlueprintsByInventionProductId,
+  getBlueprintIndexes,
   getBuildBlueprintByProductTypeId,
   getCompressibleTypes,
   getGroups,
@@ -1084,6 +1085,7 @@ async function calculatePlanPass(
     skillPrerequisites,
   } = planningData;
   const productionGroups = getProductionGroupReferences(targetFilters, groups, language);
+  const buildableTypeIds = new Set((await getBlueprintIndexes()).byBuildProductTypeId.keys());
   const facilityProfilesByLocationId = new Map(
     (request.facilityProfiles ?? []).map((profile) => [profile.locationId, profile]),
   );
@@ -2382,13 +2384,16 @@ async function calculatePlanPass(
                 false,
                 activityLocationId,
                 undefined,
-                requiredMaterialQuantity(
-                  "reaction",
-                  material.quantity,
-                  materialInstallableRuns,
-                  efficiency,
-                  profile.materialMultiplier,
-                ),
+                buildableTypeIds.has(material.typeID)
+                  && (standardStock.get(material.typeID) ?? 0) >= materialQuantity
+                  ? materialQuantity
+                  : requiredMaterialQuantity(
+                      "reaction",
+                      material.quantity,
+                      materialInstallableRuns,
+                      efficiency,
+                      profile.materialMultiplier,
+                    ),
                 activityLocationId,
                 undefined,
               );
@@ -2447,7 +2452,7 @@ async function calculatePlanPass(
         const successfulBpcRuns = inventingBlueprint.maxProductionLimit;
         const successfulBpcQuantity = Math.ceil(remainingBpcRuns / successfulBpcRuns);
         const inventionAttempts = Math.ceil(successfulBpcQuantity / successProbability);
-        const jobKey = locationTypeKey(locations?.manufacturing, inventingBlueprint._key);
+        const jobKey = locationTypeKey(locations?.invention, inventingBlueprint._key);
         const existing = inventionJobs.get(jobKey);
         inventionJobs.set(
           jobKey,
@@ -2457,7 +2462,7 @@ async function calculatePlanPass(
             countNeeded: (existing?.countNeeded ?? 0) + inventionAttempts,
             ...(locations
               ? {
-                  locationId: locations.manufacturing,
+                  locationId: locations.invention,
                 }
               : {}),
           },
@@ -2485,7 +2490,7 @@ async function calculatePlanPass(
             bpoCount: sourceBpoCount,
             bposInUse: blueprintInUseCounts.get(inventingBlueprint._key) ?? 0,
             buildTime: inventingBlueprint.activities.copying?.time ?? 0,
-            activityLocationId: locations?.manufacturing,
+            activityLocationId: locations?.invention,
             buyQuantity:
               sourceBpoCount > 0
                 ? Math.ceil(sourceRemainingRuns / inventingBlueprint.maxProductionLimit)
@@ -2498,7 +2503,7 @@ async function calculatePlanPass(
             material.quantity * inventionAttempts,
             false,
             true,
-            locations?.manufacturing,
+            locations?.invention,
           );
         }
       }

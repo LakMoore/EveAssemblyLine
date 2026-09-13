@@ -808,7 +808,7 @@ Implement in `planning/planEngine.ts`:
 - **4. Invention jobs**
   - For required BPCs that must be invented (T2, etc.):
     - Use SDE blueprint activities and invention data to compute required invention jobs.
-    - Add each job with the stockpile's `manufacturing` location or user-selected structure.
+    - Add each job and its blueprint/material inputs with the stockpile's `invention` location or user-selected structure.
 - **5. Reaction jobs**
   - For materials produced via reactions:
     - Determine reaction formulas (from SDE).

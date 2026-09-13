@@ -671,6 +671,38 @@ void test("counts corporation jobs against the installing character's slots", ()
   );
 });
 
+void test("projects available slots for characters without active jobs", () => {
+  const characterId = 2117375278;
+  const result = projectOwnerSnapshotsToClientJobs(
+    [
+      {
+        ...snapshot,
+        owner: { kind: "character", id: characterId },
+        jobs: slice([]),
+      },
+    ],
+    [],
+    new Map([
+      [
+        characterId,
+        {
+          Manufacturing: 5,
+          Reactions: 3,
+          Science: 4,
+        },
+      ],
+    ]),
+  );
+
+  assert.deepEqual(
+    result.slotUsage?.[String(characterId)],
+    {
+      slots: {},
+      availableSlots: { Manufacturing: 5, Reactions: 3, Science: 4 },
+    },
+  );
+});
+
 void test("projects normalized market order quantities", () => {
   const result = projectOwnerSnapshotsToClientAssets(
     [

@@ -15,8 +15,9 @@ import { Atom, Factory, FlaskConical } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
+import { getSlotUsageTotals, type IndustrySlotCategory } from "@/lib/client/slotUsage";
 
-const slotOrder = ["Manufacturing", "Science", "Reactions"];
+const slotOrder: IndustrySlotCategory[] = ["Manufacturing", "Science", "Reactions"];
 const scienceJobActivities = new Set([
   "Time research",
   "Material research",
@@ -165,31 +166,17 @@ export default function JobsPage() {
     ];
   }, [characters, data]);
   const slotTypes = useMemo(() => {
-    const types = new Set(slotOrder);
+    const types = new Set<string>(slotOrder);
     for (const usage of Object.values(slotUsage)) {
       for (const type of Object.keys(usage.slots)) types.add(type);
     }
     return [...types];
   }, [slotUsage]);
-  const availableSlotTotals = slotOrder.map((type) => {
-    const totals = characters.reduce(
-      (summary, character) => {
-        const usage = slotUsage[String(character.characterId)] ?? {
-          slots: {},
-          availableSlots: {},
-        };
-        const totalSlots = usage.availableSlots[type] ?? 0;
-        const inUseSlots = usage.slots[type] ?? 0;
-        return {
-          totalSlots: summary.totalSlots + totalSlots,
-          inUseSlots: summary.inUseSlots + inUseSlots,
-          availableSlots: summary.availableSlots + Math.max(0, totalSlots - inUseSlots),
-        };
-      },
-      { totalSlots: 0, inUseSlots: 0, availableSlots: 0 },
-    );
-    return { type, ...totals };
-  });
+  const characterIds = characters.map((character) => character.characterId);
+  const availableSlotTotals = slotOrder.map((type) => ({
+    type,
+    ...getSlotUsageTotals(slotUsage, type, characterIds),
+  }));
 
   return (
     <>

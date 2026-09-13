@@ -34,6 +34,7 @@ const fuelReactionProductTypeId = 16659;
 const fuelReactionFormulaTypeId = 46167;
 const reprocessingLocationId = 10;
 const manufacturingLocationId = 20;
+const inventionLocationId = 30;
 const sourceLocationId = 40;
 const alternateSourceLocationId = 50;
 
@@ -801,6 +802,30 @@ void test("plans invention attempts and materials for a missing T2 BPC", async (
             fromCompression: false,
           },
         ],
+        stockpiles: [
+          {
+            id: "invention-stockpile",
+            name: "Invention stockpile",
+            locations: {
+              stock: manufacturingLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: inventionLocationId,
+            },
+            items: [
+              {
+                typeId: capRechargerTypeId,
+                name: "Cap Recharger II",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
       },
     ),
   );
@@ -810,13 +835,20 @@ void test("plans invention attempts and materials for a missing T2 BPC", async (
   );
   assert(inventionJob);
   assert.equal(inventionJob.countNeeded, 3);
-  assert.equal(inventionJob.locationId, manufacturingLocationId);
+  assert.equal(inventionJob.locationId, inventionLocationId);
+
+  const sourceBlueprint = result.lists.bpcsToBuy.find(
+    (blueprint) => blueprint.typeId === capRechargerInventionBlueprintTypeId,
+  );
+  assert(sourceBlueprint);
+  assert.equal(sourceBlueprint.activityLocationId, inventionLocationId);
 
   for (const typeId of [highEnergyPhysicsDatacoreTypeId, quantumPhysicsDatacoreTypeId]) {
     const datacore = result.lists.materialsToBuy.find((item) => item.typeId === typeId);
     assert(datacore);
     assert.equal(datacore.requiredQuantity, 6);
     assert.equal(datacore.buyQuantity, 6);
+    assert.equal(datacore.activityLocationId, inventionLocationId);
   }
   assert.equal(
     result.lists.bpcsToBuy.some((blueprint) => blueprint.typeId === capRechargerBlueprintTypeId),
@@ -1432,6 +1464,76 @@ void test("reports no build or surplus when available intermediate stock covers 
   assert.equal(planItem.requiredQuantity, 15);
   assert.equal(planItem.neededQuantity, 0);
   assert.equal(planItem.surplusQuantity, 0);
+});
+
+void test("reserves available direct stock for a requested material", async () => {
+  const hypnagogicNeurolinkEnhancerTypeId = 57459;
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: hypnagogicNeurolinkEnhancerTypeId,
+          name: "Hypnagogic Neurolink Enhancer",
+          quantity: 160,
+          category: "item",
+          rootLocationId: inventionLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: 37605,
+            name: "Minokawa",
+            quantity: 3,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        stockpiles: [
+          {
+            id: "direct-stockpile",
+            name: "Direct stockpile",
+            locations: {
+              stock: manufacturingLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: inventionLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: 37605,
+                name: "Minokawa",
+                quantity: 3,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const response = await toPlanResponse(result);
+  const planItem = response.lists.planItems.all.find(
+    (item) => item.typeId === hypnagogicNeurolinkEnhancerTypeId,
+  );
+
+  assert(planItem);
+  assert.equal(planItem.availableQuantity, 160);
+  assert.equal(planItem.requiredQuantity, 160);
+  assert.equal(planItem.neededQuantity, 0);
+  assert.equal(planItem.surplusQuantity, 0);
+  assert.equal(
+    response.lists.materialsToBuy
+      .flatMap((bucket) => bucket.items)
+      .find((item) => item.typeId === hypnagogicNeurolinkEnhancerTypeId),
+    undefined,
+  );
 });
 
 void test("reserves available buildable intermediate stock before manufacturing fan-out", async () => {

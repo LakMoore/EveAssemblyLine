@@ -18,6 +18,7 @@ import type {
 } from "@/lib/planning/types";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import type { ClientCharacterStatus, ClientJobsResponse } from "@/lib/client/requestCache";
+import { getAvailableSlotCount, getSlotUsageTotals } from "@/lib/client/slotUsage";
 import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
 import {
   createHaulItemExclusionKey,
@@ -380,7 +381,7 @@ function getActivitySlotCharacters(
     .flatMap(([characterId, usage]) => {
       const id = Number(characterId);
       const name = characterNamesById.get(id);
-      const availableSlots = Math.max(0, usage.availableSlots[activity] - usage.slots[activity]);
+      const availableSlots = getAvailableSlotCount(usage, activity);
       return name && availableSlots > 0 ? [{ characterId: id, name, availableSlots }] : [];
     })
     .sort((left, right) => left.name.localeCompare(right.name));
@@ -646,14 +647,17 @@ function PlannerResultsContent({
     characterNamesById,
     "Manufacturing",
   );
-  const availableReactionSlots = reactionSlotCharacters.reduce(
-    (total, character) => total + character.availableSlots,
-    0,
-  );
-  const availableManufacturingSlots = manufacturingSlotCharacters.reduce(
-    (total, character) => total + character.availableSlots,
-    0,
-  );
+  const characterIds = [...characterNamesById.keys()];
+  const availableReactionSlots = getSlotUsageTotals(
+    jobs?.slotUsage ?? {},
+    "Reactions",
+    characterIds,
+  ).availableSlots;
+  const availableManufacturingSlots = getSlotUsageTotals(
+    jobs?.slotUsage ?? {},
+    "Manufacturing",
+    characterIds,
+  ).availableSlots;
   const activityLocationIds = [
     ...new Set(
       [
