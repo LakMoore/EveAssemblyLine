@@ -290,7 +290,7 @@ export async function allocateStockpileStock(
             - (remainingDemand[left.stockpileIndex].get(typeId) ?? 0)
           || left.stockpileIndex - right.stockpileIndex,
       )) {
-        const remaining = remainingDemand[stockpileIndex].get(typeId) ?? 0;
+        let remaining = remainingDemand[stockpileIndex].get(typeId) ?? 0;
         if (remaining <= 0) continue;
         for (const { item, index } of stockIndexes) {
           const stockLocationId = getStockRootLocationId(item);
@@ -315,7 +315,10 @@ export async function allocateStockpileStock(
             )
             || !canUseFutureStock(index, stockpileIndex)
           ) continue;
-          allocate(index, stockpileIndex, Math.min(remainingStock[index], remaining));
+          const quantity = Math.min(remainingStock[index], remaining);
+          allocate(index, stockpileIndex, quantity);
+          remaining -= quantity;
+          if (remaining <= 0) break;
         }
       }
       for (const { item, index } of stockIndexes) {

@@ -12,6 +12,7 @@ const rifterTypeId = 587;
 const rifterBlueprintTypeId = 691;
 const capitalComputerSystemBlueprintTypeId = 21036;
 const capitalComputerSystemTypeId = 21035;
+const capitalCargoBayTypeId = 21027;
 const grapheneNanoribbonsTypeId = 30309;
 const capitalDroneBayBlueprintTypeId = 21030;
 const capRechargerTypeId = 2032;
@@ -1375,6 +1376,85 @@ void test("uses output from an active industry job as committed availability", a
   assert.equal(tritanium.buyQuantity, 0);
   assert.equal((tritanium.availableSourceCounts?.[manufacturingLocationId] ?? {}).industry, 100);
   assert.deepEqual(result.lists.haulingTasks, []);
+});
+
+void test("shares active final-product output across stockpile demands", async () => {
+  const sharedManufacturingLocationId = 60_000_000;
+  const stockpiles = [
+    { id: "amarr", stock: 60_008_494 },
+    { id: "jita", stock: 60_003_760 },
+    { id: "shared", stock: sharedManufacturingLocationId },
+  ].map(({ id, stock }) => ({
+    id,
+    name: id,
+    locations: {
+      stock,
+      manufacturing: sharedManufacturingLocationId,
+      reactions: sharedManufacturingLocationId,
+      reprocessing: reprocessingLocationId,
+      copying: sharedManufacturingLocationId,
+      invention: sharedManufacturingLocationId,
+    },
+    items: [
+      {
+        typeId: 28606,
+        name: "Orca",
+        quantity: 5,
+        me: 0,
+        te: 0,
+        fromCompression: false,
+      },
+    ],
+  }));
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        ...Array.from(
+          { length: 12 },
+          (_, index) => ({
+            typeId: 28606,
+            name: "Orca",
+            quantity: 1,
+            category: "item" as const,
+            rootLocationId: sharedManufacturingLocationId,
+            inBuild: true,
+            inBuildQuantity: 1,
+            jobId: 2860601 + index,
+            activityName: "Manufacturing",
+            industryJobStatus: "active" as const,
+          }),
+        ),
+        {
+          typeId: capitalCargoBayTypeId,
+          name: "Capital Cargo Bay",
+          quantity: 272,
+          category: "item",
+          rootLocationId: sharedManufacturingLocationId,
+        },
+      ],
+      { items: [], stockpiles },
+    ),
+  );
+  const response = await toPlanResponse(result);
+  const orca = response.lists.planItems.all.find((item) => item.typeId === 28606);
+  const capitalCargoBay = result.lists.materialsToBuy.find(
+    (item) => item.typeId === capitalCargoBayTypeId,
+  );
+  const manufacturingJobs = result.lists.manufacturingJobs.filter((job) => job.typeId === 28607);
+
+  assert(orca);
+  assert(capitalCargoBay);
+  assert.equal(orca.requiredQuantity, 15);
+  assert.equal(orca.availableQuantity, 12);
+  assert.equal(orca.neededQuantity, 3);
+  assert.equal(orca.surplusQuantity, 0);
+  assert.equal(capitalCargoBay.requiredQuantity, 114);
+  assert.equal(capitalCargoBay.buyQuantity, 0);
+  assert.equal(
+    manufacturingJobs.reduce((total, job) => total + job.countNeeded, 0),
+    3,
+  );
 });
 
 void test("deducts in-build final products before scheduling more production", async () => {
