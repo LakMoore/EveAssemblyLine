@@ -120,6 +120,10 @@ export function facilitySettingsFromStructures(
             available: structure.allowCapitalBuilds === true,
             taxRate: jobTypes.capital ?? 0,
           },
+          supercapital: {
+            available: structure.allowSupercapitalBuilds === true,
+            taxRate: jobTypes.supercapital ?? 0,
+          },
         },
         reactions: {
           available: reactionsAllowed && structure.allowReactionBuilds !== false,

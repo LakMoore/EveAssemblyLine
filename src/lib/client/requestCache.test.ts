@@ -125,6 +125,7 @@ void test("groups each market order at its source location once", () => {
             available: true,
             standard: { available: true },
             capital: { available: false },
+            supercapital: { available: false },
           },
           reactions: {
             available: true,
@@ -214,6 +215,7 @@ void test("excludes assembled ships and containers from location volume", () => 
             available: true,
             standard: { available: true },
             capital: { available: false },
+            supercapital: { available: false },
           },
           reactions: {
             available: true,

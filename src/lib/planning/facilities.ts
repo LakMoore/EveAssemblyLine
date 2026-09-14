@@ -21,6 +21,7 @@ export type FacilitySettingsPayload = {
 export type FacilityJobType =
   | "standard"
   | "capital"
+  | "supercapital"
   | "reprocessing"
   | "reactions"
   | "biochemical"
@@ -58,6 +59,7 @@ export interface ActivitiesRequest {
   manufacturing: ActivityRequest & {
     standard: ActivityRequest;
     capital: ActivityRequest;
+    supercapital: ActivityRequest;
   };
   reactions: ActivityRequest & {
     biochemical: ActivityRequest;
@@ -95,6 +97,7 @@ export interface ActivitiesResponse extends ActivitiesRequest {
   manufacturing: ActivityResponse & {
     standard: ActivityResponse;
     capital: ActivityResponse;
+    supercapital: ActivityResponse;
   };
   reactions: ActivityResponse & {
     biochemical: ActivityResponse;
@@ -118,6 +121,7 @@ export const emptyActivitiesRequest: ActivitiesRequest = {
     available: true,
     standard: { available: true, taxRate: 0 },
     capital: { available: false, taxRate: 0 },
+    supercapital: { available: false, taxRate: 0 },
   },
   reactions: {
     available: true,
@@ -186,6 +190,10 @@ function normalizeActivities(value: unknown): ActivitiesRequest | null {
     available: normalizeActivity(manufacturing)?.available,
     standard: normalizeActivity(manufacturing.standard),
     capital: normalizeActivity(manufacturing.capital),
+    supercapital: normalizeActivity(manufacturing.supercapital) ?? {
+      available: false,
+      taxRate: 0,
+    },
   };
   const normalizedReactions = {
     available: normalizeActivity(reactions)?.available,
@@ -239,18 +247,6 @@ function normalizeEntry(value: unknown): FacilitySettingsEntry | null {
       : {}),
   };
 }
-
-const facilityJobTypes: FacilityJobType[] = [
-  "standard",
-  "capital",
-  "reprocessing",
-  "reactions",
-  "biochemical",
-  "composite",
-  "hybrid",
-  "invention",
-  "research",
-];
 
 export function normalizeFacilitySettings(value: unknown): FacilitySettingsPayload {
   if (!value || typeof value !== "object") return emptyFacilitySettings;

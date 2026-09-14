@@ -1,13 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useId, useRef, useState } from "react";
 import type { TypeMetadata } from "@/lib/reference/types";
 import type { SdeLanguage } from "@/lib/reference/languages";
+import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
-import { DialogDescription, DialogHeader } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { parsePasteList } from "@/lib/reference/pasteList";
@@ -66,6 +65,7 @@ export default function PasteListDialog({
     text: string;
   } | null>(null);
   const resolveRequestId = useRef(0);
+  const formId = useId();
 
   function invalidateResolution() {
     resolveRequestId.current += 1;
@@ -90,6 +90,10 @@ export default function PasteListDialog({
     && activeRequest.currentItems === currentItems
     && activeRequest.mode === mode
     && activeRequest.text === text;
+  const errorScrollKey = [
+    error,
+    ...results.filter((item) => item.error).map((item) => `${item.name}:${item.error}`),
+  ].join("|");
 
   async function resolveItems(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -133,125 +137,132 @@ export default function PasteListDialog({
     }
   }
 
+  const footer = (
+    <>
+      <Button type="button" variant="outline" onClick={cancelDialog}>
+        <X aria-hidden="true" />
+        Cancel
+      </Button>
+      <Button form={formId} type="submit" disabled={isResolving || text.trim().length === 0}>
+        <FileUp aria-hidden="true" />
+        <span>{isResolving ? "Checking list..." : "Import list"}</span>
+        <b aria-hidden="true">→</b>
+      </Button>
+    </>
+  );
+
   return (
-    <Dialog open onOpenChange={(open) => !open && cancelDialog()}>
-      <DialogContent render={<form onSubmit={resolveItems} />}>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
-        <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto">
-          <Textarea
-            className="min-h-48"
-            value={text}
-            onChange={(event) => {
-              invalidateResolution();
-              setText(event.target.value);
-              setResults([]);
-              setError("");
-            }}
-            placeholder={placeholder}
-            aria-label={ariaLabel}
-            autoFocus
-          />
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-          {results.length > 0 && (
-            <div className="flex max-h-48 flex-col gap-1 overflow-y-auto">
-              {results.map((item, index) => (
-                <div
-                  className={cn(
-                    "flex min-w-0 items-center gap-2 border p-2 text-sm",
-                    item.error && "border-destructive/50 bg-card",
+    <ResponsiveDialogDrawer
+      open
+      onOpenChange={(open) => !open && cancelDialog()}
+      title={title}
+      description={description}
+      scrollToBottomKey={errorScrollKey}
+      dialogFooterContent={footer}
+      drawerFooterContent={footer}
+    >
+      <form id={formId} onSubmit={resolveItems} className="flex flex-col gap-3">
+        <Textarea
+          className="min-h-48"
+          value={text}
+          onChange={(event) => {
+            invalidateResolution();
+            setText(event.target.value);
+            setResults([]);
+            setError("");
+          }}
+          placeholder={placeholder}
+          aria-label={ariaLabel}
+          autoFocus
+        />
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        {results.length > 0 && (
+          <div className="flex flex-col gap-1">
+            {results.map((item, index) => (
+              <div
+                className={cn(
+                  "flex min-w-0 items-center gap-2 border p-2 text-sm",
+                  item.error && "border-destructive/50 bg-card",
+                )}
+                key={`${item.name}-${index}`}
+              >
+                <div className="min-w-0 flex-1">
+                  {item.typeId ? (
+                    <TypeIdentity
+                      name={item.name}
+                      typeId={item.typeId}
+                      variation={item.category === "blueprint" ? "bp" : "icon"}
+                      className="min-w-0"
+                    />
+                  ) : (
+                    <span className="block min-w-0 truncate">{item.name}</span>
                   )}
-                  key={`${item.name}-${index}`}
-                  aria-invalid={item.error ? "true" : undefined}
-                >
-                  <div className="min-w-0 flex-1">
-                    {item.typeId ? (
-                      <TypeIdentity
-                        name={item.name}
-                        typeId={item.typeId}
-                        variation={item.category === "blueprint" ? "bp" : "icon"}
-                        className="min-w-0"
-                      />
-                    ) : (
-                      <span className="block min-w-0 truncate">{item.name}</span>
-                    )}
-                  </div>
-                  <div className="ml-auto flex min-w-0 flex-1 flex-wrap items-center justify-end gap-3">
-                    {item.quantity ? (
-                      <small className="text-right text-muted-foreground">
-                        Quantity {item.quantity}
-                      </small>
-                    ) : null}
-                    {item.error ? (
-                      <small className="flex min-w-0 max-w-60 items-center gap-1 text-right text-destructive">
-                        <CircleAlert className="size-3 shrink-0" aria-hidden="true" />
-                        <span className="truncate">{item.error}</span>
-                      </small>
-                    ) : null}
-                  </div>
                 </div>
-              ))}
-            </div>
+                <div className="ml-auto flex min-w-0 flex-1 flex-wrap items-center justify-end gap-3">
+                  {item.quantity ? (
+                    <small className="text-right text-muted-foreground">
+                      Quantity {item.quantity}
+                    </small>
+                  ) : null}
+                  {item.error ? (
+                    <small
+                      className="flex max-w-60 min-w-0 items-center gap-1 text-right text-destructive"
+                      role="alert"
+                    >
+                      <CircleAlert className="size-3 shrink-0" aria-hidden="true" />
+                      <span className="truncate">{item.error}</span>
+                    </small>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <RadioGroup
+          className={cn("mt-1", allowSubtract ? "sm:grid-cols-3" : "sm:grid-cols-2")}
+          value={mode}
+          onValueChange={(value) => {
+            invalidateResolution();
+            setMode(value as PasteListMode);
+          }}
+          aria-label="Paste behavior"
+        >
+          <Label className="flex items-start gap-2">
+            <RadioGroupItem value="add" />
+            <span className="grid min-w-0 gap-1">
+              <span className="text-sm font-medium">Add to list</span>
+              <span className="text-xs text-muted-foreground">
+                Keep the imported items with the current list.
+              </span>
+            </span>
+          </Label>
+          <Label className="flex items-start gap-2">
+            <RadioGroupItem value="replace" />
+            <span className="grid min-w-0 gap-1">
+              <span className="text-sm font-medium">Replace list</span>
+              <span className="text-xs text-muted-foreground">
+                Clear the current list before importing.
+              </span>
+            </span>
+          </Label>
+          {allowSubtract && (
+            <Label className="flex items-start gap-2">
+              <RadioGroupItem value="subtract" />
+              <span className="grid min-w-0 gap-1">
+                <span className="text-sm font-medium">Subtract from list</span>
+                <span className="text-xs text-muted-foreground">
+                  Deduct the imported quantities from the current list.
+                </span>
+              </span>
+            </Label>
           )}
-          <RadioGroup
-            className={cn("mt-1", allowSubtract ? "sm:grid-cols-3" : "sm:grid-cols-2")}
-            value={mode}
-            onValueChange={(value) => {
-              invalidateResolution();
-              setMode(value as PasteListMode);
-            }}
-            aria-label="Paste behavior"
-          >
-            <Label className="flex items-start gap-2">
-              <RadioGroupItem value="add" />
-              <span className="grid min-w-0 gap-1">
-                <span className="text-sm font-medium">Add to list</span>
-                <span className="text-xs text-muted-foreground">
-                  Keep the imported items with the current list.
-                </span>
-              </span>
-            </Label>
-            <Label className="flex items-start gap-2">
-              <RadioGroupItem value="replace" />
-              <span className="grid min-w-0 gap-1">
-                <span className="text-sm font-medium">Replace list</span>
-                <span className="text-xs text-muted-foreground">
-                  Clear the current list before importing.
-                </span>
-              </span>
-            </Label>
-            {allowSubtract && (
-              <Label className="flex items-start gap-2">
-                <RadioGroupItem value="subtract" />
-                <span className="grid min-w-0 gap-1">
-                  <span className="text-sm font-medium">Subtract from list</span>
-                  <span className="text-xs text-muted-foreground">
-                    Deduct the imported quantities from the current list.
-                  </span>
-                </span>
-              </Label>
-            )}
-          </RadioGroup>
-        </div>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={cancelDialog}>
-            <X aria-hidden="true" />
-            Cancel
-          </Button>
-          <Button type="submit" disabled={isResolving || text.trim().length === 0}>
-            <FileUp aria-hidden="true" />
-            <span>{isResolving ? "Checking list..." : "Import list"}</span>
-            <b aria-hidden="true">→</b>
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </RadioGroup>
+      </form>
+    </ResponsiveDialogDrawer>
   );
 }
 

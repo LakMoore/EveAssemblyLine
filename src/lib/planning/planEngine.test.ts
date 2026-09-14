@@ -2397,6 +2397,95 @@ void test("reallocates material stock after reaction formulas are reserved", asy
   assert.equal(silicates.stockQuantity > 0, true);
 });
 
+void test("allocates shared reaction input stock across stockpiles", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: 16635,
+          name: "Evaporite Deposits",
+          quantity: 5847,
+          category: "item",
+          rootLocationId: reprocessingLocationId,
+        },
+        {
+          typeId: 46168,
+          name: "Ceramic Powder Reaction Formula",
+          quantity: 2,
+          category: "reactionformula",
+          rootLocationId: reprocessingLocationId,
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "first-reaction-stockpile",
+            name: "First reaction stockpile",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: reprocessingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: 16660,
+                name: "Ceramic Powder",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "second-reaction-stockpile",
+            name: "Second reaction stockpile",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: reprocessingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: 16660,
+                name: "Ceramic Powder",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const evaporiteDeposits = result.lists.materialsToBuy.find((item) => item.typeId === 16635);
+  const response = await toPlanResponse(result);
+  const evaporiteDepositsToBuy = response.lists.materialsToBuy
+    .flatMap((bucket) => bucket.items)
+    .find((item) => item.typeId === 16635);
+  const evaporiteReactionInput = response.lists.reactionJobs
+    .flatMap((bucket) => bucket.items)
+    .flatMap((job) => job.inputs.materials)
+    .find((item) => item.typeId === 16635);
+
+  assert(evaporiteDeposits);
+  assert.equal(evaporiteDeposits.buyQuantity, 0);
+  assert.equal(evaporiteDeposits.availableStockQuantity, 200);
+  assert.equal(evaporiteDepositsToBuy, undefined);
+  assert(evaporiteReactionInput);
+  assert.equal(evaporiteReactionInput.availableQuantity, 200);
+});
+
 void test("reports full located stock beyond the quantity allocated to stockpile demand", async () => {
   const stockpiles = ["first", "second"].map((id) => ({
     id,

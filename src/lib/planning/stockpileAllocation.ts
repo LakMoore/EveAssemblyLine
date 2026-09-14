@@ -19,6 +19,7 @@ type StockpileDemandResult = {
   demand: StockpileDemand;
   jobInputDemand: StockpileDemand;
   fullJobInputDemand: StockpileDemand;
+  reactionJobInputDemand: StockpileDemand;
 };
 
 export type StockpileAllocation = {
@@ -106,6 +107,7 @@ export function getPlanDemand(
   const demand = new Map<number, number>();
   const jobInputDemand = new Map<number, number>();
   const fullJobInputDemand = new Map<number, number>();
+  const reactionJobInputDemand = new Map<number, number>();
   for (const material of result.lists.materialsToBuy) {
     const materialDemand = Math.max(
       material.requiredQuantity,
@@ -132,6 +134,12 @@ export function getPlanDemand(
     }
   }
   for (const job of result.lists.reactionJobs) {
+    for (const material of job.inputs.materials) {
+      reactionJobInputDemand.set(
+        material.typeId,
+        (reactionJobInputDemand.get(material.typeId) ?? 0) + material.requiredQuantity,
+      );
+    }
     demand.set(
       job.inputs.blueprint.typeId,
       Math.max(demand.get(job.inputs.blueprint.typeId) ?? 0, job.inputs.blueprint.requiredQuantity),
@@ -151,7 +159,7 @@ export function getPlanDemand(
   for (const [typeId, quantity] of jobInputDemand) {
     demand.set(typeId, Math.max(demand.get(typeId) ?? 0, quantity));
   }
-  return { demand, jobInputDemand, fullJobInputDemand };
+  return { demand, jobInputDemand, fullJobInputDemand, reactionJobInputDemand };
 }
 
 /** Reserves ordinary stock globally so remote stockpiles cannot consume local lots. */
@@ -186,7 +194,7 @@ export async function allocateStockpileStock(
         planningData,
         { locations: activityLocations(stockpile) },
       );
-      const { demand, jobInputDemand, fullJobInputDemand } = getPlanDemand(
+      const { demand, jobInputDemand, fullJobInputDemand, reactionJobInputDemand } = getPlanDemand(
         result,
         getOrdinaryStockByTypeId(request.stock),
       );
@@ -194,6 +202,9 @@ export async function allocateStockpileStock(
         demand: new Map([...demand].filter(([, quantity]) => quantity > 0)),
         jobInputDemand: new Map([...jobInputDemand].filter(([, quantity]) => quantity > 0)),
         fullJobInputDemand: new Map([...fullJobInputDemand].filter(([, quantity]) => quantity > 0)),
+        reactionJobInputDemand: new Map(
+          [...reactionJobInputDemand].filter(([, quantity]) => quantity > 0),
+        ),
       };
     }),
   );
@@ -203,6 +214,9 @@ export async function allocateStockpileStock(
   );
   const fullJobInputDemandByStockpile = stockpileDemandResults.map(
     ({ fullJobInputDemand }) => fullJobInputDemand,
+  );
+  const reactionJobInputDemandByStockpile = stockpileDemandResults.map(
+    ({ reactionJobInputDemand }) => reactionJobInputDemand,
   );
   const fullJobInputTypeIds = new Set(
     fullJobInputDemandByStockpile.flatMap((demand) => [...demand.keys()]),
@@ -380,6 +394,7 @@ export async function allocateStockpileStock(
     demandByStockpile: StockpileDemand[],
     jobInputDemandByStockpile: StockpileDemand[],
     fullJobInputDemandByStockpile: StockpileDemand[],
+    reactionJobInputDemandByStockpile: StockpileDemand[],
   ) => {
     remainingStock = request.stock.map((item) =>
       isAllocatableOrdinaryStock(item) ? item.quantity : 0,
@@ -413,8 +428,9 @@ export async function allocateStockpileStock(
     const reservableJobInputDemandByStockpile = jobInputDemandByStockpile.map(
       (demand, stockpileIndex) => {
         const reservableDemand = new Map(demand);
+        const reactionJobInputDemand = reactionJobInputDemandByStockpile[stockpileIndex];
         for (const [typeId, quantity] of fullJobInputDemandByStockpile[stockpileIndex]) {
-          if (!buildableTypeIds.has(typeId)) continue;
+          if (!buildableTypeIds.has(typeId) && !reactionJobInputDemand.has(typeId)) continue;
           reservableDemand.set(typeId, Math.max(reservableDemand.get(typeId) ?? 0, quantity));
         }
         return reservableDemand;
@@ -525,6 +541,7 @@ export async function allocateStockpileStock(
     demandByStockpile,
     jobInputDemandByStockpile,
     fullJobInputDemandByStockpile,
+    reactionJobInputDemandByStockpile,
   );
   const ordinaryStockpileStock = ordinaryStockpileAllocation.stockpileStock;
   const ordinaryStockpileResults = await Promise.all(
@@ -547,19 +564,22 @@ export async function allocateStockpileStock(
   const actualDemandByStockpile: StockpileDemand[] = [];
   const actualJobInputDemandByStockpile: StockpileDemand[] = [];
   const actualFullJobInputDemandByStockpile: StockpileDemand[] = [];
+  const ordinaryReactionJobInputDemandByStockpile: StockpileDemand[] = [];
   for (const result of ordinaryStockpileResults) {
-    const { demand, jobInputDemand, fullJobInputDemand } = getPlanDemand(
+    const { demand, jobInputDemand, fullJobInputDemand, reactionJobInputDemand } = getPlanDemand(
       result,
       getOrdinaryStockByTypeId(request.stock),
     );
     actualDemandByStockpile.push(demand);
     actualJobInputDemandByStockpile.push(jobInputDemand);
     actualFullJobInputDemandByStockpile.push(fullJobInputDemand);
+    ordinaryReactionJobInputDemandByStockpile.push(reactionJobInputDemand);
   }
   const correctedStockpileAllocation = allocateOrdinaryStock(
     actualDemandByStockpile,
     actualJobInputDemandByStockpile,
     actualFullJobInputDemandByStockpile,
+    ordinaryReactionJobInputDemandByStockpile,
   );
   const correctedStockpileStock = correctedStockpileAllocation.stockpileStock;
   const specialDemandByStockpile: StockpileDemand[] = await Promise.all(
@@ -616,6 +636,7 @@ export async function allocateStockpileStock(
   const finalDemandByStockpile: StockpileDemand[] = [];
   const finalJobInputDemandByStockpile: StockpileDemand[] = [];
   const finalFullJobInputDemandByStockpile: StockpileDemand[] = [];
+  const finalReactionJobInputDemandByStockpile: StockpileDemand[] = [];
   for (const [stockpileIndex, stockpile] of stockpiles.entries()) {
     const result = await calculatePlanPass(
       {
@@ -630,18 +651,20 @@ export async function allocateStockpileStock(
       planningData,
       { locations: activityLocations(stockpile) },
     );
-    const { demand, jobInputDemand, fullJobInputDemand } = getPlanDemand(
+    const { demand, jobInputDemand, fullJobInputDemand, reactionJobInputDemand } = getPlanDemand(
       result,
       getOrdinaryStockByTypeId(request.stock),
     );
     finalDemandByStockpile.push(demand);
     finalJobInputDemandByStockpile.push(jobInputDemand);
     finalFullJobInputDemandByStockpile.push(fullJobInputDemand);
+    finalReactionJobInputDemandByStockpile.push(reactionJobInputDemand);
   }
   const finalStockpileAllocation = allocateOrdinaryStock(
     finalDemandByStockpile,
     finalJobInputDemandByStockpile,
     finalFullJobInputDemandByStockpile,
+    finalReactionJobInputDemandByStockpile,
   );
   for (const [stockpileIndex, allocation] of allocations.entries()) {
     for (const [stockIndex, quantity] of specialAllocations[stockpileIndex]) {

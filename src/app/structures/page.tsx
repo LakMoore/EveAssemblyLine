@@ -1,9 +1,10 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useId, useState } from "react";
 import { useAppLanguage } from "../AppShell";
-import { ArrowRight, Pencil, Plus, Trash2 } from "lucide-react";
-import DialogBody from "@/components/DialogBody";
+import { ArrowRight, ClipboardPaste, Pencil, Plus, Trash2 } from "lucide-react";
+import PasteFittingDialog from "@/components/PasteFittingDialog";
+import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import {
   Combobox,
   ComboboxContent,
@@ -14,14 +15,6 @@ import {
   useComboboxAnchor,
 } from "@/components/ui/combobox";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
@@ -55,7 +48,9 @@ import {
 } from "@/lib/planning/facilities";
 import { formatLocationName } from "@/lib/reference/locationName";
 import { publishFacilities, facilitySettingsFromStructures } from "@/lib/planning/facilitiesStore";
+import { facilityServiceFromName, type FacilityService } from "@/lib/planning/facilityServices";
 import { refreshAllPlannerStockpileEfficiencies } from "@/lib/planning/reprocessingClient";
+import type { ResolvedFitting } from "@/lib/reference/fittings";
 import {
   Select,
   SelectContent,
@@ -663,6 +658,7 @@ export default function LocationsPage() {
           structure={editingStructure}
           rigOptionsBySize={rigOptionsBySize}
           rigTypeIdsByName={rigTypeIdsByName}
+          rigNamesByTypeId={rigNamesByTypeId}
           onCancel={() => setIsDialogOpen(false)}
           onSave={(structure) => {
             const previous = knownStructures.find((current) => current.id === structure.id);
@@ -714,6 +710,7 @@ function StructureDialog({
   structure,
   rigOptionsBySize,
   rigTypeIdsByName,
+  rigNamesByTypeId,
 }: {
   language: SdeLanguage;
   structureTypes: StructureType[];
@@ -722,6 +719,7 @@ function StructureDialog({
   structure: KnownStructure | null;
   rigOptionsBySize: Record<StructureSize, string[]>;
   rigTypeIdsByName: Record<string, number>;
+  rigNamesByTypeId: Record<number, string>;
 }) {
   const [systemName, setSystemName] = useState(structure?.systemName ?? "");
   const [system, setSystem] = useState<SystemMatch | null>(
@@ -735,6 +733,8 @@ function StructureDialog({
   );
   const [suggestions, setSuggestions] = useState<SystemMatch[]>([]);
   const [isOpen, setIsOpen] = useState(false);
+  const [isFittingDialogOpen, setIsFittingDialogOpen] = useState(false);
+  const formId = useId();
   const systemAnchor = useComboboxAnchor();
   const [type, setType] = useState(structure?.type ?? structureTypes[0].name);
   const [name, setName] = useState(structure?.name ?? "");
@@ -744,6 +744,9 @@ function StructureDialog({
   );
   const [allowCapitalBuilds, setAllowCapitalBuilds] = useState(
     structure?.allowCapitalBuilds ?? false,
+  );
+  const [allowSupercapitalBuilds, setAllowSupercapitalBuilds] = useState(
+    structure?.allowSupercapitalBuilds ?? false,
   );
   const [allowReprocessing, setAllowReprocessing] = useState(structure?.allowReprocessing ?? true);
   const [allowReactionBuilds, setAllowReactionBuilds] = useState(
@@ -763,6 +766,7 @@ function StructureDialog({
   const [jobTypes, setJobTypes] = useState(() => ({
     standard: String(structure?.jobTypes?.standard ?? 0),
     capital: String(structure?.jobTypes?.capital ?? 0),
+    supercapital: String(structure?.jobTypes?.supercapital ?? 0),
     reprocessing: String(structure?.jobTypes?.reprocessing ?? 0),
     reactions: String(structure?.jobTypes?.reactions ?? 0),
     biochemical: String(structure?.jobTypes?.biochemical ?? 0),
@@ -784,6 +788,51 @@ function StructureDialog({
     selectedType?.typeId,
     system?.securityStatus ?? structure?.securityStatus,
   );
+
+  function applyFitting(fitting: ResolvedFitting) {
+    if (!selectedType) return;
+    const typeIdByFlag = new Map(fitting.fitting.items.map((item) => [item.flag, item.type_id]));
+    const fittingRigs = Array.from(
+      { length: 3 },
+      (_, index) => {
+        const rigName = rigNamesByTypeId[typeIdByFlag.get(92 + index) ?? 0];
+        return rigName && rigOptionsBySize[selectedType.size].includes(rigName)
+          ? rigName
+          : "No Rig";
+      },
+    );
+    const serviceItems = fitting.items.filter((item) => item.flag >= 165 && item.flag < 173);
+    const serviceNames = serviceItems.map((item) => item.name);
+    const unsupportedServices = serviceNames.filter(
+      (service) => facilityServiceFromName(service) === null,
+    );
+    if (unsupportedServices.length > 0) {
+      throw new Error(
+        `Unsupported structure service: ${unsupportedServices.join(", ")}. Remove it from the fitting and try again.`,
+      );
+    }
+    const services = new Set(
+      serviceItems
+        .map((item) => facilityServiceFromName(item.name))
+        .filter((service): service is FacilityService => service !== null),
+    );
+    const hasService = (service: FacilityService) => services.has(service);
+
+    setRigs(fittingRigs);
+    setAllowStandardBuilds(hasService("standard"));
+    setAllowCapitalBuilds(hasService("capital"));
+    setAllowSupercapitalBuilds(hasService("supercapital"));
+    setAllowReprocessing(hasService("reprocessing"));
+    setAllowReactionBuilds(
+      hasService("biochemical") || hasService("composite") || hasService("hybrid"),
+    );
+    setAllowBiochemicalReactions(hasService("biochemical"));
+    setAllowCompositeReactions(hasService("composite"));
+    setAllowHybridReactions(hasService("hybrid"));
+    setAllowInvention(hasService("invention"));
+    setAllowResearch(hasService("research"));
+    setIsFittingDialogOpen(false);
+  }
 
   useEffect(() => {
     if (!system || system.securityStatus !== undefined) return;
@@ -827,6 +876,7 @@ function StructureDialog({
     const savedJobTypes = {
       standard: numericTaxRate("standard"),
       capital: numericTaxRate("capital"),
+      supercapital: numericTaxRate("supercapital"),
       reprocessing: numericTaxRate("reprocessing"),
       reactions: numericTaxRate("reactions"),
       biochemical: reactionsAllowed ? numericTaxRate("biochemical") : 0,
@@ -860,6 +910,7 @@ function StructureDialog({
       rigTypeIds: rigs.map((rig) => rigTypeIdsByName[rig] ?? 0),
       allowStandardBuilds,
       allowCapitalBuilds,
+      allowSupercapitalBuilds,
       allowReprocessing,
       allowReactionBuilds,
       allowInvention,
@@ -873,261 +924,295 @@ function StructureDialog({
 
   if (!selectedType) return null;
 
+  const footer = (
+    <>
+      <Button type="button" variant="outline" onClick={onCancel}>
+        Cancel
+      </Button>
+      <Button form={formId} type="submit" disabled={!system || !name.trim()}>
+        {structure ? "Save structure" : "Add structure"}
+        <ArrowRight data-icon="inline-end" />
+      </Button>
+    </>
+  );
+
   return (
-    <Dialog open onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className={styles.importModal} render={<form onSubmit={submit} />}>
-        <DialogHeader>
+    <>
+      <ResponsiveDialogDrawer
+        open
+        onOpenChange={(open) => !open && onCancel()}
+        title={structure ? "Edit structure" : "Add structure"}
+        description="Use the options below to manually define this location. Alternatively, paste the fitting from the game client to automatically set the Rigs and Services."
+        headerContent={
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-2 self-start"
+            onClick={() => setIsFittingDialogOpen(true)}
+          >
+            <ClipboardPaste data-icon="inline-start" />
+            Paste fitting
+          </Button>
+        }
+        dialogClassName={styles.importModal}
+        dialogFooterContent={footer}
+        drawerFooterContent={footer}
+      >
+        <form id={formId} onSubmit={submit}>
           <div>
-            <DialogTitle>{structure ? "Edit structure" : "Add structure"}</DialogTitle>
-            <DialogDescription>
-              {structure
-                ? "Edit the details of the structure."
-                : "Add a new structure to the directory."}
-            </DialogDescription>
-          </div>
-        </DialogHeader>
-        <DialogBody>
-          <FieldGroup>
-            <Field>
-              <FieldLabel>SYSTEM</FieldLabel>
-              <div ref={systemAnchor}>
-                <Combobox
-                  open={isOpen && systemName.trim().length >= 2}
-                  inputValue={systemName}
-                  onOpenChange={setIsOpen}
-                  onInputValueChange={(value, eventDetails) => {
-                    if (eventDetails.reason !== "input-change") return;
-                    setSystem(null);
-                    setSystemName(value);
-                    setIsOpen(true);
-                  }}
-                  onValueChange={(value) => {
-                    const match = suggestions.find(
-                      (item) => String(item.systemId) === String(value),
-                    );
-                    if (match) {
-                      setSystem(match);
-                      setSystemName(match.name);
-                      setIsOpen(false);
-                    }
-                  }}
-                >
-                  <ComboboxInput
-                    showTrigger={false}
-                    onFocus={() => suggestions.length > 0 && setIsOpen(true)}
-                    placeholder="Type a system name"
-                    aria-label="Search systems"
+            <FieldGroup>
+              <Field>
+                <FieldLabel>SYSTEM</FieldLabel>
+                <div ref={systemAnchor}>
+                  <Combobox
+                    open={isOpen && systemName.trim().length >= 2}
+                    inputValue={systemName}
+                    onOpenChange={setIsOpen}
+                    onInputValueChange={(value, eventDetails) => {
+                      if (eventDetails.reason !== "input-change") return;
+                      setSystem(null);
+                      setSystemName(value);
+                      setIsOpen(true);
+                    }}
+                    onValueChange={(value) => {
+                      const match = suggestions.find(
+                        (item) => String(item.systemId) === String(value),
+                      );
+                      if (match) {
+                        setSystem(match);
+                        setSystemName(match.name);
+                        setIsOpen(false);
+                      }
+                    }}
+                  >
+                    <ComboboxInput
+                      showTrigger={false}
+                      onFocus={() => suggestions.length > 0 && setIsOpen(true)}
+                      placeholder="Type a system name"
+                      aria-label="Search systems"
+                    />
+                    <ComboboxContent anchor={systemAnchor}>
+                      <ComboboxList>
+                        {suggestions.length > 0 ? (
+                          suggestions.map((match) => (
+                            <ComboboxItem key={match.systemId} value={String(match.systemId)}>
+                              <span>{match.name}</span>
+                              <small>System ID {match.systemId}</small>
+                            </ComboboxItem>
+                          ))
+                        ) : (
+                          <ComboboxEmpty>No matching systems.</ComboboxEmpty>
+                        )}
+                      </ComboboxList>
+                    </ComboboxContent>
+                  </Combobox>
+                </div>
+              </Field>
+              <StructureSelect
+                label="STRUCTURE TYPE"
+                value={type}
+                options={structureTypes.map((option) => ({
+                  value: option.name,
+                  label: `${option.name} (${option.size})`,
+                }))}
+                onChange={(value) => {
+                  const nextType = structureTypes.find(
+                    (structureType) => structureType.name === value,
+                  );
+                  if (!nextType) return;
+                  setType(nextType.name);
+                  setRigs((current) =>
+                    current.map((rig) =>
+                      rigOptionsBySize[nextType.size].includes(rig) ? rig : "No Rig",
+                    ),
+                  );
+                }}
+              />
+              <Field>
+                <FieldLabel htmlFor="structure-name">NAME</FieldLabel>
+                <div>
+                  <Input
+                    id="structure-name"
+                    required
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder="e.g. Assembly Bay Alpha"
+                    aria-label="Structure name"
                   />
-                  <ComboboxContent anchor={systemAnchor}>
-                    <ComboboxList>
-                      {suggestions.length > 0 ? (
-                        suggestions.map((match) => (
-                          <ComboboxItem key={match.systemId} value={String(match.systemId)}>
-                            <span>{match.name}</span>
-                            <small>System ID {match.systemId}</small>
-                          </ComboboxItem>
-                        ))
-                      ) : (
-                        <ComboboxEmpty>No matching systems.</ComboboxEmpty>
-                      )}
-                    </ComboboxList>
-                  </ComboboxContent>
-                </Combobox>
+                </div>
+              </Field>
+              {rigs.map((rig, index) => (
+                <StructureSelect
+                  key={index}
+                  label={`RIG ${index + 1}`}
+                  value={rig}
+                  options={rigOptionsBySize[selectedType.size].map((option) => ({
+                    value: option,
+                    label: option,
+                  }))}
+                  onChange={(value) =>
+                    setRigs((current) =>
+                      current.map((currentRig, rigIndex) =>
+                        rigIndex === index ? value : currentRig,
+                      ),
+                    )
+                  }
+                />
+              ))}
+            </FieldGroup>
+            <div className={styles.constructionGrid}>
+              <div className={styles.constructionGridHeader} aria-hidden="true">
+                <span />
+                <span>ENABLED</span>
+                <span>TAX RATE</span>
               </div>
-            </Field>
-            <StructureSelect
-              label="STRUCTURE TYPE"
-              value={type}
-              options={structureTypes.map((option) => ({
-                value: option.name,
-                label: `${option.name} (${option.size})`,
-              }))}
-              onChange={(value) => {
-                const nextType = structureTypes.find(
-                  (structureType) => structureType.name === value,
-                );
-                if (!nextType) return;
-                setType(nextType.name);
-                setRigs((current) =>
-                  current.map((rig) =>
-                    rigOptionsBySize[nextType.size].includes(rig) ? rig : "No Rig",
-                  ),
-                );
-              }}
-            />
-            <Field>
-              <FieldLabel htmlFor="structure-name">NAME</FieldLabel>
-              <div>
-                <Input
-                  id="structure-name"
-                  required
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  placeholder="e.g. Assembly Bay Alpha"
-                  aria-label="Structure name"
+              <div className={styles.constructionGridRow}>
+                <span>REPROCESSING</span>
+                <ActivitySwitch
+                  label="reprocessing"
+                  checked={allowReprocessing}
+                  onCheckedChange={setAllowReprocessing}
+                />
+                <TaxRateInput
+                  label="Reprocessing"
+                  value={taxRate("reprocessing")}
+                  onChange={(value) => setTaxRate("reprocessing", value)}
                 />
               </div>
-            </Field>
-            {rigs.map((rig, index) => (
-              <StructureSelect
-                key={index}
-                label={`RIG ${index + 1}`}
-                value={rig}
-                options={rigOptionsBySize[selectedType.size].map((option) => ({
-                  value: option,
-                  label: option,
-                }))}
-                onChange={(value) =>
-                  setRigs((current) =>
-                    current.map((currentRig, rigIndex) =>
-                      rigIndex === index ? value : currentRig,
-                    ),
-                  )
-                }
-              />
-            ))}
-          </FieldGroup>
-          <div className={styles.constructionGrid}>
-            <div className={styles.constructionGridHeader} aria-hidden="true">
-              <span />
-              <span>ENABLED</span>
-              <span>TAX RATE</span>
-            </div>
-            <div className={styles.constructionGridRow}>
-              <span>REPROCESSING</span>
-              <ActivitySwitch
-                label="reprocessing"
-                checked={allowReprocessing}
-                onCheckedChange={setAllowReprocessing}
-              />
-              <TaxRateInput
-                label="Reprocessing"
-                value={taxRate("reprocessing")}
-                onChange={(value) => setTaxRate("reprocessing", value)}
-              />
-            </div>
-            <div className={styles.constructionGridRow}>
-              <span>STANDARD MANUFACTURING</span>
-              <ActivitySwitch
-                label="standard manufacturing"
-                checked={allowStandardBuilds}
-                onCheckedChange={setAllowStandardBuilds}
-              />
-              <TaxRateInput
-                label="Standard manufacturing"
-                value={taxRate("standard")}
-                onChange={(value) => setTaxRate("standard", value)}
-              />
-            </div>
-            <div className={styles.constructionGridRow}>
-              <span>CAPITAL MANUFACTURING</span>
-              <ActivitySwitch
-                label="capital manufacturing"
-                checked={allowCapitalBuilds}
-                onCheckedChange={setAllowCapitalBuilds}
-              />
-              <TaxRateInput
-                label="Capital manufacturing"
-                value={taxRate("capital")}
-                onChange={(value) => setTaxRate("capital", value)}
-              />
-            </div>
-            <div
-              className={`${styles.constructionGridRow} ${
-                !reactionsAllowed ? styles.constructionGridRowDisabled : ""
-              }`}
-            >
-              <span>BIOCHEMICAL REACTIONS</span>
-              <ActivitySwitch
-                label="biochemical reactions"
-                checked={reactionsAllowed && allowBiochemicalReactions}
-                disabled={!reactionsAllowed}
-                onCheckedChange={setAllowBiochemicalReactions}
-              />
-              <TaxRateInput
-                label="Biochemical reaction"
-                value={reactionsAllowed ? taxRate("biochemical") : "0.0"}
-                disabled={!reactionsAllowed}
-                onChange={(value) => setTaxRate("biochemical", value)}
-              />
-            </div>
-            <div
-              className={`${styles.constructionGridRow} ${
-                !reactionsAllowed ? styles.constructionGridRowDisabled : ""
-              }`}
-            >
-              <span>COMPOSITE REACTIONS</span>
-              <ActivitySwitch
-                label="composite reactions"
-                checked={reactionsAllowed && allowCompositeReactions}
-                disabled={!reactionsAllowed}
-                onCheckedChange={setAllowCompositeReactions}
-              />
-              <TaxRateInput
-                label="Composite reaction"
-                value={reactionsAllowed ? taxRate("composite") : "0.0"}
-                disabled={!reactionsAllowed}
-                onChange={(value) => setTaxRate("composite", value)}
-              />
-            </div>
-            <div
-              className={`${styles.constructionGridRow} ${
-                !reactionsAllowed ? styles.constructionGridRowDisabled : ""
-              }`}
-            >
-              <span>HYBRID REACTIONS</span>
-              <ActivitySwitch
-                label="hybrid reactions"
-                checked={reactionsAllowed && allowHybridReactions}
-                disabled={!reactionsAllowed}
-                onCheckedChange={setAllowHybridReactions}
-              />
-              <TaxRateInput
-                label="Hybrid reaction"
-                value={reactionsAllowed ? taxRate("hybrid") : "0.0"}
-                disabled={!reactionsAllowed}
-                onChange={(value) => setTaxRate("hybrid", value)}
-              />
-            </div>
-            <div className={styles.constructionGridRow}>
-              <span>INVENTION</span>
-              <ActivitySwitch
-                label="invention"
-                checked={allowInvention}
-                onCheckedChange={setAllowInvention}
-              />
-              <TaxRateInput
-                label="Invention"
-                value={taxRate("invention")}
-                onChange={(value) => setTaxRate("invention", value)}
-              />
-            </div>
-            <div className={styles.constructionGridRow}>
-              <span>RESEARCH</span>
-              <ActivitySwitch
-                label="research"
-                checked={allowResearch}
-                onCheckedChange={setAllowResearch}
-              />
-              <TaxRateInput
-                label="Research"
-                value={taxRate("research")}
-                onChange={(value) => setTaxRate("research", value)}
-              />
+              <div className={styles.constructionGridRow}>
+                <span>STANDARD MANUFACTURING</span>
+                <ActivitySwitch
+                  label="standard manufacturing"
+                  checked={allowStandardBuilds}
+                  onCheckedChange={setAllowStandardBuilds}
+                />
+                <TaxRateInput
+                  label="Standard manufacturing"
+                  value={taxRate("standard")}
+                  onChange={(value) => setTaxRate("standard", value)}
+                />
+              </div>
+              <div className={styles.constructionGridRow}>
+                <span>CAPITAL MANUFACTURING</span>
+                <ActivitySwitch
+                  label="capital manufacturing"
+                  checked={allowCapitalBuilds}
+                  onCheckedChange={setAllowCapitalBuilds}
+                />
+                <TaxRateInput
+                  label="Capital manufacturing"
+                  value={taxRate("capital")}
+                  onChange={(value) => setTaxRate("capital", value)}
+                />
+              </div>
+              <div className={styles.constructionGridRow}>
+                <span>SUPERCAPITAL MANUFACTURING</span>
+                <ActivitySwitch
+                  label="supercapital manufacturing"
+                  checked={allowSupercapitalBuilds}
+                  onCheckedChange={setAllowSupercapitalBuilds}
+                />
+                <TaxRateInput
+                  label="Supercapital manufacturing"
+                  value={taxRate("supercapital")}
+                  onChange={(value) => setTaxRate("supercapital", value)}
+                />
+              </div>
+              <div
+                className={`${styles.constructionGridRow} ${
+                  !reactionsAllowed ? styles.constructionGridRowDisabled : ""
+                }`}
+              >
+                <span>BIOCHEMICAL REACTIONS</span>
+                <ActivitySwitch
+                  label="biochemical reactions"
+                  checked={reactionsAllowed && allowBiochemicalReactions}
+                  disabled={!reactionsAllowed}
+                  onCheckedChange={setAllowBiochemicalReactions}
+                />
+                <TaxRateInput
+                  label="Biochemical reaction"
+                  value={reactionsAllowed ? taxRate("biochemical") : "0.0"}
+                  disabled={!reactionsAllowed}
+                  onChange={(value) => setTaxRate("biochemical", value)}
+                />
+              </div>
+              <div
+                className={`${styles.constructionGridRow} ${
+                  !reactionsAllowed ? styles.constructionGridRowDisabled : ""
+                }`}
+              >
+                <span>COMPOSITE REACTIONS</span>
+                <ActivitySwitch
+                  label="composite reactions"
+                  checked={reactionsAllowed && allowCompositeReactions}
+                  disabled={!reactionsAllowed}
+                  onCheckedChange={setAllowCompositeReactions}
+                />
+                <TaxRateInput
+                  label="Composite reaction"
+                  value={reactionsAllowed ? taxRate("composite") : "0.0"}
+                  disabled={!reactionsAllowed}
+                  onChange={(value) => setTaxRate("composite", value)}
+                />
+              </div>
+              <div
+                className={`${styles.constructionGridRow} ${
+                  !reactionsAllowed ? styles.constructionGridRowDisabled : ""
+                }`}
+              >
+                <span>HYBRID REACTIONS</span>
+                <ActivitySwitch
+                  label="hybrid reactions"
+                  checked={reactionsAllowed && allowHybridReactions}
+                  disabled={!reactionsAllowed}
+                  onCheckedChange={setAllowHybridReactions}
+                />
+                <TaxRateInput
+                  label="Hybrid reaction"
+                  value={reactionsAllowed ? taxRate("hybrid") : "0.0"}
+                  disabled={!reactionsAllowed}
+                  onChange={(value) => setTaxRate("hybrid", value)}
+                />
+              </div>
+              <div className={styles.constructionGridRow}>
+                <span>INVENTION</span>
+                <ActivitySwitch
+                  label="invention"
+                  checked={allowInvention}
+                  onCheckedChange={setAllowInvention}
+                />
+                <TaxRateInput
+                  label="Invention"
+                  value={taxRate("invention")}
+                  onChange={(value) => setTaxRate("invention", value)}
+                />
+              </div>
+              <div className={styles.constructionGridRow}>
+                <span>RESEARCH</span>
+                <ActivitySwitch
+                  label="research"
+                  checked={allowResearch}
+                  onCheckedChange={setAllowResearch}
+                />
+                <TaxRateInput
+                  label="Research"
+                  value={taxRate("research")}
+                  onChange={(value) => setTaxRate("research", value)}
+                />
+              </div>
             </div>
           </div>
-        </DialogBody>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={!system || !name.trim()}>
-            {structure ? "Save structure" : "Add structure"}
-            <ArrowRight data-icon="inline-end" />
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </form>
+      </ResponsiveDialogDrawer>
+      {isFittingDialogOpen && (
+        <PasteFittingDialog
+          language={language}
+          onCancel={() => setIsFittingDialogOpen(false)}
+          onImport={applyFitting}
+        />
+      )}
+    </>
   );
 }
 
@@ -1142,11 +1227,13 @@ function StructureSelect({
   options: Array<{ value: string; label: string }>;
   onChange: (value: string) => void;
 }) {
+  const selectId = useId();
+
   return (
     <Field>
-      <FieldLabel>{label}</FieldLabel>
+      <FieldLabel htmlFor={selectId}>{label}</FieldLabel>
       <Select value={value} onValueChange={(nextValue) => nextValue && onChange(nextValue)}>
-        <SelectTrigger>
+        <SelectTrigger id={selectId}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

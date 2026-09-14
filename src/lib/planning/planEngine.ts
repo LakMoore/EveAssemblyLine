@@ -3122,10 +3122,31 @@ function restorePlanStockQuantities(
   for (const [typeId, quantity] of restoredStockQuantitiesByType) {
     availableStockQuantitiesByType.set(typeId, quantity);
   }
+  const blockedReactionInputTypeIds = new Set(
+    result.lists.reactionJobs.flatMap((job) =>
+      job.inputs.materials
+        .filter((material) => material.availableQuantity < material.requiredQuantity)
+        .map((material) => material.typeId),
+    ),
+  );
   const materialsToBuy = result.lists.materialsToBuy.map((entry) => {
     const excludedQuantity = excludedStockQuantitiesByType.get(entry.typeId) ?? 0;
-    if (excludedQuantity <= 0) return entry;
-    const availableStockQuantity = Math.max(0, entry.availableStockQuantity - excludedQuantity);
+    const isBlockedReactionInput = blockedReactionInputTypeIds.has(entry.typeId);
+    if (excludedQuantity <= 0 && !isBlockedReactionInput) return entry;
+    const demandLocationId = entry.stockpileLocationId ?? entry.activityLocationId;
+    const locallyAvailableStockQuantity =
+      demandLocationId === undefined
+        ? 0
+        : (
+            availableStockQuantitiesByLocationAndType.get(
+              locationTypeKey(demandLocationId, entry.typeId),
+            ) ?? 0
+          );
+    const availableStockQuantity = Math.max(
+      0,
+      entry.availableStockQuantity - excludedQuantity,
+      locallyAvailableStockQuantity,
+    );
     const plannedProductionQuantity = Math.max(
       0,
       entry.productionQuantity - (entry.reprocessingQuantity ?? 0),
@@ -3133,10 +3154,12 @@ function restorePlanStockQuantities(
     return {
       ...entry,
       availableStockQuantity,
-      buyQuantity: Math.max(
-        entry.buyQuantity,
-        entry.requiredQuantity - availableStockQuantity - plannedProductionQuantity,
-      ),
+      buyQuantity: isBlockedReactionInput
+        ? Math.max(0, entry.requiredQuantity - availableStockQuantity - plannedProductionQuantity)
+        : Math.max(
+            entry.buyQuantity,
+            entry.requiredQuantity - availableStockQuantity - plannedProductionQuantity,
+          ),
     };
   });
   return {

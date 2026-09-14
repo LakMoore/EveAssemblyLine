@@ -70,6 +70,7 @@ function emptyActivities(): ActivitiesResponse {
       available: false,
       standard: { available: false },
       capital: { available: false },
+      supercapital: { available: false },
     },
     reactions: {
       available: false,
@@ -404,6 +405,12 @@ export async function calculateFacilities(
       available:
         activities.manufacturing.available && requestActivities.manufacturing.capital.available,
       taxRate: requestActivities.manufacturing.capital.taxRate,
+    };
+    activities.manufacturing.supercapital = {
+      available:
+        activities.manufacturing.available
+        && requestActivities.manufacturing.supercapital.available,
+      taxRate: requestActivities.manufacturing.supercapital.taxRate,
     };
     activities.reactions.biochemical = {
       available:

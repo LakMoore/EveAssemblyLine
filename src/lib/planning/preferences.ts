@@ -26,6 +26,7 @@ export type KnownStructure = {
   esiStructureId?: number;
   allowStandardBuilds?: boolean;
   allowCapitalBuilds?: boolean;
+  allowSupercapitalBuilds?: boolean;
   allowReprocessing?: boolean;
   allowReactionBuilds?: boolean;
   allowBiochemicalReactions?: boolean;
