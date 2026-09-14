@@ -1966,6 +1966,7 @@ function Planner() {
         planStatus={planStatus}
         characterStatuses={characterStatuses}
         characterNamesById={characterNamesById}
+        slotCharacterNamesById={activeCharacterNamesById}
         corporationNamesById={corporationNamesById}
         jobs={jobs}
         stock={stock}

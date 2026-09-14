@@ -551,6 +551,7 @@ function PlannerResultsContent({
   planStatus,
   characterStatuses,
   characterNamesById,
+  slotCharacterNamesById,
   corporationNamesById,
   jobs,
   stock,
@@ -571,6 +572,7 @@ function PlannerResultsContent({
   planStatus: string;
   characterStatuses: ClientCharacterStatus[];
   characterNamesById: Map<number, string>;
+  slotCharacterNamesById: Map<number, string>;
   corporationNamesById: Map<number, string>;
   jobs: ClientJobsResponse | null;
   stock: PlanStockItem[];
@@ -641,22 +643,26 @@ function PlannerResultsContent({
     updatePlannerUrl(activeTab, typeId);
   }
 
-  const reactionSlotCharacters = getActivitySlotCharacters(jobs, characterNamesById, "Reactions");
+  const reactionSlotCharacters = getActivitySlotCharacters(
+    jobs,
+    slotCharacterNamesById,
+    "Reactions",
+  );
   const manufacturingSlotCharacters = getActivitySlotCharacters(
     jobs,
-    characterNamesById,
+    slotCharacterNamesById,
     "Manufacturing",
   );
-  const characterIds = [...characterNamesById.keys()];
+  const slotCharacterIds = [...slotCharacterNamesById.keys()];
   const availableReactionSlots = getSlotUsageTotals(
     jobs?.slotUsage ?? {},
     "Reactions",
-    characterIds,
+    slotCharacterIds,
   ).availableSlots;
   const availableManufacturingSlots = getSlotUsageTotals(
     jobs?.slotUsage ?? {},
     "Manufacturing",
-    characterIds,
+    slotCharacterIds,
   ).availableSlots;
   const activityLocationIds = [
     ...new Set(
