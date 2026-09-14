@@ -18,6 +18,11 @@ import type {
 } from "@/lib/planning/types";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import type { ClientCharacterStatus, ClientJobsResponse } from "@/lib/client/requestCache";
+import {
+  getIndustryJobMinutesUntil,
+  getNextIndustryJobEndTime,
+  nextIndustryJobDetail,
+} from "@/lib/client/industryJobs";
 import { getAvailableSlotCount, getSlotUsageTotals } from "@/lib/client/slotUsage";
 import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
 import {
@@ -803,6 +808,7 @@ function PlannerResultsContent({
               characterStatuses={characterStatuses}
               characterNamesById={characterNamesById}
               corporationNamesById={corporationNamesById}
+              jobs={jobs}
               stock={stock}
               marketBuyOrderQuantities={marketBuyOrderQuantities}
               activityLocationIds={activityLocationIds}
@@ -844,6 +850,7 @@ function PlanList({
   characterStatuses,
   characterNamesById,
   corporationNamesById,
+  jobs,
   stock,
   marketBuyOrderQuantities,
   activityLocationIds,
@@ -869,6 +876,7 @@ function PlanList({
   characterStatuses: ClientCharacterStatus[];
   characterNamesById: Map<number, string>;
   corporationNamesById: Map<number, string>;
+  jobs: ClientJobsResponse | null;
   stock: PlanStockItem[];
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
   activityLocationIds: number[];
@@ -1498,6 +1506,7 @@ function PlanList({
       {activeTab === "Haul" ? (
         <PlannerHaulTab
           groups={sortedHaulGroups}
+          jobs={jobs}
           locationNamesById={locationNamesById}
           stockpileLocations={stockpileLocations}
           characterNamesById={characterNamesById}
@@ -1596,6 +1605,8 @@ function PlanList({
                   {displayRows.map(({ entry, reactionPlans }, index) => {
                     const rowSchedules = reactionPlans;
                     const typeId = entry.typeId;
+                    const activityLocationId =
+                      typeof locationId === "number" ? locationId : undefined;
                     const name = getEntryName(entry);
                     const marketBuyOrderQuantity =
                       activeTab === "Buy" || activeTab === "Plan"
@@ -1802,9 +1813,12 @@ function PlanList({
                                 inputs={reactionInputs ?? entry.inputs}
                                 name={name}
                                 typeId={typeId}
+                                locationId={activityLocationId}
                                 variation={imageVariation}
                                 installableRuns={entry.runsAvailable}
                                 totalRuns={entry.countNeeded}
+                                jobs={jobs}
+                                marketBuyOrderQuantities={marketBuyOrderQuantities}
                               />
                             </span>
                           )}
@@ -1814,9 +1828,12 @@ function PlanList({
                                 inputs={entry.inputs}
                                 name={name}
                                 typeId={typeId}
+                                locationId={activityLocationId}
                                 variation={imageVariation}
                                 installableRuns={entry.runsAvailable}
                                 totalRuns={entry.countNeeded}
+                                jobs={jobs}
+                                marketBuyOrderQuantities={marketBuyOrderQuantities}
                               />
                             </span>
                           )}
@@ -1836,6 +1853,8 @@ function PlanList({
                                             ? entry.availableSourceCounts
                                             : undefined
                                         }
+                                        jobs={jobs}
+                                        typeId={typeId}
                                         haulingQuantity={planHaulingQuantity}
                                       />
                                     )}
@@ -2082,9 +2101,13 @@ function PlanList({
 
 function AvailableSourceIcons({
   counts,
+  jobs,
+  typeId,
   haulingQuantity = 0,
 }: {
   counts?: PlanSourceCountsByLocation;
+  jobs: ClientJobsResponse | null;
+  typeId: number;
   haulingQuantity?: number;
 }) {
   const summedCounts = sumSourceCounts(counts);
@@ -2111,7 +2134,11 @@ function AvailableSourceIcons({
           copying: "being Copied",
           reprocessing: "from Reprocessing",
         };
-        const label = `${quantity.toLocaleString()} ${sourceDescriptions[icon]}`;
+        const nextJobMinutes =
+          icon === "industry"
+            ? getIndustryJobMinutesUntil(getNextIndustryJobEndTime(typeId, jobs))
+            : undefined;
+        const label = `${quantity.toLocaleString()} ${sourceDescriptions[icon]}${nextIndustryJobDetail(nextJobMinutes)}`;
         return (
           <span
             key={icon}

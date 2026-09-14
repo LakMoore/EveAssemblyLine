@@ -1,13 +1,19 @@
 "use client";
 
 import type { PlanJobInput, PlanJobInputs, PlanJobInputStatus } from "@/lib/planning/types";
+import type { ClientJobsResponse } from "@/lib/client/requestCache";
+import {
+  getIndustryJobMinutesUntil,
+  getIndustryJobSummary,
+  nextIndustryJobDetail,
+} from "@/lib/client/industryJobs";
 import ResultRow from "@/components/ResultRow";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { Badge } from "@/components/ui/badge";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { ClipboardList, Factory } from "lucide-react";
+import styles from "@/app/page.module.css";
+import { ChartLine, ClipboardList, Factory } from "lucide-react";
 
 function statusLabel(status: PlanJobInputStatus) {
   return status === "ready" ? "Ready" : status === "partial" ? "Partial" : "Blocked";
@@ -21,6 +27,29 @@ function statusClassName(status: PlanJobInputStatus) {
       : "border-destructive/40 text-destructive";
 }
 
+function SourceIcon({
+  source,
+  label,
+  Icon,
+}: {
+  source: "industry" | "market";
+  label: string;
+  Icon: typeof Factory;
+}) {
+  return (
+    <span
+      className={styles.availableSourceIcon}
+      data-source={source}
+      data-tooltip={label}
+      aria-label={label}
+      role="img"
+      tabIndex={0}
+    >
+      <Icon size={14} strokeWidth={1.8} aria-hidden="true" />
+    </span>
+  );
+}
+
 /** Calculates the readiness percentage shown for an industry's inputs trigger. */
 export function getJobInputsCompletionPercent(inputs: PlanJobInputs): number {
   return inputs.materials.length
@@ -28,7 +57,32 @@ export function getJobInputsCompletionPercent(inputs: PlanJobInputs): number {
     : 100;
 }
 
-function InputRow({ input }: { input: PlanJobInput }) {
+function InputRow({
+  input,
+  locationId,
+  jobs,
+  marketBuyOrderQuantity,
+}: {
+  input: PlanJobInput;
+  locationId?: number;
+  jobs: ClientJobsResponse | null;
+  marketBuyOrderQuantity: number;
+}) {
+  const isIncomplete = input.completionPercent < 100;
+  const industrySummary = isIncomplete
+    ? getIndustryJobSummary(input.typeId, jobs, locationId)
+    : null;
+  const industryQuantity = industrySummary?.quantity ?? 0;
+  const readyIndustryQuantity = input.inBuildQuantity ?? 0;
+  const minutesUntilNextJob = getIndustryJobMinutesUntil(industrySummary?.nextEndTime);
+  const industryLabel = industryQuantity
+    ? `${industryQuantity.toLocaleString()} in build${
+        readyIndustryQuantity > 0
+          ? `, ${readyIndustryQuantity.toLocaleString()} ready from industry output`
+          : ""
+      }${nextIndustryJobDetail(minutesUntilNextJob)}`
+    : `${readyIndustryQuantity.toLocaleString()} available from ready industry output`;
+
   return (
     <ResultRow
       name={input.name}
@@ -44,24 +98,15 @@ function InputRow({ input }: { input: PlanJobInput }) {
       identityClassName="[&>span]:min-w-0"
     >
       <div className="flex shrink-0 items-center gap-2 self-center">
-        {input.inBuildQuantity !== undefined && input.inBuildQuantity > 0 && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <span
-                  aria-label={
-                    input.inBuildQuantity.toLocaleString() + " available from industry output"
-                  }
-                  className="text-muted-foreground"
-                >
-                  <Factory size={14} strokeWidth={1.8} aria-hidden="true" />
-                </span>
-              }
-            />
-            <TooltipContent>
-              {input.inBuildQuantity.toLocaleString() + " available from ready industry output"}
-            </TooltipContent>
-          </Tooltip>
+        {isIncomplete && (industryQuantity > 0 || readyIndustryQuantity > 0) && (
+          <SourceIcon source="industry" label={industryLabel} Icon={Factory} />
+        )}
+        {isIncomplete && marketBuyOrderQuantity > 0 && (
+          <SourceIcon
+            source="market"
+            label={`${marketBuyOrderQuantity.toLocaleString()} currently in market buy orders`}
+            Icon={ChartLine}
+          />
         )}
         <span className={cn("font-mono", statusClassName(input.status))}>
           {input.completionPercent}%
@@ -85,16 +130,22 @@ export default function JobInputsResponsive({
   inputs,
   name,
   typeId,
+  locationId,
   variation,
   installableRuns,
   totalRuns,
+  jobs,
+  marketBuyOrderQuantities,
 }: {
   inputs: PlanJobInputs;
   name: string;
   typeId: number;
+  locationId?: number;
   variation?: "icon" | "render" | "bp" | "bpc";
   installableRuns: number;
   totalRuns: number;
+  jobs: ClientJobsResponse | null;
+  marketBuyOrderQuantities?: Readonly<Record<string, number>>;
 }) {
   const completionPercent = getJobInputsCompletionPercent(inputs);
   const status: PlanJobInputStatus =
@@ -155,7 +206,15 @@ export default function JobInputsResponsive({
           Materials
         </p>
         {inputs.materials.length > 0 ? (
-          inputs.materials.map((input) => <InputRow input={input} key={input.typeId} />)
+          inputs.materials.map((input) => (
+            <InputRow
+              input={input}
+              locationId={locationId}
+              jobs={jobs}
+              marketBuyOrderQuantity={marketBuyOrderQuantities?.[String(input.typeId)] ?? 0}
+              key={input.typeId}
+            />
+          ))
         ) : (
           <p className="py-2 text-muted-foreground">No material inputs</p>
         )}

@@ -16,6 +16,11 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { getSlotUsageTotals, type IndustrySlotCategory } from "@/lib/client/slotUsage";
+import {
+  getIndustryJobMinutesUntil,
+  getNextIndustryActivityJobEndTime,
+  nextIndustryJobDetail,
+} from "@/lib/client/industryJobs";
 
 const slotOrder: IndustrySlotCategory[] = ["Manufacturing", "Science", "Reactions"];
 const scienceJobActivities = new Set([
@@ -191,26 +196,40 @@ export default function JobsPage() {
         <div className={styles.shipsStats}>
           <div className={styles.jobsAvailableSlots}>
             <div className={styles.jobsAvailableSlotValues}>
-              {availableSlotTotals.map(({ type, availableSlots, inUseSlots, totalSlots }) => (
-                <span
-                  key={type}
-                  className={`${styles.jobsAvailableSlot} ${styles.availableSourceIcon}`}
-                  title={`${type}: ${inUseSlots} / ${totalSlots} in use`}
-                  data-tooltip={`${type}: ${inUseSlots} / ${totalSlots} in use`}
-                  aria-label={`${type}: ${inUseSlots} / ${totalSlots} in use`}
-                  role="img"
-                  tabIndex={0}
-                >
-                  <strong>{availableSlots}</strong>
-                  {type === "Manufacturing" ? (
-                    <Factory aria-hidden="true" />
-                  ) : type === "Reactions" ? (
-                    <Atom aria-hidden="true" />
-                  ) : (
-                    <FlaskConical aria-hidden="true" />
-                  )}
-                </span>
-              ))}
+              {availableSlotTotals.map(({ type, availableSlots, inUseSlots, totalSlots }) => {
+                const nextManufacturingJobMinutes =
+                  type === "Manufacturing"
+                    ? getIndustryJobMinutesUntil(
+                        getNextIndustryActivityJobEndTime(
+                          "manufacturing",
+                          data,
+                          undefined,
+                          new Set(characterIds),
+                        ),
+                      )
+                    : undefined;
+                const slotLabel = `${type}: ${inUseSlots} / ${totalSlots} in use${nextIndustryJobDetail(nextManufacturingJobMinutes)}`;
+                return (
+                  <span
+                    key={type}
+                    className={`${styles.jobsAvailableSlot} ${styles.availableSourceIcon}`}
+                    title={slotLabel}
+                    data-tooltip={slotLabel}
+                    aria-label={slotLabel}
+                    role="img"
+                    tabIndex={0}
+                  >
+                    <strong>{availableSlots}</strong>
+                    {type === "Manufacturing" ? (
+                      <Factory aria-hidden="true" />
+                    ) : type === "Reactions" ? (
+                      <Atom aria-hidden="true" />
+                    ) : (
+                      <FlaskConical aria-hidden="true" />
+                    )}
+                  </span>
+                );
+              })}
             </div>
             <small>SLOTS AVAILABLE</small>
           </div>
@@ -259,7 +278,16 @@ export default function JobsPage() {
                     <span key={type}>
                       <small>
                         {type === "Manufacturing" ? (
-                          <Factory aria-hidden="true" />
+                          <span
+                            className={styles.availableSourceIcon}
+                            data-source="industry"
+                            data-tooltip={`${type}${nextIndustryJobDetail(getIndustryJobMinutesUntil(getNextIndustryActivityJobEndTime("manufacturing", data, character.characterId)))}`}
+                            aria-label={`${type}${nextIndustryJobDetail(getIndustryJobMinutesUntil(getNextIndustryActivityJobEndTime("manufacturing", data, character.characterId)))}`}
+                            role="img"
+                            tabIndex={0}
+                          >
+                            <Factory aria-hidden="true" />
+                          </span>
                         ) : type === "Reactions" ? (
                           <Atom aria-hidden="true" />
                         ) : type === "Science" ? (

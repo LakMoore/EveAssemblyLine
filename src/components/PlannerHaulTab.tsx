@@ -6,6 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { HaulPatch, ResponseHaulTask } from "@/lib/planning/types";
+import type { ClientJobsResponse } from "@/lib/client/requestCache";
+import {
+  getIndustryJobMinutesUntil,
+  getNextIndustryJobEndTime,
+  nextIndustryJobDetail,
+} from "@/lib/client/industryJobs";
 import { createHaulItemExclusionKey, type HaulItemExclusion } from "@/lib/planning/planView";
 import { isHaulTaskPatched } from "@/lib/planning/haulPatches";
 import {
@@ -52,6 +58,7 @@ function getHaulGroupVolume(tasks: DisplayHaulTask[]): number {
 
 type PlannerHaulTabProps = {
   groups: PlannerHaulGroup[];
+  jobs: ClientJobsResponse | null;
   locationNamesById: Map<number, string>;
   stockpileLocations: ReadonlySet<number>;
   characterNamesById: Map<number, string>;
@@ -76,6 +83,7 @@ type PlannerHaulTabProps = {
 /** Renders grouped hauling tasks and owns haul-specific progress state. */
 export default function PlannerHaulTab({
   groups,
+  jobs,
   locationNamesById,
   stockpileLocations,
   characterNamesById,
@@ -284,9 +292,7 @@ export default function PlannerHaulTab({
                           <TooltipTrigger
                             render={
                               <span
-                                aria-label={
-                                  task.inBuildQuantity.toLocaleString() + " ready industry output"
-                                }
+                                aria-label={`${task.inBuildQuantity.toLocaleString()} ready industry output${nextIndustryJobDetail(getIndustryJobMinutesUntil(getNextIndustryJobEndTime(task.typeId, jobs, task.fromLocationId, group.ownerType, group.ownerId)))}`}
                                 className="inline-flex items-center text-[#72d3b1]"
                               >
                                 <Factory size={14} strokeWidth={1.8} aria-hidden="true" />
@@ -294,7 +300,7 @@ export default function PlannerHaulTab({
                             }
                           />
                           <TooltipContent>
-                            {task.inBuildQuantity.toLocaleString() + " ready industry output"}
+                            {`${task.inBuildQuantity.toLocaleString()} ready industry output${nextIndustryJobDetail(getIndustryJobMinutesUntil(getNextIndustryJobEndTime(task.typeId, jobs, task.fromLocationId, group.ownerType, group.ownerId)))}`}
                           </TooltipContent>
                         </Tooltip>
                       )}

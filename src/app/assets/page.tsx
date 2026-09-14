@@ -20,10 +20,17 @@ import { AssemblyLineGroups } from "@/lib/reference/assemblyLineGroups";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import {
   filterClientAssetsForPlanning,
+  loadClientJobs,
   groupClientAssetsByLocation,
   loadClientAssets,
   type ClientAssetsResponse,
+  type ClientJobsResponse,
 } from "@/lib/client/requestCache";
+import {
+  getIndustryJobMinutesUntil,
+  getNextIndustryJobEndTime,
+  nextIndustryJobDetail,
+} from "@/lib/client/industryJobs";
 import { type KnownStructure } from "@/lib/planning/preferences";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import DialogBody from "@/components/DialogBody";
@@ -169,6 +176,7 @@ function stockLocationId(location: StockRecord) {
 export default function StockPage() {
   const { language } = useAppLanguage();
   const [locations, setLocations] = useState<StockRecord[]>([]);
+  const [jobs, setJobs] = useState<ClientJobsResponse | null>(null);
   const [selectedAssetTypeId, setSelectedAssetTypeId] = useState<number | null>(null);
   const [viewingFilter, setViewingFilter] = useState<StockFilter>({ kind: "all" });
   const [knownStructures, setKnownStructures] = useState<KnownStructure[]>([]);
@@ -211,7 +219,7 @@ export default function StockPage() {
     async function loadPageData(loadEsiStock = true, reloadEsiStock = false) {
       setIsHydratingVolumes(true);
       try {
-        const [records, structures, esiResponse] = await Promise.all([
+        const [records, structures, esiResponse, jobsResponse] = await Promise.all([
           loadStockRecords().catch(() => []),
           loadStructures().catch(() => []),
           loadEsiStock
@@ -220,7 +228,9 @@ export default function StockPage() {
                 json: async () => data,
               }))
             : Promise.resolve({ ok: false, json: async () => ({}) }),
+          loadClientJobs().catch((): ClientJobsResponse => ({ jobs: [] })),
         ]);
+        setJobs(jobsResponse);
         const esiData = (await esiResponse.json()) as ClientAssetsResponse;
         const filteredEsiData = filterClientAssetsForPlanning(esiData);
         const esiLocations = esiResponse.ok
@@ -580,6 +590,7 @@ export default function StockPage() {
       {viewing && (
         <ViewItemsModal
           location={viewing}
+          jobs={jobs}
           filter={viewingFilter}
           assetTypeFilter={assetTypeFilter}
           onFilterChange={setViewingFilter}
@@ -993,6 +1004,7 @@ type StockTypeBucket = {
 
 function ViewItemsModal({
   location,
+  jobs,
   filter,
   assetTypeFilter,
   onFilterChange,
@@ -1000,6 +1012,7 @@ function ViewItemsModal({
   onCancel,
 }: {
   location: StockRecord;
+  jobs: ClientJobsResponse | null;
   filter: StockFilter;
   assetTypeFilter: AssetTypeFilter | null;
   onFilterChange: (filter: StockFilter) => void;
@@ -1158,6 +1171,10 @@ function ViewItemsModal({
                 filter.kind === "all" || (filter.kind === "category" && filter.value === "item");
               const isBlueprint = isBlueprintStockItem(item);
               const isReaction = item.category === "reactionformula";
+              const nextProductionJobMinutes = getIndustryJobMinutesUntil(
+                getNextIndustryJobEndTime(item.typeId, jobs, stockLocationId(location)),
+              );
+              const productionLabel = `${productionQuantity.toLocaleString()} in production${nextIndustryJobDetail(nextProductionJobMinutes)}`;
               return (
                 <div className={styles.stockRow} key={`${item.typeId}:${itemIndex}`}>
                   <div className={styles.stockIdentityStack}>
@@ -1207,7 +1224,16 @@ function ViewItemsModal({
                           {isReaction ? (
                             <Atom aria-hidden="true" />
                           ) : (
-                            <Factory aria-hidden="true" />
+                            <span
+                              className={styles.availableSourceIcon}
+                              data-source="industry"
+                              data-tooltip={productionLabel}
+                              aria-label={productionLabel}
+                              role="img"
+                              tabIndex={0}
+                            >
+                              <Factory aria-hidden="true" />
+                            </span>
                           )}
                           <b>{productionQuantity.toLocaleString()}</b>
                           <small>{isReaction ? "In use" : "In production"}</small>
