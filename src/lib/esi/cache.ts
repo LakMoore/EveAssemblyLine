@@ -1022,13 +1022,28 @@ function jobStartedAfter(job: IndustryJobRecord, lastModified: string | undefine
 }
 
 function jobDeliveredAfter(job: IndustryJobRecord, lastModified: string | undefined) {
-  const jobDeliveredAt = Date.parse(job.endDate);
+  const jobDeliveredAt = Date.parse(job.completedDate ?? "");
   const endpointModifiedAt = Date.parse(lastModified ?? "");
   return (
-    job.status.toLowerCase() === "delivered"
+    job.completedDate !== undefined
     && Number.isFinite(jobDeliveredAt)
     && Number.isFinite(endpointModifiedAt)
     && jobDeliveredAt > endpointModifiedAt
+  );
+}
+
+function retainJobSinceAssetsModified(
+  job: IndustryJobRecord,
+  assetsLastModified: string | undefined,
+) {
+  if (!assetsLastModified) return true;
+  if (!job.completedDate) return job.status.toLowerCase() !== "delivered";
+  const completedAt = Date.parse(job.completedDate);
+  const assetsModifiedAt = Date.parse(assetsLastModified);
+  return (
+    !Number.isFinite(completedAt)
+    || !Number.isFinite(assetsModifiedAt)
+    || completedAt >= assetsModifiedAt
   );
 }
 
@@ -1075,6 +1090,51 @@ function getJobOutputQuantity(
   return (product?.quantity ?? 0) * installedRuns;
 }
 
+function getJobOutputRootLocation(cache: OwnerCache, job: IndustryJobRecord) {
+  return (
+    cache.rootLocationsByItemId.get(job.outputLocationId)
+    ?? cache.rootLocationsByItemId.get(job.facilityId)
+  );
+}
+
+function getJobOutputAssetTemplate(cache: OwnerCache, job: IndustryJobRecord) {
+  return (cache.allAssetsRaw?.lastBody ?? []).find(
+    (asset) =>
+      asset.locationId === job.outputLocationId
+      && asset.ownerType === job.ownerType
+      && asset.ownerId === job.ownerId,
+  );
+}
+
+/** Builds the temporary asset used while a delivered job is newer than assets. */
+export function buildDeliveredJobAsset(
+  job: IndustryJobRecord,
+  productTypeId: number,
+  outputQuantity: number,
+  rootLocation?: AssetLocation,
+  template?: Pick<
+    AssetRecord,
+    "locationType" | "locationFlag" | "containerId" | "rootLocationId" | "hangarId"
+  >,
+): AssetRecord {
+  return {
+    itemId: -job.jobId,
+    typeId: productTypeId,
+    quantity: outputQuantity,
+    locationId: job.outputLocationId,
+    locationType: template?.locationType ?? "item",
+    locationFlag:
+      template?.locationFlag ?? (job.ownerType === "corporation" ? "CorpDeliveries" : "Deliveries"),
+    isSingleton: false,
+    ownerType: job.ownerType,
+    ownerId: job.ownerId,
+    containerId: template?.containerId ?? job.outputLocationId,
+    rootLocationId: template?.rootLocationId ?? rootLocation?.locationId ?? job.outputLocationId,
+    hangarId: template?.hangarId ?? null,
+    ...(rootLocation ? { rootLocation } : {}),
+  };
+}
+
 async function refreshJobAdjustments(
   cache: OwnerCache,
   jobs: IndustryJobRecord[],
@@ -1093,7 +1153,8 @@ async function refreshJobAdjustments(
           (job) =>
             jobStartedAfter(job, assetsLastModified)
             || jobStartedAfter(job, blueprintsLastModified)
-            || jobDeliveredAfter(job, assetsLastModified),
+            || jobDeliveredAfter(job, assetsLastModified)
+            || jobDeliveredAfter(job, blueprintsLastModified),
         )
         .map((job) => job.blueprintTypeId),
     ),
@@ -1122,36 +1183,32 @@ async function refreshJobAdjustments(
     if (jobDeliveredAfter(job, assetsLastModified)) {
       const outputQuantity = getJobOutputQuantity(job, blueprint);
       if (outputQuantity > 0 && job.productTypeId !== undefined) {
-        const rootLocation =
-          cache.rootLocationsByItemId.get(job.outputLocationId)
-          ?? cache.rootLocationsByItemId.get(job.facilityId);
-        const key = `${job.productTypeId}:${job.facilityId}`;
+        const rootLocation = getJobOutputRootLocation(cache, job);
+        const template = getJobOutputAssetTemplate(cache, job);
+        const rootLocationId =
+          template?.rootLocationId ?? rootLocation?.locationId ?? job.outputLocationId;
+        const key = `${job.productTypeId}:${rootLocationId}`;
         const existing = cache.jobAssetAdditions.get(key);
         cache.jobAssetAdditions.set(
           key,
           existing
             ? { ...existing, quantity: existing.quantity + outputQuantity }
-            : {
-                itemId: -job.jobId,
-                typeId: job.productTypeId,
-                quantity: outputQuantity,
-                locationId: job.outputLocationId,
-                locationType: "item",
-                locationFlag: "Deliveries",
-                isSingleton: false,
-                ownerType: job.ownerType,
-                ownerId: job.ownerId,
-                ...(rootLocation ? { rootLocation } : {}),
-              },
+            : buildDeliveredJobAsset(
+                job,
+                job.productTypeId,
+                outputQuantity,
+                rootLocation,
+                template,
+              ),
         );
       }
     }
 
-    // Delivered jobs returned their blueprint; undelivered jobs still hold it or consume BPC runs.
+    // Completed jobs returned their blueprint; adjust stale BPC runs until blueprints catches up.
+    if (job.activityId === 9) continue;
     if (
-      job.status.toLowerCase() === "delivered"
-      || !jobStartedAfter(job, blueprintsLastModified)
-      || job.activityId === 9
+      !jobStartedAfter(job, blueprintsLastModified)
+      && !jobDeliveredAfter(job, blueprintsLastModified)
     ) continue;
     const blueprintInstance = blueprintInstances.get(job.blueprintId);
     if (!blueprintInstance) continue;
@@ -1211,16 +1268,26 @@ function effectiveAssets(cache: OwnerCache) {
       if (deduction > 0) deductions.set(key, deduction - deductedQuantity);
       if (remainingQuantity <= 0) return [];
       const addition = additions.get(key);
-      if (addition) additions.delete(key);
+      const canMergeAddition = canMergeDeliveredAsset(asset, addition);
+      if (canMergeAddition) additions.delete(key);
+      const mergedAdditionQuantity = addition && canMergeAddition ? addition.quantity : 0;
       return [
         {
           ...asset,
-          quantity: remainingQuantity + (addition?.quantity ?? 0),
+          quantity: remainingQuantity + mergedAdditionQuantity,
           ...(blueprintAdjustment?.inUse ? { inUse: true } : {}),
         },
       ];
     })
     .concat([...additions.values()]);
+}
+
+/** Returns whether delivered stock belongs to the same container as existing stock. */
+export function canMergeDeliveredAsset(
+  asset: Pick<AssetRecord, "containerId">,
+  addition: Pick<AssetRecord, "containerId"> | undefined,
+) {
+  return addition?.containerId === asset.containerId;
 }
 
 function marketOrderIssuedAfter(order: MarketOrderRecord, lastModified: string | undefined) {
@@ -1275,6 +1342,7 @@ function effectiveBlueprints(cache: OwnerCache) {
 type IndustryJobsFetcher = (
   record: CharacterTokenRecord,
   etag?: string,
+  assetsLastModified?: string,
 ) => ReturnType<typeof fetchCharacterIndustryJobs>;
 
 async function refreshIndustryJobs(
@@ -1285,7 +1353,7 @@ async function refreshIndustryJobs(
   blueprintsLastModified: string | undefined,
 ) {
   if (!cache.jobs || !cache.jobs.expires || Date.parse(cache.jobs.expires) <= Date.now()) {
-    const jobs = await fetchJobs(character, cache.jobs?.etag);
+    const jobs = await fetchJobs(character, cache.jobs?.etag, assetsLastModified);
     cache.jobs =
       jobs.notModified && cache.jobs
         ? setFresh(cache.jobs.lastBody, jobs.headers, cache.jobs, true)
@@ -1294,6 +1362,9 @@ async function refreshIndustryJobs(
   else {
     cache.jobs.status = endpointDataStatus(cache.jobs.lastModified, cache.jobs.expires);
   }
+  cache.jobs.lastBody = cache.jobs.lastBody.filter((job) =>
+    retainJobSinceAssetsModified(job, assetsLastModified),
+  );
   try {
     await refreshJobAdjustments(
       cache,

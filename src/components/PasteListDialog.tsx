@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import type { TypeMetadata } from "@/lib/reference/types";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
@@ -11,6 +11,7 @@ import { DialogDescription, DialogHeader } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { parsePasteList } from "@/lib/reference/pasteList";
+import { applyPasteListMode, type PasteListMode } from "@/lib/reference/pasteListOperations";
 import { cn } from "@/lib/utils";
 import { CircleAlert, FileUp, X } from "lucide-react";
 import { Label } from "./ui/label";
@@ -35,6 +36,7 @@ type PasteListDialogProps = {
   description?: string;
   placeholder?: string;
   ariaLabel?: string;
+  allowSubtract?: boolean;
   currentItems: PasteListItem[];
   onCancel: () => void;
   onImport: (items: PasteListItem[]) => void;
@@ -47,15 +49,47 @@ export default function PasteListDialog({
   description = "One item per line. Put the quantity at the end of each line.",
   placeholder = "Raven 2\nVargur 1",
   ariaLabel = "Build items and quantities",
+  allowSubtract = false,
   currentItems,
   onCancel,
   onImport,
 }: PasteListDialogProps) {
   const [text, setText] = useState("");
   const [results, setResults] = useState<PasteResult[]>([]);
-  const [isResolving, setIsResolving] = useState(false);
   const [error, setError] = useState("");
-  const [mode, setMode] = useState<"add" | "replace">("add");
+  const [mode, setMode] = useState<PasteListMode>("add");
+  const [activeRequest, setActiveRequest] = useState<{
+    id: number;
+    language: SdeLanguage;
+    currentItems: PasteListItem[];
+    mode: PasteListMode;
+    text: string;
+  } | null>(null);
+  const resolveRequestId = useRef(0);
+
+  function invalidateResolution() {
+    resolveRequestId.current += 1;
+    setActiveRequest(null);
+  }
+
+  function cancelDialog() {
+    invalidateResolution();
+    onCancel();
+  }
+
+  useEffect(
+    () => () => {
+      resolveRequestId.current += 1;
+    },
+    [currentItems, language],
+  );
+
+  const isResolving =
+    activeRequest !== null
+    && activeRequest.language === language
+    && activeRequest.currentItems === currentItems
+    && activeRequest.mode === mode
+    && activeRequest.text === text;
 
   async function resolveItems(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -65,7 +99,8 @@ export default function PasteListDialog({
       setResults([]);
       return;
     }
-    setIsResolving(true);
+    const requestId = ++resolveRequestId.current;
+    setActiveRequest({ id: requestId, language, currentItems, mode, text });
     setError("");
     try {
       const response = await fetch(
@@ -78,36 +113,28 @@ export default function PasteListDialog({
       );
       const data = (await response.json()) as { items?: PasteResult[]; error?: string };
       if (!response.ok) throw new Error(data.error ?? "Could not resolve the pasted list.");
+      if (requestId !== resolveRequestId.current) return;
       const resolvedItems = data.items ?? [];
       setResults(resolvedItems);
       if (resolvedItems.length > 0 && resolvedItems.every((item) => !item.error && item.typeId)) {
         const importedItems = resolvedItems as PasteListItem[];
-        if (mode === "replace") {
-          onImport(importedItems);
-          return;
-        }
-        const merged = [...currentItems];
-        for (const item of importedItems) {
-          const existing = merged.find((entry) => entry.typeId === item.typeId);
-          if (existing) existing.quantity = (existing.quantity ?? 0) + (item.quantity ?? 0);
-          else merged.push(item);
-        }
-        onImport(merged);
+        onImport(applyPasteListMode(currentItems, importedItems, mode));
       }
     }
     catch (resolveError) {
+      if (requestId !== resolveRequestId.current) return;
       setResults([]);
       setError(
         resolveError instanceof Error ? resolveError.message : "Could not resolve the pasted list.",
       );
     }
     finally {
-      setIsResolving(false);
+      if (requestId === resolveRequestId.current) setActiveRequest(null);
     }
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+    <Dialog open onOpenChange={(open) => !open && cancelDialog()}>
       <DialogContent render={<form onSubmit={resolveItems} />}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
@@ -118,6 +145,7 @@ export default function PasteListDialog({
             className="min-h-48"
             value={text}
             onChange={(event) => {
+              invalidateResolution();
               setText(event.target.value);
               setResults([]);
               setError("");
@@ -154,14 +182,14 @@ export default function PasteListDialog({
                       <span className="block min-w-0 truncate">{item.name}</span>
                     )}
                   </div>
-                  <div className="ml-auto flex shrink-0 items-center gap-3">
+                  <div className="ml-auto flex min-w-0 flex-1 flex-wrap items-center justify-end gap-3">
                     {item.quantity ? (
                       <small className="text-right text-muted-foreground">
                         Quantity {item.quantity}
                       </small>
                     ) : null}
                     {item.error ? (
-                      <small className="flex max-w-[15rem] min-w-0 flex-nowrap items-center gap-1 whitespace-nowrap text-right text-destructive">
+                      <small className="flex min-w-0 max-w-60 items-center gap-1 text-right text-destructive">
                         <CircleAlert className="size-3 shrink-0" aria-hidden="true" />
                         <span className="truncate">{item.error}</span>
                       </small>
@@ -172,16 +200,19 @@ export default function PasteListDialog({
             </div>
           )}
           <RadioGroup
-            className="mt-1 sm:grid-cols-2"
+            className={cn("mt-1", allowSubtract ? "sm:grid-cols-3" : "sm:grid-cols-2")}
             value={mode}
-            onValueChange={(value) => setMode(value as "add" | "replace")}
+            onValueChange={(value) => {
+              invalidateResolution();
+              setMode(value as PasteListMode);
+            }}
             aria-label="Paste behavior"
           >
             <Label className="flex items-start gap-2">
               <RadioGroupItem value="add" />
               <span className="grid min-w-0 gap-1">
                 <span className="text-sm font-medium">Add to list</span>
-                <span className="text-muted-foreground text-xs">
+                <span className="text-xs text-muted-foreground">
                   Keep the imported items with the current list.
                 </span>
               </span>
@@ -190,15 +221,26 @@ export default function PasteListDialog({
               <RadioGroupItem value="replace" />
               <span className="grid min-w-0 gap-1">
                 <span className="text-sm font-medium">Replace list</span>
-                <span className="text-muted-foreground text-xs">
+                <span className="text-xs text-muted-foreground">
                   Clear the current list before importing.
                 </span>
               </span>
             </Label>
+            {allowSubtract && (
+              <Label className="flex items-start gap-2">
+                <RadioGroupItem value="subtract" />
+                <span className="grid min-w-0 gap-1">
+                  <span className="text-sm font-medium">Subtract from list</span>
+                  <span className="text-xs text-muted-foreground">
+                    Deduct the imported quantities from the current list.
+                  </span>
+                </span>
+              </Label>
+            )}
           </RadioGroup>
         </div>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onCancel}>
+          <Button type="button" variant="outline" onClick={cancelDialog}>
             <X aria-hidden="true" />
             Cancel
           </Button>

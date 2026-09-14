@@ -46,6 +46,7 @@ type ClientOwnerSnapshotJob = {
   endDate: string;
   facilityId: number;
   outputLocationId: number;
+  outputLocationName?: string;
   blueprintTypeId: number;
   productTypeId?: number;
 };
@@ -162,6 +163,10 @@ function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
+function isAssetItemId(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value !== 0;
+}
+
 function isNonNegativeNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
@@ -199,7 +204,7 @@ function isSnapshotSourceLocation(value: unknown): value is ClientOwnerSnapshotS
 function isSnapshotAsset(value: unknown, depth = 0): value is ClientOwnerSnapshotAsset {
   if (!isRecord(value) || depth > 20) return false;
   return (
-    isPositiveInteger(value.itemId)
+    isAssetItemId(value.itemId)
     && isPositiveInteger(value.typeId)
     && isNonNegativeNumber(value.quantity)
     && isPositiveInteger(value.locationId)

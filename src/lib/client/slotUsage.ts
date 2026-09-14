@@ -31,8 +31,8 @@ export function getSlotUsageTotals(
   return characterIds.reduce(
     (summary, characterId) => {
       const usage = slotUsage[String(characterId)];
-      const totalSlots = usage?.availableSlots[activity] ?? 0;
-      const inUseSlots = usage?.slots[activity] ?? 0;
+      const totalSlots = usage.availableSlots[activity] ?? 0;
+      const inUseSlots = usage.slots[activity] ?? 0;
       return {
         totalSlots: summary.totalSlots + totalSlots,
         inUseSlots: summary.inUseSlots + inUseSlots,

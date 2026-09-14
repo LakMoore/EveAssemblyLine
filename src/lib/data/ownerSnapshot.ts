@@ -39,7 +39,7 @@ export type OwnerSnapshotAsset = Omit<
 
 export type OwnerSnapshotJob = Omit<
   NonNullable<OwnerJobsResponse["jobs"]>[number],
-  "activity" | "outputLocationName" | "blueprintTypeName" | "productTypeName"
+  "activity" | "blueprintTypeName" | "productTypeName"
 >;
 
 export type OwnerSnapshotShip = Omit<
@@ -177,7 +177,6 @@ function snapshotJobs(data: OwnerJobsResponse): OwnerSnapshotData["jobs"] {
   return data.jobs.map(
     ({
       activity: _activity,
-      outputLocationName: _outputLocationName,
       blueprintTypeName: _blueprintTypeName,
       productTypeName: _productTypeName,
       ...job

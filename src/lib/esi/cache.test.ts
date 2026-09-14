@@ -8,6 +8,8 @@ import {
   getStateStatus,
   getMarketOrderAssetDeductions,
   getKnownNonStructureItemIds,
+  buildDeliveredJobAsset,
+  canMergeDeliveredAsset,
   isCorporationRecordAllowed,
   isCorporationRecordAccessible,
   isCargoContainerType,
@@ -19,7 +21,11 @@ import {
 import { getGroups, getMarketGroups, getTypesByIds } from "@/cache/services/sdeCache";
 import { normalizeCorporationSettings } from "@/lib/auth/tokensStore";
 import { getCorporationHangarPermissions } from "./corporationAccess";
-import type { AssetRecord, CorporationCollectionSettings } from "@/lib/auth/model";
+import type {
+  AssetRecord,
+  CorporationCollectionSettings,
+  IndustryJobRecord,
+} from "@/lib/auth/model";
 
 const corporationPolicy: CorporationCollectionSettings = {
   corporationId: 900,
@@ -371,6 +377,86 @@ void test("limits refresh access to the hangars visible to non-directors", () =>
     ),
     false,
   );
+});
+
+void test("recognizes patched corporation delivery stock as an accessible source", () => {
+  const deliveredJob = {
+    jobId: 700,
+    activityId: 1,
+    blueprintId: 701,
+    blueprintLocationId: 600,
+    blueprintTypeId: 21034,
+    endDate: "2026-09-14T12:00:00.000Z",
+    facilityId: 600,
+    installerId: 1,
+    locationId: 600,
+    outputLocationId: 600,
+    ownerType: "corporation",
+    ownerId: 900,
+    productTypeId: 21035,
+    runs: 10,
+    startDate: "2026-09-14T11:00:00.000Z",
+    status: "delivered",
+  } satisfies IndustryJobRecord;
+  const deliveredAsset = buildDeliveredJobAsset(deliveredJob, deliveredJob.productTypeId, 10);
+
+  assert.deepEqual(
+    deliveredAsset,
+    {
+      itemId: -700,
+      typeId: 21035,
+      quantity: 10,
+      locationId: 600,
+      locationType: "item",
+      locationFlag: "CorpDeliveries",
+      isSingleton: false,
+      ownerType: "corporation",
+      ownerId: 900,
+      rootLocationId: 600,
+      containerId: 600,
+      hangarId: null,
+    },
+  );
+
+  const deliveredContainerAsset = buildDeliveredJobAsset(
+    deliveredJob,
+    deliveredJob.productTypeId,
+    10,
+    undefined,
+    {
+      locationType: "item",
+      locationFlag: "CorpSAG3",
+      containerId: 1054061681947,
+      rootLocationId: 1050827709022,
+      hangarId: 1054061681947,
+    },
+  );
+  assert.equal(deliveredContainerAsset.locationFlag, "CorpSAG3");
+  assert.equal(deliveredContainerAsset.rootLocationId, 1050827709022);
+
+  const deliveryRoles = [
+    {
+      ...corporationRoles[0],
+      corporationRoles: ["Deliveries_Take", "Deliveries_Query"],
+      rolesAtOther: ["Deliveries_Take", "Deliveries_Query"],
+    },
+  ] satisfies Parameters<typeof getCorporationHangarPermissions>[0];
+
+  assert.equal(
+    isCorporationRecordAccessible(
+      deliveredAsset,
+      sourcePolicy(),
+      deliveryRoles,
+      new Set(),
+      new Map(),
+    ),
+    true,
+  );
+});
+
+void test("does not merge delivered stock into a different container", () => {
+  assert.equal(canMergeDeliveredAsset({ containerId: 100 }, { containerId: 200 }), false);
+  assert.equal(canMergeDeliveredAsset({ containerId: 100 }, { containerId: 100 }), true);
 });
 
 void test("uses the hangar location rather than an outer asset for HQ roles", () => {

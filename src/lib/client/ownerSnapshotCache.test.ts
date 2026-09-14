@@ -134,6 +134,31 @@ void test("accepts corporation container selection metadata", () => {
   );
 });
 
+void test("accepts synthetic delivered asset IDs", () => {
+  assert.equal(
+    isCompleteClientOwnerSnapshot({
+      ...completeSnapshot,
+      assets: slice([
+        {
+          itemId: -671463795,
+          typeId: 57479,
+          quantity: 18,
+          locationId: 1055498192868,
+          locationType: "item",
+          locationFlag: "Unlocked",
+          isSingleton: false,
+          ownerType: "corporation",
+          ownerId: 840323545,
+          containerId: 1055498192868,
+          rootLocationId: 1055354926818,
+          hangarId: 1055380791459,
+        },
+      ]),
+    }),
+    true,
+  );
+});
+
 void test("rejects incomplete owner snapshots", () => {
   const incomplete = { ...completeSnapshot, marketOrders: undefined };
   assert.equal(isCompleteClientOwnerSnapshot(incomplete), false);

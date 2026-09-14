@@ -152,12 +152,12 @@ export async function POST(request: Request) {
       const name = item.name?.trim() ?? "";
       const quantity = item.quantity;
       const match = byName.get(name.toLocaleLowerCase(language));
-      const validQuantity = quantity === undefined || (Number.isInteger(quantity) && quantity > 0);
+      const validQuantity = quantity === undefined || (Number.isInteger(quantity) && quantity >= 0);
       if (!match || !validQuantity) {
         return {
           name,
           quantity,
-          error: !match ? "Item name was not found." : "Quantity must be a positive whole number.",
+          error: !match ? "Item name was not found." : "Quantity must be zero or greater.",
         };
       }
       return { ...match, quantity: quantity ?? 1 };

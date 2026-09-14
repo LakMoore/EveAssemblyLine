@@ -455,7 +455,7 @@ export function projectOwnerSnapshotsToClientJobs(
     snapshot.jobs.data.map((job) => ({
       ...job,
       activity: activityName(job.activityId),
-      outputLocationName: locationName(snapshot, job.outputLocationId),
+      outputLocationName: job.outputLocationName ?? locationName(snapshot, job.outputLocationId),
       blueprintTypeName: metadataByTypeId.get(job.blueprintTypeId)?.name,
       productTypeName:
         job.productTypeId === undefined ? undefined : metadataByTypeId.get(job.productTypeId)?.name,

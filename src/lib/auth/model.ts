@@ -121,6 +121,7 @@ export interface IndustryJobRecord {
   blueprintId: number;
   blueprintLocationId: number;
   blueprintTypeId: number;
+  completedDate?: string;
   endDate: string;
   facilityId: number;
   installerId: number;

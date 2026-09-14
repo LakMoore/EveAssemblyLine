@@ -167,6 +167,7 @@ type EsiIndustryJob = {
   successful_runs?: number;
   start_date: string;
   end_date: string;
+  completed_date?: string;
 };
 
 type EsiMarketOrder = {
@@ -796,12 +797,44 @@ function mapIndustryJob(
     ...(job.successful_runs !== undefined ? { successfulRuns: job.successful_runs } : {}),
     startDate: job.start_date,
     endDate: job.end_date,
+    ...(job.completed_date !== undefined ? { completedDate: job.completed_date } : {}),
     ownerType,
     ownerId,
   };
 }
 
-export async function fetchCharacterIndustryJobs(record: CharacterTokenRecord, etag?: string) {
+function retainIndustryJobSinceAssetsModified(
+  job: EsiIndustryJob,
+  assetsLastModified: string | undefined,
+) {
+  if (!assetsLastModified) return true;
+  if (!job.completed_date) return job.status !== "delivered";
+  const completedAt = Date.parse(job.completed_date);
+  const assetsModifiedAt = Date.parse(assetsLastModified);
+  return (
+    !Number.isFinite(completedAt)
+    || !Number.isFinite(assetsModifiedAt)
+    || completedAt >= assetsModifiedAt
+  );
+}
+
+function mapIndustryJobs(
+  jobs: EsiIndustryJob[],
+  ownerType: IndustryJobRecord["ownerType"],
+  ownerId: number,
+  assetsLastModified: string | undefined,
+) {
+  return jobs
+    .filter((job) => job.status !== "cancelled" && job.status !== "reverted")
+    .filter((job) => retainIndustryJobSinceAssetsModified(job, assetsLastModified))
+    .map((job) => mapIndustryJob(job, ownerType, ownerId));
+}
+
+export async function fetchCharacterIndustryJobs(
+  record: CharacterTokenRecord,
+  etag?: string,
+  assetsLastModified?: string,
+) {
   const token = await getUsableToken(record);
   const result = await fetchEsiEndpoint<EsiIndustryJob[]>(
     // Completed jobs are required to reconcile assets and blueprints after installation.
@@ -815,9 +848,7 @@ export async function fetchCharacterIndustryJobs(record: CharacterTokenRecord, e
     jobs:
       result.data === null
         ? null
-        : result.data
-            .filter((job) => job.status !== "cancelled" && job.status !== "reverted")
-            .map((job) => mapIndustryJob(job, "character", record.characterId)),
+        : mapIndustryJobs(result.data, "character", record.characterId, assetsLastModified),
     headers: result.headers,
     notModified: result.notModified,
   };
@@ -844,7 +875,11 @@ export async function fetchCharacterSkills(record: CharacterTokenRecord, etag?: 
   };
 }
 
-export async function fetchCorporationIndustryJobs(record: CharacterTokenRecord, etag?: string) {
+export async function fetchCorporationIndustryJobs(
+  record: CharacterTokenRecord,
+  etag?: string,
+  assetsLastModified?: string,
+) {
   if (!record.corporationId || !record.hasDirectorRole) {
     throw new Error("Corporation authorization is incomplete");
   }
@@ -861,9 +896,7 @@ export async function fetchCorporationIndustryJobs(record: CharacterTokenRecord,
     jobs:
       result.data === null
         ? null
-        : result.data
-            .filter((job) => job.status !== "cancelled" && job.status !== "reverted")
-            .map((job) => mapIndustryJob(job, "corporation", corporationId)),
+        : mapIndustryJobs(result.data, "corporation", corporationId, assetsLastModified),
     headers: result.headers,
     notModified: result.notModified,
   };

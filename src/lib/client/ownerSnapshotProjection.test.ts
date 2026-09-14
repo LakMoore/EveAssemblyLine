@@ -671,6 +671,37 @@ void test("counts corporation jobs against the installing character's slots", ()
   );
 });
 
+void test("keeps the server-resolved job location name", () => {
+  const result = projectOwnerSnapshotsToClientJobs(
+    [
+      {
+        ...snapshot,
+        jobs: slice([
+          {
+            jobId: 77,
+            characterId: 2117375278,
+            ownerId: 900,
+            ownerType: "corporation" as const,
+            activityId: 1,
+            status: "active",
+            runs: 1,
+            outputQuantity: 1,
+            startDate: "2026-09-13T00:00:00.000Z",
+            endDate: "2026-09-14T00:00:00.000Z",
+            facilityId: 1055354926818,
+            outputLocationId: 1055354926818,
+            outputLocationName: "Jita - Production Fortizar",
+            blueprintTypeId: 100,
+          },
+        ]),
+      },
+    ],
+    [],
+  );
+
+  assert.equal(result.jobs?.[0]?.outputLocationName, "Jita - Production Fortizar");
+});
+
 void test("projects available slots for characters without active jobs", () => {
   const characterId = 2117375278;
   const result = projectOwnerSnapshotsToClientJobs(

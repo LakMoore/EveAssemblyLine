@@ -255,18 +255,59 @@ void test("fetches active industry jobs and excludes unusable terminal jobs", as
         start_date: "2026-08-31T00:00:00Z",
         end_date: "2026-09-01T00:00:00Z",
       },
+      {
+        job_id: 7,
+        installer_id: 42,
+        facility_id: 6001,
+        location_id: 6001,
+        output_location_id: 6001,
+        activity_id: 1,
+        blueprint_id: 8,
+        blueprint_type_id: 9,
+        blueprint_location_id: 6001,
+        runs: 2,
+        product_type_id: 10,
+        status: "delivered",
+        start_date: "2026-08-30T00:00:00Z",
+        end_date: "2026-08-30T01:00:00Z",
+        completed_date: "2026-08-30T01:00:00Z",
+      },
+      {
+        job_id: 11,
+        installer_id: 42,
+        facility_id: 6001,
+        location_id: 6001,
+        output_location_id: 6001,
+        activity_id: 1,
+        blueprint_id: 12,
+        blueprint_type_id: 13,
+        blueprint_location_id: 6001,
+        runs: 3,
+        product_type_id: 14,
+        status: "delivered",
+        start_date: "2026-09-02T00:00:00Z",
+        end_date: "2026-09-02T01:00:00Z",
+        completed_date: "2026-09-02T01:00:00Z",
+      },
     ]);
   };
 
-  const result = await fetchCharacterIndustryJobs(character);
+  const result = await fetchCharacterIndustryJobs(character, undefined, "2026-09-01T00:00:00Z");
 
   assert.equal(
     requestUrl,
     "https://esi.evetech.net/latest/characters/42/industry/jobs/?include_completed=true",
   );
   assert.deepEqual(
-    result.jobs?.map((job) => ({ jobId: job.jobId, status: job.status })),
-    [{ jobId: 1, status: "active" }],
+    result.jobs?.map((job) => ({
+      jobId: job.jobId,
+      status: job.status,
+      completedDate: job.completedDate,
+    })),
+    [
+      { jobId: 1, status: "active", completedDate: undefined },
+      { jobId: 11, status: "delivered", completedDate: "2026-09-02T01:00:00Z" },
+    ],
   );
 });
 

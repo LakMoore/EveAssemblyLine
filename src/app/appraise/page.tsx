@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { BadgeDollarSign, ClipboardPaste, Trash2 } from "lucide-react";
+import { startTransition, useEffect, useRef, useState } from "react";
+import { BadgeDollarSign, ClipboardPaste, List, Trash2 } from "lucide-react";
 import { useAppLanguage } from "../AppShell";
 import CalculateButton from "@/components/CalculateButton";
 import PasteListDialog from "@/components/PasteListDialog";
+import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import TypeSearch, { type TypeSearchResult } from "@/components/TypeSearch";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -27,10 +28,25 @@ type AppraiseItem = {
   name: string;
   typeId?: number;
   quantity: number;
+  prices: AppraisalPrices;
   price?: number;
+  unitVolume?: number;
   volume?: number;
   total?: number;
   error?: string;
+};
+
+type AppraisalPrices = {
+  fivePercentSellPrice: number | null;
+  minSellPrice: number | null;
+  splitPrice: number | null;
+  maxBuyPrice: number | null;
+  fivePercentBuyPrice: number | null;
+};
+
+type AppraisalTotals = {
+  volume: number;
+  prices: AppraisalPrices;
 };
 
 type AppraiseInputItem = {
@@ -42,30 +58,70 @@ type AppraiseInputItem = {
 type AppraiseResponse = {
   market?: string;
   items?: AppraiseItem[];
+  totals?: AppraisalTotals;
   error?: string;
 };
 
-function formatIsk(value?: number) {
-  return value === undefined
+function formatIsk(value?: number | null) {
+  return value === undefined || value === null
     ? "-"
     : `${new Intl.NumberFormat(undefined, { maximumSignificantDigits: 4 }).format(value)} ISK`;
+}
+
+function PriceMetric({ label, value }: { label: string; value?: number | null }) {
+  const formattedValue = formatIsk(value);
+  return (
+    <div className="grid min-w-0 gap-1">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <strong className="text-sm font-medium break-all" title={formattedValue}>
+        {formattedValue}
+      </strong>
+    </div>
+  );
 }
 
 export default function AppraisePage() {
   const { language } = useAppLanguage();
   const [inputItems, setInputItems] = useState<AppraiseInputItem[]>([]);
   const [items, setItems] = useState<AppraiseItem[]>([]);
+  const [totals, setTotals] = useState<AppraisalTotals | null>(null);
   const [market, setMarket] = useState("Jita");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [isPasteOpen, setIsPasteOpen] = useState(false);
   const [showTotalValues, setShowTotalValues] = useState(false);
+  const appraisalRequestId = useRef(0);
+  const currentLanguage = useRef(language);
+  const languageGeneration = useRef(0);
+
+  useEffect(() => {
+    currentLanguage.current = language;
+    languageGeneration.current += 1;
+    appraisalRequestId.current += 1;
+    startTransition(() => {
+      setItems([]);
+      setTotals(null);
+      setError("");
+      setIsLoading(false);
+    });
+  }, [language]);
+
+  function invalidateAppraisal() {
+    appraisalRequestId.current += 1;
+    setItems([]);
+    setTotals(null);
+    setError("");
+    setIsLoading(false);
+  }
 
   async function appraiseItems() {
     if (inputItems.length === 0) {
       setError("Add at least one item.");
       return;
     }
+    const requestId = ++appraisalRequestId.current;
+    const requestLanguage = language;
+    const requestLanguageGeneration = languageGeneration.current;
     setIsLoading(true);
     setError("");
     try {
@@ -79,21 +135,36 @@ export default function AppraisePage() {
       );
       const data = (await response.json()) as AppraiseResponse;
       if (!response.ok) throw new Error(data.error ?? "Could not appraise this list.");
+      if (
+        requestId !== appraisalRequestId.current
+        || requestLanguage !== currentLanguage.current
+        || requestLanguageGeneration !== languageGeneration.current
+      ) {
+        return;
+      }
       setItems(data.items ?? []);
+      setTotals(data.totals ?? null);
     }
     catch (caughtError) {
+      if (
+        requestId !== appraisalRequestId.current
+        || requestLanguage !== currentLanguage.current
+        || requestLanguageGeneration !== languageGeneration.current
+      ) {
+        return;
+      }
       setError(
         caughtError instanceof Error ? caughtError.message : "Could not appraise this list.",
       );
       setItems([]);
+      setTotals(null);
     }
     finally {
-      setIsLoading(false);
+      if (requestId === appraisalRequestId.current) setIsLoading(false);
     }
   }
 
-  const totalIsk = items.reduce((sum, item) => sum + (item.total ?? 0), 0);
-  const totalVolume = items.reduce((sum, item) => sum + (item.volume ?? 0), 0);
+  const appraisalPrices = totals?.prices;
   const valueColumnLabel = showTotalValues ? "Total value" : "Unit price";
   const volumeColumnLabel = showTotalValues ? "Total volume" : "Unit volume";
 
@@ -107,8 +178,7 @@ export default function AppraisePage() {
       }
       return [{ name: item.name, typeId: item.typeId, quantity: 1 }, ...current];
     });
-    setItems([]);
-    setError("");
+    invalidateAppraisal();
   }
 
   return (
@@ -131,7 +201,11 @@ export default function AppraisePage() {
               <FieldLabel htmlFor="appraise-market">Market</FieldLabel>
               <Select
                 value={market}
-                onValueChange={(value) => value && setMarket(value)}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  setMarket(value);
+                  invalidateAppraisal();
+                }}
                 items={[
                   { value: "Jita", label: "Jita" },
                   { value: "Amarr", label: "Amarr" },
@@ -183,26 +257,30 @@ export default function AppraisePage() {
                 <Input
                   className="text-right"
                   type="number"
-                  min="1"
+                  min="0"
                   step="1"
                   value={item.quantity}
                   aria-label={`${item.name} quantity`}
-                  onChange={(event) =>
+                  onChange={(event) => {
                     setInputItems(
                       inputItems.map((entry, itemIndex) =>
                         itemIndex === index
-                          ? { ...entry, quantity: Math.max(1, Number(event.target.value) || 1) }
+                          ? { ...entry, quantity: Math.max(0, Number(event.target.value) || 0) }
                           : entry,
                       ),
-                    )
-                  }
+                    );
+                    invalidateAppraisal();
+                  }}
                 />
                 <Button
                   type="button"
                   variant="destructive"
                   size="icon-sm"
                   aria-label={`Remove ${item.name}`}
-                  onClick={() => setInputItems(inputItems.filter((entry) => entry !== item))}
+                  onClick={() => {
+                    setInputItems(inputItems.filter((entry) => entry !== item));
+                    invalidateAppraisal();
+                  }}
                 >
                   <Trash2 aria-hidden="true" />
                 </Button>
@@ -227,12 +305,14 @@ export default function AppraisePage() {
       </section>
       {isPasteOpen && (
         <PasteListDialog
+          key={`${language}:${inputItems.map((item) => `${item.typeId}-${item.quantity}`).join(",")}`}
           language={language}
           title="BATCH IMPORT"
           description="Compatible with Eve Multibuy. One item per line, with the quantity at the end."
           placeholder={`Tritanium 120000
 Pyerite 60000`}
           ariaLabel="Multibuy list"
+          allowSubtract
           currentItems={inputItems}
           onCancel={() => setIsPasteOpen(false)}
           onImport={(importedItems) => {
@@ -243,24 +323,71 @@ Pyerite 60000`}
                 quantity: item.quantity ?? 1,
               })),
             );
-            setItems([]);
-            setError("");
+            invalidateAppraisal();
             setIsPasteOpen(false);
           }}
         />
       )}
       {items.length > 0 && (
-        <section className={styles.appraiseResults}>
-          <div className={`${styles.appraiseSummary} flex items-center justify-between gap-4`}>
-            <div>
-              <span>Total value</span>
-              <strong>{formatIsk(totalIsk)}</strong>
+        <section className={`${styles.appraiseResults} min-w-0`}>
+          <div className={`${styles.appraiseSummary} flex flex-col items-stretch gap-4`}>
+            <div className="flex w-full items-center justify-between gap-4">
+              <span className="text-xs font-medium">Grand total</span>
+              <small>{market} order book</small>
             </div>
-            <div>
-              <span>Total volume</span>
-              <strong>{Math.ceil(totalVolume).toLocaleString()} m³</strong>
+            <div className="grid w-full gap-3">
+              <PriceMetric label="5% sell" value={appraisalPrices?.fivePercentSellPrice} />
+              <PriceMetric label="Min sell" value={appraisalPrices?.minSellPrice} />
+              <PriceMetric label="Split" value={appraisalPrices?.splitPrice} />
+              <PriceMetric label="Max buy" value={appraisalPrices?.maxBuyPrice} />
+              <PriceMetric label="5% buy" value={appraisalPrices?.fivePercentBuyPrice} />
             </div>
-            <small>{market} sell orders</small>
+            <div className="flex w-full items-center justify-between gap-4">
+              <div>
+                <span>Total volume</span>
+                <strong>{Math.ceil(totals?.volume ?? 0).toLocaleString()} m³</strong>
+              </div>
+              <ResponsiveDialogDrawer
+                trigger={
+                  <Button type="button" variant="outline">
+                    <List aria-hidden="true" />
+                    Item price ranges
+                  </Button>
+                }
+                title="ITEM PRICE RANGES"
+                description="Sell prices use the selected hub station; buy prices use the region."
+                dialogClassName="sm:max-w-4xl"
+              >
+                <div className="grid gap-3">
+                  {items.map((item) => (
+                    <div className="grid gap-3 border p-3" key={item.typeId ?? item.name}>
+                      <div className="flex min-w-0 items-center justify-between gap-3">
+                        <div className="grid min-w-0 gap-1">
+                          {item.typeId ? (
+                            <TypeIdentity name={item.name} typeId={item.typeId} imageSize={24} />
+                          ) : (
+                            <strong className="truncate text-xs">{item.name}</strong>
+                          )}
+                          {item.error && (
+                            <span className="text-xs text-destructive">{item.error}</span>
+                          )}
+                        </div>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          Quantity {item.quantity.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="grid gap-3">
+                        <PriceMetric label="5% sell" value={item.prices.fivePercentSellPrice} />
+                        <PriceMetric label="Min sell" value={item.prices.minSellPrice} />
+                        <PriceMetric label="Split" value={item.prices.splitPrice} />
+                        <PriceMetric label="Max buy" value={item.prices.maxBuyPrice} />
+                        <PriceMetric label="5% buy" value={item.prices.fivePercentBuyPrice} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </ResponsiveDialogDrawer>
+            </div>
           </div>
           <div className="flex items-center justify-between gap-4 border-b py-3">
             <span className="text-xs font-medium">Appraisal details</span>
@@ -276,7 +403,7 @@ Pyerite 60000`}
           </div>
           <div className="overflow-x-auto" role="table" aria-label="Appraisal results">
             <div
-              className="grid min-w-[36rem] grid-cols-[minmax(12rem,1fr)_minmax(6rem,auto)_minmax(8rem,auto)_minmax(7rem,auto)] gap-4 border-b py-2 text-xs font-medium text-muted-foreground"
+              className="grid min-w-xl grid-cols-[minmax(12rem,1fr)_minmax(6rem,auto)_minmax(8rem,auto)_minmax(7rem,auto)] gap-4 border-b py-2 text-xs font-medium text-muted-foreground"
               role="row"
             >
               <span className="text-left" role="columnheader">
@@ -294,26 +421,29 @@ Pyerite 60000`}
             </div>
             {items.map((item) => (
               <div
-                className="grid min-w-[36rem] grid-cols-[minmax(12rem,1fr)_minmax(6rem,auto)_minmax(8rem,auto)_minmax(7rem,auto)] items-center gap-4 border-b py-3 text-right"
+                className="grid min-w-xl grid-cols-[minmax(12rem,1fr)_minmax(6rem,auto)_minmax(8rem,auto)_minmax(7rem,auto)] items-center gap-4 border-b py-3 text-right"
                 key={`${item.typeId ?? item.name}-${item.quantity}`}
                 role="row"
               >
-                <span className="min-w-0 text-left" role="cell">
-                  {item.typeId ? (
-                    <TypeIdentity name={item.name} typeId={item.typeId} imageSize={32} />
-                  ) : (
-                    <strong className="truncate text-xs">{item.name}</strong>
-                  )}
-                </span>
-                <span className="whitespace-nowrap text-xs" role="cell">
+                <div className="min-w-0 text-left" role="cell">
+                  <div className="grid min-w-0 gap-1">
+                    {item.typeId ? (
+                      <TypeIdentity name={item.name} typeId={item.typeId} imageSize={32} />
+                    ) : (
+                      <strong className="truncate text-xs">{item.name}</strong>
+                    )}
+                    {item.error && <span className="text-xs text-destructive">{item.error}</span>}
+                  </div>
+                </div>
+                <span className="text-xs whitespace-nowrap" role="cell">
                   {item.quantity.toLocaleString()}
                 </span>
-                <span className="whitespace-nowrap text-xs" role="cell">
+                <span className="text-xs whitespace-nowrap" role="cell">
                   {formatIsk(showTotalValues ? item.total : item.price)}
                 </span>
-                <span className="whitespace-nowrap text-xs" role="cell">
+                <span className="text-xs whitespace-nowrap" role="cell">
                   {Math
-                    .ceil((item.volume ?? 0) * (showTotalValues ? item.quantity : 1))
+                    .ceil(showTotalValues ? (item.volume ?? 0) : (item.unitVolume ?? 0))
                     .toLocaleString()}{" "}
                   m³
                 </span>
