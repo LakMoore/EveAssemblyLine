@@ -417,6 +417,45 @@ void test("projects blueprint instance runs for asset aggregation", () => {
   );
 });
 
+void test("classifies a blueprint original from the blueprint instance quantity", () => {
+  const blueprintSnapshot: ClientOwnerSnapshot = {
+    ...snapshot,
+    assets: slice([
+      {
+        ...snapshot.assets.data[0],
+        typeId: 41583,
+        quantity: 1,
+      },
+    ]),
+    blueprintInstances: slice([
+      {
+        itemId: snapshot.assets.data[0].itemId,
+        typeId: 41583,
+        locationId: 44,
+        locationFlag: "CorpSAG1",
+        quantity: -1,
+        runs: -1,
+        me: 10,
+        te: 12,
+        ownerType: "corporation",
+        ownerId: 900,
+      },
+    ]),
+  };
+  const result = projectOwnerSnapshotsToClientAssets(
+    [blueprintSnapshot],
+    {
+      metadata: [{ typeId: 41583, name: "Minokawa Blueprint", category: "blueprint" }],
+    },
+  );
+  const blueprint = result.assets?.[0];
+  assert.ok(blueprint);
+
+  assert.equal(blueprint.quantity, 1);
+  assert.equal(blueprint.blueprintType, "bpo");
+  assert.equal(blueprint.blueprintPrints?.[0]?.type, "bpo");
+});
+
 void test("projects job output and remaining blueprint runs without an asset record", () => {
   const jobSnapshot: ClientOwnerSnapshot = {
     ...snapshot,

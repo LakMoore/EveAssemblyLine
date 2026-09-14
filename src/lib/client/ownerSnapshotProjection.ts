@@ -122,16 +122,22 @@ function projectAsset(
     rootLocation?.systemId
     ?? (rootLocation?.kind === "solar_system" ? rootLocation.locationId : undefined);
   const category = metadata?.category ?? "item";
-  const quantity = category === "blueprint" && asset.quantity === -1 ? 1 : asset.quantity;
   const blueprintInstance =
     category === "blueprint"
       ? snapshot.blueprintInstances.data.find((instance) => instance.itemId === asset.itemId)
       : undefined;
+  const isBpo =
+    category === "blueprint"
+    && (
+      blueprintInstance?.quantity === -1
+      || (blueprintInstance === undefined && asset.quantity === -1)
+    );
+  const quantity = isBpo ? 1 : asset.quantity;
   const blueprintPrint: BlueprintPrint | undefined = blueprintInstance
     ? {
         itemId: blueprintInstance.itemId,
         runs: blueprintInstance.runs,
-        type: asset.quantity === -1 ? "bpo" : "bpc",
+        type: isBpo ? "bpo" : "bpc",
         me: blueprintInstance.me,
         te: blueprintInstance.te,
       }
@@ -162,7 +168,7 @@ function projectAsset(
     techLevel: metadata?.techLevel,
     assemblyLineGroup: metadata?.assemblyLineGroup,
     ...(category === "blueprint"
-      ? { blueprintType: asset.quantity === -1 ? ("bpo" as const) : ("bpc" as const) }
+      ? { blueprintType: isBpo ? ("bpo" as const) : ("bpc" as const) }
       : {}),
     ...(asset.runCount !== undefined ? { blueprintRunsAtInstall: asset.runCount } : {}),
     ...(blueprintPrint ? { blueprintPrints: [blueprintPrint] } : {}),
