@@ -13,10 +13,22 @@ export type EsiFitting = {
   items: EsiFittingItem[];
 };
 
+export enum FittingSlot {
+  Low = "low",
+  Medium = "medium",
+  High = "high",
+  Rig = "rig",
+  Subsystem = "subsystem",
+  Service = "service",
+  Cargo = "cargo",
+  Drone = "drone",
+}
+
 export type ParsedFittingItem = {
-  flag: number;
   name: string;
   quantity: number;
+  slot: FittingSlot;
+  slotIndex: number;
 };
 
 export type FittingFormat = string;
@@ -39,24 +51,33 @@ export type FittingParser = {
   parse: (text: string) => ParsedFitting;
 };
 
-const fittingSlotFlags = {
-  high: 27,
-  medium: 19,
-  low: 11,
-  rig: 92,
-  service: 165,
-  cargo: 5,
-} as const;
+// ESI fitting responses use numeric inventory flags, while ESI asset responses
+// expose equivalent symbolic values such as "HiSlot0" and "ServiceSlot0".
+const esiFittingFlagBases: Record<FittingSlot, number> = {
+  [FittingSlot.High]: 27,
+  [FittingSlot.Medium]: 19,
+  [FittingSlot.Low]: 11,
+  [FittingSlot.Rig]: 92,
+  [FittingSlot.Subsystem]: 125,
+  [FittingSlot.Service]: 164,
+  [FittingSlot.Cargo]: 5,
+  [FittingSlot.Drone]: 87,
+};
 
-function parseEftItem(line: string, flag: number): ParsedFittingItem | null {
+function parseEftItem(
+  line: string,
+  slot: FittingSlot,
+  slotIndex: number,
+): ParsedFittingItem | null {
   if (/^\[empty\b/i.test(line)) return null;
   const match = line.match(/^(.*?)\s+x(\d+)$/i);
   const name = (match?.[1] ?? line).trim();
   if (!name) return null;
   return {
-    flag,
     name,
     quantity: match ? Number(match[2]) : 1,
+    slot,
+    slotIndex,
   };
 }
 
@@ -79,25 +100,34 @@ function parseEft(text: string): ParsedFitting {
     throw new Error("The fitting does not contain all EFT slot sections.");
   }
 
-  const slotSections = [
-    [fittingSlotFlags.high, sections[0]],
-    [fittingSlotFlags.medium, sections[1]],
-    [fittingSlotFlags.low, sections[2]],
-    [fittingSlotFlags.rig, sections[3]],
-    [fittingSlotFlags.service, sections[4]],
-  ] as const;
+  const slotFlags =
+    sections.length >= 8
+      ? [
+          FittingSlot.Low,
+          FittingSlot.Medium,
+          FittingSlot.High,
+          FittingSlot.Rig,
+          FittingSlot.Subsystem,
+          FittingSlot.Service,
+          FittingSlot.Drone,
+          FittingSlot.Cargo,
+        ]
+      : [
+          FittingSlot.Low,
+          FittingSlot.Medium,
+          FittingSlot.High,
+          FittingSlot.Rig,
+          FittingSlot.Service,
+          FittingSlot.Cargo,
+          FittingSlot.Drone,
+        ];
   const items: ParsedFittingItem[] = [];
-  for (const [slotFlag, section] of slotSections) {
-    section.forEach((line, index) => {
-      const item = parseEftItem(line, slotFlag + index);
+  for (const [index, section] of sections.entries()) {
+    const slot = slotFlags[index] ?? FittingSlot.Cargo;
+    section.forEach((line, itemIndex) => {
+      const item = parseEftItem(line, slot, itemIndex);
       if (item) items.push(item);
     });
-  }
-  for (const section of sections.slice(5)) {
-    for (const line of section) {
-      const item = parseEftItem(line, fittingSlotFlags.cargo);
-      if (item) items.push(item);
-    }
   }
 
   return {
@@ -106,6 +136,13 @@ function parseEft(text: string): ParsedFitting {
     name: header[2].trim(),
     items,
   };
+}
+
+function esiFittingFlag(item: ParsedFittingItem): number {
+  const baseFlag = esiFittingFlagBases[item.slot];
+  return item.slot === FittingSlot.Cargo || item.slot === FittingSlot.Drone
+    ? baseFlag
+    : baseFlag + item.slotIndex;
 }
 
 const fittingParsers: FittingParser[] = [
@@ -171,7 +208,7 @@ export async function resolveFitting(
       name: parsed.name,
       ship_type_id: ship.typeId,
       items: items.map(({ item, typeId }) => ({
-        flag: item.flag,
+        flag: esiFittingFlag(item),
         quantity: item.quantity,
         type_id: typeId,
       })),

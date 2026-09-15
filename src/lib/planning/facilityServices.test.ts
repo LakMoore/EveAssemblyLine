@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { facilityServiceFromName } from "./facilityServices";
+import { facilityServiceFromName, facilityServicesFromNames } from "./facilityServices";
 
 void test("maps facility fitting service modules to activity settings", () => {
   assert.deepEqual(
@@ -32,4 +32,19 @@ void test("maps facility fitting service modules to activity settings", () => {
     ],
   );
   assert.equal(facilityServiceFromName("Unknown Service I"), null);
+});
+
+void test("keeps recognized services when a fitting contains an unsupported module", () => {
+  assert.deepEqual(
+    [
+      ...facilityServicesFromNames([
+        "Standup Cloning Center I",
+        "Standup Capital Shipyard I",
+        "Standup Manufacturing Plant I",
+        "Unknown Service I",
+        "Standup Invention Lab I",
+      ]),
+    ],
+    ["capital", "standard", "invention"],
+  );
 });

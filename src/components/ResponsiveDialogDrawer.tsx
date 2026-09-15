@@ -100,9 +100,7 @@ export default function ResponsiveDialogDrawer({
           {description && <DialogDescription>{description}</DialogDescription>}
           {headerContent}
         </DialogHeader>
-        <ScrollArea className="size-full max-h-[50vh] overflow-y-auto pr-3">
-          {children}
-        </ScrollArea>
+        <ScrollArea className="size-full max-h-[50vh] overflow-y-auto pr-3">{children}</ScrollArea>
         <DialogFooter>{dialogFooterContent}</DialogFooter>
       </DialogContent>
     </Dialog>

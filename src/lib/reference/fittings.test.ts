@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseFitting } from "./fittings";
+import { FittingSlot, parseFitting } from "./fittings";
 
 void test("parses EFT fittings into ESI slot flags and quantities", () => {
   const fitting = parseFitting(`[Sotiyo, A Sotiyo far far away]
@@ -39,34 +39,78 @@ Standup Siren II x19`);
   assert.equal(fitting.shipTypeName, "Sotiyo");
   assert.equal(fitting.name, "A Sotiyo far far away");
   assert.deepEqual(
-    fitting.items.slice(0, 3).map(({ name, flag, quantity }) => ({ name, flag, quantity })),
+    fitting.items
+      .slice(0, 3)
+      .map(({ name, slot, slotIndex, quantity }) => ({
+        name,
+        slot,
+        slotIndex,
+        quantity,
+      })),
     [
-      { name: "Standup Ballistic Control System II", flag: 27, quantity: 1 },
-      { name: "Standup Signal Amplifier II", flag: 28, quantity: 1 },
-      { name: "Standup Ballistic Control System II", flag: 29, quantity: 1 },
+      {
+        name: "Standup Ballistic Control System II",
+        slot: FittingSlot.Low,
+        slotIndex: 0,
+        quantity: 1,
+      },
+      { name: "Standup Signal Amplifier II", slot: FittingSlot.Low, slotIndex: 1, quantity: 1 },
+      {
+        name: "Standup Ballistic Control System II",
+        slot: FittingSlot.Low,
+        slotIndex: 2,
+        quantity: 1,
+      },
     ],
   );
   assert.deepEqual(
-    fitting.items.filter((item) => item.flag >= 92 && item.flag < 100),
+    fitting.items.slice(3, 7).map(({ slot, slotIndex }) => ({ slot, slotIndex })),
+    [0, 1, 2, 3].map((slotIndex) => ({ slot: FittingSlot.Medium, slotIndex })),
+  );
+  assert.deepEqual(
+    fitting.items.slice(7, 13).map(({ slot, slotIndex }) => ({ slot, slotIndex })),
+    [0, 1, 2, 3, 4, 5].map((slotIndex) => ({ slot: FittingSlot.High, slotIndex })),
+  );
+  assert.deepEqual(
+    fitting.items.filter((item) => item.slot === FittingSlot.Service),
+    [
+      { name: "Standup Cloning Center I", quantity: 1, slot: FittingSlot.Service, slotIndex: 0 },
+      { name: "Standup Capital Shipyard I", quantity: 1, slot: FittingSlot.Service, slotIndex: 1 },
+      {
+        name: "Standup Manufacturing Plant I",
+        quantity: 1,
+        slot: FittingSlot.Service,
+        slotIndex: 2,
+      },
+      { name: "Standup Invention Lab I", quantity: 1, slot: FittingSlot.Service, slotIndex: 4 },
+    ],
+  );
+  assert.deepEqual(
+    fitting.items.filter((item) => item.slot === FittingSlot.Rig),
     [
       {
-        flag: 93,
         name: "Standup XL-Set Ship Manufacturing Efficiency I",
         quantity: 1,
+        slot: FittingSlot.Rig,
+        slotIndex: 1,
       },
       {
-        flag: 94,
         name: "Standup XL-Set Structure and Component Manufacturing Efficiency I",
         quantity: 1,
+        slot: FittingSlot.Rig,
+        slotIndex: 2,
       },
     ],
   );
   assert.deepEqual(
-    fitting.items.filter((item) => item.flag === 5),
+    fitting.items.filter((item) => item.slot === FittingSlot.Cargo),
     [
-      { flag: 5, name: "Standup Radar ECM Script", quantity: 4 },
-      { flag: 5, name: "Standup Cruise Missile", quantity: 3000 },
-      { flag: 5, name: "Standup Siren II", quantity: 19 },
+      { name: "Standup Radar ECM Script", quantity: 4, slot: FittingSlot.Cargo, slotIndex: 0 },
+      { name: "Standup Cruise Missile", quantity: 3000, slot: FittingSlot.Cargo, slotIndex: 1 },
     ],
+  );
+  assert.deepEqual(
+    fitting.items.filter((item) => item.slot === FittingSlot.Drone),
+    [{ name: "Standup Siren II", quantity: 19, slot: FittingSlot.Drone, slotIndex: 0 }],
   );
 });

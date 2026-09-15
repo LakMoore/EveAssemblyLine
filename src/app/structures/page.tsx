@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/combobox";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -48,9 +49,13 @@ import {
 } from "@/lib/planning/facilities";
 import { formatLocationName } from "@/lib/reference/locationName";
 import { publishFacilities, facilitySettingsFromStructures } from "@/lib/planning/facilitiesStore";
-import { facilityServiceFromName, type FacilityService } from "@/lib/planning/facilityServices";
+import {
+  facilityServiceFromName,
+  facilityServicesFromNames,
+  type FacilityService,
+} from "@/lib/planning/facilityServices";
 import { refreshAllPlannerStockpileEfficiencies } from "@/lib/planning/reprocessingClient";
-import type { ResolvedFitting } from "@/lib/reference/fittings";
+import { FittingSlot, type ResolvedFitting } from "@/lib/reference/fittings";
 import {
   Select,
   SelectContent,
@@ -738,6 +743,7 @@ function StructureDialog({
   const systemAnchor = useComboboxAnchor();
   const [type, setType] = useState(structure?.type ?? structureTypes[0].name);
   const [name, setName] = useState(structure?.name ?? "");
+  const [fittingWarning, setFittingWarning] = useState("");
   const [rigs, setRigs] = useState(structure?.rigs ?? ["No Rig", "No Rig", "No Rig"]);
   const [allowStandardBuilds, setAllowStandardBuilds] = useState(
     structure?.allowStandardBuilds ?? true,
@@ -791,34 +797,35 @@ function StructureDialog({
 
   function applyFitting(fitting: ResolvedFitting) {
     if (!selectedType) return;
-    const typeIdByFlag = new Map(fitting.fitting.items.map((item) => [item.flag, item.type_id]));
+    const resolvedItems = fitting.items.map((item, index) => ({
+      item,
+      typeId: fitting.fitting.items[index]?.type_id,
+    }));
     const fittingRigs = Array.from(
       { length: 3 },
       (_, index) => {
-        const rigName = rigNamesByTypeId[typeIdByFlag.get(92 + index) ?? 0];
+        const rigTypeId = resolvedItems.find(
+          ({ item }) => item.slot === FittingSlot.Rig && item.slotIndex === index,
+        )?.typeId;
+        const rigName = rigNamesByTypeId[rigTypeId ?? 0];
         return rigName && rigOptionsBySize[selectedType.size].includes(rigName)
           ? rigName
           : "No Rig";
       },
     );
-    const serviceItems = fitting.items.filter((item) => item.flag >= 165 && item.flag < 173);
-    const serviceNames = serviceItems.map((item) => item.name);
-    const unsupportedServices = serviceNames.filter(
-      (service) => facilityServiceFromName(service) === null,
-    );
-    if (unsupportedServices.length > 0) {
-      throw new Error(
-        `Unsupported structure service: ${unsupportedServices.join(", ")}. Remove it from the fitting and try again.`,
-      );
-    }
-    const services = new Set(
-      serviceItems
-        .map((item) => facilityServiceFromName(item.name))
-        .filter((service): service is FacilityService => service !== null),
-    );
+    const serviceItems = fitting.items.filter((item) => item.slot === FittingSlot.Service);
+    const unsupportedServices = serviceItems
+      .map((item) => item.name)
+      .filter((serviceName) => facilityServiceFromName(serviceName) === null);
+    const services = facilityServicesFromNames(serviceItems.map((item) => item.name));
     const hasService = (service: FacilityService) => services.has(service);
 
     setRigs(fittingRigs);
+    setFittingWarning(
+      unsupportedServices.length > 0
+        ? `Ignored unsupported structure services: ${unsupportedServices.join(", ")}.`
+        : "",
+    );
     setAllowStandardBuilds(hasService("standard"));
     setAllowCapitalBuilds(hasService("capital"));
     setAllowSupercapitalBuilds(hasService("supercapital"));
@@ -925,15 +932,22 @@ function StructureDialog({
   if (!selectedType) return null;
 
   const footer = (
-    <>
-      <Button type="button" variant="outline" onClick={onCancel}>
-        Cancel
-      </Button>
-      <Button form={formId} type="submit" disabled={!system || !name.trim()}>
-        {structure ? "Save structure" : "Add structure"}
-        <ArrowRight data-icon="inline-end" />
-      </Button>
-    </>
+    <div className="flex w-full min-w-0 flex-col gap-2">
+      {fittingWarning && (
+        <Alert>
+          <AlertDescription>{fittingWarning}</AlertDescription>
+        </Alert>
+      )}
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button form={formId} type="submit" disabled={!system || !name.trim()}>
+          {structure ? "Save structure" : "Add structure"}
+          <ArrowRight data-icon="inline-end" />
+        </Button>
+      </div>
+    </div>
   );
 
   return (

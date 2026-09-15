@@ -27,3 +27,12 @@ const facilityServiceByName: Record<string, FacilityService> = {
 export function facilityServiceFromName(name: string): FacilityService | null {
   return facilityServiceByName[name.trim().toLocaleLowerCase("en-US")] ?? null;
 }
+
+/** Converts recognized fitting service names into the facility settings they enable. */
+export function facilityServicesFromNames(names: readonly string[]): Set<FacilityService> {
+  return new Set(
+    names
+      .map(facilityServiceFromName)
+      .filter((service): service is FacilityService => service !== null),
+  );
+}
