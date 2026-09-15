@@ -86,23 +86,22 @@ export default function ResponsiveDialogDrawer({
     return (
       <Drawer open={open} onOpenChange={onOpenChange}>
         {trigger && <DrawerTrigger render={trigger} />}
+        {/* Constrain height (h-full) makes the ScrollArea work */}
         <DrawerContent
           className={cn(
-            "max-h-[85vh] border border-popover shadow-xl [--drawer-bleed-background:transparent] [--drawer-inset:--spacing(2)]",
+            "h-full max-h-[85vh] min-h-[5vh] border border-popover shadow-xl [--drawer-bleed-background:transparent] [--drawer-inset:--spacing(2)]",
             drawerClassName,
           )}
         >
-          <DrawerHeader>
+          <DrawerHeader className="shrink-0">
             <DrawerTitle>{title}</DrawerTitle>
             {description && <DrawerDescription>{description}</DrawerDescription>}
             {headerContent}
           </DrawerHeader>
-          <div ref={scrollAreaContainerRef} className="min-h-0 flex-1">
-            <ScrollArea className="size-full overflow-y-auto p-4 pr-5">
-              <div className="py-2">{children}</div>
-            </ScrollArea>
-          </div>
-          <DrawerFooter>{drawerFooterContent}</DrawerFooter>
+          <ScrollArea ref={scrollAreaContainerRef} className="overflow-y-auto p-4">
+            {children}
+          </ScrollArea>
+          <DrawerFooter className="shrink-0">{drawerFooterContent}</DrawerFooter>
         </DrawerContent>
       </Drawer>
     );
@@ -118,8 +117,8 @@ export default function ResponsiveDialogDrawer({
           {headerContent}
         </DialogHeader>
         <div ref={scrollAreaContainerRef} className="min-h-0">
-          <ScrollArea className="-mx-4 no-scrollbar size-full max-h-[50vh] overflow-y-auto px-4">
-            <div className="py-2">{children}</div>
+          <ScrollArea className="size-full max-h-[50vh] overflow-y-auto pr-3">
+            {children}
           </ScrollArea>
         </div>
         <DialogFooter>{dialogFooterContent}</DialogFooter>

@@ -3,7 +3,7 @@ import test from "node:test";
 import { parseFitting } from "./fittings";
 
 void test("parses EFT fittings into ESI slot flags and quantities", () => {
-  const fitting = parseFitting(`[Sotiyo, J130330 - I The Industrial Menace]
+  const fitting = parseFitting(`[Sotiyo, A Sotiyo far far away]
 Standup Ballistic Control System II
 Standup Signal Amplifier II
 Standup Ballistic Control System II
@@ -37,7 +37,7 @@ Standup Siren II x19`);
 
   assert.equal(fitting.format, "eft");
   assert.equal(fitting.shipTypeName, "Sotiyo");
-  assert.equal(fitting.name, "J130330 - I The Industrial Menace");
+  assert.equal(fitting.name, "A Sotiyo far far away");
   assert.deepEqual(
     fitting.items.slice(0, 3).map(({ name, flag, quantity }) => ({ name, flag, quantity })),
     [
