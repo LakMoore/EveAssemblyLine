@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactElement, ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog,
@@ -34,7 +34,6 @@ export type ResponsiveDialogDrawerProps = {
   drawerFooterContent?: ReactNode;
   dialogClassName?: string;
   dialogFooterContent?: ReactNode;
-  scrollToBottomKey?: string | number | boolean;
   children: ReactNode;
 };
 
@@ -65,22 +64,9 @@ export default function ResponsiveDialogDrawer({
   drawerFooterContent,
   dialogClassName,
   dialogFooterContent,
-  scrollToBottomKey,
   children,
 }: ResponsiveDialogDrawerProps) {
   const isMobile = useIsMobile();
-  const scrollAreaContainerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!scrollToBottomKey) return;
-    const frame = window.requestAnimationFrame(() => {
-      const viewport = scrollAreaContainerRef.current?.querySelector<HTMLElement>(
-        '[data-slot="scroll-area-viewport"]',
-      );
-      if (viewport) viewport.scrollTop = viewport.scrollHeight;
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [isMobile, scrollToBottomKey]);
 
   if (isMobile) {
     return (
@@ -98,9 +84,7 @@ export default function ResponsiveDialogDrawer({
             {description && <DrawerDescription>{description}</DrawerDescription>}
             {headerContent}
           </DrawerHeader>
-          <ScrollArea ref={scrollAreaContainerRef} className="overflow-y-auto p-4">
-            {children}
-          </ScrollArea>
+          <ScrollArea className="overflow-y-auto p-4">{children}</ScrollArea>
           <DrawerFooter className="shrink-0">{drawerFooterContent}</DrawerFooter>
         </DrawerContent>
       </Drawer>
@@ -116,11 +100,9 @@ export default function ResponsiveDialogDrawer({
           {description && <DialogDescription>{description}</DialogDescription>}
           {headerContent}
         </DialogHeader>
-        <div ref={scrollAreaContainerRef} className="min-h-0">
-          <ScrollArea className="size-full max-h-[50vh] overflow-y-auto pr-3">
-            {children}
-          </ScrollArea>
-        </div>
+        <ScrollArea className="size-full max-h-[50vh] overflow-y-auto pr-3">
+          {children}
+        </ScrollArea>
         <DialogFooter>{dialogFooterContent}</DialogFooter>
       </DialogContent>
     </Dialog>

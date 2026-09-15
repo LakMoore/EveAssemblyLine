@@ -54,16 +54,23 @@ export default function PasteFittingDialog({
   }
 
   const footer = (
-    <>
-      <Button type="button" variant="outline" onClick={cancelDialog}>
-        <X aria-hidden="true" />
-        Cancel
-      </Button>
-      <Button form={formId} type="submit" disabled={isResolving || text.trim().length === 0}>
-        <FileUp aria-hidden="true" />
-        <span>{isResolving ? "Checking fitting..." : "Use fitting"}</span>
-      </Button>
-    </>
+    <div className="flex w-full min-w-0 flex-col gap-2">
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button type="button" variant="outline" onClick={cancelDialog}>
+          <X aria-hidden="true" />
+          Cancel
+        </Button>
+        <Button form={formId} type="submit" disabled={isResolving || text.trim().length === 0}>
+          <FileUp aria-hidden="true" />
+          <span>{isResolving ? "Checking fitting..." : "Use fitting"}</span>
+        </Button>
+      </div>
+    </div>
   );
 
   return (
@@ -88,11 +95,6 @@ export default function PasteFittingDialog({
           aria-label="EVE fitting"
           autoFocus
         />
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
       </form>
     </ResponsiveDialogDrawer>
   );

@@ -12,7 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { parsePasteList } from "@/lib/reference/pasteList";
 import { applyPasteListMode, type PasteListMode } from "@/lib/reference/pasteListOperations";
 import { cn } from "@/lib/utils";
-import { CircleAlert, FileUp, X } from "lucide-react";
+import { FileUp, X } from "lucide-react";
 import { Label } from "./ui/label";
 
 type PasteResult = Partial<TypeMetadata> & {
@@ -90,10 +90,9 @@ export default function PasteListDialog({
     && activeRequest.currentItems === currentItems
     && activeRequest.mode === mode
     && activeRequest.text === text;
-  const errorScrollKey = [
-    error,
-    ...results.filter((item) => item.error).map((item) => `${item.name}:${item.error}`),
-  ].join("|");
+  const itemErrors = results.filter((item) => item.error);
+  const visibleItemErrors = itemErrors.slice(0, 3);
+  const hiddenItemErrorCount = itemErrors.length - visibleItemErrors.length;
 
   async function resolveItems(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -138,17 +137,43 @@ export default function PasteListDialog({
   }
 
   const footer = (
-    <>
-      <Button type="button" variant="outline" onClick={cancelDialog}>
-        <X aria-hidden="true" />
-        Cancel
-      </Button>
-      <Button form={formId} type="submit" disabled={isResolving || text.trim().length === 0}>
-        <FileUp aria-hidden="true" />
-        <span>{isResolving ? "Checking list..." : "Import list"}</span>
-        <b aria-hidden="true">→</b>
-      </Button>
-    </>
+    <div className="flex w-full min-w-0 flex-col gap-2">
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      {itemErrors.length > 0 && (
+        <Alert variant="destructive">
+          <AlertDescription>
+            <p>
+              {itemErrors.length === 1
+                ? "One item could not be resolved:"
+                : `${itemErrors.length} items could not be resolved:`}
+            </p>
+            <ul className="flex flex-col gap-1">
+              {visibleItemErrors.map((item, index) => (
+                <li key={`${item.name}-${index}`}>
+                  <span className="font-medium">{item.name}:</span> {item.error}
+                </li>
+              ))}
+              {hiddenItemErrorCount > 0 && <li>And {hiddenItemErrorCount} more items.</li>}
+            </ul>
+          </AlertDescription>
+        </Alert>
+      )}
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button type="button" variant="outline" onClick={cancelDialog}>
+          <X aria-hidden="true" />
+          Cancel
+        </Button>
+        <Button form={formId} type="submit" disabled={isResolving || text.trim().length === 0}>
+          <FileUp aria-hidden="true" />
+          <span>{isResolving ? "Checking list..." : "Import list"}</span>
+          <b aria-hidden="true">→</b>
+        </Button>
+      </div>
+    </div>
   );
 
   return (
@@ -157,7 +182,6 @@ export default function PasteListDialog({
       onOpenChange={(open) => !open && cancelDialog()}
       title={title}
       description={description}
-      scrollToBottomKey={errorScrollKey}
       dialogFooterContent={footer}
       drawerFooterContent={footer}
     >
@@ -175,11 +199,6 @@ export default function PasteListDialog({
           aria-label={ariaLabel}
           autoFocus
         />
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
         {results.length > 0 && (
           <div className="flex flex-col gap-1">
             {results.map((item, index) => (
@@ -206,15 +225,6 @@ export default function PasteListDialog({
                   {item.quantity ? (
                     <small className="text-right text-muted-foreground">
                       Quantity {item.quantity}
-                    </small>
-                  ) : null}
-                  {item.error ? (
-                    <small
-                      className="flex max-w-60 min-w-0 items-center gap-1 text-right text-destructive"
-                      role="alert"
-                    >
-                      <CircleAlert className="size-3 shrink-0" aria-hidden="true" />
-                      <span className="truncate">{item.error}</span>
                     </small>
                   ) : null}
                 </div>
