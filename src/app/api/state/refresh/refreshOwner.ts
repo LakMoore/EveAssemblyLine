@@ -4,6 +4,7 @@ import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/sessio
 import {
   findCorporationDirector,
   getCharacter,
+  getCollectionFacilities,
   getCollectionCorporationSettings,
 } from "@/lib/auth/tokensStore";
 import { getCorporationSourcePolicies } from "@/lib/esi/cache";
@@ -18,6 +19,7 @@ import {
 } from "@/lib/esi/cache";
 import { getEsiRateLimitUntil } from "@/lib/esi/client";
 import { getOwnerSnapshot, type OwnerSnapshot } from "@/lib/data/ownerSnapshot";
+import { calculateFacilities } from "@/lib/planning/facilitiesServer";
 
 const refreshIdSchema = z.coerce.number().int().positive();
 const refreshRequestSchema = z
@@ -59,15 +61,22 @@ async function refreshUnit(
   sessionId: string,
   authorizationCharacter: NonNullable<Awaited<ReturnType<typeof getCharacter>>>,
   profiler: RefreshProfiler,
+  materialContext?: Awaited<ReturnType<typeof calculateFacilities>>,
 ) {
   const source = await refreshCoordinator.run(
     unit.key,
     async () => {
       if (unit.kind === "character") {
-        await refreshCharacterState(authorizationCharacter, sessionId, profiler);
+        await refreshCharacterState(authorizationCharacter, sessionId, profiler, materialContext);
       }
       else {
-        await refreshCorporationState(unit.ownerId, authorizationCharacter, sessionId, profiler);
+        await refreshCorporationState(
+          unit.ownerId,
+          authorizationCharacter,
+          sessionId,
+          profiler,
+          materialContext,
+        );
       }
       return { sessionId };
     },
@@ -213,10 +222,27 @@ async function handleRefreshRequestInternal(
     });
   }
 
+  let materialContext: Awaited<ReturnType<typeof calculateFacilities>> | undefined;
+  if (session.collectionId) {
+    profiler.start("facilities");
+    try {
+      materialContext = await calculateFacilities(
+        request,
+        await getCollectionFacilities(session.collectionId),
+      );
+    }
+    catch {
+      // Facility bonuses are optional for reconciliation; the raw material quantity remains safe.
+    }
+    finally {
+      profiler.end("facilities");
+    }
+  }
+
   let refreshError: unknown;
   profiler.start("refresh");
   try {
-    await refreshUnit(unit, session.sessionId, authorizationCharacter, profiler);
+    await refreshUnit(unit, session.sessionId, authorizationCharacter, profiler, materialContext);
   }
   catch (error) {
     refreshError = error;

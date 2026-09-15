@@ -7,6 +7,7 @@ import {
   getCorporationIdsForCharacters,
   getStateStatus,
   getMarketOrderAssetDeductions,
+  getJobAssetRootLocationId,
   getKnownNonStructureItemIds,
   buildDeliveredJobAsset,
   canMergeDeliveredAsset,
@@ -733,6 +734,17 @@ void test("deducts each newer sell order once using its original quantity", () =
 
   assert.equal(first.get("34:600000001"), 100);
   assert.deepEqual([...second], [...first]);
+});
+
+void test("uses the resolved root location for installed-job asset deductions", () => {
+  const rootLocation = {
+    locationId: 600,
+    kind: "structure" as const,
+    resolved: true,
+  };
+
+  assert.equal(getJobAssetRootLocationId(new Map([[9001, rootLocation]]), 9001), 600);
+  assert.equal(getJobAssetRootLocationId(new Map(), 600), 600);
 });
 
 void test("builds an undocked current ship with a solar-system root", () => {

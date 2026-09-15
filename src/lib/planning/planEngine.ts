@@ -13,6 +13,7 @@ import { getTypes } from "@/lib/sde/loader";
 import { categorizeType } from "@/lib/reference/category";
 import { AssemblyLineGroups } from "@/lib/reference/assemblyLineGroups";
 import { getProductionGroupReferences, productionGroupForType } from "./productionGroups";
+import { requiredMaterialQuantity } from "./materialQuantities";
 import {
   PlanBuildItem,
   PlanJobInput,
@@ -64,20 +65,6 @@ type StockLot = {
   volumePerUnit: number;
   sourceItem: PlanStockItem;
 };
-
-/** Calculates material demand after modifiers, enforcing one unit per material per run. */
-function requiredMaterialQuantity(
-  activity: "manufacturing" | "reaction",
-  materialQuantity: number,
-  runs: number,
-  efficiency: Efficiency,
-  materialMultiplier: number,
-): number {
-  if (runs <= 0) return 0;
-  const efficiencyMultiplier = activity === "manufacturing" ? 1 - efficiency.me / 100 : 1;
-  const adjustedQuantityPerRun = materialQuantity * efficiencyMultiplier * materialMultiplier;
-  return Math.max(1, Math.ceil(adjustedQuantityPerRun)) * runs;
-}
 
 /** Builds a job-input group and derives its aggregate completion state. */
 function summarizePlanJobInputs(

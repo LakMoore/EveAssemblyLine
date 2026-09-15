@@ -19,6 +19,9 @@ import type {
   EsiCorporationStructure,
 } from "./client";
 import type { PlanStockItem } from "@/lib/planning/types";
+import type { FacilityResponse } from "@/lib/planning/facilities";
+import { productionGroupForType } from "@/lib/planning/productionGroups";
+import { requiredMaterialQuantity } from "@/lib/planning/materialQuantities";
 import {
   getGroups,
   getMarketGroups,
@@ -1070,6 +1073,8 @@ function getJobMaterials(
   }
 }
 
+type JobMaterialCalculationContext = Pick<FacilityResponse, "facilities" | "productionGroups">;
+
 function getJobOutputQuantity(
   job: IndustryJobRecord,
   blueprint: Awaited<ReturnType<typeof getBlueprintById>>,
@@ -1095,6 +1100,13 @@ function getJobOutputRootLocation(cache: OwnerCache, job: IndustryJobRecord) {
     cache.rootLocationsByItemId.get(job.outputLocationId)
     ?? cache.rootLocationsByItemId.get(job.facilityId)
   );
+}
+
+export function getJobAssetRootLocationId(
+  rootLocationsByItemId: ReadonlyMap<number, AssetLocation>,
+  locationId: number,
+) {
+  return rootLocationsByItemId.get(locationId)?.locationId ?? locationId;
 }
 
 function getJobOutputAssetTemplate(cache: OwnerCache, job: IndustryJobRecord) {
@@ -1140,6 +1152,7 @@ async function refreshJobAdjustments(
   jobs: IndustryJobRecord[],
   assetsLastModified: string | undefined,
   blueprintsLastModified: string | undefined,
+  materialContext?: JobMaterialCalculationContext,
 ) {
   cache.jobAssetDeductions = new Map();
   cache.jobAssetAdditions = new Map();
@@ -1167,15 +1180,62 @@ async function refreshJobAdjustments(
   const blueprintInstances = new Map(
     (cache.blueprintInstances?.lastBody ?? []).map((blueprint) => [blueprint.itemId, blueprint]),
   );
+  const materialJobs = jobs.filter(
+    (job) => (job.activityId === 1 || job.activityId === 9) && job.productTypeId !== undefined,
+  );
+  const materialProductTypeIds = materialJobs.flatMap((job) =>
+    job.productTypeId === undefined ? [] : [job.productTypeId],
+  );
+  const productTypes = materialContext
+    ? await getTypesByIds([...new Set(materialProductTypeIds)])
+    : new Map();
+  const groups = materialContext ? await getGroups() : new Map();
+  const facilitiesByLocationId = new Map(
+    materialContext?.facilities.flatMap((facility) => {
+      const locationId = Number(facility.id);
+      return Number.isSafeInteger(locationId) ? [[locationId, facility] as const] : [];
+    }),
+  );
 
   for (const job of jobs) {
     const blueprint = blueprints.get(job.blueprintTypeId) ?? null;
     if (jobStartedAfter(job, assetsLastModified)) {
       for (const material of getJobMaterials(job, blueprint)) {
-        const key = `${material.typeID}:${job.facilityId}`;
+        const key = `${material.typeID}:${getJobAssetRootLocationId(
+          cache.rootLocationsByItemId,
+          job.facilityId,
+        )}`;
+        const activity =
+          job.activityId === 1 ? "manufacturing" : job.activityId === 9 ? "reaction" : undefined;
+        const group =
+          activity && materialContext && job.productTypeId !== undefined
+            ? productionGroupForType(
+                productTypes.get(job.productTypeId),
+                groups,
+                materialContext.productionGroups,
+              )
+            : undefined;
+        const facility = facilitiesByLocationId.get(
+          getJobAssetRootLocationId(cache.rootLocationsByItemId, job.facilityId),
+        );
+        const bonus = group && facility ? facility.buildTypeGroups[group.key] : undefined;
+        const materialMultiplier =
+          activity === "manufacturing"
+            ? (bonus?.manufacturingMaterialMultiplier ?? 1)
+            : (bonus?.reactionMaterialMultiplier ?? 1);
+        const blueprintInstance = blueprintInstances.get(job.blueprintId);
+        const materialQuantity = activity
+          ? requiredMaterialQuantity(
+              activity,
+              material.quantity,
+              job.runs,
+              { me: blueprintInstance?.me ?? 0 },
+              materialMultiplier,
+            )
+          : material.quantity * job.runs;
         cache.jobAssetDeductions.set(
           key,
-          (cache.jobAssetDeductions.get(key) ?? 0) + material.quantity * job.runs,
+          (cache.jobAssetDeductions.get(key) ?? 0) + materialQuantity,
         );
       }
     }
@@ -1351,6 +1411,7 @@ async function refreshIndustryJobs(
   fetchJobs: IndustryJobsFetcher,
   assetsLastModified: string | undefined,
   blueprintsLastModified: string | undefined,
+  materialContext?: JobMaterialCalculationContext,
 ) {
   if (!cache.jobs || !cache.jobs.expires || Date.parse(cache.jobs.expires) <= Date.now()) {
     const jobs = await fetchJobs(character, cache.jobs?.etag, assetsLastModified);
@@ -1371,6 +1432,7 @@ async function refreshIndustryJobs(
       cache.jobs.lastBody,
       assetsLastModified,
       blueprintsLastModified,
+      materialContext,
     );
   }
   catch {
@@ -1893,6 +1955,7 @@ export async function refreshCharacterState(
   character: CharacterTokenRecord,
   sessionId: string,
   profiler: RefreshProfiler,
+  materialContext?: JobMaterialCalculationContext,
 ): Promise<void> {
   const cache = getCache(characterCaches, character.characterId, sessionId);
   let currentShipStateChanged = false;
@@ -2038,6 +2101,7 @@ export async function refreshCharacterState(
       fetchCharacterIndustryJobs,
       cache.allAssetsRaw?.lastModified,
       cache.blueprintInstances?.lastModified,
+      materialContext,
     );
   }
   catch (error) {
@@ -2102,6 +2166,7 @@ async function refreshCorporationCache(
   corporationId: number,
   sessionId: string,
   profiler: RefreshProfiler,
+  materialContext?: JobMaterialCalculationContext,
 ): Promise<void> {
   const corpCache = getCache(corporationCaches, corporationId, sessionId);
   const corpSummary: {
@@ -2281,6 +2346,7 @@ async function refreshCorporationCache(
       fetchCorporationIndustryJobs,
       corpCache.allAssetsRaw?.lastModified,
       corpCache.blueprintInstances?.lastModified,
+      materialContext,
     );
     corpSummary.jobs = corpCache.jobs;
   }
@@ -2355,6 +2421,7 @@ export async function refreshCorporationState(
   character: CharacterTokenRecord,
   sessionId: string,
   profiler: RefreshProfiler,
+  materialContext?: JobMaterialCalculationContext,
 ): Promise<void> {
   profiler.start("authorization");
   try {
@@ -2396,6 +2463,7 @@ export async function refreshCorporationState(
       corporationId,
       sessionId,
       profiler,
+      materialContext,
     );
   }
   finally {
