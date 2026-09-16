@@ -96,12 +96,13 @@ function parseEft(text: string): ParsedFitting {
     }
   }
   while (sections.length > 0 && sections.at(-1)?.length === 0) sections.pop();
-  if (sections.length < 5) {
+  const populatedSections = sections.filter((section) => section.length > 0);
+  if (populatedSections.length < 5) {
     throw new Error("The fitting does not contain all EFT slot sections.");
   }
 
   const slotFlags =
-    sections.length >= 8
+    populatedSections.length >= 8
       ? [
           FittingSlot.Low,
           FittingSlot.Medium,
@@ -122,7 +123,7 @@ function parseEft(text: string): ParsedFitting {
           FittingSlot.Drone,
         ];
   const items: ParsedFittingItem[] = [];
-  for (const [index, section] of sections.entries()) {
+  for (const [index, section] of populatedSections.entries()) {
     const slot = slotFlags[index] ?? FittingSlot.Cargo;
     section.forEach((line, itemIndex) => {
       const item = parseEftItem(line, slot, itemIndex);

@@ -114,3 +114,33 @@ Standup Siren II x19`);
     [{ name: "Standup Siren II", quantity: 19, slot: FittingSlot.Drone, slotIndex: 0 }],
   );
 });
+
+void test("keeps services in the service slot when the paste has extra blank lines", () => {
+  const fitting = parseFitting(`[Tatara, J130330 - V The Empire Refines Back]
+Standup Capacitor Power Relay II
+Standup Capacitor Power Relay II
+Standup Capacitor Power Relay II
+
+Standup Variable Spectrum ECM II
+Standup Variable Spectrum ECM II
+[Empty Med slot]
+Standup Variable Spectrum ECM II
+
+Standup Heavy Energy Neutralizer I
+Standup Heavy Energy Neutralizer I
+Standup Point Defense Battery II
+Standup Heavy Energy Neutralizer I
+Standup Heavy Energy Neutralizer I
+
+Standup L-Set Reprocessing Monitor II
+Standup L-Set Reactor Efficiency I
+
+
+Standup Cloning Center I
+Standup Reprocessing Facility I`);
+
+  assert.deepEqual(
+    fitting.items.filter((item) => item.slot === FittingSlot.Service).map((item) => item.name),
+    ["Standup Cloning Center I", "Standup Reprocessing Facility I"],
+  );
+});
