@@ -30,6 +30,7 @@ import {
   PlanSourceCountsByLocation,
   PlanSourceCountsByType,
   PlanSourceIcon,
+  PlanDemandSources,
   PlanStockItem,
   ResponsePlanItem,
   ResponsePlanItems,
@@ -85,6 +86,44 @@ function summarizePlanJobInputs(
     completionPercent,
     status: completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked",
   };
+}
+
+/** Adds a discovered demand contribution to a calculation row's provenance map. */
+function addDemandSource(
+  demandSources: PlanDemandSources,
+  demandingTypeId: number | undefined,
+  quantity: number,
+  headlineQuantity: number,
+) {
+  if (demandingTypeId === undefined || quantity <= 0 || headlineQuantity <= 0) {
+    return demandSources;
+  }
+  const next = new Map(demandSources);
+  const existing = next.get(demandingTypeId);
+  next.set(
+    demandingTypeId,
+    {
+      quantity: (existing?.quantity ?? 0) + quantity,
+      headlineQuantity: (existing?.headlineQuantity ?? 0) + headlineQuantity,
+    },
+  );
+  return next;
+}
+
+/** Merges demand provenance from calculation rows representing the same type. */
+function mergeDemandSources(existing: PlanDemandSources, next: PlanDemandSources) {
+  const merged = new Map(existing);
+  for (const [typeId, source] of next) {
+    const current = merged.get(typeId);
+    merged.set(
+      typeId,
+      {
+        quantity: (current?.quantity ?? 0) + source.quantity,
+        headlineQuantity: (current?.headlineQuantity ?? 0) + source.headlineQuantity,
+      },
+    );
+  }
+  return merged;
 }
 
 /** Aggregates item quantities by type ID. */
@@ -591,6 +630,13 @@ export function toPlanResponse(
         .map((entry) => entry.stockpileLocationId ?? entry.activityLocationId)
         .filter((locationId): locationId is number => locationId !== undefined),
     ]);
+    const remoteIndustryOutputQuantity = (typeId: number, locationId: number | undefined) => {
+      if (locationId === undefined) return 0;
+      return Object
+        .entries(result.availableSourceCountsByType?.get(typeId) ?? {})
+        .filter(([sourceLocationId]) => Number(sourceLocationId) !== locationId)
+        .reduce((total, [, counts]) => total + (counts?.industry ?? 0), 0);
+    };
     const allPlanItems = mergeResponsePlanItems(planItems, undefined).map((entry) =>
       toResponsePlanItem(
         entry,
@@ -599,6 +645,7 @@ export function toPlanResponse(
         resolveTypeName,
         result.availableSourceCountsByType?.get(entry.typeId),
         result.availableStockQuantitiesByType?.get(entry.typeId),
+        0,
         false,
       ),
     );
@@ -634,6 +681,7 @@ export function toPlanResponse(
                       locationTypeKey(locationId, entry.typeId),
                     ) ?? 0
                   ),
+              remoteIndustryOutputQuantity(entry.typeId, locationId),
               true,
             ),
           ),
@@ -813,6 +861,7 @@ function mergeResponsePlanItems(
           remainingProductionQuantity:
             existing.remainingProductionQuantity + entry.remainingProductionQuantity,
           availableSourceCounts: mergeSourceCounts(existing.availableSourceCounts, sourceCounts),
+          demandSources: mergeDemandSources(existing.demandSources, entry.demandSources),
         },
       );
     }
@@ -828,6 +877,7 @@ function mergeResponsePlanItems(
           bpoCount: existing.bpoCount + entry.bpoCount,
           bposInUse: (existing.bposInUse ?? 0) + (entry.bposInUse ?? 0),
           availableSourceCounts: mergeSourceCounts(existing.availableSourceCounts, sourceCounts),
+          demandSources: mergeDemandSources(existing.demandSources, entry.demandSources),
         },
       );
     }
@@ -848,6 +898,7 @@ function mergeResponsePlanItems(
             ? Math.max(existing.bposInUse, entry.bposInUse)
             : existing.bposInUse + entry.bposInUse,
           availableSourceCounts: mergeSourceCounts(existing.availableSourceCounts, sourceCounts),
+          demandSources: mergeDemandSources(existing.demandSources, entry.demandSources),
         },
       );
       if (!sameSourceLocation) sourceLocationByKey.set(key, undefined);
@@ -890,6 +941,7 @@ function toResponsePlanItem(
   resolveTypeName: (typeId: number) => string,
   availableSourceCountsOverride?: PlanSourceCountsByLocation,
   availableQuantityOverride?: number,
+  additionalAvailableQuantity = 0,
   includeHaulingQuantity = false,
 ): ResponsePlanItem {
   const haulingQuantity = haulingTasks
@@ -914,6 +966,11 @@ function toResponsePlanItem(
     typeId: entry.typeId,
     typeName: resolveTypeName(entry.typeId),
     unitVolume: entry.unitVolume,
+    demandSources: [...entry.demandSources].map(([typeId, source]) => ({
+      typeId,
+      quantity: source.quantity,
+      headlineQuantity: source.headlineQuantity,
+    })),
     availableSourceCounts: availableSourceCountsOverride ?? entry.availableSourceCounts,
     haulingQuantity,
   };
@@ -927,9 +984,10 @@ function toResponsePlanItem(
       0,
       entry.productionQuantity - (entry.reprocessingQuantity ?? 0),
     );
+    const effectiveAvailableQuantity = availableQuantity + additionalAvailableQuantity;
     const neededQuantity = Math.max(
       plannedProductionQuantity,
-      entry.requiredQuantity - availableQuantity,
+      entry.requiredQuantity - effectiveAvailableQuantity,
     );
     return {
       ...identity,
@@ -939,7 +997,7 @@ function toResponsePlanItem(
       neededQuantity,
       surplusQuantity: Math.max(
         0,
-        availableQuantity + plannedProductionQuantity - entry.requiredQuantity,
+        effectiveAvailableQuantity + plannedProductionQuantity - entry.requiredQuantity,
       ),
     };
   }
@@ -1868,6 +1926,7 @@ async function calculatePlanPass(
           ?? typeRecords.get(typeId)?.packagedVolume
           ?? typeRecords.get(typeId)?.volume
           ?? 0,
+        demandSources: existing?.demandSources ?? new Map(),
         quantity: existing?.quantity ?? 0,
         requiredQuantity: existing?.requiredQuantity ?? 0,
         stockQuantity: existing?.stockQuantity ?? 0,
@@ -1891,6 +1950,7 @@ async function calculatePlanPass(
         productionQuantity: quantity,
         reprocessingQuantity: quantity,
       },
+      reprocessingLocationId,
     );
   }
 
@@ -1928,6 +1988,8 @@ async function calculatePlanPass(
     useAvailableStock = true,
     activityRootLocationId?: number,
     stockpileLocationId?: number,
+    demandingTypeId?: number,
+    demandingQuantity?: number,
   ) {
     return profiler.measure(
       "addMaterial",
@@ -1944,6 +2006,14 @@ async function calculatePlanPass(
             quantity: (existing?.quantity ?? 0) + quantity - stockConsumed,
             requiredQuantity:
               (existing?.requiredQuantity ?? 0) + (demandAlreadyRecorded ? 0 : quantity),
+            demandSources: demandAlreadyRecorded
+              ? (existing?.demandSources ?? new Map())
+              : addDemandSource(
+                  existing?.demandSources ?? new Map(),
+                  demandingTypeId,
+                  demandingQuantity ?? quantity,
+                  quantity,
+                ),
             stockQuantity:
               (existing?.stockQuantity ?? 0) + (demandAlreadyRecorded ? 0 : stockConsumed),
             buyQuantity: (existing?.buyQuantity ?? 0) + quantity - stockConsumed,
@@ -1968,6 +2038,8 @@ async function calculatePlanPass(
     demandActivityLocationId?: number,
     demandStockpileLocationId?: number,
     consumeBuildableStock = false,
+    demandingTypeId?: number,
+    demandingQuantity?: number,
   ) {
     let phase = "stock";
     let activity = "unknown";
@@ -2011,6 +2083,12 @@ async function calculatePlanPass(
           {
             requiredQuantity: (existingMaterial?.requiredQuantity ?? 0) + requestedQuantity,
             stockQuantity: (existingMaterial?.stockQuantity ?? 0) + stockConsumed,
+            demandSources: addDemandSource(
+              existingMaterial?.demandSources ?? new Map(),
+              demandingTypeId,
+              demandingQuantity ?? requestedQuantity,
+              requestedQuantity,
+            ),
           },
           demandActivityLocationId,
           demandStockpileLocationId,
@@ -2238,6 +2316,8 @@ async function calculatePlanPass(
                   activityLocationId,
                   undefined,
                   true,
+                  typeId,
+                  requestedQuantity,
                 );
               }
             },
@@ -2259,6 +2339,12 @@ async function calculatePlanPass(
                 ?? typeRecords.get(blueprint._key)?.volume
                 ?? 0,
               neededQuantity: (bpcs.get(blueprint._key)?.neededQuantity ?? 0) + runsNeeded,
+              demandSources: addDemandSource(
+                bpcs.get(blueprint._key)?.demandSources ?? new Map(),
+                demandingTypeId,
+                demandingQuantity ?? requestedQuantity,
+                runsNeeded,
+              ),
               stockQuantity: copyStock?.copies ?? 0,
               stockRuns: copyStock?.runs ?? 0,
               availableSourceCounts: sourceMetadata(blueprint._key)?.counts,
@@ -2330,6 +2416,12 @@ async function calculatePlanPass(
           {
             kind: "reaction",
             typeId: blueprint._key,
+            demandSources: addDemandSource(
+              existingFormula?.demandSources ?? new Map(),
+              demandingTypeId,
+              demandingQuantity ?? requestedQuantity,
+              runsNeeded,
+            ),
             unitVolume:
               typeRecords.get(blueprint._key)?.packagedVolume
               ?? typeRecords.get(blueprint._key)?.volume
@@ -2345,7 +2437,16 @@ async function calculatePlanPass(
           },
         );
         if (runsNeeded > 0 && formulaCount === 0) {
-          await addMaterial(blueprint._key, 1, false, true, activityLocationId);
+          await addMaterial(
+            blueprint._key,
+            1,
+            false,
+            true,
+            activityLocationId,
+            undefined,
+            typeId,
+            quantity,
+          );
         }
         else if (runsNeeded > 0) {
           consumeTrackedStock(blueprint._key, 1, locations?.reactions);
@@ -2383,6 +2484,9 @@ async function calculatePlanPass(
                     ),
                 activityLocationId,
                 undefined,
+                false,
+                typeId,
+                requestedQuantity,
               );
             }
           },
@@ -2470,6 +2574,12 @@ async function calculatePlanPass(
               typeRecords.get(inventingBlueprint._key)?.packagedVolume
               ?? typeRecords.get(inventingBlueprint._key)?.volume
               ?? 0,
+            demandSources: addDemandSource(
+              sourceBpc?.demandSources ?? new Map(),
+              bpc.typeId,
+              remainingBpcRuns,
+              inventionAttempts,
+            ),
             neededQuantity: sourceNeededQuantity,
             stockQuantity: sourceBpc?.stockQuantity ?? 0,
             stockRuns: sourceBpc?.stockRuns ?? 0,
@@ -2491,6 +2601,9 @@ async function calculatePlanPass(
             false,
             true,
             locations?.invention,
+            undefined,
+            inventingBlueprint._key,
+            inventionAttempts,
           );
         }
       }
@@ -2733,6 +2846,7 @@ async function calculatePlanPass(
     planItems.push({
       kind: "material",
       typeId: stockItem.typeId,
+      demandSources: new Map(),
       unitVolume:
         typeRecords.get(stockItem.typeId)?.packagedVolume
         ?? typeRecords.get(stockItem.typeId)?.volume
@@ -2869,7 +2983,7 @@ async function calculateStockpilePlan(
     );
     stockpileResults.push(result);
   }
-  const mergedResult = mergeStockpileResults(stockpileResults, request.stock, request);
+  const mergedResult = await mergeStockpileResults(stockpileResults, request.stock, request);
   return restorePlanResourceCounts(
     restorePlanSourceCounts(restorePlanStockQuantities(mergedResult, request), request.stock),
     request.stock,
@@ -3589,11 +3703,182 @@ function mergeReactionJobInputs(entries: PlanJobInputs[]): PlanJobInputs {
   return summarizePlanJobInputs(mergedBlueprint, merged.materials);
 }
 
-function mergeStockpileResults(
+/** Reconciles independently rounded reaction passes against the combined shortage. */
+async function reconcileMergedReactionProduction(
+  result: PlanCalculation,
+): Promise<PlanCalculation> {
+  const materialEntries = result.lists.materialsToBuy.filter(
+    (entry) => entry.productionQuantity > 0 && (entry.reprocessingQuantity ?? 0) === 0,
+  );
+  const candidates = await Promise.all(
+    materialEntries.map(async (entry) => ({
+      entry,
+      candidate: await getBuildBlueprintByProductTypeId(entry.typeId),
+    })),
+  );
+  let planItems = result.lists.planItems;
+  let materialsToBuy = result.lists.materialsToBuy;
+  let reactionJobs = result.lists.reactionJobs;
+
+  for (const { entry, candidate } of candidates) {
+    if (candidate?.activity !== "reaction" || !candidate.blueprint) continue;
+    const reactionActivity = candidate.blueprint.activities.reaction;
+    const product = reactionActivity?.products?.find(
+      (productEntry) => productEntry.typeID === entry.typeId,
+    );
+    if (!product || product.quantity <= 0) continue;
+
+    const shortage = Math.max(0, entry.requiredQuantity - entry.availableStockQuantity);
+    const targetProductionQuantity = Math.ceil(shortage / product.quantity) * product.quantity;
+    const currentProductionQuantity = Math.max(
+      0,
+      entry.productionQuantity - (entry.reprocessingQuantity ?? 0),
+    );
+    const reductionQuantity = currentProductionQuantity - targetProductionQuantity;
+    if (reductionQuantity <= 0) continue;
+
+    const runsToRemove = Math.floor(reductionQuantity / product.quantity);
+    if (runsToRemove <= 0) continue;
+    const formulaTypeId = candidate.blueprint._key;
+    materialsToBuy = reduceMaterialProduction(materialsToBuy, entry.typeId, reductionQuantity);
+    planItems = reduceMaterialProduction(planItems, entry.typeId, reductionQuantity);
+    planItems = reduceReactionFormulaRuns(planItems, formulaTypeId, runsToRemove);
+    reactionJobs = reduceReactionJobRuns(reactionJobs, formulaTypeId, runsToRemove);
+  }
+
+  return {
+    ...result,
+    lists: {
+      ...result.lists,
+      planItems,
+      materialsToBuy,
+      reactionJobs,
+    },
+  };
+}
+
+function reduceMaterialProduction(
+  entries: Material[],
+  typeId: number,
+  reductionQuantity: number,
+): Material[];
+function reduceMaterialProduction(
+  entries: PlanCalculation["lists"]["planItems"],
+  typeId: number,
+  reductionQuantity: number,
+): PlanCalculation["lists"]["planItems"];
+function reduceMaterialProduction(
+  entries: Material[] | PlanCalculation["lists"]["planItems"],
+  typeId: number,
+  reductionQuantity: number,
+) {
+  const updatedEntries = entries.map((entry) => ({ ...entry }));
+  let remainingReduction = reductionQuantity;
+  for (let index = updatedEntries.length - 1; index >= 0 && remainingReduction > 0; index -= 1) {
+    const entry = updatedEntries[index];
+    if (("kind" in entry && entry.kind !== "material") || entry.typeId !== typeId) continue;
+    const reducibleQuantity = Math.min(
+      remainingReduction,
+      Math.max(0, entry.productionQuantity - (entry.reprocessingQuantity ?? 0)),
+    );
+    if (reducibleQuantity <= 0) continue;
+    const productionQuantity = entry.productionQuantity - reducibleQuantity;
+    const buildProductionQuantity = Math.max(
+      0,
+      productionQuantity - (entry.reprocessingQuantity ?? 0),
+    );
+    updatedEntries[index] = {
+      ...entry,
+      productionQuantity,
+      buyQuantity: Math.max(
+        0,
+        entry.requiredQuantity - entry.availableStockQuantity - buildProductionQuantity,
+      ),
+      remainingProductionQuantity: Math.max(
+        0,
+        entry.availableStockQuantity + buildProductionQuantity - entry.requiredQuantity,
+      ),
+    };
+    remainingReduction -= reducibleQuantity;
+  }
+  return updatedEntries;
+}
+
+function reduceReactionFormulaRuns(
+  entries: PlanCalculation["lists"]["planItems"],
+  formulaTypeId: number,
+  runsToRemove: number,
+) {
+  const updatedEntries = entries.map((entry) => ({ ...entry }));
+  let remainingRuns = runsToRemove;
+  for (let index = updatedEntries.length - 1; index >= 0 && remainingRuns > 0; index -= 1) {
+    const entry = updatedEntries[index];
+    if (entry.kind !== "reaction" || entry.typeId !== formulaTypeId) continue;
+    const removedRuns = Math.min(remainingRuns, entry.runsNeeded);
+    updatedEntries[index] = { ...entry, runsNeeded: entry.runsNeeded - removedRuns };
+    remainingRuns -= removedRuns;
+  }
+  return updatedEntries;
+}
+
+function reduceReactionJobRuns(
+  entries: PlanCalculation["lists"]["reactionJobs"],
+  formulaTypeId: number,
+  runsToRemove: number,
+) {
+  const updatedEntries = entries.map((entry) => ({ ...entry }));
+  let remainingRuns = runsToRemove;
+  for (let index = updatedEntries.length - 1; index >= 0 && remainingRuns > 0; index -= 1) {
+    const entry = updatedEntries[index];
+    if (entry.typeId !== formulaTypeId) continue;
+    const removedRuns = Math.min(remainingRuns, entry.countNeeded);
+    const nextCount = entry.countNeeded - removedRuns;
+    const materials = entry.inputs.materials.map((input) => {
+      const requiredQuantity =
+        entry.countNeeded > 0
+          ? Math.ceil((input.requiredQuantity * nextCount) / entry.countNeeded)
+          : 0;
+      const completionPercent =
+        requiredQuantity <= 0
+          ? 100
+          : Math.min(100, Math.round((input.availableQuantity / requiredQuantity) * 100));
+      const status: PlanJobInputStatus =
+        requiredQuantity <= 0 || input.availableQuantity >= requiredQuantity
+          ? "ready"
+          : input.availableQuantity > 0
+            ? "partial"
+            : "blocked";
+      return {
+        ...input,
+        requiredQuantity,
+        completionPercent,
+        status,
+      };
+    });
+    updatedEntries[index] = {
+      ...entry,
+      countNeeded: nextCount,
+      runsAvailable: Math.min(entry.runsAvailable, nextCount),
+      totalTime: entry.countNeeded > 0 ? (entry.totalTime * nextCount) / entry.countNeeded : 0,
+      inputs: summarizePlanJobInputs(
+        entry.inputs.blueprint,
+        materials,
+        {
+          bpoCount: entry.inputs.bpoCount,
+          bpcRuns: entry.inputs.bpcRuns,
+        },
+      ),
+    };
+    remainingRuns -= removedRuns;
+  }
+  return updatedEntries;
+}
+
+async function mergeStockpileResults(
   results: PlanCalculation[],
   stock: PlanStockItem[],
   request: PlannerRequest,
-): PlanCalculation {
+): Promise<PlanCalculation> {
   const haulingTasks = capHaulingTasksToLocalStockpileSurplus(
     mergeHaulingTasks(results.flatMap((result) => result.lists.haulingTasks)),
     stock,
@@ -3650,7 +3935,7 @@ function mergeStockpileResults(
       }
     }
   }
-  return {
+  const mergedResult: PlanCalculation = {
     metadata: {
       generatedAt: new Date().toISOString(),
       unresolvedAssetCount: request.unresolvedAssetCount ?? 0,
@@ -3681,4 +3966,5 @@ function mergeStockpileResults(
     availableStockQuantitiesByLocationAndType,
     availableStockQuantitiesByType,
   };
+  return reconcileMergedReactionProduction(mergedResult);
 }

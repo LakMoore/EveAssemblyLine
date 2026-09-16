@@ -155,6 +155,50 @@ void test("build blacklist forces a buildable item to be purchased", async () =>
   );
 });
 
+void test("records the demanding type for discovered material requirements", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      1,
+      [],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const tritanium = result.lists.materialsToBuy.find((item) => item.typeId === tritaniumTypeId);
+  const rifter = result.lists.planItems.find((item) => item.typeId === rifterTypeId);
+
+  assert(tritanium);
+  assert(rifter);
+  assert.deepEqual(
+    tritanium.demandSources.get(rifterTypeId),
+    {
+      quantity: 1,
+      headlineQuantity: 32000,
+    },
+  );
+  assert.deepEqual(rifter.demandSources, new Map());
+
+  const response = await toPlanResponse(result);
+  const tritaniumPlanItem = response.lists.planItems.all.find(
+    (item) => item.typeId === tritaniumTypeId,
+  );
+  assert(tritaniumPlanItem);
+  assert.deepEqual(
+    tritaniumPlanItem.demandSources?.find((source) => source.typeId === rifterTypeId),
+    { typeId: rifterTypeId, quantity: 1, headlineQuantity: 32000 },
+  );
+});
+
 void test("reports the explicit unresolved asset count", async () => {
   const result = await calculatePlanCalculation(
     request(
@@ -2240,6 +2284,116 @@ void test("uses remote active output for a stockpile final product", async () =>
   assert.equal(tritanium.availableStockQuantity, 20);
   assert.equal((tritanium.availableSourceCounts?.[alternateSourceLocationId] ?? {}).industry, 20);
   assert.deepEqual(result.lists.haulingTasks, []);
+
+  const response = await toPlanResponse(result);
+  const demandLocation = response.lists.planItems.byActivityLocation.find(
+    (bucket) => bucket.locationId === sourceLocationId,
+  );
+  const demandRow = demandLocation?.items.find((item) => item.typeId === tritaniumTypeId);
+  assert(demandRow);
+  assert.equal(demandRow.neededQuantity, 130);
+});
+
+void test("rounds reaction production once across stockpiles", async () => {
+  const stockpileLocations = (id: string) => ({
+    stock: sourceLocationId,
+    manufacturing: manufacturingLocationId,
+    reactions: manufacturingLocationId,
+    reprocessing: reprocessingLocationId,
+    copying: manufacturingLocationId,
+    invention: manufacturingLocationId,
+  });
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: 57457,
+          name: "Reaction Product",
+          quantity: 833,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+        {
+          typeId: 57457,
+          name: "Reaction Product",
+          quantity: 2_000,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+          inBuild: true,
+          inBuildQuantity: 2_000,
+          jobId: 5745701,
+          activityName: "Manufacturing",
+          industryJobStatus: "active",
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "first-reaction-product",
+            name: "First reaction product",
+            locations: stockpileLocations("first"),
+            items: [
+              {
+                typeId: 57457,
+                name: "Reaction Product",
+                quantity: 30_500,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "second-reaction-product",
+            name: "Second reaction product",
+            locations: stockpileLocations("second"),
+            items: [
+              {
+                typeId: 57457,
+                name: "Reaction Product",
+                quantity: 30_889,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const response = await toPlanResponse(result);
+  const reactionProduct = response.lists.planItems.all.find((item) => item.typeId === 57457);
+  const reactionJob = result.lists.reactionJobs.find((job) => job.typeId === 57493);
+  const responseReactionJob = response.lists.reactionJobs
+    .flatMap((bucket) => bucket.items)
+    .find((job) => job.typeId === 57493);
+  const demandLocation = response.lists.planItems.byActivityLocation.find(
+    (bucket) => bucket.locationId === sourceLocationId,
+  );
+  const demandLocationProduct = demandLocation?.items.find((item) => item.typeId === 57457);
+  const activeOutputLocation = response.lists.planItems.byActivityLocation.find(
+    (bucket) => bucket.locationId === alternateSourceLocationId,
+  );
+  const activeOutputProduct = activeOutputLocation?.items.find((item) => item.typeId === 57457);
+
+  assert(reactionProduct);
+  assert(reactionJob);
+  assert(responseReactionJob);
+  assert(demandLocationProduct);
+  assert(activeOutputProduct);
+  assert.equal(reactionProduct.requiredQuantity, 61_389);
+  assert.equal(reactionProduct.availableQuantity, 2_833);
+  assert.equal(reactionProduct.neededQuantity, 58_600);
+  assert.equal(reactionProduct.surplusQuantity, 44);
+  assert.equal(reactionJob.countNeeded, 293);
+  assert.equal(responseReactionJob.countNeeded, 293);
+  assert.equal(demandLocationProduct.neededQuantity, 58_600);
+  assert.equal(demandLocationProduct.surplusQuantity, 44);
+  assert.equal(activeOutputProduct.neededQuantity, 0);
+  assert.equal(activeOutputProduct.surplusQuantity, 2_000);
 });
 
 void test("ignores empty stockpiles when calculating a plan", async () => {
@@ -6449,6 +6603,14 @@ void test("makes refinery compressed stock available as reprocessed material", a
   assert.equal(rawGas.availableStockQuantity, 100);
   assert.equal((rawGas.availableSourceCounts?.[reprocessingLocationId] ?? {}).reprocessing, 100);
   assert.equal(rawGas.buyQuantity, 0);
+  const rawGasPlanItems = result.lists.planItems.filter(
+    (item) => item.kind === "material" && item.typeId === amberMykoserocinTypeId,
+  );
+  const reprocessedRawGasRows = rawGasPlanItems.filter(
+    (item) => item.kind === "material" && item.productionQuantity > 0,
+  );
+  assert(reprocessedRawGasRows.length > 0);
+  assert(reprocessedRawGasRows.every((item) => item.activityLocationId === reprocessingLocationId));
 });
 
 void test("consumes owned compressed gas surplus and hauls it to the refinery", async () => {
@@ -6507,6 +6669,84 @@ void test("consumes owned compressed gas surplus and hauls it to the refinery", 
   assert.equal(compressedHaul.neededQuantity, 2_748);
   assert.equal(compressedHaul.fromLocationId, sourceLocationId);
   assert.equal(compressedHaul.toLocationId, reprocessingLocationId);
+});
+
+void test("allocates compressed refinery stock to its raw-material stockpile", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: compressedAmberMykoserocinTypeId,
+          name: "Compressed Amber Mykoserocin",
+          quantity: 106,
+          category: "item",
+          rootLocationId: reprocessingLocationId,
+        },
+      ],
+      {
+        items: [],
+        reprocessingEfficiencies: { [compressedAmberMykoserocinTypeId]: 95 },
+        stockpiles: [
+          {
+            id: "amber-stockpile",
+            name: "Amber stockpile",
+            locations: {
+              stock: manufacturingLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: amberMykoserocinTypeId,
+                name: "Amber Mykoserocin",
+                quantity: 100,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "other-stockpile",
+            name: "Other stockpile",
+            locations: {
+              stock: alternateSourceLocationId,
+              manufacturing: alternateSourceLocationId,
+              reactions: alternateSourceLocationId,
+              reprocessing: alternateSourceLocationId,
+              copying: alternateSourceLocationId,
+              invention: alternateSourceLocationId,
+            },
+            items: [
+              {
+                typeId: tritaniumTypeId,
+                name: "Tritanium",
+                quantity: 1,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const rawGas = result.lists.materialsToBuy.find(
+    (material) => material.typeId === amberMykoserocinTypeId,
+  );
+
+  assert(rawGas);
+  assert.equal(rawGas.buyQuantity, 0);
+  assert.equal(
+    result.lists.reprocessingJobs.find((job) => job.typeId === compressedAmberMykoserocinTypeId)
+      ?.countNeeded,
+    106,
+  );
 });
 
 void test("falls back to 50 percent when no efficiency snapshot is supplied", async () => {

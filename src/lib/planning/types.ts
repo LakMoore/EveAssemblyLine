@@ -228,6 +228,16 @@ export type PlanSourceIcon = "market" | "industry" | "invention" | "copying" | "
 export type PlanSourceCounts = Partial<Record<PlanSourceIcon, number>>;
 export type PlanSourceCountsByLocation = Partial<Record<number, PlanSourceCounts>>;
 export type PlanSourceCountsByType = Map<number, PlanSourceCountsByLocation>;
+export interface PlanDemandSource {
+  quantity: number;
+  headlineQuantity: number;
+}
+export type PlanDemandSources = Map<number, PlanDemandSource>;
+export interface ResponsePlanDemandSource {
+  typeId: number;
+  quantity: number;
+  headlineQuantity: number;
+}
 export type PlanJobInputKind = "blueprint" | "material";
 export type PlanJobInputStatus = "ready" | "partial" | "blocked";
 
@@ -327,6 +337,7 @@ export type PlanHaulTask = ResponseHaulTask & {
 
 export interface ResponsePlanMaterial extends ResponseMaterial {
   kind: "material";
+  demandSources?: ResponsePlanDemandSource[];
   requiredQuantity: number;
   availableQuantity: number;
   surplusQuantity: number;
@@ -336,6 +347,7 @@ export interface ResponsePlanMaterial extends ResponseMaterial {
 
 export interface ResponsePlanBlueprint extends ResponseMaterial {
   kind: "bpc";
+  demandSources?: ResponsePlanDemandSource[];
   requiredQuantity: number;
   availableQuantity: number;
   surplusQuantity: number;
@@ -348,6 +360,7 @@ export interface ResponsePlanBlueprint extends ResponseMaterial {
 
 export interface ResponsePlanReaction extends ResponseMaterial {
   kind: "reaction";
+  demandSources?: ResponsePlanDemandSource[];
   requiredQuantity: number;
   availableQuantity: number;
   surplusQuantity: number;
@@ -393,6 +406,7 @@ export interface ResponsePlanItems {
 export interface PlanCalculationBase {
   typeId: number;
   unitVolume: number;
+  demandSources: PlanDemandSources;
   availableSourceCounts?: PlanSourceCountsByLocation;
   activityLocationId?: number;
   stockpileLocationId?: number;

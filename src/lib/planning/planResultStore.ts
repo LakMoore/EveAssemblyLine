@@ -60,6 +60,30 @@ export function isPlanResponse(value: unknown): value is PlanResponse {
     lists.manufacturingJobs,
     lists.reprocessingJobs,
   ].every(validLocationBuckets);
+  const validDemandSources = (value: unknown) =>
+    value === undefined
+    || (
+      Array.isArray(value)
+      && value.every((source) => {
+        if (!source || typeof source !== "object" || Array.isArray(source)) return false;
+        const demandSource = source as Record<string, unknown>;
+        return (
+          Number.isSafeInteger(demandSource.typeId)
+          && (demandSource.typeId as number) > 0
+          && Number.isSafeInteger(demandSource.quantity)
+          && (demandSource.quantity as number) >= 0
+          && Number.isSafeInteger(demandSource.headlineQuantity)
+          && (demandSource.headlineQuantity as number) >= 0
+        );
+      })
+    );
+  const validPlanItemsInLocationBuckets = (value: unknown) =>
+    validLocationBuckets(value)
+    && (value as Array<{ items: unknown[] }>).every((bucket) =>
+      bucket.items.every((item) =>
+        validDemandSources((item as Record<string, unknown>).demandSources),
+      ),
+    );
   const validPlanRows = (value: unknown) =>
     Array.isArray(value)
     && value.every(
@@ -67,14 +91,17 @@ export function isPlanResponse(value: unknown): value is PlanResponse {
         item
         && typeof item === "object"
         && !Array.isArray(item)
-        && !internalContextKeys.some((key) => key in (item as Record<string, unknown>)),
+        && !internalContextKeys.some((key) => key in (item as Record<string, unknown>))
+        && validDemandSources((item as Record<string, unknown>).demandSources),
     );
   const validPlanItems =
     lists.planItems
     && typeof lists.planItems === "object"
     && !Array.isArray(lists.planItems)
     && validPlanRows((lists.planItems as Record<string, unknown>).all)
-    && validLocationBuckets((lists.planItems as Record<string, unknown>).byActivityLocation);
+    && validPlanItemsInLocationBuckets(
+      (lists.planItems as Record<string, unknown>).byActivityLocation,
+    );
   if (!validBucketLists) return false;
   const validMaterialItem = (entry: unknown) => {
     if (!entry || typeof entry !== "object") return false;

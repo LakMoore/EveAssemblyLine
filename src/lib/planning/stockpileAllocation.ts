@@ -254,16 +254,54 @@ export async function allocateStockpileStock(
         ),
     );
   };
-  const allocate = (stockIndex: number, stockpileIndex: number, quantity: number) => {
+  const allocate = (
+    stockIndex: number,
+    stockpileIndex: number,
+    quantity: number,
+    demandTypeId = request.stock[stockIndex].typeId,
+    demandQuantity = quantity,
+  ) => {
     if (quantity <= 0) return;
     const current = allocations[stockpileIndex].get(stockIndex) ?? 0;
     allocations[stockpileIndex].set(stockIndex, current + quantity);
     remainingStock[stockIndex] -= quantity;
-    const item = request.stock[stockIndex];
     remainingDemand[stockpileIndex].set(
-      item.typeId,
-      Math.max(0, (remainingDemand[stockpileIndex].get(item.typeId) ?? 0) - quantity),
+      demandTypeId,
+      Math.max(0, (remainingDemand[stockpileIndex].get(demandTypeId) ?? 0) - demandQuantity),
     );
+  };
+
+  const allocationFor = (
+    stockTypeId: number,
+    demandTypeId: number,
+    stockpileIndex: number,
+    availableQuantity: number,
+  ) => {
+    const remainingQuantity = remainingDemand[stockpileIndex].get(demandTypeId) ?? 0;
+    if (remainingQuantity <= 0 || availableQuantity <= 0) return undefined;
+    if (stockTypeId === demandTypeId) {
+      const quantity = Math.min(availableQuantity, remainingQuantity);
+      return { quantity, demandQuantity: quantity };
+    }
+    const type = planningData.types.get(stockTypeId);
+    const material = planningData.typeMaterials
+      .get(stockTypeId)
+      ?.materials?.find((candidate) => candidate.materialTypeID === demandTypeId);
+    const portionSize = type?.portionSize ?? 1;
+    const efficiency =
+      stockpiles[stockpileIndex].reprocessingEfficiencies?.[String(stockTypeId)]
+      ?? request.reprocessingEfficiencies?.[String(stockTypeId)]
+      ?? 50;
+    const outputPerPortion = ((material?.quantity ?? 0) * efficiency) / 100;
+    if (portionSize <= 0 || outputPerPortion <= 0) return undefined;
+    const availablePortions = Math.floor(availableQuantity / portionSize);
+    const requiredPortions = Math.ceil(remainingQuantity / outputPerPortion);
+    const portions = Math.min(availablePortions, requiredPortions);
+    if (portions <= 0) return undefined;
+    return {
+      quantity: portions * portionSize,
+      demandQuantity: Math.min(remainingQuantity, Math.floor(portions * outputPerPortion)),
+    };
   };
 
   const allocateTypes = (
@@ -271,26 +309,38 @@ export async function allocateStockpileStock(
     demandByPriority: StockpileDemand[],
     preferActivityLocations = false,
   ) => {
+    const allocationPairs = [
+      ...[...typeIdsToAllocate].map((typeId) => ({
+        stockTypeId: typeId,
+        demandTypeId: typeId,
+      })),
+      ...[...typeIdsToAllocate].flatMap((demandTypeId) => {
+        const compressedTypeId = planningData.compressibleTypes.get(demandTypeId);
+        return compressedTypeId === undefined
+          ? []
+          : [{ stockTypeId: compressedTypeId, demandTypeId }];
+      }),
+    ];
     remainingDemand = demandByPriority.map((demand) => new Map(demand));
-    for (const typeId of typeIdsToAllocate) {
+    for (const { stockTypeId, demandTypeId } of allocationPairs) {
       const stockIndexes = request.stock
         .map((item, index) => ({ item, index }))
         .filter(({ item, index }) => {
-          if (item.typeId !== typeId || remainingStock[index] <= 0) return false;
+          if (item.typeId !== stockTypeId || remainingStock[index] <= 0) return false;
           if (item.category !== "reactionformula") return true;
           return stockpiles.some(
             (stockpile, stockpileIndex) =>
-              (remainingDemand[stockpileIndex].get(typeId) ?? 0) > 0
+              (remainingDemand[stockpileIndex].get(demandTypeId) ?? 0) > 0
               && getStockRootLocationId(item) === stockpile.locations.reactions,
           );
         });
       for (const { stockpile, stockpileIndex } of [...stockpileEntries].sort(
         (left, right) =>
-          (remainingDemand[right.stockpileIndex].get(typeId) ?? 0)
-            - (remainingDemand[left.stockpileIndex].get(typeId) ?? 0)
+          (remainingDemand[right.stockpileIndex].get(demandTypeId) ?? 0)
+            - (remainingDemand[left.stockpileIndex].get(demandTypeId) ?? 0)
           || left.stockpileIndex - right.stockpileIndex,
       )) {
-        let remaining = remainingDemand[stockpileIndex].get(typeId) ?? 0;
+        let remaining = remainingDemand[stockpileIndex].get(demandTypeId) ?? 0;
         if (remaining <= 0) continue;
         for (const { item, index } of stockIndexes) {
           const stockLocationId = getStockRootLocationId(item);
@@ -315,9 +365,21 @@ export async function allocateStockpileStock(
             )
             || !canUseFutureStock(index, stockpileIndex)
           ) continue;
-          const quantity = Math.min(remainingStock[index], remaining);
-          allocate(index, stockpileIndex, quantity);
-          remaining -= quantity;
+          const allocation = allocationFor(
+            stockTypeId,
+            demandTypeId,
+            stockpileIndex,
+            remainingStock[index],
+          );
+          if (!allocation) continue;
+          allocate(
+            index,
+            stockpileIndex,
+            allocation.quantity,
+            demandTypeId,
+            allocation.demandQuantity,
+          );
+          remaining -= allocation.demandQuantity;
           if (remaining <= 0) break;
         }
       }
@@ -326,7 +388,7 @@ export async function allocateStockpileStock(
         const localStockpiles = stockpileEntries
           .filter(
             ({ stockpile, stockpileIndex, activityLocationIds }) =>
-              (remainingDemand[stockpileIndex].get(typeId) ?? 0) > 0
+              (remainingDemand[stockpileIndex].get(demandTypeId) ?? 0) > 0
               && stockLocationId !== undefined
               && (item.source !== "marketOrder" || stockLocationId === stockpile.locations.stock)
               && (item.category === "reactionformula"
@@ -335,22 +397,31 @@ export async function allocateStockpileStock(
           )
           .sort(
             (left, right) =>
-              (remainingDemand[right.stockpileIndex].get(typeId) ?? 0)
-                - (remainingDemand[left.stockpileIndex].get(typeId) ?? 0)
+              (remainingDemand[right.stockpileIndex].get(demandTypeId) ?? 0)
+                - (remainingDemand[left.stockpileIndex].get(demandTypeId) ?? 0)
               || left.stockpileIndex - right.stockpileIndex,
           );
         for (const { stockpileIndex } of localStockpiles) {
           if (remainingStock[index] <= 0) break;
           if (!canUseFutureStock(index, stockpileIndex)) continue;
+          const allocation = allocationFor(
+            stockTypeId,
+            demandTypeId,
+            stockpileIndex,
+            remainingStock[index],
+          );
+          if (!allocation) continue;
           allocate(
             index,
             stockpileIndex,
-            Math.min(remainingStock[index], remainingDemand[stockpileIndex].get(typeId) ?? 0),
+            allocation.quantity,
+            demandTypeId,
+            allocation.demandQuantity,
           );
         }
       }
       for (const { stockpile, stockpileIndex } of stockpileEntries) {
-        let remaining = remainingDemand[stockpileIndex].get(typeId) ?? 0;
+        let remaining = remainingDemand[stockpileIndex].get(demandTypeId) ?? 0;
         if (remaining <= 0) continue;
         for (const { index } of stockIndexes) {
           if (remaining <= 0) break;
@@ -374,9 +445,21 @@ export async function allocateStockpileStock(
               && getStockRootLocationId(item) !== stockpiles[stockpileIndex].locations.stock
             )
           ) continue;
-          const quantity = Math.min(remainingStock[index], remaining);
-          allocate(index, stockpileIndex, quantity);
-          remaining -= quantity;
+          const allocation = allocationFor(
+            stockTypeId,
+            demandTypeId,
+            stockpileIndex,
+            remainingStock[index],
+          );
+          if (!allocation) continue;
+          allocate(
+            index,
+            stockpileIndex,
+            allocation.quantity,
+            demandTypeId,
+            allocation.demandQuantity,
+          );
+          remaining -= allocation.demandQuantity;
         }
       }
     }

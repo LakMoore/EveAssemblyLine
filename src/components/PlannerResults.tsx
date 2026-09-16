@@ -12,6 +12,7 @@ import type {
   PlanStockItem,
   HaulPatch,
   ResponsePlanItem,
+  ResponsePlanDemandSource,
   ResponseHaulTask,
   ResponseMaterialBuy,
   ResponseBlueprintBuy,
@@ -32,6 +33,8 @@ import {
   type HaulItemExclusion,
 } from "@/lib/planning/planView";
 import CopyableText from "@/components/CopyableText";
+import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
+import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import JobInputsResponsive, {
   getJobInputsCompletionPercent,
 } from "@/components/JobInputsResponsive";
@@ -78,6 +81,7 @@ import {
   Microscope,
   TestTubes,
   ShoppingCart,
+  ListTree,
   Truck,
   type LucideIcon,
 } from "lucide-react";
@@ -151,6 +155,13 @@ function isMultibuyMaterial(entry: PlanBuyEntry): boolean {
 function getEntryName(entry: { name?: string; typeName?: string }) {
   return entry.typeName ?? entry.name ?? "";
 }
+
+function formatQuantity(quantity: number, unit: "runs" | "units") {
+  return `${quantity.toLocaleString()} ${quantity === 1 ? unit.slice(0, -1) : unit}`;
+}
+
+const demandColumnsClass =
+  "grid grid-cols-[minmax(0,1fr)_5rem_5rem] gap-x-2 sm:grid-cols-[minmax(0,1fr)_9rem_9rem] sm:gap-x-4";
 
 function reactionJobKey(job: { typeId: number; locationId?: number }) {
   return `${job.locationId ?? "unlocated"}:${job.typeId}`;
@@ -909,6 +920,7 @@ function PlanList({
   const [togglingHaulPatchKey, setTogglingHaulPatchKey] = useState<string | null>(null);
   const [togglingHaulPatchGroupKey, setTogglingHaulPatchGroupKey] = useState<string | null>(null);
   const [selectedResultRowKey, setSelectedResultRowKey] = useState<string | null>(null);
+  const [demandSourceEntry, setDemandSourceEntry] = useState<ResponsePlanItem | null>(null);
   const [installedResultRowKeysByPlan, setInstalledResultRowKeysByPlan] = useState<
     Record<string, ReadonlySet<string>>
   >({});
@@ -961,6 +973,8 @@ function PlanList({
     ).values(),
   ].sort((left, right) => left.name.localeCompare(right.name) || left.id - right.id);
   const selectedType = planTypeOptions.find((option) => option.id === selectedTypeId);
+  const planTypeNamesById = new Map(planTypeOptions.map((option) => [option.id, option.name]));
+  const planTypeKindsById = new Map(planItems.map((entry) => [entry.typeId, entry.kind]));
   const filteredPlanItems =
     selectedTypeId === null
       ? planItems
@@ -1754,6 +1768,7 @@ function PlanList({
                               : "icon");
                     const planCells =
                       activeTab === "Plan" ? getPlanCells(entry as ResponsePlanItem) : null;
+                    const planEntry = activeTab === "Plan" ? (entry as ResponsePlanItem) : null;
                     const planHaulingQuantity =
                       activeTab === "Plan" && "kind" in entry
                         ? (entry as ResponsePlanItem).haulingQuantity
@@ -1861,6 +1876,25 @@ function PlanList({
                                     {column === "Buy/Build" && (
                                       <MarketBuyOrderIndicator quantity={marketBuyOrderQuantity} />
                                     )}
+                                    {column === "Required"
+                                      && planEntry
+                                      && planEntry.demandSources
+                                      && planEntry.demandSources.length > 0 && (
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="icon-xs"
+                                          className="text-muted-foreground transition-colors hover:text-foreground"
+                                          aria-label={`View what creates the ${name} demand`}
+                                          title="View demand sources"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            setDemandSourceEntry(planEntry);
+                                          }}
+                                        >
+                                          <ListTree aria-hidden="true" />
+                                        </Button>
+                                      )}
                                     {planCells[column]}
                                   </span>
                                 </span>
@@ -2095,7 +2129,111 @@ function PlanList({
           })}
         </div>
       )}
+      {demandSourceEntry && (
+        <DemandSourcesDrawer
+          entry={demandSourceEntry}
+          namesByTypeId={planTypeNamesById}
+          kindsByTypeId={planTypeKindsById}
+          onOpenChange={(open) => {
+            if (!open) setDemandSourceEntry(null);
+          }}
+        />
+      )}
     </>
+  );
+}
+
+function DemandSourcesDrawer({
+  entry,
+  namesByTypeId,
+  kindsByTypeId,
+  onOpenChange,
+}: {
+  entry: ResponsePlanItem;
+  namesByTypeId: ReadonlyMap<number, string>;
+  kindsByTypeId: ReadonlyMap<number, ResponsePlanItem["kind"]>;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const demandSources = entry.demandSources ?? [];
+  const entryName = getEntryName(entry);
+  const entryUnit = entry.kind === "bpc" || entry.kind === "reaction" ? "runs" : "units";
+  const totalInputQuantity = demandSources.reduce(
+    (total, source) => total + source.headlineQuantity,
+    0,
+  );
+  const footerContent = (
+    <div className="flex w-full flex-col gap-3">
+      <div className={`${demandColumnsClass} items-center`}>
+        <strong className="col-span-2 text-right text-xs text-foreground">
+          Total Input Quantity
+        </strong>
+        <strong className="text-right font-mono text-xs text-foreground">
+          {formatQuantity(totalInputQuantity, entryUnit)}
+        </strong>
+      </div>
+    </div>
+  );
+  return (
+    <ResponsiveDialogDrawer
+      open
+      onOpenChange={onOpenChange}
+      title="Demand sources"
+      description={`The planning requirements that created ${entryName}.`}
+      drawerFooterContent={footerContent}
+      dialogFooterContent={footerContent}
+      headerContent={
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-4">
+            <TypeIdentity name={entryName} typeId={entry.typeId} linkPath="assets" imageSize={40} />
+            <strong className="shrink-0 text-right font-mono text-xs text-foreground">
+              {formatQuantity(entry.requiredQuantity, entryUnit)} required
+            </strong>
+          </div>
+          <div
+            className={`${demandColumnsClass} border-t border-border pt-3 text-right text-xs text-muted-foreground`}
+          >
+            <span className="text-left">Type</span>
+            <span>Output Quantity</span>
+            <span>Input Quantity</span>
+          </div>
+        </div>
+      }
+    >
+      <div className="w-full">
+        {demandSources.map((source: ResponsePlanDemandSource) => {
+          const sourceName = namesByTypeId.get(source.typeId) ?? `Type ${source.typeId}`;
+          const sourceKind = kindsByTypeId.get(source.typeId);
+          const sourceUnit = sourceKind === "bpc" || sourceKind === "reaction" ? "runs" : "units";
+          return (
+            <div
+              className={`${demandColumnsClass} items-center border-b border-border last:border-b-0`}
+              key={source.typeId}
+            >
+              <div className="min-w-0 py-3 text-left">
+                <TypeIdentity
+                  name={sourceName}
+                  typeId={source.typeId}
+                  linkPath="assets"
+                  imageSize={32}
+                />
+              </div>
+              <div
+                className="py-3 text-right font-mono text-xs text-foreground"
+                aria-label={`Output quantity: ${formatQuantity(source.quantity, sourceUnit)}`}
+              >
+                {formatQuantity(source.quantity, sourceUnit)}
+              </div>
+              <div
+                className="py-3 text-right font-mono text-xs text-foreground"
+                aria-label={`Input quantity: ${formatQuantity(source.headlineQuantity, entryUnit)}`}
+              >
+                {formatQuantity(source.headlineQuantity, entryUnit)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </ResponsiveDialogDrawer>
   );
 }
 
