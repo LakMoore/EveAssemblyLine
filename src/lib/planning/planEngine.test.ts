@@ -4590,6 +4590,115 @@ void test("reserves fuel blocks for reaction inputs before direct stockpile dema
   assert.equal(reactionJob.inputs.status, "ready");
 });
 
+void test("does not haul reaction inputs when destination stock already covers demand", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: heliumFuelBlockTypeId,
+          name: "Helium Fuel Block",
+          quantity: 100,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: heliumFuelBlockTypeId,
+          name: "Helium Fuel Block",
+          quantity: 30,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+        {
+          typeId: 16633,
+          name: "Reaction Material A",
+          quantity: 100,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 16636,
+          name: "Reaction Material B",
+          quantity: 100,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: fuelReactionFormulaTypeId,
+          name: "Fuel Reaction Formula",
+          quantity: 1,
+          category: "reactionformula",
+          rootLocationId: manufacturingLocationId,
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "fuel-stock",
+            name: "Fuel stock",
+            locations: {
+              stock: manufacturingLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: manufacturingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: heliumFuelBlockTypeId,
+                name: "Helium Fuel Block",
+                quantity: 5,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "fuel-reaction",
+            name: "Fuel reaction",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: manufacturingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: fuelReactionProductTypeId,
+                name: "Fuel Reaction Product",
+                quantity: 200,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const response = await toPlanResponse(result);
+  const fuel = response.lists.planItems.all.find((item) => item.typeId === heliumFuelBlockTypeId);
+  const fuelPurchase = result.lists.materialsToBuy.find(
+    (item) => item.typeId === heliumFuelBlockTypeId,
+  );
+
+  assert(fuel);
+  assert(fuelPurchase);
+  assert.equal(fuel.availableQuantity, 130);
+  assert.equal(fuel.neededQuantity, 0);
+  assert.equal(fuelPurchase.buyQuantity, 0);
+  assert.deepEqual(
+    result.lists.haulingTasks.filter((task) => task.typeId === heliumFuelBlockTypeId),
+    [],
+  );
+});
+
 void test("combines haul tasks with the same type and route", async () => {
   const result = await calculatePlanCalculation(
     request(

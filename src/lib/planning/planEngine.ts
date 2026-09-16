@@ -3075,6 +3075,57 @@ function capHaulingTasksToLocalStockpileSurplus(
     .filter((task) => task.neededQuantity > 0);
 }
 
+function capHaulingTasksToDestinationDemand(
+  tasks: PlanCalculation["lists"]["haulingTasks"],
+  stock: PlanStockItem[],
+  results: PlanCalculation[],
+) {
+  const localStockByLocationAndType = new Map<string, number>();
+  for (const item of stock) {
+    const locationId = getStockRootLocationId(item);
+    if (
+      locationId === undefined
+      || item.category !== "item"
+      || item.source === "marketOrder"
+      || !isUsableIndustryProductionOutput(item)
+    ) continue;
+    const key = locationTypeKey(locationId, item.typeId);
+    localStockByLocationAndType.set(
+      key,
+      (localStockByLocationAndType.get(key) ?? 0) + item.quantity,
+    );
+  }
+
+  const demandByLocationAndType = new Map<string, number>();
+  for (const result of results) {
+    for (const material of result.lists.materialsToBuy) {
+      const locationId = material.stockpileLocationId ?? material.activityLocationId;
+      if (locationId === undefined || material.requiredQuantity <= 0) continue;
+      const key = locationTypeKey(locationId, material.typeId);
+      demandByLocationAndType.set(
+        key,
+        (demandByLocationAndType.get(key) ?? 0) + material.requiredQuantity,
+      );
+    }
+  }
+
+  const inboundByLocationAndType = new Map<string, number>();
+  return tasks
+    .map((task) => {
+      const key = locationTypeKey(task.toLocationId, task.typeId);
+      const demand = demandByLocationAndType.get(key);
+      if (demand === undefined) return task;
+      const localStock = localStockByLocationAndType.get(key) ?? 0;
+      const inbound = inboundByLocationAndType.get(key) ?? 0;
+      const remainingDemand = Math.max(0, demand - localStock - inbound);
+      const retainedQuantity = Math.min(task.neededQuantity, remainingDemand);
+      inboundByLocationAndType.set(key, inbound + retainedQuantity);
+      if (retainedQuantity === task.neededQuantity) return task;
+      return { ...task, neededQuantity: retainedQuantity };
+    })
+    .filter((task) => task.neededQuantity > 0);
+}
+
 function countPlanBlueprints(
   stock: PlanStockItem[],
   typeId: number,
@@ -3239,10 +3290,50 @@ function restorePlanStockQuantities(
         .map((material) => material.typeId),
     ),
   );
+  const nonMarketUsableStockQuantitiesByType = new Map<number, number>();
+  for (const item of stock) {
+    if (
+      item.category !== "item"
+      || item.source === "marketOrder"
+      || !isAvailableIndustryProductionOutput(item)
+      || !isUsableIndustryProductionOutput(item)
+    ) continue;
+    nonMarketUsableStockQuantitiesByType.set(
+      item.typeId,
+      (nonMarketUsableStockQuantitiesByType.get(item.typeId) ?? 0) + item.quantity,
+    );
+  }
   const materialsToBuy = result.lists.materialsToBuy.map((entry) => {
     const excludedQuantity = excludedStockQuantitiesByType.get(entry.typeId) ?? 0;
     const isBlockedReactionInput = blockedReactionInputTypeIds.has(entry.typeId);
-    if (excludedQuantity <= 0 && !isBlockedReactionInput) return entry;
+    if (excludedQuantity <= 0 && !isBlockedReactionInput) {
+      const restoredAvailableStockQuantity =
+        availableStockQuantitiesByType.get(entry.typeId) ?? entry.availableStockQuantity;
+      const additionalAvailableQuantity = Math.min(
+        Math.max(0, restoredAvailableStockQuantity - entry.availableStockQuantity),
+        Math.max(
+          0,
+          (nonMarketUsableStockQuantitiesByType.get(entry.typeId) ?? 0)
+            - entry.availableStockQuantity,
+        ),
+      );
+      if (additionalAvailableQuantity <= 0) return entry;
+      const plannedProductionQuantity = Math.max(
+        0,
+        entry.productionQuantity - (entry.reprocessingQuantity ?? 0),
+      );
+      const remainingShortage = Math.max(
+        0,
+        entry.requiredQuantity
+          - entry.availableStockQuantity
+          - additionalAvailableQuantity
+          - plannedProductionQuantity,
+      );
+      return {
+        ...entry,
+        buyQuantity: Math.min(entry.buyQuantity, remainingShortage),
+      };
+    }
     const demandLocationId = entry.stockpileLocationId ?? entry.activityLocationId;
     const locallyAvailableStockQuantity =
       demandLocationId === undefined
@@ -3730,9 +3821,10 @@ async function reconcileMergedReactionProduction(
   let reactionJobs = result.lists.reactionJobs;
 
   for (const { entry, candidate } of candidates) {
-    if (candidate?.activity !== "reaction" || !candidate.blueprint) continue;
+    if (candidate === null || candidate.activity !== "reaction") continue;
     const reactionActivity = candidate.blueprint.activities.reaction;
-    const product = reactionActivity?.products?.find(
+    if (!reactionActivity) continue;
+    const product = reactionActivity.products.find(
       (productEntry) => productEntry.typeID === entry.typeId,
     );
     if (!product || product.quantity <= 0) continue;
@@ -3888,8 +3980,11 @@ async function mergeStockpileResults(
   stock: PlanStockItem[],
   request: PlannerRequest,
 ): Promise<PlanCalculation> {
+  const mergedHaulingTasks = mergeHaulingTasks(
+    results.flatMap((result) => result.lists.haulingTasks),
+  );
   const haulingTasks = capHaulingTasksToLocalStockpileSurplus(
-    mergeHaulingTasks(results.flatMap((result) => result.lists.haulingTasks)),
+    capHaulingTasksToDestinationDemand(mergedHaulingTasks, stock, results),
     stock,
     request.stockpiles,
   );
