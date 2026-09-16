@@ -12,7 +12,7 @@ export type EsiRequestLog = {
   path: string;
   characterId?: number;
   status: number | null;
-  outcome: "success" | "error";
+  outcome: "success" | "error" | "access_denied";
   durationMs: number;
   error?: string;
   rateLimitGroup?: string;

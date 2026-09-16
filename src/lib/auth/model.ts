@@ -109,6 +109,7 @@ export interface AssetRecord {
 export interface AssetLocation {
   locationId: number;
   kind: "station" | "structure" | "solar_system";
+  discoveredByCharacterId?: number;
   name?: string;
   typeId?: number;
   systemId?: number;
@@ -122,6 +123,7 @@ export interface IndustryJobRecord {
   blueprintLocationId: number;
   blueprintTypeId: number;
   completedDate?: string;
+  discoveredByCharacterId?: number;
   endDate: string;
   facilityId: number;
   installerId: number;
@@ -165,6 +167,7 @@ export interface BlueprintInstanceRecord {
   typeId: number;
   locationId: number;
   locationFlag: string;
+  discoveredByCharacterId?: number;
   quantity: number;
   runs: number;
   runsBeforeJobAdjustments?: number;
@@ -179,6 +182,7 @@ export interface MarketOrderRecord {
   orderId: number;
   typeId: number;
   locationId: number;
+  discoveredByCharacterId?: number;
   issuedAt: string;
   volumeRemain: number;
   volumeTotal: number;

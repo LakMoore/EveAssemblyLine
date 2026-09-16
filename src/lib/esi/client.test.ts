@@ -10,6 +10,8 @@ import {
   fetchCorporationIndustryJobs,
   fetchCorporationStructures,
   fetchEsiEndpoint,
+  fetchStructureMetadataPerCharacter,
+  getUsableToken,
 } from "./client";
 
 const token: TokenSet = {
@@ -211,6 +213,40 @@ void test("sends the cached ETag for corporation structures", async (t) => {
   assert.deepEqual(result.structures, []);
   assert.equal(result.notModified, false);
   assert.equal(request.headers.get("if-none-match"), "old-etag");
+});
+
+void test("scopes structure metadata failures to the character token", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const firstCharacter = {
+    ...character,
+    characterId: 9101,
+    personalAuth: { ...token, accessToken: "first-access-token" },
+  };
+  const secondCharacter = {
+    ...character,
+    characterId: 9102,
+    personalAuth: { ...token, accessToken: "second-access-token" },
+  };
+  const requests: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    requests.push(new Headers(init?.headers).get("authorization") ?? "");
+    if (requests.length === 1) return new Response(null, { status: 403 });
+    return Response.json({ name: "Accessible Structure", system_id: 30000142 });
+  };
+
+  const firstToken = await getUsableToken(firstCharacter);
+  const secondToken = await getUsableToken(secondCharacter);
+  const first = await fetchStructureMetadataPerCharacter(910000000001, firstToken);
+  const second = await fetchStructureMetadataPerCharacter(910000000001, secondToken);
+
+  assert.equal(first.status, 403);
+  assert.equal(first.data, null);
+  assert.equal(second.data?.name, "Accessible Structure");
+  assert.deepEqual(requests, ["Bearer first-access-token", "Bearer second-access-token"]);
 });
 
 void test("fetches active industry jobs and excludes unusable terminal jobs", async (t) => {

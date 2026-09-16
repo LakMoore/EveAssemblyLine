@@ -11,6 +11,7 @@ import {
   getKnownNonStructureItemIds,
   buildDeliveredJobAsset,
   canMergeDeliveredAsset,
+  getStructureResolverCharacterId,
   isCorporationRecordAllowed,
   isCorporationRecordAccessible,
   isCargoContainerType,
@@ -747,6 +748,28 @@ void test("uses the resolved root location for installed-job asset deductions", 
   assert.equal(getJobAssetRootLocationId(new Map(), 600), 600);
 });
 
+void test("keeps the source record character ahead of merged root-cache metadata", () => {
+  assert.equal(
+    getStructureResolverCharacterId(
+      {
+        ownerType: "character",
+        ownerId: 42,
+        recordType: "job",
+        discoveredByCharacterId: 42,
+      },
+      { discoveredByCharacterId: 84 },
+    ),
+    42,
+  );
+  assert.equal(
+    getStructureResolverCharacterId(
+      { ownerType: "character", ownerId: 42, recordType: "job" },
+      { discoveredByCharacterId: 84 },
+    ),
+    84,
+  );
+});
+
 void test("builds an undocked current ship with a solar-system root", () => {
   const asset = buildCurrentShipAsset(
     {
@@ -767,6 +790,7 @@ void test("builds an undocked current ship with a solar-system root", () => {
     {
       locationId: 30_000_142,
       kind: "solar_system",
+      discoveredByCharacterId: 42,
       systemId: 30_000_142,
       resolved: true,
     },
@@ -800,6 +824,7 @@ void test("builds a docked current ship with its known system", () => {
     {
       locationId: 1_050_000_000_001,
       kind: "structure",
+      discoveredByCharacterId: 42,
       systemId: 30_000_142,
       resolved: false,
     },

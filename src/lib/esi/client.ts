@@ -312,6 +312,11 @@ async function requestEsi<T>(
     return result;
   }
   catch (error) {
+    const status =
+      typeof (error as { status?: unknown }).status === "number"
+        ? (error as { status: number }).status
+        : null;
+    const accessDenied = status === 403 && path.startsWith("/universe/structures/");
     const esiHeaders =
       typeof (error as { esiRateLimitHeaders?: unknown }).esiRateLimitHeaders === "object"
         ? (error as { esiRateLimitHeaders: EsiRateLimitHeaders }).esiRateLimitHeaders
@@ -323,14 +328,15 @@ async function requestEsi<T>(
       ...(tokenSet && tokenContexts.get(tokenSet)?.characterId !== undefined
         ? { characterId: tokenContexts.get(tokenSet)?.characterId }
         : {}),
-      status:
-        typeof (error as { status?: unknown }).status === "number"
-          ? (error as { status: number }).status
-          : null,
-      outcome: "error",
+      status,
+      outcome: accessDenied ? "access_denied" : "error",
       durationMs: Date.now() - startedAt,
       ...esiHeaders,
-      error: error instanceof Error ? error.message.slice(0, 240) : "ESI request failed",
+      error: accessDenied
+        ? "The character does not have permission to inspect this structure."
+        : error instanceof Error
+          ? error.message.slice(0, 240)
+          : "ESI request failed",
     });
     throw error;
   }
@@ -601,12 +607,14 @@ function mapBlueprintInstance(
   blueprint: EsiBlueprint,
   ownerType: BlueprintInstanceRecord["ownerType"],
   ownerId: number,
+  discoveredByCharacterId: number,
 ): BlueprintInstanceRecord {
   return {
     itemId: blueprint.item_id,
     typeId: blueprint.type_id,
     locationId: blueprint.location_id,
     locationFlag: blueprint.location_flag,
+    discoveredByCharacterId,
     quantity: blueprint.quantity,
     runs: blueprint.runs,
     me: blueprint.material_efficiency,
@@ -627,7 +635,7 @@ export async function fetchCharacterBlueprints(record: CharacterTokenRecord, eta
   return {
     blueprints:
       result.data?.map((blueprint) =>
-        mapBlueprintInstance(blueprint, "character", record.characterId),
+        mapBlueprintInstance(blueprint, "character", record.characterId, record.characterId),
       ) ?? null,
     headers: result.headers,
     notModified: result.notModified,
@@ -648,8 +656,9 @@ export async function fetchCorporationBlueprints(record: CharacterTokenRecord, e
   const corporationId = record.corporationId;
   return {
     blueprints:
-      result.data?.map((blueprint) => mapBlueprintInstance(blueprint, "corporation", corporationId))
-      ?? null,
+      result.data?.map((blueprint) =>
+        mapBlueprintInstance(blueprint, "corporation", corporationId, record.characterId),
+      ) ?? null,
     headers: result.headers,
     notModified: result.notModified,
   };
@@ -776,6 +785,7 @@ function mapIndustryJob(
   job: EsiIndustryJob,
   ownerType: IndustryJobRecord["ownerType"],
   ownerId: number,
+  discoveredByCharacterId: number,
 ): IndustryJobRecord {
   const installedRuns = job.successful_runs ?? Math.floor(job.runs * (job.probability ?? 1));
   return {
@@ -797,6 +807,7 @@ function mapIndustryJob(
     ...(job.successful_runs !== undefined ? { successfulRuns: job.successful_runs } : {}),
     startDate: job.start_date,
     endDate: job.end_date,
+    discoveredByCharacterId,
     ...(job.completed_date !== undefined ? { completedDate: job.completed_date } : {}),
     ownerType,
     ownerId,
@@ -822,12 +833,13 @@ function mapIndustryJobs(
   jobs: EsiIndustryJob[],
   ownerType: IndustryJobRecord["ownerType"],
   ownerId: number,
+  discoveredByCharacterId: number,
   assetsLastModified: string | undefined,
 ) {
   return jobs
     .filter((job) => job.status !== "cancelled" && job.status !== "reverted")
     .filter((job) => retainIndustryJobSinceAssetsModified(job, assetsLastModified))
-    .map((job) => mapIndustryJob(job, ownerType, ownerId));
+    .map((job) => mapIndustryJob(job, ownerType, ownerId, discoveredByCharacterId));
 }
 
 export async function fetchCharacterIndustryJobs(
@@ -848,7 +860,13 @@ export async function fetchCharacterIndustryJobs(
     jobs:
       result.data === null
         ? null
-        : mapIndustryJobs(result.data, "character", record.characterId, assetsLastModified),
+        : mapIndustryJobs(
+            result.data,
+            "character",
+            record.characterId,
+            record.characterId,
+            assetsLastModified,
+          ),
     headers: result.headers,
     notModified: result.notModified,
   };
@@ -896,7 +914,13 @@ export async function fetchCorporationIndustryJobs(
     jobs:
       result.data === null
         ? null
-        : mapIndustryJobs(result.data, "corporation", corporationId, assetsLastModified),
+        : mapIndustryJobs(
+            result.data,
+            "corporation",
+            corporationId,
+            record.characterId,
+            assetsLastModified,
+          ),
     headers: result.headers,
     notModified: result.notModified,
   };
@@ -906,11 +930,13 @@ function mapMarketOrder(
   order: EsiMarketOrder,
   ownerType: MarketOrderRecord["ownerType"],
   ownerId: number,
+  discoveredByCharacterId: number,
 ): MarketOrderRecord {
   return {
     orderId: order.order_id,
     typeId: order.type_id,
     locationId: order.location_id,
+    discoveredByCharacterId,
     issuedAt: order.issued,
     volumeRemain: order.volume_remain,
     volumeTotal: order.volume_total,
@@ -932,7 +958,9 @@ export async function fetchCharacterMarketOrders(record: CharacterTokenRecord, e
   );
   return {
     orders:
-      result.data?.map((order) => mapMarketOrder(order, "character", record.characterId)) ?? null,
+      result.data?.map((order) =>
+        mapMarketOrder(order, "character", record.characterId, record.characterId),
+      ) ?? null,
     token,
     headers: result.headers,
     notModified: result.notModified,
@@ -953,7 +981,9 @@ export async function fetchCorporationMarketOrders(record: CharacterTokenRecord,
   const corporationId = record.corporationId;
   return {
     orders:
-      result.data?.map((order) => mapMarketOrder(order, "corporation", corporationId)) ?? null,
+      result.data?.map((order) =>
+        mapMarketOrder(order, "corporation", corporationId, record.characterId),
+      ) ?? null,
     token,
     headers: result.headers,
     notModified: result.notModified,
@@ -1246,12 +1276,9 @@ export async function fetchStructureMetadataPerCharacter(structureId: number, to
   const cached = structureMetadataCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return { ...cached.response, fromCache: true };
   try {
-    const response = await requestCachedEsi<LocationMetadata>(
+    const response = await requestEsi<LocationMetadata>(
       `/universe/structures/${structureId}/`,
       token,
-      undefined,
-      // Structure metadata is access-controlled, so it must not enter the shared ESI cache.
-      { skipCacheWrite: true },
     );
     if (response.data) {
       structureMetadataCache.set(

@@ -63,6 +63,7 @@ export type OwnerJobsResponse = {
     facilityId: number;
     outputLocationId: number;
     outputLocationName: string;
+    discoveredByCharacterId?: number;
     blueprintTypeId: number;
     blueprintTypeName?: string;
     productTypeId?: number;
@@ -187,6 +188,7 @@ async function buildJobsResponse(
                 ownerType: job.ownerType,
                 ownerId: job.ownerId,
                 recordType: "job",
+                discoveredByCharacterId: job.discoveredByCharacterId,
               },
               rootLocations,
               stations,
@@ -267,6 +269,9 @@ async function buildJobsResponse(
         facilityId: job.facilityId,
         outputLocationId: job.outputLocationId,
         outputLocationName: outputLocationNames.get(job.outputLocationId) ?? "Location unavailable",
+        ...(job.discoveredByCharacterId !== undefined
+          ? { discoveredByCharacterId: job.discoveredByCharacterId }
+          : {}),
         blueprintTypeId: job.blueprintTypeId,
         blueprintTypeName: types.get(job.blueprintTypeId)?.name.en,
         ...(job.productTypeId !== undefined

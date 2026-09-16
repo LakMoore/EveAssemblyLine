@@ -120,7 +120,8 @@ export type OwnerSnapshot = {
 };
 
 function snapshotLocation(location: AssetLocation): OwnerSnapshotLocation {
-  return { ...location };
+  const { discoveredByCharacterId: _discoveredByCharacterId, ...stableLocation } = location;
+  return stableLocation;
 }
 
 function snapshotAsset(asset: AssetRecord): OwnerSnapshotAsset {
@@ -145,7 +146,9 @@ function snapshotAssets(data: OwnerAssetData) {
   return {
     assets: data.assets.map(snapshotAsset),
     industryJobs: data.jobs,
-    blueprintInstances: data.blueprintInstances,
+    blueprintInstances: data.blueprintInstances.map(
+      ({ discoveredByCharacterId: _discoveredByCharacterId, ...blueprint }) => blueprint,
+    ),
     rootLocations: [...data.rootLocationsByItemId].map(([itemId, location]) => ({
       itemId,
       location: snapshotLocation(location),
@@ -179,6 +182,7 @@ function snapshotJobs(data: OwnerJobsResponse): OwnerSnapshotData["jobs"] {
       activity: _activity,
       blueprintTypeName: _blueprintTypeName,
       productTypeName: _productTypeName,
+      discoveredByCharacterId: _discoveredByCharacterId,
       ...job
     }) => job,
   );
