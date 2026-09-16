@@ -9,6 +9,7 @@ export type ReprocessingCandidate = {
   yields: ReadonlyMap<number, number>;
   source: "owned" | "purchase";
   volumePerUnit: number;
+  isCompressed?: boolean;
   quantityAtReprocessingLocation?: number;
 };
 
@@ -212,7 +213,8 @@ export function allocateReprocessing(
         )
         .sort(
           (left, right) =>
-            Number(left.score.haulingVolume > 0) - Number(right.score.haulingVolume > 0)
+            Number(!left.candidate.isCompressed) - Number(!right.candidate.isCompressed)
+            || Number(left.score.haulingVolume > 0) - Number(right.score.haulingVolume > 0)
             || left.score.surplus - right.score.surplus
             || right.score.coveragePerVolume - left.score.coveragePerVolume
             || right.score.coverageEfficiency - left.score.coverageEfficiency

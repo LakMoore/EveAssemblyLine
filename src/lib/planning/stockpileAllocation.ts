@@ -181,6 +181,18 @@ export async function allocateStockpileStock(
     stockpileIndex,
     activityLocationIds: stockpileActivityLocations(stockpile),
   }));
+  const reprocessableTypeIdsByMaterial = new Map<number, number[]>();
+  const reprocessableTypeIds = new Set([
+    ...planningData.compressibleTypes.values(),
+    ...planningData.compressibleTypes.keys(),
+  ]);
+  for (const reprocessableTypeId of reprocessableTypeIds) {
+    for (const material of planningData.typeMaterials.get(reprocessableTypeId)?.materials ?? []) {
+      const sourceTypeIds = reprocessableTypeIdsByMaterial.get(material.materialTypeID) ?? [];
+      sourceTypeIds.push(reprocessableTypeId);
+      reprocessableTypeIdsByMaterial.set(material.materialTypeID, sourceTypeIds);
+    }
+  }
   const stockpileDemandResults = await Promise.all(
     stockpiles.map(async (stockpile) => {
       const result = await calculatePlanPass(
@@ -304,6 +316,12 @@ export async function allocateStockpileStock(
     };
   };
 
+  const isReprocessableSourceForDemand = (stockTypeId: number, demandTypeId: number) =>
+    stockTypeId !== demandTypeId
+    && (planningData.typeMaterials.get(stockTypeId)?.materials ?? []).some(
+      (material) => material.materialTypeID === demandTypeId,
+    );
+
   const allocateTypes = (
     typeIdsToAllocate: Set<number>,
     demandByPriority: StockpileDemand[],
@@ -316,9 +334,11 @@ export async function allocateStockpileStock(
       })),
       ...[...typeIdsToAllocate].flatMap((demandTypeId) => {
         const compressedTypeId = planningData.compressibleTypes.get(demandTypeId);
-        return compressedTypeId === undefined
-          ? []
-          : [{ stockTypeId: compressedTypeId, demandTypeId }];
+        const reprocessableTypeIds = new Set([
+          ...(compressedTypeId === undefined ? [] : [compressedTypeId]),
+          ...(reprocessableTypeIdsByMaterial.get(demandTypeId) ?? []),
+        ]);
+        return [...reprocessableTypeIds].map((stockTypeId) => ({ stockTypeId, demandTypeId }));
       }),
     ];
     remainingDemand = demandByPriority.map((demand) => new Map(demand));
@@ -435,6 +455,7 @@ export async function allocateStockpileStock(
               && item.category !== "reactionformula"
               && itemRootLocationId !== undefined
               && !stockpileActivityLocations(stockpiles[stockpileIndex]).has(itemRootLocationId)
+              && !isReprocessableSourceForDemand(stockTypeId, demandTypeId)
             )
             || (
               item.category === "reactionformula"

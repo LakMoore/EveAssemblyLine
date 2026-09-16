@@ -86,6 +86,35 @@ void test("prefers the candidate that covers demand with less collateral output"
   assert.deepEqual(result.remainingRequirements, new Map([[34, 0]]));
 });
 
+void test("prefers compressed candidates before raw candidates", () => {
+  const result = allocateReprocessing(
+    new Map([[34, 500]]),
+    [
+      candidate({ typeId: 62520, availableQuantity: 100, isCompressed: false }),
+      candidate({
+        typeId: 62521,
+        availableQuantity: 100,
+        isCompressed: true,
+        yields: new Map([[34, 1_000]]),
+      }),
+    ],
+  );
+
+  assert.deepEqual(result.consumedOwned, new Map([[62521, 100]]));
+});
+
+void test("uses raw candidates when compressed stock has no complete portion", () => {
+  const result = allocateReprocessing(
+    new Map([[34, 500]]),
+    [
+      candidate({ typeId: 62520, availableQuantity: 50, isCompressed: true }),
+      candidate({ typeId: 62521, availableQuantity: 100, isCompressed: false }),
+    ],
+  );
+
+  assert.deepEqual(result.consumedOwned, new Map([[62521, 100]]));
+});
+
 void test("does not consume owned portions beyond the material shortage", () => {
   const result = allocateReprocessing(
     new Map([[34, 500]]),

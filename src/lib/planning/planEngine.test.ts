@@ -6749,6 +6749,96 @@ void test("allocates compressed refinery stock to its raw-material stockpile", a
   );
 });
 
+void test("prefers compressed Bitumens over raw stock across stockpiles", async () => {
+  const rawMaterials = [
+    {
+      typeId: hydrocarbonsTypeId,
+      name: "Hydrocarbons",
+      quantity: 1_000,
+      me: 0,
+      te: 0,
+      fromCompression: false,
+    },
+    {
+      typeId: 36,
+      name: "Mexallon",
+      quantity: 10_000,
+      me: 0,
+      te: 0,
+      fromCompression: false,
+    },
+    {
+      typeId: 35,
+      name: "Pyerite",
+      quantity: 100_000,
+      me: 0,
+      te: 0,
+      fromCompression: false,
+    },
+  ];
+  const stockpileLocations = (stock: number) => ({
+    stock,
+    manufacturing: stock,
+    reactions: stock,
+    reprocessing: reprocessingLocationId,
+    copying: stock,
+    invention: stock,
+  });
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: 45492,
+          name: "Bitumens",
+          quantity: 10_000,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+        {
+          typeId: 62454,
+          name: "Compressed Bitumens",
+          quantity: 10_000,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+      ],
+      {
+        items: [],
+        reprocessingEfficiencies: { 45492: 100, 62454: 100 },
+        stockpiles: [
+          {
+            id: "hydrocarbons-stockpile",
+            name: "Hydrocarbons stockpile",
+            locations: stockpileLocations(manufacturingLocationId),
+            items: [rawMaterials[0]],
+          },
+          {
+            id: "minerals-stockpile",
+            name: "Minerals stockpile",
+            locations: stockpileLocations(alternateSourceLocationId),
+            items: rawMaterials.slice(1),
+          },
+        ],
+      },
+    ),
+  );
+
+  for (const typeId of [hydrocarbonsTypeId, 36, 35]) {
+    const material = result.lists.materialsToBuy.find((entry) => entry.typeId === typeId);
+    assert(material);
+    assert.equal(material.buyQuantity, 0);
+  }
+  assert.equal(
+    result.lists.haulingTasks.find((task) => task.typeId === 45492)?.neededQuantity,
+    undefined,
+  );
+  assert.equal(
+    result.lists.haulingTasks.find((task) => task.typeId === 62454)?.neededQuantity,
+    4_100,
+  );
+});
+
 void test("falls back to 50 percent when no efficiency snapshot is supplied", async () => {
   const result = await calculatePlanCalculation(request(300, [compressedStock(250)]));
   const refineryHaul = result.lists.haulingTasks.find(

@@ -276,7 +276,9 @@ async function allocatePlanReprocessing(
   ownedQuantityLimits?: ReadonlyMap<number, number>,
 ): Promise<ReprocessingAllocation> {
   const { types, compressibleTypes, typeMaterials } = planningData;
+  const compressedTypeIds = new Set(compressibleTypes.values());
   const reprocessableTypeIds = new Set([
+    ...compressibleTypes.keys(),
     ...compressibleTypes.values(),
     ...specialReprocessableTypeIds,
   ]);
@@ -334,6 +336,7 @@ async function allocatePlanReprocessing(
       ),
       source,
       volumePerUnit: type.packagedVolume ?? type.volume ?? 0,
+      isCompressed: compressedTypeIds.has(typeId),
       ...(source === "owned"
         ? {
             quantityAtReprocessingLocation: Math.min(
@@ -427,7 +430,13 @@ async function minimizeOwnedReprocessing(
 ): Promise<ReprocessingAllocation> {
   let minimized = allocation;
   let currentPlan = baseline;
-  for (const [typeId, currentQuantity] of allocation.consumedOwned) {
+  const compressedTypeIds = new Set(planningData.compressibleTypes.values());
+  const ownedAllocations = [...allocation.consumedOwned].sort(
+    ([leftTypeId], [rightTypeId]) =>
+      Number(compressedTypeIds.has(leftTypeId)) - Number(compressedTypeIds.has(rightTypeId)),
+  );
+  for (const [typeId, currentQuantity] of ownedAllocations) {
+    if (compressedTypeIds.has(typeId)) continue;
     const limitedQuantity = firstOwnedContributionQuantity(
       typeId,
       currentQuantity,
