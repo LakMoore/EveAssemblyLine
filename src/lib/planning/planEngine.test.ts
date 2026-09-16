@@ -1543,6 +1543,16 @@ void test("deducts in-build final products before scheduling more production", a
   assert.equal(planItem.availableQuantity, 45);
   assert.equal(planItem.neededQuantity, 135);
   assert.equal(planItem.surplusQuantity, 0);
+  const firstMaterialTypeId = manufacturingJob.inputs.materials[0]?.typeId;
+  assert(firstMaterialTypeId);
+  const firstMaterial = response.lists.planItems.all.find(
+    (item) => item.typeId === firstMaterialTypeId,
+  );
+  assert(firstMaterial);
+  assert.equal(
+    firstMaterial.demandSources?.find((source) => source.typeId === 21019)?.quantity,
+    135,
+  );
 });
 
 void test("reports no build or surplus when available intermediate stock covers demand", async () => {

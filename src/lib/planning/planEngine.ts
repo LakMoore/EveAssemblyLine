@@ -2326,7 +2326,7 @@ async function calculatePlanPass(
                   undefined,
                   true,
                   typeId,
-                  requestedQuantity,
+                  quantity,
                 );
               }
             },

@@ -2213,7 +2213,10 @@ function DemandSourcesDrawer({
                 <TypeIdentity
                   name={sourceName}
                   typeId={source.typeId}
-                  linkPath="assets"
+                  linkPath="planner"
+                  linkIcon={ClipboardList}
+                  linkSearchParams={{ tab: "Plan" }}
+                  linkHash="plan-breakdown"
                   imageSize={32}
                 />
               </div>
