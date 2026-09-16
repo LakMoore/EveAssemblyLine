@@ -83,6 +83,7 @@ export default function TypeIdentity({
               href={linkHref}
               title={`View ${name}`}
               aria-label={`View ${name}`}
+              prefetch={false}
             >
               <LinkIcon size={12} strokeWidth={2} aria-hidden="true" />
             </Link>
