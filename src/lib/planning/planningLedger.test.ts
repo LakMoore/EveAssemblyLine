@@ -4,6 +4,8 @@ import {
   assertPlanningLedgerConservation,
   createPlanningLedger,
   getFinalPlanningLedgerTransfers,
+  getPlanningLedgerJobInputAvailability,
+  recordPlanningLedgerJobInputReservations,
   recordPlanningLedgerPhase,
   type PlanningLedgerAllocation,
 } from "./planningLedger";
@@ -160,6 +162,74 @@ void test("rejects allocations that exceed an original source lot", () => {
         ],
       ),
     /over-allocated stock lot 0/,
+  );
+});
+
+void test("records immutable input reservations for manufacturing and reaction jobs", () => {
+  const scenario = createSharedStockScenario();
+  const ledger = recordPlanningLedgerJobInputReservations(
+    createPlanningLedger(
+      scenario.sourceQuantities,
+      scenario.sourceLots,
+      scenario.stockpileDestinationLocationIds,
+    ),
+    [
+      {
+        stockIndex: 0,
+        quantity: 30,
+        activity: "reaction",
+        jobTypeId: 1000,
+        jobLocationId: 300,
+      },
+      {
+        stockIndex: 0,
+        quantity: 50,
+        activity: "manufacturing",
+        jobTypeId: 2000,
+        jobLocationId: 400,
+      },
+    ],
+  );
+
+  assert.equal(
+    getPlanningLedgerJobInputAvailability(
+      ledger,
+      {
+        activity: "reaction",
+        jobTypeId: 1000,
+        jobLocationId: 300,
+        typeId: 34,
+      },
+    ),
+    30,
+  );
+  assert.equal(
+    getPlanningLedgerJobInputAvailability(
+      ledger,
+      {
+        activity: "manufacturing",
+        jobTypeId: 2000,
+        jobLocationId: 400,
+        typeId: 34,
+      },
+    ),
+    50,
+  );
+  assert.equal(Object.isFrozen(ledger.jobInputReservations), true);
+  assert.throws(
+    () =>
+      recordPlanningLedgerJobInputReservations(
+        ledger,
+        [
+          {
+            stockIndex: 0,
+            quantity: 81,
+            activity: "reaction",
+            jobTypeId: 1001,
+          },
+        ],
+      ),
+    /over-allocated job input stock lot 0/,
   );
 });
 

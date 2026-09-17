@@ -4811,6 +4811,7 @@ void test("reserves fuel blocks for reaction inputs before direct stockpile dema
   assert.equal(fuelInput.availableQuantity, 5);
   assert.equal(fuelInput.status, "ready");
   assert.equal(reactionJob.inputs.status, "ready");
+  assert.equal(reactionJob.runsAvailable, reactionJob.countNeeded);
 });
 
 void test("does not haul reaction inputs when destination stock already covers demand", async () => {
@@ -5771,7 +5772,7 @@ void test("warns when manufacturing has no usable local blueprint", async () => 
             code: "manufacturing-blueprint-me-zero",
             fallbackMe: 8,
             fallbackTe: 10,
-            typeId: rifterTypeId,
+            typeId: rifterBlueprintTypeId,
           },
         ],
       },
@@ -6344,6 +6345,113 @@ void test("does not buy a buildable reaction product when output rounding covers
   assert.equal(material.requiredQuantity, 214_184);
   assert.equal(material.productionQuantity, 214_200);
   assert.equal(material.buyQuantity, 0);
+});
+
+void test("keeps a reaction when its output stock is reserved by another stockpile", async () => {
+  const terahertzMetamaterialsTypeId = 33360;
+  const terahertzMetamaterialsFormulaTypeId = 46216;
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: terahertzMetamaterialsFormulaTypeId,
+          name: "Terahertz Metamaterials Reaction Formula",
+          quantity: 1,
+          category: "reactionformula",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: heliumFuelBlockTypeId,
+          name: "Helium Fuel Block",
+          quantity: 15,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 16657,
+          name: "Rolled Tungsten Alloy",
+          quantity: 294,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: 33337,
+          name: "Promethium Mercurite",
+          quantity: 294,
+          category: "item",
+          rootLocationId: manufacturingLocationId,
+        },
+        {
+          typeId: terahertzMetamaterialsTypeId,
+          name: "Terahertz Metamaterials",
+          quantity: 900,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "reaction-destination",
+            name: "Reaction destination",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: manufacturingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: terahertzMetamaterialsTypeId,
+                name: "Terahertz Metamaterials",
+                quantity: 651,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "reserved-output",
+            name: "Reserved output",
+            locations: {
+              stock: alternateSourceLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: manufacturingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: terahertzMetamaterialsTypeId,
+                name: "Terahertz Metamaterials",
+                quantity: 900,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+
+  const reactionJob = result.lists.reactionJobs.find(
+    (job) => job.typeId === terahertzMetamaterialsFormulaTypeId,
+  );
+  const productPurchase = result.lists.materialsToBuy.find(
+    (material) => material.typeId === terahertzMetamaterialsTypeId,
+  );
+
+  assert(reactionJob);
+  assert(reactionJob.countNeeded > 0);
+  assert.equal(productPurchase?.buyQuantity ?? 0, 0);
 });
 
 void test("accumulates installable reaction runs across repeated expansions", async () => {

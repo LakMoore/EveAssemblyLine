@@ -50,7 +50,12 @@ import {
   specialReprocessableTypeIds,
 } from "./reprocessStock";
 import { allocateStockpileStock } from "./stockpileAllocation";
-import { getFinalPlanningLedgerTransfers, type PlanningLedger } from "./planningLedger";
+import {
+  getFinalPlanningLedgerTransfers,
+  getPlanningLedgerJobInputAvailability,
+  recordPlanningLedgerJobInputReservations,
+  type PlanningLedger,
+} from "./planningLedger";
 import {
   getStockRootLocationId,
   isAvailableIndustryProductionOutput,
@@ -95,6 +100,21 @@ function summarizePlanJobInputs(
     completionPercent,
     status: completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked",
   };
+}
+
+/** Calculates the number of requested job runs covered by the supplied input quantities. */
+function getInstallableRunsFromInputs(inputs: PlanJobInputs, requestedRuns: number): number {
+  if (requestedRuns <= 0) return 0;
+  const requiredInputs = [inputs.blueprint, ...inputs.materials].filter(
+    (input) => input.requiredQuantity > 0,
+  );
+  if (requiredInputs.length === 0) return requestedRuns;
+  return Math.min(
+    requestedRuns,
+    ...requiredInputs.map((input) =>
+      Math.floor((input.availableQuantity * requestedRuns) / input.requiredQuantity),
+    ),
+  );
 }
 
 /** Adds a discovered demand contribution to a calculation row's provenance map. */
@@ -3286,61 +3306,104 @@ async function reconcileStockpilePlan(
   return restorePlanResourceCounts(restoredSources, request.stock);
 }
 
-/** Reallocates merged manufacturing inputs from usable stock held at each build location. */
-function reconcileMergedManufacturingJobInputs(
-  jobs: PlanCalculation["lists"]["manufacturingJobs"],
+/** Records local-first, haul-aware source-lot reservations for all merged industry job inputs. */
+function reserveMergedJobInputs(
+  ledger: PlanningLedger,
   request: PlannerRequest,
+  reactionJobs: PlanCalculation["lists"]["reactionJobs"],
+  manufacturingJobs: PlanCalculation["lists"]["manufacturingJobs"],
 ) {
   const availableStock = request.stock
+    .map((item, stockIndex) => ({ item, stockIndex, remainingQuantity: item.quantity }))
     .filter(
-      (item) =>
+      ({ item }) =>
         item.category === "item"
         && item.source !== "marketOrder"
         && isUsableIndustryProductionOutput(item)
         && getStockRootLocationId(item) !== undefined,
-    )
-    .map((item) => ({ ...item }));
+    );
+  const reservations: Array<{
+    stockIndex: number;
+    quantity: number;
+    activity: "manufacturing" | "reaction";
+    jobTypeId: number;
+    jobLocationId?: number;
+  }> = [];
+  for (const [activity, jobs] of [
+    ["reaction", reactionJobs],
+    ["manufacturing", manufacturingJobs],
+  ] as const) {
+    for (const job of jobs) {
+      for (const input of job.inputs.materials) {
+        let remainingQuantity = input.requiredQuantity;
+        for (const item of availableStock
+          .filter((candidate) => {
+            const sourceLocationId = getStockRootLocationId(candidate.item);
+            return (
+              candidate.item.typeId === input.typeId
+              && candidate.remainingQuantity > 0
+              && sourceLocationId !== undefined
+              && (sourceLocationId === job.locationId || !candidate.item.inBuild)
+              && !(
+                job.locationId !== undefined
+                && request.haulExclusions?.some(
+                  (exclusion) =>
+                    exclusion.typeId === input.typeId
+                    && exclusion.fromLocationId === sourceLocationId
+                    && exclusion.toLocationId === job.locationId
+                    && (
+                      exclusion.ownerType === undefined
+                      || (
+                        exclusion.ownerType === candidate.item.ownerType
+                        && exclusion.ownerId === candidate.item.ownerId
+                      )
+                    ),
+                )
+              )
+            );
+          })
+          .sort(
+            (left, right) =>
+              Number(getStockRootLocationId(left.item) !== job.locationId)
+                - Number(getStockRootLocationId(right.item) !== job.locationId)
+              || (getStockRootLocationId(left.item) ?? 0)
+                - (getStockRootLocationId(right.item) ?? 0),
+          )) {
+          if (remainingQuantity <= 0) break;
+          const allocatedQuantity = Math.min(remainingQuantity, item.remainingQuantity);
+          item.remainingQuantity -= allocatedQuantity;
+          remainingQuantity -= allocatedQuantity;
+          reservations.push({
+            stockIndex: item.stockIndex,
+            quantity: allocatedQuantity,
+            activity,
+            jobTypeId: job.typeId,
+            ...(job.locationId === undefined ? {} : { jobLocationId: job.locationId }),
+          });
+        }
+      }
+    }
+  }
+  return recordPlanningLedgerJobInputReservations(ledger, reservations);
+}
+
+/** Rebuilds merged job input states from immutable source-lot reservations. */
+function reconcileMergedJobInputs<T extends PlanCalculation["lists"]["reactionJobs"][number]>(
+  activity: "reaction" | "manufacturing",
+  jobs: T[],
+  ledger: PlanningLedger,
+): T[] {
   return jobs.map((job) => {
     const materials = job.inputs.materials.map((input) => {
-      let remainingQuantity = input.requiredQuantity;
-      for (const item of availableStock
-        .filter((candidate) => {
-          const sourceLocationId = getStockRootLocationId(candidate);
-          return (
-            candidate.typeId === input.typeId
-            && candidate.quantity > 0
-            && sourceLocationId !== undefined
-            && (sourceLocationId === job.locationId || !candidate.inBuild)
-            && !(
-              job.locationId !== undefined
-              && request.haulExclusions?.some(
-                (exclusion) =>
-                  exclusion.typeId === input.typeId
-                  && exclusion.fromLocationId === sourceLocationId
-                  && exclusion.toLocationId === job.locationId
-                  && (
-                    exclusion.ownerType === undefined
-                    || (
-                      exclusion.ownerType === candidate.ownerType
-                      && exclusion.ownerId === candidate.ownerId
-                    )
-                  ),
-              )
-            )
-          );
-        })
-        .sort(
-          (left, right) =>
-            Number(getStockRootLocationId(left) !== job.locationId)
-              - Number(getStockRootLocationId(right) !== job.locationId)
-            || (getStockRootLocationId(left) ?? 0) - (getStockRootLocationId(right) ?? 0),
-        )) {
-        if (remainingQuantity <= 0) break;
-        const allocatedQuantity = Math.min(remainingQuantity, item.quantity);
-        item.quantity -= allocatedQuantity;
-        remainingQuantity -= allocatedQuantity;
-      }
-      const availableQuantity = input.requiredQuantity - remainingQuantity;
+      const availableQuantity = getPlanningLedgerJobInputAvailability(
+        ledger,
+        {
+          activity,
+          jobTypeId: job.typeId,
+          ...(job.locationId === undefined ? {} : { jobLocationId: job.locationId }),
+          typeId: input.typeId,
+        },
+      );
       const completionPercent =
         input.requiredQuantity <= 0
           ? 100
@@ -3360,16 +3423,18 @@ function reconcileMergedManufacturingJobInputs(
               : ("blocked" as const),
       };
     });
+    const inputs = summarizePlanJobInputs(
+      job.inputs.blueprint,
+      materials,
+      {
+        bpoCount: job.inputs.bpoCount,
+        bpcRuns: job.inputs.bpcRuns,
+      },
+    );
     return {
       ...job,
-      inputs: summarizePlanJobInputs(
-        job.inputs.blueprint,
-        materials,
-        {
-          bpoCount: job.inputs.bpoCount,
-          bpcRuns: job.inputs.bpcRuns,
-        },
-      ),
+      runsAvailable: getInstallableRunsFromInputs(inputs, job.countNeeded),
+      inputs,
     };
   });
 }
@@ -4210,7 +4275,13 @@ async function reconcileMergedReactionProduction(
     );
     if (!product || product.quantity <= 0) continue;
 
-    const shortage = Math.max(0, entry.requiredQuantity - entry.availableStockQuantity);
+    const activeIndustryOutputQuantity = Object
+      .values(entry.availableSourceCounts ?? {})
+      .reduce((total, sourceCounts) => total + (sourceCounts?.industry ?? 0), 0);
+    const shortage = Math.max(
+      0,
+      entry.requiredQuantity - entry.stockQuantity - activeIndustryOutputQuantity,
+    );
     const targetProductionQuantity = Math.ceil(shortage / product.quantity) * product.quantity;
     const currentProductionQuantity = Math.max(
       0,
@@ -4300,7 +4371,7 @@ function reduceReactionFormulaRuns(
     updatedEntries[index] = { ...entry, runsNeeded: entry.runsNeeded - removedRuns };
     remainingRuns -= removedRuns;
   }
-  return updatedEntries;
+  return updatedEntries.filter((entry) => entry.kind !== "reaction" || entry.runsNeeded > 0);
 }
 
 function reduceReactionJobRuns(
@@ -4353,7 +4424,7 @@ function reduceReactionJobRuns(
     };
     remainingRuns -= removedRuns;
   }
-  return updatedEntries;
+  return updatedEntries.filter((entry) => entry.countNeeded > 0);
 }
 
 async function mergeStockpileResults(
@@ -4425,6 +4496,18 @@ async function mergeStockpileResults(
     const key = `${warning.code}:${warning.typeId}:${warning.locationId ?? "unlocated"}`;
     warningByKey.set(key, warning);
   }
+  const mergedReactionJobs = mergeReactionJobs(
+    results.flatMap((result) => result.lists.reactionJobs),
+  );
+  const mergedManufacturingJobs = mergeManufacturingJobs(
+    results.flatMap((result) => result.lists.manufacturingJobs),
+  );
+  const jobInputLedger = reserveMergedJobInputs(
+    ledger,
+    request,
+    mergedReactionJobs,
+    mergedManufacturingJobs,
+  );
   const mergedResult: PlanCalculation = {
     metadata: {
       generatedAt: new Date().toISOString(),
@@ -4445,10 +4528,11 @@ async function mergeStockpileResults(
       bpcsNeeded: mergedBpcRequirements.filter((entry) => entry.bpoCount > 0),
       bpcsToBuy: mergedBpcRequirements.filter((entry) => entry.bpoCount === 0),
       inventionJobs: mergeInventionJobs(results.flatMap((result) => result.lists.inventionJobs)),
-      reactionJobs: mergeReactionJobs(results.flatMap((result) => result.lists.reactionJobs)),
-      manufacturingJobs: reconcileMergedManufacturingJobInputs(
-        mergeManufacturingJobs(results.flatMap((result) => result.lists.manufacturingJobs)),
-        request,
+      reactionJobs: reconcileMergedJobInputs("reaction", mergedReactionJobs, jobInputLedger),
+      manufacturingJobs: reconcileMergedJobInputs(
+        "manufacturing",
+        mergedManufacturingJobs,
+        jobInputLedger,
       ),
       reprocessingJobs: results.flatMap((result) => result.lists.reprocessingJobs),
       skillsRequired: [...skillsById.values()],

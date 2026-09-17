@@ -19,6 +19,33 @@ export type PlanningLedgerAllocation = Readonly<{
   purpose: "stockpile-reservation";
 }>;
 
+/** Immutable reservation of one source lot for a merged industry job input. */
+export type PlanningLedgerJobInputReservation = Readonly<{
+  stockIndex: number;
+  quantity: number;
+  typeId: number;
+  sourceLocationId?: number;
+  ownerType?: "character" | "corporation";
+  ownerId?: number;
+  activity: "manufacturing" | "reaction";
+  jobTypeId: number;
+  jobLocationId?: number;
+  purpose: "job-input-reservation";
+}>;
+
+/** Identifies a merged industry job material input in the reservation ledger. */
+export type PlanningLedgerJobInputKey = Readonly<{
+  activity: "manufacturing" | "reaction";
+  jobTypeId: number;
+  jobLocationId?: number;
+  typeId: number;
+}>;
+
+type PlanningLedgerJobInputReservationRequest = Pick<
+  PlanningLedgerJobInputReservation,
+  "stockIndex" | "quantity" | "activity" | "jobTypeId" | "jobLocationId"
+>;
+
 type PlanningLedgerAllocationQuantity = Pick<
   PlanningLedgerAllocation,
   "stockIndex" | "stockpileIndex" | "quantity"
@@ -46,6 +73,7 @@ export type PlanningLedger = Readonly<{
   stockpileCount: number;
   stockpileDestinationLocationIds: readonly number[];
   phases: readonly PlanningLedgerPhase[];
+  jobInputReservations: readonly PlanningLedgerJobInputReservation[];
 }>;
 
 /** Creates the canonical ledger used to audit stockpile allocation phases. */
@@ -85,7 +113,47 @@ export function createPlanningLedger(
     stockpileCount,
     stockpileDestinationLocationIds: Object.freeze([...stockpileDestinationLocationIds]),
     phases: Object.freeze([]),
+    jobInputReservations: Object.freeze([]),
   });
+}
+
+/** Records source-conserving material reservations for merged manufacturing and reaction jobs. */
+export function recordPlanningLedgerJobInputReservations(
+  ledger: PlanningLedger,
+  reservationRequests: readonly PlanningLedgerJobInputReservationRequest[],
+): PlanningLedger {
+  const reservations = reservationRequests.map((reservation) => {
+    const sourceLot = ledger.sourceLots[reservation.stockIndex];
+    return {
+      ...reservation,
+      ...sourceLot,
+      purpose: "job-input-reservation" as const,
+    };
+  });
+  assertPlanningLedgerJobInputReservations(ledger.sourceQuantities, reservations);
+  return Object.freeze({
+    ...ledger,
+    jobInputReservations: Object.freeze(
+      reservations.map((reservation) => Object.freeze(reservation)),
+    ),
+  });
+}
+
+/** Returns the quantity reserved for a merged job material input. */
+export function getPlanningLedgerJobInputAvailability(
+  ledger: PlanningLedger,
+  key: PlanningLedgerJobInputKey,
+): number {
+  return ledger.jobInputReservations.reduce(
+    (total, reservation) =>
+      reservation.activity === key.activity
+      && reservation.jobTypeId === key.jobTypeId
+      && reservation.jobLocationId === key.jobLocationId
+      && reservation.typeId === key.typeId
+        ? total + reservation.quantity
+        : total,
+    0,
+  );
 }
 
 /** Captures immutable allocations for a completed phase and verifies lot conservation. */
@@ -209,6 +277,40 @@ export function assertPlanningLedgerConservation(
   for (const [stockIndex, allocatedQuantity] of allocatedByStockIndex) {
     if (allocatedQuantity > sourceQuantities[stockIndex]) {
       throw new Error(`Planning ledger over-allocated stock lot ${stockIndex}.`);
+    }
+  }
+}
+
+/** Verifies that job-input reservations are valid and do not over-allocate a source lot. */
+function assertPlanningLedgerJobInputReservations(
+  sourceQuantities: readonly number[],
+  reservations: readonly PlanningLedgerJobInputReservation[],
+): void {
+  const reservedByStockIndex = new Map<number, number>();
+  for (const reservation of reservations) {
+    if (
+      !Number.isInteger(reservation.stockIndex)
+      || reservation.stockIndex < 0
+      || reservation.stockIndex >= sourceQuantities.length
+      || !Number.isFinite(reservation.quantity)
+      || reservation.quantity < 0
+      || !Number.isInteger(reservation.jobTypeId)
+      || reservation.jobTypeId <= 0
+      || (
+        reservation.jobLocationId !== undefined
+        && !Number.isSafeInteger(reservation.jobLocationId)
+      )
+    ) {
+      throw new Error("Planning ledger contains an invalid job input reservation.");
+    }
+    reservedByStockIndex.set(
+      reservation.stockIndex,
+      (reservedByStockIndex.get(reservation.stockIndex) ?? 0) + reservation.quantity,
+    );
+  }
+  for (const [stockIndex, reservedQuantity] of reservedByStockIndex) {
+    if (reservedQuantity > sourceQuantities[stockIndex]) {
+      throw new Error(`Planning ledger over-allocated job input stock lot ${stockIndex}.`);
     }
   }
 }

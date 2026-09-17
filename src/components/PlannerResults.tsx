@@ -1530,11 +1530,10 @@ function PlanList({
               }),
           ]
         : entriesToCopy
-            .filter(
-              (entry) =>
-                (activeTab === "React" || activeTab === "Manufacture")
-                  ? getListAmount(entry) > 0
-                  : true,
+            .filter((entry) =>
+              activeTab === "React" || activeTab === "Manufacture"
+                ? getListAmount(entry) > 0
+                : true,
             )
             .map((entry) => `${getEntryName(entry)}\t${getListAmount(entry)}`);
     try {
@@ -1553,10 +1552,7 @@ function PlanList({
     try {
       await navigator.clipboard.writeText(
         list
-          .filter(
-            (entry) =>
-              "locationId" in entry && String(entry.locationId) === locationId,
-          )
+          .filter((entry) => "locationId" in entry && String(entry.locationId) === locationId)
           .filter((entry) => getListAmount(entry) > 0)
           .map((entry) => `${getEntryName(entry)}\t${getListAmount(entry)}`)
           .join("\n"),
