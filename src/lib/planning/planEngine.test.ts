@@ -4334,7 +4334,7 @@ void test("reserves abundant manufacturing inputs despite another blocked materi
           name: "Nocxium",
           quantity: 51_000,
           category: "item",
-          rootLocationId: sourceLocationId,
+          rootLocationId: manufacturingLocationId,
         },
       ],
       {
