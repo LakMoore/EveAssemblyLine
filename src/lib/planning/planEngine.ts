@@ -48,7 +48,7 @@ import {
   specialReprocessableTypeIds,
 } from "./reprocessStock";
 import { allocateStockpileStock } from "./stockpileAllocation";
-import type { PlanningLedger } from "./planningLedger";
+import { getFinalPlanningLedgerTransfers, type PlanningLedger } from "./planningLedger";
 import {
   getStockRootLocationId,
   isAvailableIndustryProductionOutput,
@@ -3053,7 +3053,12 @@ async function reconcileStockpilePlan(
   if (finalPhase?.name !== (request.stockpiles.length === 1 ? "single-stockpile" : "final")) {
     throw new Error("Stockpile allocation did not produce a final ledger phase.");
   }
-  const mergedResult = await mergeStockpileResults(stockpileResults, request.stock, request);
+  const mergedResult = await mergeStockpileResults(
+    stockpileResults,
+    request.stock,
+    request,
+    ledger,
+  );
   const restoredStock = restorePlanStockQuantities(mergedResult, request);
   const restoredSources = restorePlanSourceCounts(restoredStock, request.stock);
   return restorePlanResourceCounts(restoredSources, request.stock);
@@ -3127,35 +3132,27 @@ function capHaulingTasksToCapacity(
     .filter((task) => task.neededQuantity > 0);
 }
 
-/** Caps outbound hauling to surplus remaining after final-product demand at the source. */
-function capHaulingTasksToLocalStockpileSurplus(
+/** Caps ordinary stock hauling to final remote reservations in the allocation ledger. */
+function capNonProductionHaulingToLedgerReservations(
   tasks: PlanCalculation["lists"]["haulingTasks"],
-  stock: PlanStockItem[],
-  stockpiles: NonNullable<PlannerRequest["stockpiles"]>,
+  ledger: PlanningLedger,
 ) {
-  const stockByLocationAndType = getStockQuantitiesByLocationAndType(
-    stock,
-    (item) =>
-      item.category !== "blueprint"
-      && item.category !== "reactionformula"
-      && item.source !== "marketOrder"
-      && isAvailableIndustryProductionOutput(item),
-  );
-  const surplusByLocationAndType = new Map(stockByLocationAndType);
-  for (const stockpile of stockpiles) {
-    for (const item of stockpile.items) {
-      const key = locationTypeKey(stockpile.locations.stock, item.typeId);
-      surplusByLocationAndType.set(key, (surplusByLocationAndType.get(key) ?? 0) - item.quantity);
-    }
+  const reservedQuantityBySource = new Map<string, number>();
+  for (const transfer of getFinalPlanningLedgerTransfers(ledger)) {
+    if (transfer.sourceLocationId === undefined) continue;
+    const key = locationTypeKey(transfer.sourceLocationId, transfer.typeId);
+    reservedQuantityBySource.set(key, (reservedQuantityBySource.get(key) ?? 0) + transfer.quantity);
   }
-  for (const [key, quantity] of surplusByLocationAndType) {
-    surplusByLocationAndType.set(key, Math.max(0, quantity));
-  }
-  return capHaulingTasksToCapacity(
-    tasks,
-    surplusByLocationAndType,
-    (task) => locationTypeKey(task.fromLocationId, task.typeId),
-  );
+  const productionTasks = tasks.filter((task) => task.source === "production");
+  const stockTasks = tasks.filter((task) => task.source !== "production");
+  return [
+    ...productionTasks,
+    ...capHaulingTasksToCapacity(
+      stockTasks,
+      reservedQuantityBySource,
+      (task) => locationTypeKey(task.fromLocationId, task.typeId),
+    ),
+  ];
 }
 
 /** Caps inbound hauling to remaining material demand at the destination. */
@@ -4053,14 +4050,14 @@ async function mergeStockpileResults(
   results: PlanCalculation[],
   stock: PlanStockItem[],
   request: PlannerRequest,
+  ledger: PlanningLedger,
 ): Promise<PlanCalculation> {
   const mergedHaulingTasks = mergeHaulingTasks(
     results.flatMap((result) => result.lists.haulingTasks),
   );
-  const haulingTasks = capHaulingTasksToLocalStockpileSurplus(
+  const haulingTasks = capNonProductionHaulingToLedgerReservations(
     capHaulingTasksToDestinationDemand(mergedHaulingTasks, stock, results),
-    stock,
-    request.stockpiles,
+    ledger,
   );
   const buildableTypeIds = new Set(
     results.flatMap((result) =>

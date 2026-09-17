@@ -127,7 +127,7 @@ void test("rounds remaining minutes up and clamps expired jobs", () => {
 });
 
 void test("formats completed jobs as ready for delivery", () => {
-  assert.equal(nextIndustryJobDetail(0), "; Ready for Delivery");
+  assert.equal(nextIndustryJobDetail(0), "; next job ready for delivery");
   assert.equal(nextIndustryJobDetail(1), "; next job ends in 1 minutes");
   assert.equal(nextIndustryJobDetail(undefined), "");
 });

@@ -1,9 +1,28 @@
+/** Immutable source-lot metadata used to explain stockpile allocations. */
+export type PlanningLedgerSourceLot = Readonly<{
+  typeId: number;
+  sourceLocationId?: number;
+  ownerType?: "character" | "corporation";
+  ownerId?: number;
+}>;
+
 /** One source-lot allocation captured at the end of a planning phase. */
 export type PlanningLedgerAllocation = Readonly<{
   stockIndex: number;
   stockpileIndex: number;
   quantity: number;
+  typeId: number;
+  sourceLocationId?: number;
+  destinationLocationId: number;
+  ownerType?: "character" | "corporation";
+  ownerId?: number;
+  purpose: "stockpile-reservation";
 }>;
+
+type PlanningLedgerAllocationQuantity = Pick<
+  PlanningLedgerAllocation,
+  "stockIndex" | "stockpileIndex" | "quantity"
+>;
 
 /** Unfulfilled demand recorded for one stockpile at the end of a planning phase. */
 export type PlanningLedgerDemand = Readonly<{
@@ -22,24 +41,48 @@ export type PlanningLedgerPhase = Readonly<{
 /** Immutable audit trail for allocations made from the request's original stock lots. */
 export type PlanningLedger = Readonly<{
   sourceQuantities: readonly number[];
+  sourceLots: readonly PlanningLedgerSourceLot[];
   stockpileCount: number;
+  stockpileDestinationLocationIds: readonly number[];
   phases: readonly PlanningLedgerPhase[];
 }>;
 
 /** Creates the canonical ledger used to audit stockpile allocation phases. */
 export function createPlanningLedger(
   sourceQuantities: readonly number[],
-  stockpileCount: number,
+  sourceLots: readonly PlanningLedgerSourceLot[],
+  stockpileDestinationLocationIds: readonly number[],
 ): PlanningLedger {
+  const stockpileCount = stockpileDestinationLocationIds.length;
   if (!Number.isInteger(stockpileCount) || stockpileCount <= 0) {
     throw new Error("Planning ledger requires at least one stockpile.");
   }
   if (sourceQuantities.some((quantity) => !Number.isFinite(quantity) || quantity < 0)) {
     throw new Error("Planning ledger source quantities must be non-negative finite numbers.");
   }
+  if (sourceLots.length !== sourceQuantities.length) {
+    throw new Error("Planning ledger source metadata must match source quantities.");
+  }
+  if (
+    sourceLots.some(
+      (sourceLot) =>
+        !Number.isInteger(sourceLot.typeId)
+        || sourceLot.typeId <= 0
+        || (
+          sourceLot.sourceLocationId !== undefined
+          && !Number.isSafeInteger(sourceLot.sourceLocationId)
+        )
+        || (sourceLot.ownerId !== undefined && !Number.isSafeInteger(sourceLot.ownerId)),
+    )
+    || stockpileDestinationLocationIds.some((locationId) => !Number.isSafeInteger(locationId))
+  ) {
+    throw new Error("Planning ledger contains invalid source or destination metadata.");
+  }
   return Object.freeze({
     sourceQuantities: Object.freeze([...sourceQuantities]),
+    sourceLots: Object.freeze(sourceLots.map((sourceLot) => Object.freeze({ ...sourceLot }))),
     stockpileCount,
+    stockpileDestinationLocationIds: Object.freeze([...stockpileDestinationLocationIds]),
     phases: Object.freeze([]),
   });
 }
@@ -58,7 +101,14 @@ export function recordPlanningLedgerPhase(
     throw new Error(`Planning ledger phase ${name} has an unexpected stockpile count.`);
   }
   const allocations = allocationsByStockpile.flatMap((allocations, stockpileIndex) =>
-    [...allocations].map(([stockIndex, quantity]) => ({ stockIndex, stockpileIndex, quantity })),
+    [...allocations].map(([stockIndex, quantity]) => ({
+      stockIndex,
+      stockpileIndex,
+      quantity,
+      ...ledger.sourceLots[stockIndex],
+      destinationLocationId: ledger.stockpileDestinationLocationIds[stockpileIndex],
+      purpose: "stockpile-reservation" as const,
+    })),
   );
   const remainingDemand = remainingDemandByStockpile.flatMap((demand, stockpileIndex) =>
     [...demand].map(([typeId, quantity]) => ({ typeId, stockpileIndex, quantity })),
@@ -74,6 +124,17 @@ export function recordPlanningLedgerPhase(
     ...ledger,
     phases: Object.freeze([...ledger.phases, phase]),
   });
+}
+
+/** Returns final ordinary reservations that require stock to leave its source location. */
+export function getFinalPlanningLedgerTransfers(
+  ledger: PlanningLedger,
+): readonly PlanningLedgerAllocation[] {
+  return (ledger.phases.at(-1)?.allocations ?? []).filter(
+    (allocation) =>
+      allocation.sourceLocationId !== undefined
+      && allocation.sourceLocationId !== allocation.destinationLocationId,
+  );
 }
 
 /** Verifies that demand snapshots contain valid stockpile and type identifiers. */
@@ -100,7 +161,7 @@ function assertPlanningLedgerDemand(
 export function assertPlanningLedgerConservation(
   sourceQuantities: readonly number[],
   stockpileCount: number,
-  allocations: readonly PlanningLedgerAllocation[],
+  allocations: readonly PlanningLedgerAllocationQuantity[],
 ): void {
   const allocatedByStockIndex = new Map<number, number>();
   for (const allocation of allocations) {

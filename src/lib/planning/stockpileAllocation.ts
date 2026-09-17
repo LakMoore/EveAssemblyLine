@@ -188,7 +188,15 @@ export async function allocateStockpileStock(
 ): Promise<StockpileAllocation> {
   let ledger = createPlanningLedger(
     request.stock.map((item) => item.quantity),
-    stockpiles.length,
+    request.stock.map((item) => ({
+      typeId: item.typeId,
+      ...(getStockRootLocationId(item) !== undefined
+        ? { sourceLocationId: getStockRootLocationId(item) }
+        : {}),
+      ...(item.ownerType !== undefined ? { ownerType: item.ownerType } : {}),
+      ...(item.ownerId !== undefined ? { ownerId: item.ownerId } : {}),
+    })),
+    stockpiles.map((stockpile) => stockpile.locations.stock),
   );
   if (stockpiles.length === 1) {
     ledger = recordPlanningLedgerPhase(
