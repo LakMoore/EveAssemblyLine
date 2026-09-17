@@ -2,6 +2,7 @@ import type { SdeLanguage } from "@/lib/reference/languages";
 import type { AssemblyLineGroup, AssemblyLineGroups } from "@/lib/reference/assemblyLineGroups";
 import type { FacilityGroupBonus } from "./facilityBonuses";
 import type { ProductionGroupKey } from "./productionGroups";
+import type { PlanWarningCode } from "./warnings";
 
 // shape of build items passed between client and server
 export interface PlanBuildItem {
@@ -267,11 +268,22 @@ export type PlanSkillRequirement = {
   requiredLevel: number;
 };
 
+/** A compact warning returned by the planner and presented by the client. */
+export type PlanWarning = {
+  code: PlanWarningCode;
+  typeId: number;
+  locationId?: number;
+};
+
 interface ResponseMetadata {
   generatedAt: string;
   planId?: string;
   unresolvedAssetCount?: number;
   corporationAssetSources?: number[];
+}
+
+interface PlanCalculationMetadata extends ResponseMetadata {
+  warnings?: PlanWarning[];
 }
 
 interface ResponseJob {
@@ -460,7 +472,7 @@ export interface PlanCalculationLists {
 
 /** Calculation state retained only until the authoritative response is assembled. */
 export interface PlanCalculation {
-  metadata: ResponseMetadata;
+  metadata: PlanCalculationMetadata;
   lists: PlanCalculationLists;
   availableSourceCountsByType?: PlanSourceCountsByType;
   availableStockQuantitiesByLocationAndType?: Map<string, number>;
@@ -470,6 +482,7 @@ export interface PlanCalculation {
 export type PlanResponse = {
   metadata: ResponseMetadata;
   lists: {
+    warnings: ResponseLocationBucket<PlanWarning>[];
     planItems: ResponsePlanItems;
     materialsToBuy: AssemblyLineGroups<ResponseMaterialBuy>;
     bpcToCopy: ResponseLocationBucket<ResponseBlueprintCopy>[];

@@ -867,7 +867,13 @@ export async function allocateStockpileStock(
       allocation.set(stockIndex, quantity);
     }
   }
-  ledger = recordPlanningLedgerPhase(ledger, "final", allocations, remainingDemand);
+  ledger = recordPlanningLedgerPhase(
+    ledger,
+    "final",
+    allocations,
+    remainingDemand,
+    finalDemandByStockpile,
+  );
 
   return {
     stockpileStock: allocatedStockpileStock(),

@@ -32,6 +32,7 @@ import {
   splitReactionRunAllocations,
   type HaulItemExclusion,
 } from "@/lib/planning/planView";
+import { planWarningPresentation } from "@/lib/planning/warnings";
 import CopyableText from "@/components/CopyableText";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
@@ -57,6 +58,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Select,
   SelectContent,
@@ -81,12 +83,14 @@ import {
   Microscope,
   TestTubes,
   ShoppingCart,
+  TriangleAlert,
   ListTree,
   Truck,
   type LucideIcon,
 } from "lucide-react";
 
 export type PlannerTab =
+  | "Warnings"
   | "Plan"
   | "Haul"
   | "Buy"
@@ -98,6 +102,7 @@ export type PlannerTab =
   | "Skills";
 
 const tabs: { value: PlannerTab; icon: LucideIcon }[] = [
+  { value: "Warnings", icon: TriangleAlert },
   { value: "Plan", icon: ClipboardList },
   { value: "Haul", icon: Truck },
   { value: "Buy", icon: ShoppingCart },
@@ -854,6 +859,99 @@ function PlannerResultsContent({
   );
 }
 
+function PlannerWarnings({
+  warningBuckets,
+  locationNamesById,
+  typeNamesById,
+}: {
+  warningBuckets: PlanResponse["lists"]["warnings"];
+  locationNamesById: Map<number, string>;
+  typeNamesById: Map<number, string>;
+}) {
+  if (warningBuckets.length === 0) {
+    return (
+      <Empty className={styles.emptyResult}>
+        <div className={styles.resultGlyph}>✓</div>
+        <strong>No warnings</strong>
+        <EmptyDescription>The current plan has no calculation warnings.</EmptyDescription>
+      </Empty>
+    );
+  }
+  const sortedWarningBuckets = [...warningBuckets].sort((left, right) => {
+    const leftName = locationNamesById.get(left.locationId ?? 0) ?? "Location unavailable";
+    const rightName = locationNamesById.get(right.locationId ?? 0) ?? "Location unavailable";
+    return leftName.localeCompare(rightName);
+  });
+  return (
+    <div className={styles.planList}>
+      {sortedWarningBuckets.map((bucket) => (
+        <PlannerWarningGroup
+          key={bucket.locationId ?? "unlocated"}
+          bucket={bucket}
+          typeNamesById={typeNamesById}
+          locationName={
+            bucket.locationId === undefined
+              ? "Location unavailable"
+              : (locationNamesById.get(bucket.locationId) ?? `Location ${bucket.locationId}`)
+          }
+        />
+      ))}
+    </div>
+  );
+}
+
+function PlannerWarningGroup({
+  bucket,
+  locationName,
+  typeNamesById,
+}: {
+  bucket: PlanResponse["lists"]["warnings"][number];
+  locationName: string;
+  typeNamesById: Map<number, string>;
+}) {
+  const [isOpen, setIsOpen] = useState(true);
+  const avatarRows = bucket.items
+    .slice(0, 4)
+    .map((warning) => ({
+      typeId: warning.typeId,
+      name: typeNamesById.get(warning.typeId) ?? `Type ${warning.typeId}`,
+      imageVariation: "icon" as const,
+    }));
+  return (
+    <Collapsible className="group/plan-group" open={isOpen} onOpenChange={setIsOpen}>
+      <PlannerResultGroupHeader
+        label={locationName}
+        isOpen={isOpen}
+        avatarRows={avatarRows}
+        remainingCount={Math.max(0, bucket.items.length - avatarRows.length)}
+      />
+      <CollapsibleContent>
+        <div className="flex flex-col gap-2 py-2" role="list">
+          {bucket.items.map((warning) => (
+            <Alert key={`${warning.code}:${warning.typeId}`} role="listitem">
+              <div className="flex min-w-0 flex-col gap-2 md:flex-row md:items-start md:gap-4">
+                <TypeIdentity
+                  className="shrink-0"
+                  name={typeNamesById.get(warning.typeId) ?? `Type ${warning.typeId}`}
+                  typeId={warning.typeId}
+                  linkPath="planner"
+                  linkIcon={ClipboardList}
+                  linkHash="plan-breakdown"
+                  navigateInPlace
+                />
+                <div className="flex min-w-0 flex-col gap-0.5 text-right md:w-full md:justify-self-end">
+                  <AlertTitle>{planWarningPresentation[warning.code].title}</AlertTitle>
+                  <AlertDescription>{planWarningPresentation[warning.code].detail}</AlertDescription>
+                </div>
+              </div>
+            </Alert>
+          ))}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 function PlanList({
   activeTab,
   language,
@@ -967,6 +1065,7 @@ function PlanList({
     };
   });
   const planItems = plan.lists.planItems.all;
+  const warningBuckets = plan.lists.warnings;
   const planTypeOptions = [
     ...new Map(
       planItems.map((entry) => [entry.typeId, { id: entry.typeId, name: getEntryName(entry) }]),
@@ -1001,6 +1100,16 @@ function PlanList({
   );
   const disabledReactionJobKeys = disabledReactionJobKeysByPlan[planStateKey] ?? new Set<string>();
   const installedResultRowKeys = installedResultRowKeysByPlan[planStateKey] ?? new Set<string>();
+
+  if (activeTab === "Warnings") {
+    return (
+      <PlannerWarnings
+        warningBuckets={warningBuckets}
+        locationNamesById={locationNamesById}
+        typeNamesById={planTypeNamesById}
+      />
+    );
+  }
 
   function toggleSelectedResultRow(rowKey: string) {
     setSelectedResultRowKey((current) => (current === rowKey ? null : rowKey));

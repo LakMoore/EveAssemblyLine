@@ -65,6 +65,10 @@ function addPercentageModifier(multiplierValue: number, modifier: number) {
   return multiplierValue * (1 + modifier / 100);
 }
 
+function addMaterialPercentageModifier(multiplierValue: number, modifier: number | undefined) {
+  return modifier === undefined ? multiplierValue : multiplierValue + modifier / 100;
+}
+
 function securityClass(securityStatus: number | undefined) {
   if (securityStatus === undefined || securityStatus >= 0.5) return "high";
   return securityStatus > 0 ? "low" : "null";
@@ -89,9 +93,13 @@ function modifierValue(
   modifyingAttributeId: number,
 ) {
   const rigAttributes = attributesFor(rig);
-  const modifier = effectModifiers(rig, effects, modifyingAttributeId).find(
-    (entry) => entry.modifiedAttributeID === modifiedAttributeId,
-  );
+  const modifier =
+    effectModifiers(rig, effects, modifyingAttributeId).find(
+      (entry) => entry.modifiedAttributeID === modifiedAttributeId,
+    )
+    ?? (rig?.dogmaEffects ?? [])
+      .flatMap(({ effectID }) => effects.get(effectID)?.modifierInfo ?? [])
+      .find((entry) => entry.modifiedAttributeID === modifiedAttributeId);
   return modifier?.modifyingAttributeID === undefined
     ? undefined
     : rigAttributes.get(modifier.modifyingAttributeID);
@@ -217,9 +225,7 @@ export function calculateFacilityBonuses(
     reprocessingYield += rigAttributes.get(rigReprocessingAttribute) ?? 0;
   }
 
-  if (bestManufacturingMaterialModifier !== undefined) {
-    material = addPercentageModifier(material, bestManufacturingMaterialModifier);
-  }
+  material = addMaterialPercentageModifier(material, bestManufacturingMaterialModifier);
 
   return {
     manufacturing: {
@@ -250,6 +256,7 @@ export function calculateFacilityGroupBonuses(
   securityStatus?: number,
 ): Record<string, FacilityGroupBonus> {
   const structureAttributes = attributesFor(structure);
+  const structureMaterial = multiplier(structureAttributes.get(structureMaterialAttribute));
   const structureTime = multiplier(structureAttributes.get(structureTimeAttribute));
   const reactionTime = multiplier(
     structureAttributes.get(reactionStructureTimeMultiplierAttribute),
@@ -317,7 +324,10 @@ export function calculateFacilityGroupBonuses(
         );
         return value === undefined ? [] : [value];
       });
-      const manufacturingMaterialMultiplier = applyModifier(1, manufacturingMaterialModifier);
+      const manufacturingMaterialMultiplier = addMaterialPercentageModifier(
+        structureMaterial,
+        manufacturingMaterialModifier,
+      );
       const manufacturingTimeMultiplier = manufacturingTimeModifiers.reduce(
         applyModifier,
         structureTime,

@@ -25,6 +25,7 @@ import {
   PlanHaulTask,
   ResponseLocationBucket,
   PlanResponse,
+  PlanWarning,
   PlannerRequest,
   PlanCalculation,
   PlanSourceCounts,
@@ -33,6 +34,7 @@ import {
   PlanSourceIcon,
   PlanDemandSources,
   PlanStockItem,
+  BlueprintPrint,
   ResponsePlanItem,
   ResponsePlanItems,
   ResponseMaterial,
@@ -58,6 +60,11 @@ import {
 
 type Material = PlanCalculation["lists"]["materialsToBuy"][number];
 type Efficiency = { me: number; te: number };
+type ManufacturingRunAllocation = {
+  runs: number;
+  efficiency: Efficiency;
+  source: "bpo" | "bpc" | "fallback";
+};
 type StockLot = {
   typeId: number;
   quantity: number;
@@ -795,6 +802,7 @@ export function toPlanResponse(
       },
       lists: {
         ...otherLists,
+        warnings: locationBuckets(result.metadata.warnings ?? [], (entry) => entry.locationId),
         planItems: responsePlanItems,
         materialsToBuy: groupResponseMaterialEntries(materialPurchaseEntries),
         bpcToCopy: locationBuckets(blueprintCopyEntries, (entry) => entry.locationId),
@@ -1675,10 +1683,15 @@ async function calculatePlanPass(
   }
   const allBlueprintStockItems = request.stock.filter((item) => item.category === "blueprint");
   const blueprintCopyStock = new Map<number, { copies: number; runs: number }>();
+  const blueprintPrintsByLocation = new Map<string, BlueprintPrint[]>();
+  const blueprintCopiesByType = new Map<number, BlueprintPrint[]>();
+  const blueprintMaterialEfficiencyByLocation = new Map<string, number>();
+  const blueprintOriginalCountsByLocation = new Map<string, number>();
   const seenBlueprintPrints = new Set<number>();
   const blueprintOriginalCounts = new Map<number, number>();
   const blueprintInUseCounts = new Map<number, number>();
   for (const bpStockItem of allBlueprintStockItems) {
+    const locationId = getStockRootLocationId(bpStockItem);
     const existing = blueprintCopyStock.get(bpStockItem.typeId) ?? { copies: 0, runs: 0 };
     const prints = bpStockItem.blueprintPrints ?? [];
     const bpoPrints = prints.filter((print) => print.type === "bpo");
@@ -1686,6 +1699,40 @@ async function calculatePlanPass(
       bpStockItem.blueprintType === "bpo" ? bpStockItem.quantity : bpoPrints.length;
     const bposInUse = bpStockItem.inUse ? totalBpoCount : 0;
     const availableBpoCount = totalBpoCount - bposInUse;
+    const uniquePrints = prints.filter((print) => {
+      if (seenBlueprintPrints.has(print.itemId)) return false;
+      seenBlueprintPrints.add(print.itemId);
+      return true;
+    });
+    const copiesByType = blueprintCopiesByType.get(bpStockItem.typeId) ?? [];
+    blueprintCopiesByType.set(
+      bpStockItem.typeId,
+      [...copiesByType, ...uniquePrints.filter((print) => print.type === "bpc")],
+    );
+    if (locationId !== undefined) {
+      const locationKey = `${bpStockItem.typeId}:${locationId}`;
+      const printsAtLocation = blueprintPrintsByLocation.get(locationKey) ?? [];
+      blueprintPrintsByLocation.set(locationKey, [...printsAtLocation, ...uniquePrints]);
+      if (availableBpoCount > 0) {
+        blueprintOriginalCountsByLocation.set(
+          locationKey,
+          (blueprintOriginalCountsByLocation.get(locationKey) ?? 0) + availableBpoCount,
+        );
+      }
+      const addMaterialEfficiency = (efficiency: number | undefined) => {
+        const current = blueprintMaterialEfficiencyByLocation.get(locationKey);
+        const next = clampEfficiency(efficiency ?? 0, 10);
+        if (current === undefined || next > current) {
+          blueprintMaterialEfficiencyByLocation.set(locationKey, next);
+        }
+      };
+      if (bpStockItem.blueprintType === "bpo" || bpoPrints.length > 0) {
+        addMaterialEfficiency(prints.find((print) => print.type === "bpo")?.me ?? bpStockItem.me);
+      }
+      for (const print of prints) {
+        if (print.type === "bpc" && print.runs > 0) addMaterialEfficiency(print.me);
+      }
+    }
     if (availableBpoCount > 0) {
       blueprintOriginalCounts.set(
         bpStockItem.typeId,
@@ -1698,11 +1745,6 @@ async function calculatePlanPass(
         (blueprintInUseCounts.get(bpStockItem.typeId) ?? 0) + bposInUse,
       );
     }
-    const uniquePrints = prints.filter((print) => {
-      if (seenBlueprintPrints.has(print.itemId)) return false;
-      seenBlueprintPrints.add(print.itemId);
-      return true;
-    });
     if (prints.length > 0 && uniquePrints.length === 0) continue;
     const printRuns = uniquePrints
       .filter((print) => print.type === "bpc")
@@ -1781,15 +1823,23 @@ async function calculatePlanPass(
     efficiency: Efficiency,
     locationId: number | undefined,
     materialMultiplier = 1,
+    materialRunAllocations: readonly ManufacturingRunAllocation[] = [
+      { runs, efficiency, source: "fallback" },
+    ],
   ): PlanJobInputs {
     const activityData = blueprint.activities[activity];
     const materials = (activityData?.materials ?? []).map((material) => {
-      const adjustedRequiredQuantity = requiredMaterialQuantity(
-        activity,
-        material.quantity,
-        runs,
-        efficiency,
-        materialMultiplier,
+      const adjustedRequiredQuantity = materialRunAllocations.reduce(
+        (total, allocation) =>
+          total
+          + requiredMaterialQuantity(
+            activity,
+            material.quantity,
+            allocation.runs,
+            allocation.efficiency,
+            materialMultiplier,
+          ),
+        0,
       );
       const availableQuantity = getLocationQuantity(
         jobAvailableByLocationAndType,
@@ -1809,7 +1859,10 @@ async function calculatePlanPass(
         inBuildQuantity,
       );
     });
-    const bpoCount = blueprintOriginalCounts.get(blueprint._key) ?? 0;
+    const bpoCount =
+      locationId === undefined
+        ? 0
+        : (blueprintOriginalCountsByLocation.get(`${blueprint._key}:${locationId}`) ?? 0);
     const copyStock = blueprintCopyStock.get(blueprint._key);
     const availableBlueprintQuantity =
       activity === "reaction"
@@ -1877,6 +1930,7 @@ async function calculatePlanPass(
     );
   }
   const usedRunsByBlueprint = new Map<number, number>();
+  const usedRunsByBlueprintPrint = new Map<number, number>();
   const consumedMarketOrderStock = new Set<number>();
   const buildBlacklist = new Set(request.settings.buildBlacklist);
   const buildBlueprintsByTypeId = new Map<
@@ -1891,6 +1945,102 @@ async function calculatePlanPass(
   const reactionTimeMultiplier = request.facilityTimeMultipliers?.reactions ?? 1;
   const manufacturingSkillTimeMultiplier = request.skillTimeMultipliers?.manufacturing ?? 1;
   const reactionSkillTimeMultiplier = request.skillTimeMultipliers?.reactions ?? 1;
+  const zeroEfficiencyWarnings = new Map<string, PlanWarning>();
+  const insufficientBpcRunWarnings = new Map<string, PlanWarning>();
+
+  function manufacturingRunAllocations(
+    blueprintTypeId: number,
+    locationId: number | undefined,
+    runs: number,
+    fallbackEfficiency: Efficiency,
+  ): ManufacturingRunAllocation[] {
+    if (locationId === undefined || runs <= 0) {
+      return [{ runs, efficiency: fallbackEfficiency, source: "fallback" }];
+    }
+    const locationKey = `${blueprintTypeId}:${locationId}`;
+    const prints = blueprintPrintsByLocation.get(locationKey) ?? [];
+    const bpoCount = blueprintOriginalCountsByLocation.get(locationKey) ?? 0;
+    const bpoEfficiency = clampEfficiency(
+      prints
+        .filter((print) => print.type === "bpo")
+        .reduce(
+          (maximum, print) => Math.max(maximum, print.me ?? 0),
+          blueprintMaterialEfficiencyByLocation.get(locationKey) ?? 0,
+        ),
+      10,
+    );
+    const copies = (blueprintCopiesByType.get(blueprintTypeId) ?? [])
+      .filter((print) => print.runs > 0)
+      .sort(
+        (left, right) =>
+          (right.me ?? 0) - (left.me ?? 0) || right.runs - left.runs || left.itemId - right.itemId,
+      );
+    const bestCopyEfficiency = copies.reduce(
+      (maximum, print) => Math.max(maximum, print.me ?? 0),
+      0,
+    );
+    if (bpoCount > 0 && bpoEfficiency >= bestCopyEfficiency) {
+      return [
+        { runs, efficiency: { me: bpoEfficiency, te: fallbackEfficiency.te }, source: "bpo" },
+      ];
+    }
+
+    let remainingRuns = runs;
+    const allocations: ManufacturingRunAllocation[] = [];
+    for (const copy of copies) {
+      if (remainingRuns <= 0) break;
+      const usedRuns = usedRunsByBlueprintPrint.get(copy.itemId) ?? 0;
+      const copyRuns = Math.max(0, copy.runs - usedRuns);
+      const allocatedRuns = Math.min(remainingRuns, copyRuns);
+      if (allocatedRuns <= 0) continue;
+      usedRunsByBlueprintPrint.set(copy.itemId, usedRuns + allocatedRuns);
+      allocations.push({
+        runs: allocatedRuns,
+        efficiency: { me: clampEfficiency(copy.me ?? 0, 10), te: copy.te ?? fallbackEfficiency.te },
+        source: "bpc",
+      });
+      remainingRuns -= allocatedRuns;
+    }
+    if (remainingRuns > 0 && bpoCount > 0) {
+      allocations.push({
+        runs: remainingRuns,
+        efficiency: { me: bpoEfficiency, te: fallbackEfficiency.te },
+        source: "bpo",
+      });
+      remainingRuns = 0;
+    }
+    if (remainingRuns > 0) {
+      allocations.push({ runs: remainingRuns, efficiency: fallbackEfficiency, source: "fallback" });
+    }
+    return allocations;
+  }
+
+  function manufacturingEfficiency(
+    typeId: number,
+    blueprintTypeId: number,
+    locationId: number | undefined,
+    te: number,
+  ): Efficiency {
+    const warningKey = `${blueprintTypeId}:${locationId ?? "unlocated"}`;
+    const selectedEfficiency =
+      locationId === undefined
+        ? undefined
+        : blueprintMaterialEfficiencyByLocation.get(`${blueprintTypeId}:${locationId}`);
+    if (selectedEfficiency !== undefined) {
+      return { me: selectedEfficiency, te };
+    }
+    if (!zeroEfficiencyWarnings.has(warningKey)) {
+      zeroEfficiencyWarnings.set(
+        warningKey,
+        {
+          code: "manufacturing-blueprint-me-zero",
+          typeId,
+          ...(locationId === undefined ? {} : { locationId }),
+        },
+      );
+    }
+    return { me: 0, te };
+  }
 
   function activityProfile(typeId: number, activity: "manufacturing" | "reaction") {
     const group = productionGroupForType(typeRecords.get(typeId), groups, productionGroups);
@@ -2237,6 +2387,10 @@ async function calculatePlanPass(
         activity = candidate.activity;
         const profile = activityProfile(typeId, candidate.activity);
         const activityLocationId = profile.locationId;
+        const fallbackEfficiency =
+          candidate.activity === "manufacturing"
+            ? manufacturingEfficiency(typeId, blueprint._key, activityLocationId, efficiency.te)
+            : efficiency;
         const productionActivity =
           candidate.activity === "manufacturing"
             ? candidate.blueprint.activities.manufacturing
@@ -2250,6 +2404,39 @@ async function calculatePlanPass(
         }
         const productQuantity = product.quantity;
         const runsNeeded = Math.ceil(quantity / productQuantity);
+        const materialRunAllocations: ManufacturingRunAllocation[] =
+          candidate.activity === "manufacturing"
+            ? manufacturingRunAllocations(
+                blueprint._key,
+                activityLocationId,
+                runsNeeded,
+                fallbackEfficiency,
+              )
+            : [{ runs: runsNeeded, efficiency: fallbackEfficiency, source: "fallback" }];
+        if (
+          candidate.activity === "manufacturing"
+          && materialRunAllocations.some((allocation) => allocation.source !== "fallback")
+        ) {
+          zeroEfficiencyWarnings.delete(`${blueprint._key}:${activityLocationId ?? "unlocated"}`);
+        }
+        if (
+          candidate.activity === "manufacturing"
+          && materialRunAllocations.some((allocation) => allocation.source === "fallback")
+          && materialRunAllocations.some((allocation) => allocation.source === "bpc")
+          && (blueprintOriginalCountsByLocation.get(`${blueprint._key}:${activityLocationId}`) ?? 0)
+            === 0
+        ) {
+          const warningKey = `${blueprint._key}:${activityLocationId ?? "unlocated"}`;
+          insufficientBpcRunWarnings.set(
+            warningKey,
+            {
+              code: "manufacturing-bpc-runs-insufficient",
+              typeId,
+              ...(activityLocationId === undefined ? {} : { locationId: activityLocationId }),
+            },
+          );
+        }
+        const effectiveEfficiency = materialRunAllocations[0]?.efficiency ?? fallbackEfficiency;
         const producedQuantity = runsNeeded * productQuantity;
         updateMaterial(
           typeId,
@@ -2269,11 +2456,6 @@ async function calculatePlanPass(
 
         let remainingRuns = runsNeeded;
         const copyStock = blueprintCopyStock.get(blueprint._key);
-        const alreadyUsedRuns = usedRunsByBlueprint.get(blueprint._key) ?? 0;
-        const availableRuns = Math.max(0, (copyStock?.runs ?? 0) - alreadyUsedRuns);
-        const runsFromStock = Math.min(remainingRuns, availableRuns);
-        remainingRuns -= runsFromStock;
-        usedRunsByBlueprint.set(blueprint._key, alreadyUsedRuns + runsFromStock);
 
         if (activity === "manufacturing") {
           const manufacturingActivity = blueprint.activities.manufacturing;
@@ -2287,9 +2469,10 @@ async function calculatePlanPass(
             "manufacturing",
             blueprint,
             runsNeeded,
-            efficiency,
+            effectiveEfficiency,
             activityLocationId,
             profile.materialMultiplier,
+            materialRunAllocations,
           );
           const installableRuns = getInstallableRuns(jobInputs, runsNeeded);
           const materialInstallableRuns = getMaterialInstallableRuns(
@@ -2318,7 +2501,7 @@ async function calculatePlanPass(
               totalTime:
                 (existing?.totalTime ?? 0)
                 + manufacturingActivity.time
-                  * (1 - efficiency.te / 100)
+                  * (1 - effectiveEfficiency.te / 100)
                   * profile.timeMultiplier
                   * manufacturingSkillTimeMultiplier
                   * runsNeeded,
@@ -2331,12 +2514,17 @@ async function calculatePlanPass(
             "expand.materials",
             async () => {
               for (const material of blueprint.activities.manufacturing?.materials ?? []) {
-                const materialQuantity = requiredMaterialQuantity(
-                  "manufacturing",
-                  material.quantity,
-                  runsNeeded,
-                  efficiency,
-                  profile.materialMultiplier,
+                const materialQuantity = materialRunAllocations.reduce(
+                  (total, allocation) =>
+                    total
+                    + requiredMaterialQuantity(
+                      "manufacturing",
+                      material.quantity,
+                      allocation.runs,
+                      allocation.efficiency,
+                      profile.materialMultiplier,
+                    ),
+                  0,
                 );
                 await expand(
                   material.typeID,
@@ -2351,7 +2539,7 @@ async function calculatePlanPass(
                     "manufacturing",
                     material.quantity,
                     materialInstallableRuns,
-                    efficiency,
+                    effectiveEfficiency,
                     profile.materialMultiplier,
                   ),
                   activityLocationId,
@@ -2364,6 +2552,12 @@ async function calculatePlanPass(
             },
           );
           const bpoCount = blueprintOriginalCounts.get(blueprint._key) ?? 0;
+          const bpcRunsUsed = materialRunAllocations
+            .filter((allocation) => allocation.source === "bpc")
+            .reduce((total, allocation) => total + allocation.runs, 0);
+          const alreadyUsedRuns = usedRunsByBlueprint.get(blueprint._key) ?? 0;
+          usedRunsByBlueprint.set(blueprint._key, alreadyUsedRuns + bpcRunsUsed);
+          remainingRuns = Math.max(0, runsNeeded - bpcRunsUsed);
           if (bpoCount > 0 && remainingRuns > 0) {
             addRequiredSkills(blueprint.activities.copying?.skills);
           }
@@ -2925,6 +3119,7 @@ async function calculatePlanPass(
             .filter((id): id is number => id !== undefined),
         ),
       ],
+      warnings: [...zeroEfficiencyWarnings.values(), ...insufficientBpcRunWarnings.values()],
     },
     lists: {
       planItems,
@@ -4110,6 +4305,11 @@ async function mergeStockpileResults(
       }
     }
   }
+  const warningByKey = new Map<string, PlanWarning>();
+  for (const warning of results.flatMap((result) => result.metadata.warnings ?? [])) {
+    const key = `${warning.code}:${warning.typeId}:${warning.locationId ?? "unlocated"}`;
+    warningByKey.set(key, warning);
+  }
   const mergedResult: PlanCalculation = {
     metadata: {
       generatedAt: new Date().toISOString(),
@@ -4122,6 +4322,7 @@ async function mergeStockpileResults(
             .filter((id): id is number => id !== undefined),
         ),
       ],
+      ...(warningByKey.size > 0 ? { warnings: [...warningByKey.values()] } : {}),
     },
     lists: {
       planItems: results.flatMap((result) => result.lists.planItems),

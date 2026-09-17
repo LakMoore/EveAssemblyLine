@@ -33,6 +33,12 @@ const atmosphericGasesTypeId = 16634;
 const oxygenFuelBlockTypeId = 4312;
 const fuelReactionProductTypeId = 16659;
 const fuelReactionFormulaTypeId = 46167;
+const coreTemperatureRegulatorTypeId = 57479;
+const capitalCoreTemperatureRegulatorTypeId = 57487;
+const capitalCoreTemperatureRegulatorBlueprintTypeId = 57524;
+const charonTypeId = 20185;
+const charonBlueprintTypeId = 20186;
+const capitalArmorPlatesTypeId = 21017;
 const reprocessingLocationId = 10;
 const manufacturingLocationId = 20;
 const inventionLocationId = 30;
@@ -1196,6 +1202,73 @@ void test("requires one unit of manufacturing material per run after bonuses", a
   const powerCoreMaterial = result.lists.materialsToBuy.find((item) => item.typeId === 2872);
   assert(powerCoreMaterial);
   assert.equal(powerCoreMaterial.requiredQuantity, 27);
+});
+
+void test("applies blueprint ME and structure material bonuses to capital component inputs", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: capitalCoreTemperatureRegulatorBlueprintTypeId,
+          name: "Capital Core Temperature Regulator Blueprint",
+          quantity: 1,
+          category: "blueprint",
+          blueprintType: "bpo",
+          inUse: true,
+          te: 0,
+          rootLocationId: alternateSourceLocationId,
+          blueprintPrints: [{ itemId: 57524, type: "bpo", runs: -1, me: 10 }],
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: capitalCoreTemperatureRegulatorTypeId,
+            name: "Capital Core Temperature Regulator",
+            quantity: 3,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+        groupAssignments: { capitalComponents: alternateSourceLocationId },
+        facilityProfiles: [
+          {
+            locationId: alternateSourceLocationId,
+            sizeId: 1,
+            buildTypeGroups: {
+              capitalComponents: {
+                manufacturingMaterialMultiplier: 0.9197,
+                manufacturingMaterialPercentage: 8.03,
+                manufacturingTimeMultiplier: 1,
+                manufacturingTimePercentage: 0,
+                reactionMaterialMultiplier: 1,
+                reactionMaterialPercentage: 0,
+                reactionTimeMultiplier: 1,
+                reactionTimePercentage: 0,
+              },
+            },
+          },
+        ],
+      },
+    ),
+  );
+
+  const job = result.lists.manufacturingJobs.find(
+    (entry) => entry.typeId === capitalCoreTemperatureRegulatorBlueprintTypeId,
+  );
+  assert(job);
+  const coreTemperatureRegulator = job.inputs.materials.find(
+    (input) => input.typeId === coreTemperatureRegulatorTypeId,
+  );
+  assert(coreTemperatureRegulator);
+  assert.equal(coreTemperatureRegulator.requiredQuantity, 87);
+  const coreTemperatureRegulatorPurchase = result.lists.materialsToBuy.find(
+    (item) => item.typeId === coreTemperatureRegulatorTypeId,
+  );
+  assert(coreTemperatureRegulatorPurchase);
+  assert.equal(coreTemperatureRegulatorPurchase.requiredQuantity, 87);
 });
 
 void test("applies assigned reaction group facility modifiers", async () => {
@@ -3531,9 +3604,9 @@ void test("does not count hauled stock twice in aggregate purchases", async () =
 
   assert(material);
   assert(transfer);
-  assert.equal(material.requiredQuantity, 12_130);
+  assert.equal(material.requiredQuantity, 12_125);
   assert.equal(material.stockQuantity, 2_000);
-  assert.equal(material.buyQuantity, 5_124);
+  assert.equal(material.buyQuantity, 5_119);
   assert.equal(transfer.neededQuantity, 2_000);
 
   const response = await toPlanResponse(result);
@@ -3557,10 +3630,10 @@ void test("does not count hauled stock twice in aggregate purchases", async () =
   assert(destinationMaterial);
   assert(responsePurchase);
   assert.equal(sourceMaterial.availableQuantity, 7_006);
-  assert.equal(sourceMaterial.neededQuantity, 5_124);
+  assert.equal(sourceMaterial.neededQuantity, 5_119);
   assert.equal(destinationMaterial.availableQuantity, 2_000);
   assert.equal(destinationMaterial.neededQuantity, 0);
-  assert.equal(responsePurchase.neededQuantity, 5_124);
+  assert.equal(responsePurchase.neededQuantity, 5_119);
 });
 
 void test("hauls all remote stock needed for future material demand", async () => {
@@ -5386,6 +5459,170 @@ void test("reports manufacturing blueprint and material inputs", async () => {
   assert.equal(tritanium.availableQuantity, 32_000);
   assert.equal(tritanium.requiredQuantity, 32_000);
   assert.equal(tritanium.completionPercent, 100);
+});
+
+void test("uses the highest ME blueprint copy available at the manufacturing location", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: rifterBlueprintTypeId,
+          name: "Rifter Blueprint Copy",
+          quantity: 1,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [{ itemId: 9003, type: "bpc", runs: 1, me: 4 }],
+        },
+        {
+          typeId: rifterBlueprintTypeId,
+          name: "Rifter Blueprint Copy",
+          quantity: 1,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [{ itemId: 9004, type: "bpc", runs: 1, me: 10 }],
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const tritanium = result.lists.manufacturingJobs[0]?.inputs.materials.find(
+    (input) => input.typeId === tritaniumTypeId,
+  );
+
+  assert(tritanium);
+  assert.equal(tritanium.requiredQuantity, 28_800);
+  assert.deepEqual(result.metadata.warnings, undefined);
+});
+
+void test("rounds Charon material requirements for each selected one-run BPC", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: charonBlueprintTypeId,
+          name: "Charon Blueprint Copy",
+          quantity: 1,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [{ itemId: 9201, type: "bpc", runs: 1, me: 10 }],
+        },
+        {
+          typeId: charonBlueprintTypeId,
+          name: "Charon Blueprint Copy",
+          quantity: 1,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [{ itemId: 9202, type: "bpc", runs: 1, me: 10 }],
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: charonTypeId,
+            name: "Charon",
+            quantity: 2,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const capitalArmorPlates = result.lists.manufacturingJobs
+    .find((job) => job.typeId === charonBlueprintTypeId)
+    ?.inputs.materials.find((input) => input.typeId === capitalArmorPlatesTypeId);
+
+  assert(capitalArmorPlates);
+  assert.equal(capitalArmorPlates.requiredQuantity, 10);
+  assert.equal(
+    result.metadata.warnings?.some((warning) => warning.typeId === charonTypeId),
+    false,
+  );
+});
+
+void test("warns when owned BPC runs cannot cover a manufacturing requirement", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: charonBlueprintTypeId,
+          name: "Charon Blueprint Copy",
+          quantity: 1,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [{ itemId: 9203, type: "bpc", runs: 1, me: 10 }],
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: charonTypeId,
+            name: "Charon",
+            quantity: 2,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+
+  const warning = result.metadata.warnings?.find((entry) => entry.typeId === charonTypeId);
+
+  assert.equal(warning?.code, "manufacturing-bpc-runs-insufficient");
+});
+
+void test("warns when manufacturing has no usable local blueprint", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const response = await toPlanResponse(result);
+
+  assert.deepEqual(
+    response.lists.warnings,
+    [
+      {
+        locationId: manufacturingLocationId,
+        items: [
+          {
+            code: "manufacturing-blueprint-me-zero",
+            typeId: rifterTypeId,
+          },
+        ],
+      },
+    ],
+  );
 });
 
 void test("requires buying copies when the owned BPO is in use", async () => {

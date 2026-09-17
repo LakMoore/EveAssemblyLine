@@ -35,6 +35,7 @@ export type PlanningLedgerDemand = Readonly<{
 export type PlanningLedgerPhase = Readonly<{
   name: string;
   allocations: readonly PlanningLedgerAllocation[];
+  plannedDemand: readonly PlanningLedgerDemand[];
   remainingDemand: readonly PlanningLedgerDemand[];
 }>;
 
@@ -93,10 +94,15 @@ export function recordPlanningLedgerPhase(
   name: string,
   allocationsByStockpile: ReadonlyArray<ReadonlyMap<number, number>>,
   remainingDemandByStockpile: ReadonlyArray<ReadonlyMap<number, number>>,
+  plannedDemandByStockpile: ReadonlyArray<ReadonlyMap<number, number>> = Array.from(
+    { length: ledger.stockpileCount },
+    () => new Map(),
+  ),
 ): PlanningLedger {
   if (
     allocationsByStockpile.length !== ledger.stockpileCount
     || remainingDemandByStockpile.length !== ledger.stockpileCount
+    || plannedDemandByStockpile.length !== ledger.stockpileCount
   ) {
     throw new Error(`Planning ledger phase ${name} has an unexpected stockpile count.`);
   }
@@ -113,11 +119,16 @@ export function recordPlanningLedgerPhase(
   const remainingDemand = remainingDemandByStockpile.flatMap((demand, stockpileIndex) =>
     [...demand].map(([typeId, quantity]) => ({ typeId, stockpileIndex, quantity })),
   );
+  const plannedDemand = plannedDemandByStockpile.flatMap((demand, stockpileIndex) =>
+    [...demand].map(([typeId, quantity]) => ({ typeId, stockpileIndex, quantity })),
+  );
   assertPlanningLedgerConservation(ledger.sourceQuantities, ledger.stockpileCount, allocations);
+  assertPlanningLedgerDemand(ledger.stockpileCount, plannedDemand);
   assertPlanningLedgerDemand(ledger.stockpileCount, remainingDemand);
   const phase = Object.freeze({
     name,
     allocations: Object.freeze(allocations.map((allocation) => Object.freeze(allocation))),
+    plannedDemand: Object.freeze(plannedDemand.map((demand) => Object.freeze(demand))),
     remainingDemand: Object.freeze(remainingDemand.map((demand) => Object.freeze(demand))),
   });
   return Object.freeze({
@@ -135,6 +146,19 @@ export function getFinalPlanningLedgerTransfers(
       allocation.sourceLocationId !== undefined
       && allocation.sourceLocationId !== allocation.destinationLocationId,
   );
+}
+
+/** Groups the final unfulfilled demand snapshot by stockpile destination and type. */
+export function getFinalPlanningLedgerDemandByDestination(
+  ledger: PlanningLedger,
+): ReadonlyMap<string, number> {
+  const demandByDestination = new Map<string, number>();
+  for (const demand of ledger.phases.at(-1)?.remainingDemand ?? []) {
+    const destinationLocationId = ledger.stockpileDestinationLocationIds[demand.stockpileIndex];
+    const key = `${destinationLocationId}:${demand.typeId}`;
+    demandByDestination.set(key, (demandByDestination.get(key) ?? 0) + demand.quantity);
+  }
+  return demandByDestination;
 }
 
 /** Verifies that demand snapshots contain valid stockpile and type identifiers. */

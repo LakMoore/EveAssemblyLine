@@ -89,6 +89,7 @@ void test("captures independent immutable phase outputs", () => {
     "ordinary",
     scenario.allocationsByStockpile,
     [new Map([[34, 20]]), new Map([[35, 10]])],
+    [new Map([[34, 70]]), new Map([[35, 40]])],
   );
 
   scenario.sourceQuantities[0] = 0;
@@ -125,6 +126,13 @@ void test("captures independent immutable phase outputs", () => {
         destinationLocationId: 400,
         purpose: "stockpile-reservation",
       },
+    ],
+  );
+  assert.deepEqual(
+    recorded.phases[0].plannedDemand,
+    [
+      { stockpileIndex: 0, typeId: 34, quantity: 70 },
+      { stockpileIndex: 1, typeId: 35, quantity: 40 },
     ],
   );
   assert.deepEqual(

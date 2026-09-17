@@ -74,6 +74,11 @@ const smallShips =
   ?? (() => {
     throw new Error("Small ships production group is missing.");
   })();
+const capitalComponents =
+  productionGroupDefinitions.find((definition) => definition.targetFilterId === 13)
+  ?? (() => {
+    throw new Error("Capital Components production group is missing.");
+  })();
 
 void test("resolves target-filter memberships and localized group names", () => {
   const references = getProductionGroupReferences(
@@ -100,7 +105,7 @@ void test("resolves target-filter memberships and localized group names", () => 
 
 void test("applies a rig only to its matching group and scales low-security bonuses", () => {
   const structure = dogmaRecord([
-    { attributeID: 2600, value: 1 },
+    { attributeID: 2600, value: 0.98 },
     { attributeID: 2601, value: 1 },
     { attributeID: 2721, value: 1 },
   ]);
@@ -140,9 +145,9 @@ void test("applies a rig only to its matching group and scales low-security bonu
     0.1,
   );
 
-  assert.equal(bonuses.mediumShips.manufacturingMaterialMultiplier, 0.96);
+  assert.equal(bonuses.mediumShips.manufacturingMaterialMultiplier, 0.94);
   assert.equal(bonuses.mediumShips.manufacturingTimeMultiplier, 0.9);
-  assert.equal(bonuses.smallShips.manufacturingMaterialMultiplier, 1);
+  assert.equal(bonuses.smallShips.manufacturingMaterialMultiplier, 0.98);
   assert.equal(bonuses.smallShips.manufacturingTimeMultiplier, 1);
 });
 
@@ -191,8 +196,53 @@ void test("applies a broad Ships rig to every ship subgroup", () => {
     0.1,
   );
 
-  assert.ok(Math.abs(bonuses.smallShips.manufacturingMaterialPercentage + 3.8) < 1e-9);
-  assert.ok(Math.abs(bonuses.largeShips.manufacturingMaterialPercentage + 3.8) < 1e-9);
-  assert.ok(Math.abs(bonuses.charges.manufacturingMaterialPercentage) < 1e-9);
-  assert.ok(Math.abs(bonuses.drones.manufacturingMaterialPercentage) < 1e-9);
+  assert.ok(Math.abs(bonuses.smallShips.manufacturingMaterialPercentage + 4.8) < 1e-9);
+  assert.ok(Math.abs(bonuses.largeShips.manufacturingMaterialPercentage + 4.8) < 1e-9);
+  assert.ok(Math.abs(bonuses.charges.manufacturingMaterialPercentage + 1) < 1e-9);
+  assert.ok(Math.abs(bonuses.drones.manufacturingMaterialPercentage + 1) < 1e-9);
+});
+
+void test("applies a capital component rig through its specialized material attribute", () => {
+  const structure = dogmaRecord([{ attributeID: 2600, value: 0.99 }]);
+  const rig = dogmaRecord([
+    { attributeID: 2356, value: 1.9 },
+    { attributeID: 2653, value: -3.7 },
+  ]);
+  const effect: DogmaEffectsRecord = {
+    ...effectRecord(),
+    modifierInfo: [
+      {
+        domain: "structureID",
+        func: "ItemModifier",
+        modifiedAttributeID: 2559,
+        modifyingAttributeID: 2653,
+      },
+    ],
+  };
+  const bonuses = calculateFacilityGroupBonuses(
+    structure,
+    [45548],
+    new Map([[45548, rig]]),
+    new Map([[0, effect]]),
+    new Map([
+      [
+        45548,
+        {
+          _key: 45548,
+          manufacturing: { material: [{ dogmaAttributeID: 2559, filterID: 13 }] },
+        },
+      ],
+    ]),
+    [
+      {
+        ...capitalComponents,
+        groupIds: [],
+        categoryIds: [],
+        localizedGroupNames: {},
+      },
+    ],
+    0.1,
+  );
+
+  assert.ok(Math.abs(bonuses.capitalComponents.manufacturingMaterialMultiplier - 0.9197) < 1e-9);
 });
