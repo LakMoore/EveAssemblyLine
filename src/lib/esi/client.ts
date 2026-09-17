@@ -35,6 +35,8 @@ const structureMetadataCache = new Map<
   { expiresAt: number; response: LocationMetadataResponse }
 >();
 const structureMetadataCacheTtlMs = 60 * 60 * 1000;
+// Keep the guard conservative; EVE's spawned-item range begins at 1 billion.
+const minimumStructureId = 1_000_000_000;
 let esiRateLimitedUntil = 0;
 
 type EsiRateLimitHeaders = {
@@ -1268,6 +1270,14 @@ export function fetchIndustrySystems() {
  * @returns The structure metadata response.
  */
 export async function fetchStructureMetadataPerCharacter(structureId: number, token: TokenSet) {
+  if (structureId < minimumStructureId) {
+    return {
+      data: null,
+      headers: new Headers(),
+      status: 400,
+      fromCache: false,
+    } satisfies LocationMetadataResponse;
+  }
   const characterId = tokenContexts.get(token)?.characterId;
   if (characterId === undefined) {
     throw new Error("Structure metadata requires a character-associated token.");

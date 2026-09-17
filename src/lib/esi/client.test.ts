@@ -249,6 +249,25 @@ void test("scopes structure metadata failures to the character token", async (t)
   assert.deepEqual(requests, ["Bearer first-access-token", "Bearer second-access-token"]);
 });
 
+void test("does not request sub-billion IDs as structures", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  let requestCount = 0;
+  globalThis.fetch = async () => {
+    requestCount += 1;
+    return Response.json({ name: "Unexpected structure" });
+  };
+
+  const result = await fetchStructureMetadataPerCharacter(3007, token);
+
+  assert.equal(result.status, 400);
+  assert.equal(result.data, null);
+  assert.equal(requestCount, 0);
+});
+
 void test("fetches active industry jobs and excludes unusable terminal jobs", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
