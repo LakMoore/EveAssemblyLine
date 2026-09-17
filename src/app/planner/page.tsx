@@ -125,6 +125,7 @@ import {
   Upload,
 } from "lucide-react";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
+import { cn } from "@/lib/utils";
 import PasteListDialog from "@/components/PasteListDialog";
 import {
   PlannerStockpileDetailsDialog,
@@ -2081,14 +2082,26 @@ function PlannerStockpileSummary({
   const remainingProductCount = stockpile.items.length - productAvatarItems.length;
 
   return (
-    <article className="grid min-w-0 gap-3 border p-4">
+    <article
+      className={cn(
+        "grid min-w-0 gap-3 border p-4",
+        stockpile.isActive === false && "opacity-60",
+      )}
+    >
       <div className="flex min-w-0 flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-start">
         <div className="flex min-w-0 flex-1 flex-row items-center gap-3">
-          <Switch
-            aria-label={`Toggle ${stockpile.name}`}
-            checked={stockpile.isActive !== false}
-            onCheckedChange={onActiveChange}
-          />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Switch
+                  aria-label={`Toggle ${stockpile.name}`}
+                  checked={stockpile.isActive !== false}
+                  onCheckedChange={onActiveChange}
+                />
+              }
+            />
+            <TooltipContent>Include this Stockpile?</TooltipContent>
+          </Tooltip>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2">
               <h3 className="truncate text-base font-medium">{stockpile.name}</h3>
