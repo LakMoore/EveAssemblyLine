@@ -1,6 +1,11 @@
 import type { PlanningData } from "./planEngine";
 import { getBuildBlueprintByProductTypeId } from "@/cache/services/sdeCache";
 import type { RequestProfiler } from "@/lib/server/profiling";
+import {
+  createPlanningLedger,
+  recordPlanningLedgerPhase,
+  type PlanningLedger,
+} from "./planningLedger";
 import type {
   PlanActivityLocations,
   PlanCalculation,
@@ -26,6 +31,7 @@ type StockpileDemandResult = {
 export type StockpileAllocation = {
   stockpileStock: PlanStockItem[][];
   blockedInputStock: PlanStockItem[][];
+  ledger: PlanningLedger;
 };
 
 type CalculatePlanPass = (
@@ -180,10 +186,20 @@ export async function allocateStockpileStock(
   futureStockIndexes = new Set<number>(),
   profiler?: RequestProfiler,
 ): Promise<StockpileAllocation> {
+  let ledger = createPlanningLedger(
+    request.stock.map((item) => item.quantity),
+    stockpiles.length,
+  );
   if (stockpiles.length === 1) {
+    ledger = recordPlanningLedgerPhase(
+      ledger,
+      "single-stockpile",
+      [new Map(request.stock.map((item, index) => [index, item.quantity]))],
+    );
     return {
       stockpileStock: [request.stock.map((item) => ({ ...item }))],
       blockedInputStock: [[]],
+      ledger,
     };
   }
   const stockpileEntries = stockpiles.map((stockpile, stockpileIndex) => ({
@@ -686,6 +702,7 @@ export async function allocateStockpileStock(
         reactionJobInputDemandByStockpile,
       ),
   );
+  ledger = recordPlanningLedgerPhase(ledger, "ordinary", allocations);
   const ordinaryStockpileStock = ordinaryStockpileAllocation.stockpileStock;
   const ordinaryStockpileResults = await measureProfiled(
     profiler,
@@ -739,6 +756,7 @@ export async function allocateStockpileStock(
         ordinaryReactionJobInputDemandByStockpile,
       ),
   );
+  ledger = recordPlanningLedgerPhase(ledger, "corrected", allocations);
   const correctedStockpileStock = correctedStockpileAllocation.stockpileStock;
   const specialDemandByStockpile: StockpileDemand[] = await measureProfiled(
     profiler,
@@ -797,6 +815,7 @@ export async function allocateStockpileStock(
     }
   }
   allocateTypes(specialTypeIds, specialDemandByStockpile);
+  ledger = recordPlanningLedgerPhase(ledger, "special", allocations);
 
   const specialAllocations = allocations.map((allocation) =>
     [...allocation.entries()].filter(([stockIndex]) =>
@@ -856,9 +875,11 @@ export async function allocateStockpileStock(
       allocation.set(stockIndex, quantity);
     }
   }
+  ledger = recordPlanningLedgerPhase(ledger, "final", allocations);
 
   return {
     stockpileStock: allocatedStockpileStock(),
     blockedInputStock: finalStockpileAllocation.blockedInputStock,
+    ledger,
   };
 }
