@@ -191,6 +191,12 @@ export async function allocateStockpileStock(
     stockpileIndex,
     activityLocationIds: stockpileActivityLocations(stockpile),
   }));
+  const stockIndexesByTypeId = new Map<number, { item: PlanStockItem; index: number }[]>();
+  for (const [index, item] of request.stock.entries()) {
+    const stockIndexes = stockIndexesByTypeId.get(item.typeId) ?? [];
+    stockIndexes.push({ item, index });
+    stockIndexesByTypeId.set(item.typeId, stockIndexes);
+  }
   const reprocessableTypeIdsByMaterial = new Map<number, number[]>();
   const reprocessableTypeIds = new Set([
     ...planningData.compressibleTypes.values(),
@@ -368,9 +374,8 @@ export async function allocateStockpileStock(
     ];
     remainingDemand = demandByPriority.map((demand) => new Map(demand));
     for (const { stockTypeId, demandTypeId } of allocationPairs) {
-      const stockIndexes = request.stock
-        .map((item, index) => ({ item, index }))
-        .filter(({ item, index }) => {
+      const stockIndexes = (stockIndexesByTypeId.get(stockTypeId) ?? []).filter(
+        ({ item, index }) => {
           if (item.typeId !== stockTypeId || remainingStock[index] <= 0) return false;
           if (item.category !== "reactionformula") return true;
           return stockpiles.some(
@@ -378,7 +383,8 @@ export async function allocateStockpileStock(
               (remainingDemand[stockpileIndex].get(demandTypeId) ?? 0) > 0
               && getStockRootLocationId(item) === stockpile.locations.reactions,
           );
-        });
+        },
+      );
       for (const { stockpile, stockpileIndex } of [...stockpileEntries].sort(
         (left, right) =>
           (remainingDemand[right.stockpileIndex].get(demandTypeId) ?? 0)
@@ -406,7 +412,7 @@ export async function allocateStockpileStock(
               preferActivityLocations
               && item.category !== "reactionformula"
               && stockLocationId !== undefined
-              && !stockpileActivityLocations(stockpile).has(stockLocationId)
+              && !stockpileEntries[stockpileIndex].activityLocationIds.has(stockLocationId)
             )
             || !canUseFutureStock(index, stockpileIndex)
           ) continue;
@@ -479,7 +485,7 @@ export async function allocateStockpileStock(
               preferActivityLocations
               && item.category !== "reactionformula"
               && itemRootLocationId !== undefined
-              && !stockpileActivityLocations(stockpiles[stockpileIndex]).has(itemRootLocationId)
+              && !stockpileEntries[stockpileIndex].activityLocationIds.has(itemRootLocationId)
               && !isReprocessableSourceForDemand(stockTypeId, demandTypeId)
             )
             || (
