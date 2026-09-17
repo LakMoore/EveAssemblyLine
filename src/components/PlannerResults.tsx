@@ -34,6 +34,7 @@ import {
 } from "@/lib/planning/planView";
 import { planWarningPresentation } from "@/lib/planning/warnings";
 import CopyableText from "@/components/CopyableText";
+import { getDisplayedActivityQuantity } from "@/lib/planning/activityQuantities";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import JobInputsResponsive, {
@@ -1454,6 +1455,25 @@ function PlanList({
   }
 
   function getListAmount(entry: PlanBuyEntry | (typeof list)[number]): number {
+    const countNeeded = "countNeeded" in entry ? entry.countNeeded : undefined;
+    const runsAvailable = "runsAvailable" in entry ? entry.runsAvailable : undefined;
+    if (
+      activeTab === "React"
+      && typeof countNeeded === "number"
+      && typeof runsAvailable === "number"
+    ) {
+      return getDisplayedActivityQuantity({ countNeeded, runsAvailable }, showTotalRunCounts);
+    }
+    if (
+      activeTab === "Manufacture"
+      && typeof countNeeded === "number"
+      && typeof runsAvailable === "number"
+    ) {
+      return getDisplayedActivityQuantity(
+        { countNeeded, runsAvailable },
+        showTotalManufacturingRunCounts,
+      );
+    }
     return activeTab === "Copy"
       && "kind" in entry
       && entry.kind === "bpc"
@@ -1494,6 +1514,7 @@ function PlanList({
   }
 
   async function copyList() {
+    const entriesToCopy = activeTab === "Buy" ? materialBuyEntries : list;
     const lines =
       activeTab === "Plan"
         ? [
@@ -1508,9 +1529,14 @@ function PlanList({
                 ].join("\t");
               }),
           ]
-        : (activeTab === "Buy" ? materialBuyEntries : list).map((entry) => {
-            return `${getEntryName(entry)}\t${getListAmount(entry)}`;
-          });
+        : entriesToCopy
+            .filter(
+              (entry) =>
+                (activeTab === "React" || activeTab === "Manufacture")
+                  ? getListAmount(entry) > 0
+                  : true,
+            )
+            .map((entry) => `${getEntryName(entry)}\t${getListAmount(entry)}`);
     try {
       await navigator.clipboard.writeText(lines.join("\n"));
       setCopyStatus("Copied");
@@ -1520,6 +1546,33 @@ function PlanList({
     catch {
       setCopyStatus("Copy failed");
       toast.add({ description: "Could not copy to clipboard", type: "error" });
+    }
+  }
+
+  async function copyGroupList(locationId: string) {
+    try {
+      await navigator.clipboard.writeText(
+        list
+          .filter(
+            (entry) =>
+              "locationId" in entry && String(entry.locationId) === locationId,
+          )
+          .filter((entry) => getListAmount(entry) > 0)
+          .map((entry) => `${getEntryName(entry)}\t${getListAmount(entry)}`)
+          .join("\n"),
+      );
+      setGroupCopyStatus({ category: locationId, label: "Copied" });
+      toast.add({ description: `List copied to clipboard` });
+      window.setTimeout(
+        () => {
+          setGroupCopyStatus(null);
+        },
+        1600,
+      );
+    }
+    catch {
+      setGroupCopyStatus({ category: locationId, label: "Copy failed" });
+      toast.add({ description: "Could not copy multibuy group", type: "error" });
     }
   }
 
@@ -1725,12 +1778,16 @@ function PlanList({
                               String(locationId),
                               entries as unknown as PlanBuyEntry[],
                             )
-                        : undefined
+                        : activeTab === "React" || activeTab === "Manufacture"
+                          ? () => void copyGroupList(String(locationId))
+                          : undefined
                     }
                     copyLabel={
                       groupCopyStatus?.category === String(locationId)
                         ? groupCopyStatus.label
-                        : "Copy Group Multibuy"
+                        : categoryGroupedTab
+                          ? "Copy Group Multibuy"
+                          : "Copy Location List"
                     }
                   />
                 )}
@@ -1792,9 +1849,7 @@ function PlanList({
                     const isSplitReactionRow = rowSchedules.length > 1;
                     const totalNeeded =
                       activeTab === "React" && "countNeeded" in entry && "runsAvailable" in entry
-                        ? showTotalRunCounts
-                          ? entry.countNeeded
-                          : entry.runsAvailable
+                        ? getDisplayedActivityQuantity(entry, showTotalRunCounts)
                         : null;
                     const scheduledRuns = rowSchedules.reduce(
                       (total, schedule) => total + schedule.totalRuns,
@@ -1895,9 +1950,10 @@ function PlanList({
                     const manufacturingEntry =
                       activeTab === "Manufacture" ? (entry as ResponseManufacturingJob) : null;
                     const manufacturingDisplayedRuns = manufacturingEntry
-                      ? showTotalManufacturingRunCounts
-                        ? manufacturingEntry.countNeeded
-                        : manufacturingEntry.runsAvailable
+                      ? getDisplayedActivityQuantity(
+                          manufacturingEntry,
+                          showTotalManufacturingRunCounts,
+                        )
                       : 0;
                     const manufacturingDisplayedTime =
                       manufacturingEntry && manufacturingEntry.countNeeded > 0

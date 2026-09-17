@@ -2347,20 +2347,6 @@
   gap: 10px;
 }
 
-.locationGroupHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 18px 0 0;
-  padding-top: 12px;
-  border-top: 2px solid var(--border);
-  color: var(--foreground);
-  font: 12px "DM Mono";
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-}
-
 .copySummary {
   display: flex;
   align-items: baseline;
