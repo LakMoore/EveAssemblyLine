@@ -70,6 +70,7 @@ function isClientPlanStockpile(value: unknown): value is ClientPlanStockpile {
     && stockpile.id.length > 0
     && typeof stockpile.name === "string"
     && stockpile.name.trim().length > 0
+    && (stockpile.isActive === undefined || typeof stockpile.isActive === "boolean")
     && (
       stockpile.kind === undefined
       || stockpile.kind === "standard"

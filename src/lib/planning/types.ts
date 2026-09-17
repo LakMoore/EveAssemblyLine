@@ -57,6 +57,7 @@ export interface ClientBuildItem extends BuildItem {
 }
 
 export interface ClientPlanStockpile extends Omit<PlanStockpile, "items"> {
+  isActive?: boolean;
   items: ClientBuildItem[];
 }
 

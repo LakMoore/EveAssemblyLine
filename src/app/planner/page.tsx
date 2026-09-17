@@ -1,6 +1,7 @@
 "use client";
 
 import { type ChangeEvent, FormEvent, type RefObject, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import Link from "next/link";
 import type {
   ClientBuildItem,
@@ -210,6 +211,19 @@ function getReconciledExcludedLocationIds(
   return excludedLocationIds.filter((locationId) => !stockpileLocations.has(locationId));
 }
 
+/**
+ * Waits until the browser has had an opportunity to paint the current React update.
+ *
+ * @returns A promise that resolves after the next paint.
+ */
+function waitForNextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
 function retainCurrentHaulItemExclusions(
   assets: ClientAssetsResponse,
   exclusions: HaulItemExclusion,
@@ -337,6 +351,7 @@ function createPlannerStockpile(
   return {
     id: `stockpile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     name,
+    isActive: true,
     locations: stockpileLocationsFromPlannerLocations(locations),
     items,
   };
@@ -359,6 +374,7 @@ function isImportedPlan(value: unknown): value is {
     return (
       typeof candidate.id === "string"
       && typeof candidate.name === "string"
+      && (candidate.isActive === undefined || typeof candidate.isActive === "boolean")
       && Array.isArray(candidate.items)
       && candidate.items.every(
         (item) =>
@@ -729,13 +745,18 @@ function Planner() {
     itemExclusions: HaulItemExclusion = haulItemExclusion,
     patches: ReadonlyMap<string, HaulPatch> = activeHaulPatches,
   ): Promise<boolean> {
-    const plannerItems = stockpiles.flatMap((stockpile) => stockpile.items);
+    const activeStockpiles = stockpiles.filter((stockpile) => stockpile.isActive !== false);
+    const plannerItems = activeStockpiles.flatMap((stockpile) => stockpile.items);
     if (plannerItems.length === 0 || isPlanLoading) return false;
-    setIsPlanLoading(true);
-    setPlanStatus("Calculating...");
-    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    flushSync(() => {
+      setIsPlanLoading(true);
+      setPlanStatus("Calculating...");
+    });
+    await waitForNextPaint();
     try {
-      const populatedStockpiles = stockpiles.filter((stockpile) => stockpile.items.length > 0);
+      const populatedStockpiles = activeStockpiles.filter(
+        (stockpile) => stockpile.items.length > 0,
+      );
       const missingEfficiencies = populatedStockpiles.some(
         (stockpile) => Object.keys(stockpile.reprocessingEfficiencies ?? {}).length === 0,
       );
@@ -827,7 +848,11 @@ function Planner() {
       }
       const calculatedPlan = applyHaulItemExclusionsToPlan(data as PlanResponse, itemExclusions);
       await savePlanResponse(calculatedPlan);
-      setPlan(calculatedPlan);
+      flushSync(() => {
+        setHaulItemExclusion(new Map(itemExclusions));
+        setHaulPatches(new Map(patches));
+        setPlan(calculatedPlan);
+      });
       await savePlannerLocations(locations);
       setPlanStatus("Plan updated just now");
       return true;
@@ -1384,6 +1409,13 @@ function Planner() {
                   onEditDetails={() => openStockpileDetails(stockpile)}
                   onEditItems={() => openStockpileItems(stockpile)}
                   onRemove={() => requestStockpileRemoval(stockpile)}
+                  onActiveChange={(isActive) =>
+                    setStockpiles((current) =>
+                      current.map((existing) =>
+                        existing.id === stockpile.id ? { ...existing, isActive } : existing,
+                      ),
+                    )
+                  }
                 />
               ))
             )}
@@ -1421,7 +1453,10 @@ function Planner() {
               type="button"
               className="ml-auto"
               disabled={
-                isPlanLoading || stockpiles.every((stockpile) => stockpile.items.length === 0)
+                isPlanLoading
+                || stockpiles.every(
+                  (stockpile) => stockpile.isActive === false || stockpile.items.length === 0,
+                )
               }
               icon={ClipboardList}
               isLoading={isPlanLoading}
@@ -2031,12 +2066,14 @@ function PlannerStockpileSummary({
   onEditDetails,
   onEditItems,
   onRemove,
+  onActiveChange,
 }: {
   stockpile: ClientPlanStockpile;
   locationNamesById: Map<number, string>;
   onEditDetails: () => void;
   onEditItems: () => void;
   onRemove: () => void;
+  onActiveChange: (isActive: boolean) => void;
 }) {
   const locationName = (locationId: number) =>
     locationNamesById.get(locationId) ?? String(locationId);
@@ -2046,16 +2083,23 @@ function PlannerStockpileSummary({
   return (
     <article className="grid min-w-0 gap-3 border p-4">
       <div className="flex min-w-0 flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-start">
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <h3 className="truncate text-base font-medium">{stockpile.name}</h3>
-            {stockpile.kind === "special" && <Badge variant="outline">Special</Badge>}
+        <div className="flex min-w-0 flex-1 flex-row items-center gap-3">
+          <Switch
+            aria-label={`Toggle ${stockpile.name}`}
+            checked={stockpile.isActive !== false}
+            onCheckedChange={onActiveChange}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2">
+              <h3 className="truncate text-base font-medium">{stockpile.name}</h3>
+              {stockpile.kind === "special" && <Badge variant="outline">Special</Badge>}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {stockpile.items.length.toLocaleString()} item types,{" "}
+              {stockpile.items.reduce((total, item) => total + item.quantity, 0).toLocaleString()}{" "}
+              units
+            </p>
           </div>
-          <p className="text-sm text-muted-foreground">
-            {stockpile.items.length.toLocaleString()} item types,{" "}
-            {stockpile.items.reduce((total, item) => total + item.quantity, 0).toLocaleString()}{" "}
-            units
-          </p>
         </div>
         <div className="flex w-full min-w-0 flex-col items-stretch gap-2 sm:w-auto sm:shrink-0 sm:flex-row sm:items-center sm:gap-8">
           <div className="flex w-full flex-col items-center gap-2 sm:w-auto sm:flex-row sm:gap-3">
@@ -2117,7 +2161,7 @@ function PlannerStockpileSummary({
       </div>
       <div className="grid min-w-0 gap-2 text-sm sm:grid-cols-3">
         <div className="min-w-0">
-          <span className="block text-xs uppercase text-muted-foreground">Stock destination</span>
+          <span className="block text-xs text-muted-foreground uppercase">Stock destination</span>
           <span className="block truncate">
             {locationNamesById.get(stockpile.locations.stock)
               ?? stockpile.stockLocationName
@@ -2125,11 +2169,11 @@ function PlannerStockpileSummary({
           </span>
         </div>
         <div className="min-w-0">
-          <span className="block text-xs uppercase text-muted-foreground">Build location</span>
+          <span className="block text-xs text-muted-foreground uppercase">Build location</span>
           <span className="block truncate">{locationName(stockpile.locations.manufacturing)}</span>
         </div>
         <div className="min-w-0">
-          <span className="block text-xs uppercase text-muted-foreground">Reaction location</span>
+          <span className="block text-xs text-muted-foreground uppercase">Reaction location</span>
           <span className="block truncate">{locationName(stockpile.locations.reactions)}</span>
         </div>
       </div>
