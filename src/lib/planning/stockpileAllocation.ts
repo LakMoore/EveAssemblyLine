@@ -1,5 +1,6 @@
 import type { PlanningData } from "./planEngine";
 import { getBuildBlueprintByProductTypeId } from "@/cache/services/sdeCache";
+import type { RequestProfiler } from "@/lib/server/profiling";
 import type {
   PlanActivityLocations,
   PlanCalculation,
@@ -32,6 +33,14 @@ type CalculatePlanPass = (
   planningData: PlanningData,
   options?: { locations?: PlanActivityLocations },
 ) => Promise<PlanCalculation>;
+
+function measureProfiled<T>(
+  profiler: RequestProfiler | undefined,
+  section: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return profiler?.measure(section, operation) ?? operation();
+}
 
 function activityLocations(stockpile: Stockpile): PlanActivityLocations {
   return {
@@ -169,6 +178,7 @@ export async function allocateStockpileStock(
   planningData: PlanningData,
   calculatePlanPass: CalculatePlanPass,
   futureStockIndexes = new Set<number>(),
+  profiler?: RequestProfiler,
 ): Promise<StockpileAllocation> {
   if (stockpiles.length === 1) {
     return {
@@ -193,32 +203,42 @@ export async function allocateStockpileStock(
       reprocessableTypeIdsByMaterial.set(material.materialTypeID, sourceTypeIds);
     }
   }
-  const stockpileDemandResults = await Promise.all(
-    stockpiles.map(async (stockpile) => {
-      const result = await calculatePlanPass(
-        {
-          ...request,
-          stockpiles: [],
-          items: stockpile.items,
-          stock: [],
-          groupAssignments: stockpile.groupAssignments,
-        },
-        planningData,
-        { locations: activityLocations(stockpile) },
-      );
-      const { demand, jobInputDemand, fullJobInputDemand, reactionJobInputDemand } = getPlanDemand(
-        result,
-        getOrdinaryStockByTypeId(request.stock),
-      );
-      return {
-        demand: new Map([...demand].filter(([, quantity]) => quantity > 0)),
-        jobInputDemand: new Map([...jobInputDemand].filter(([, quantity]) => quantity > 0)),
-        fullJobInputDemand: new Map([...fullJobInputDemand].filter(([, quantity]) => quantity > 0)),
-        reactionJobInputDemand: new Map(
-          [...reactionJobInputDemand].filter(([, quantity]) => quantity > 0),
-        ),
-      };
-    }),
+  const stockpileDemandResults = await measureProfiled(
+    profiler,
+    "initialDemandPasses",
+    () =>
+      Promise.all(
+        stockpiles.map(async (stockpile, stockpileIndex) => {
+          const result = await measureProfiled(
+            profiler,
+            `initialDemandPass.${stockpileIndex}`,
+            () =>
+              calculatePlanPass(
+                {
+                  ...request,
+                  stockpiles: [],
+                  items: stockpile.items,
+                  stock: [],
+                  groupAssignments: stockpile.groupAssignments,
+                },
+                planningData,
+                { locations: activityLocations(stockpile) },
+              ),
+          );
+          const { demand, jobInputDemand, fullJobInputDemand, reactionJobInputDemand } =
+            getPlanDemand(result, getOrdinaryStockByTypeId(request.stock));
+          return {
+            demand: new Map([...demand].filter(([, quantity]) => quantity > 0)),
+            jobInputDemand: new Map([...jobInputDemand].filter(([, quantity]) => quantity > 0)),
+            fullJobInputDemand: new Map(
+              [...fullJobInputDemand].filter(([, quantity]) => quantity > 0),
+            ),
+            reactionJobInputDemand: new Map(
+              [...reactionJobInputDemand].filter(([, quantity]) => quantity > 0),
+            ),
+          };
+        }),
+      ),
   );
   const demandByStockpile = stockpileDemandResults.map(({ demand }) => demand);
   const jobInputDemandByStockpile = stockpileDemandResults.map(
@@ -235,11 +255,16 @@ export async function allocateStockpileStock(
   );
   const buildableTypeIds = new Set(
     (
-      await Promise.all(
-        [...fullJobInputTypeIds].map(async (typeId) => {
-          const candidate = await getBuildBlueprintByProductTypeId(typeId);
-          return candidate?.blueprint ? typeId : undefined;
-        }),
+      await measureProfiled(
+        profiler,
+        "resolveBuildableTypes",
+        () =>
+          Promise.all(
+            [...fullJobInputTypeIds].map(async (typeId) => {
+              const candidate = await getBuildBlueprintByProductTypeId(typeId);
+              return candidate?.blueprint ? typeId : undefined;
+            }),
+          ),
       )
     ).filter((typeId): typeId is number => typeId !== undefined),
   );
@@ -644,29 +669,44 @@ export async function allocateStockpileStock(
     return { stockpileStock: allocatedStockpileStock(), blockedInputStock };
   };
 
-  const ordinaryStockpileAllocation = allocateOrdinaryStock(
-    demandByStockpile,
-    jobInputDemandByStockpile,
-    fullJobInputDemandByStockpile,
-    reactionJobInputDemandByStockpile,
+  const ordinaryStockpileAllocation = await measureProfiled(
+    profiler,
+    "ordinaryAllocation",
+    async () =>
+      allocateOrdinaryStock(
+        demandByStockpile,
+        jobInputDemandByStockpile,
+        fullJobInputDemandByStockpile,
+        reactionJobInputDemandByStockpile,
+      ),
   );
   const ordinaryStockpileStock = ordinaryStockpileAllocation.stockpileStock;
-  const ordinaryStockpileResults = await Promise.all(
-    stockpiles.map(async (stockpile, stockpileIndex) =>
-      calculatePlanPass(
-        {
-          ...request,
-          stockpiles: [],
-          items: stockpile.items,
-          stock: ordinaryStockpileStock[stockpileIndex],
-          reprocessingEfficiencies:
-            stockpile.reprocessingEfficiencies ?? request.reprocessingEfficiencies,
-          groupAssignments: stockpile.groupAssignments,
-        },
-        planningData,
-        { locations: activityLocations(stockpile) },
+  const ordinaryStockpileResults = await measureProfiled(
+    profiler,
+    "ordinaryPasses",
+    () =>
+      Promise.all(
+        stockpiles.map(async (stockpile, stockpileIndex) =>
+          measureProfiled(
+            profiler,
+            `ordinaryPass.${stockpileIndex}`,
+            () =>
+              calculatePlanPass(
+                {
+                  ...request,
+                  stockpiles: [],
+                  items: stockpile.items,
+                  stock: ordinaryStockpileStock[stockpileIndex],
+                  reprocessingEfficiencies:
+                    stockpile.reprocessingEfficiencies ?? request.reprocessingEfficiencies,
+                  groupAssignments: stockpile.groupAssignments,
+                },
+                planningData,
+                { locations: activityLocations(stockpile) },
+              ),
+          ),
+        ),
       ),
-    ),
   );
   const actualDemandByStockpile: StockpileDemand[] = [];
   const actualJobInputDemandByStockpile: StockpileDemand[] = [];
@@ -682,48 +722,66 @@ export async function allocateStockpileStock(
     actualFullJobInputDemandByStockpile.push(fullJobInputDemand);
     ordinaryReactionJobInputDemandByStockpile.push(reactionJobInputDemand);
   }
-  const correctedStockpileAllocation = allocateOrdinaryStock(
-    actualDemandByStockpile,
-    actualJobInputDemandByStockpile,
-    actualFullJobInputDemandByStockpile,
-    ordinaryReactionJobInputDemandByStockpile,
+  const correctedStockpileAllocation = await measureProfiled(
+    profiler,
+    "correctedAllocation",
+    async () =>
+      allocateOrdinaryStock(
+        actualDemandByStockpile,
+        actualJobInputDemandByStockpile,
+        actualFullJobInputDemandByStockpile,
+        ordinaryReactionJobInputDemandByStockpile,
+      ),
   );
   const correctedStockpileStock = correctedStockpileAllocation.stockpileStock;
-  const specialDemandByStockpile: StockpileDemand[] = await Promise.all(
-    stockpiles.map(async (stockpile, stockpileIndex) => {
-      const result = await calculatePlanPass(
-        {
-          ...request,
-          stockpiles: [],
-          items: stockpile.items,
-          stock: correctedStockpileStock[stockpileIndex],
-          reprocessingEfficiencies:
-            stockpile.reprocessingEfficiencies ?? request.reprocessingEfficiencies,
-          groupAssignments: stockpile.groupAssignments,
-        },
-        planningData,
-        { locations: activityLocations(stockpile) },
-      );
-      const demand = new Map<number, number>();
-      for (const entry of result.lists.planItems) {
-        if (entry.kind === "bpc") {
-          demand.set(entry.typeId, Math.max(demand.get(entry.typeId) ?? 0, entry.neededQuantity));
-        }
-        else if (entry.kind === "reaction" && entry.availableQuantity <= 0) {
-          demand.set(entry.typeId, Math.max(demand.get(entry.typeId) ?? 0, 1));
-        }
-      }
-      for (const job of result.lists.reactionJobs) {
-        demand.set(
-          job.inputs.blueprint.typeId,
-          Math.max(
-            demand.get(job.inputs.blueprint.typeId) ?? 0,
-            job.inputs.blueprint.requiredQuantity,
-          ),
-        );
-      }
-      return demand;
-    }),
+  const specialDemandByStockpile: StockpileDemand[] = await measureProfiled(
+    profiler,
+    "specialPasses",
+    () =>
+      Promise.all(
+        stockpiles.map(async (stockpile, stockpileIndex) => {
+          const result = await measureProfiled(
+            profiler,
+            `specialPass.${stockpileIndex}`,
+            () =>
+              calculatePlanPass(
+                {
+                  ...request,
+                  stockpiles: [],
+                  items: stockpile.items,
+                  stock: correctedStockpileStock[stockpileIndex],
+                  reprocessingEfficiencies:
+                    stockpile.reprocessingEfficiencies ?? request.reprocessingEfficiencies,
+                  groupAssignments: stockpile.groupAssignments,
+                },
+                planningData,
+                { locations: activityLocations(stockpile) },
+              ),
+          );
+          const demand = new Map<number, number>();
+          for (const entry of result.lists.planItems) {
+            if (entry.kind === "bpc") {
+              demand.set(
+                entry.typeId,
+                Math.max(demand.get(entry.typeId) ?? 0, entry.neededQuantity),
+              );
+            }
+            else if (entry.kind === "reaction" && entry.availableQuantity <= 0) {
+              demand.set(entry.typeId, Math.max(demand.get(entry.typeId) ?? 0, 1));
+            }
+          }
+          for (const job of result.lists.reactionJobs) {
+            demand.set(
+              job.inputs.blueprint.typeId,
+              Math.max(
+                demand.get(job.inputs.blueprint.typeId) ?? 0,
+                job.inputs.blueprint.requiredQuantity,
+              ),
+            );
+          }
+          return demand;
+        }),
+      ),
   );
   remainingDemand = specialDemandByStockpile;
   const specialTypeIds = new Set(specialDemandByStockpile.flatMap((demand) => [...demand.keys()]));
@@ -744,34 +802,48 @@ export async function allocateStockpileStock(
   const finalJobInputDemandByStockpile: StockpileDemand[] = [];
   const finalFullJobInputDemandByStockpile: StockpileDemand[] = [];
   const finalReactionJobInputDemandByStockpile: StockpileDemand[] = [];
-  for (const [stockpileIndex, stockpile] of stockpiles.entries()) {
-    const result = await calculatePlanPass(
-      {
-        ...request,
-        stockpiles: [],
-        items: stockpile.items,
-        stock: finalSpecialStock[stockpileIndex],
-        reprocessingEfficiencies:
-          stockpile.reprocessingEfficiencies ?? request.reprocessingEfficiencies,
-        groupAssignments: stockpile.groupAssignments,
-      },
-      planningData,
-      { locations: activityLocations(stockpile) },
-    );
-    const { demand, jobInputDemand, fullJobInputDemand, reactionJobInputDemand } = getPlanDemand(
-      result,
-      getOrdinaryStockByTypeId(request.stock),
-    );
-    finalDemandByStockpile.push(demand);
-    finalJobInputDemandByStockpile.push(jobInputDemand);
-    finalFullJobInputDemandByStockpile.push(fullJobInputDemand);
-    finalReactionJobInputDemandByStockpile.push(reactionJobInputDemand);
-  }
-  const finalStockpileAllocation = allocateOrdinaryStock(
-    finalDemandByStockpile,
-    finalJobInputDemandByStockpile,
-    finalFullJobInputDemandByStockpile,
-    finalReactionJobInputDemandByStockpile,
+  await measureProfiled(
+    profiler,
+    "finalPasses",
+    async () => {
+      for (const [stockpileIndex, stockpile] of stockpiles.entries()) {
+        const result = await measureProfiled(
+          profiler,
+          `finalPass.${stockpileIndex}`,
+          () =>
+            calculatePlanPass(
+              {
+                ...request,
+                stockpiles: [],
+                items: stockpile.items,
+                stock: finalSpecialStock[stockpileIndex],
+                reprocessingEfficiencies:
+                  stockpile.reprocessingEfficiencies ?? request.reprocessingEfficiencies,
+                groupAssignments: stockpile.groupAssignments,
+              },
+              planningData,
+              { locations: activityLocations(stockpile) },
+            ),
+        );
+        const { demand, jobInputDemand, fullJobInputDemand, reactionJobInputDemand } =
+          getPlanDemand(result, getOrdinaryStockByTypeId(request.stock));
+        finalDemandByStockpile.push(demand);
+        finalJobInputDemandByStockpile.push(jobInputDemand);
+        finalFullJobInputDemandByStockpile.push(fullJobInputDemand);
+        finalReactionJobInputDemandByStockpile.push(reactionJobInputDemand);
+      }
+    },
+  );
+  const finalStockpileAllocation = await measureProfiled(
+    profiler,
+    "finalAllocation",
+    async () =>
+      allocateOrdinaryStock(
+        finalDemandByStockpile,
+        finalJobInputDemandByStockpile,
+        finalFullJobInputDemandByStockpile,
+        finalReactionJobInputDemandByStockpile,
+      ),
   );
   for (const [stockpileIndex, allocation] of allocations.entries()) {
     for (const [stockIndex, quantity] of specialAllocations[stockpileIndex]) {

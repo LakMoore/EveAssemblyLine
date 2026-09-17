@@ -21,6 +21,7 @@ import { productionGroupDefinitions } from "@/lib/planning/productionGroups";
 import { logPlanRequest } from "@/lib/planning/planRequestLogger";
 import { getSessionFromRequest } from "@/lib/auth/session";
 import { incrementPlansCreated } from "@/lib/statistics";
+import { createRequestProfiler, type RequestProfiler } from "@/lib/server/profiling";
 import { randomUUID } from "node:crypto";
 import { after } from "next/server";
 
@@ -183,14 +184,31 @@ function industryProduct(
   };
 }
 
-async function calculateWorkingAssetsPlan(input: PlanRequest, assets: PlanStockItem[]) {
+function measureProfiled<T>(
+  profiler: RequestProfiler | undefined,
+  section: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return profiler?.measure(section, operation) ?? operation();
+}
+
+async function calculateWorkingAssetsPlan(
+  input: PlanRequest,
+  assets: PlanStockItem[],
+  profiler?: RequestProfiler,
+) {
   const requestedItems = input.stockpiles.flatMap((stockpile) => stockpile.items);
-  const types = await getTypesByIds([
-    ...new Set([
-      ...requestedItems.map((item) => item.typeId),
-      ...assets.map((item) => item.typeId),
-    ]),
-  ]);
+  const types = await measureProfiled(
+    profiler,
+    "loadTypes",
+    () =>
+      getTypesByIds([
+        ...new Set([
+          ...requestedItems.map((item) => item.typeId),
+          ...assets.map((item) => item.typeId),
+        ]),
+      ]),
+  );
   const resolveBuildItem = (item: PlanBuildItem): BuildItem => ({
     ...item,
     fromCompression: item.fromCompression === true,
@@ -199,25 +217,41 @@ async function calculateWorkingAssetsPlan(input: PlanRequest, assets: PlanStockI
       ?? types.get(item.typeId)?.name.en
       ?? `Type ${item.typeId}`,
   });
-  const result = await calculatePlan({
-    language: input.language,
-    items: requestedItems.map(resolveBuildItem),
-    stockpiles: input.stockpiles.map((stockpile) => ({
-      ...stockpile,
-      items: stockpile.items.map(resolveBuildItem),
-    })),
-    haulExclusions: input.haulExclusions,
-    reprocessingEfficiencies: input.reprocessingEfficiencies,
-    stock: await hydrateStockCategories(assets),
-    facilityTimeMultipliers: input.facilityTimeMultipliers,
-    facilityProfiles: input.facilityProfiles,
-    skillTimeMultipliers: input.skillTimeMultipliers,
-    settings: input.settings,
-  });
+  const stock = await measureProfiled(
+    profiler,
+    "hydrateStock",
+    () => hydrateStockCategories(assets),
+  );
+  const result = await measureProfiled(
+    profiler,
+    "engine",
+    () =>
+      calculatePlan(
+        {
+          language: input.language,
+          items: requestedItems.map(resolveBuildItem),
+          stockpiles: input.stockpiles.map((stockpile) => ({
+            ...stockpile,
+            items: stockpile.items.map(resolveBuildItem),
+          })),
+          haulExclusions: input.haulExclusions,
+          reprocessingEfficiencies: input.reprocessingEfficiencies,
+          stock,
+          facilityTimeMultipliers: input.facilityTimeMultipliers,
+          facilityProfiles: input.facilityProfiles,
+          skillTimeMultipliers: input.skillTimeMultipliers,
+          settings: input.settings,
+        },
+        profiler,
+      ),
+  );
   return result;
 }
 
-export async function calculatePlanRequest(body: unknown): Promise<Response> {
+export async function calculatePlanRequest(
+  body: unknown,
+  profiler?: RequestProfiler,
+): Promise<Response> {
   try {
     if (!body || typeof body !== "object" || Array.isArray(body)) {
       return NextResponse.json({ error: "The plan request was not valid JSON." }, { status: 400 });
@@ -301,7 +335,7 @@ export async function calculatePlanRequest(body: unknown): Promise<Response> {
       return NextResponse.json({ error: "Add at least one build item." }, { status: 400 });
     }
     if (Array.isArray(input.assets)) {
-      const result = await calculateWorkingAssetsPlan(input, input.assets);
+      const result = await calculateWorkingAssetsPlan(input, input.assets, profiler);
       return NextResponse.json(result, noStoreResponseInit);
     }
     const assets = input.assets;
@@ -345,7 +379,11 @@ export async function calculatePlanRequest(body: unknown): Promise<Response> {
         "blueprintTypeId" in item ? item.blueprintTypeId : undefined,
       ]),
     ].filter((typeId): typeId is number => typeId !== undefined);
-    const types = await getTypesByIds([...new Set(typeIds)]);
+    const types = await measureProfiled(
+      profiler,
+      "loadTypes",
+      () => getTypesByIds([...new Set(typeIds)]),
+    );
     const resolveBuildItem = (item: PlanBuildItem): BuildItem => ({
       ...item,
       fromCompression: item.fromCompression === true,
@@ -470,19 +508,31 @@ export async function calculatePlanRequest(body: unknown): Promise<Response> {
       ),
       ...industryStock,
     ];
-    const stock = await hydrateStockCategories(rawStock);
-    const result = await calculatePlan({
-      language: input.language,
-      items: buildItems,
-      stockpiles,
-      haulExclusions: input.haulExclusions,
-      reprocessingEfficiencies: input.reprocessingEfficiencies,
-      stock,
-      facilityTimeMultipliers: input.facilityTimeMultipliers,
-      facilityProfiles: input.facilityProfiles,
-      skillTimeMultipliers: input.skillTimeMultipliers,
-      settings: input.settings,
-    });
+    const stock = await measureProfiled(
+      profiler,
+      "hydrateStock",
+      () => hydrateStockCategories(rawStock),
+    );
+    const result = await measureProfiled(
+      profiler,
+      "engine",
+      () =>
+        calculatePlan(
+          {
+            language: input.language,
+            items: buildItems,
+            stockpiles,
+            haulExclusions: input.haulExclusions,
+            reprocessingEfficiencies: input.reprocessingEfficiencies,
+            stock,
+            facilityTimeMultipliers: input.facilityTimeMultipliers,
+            facilityProfiles: input.facilityProfiles,
+            skillTimeMultipliers: input.skillTimeMultipliers,
+            settings: input.settings,
+          },
+          profiler,
+        ),
+    );
     return NextResponse.json(result, noStoreResponseInit);
   }
   catch {
@@ -509,55 +559,76 @@ function withPlanId(body: unknown, planId: string): unknown {
 /** Calculates and schedules logging for one plan request before returning its response. */
 export async function POST(request: Request) {
   const planId = randomUUID();
+  const profiler = createRequestProfiler("plan", { planId });
   const requestedAt = new Date().toISOString();
-  const session = await getSessionFromRequest(request).catch(() => null);
-  const rawRequestBody = await request.text();
-  let body: unknown;
   try {
-    body = JSON.parse(rawRequestBody);
-  }
-  catch {
-    const responseBody = { planId, error: "The plan request was not valid JSON." };
+    profiler.start("session");
+    const session = await getSessionFromRequest(request).catch(() => null);
+    profiler.end("session");
+
+    profiler.start("body");
+    const rawRequestBody = await request.text();
+    profiler.end("body");
+
+    profiler.start("parse");
+    let body: unknown;
+    try {
+      body = JSON.parse(rawRequestBody);
+    }
+    catch {
+      profiler.end("parse");
+      const responseBody = { planId, error: "The plan request was not valid JSON." };
+      logPlanRequest({
+        id: planId,
+        requestedAt,
+        sessionCollectionId: session?.collectionId,
+        rawRequestBody,
+        rawResponseBody: JSON.stringify(responseBody),
+        responseStatus: 400,
+      });
+      return NextResponse.json(responseBody, { status: 400, ...noStoreResponseInit });
+    }
+    profiler.end("parse");
+
+    const response = await profiler.measure(
+      "calculate",
+      () => calculatePlanRequest(body, profiler),
+    );
+
+    profiler.start("response");
+    const responseBody = withPlanId(await response.json(), planId);
+    const rawResponseBody = JSON.stringify(responseBody);
+    if (response.ok) {
+      after(async () => {
+        try {
+          await incrementPlansCreated();
+        }
+        catch (error) {
+          console.error(
+            "Could not increment plans-created statistic",
+            error instanceof Error ? error.message : "unknown error",
+          );
+        }
+      });
+    }
     logPlanRequest({
       id: planId,
       requestedAt,
       sessionCollectionId: session?.collectionId,
       rawRequestBody,
-      rawResponseBody: JSON.stringify(responseBody),
-      responseStatus: 400,
+      rawResponseBody,
+      responseStatus: response.status,
     });
-    return NextResponse.json(responseBody, { status: 400, ...noStoreResponseInit });
+    profiler.end("response");
+    return NextResponse.json(
+      responseBody,
+      {
+        status: response.status,
+        ...noStoreResponseInit,
+      },
+    );
   }
-
-  const response = await calculatePlanRequest(body);
-  const responseBody = withPlanId(await response.json(), planId);
-  const rawResponseBody = JSON.stringify(responseBody);
-  if (response.ok) {
-    after(async () => {
-      try {
-        await incrementPlansCreated();
-      }
-      catch (error) {
-        console.error(
-          "Could not increment plans-created statistic",
-          error instanceof Error ? error.message : "unknown error",
-        );
-      }
-    });
+  finally {
+    profiler.finish();
   }
-  logPlanRequest({
-    id: planId,
-    requestedAt,
-    sessionCollectionId: session?.collectionId,
-    rawRequestBody,
-    rawResponseBody,
-    responseStatus: response.status,
-  });
-  return NextResponse.json(
-    responseBody,
-    {
-      status: response.status,
-      ...noStoreResponseInit,
-    },
-  );
 }

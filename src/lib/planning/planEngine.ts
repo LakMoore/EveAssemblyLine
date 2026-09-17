@@ -14,6 +14,7 @@ import { categorizeType } from "@/lib/reference/category";
 import { AssemblyLineGroups } from "@/lib/reference/assemblyLineGroups";
 import { getProductionGroupReferences, productionGroupForType } from "./productionGroups";
 import { requiredMaterialQuantity } from "./materialQuantities";
+import type { RequestProfiler } from "@/lib/server/profiling";
 import {
   PlanBuildItem,
   PlanJobInput,
@@ -160,8 +161,7 @@ type ProfileEntry = { count: number; totalMs: number; maxMs: number };
 
 class PlanProfiler {
   private readonly entries = new Map<string, ProfileEntry>();
-  private readonly enabled =
-    process.env.NODE_ENV === "development" && process.env.DEBUG_PLAN === "1";
+  private readonly enabled = process.env.NODE_ENV === "development";
 
   get isEnabled() {
     return this.enabled;
@@ -221,6 +221,14 @@ class PlanProfiler {
       ),
     );
   }
+}
+
+function measureProfiled<T>(
+  profiler: RequestProfiler | undefined,
+  section: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return profiler?.measure(section, operation) ?? operation();
 }
 
 export type PlanningData = {
@@ -531,19 +539,42 @@ async function getFutureCompressedMaterialStock(
 }
 
 /** Calculates the detailed internal result after selecting reprocessing portions for shortages. */
-export async function calculatePlanCalculation(request: PlannerRequest): Promise<PlanCalculation> {
+export async function calculatePlanCalculation(
+  request: PlannerRequest,
+  profiler?: RequestProfiler,
+): Promise<PlanCalculation> {
   const populatedStockpiles = request.stockpiles.filter((stockpile) => stockpile.items.length > 0);
   if (populatedStockpiles.length === 0) {
     throw new Error("Plan calculation requires at least one populated stockpile.");
   }
-  const planningData = await loadPlanningData();
-  return calculateStockpilePlan({ ...request, stockpiles: populatedStockpiles }, planningData);
+  const planningData = await measureProfiled(profiler, "planningData", loadPlanningData);
+  return measureProfiled(
+    profiler,
+    "stockpilePlan",
+    () =>
+      calculateStockpilePlan(
+        { ...request, stockpiles: populatedStockpiles },
+        planningData,
+        profiler,
+      ),
+  );
 }
 
 /** Calculates a plan and returns the compact public response shape. */
-export async function calculatePlan(request: PlannerRequest): Promise<PlanResponse> {
-  const result = await calculatePlanCalculation(request);
-  return toPlanResponse(result, getRequestActivityLocationIds(request), request.language ?? "en");
+export async function calculatePlan(
+  request: PlannerRequest,
+  profiler?: RequestProfiler,
+): Promise<PlanResponse> {
+  const result = await measureProfiled(
+    profiler,
+    "calculation",
+    () => calculatePlanCalculation(request, profiler),
+  );
+  return measureProfiled(
+    profiler,
+    "response",
+    () => toPlanResponse(result, getRequestActivityLocationIds(request), request.language ?? "en"),
+  );
 }
 
 async function loadResponseTypeData() {
@@ -2946,12 +2977,13 @@ async function calculatePlanPass(
 async function calculateStockpilePlan(
   request: PlannerRequest,
   planningData: PlanningData,
+  profiler?: RequestProfiler,
 ): Promise<PlanCalculation> {
   const stockpiles = request.stockpiles;
-  const futureCompressedMaterialStock = await getFutureCompressedMaterialStock(
-    request,
-    stockpiles,
-    planningData,
+  const futureCompressedMaterialStock = await measureProfiled(
+    profiler,
+    "futureCompressedStock",
+    () => getFutureCompressedMaterialStock(request, stockpiles, planningData),
   );
   const planningRequest =
     futureCompressedMaterialStock.length > 0
@@ -2960,12 +2992,18 @@ async function calculateStockpilePlan(
   const futureStockIndexes = new Set(
     futureCompressedMaterialStock.map((_, index) => request.stock.length + index),
   );
-  const stockpileAllocation = await allocateStockpileStock(
-    planningRequest,
-    stockpiles,
-    planningData,
-    calculatePlanPass,
-    futureStockIndexes,
+  const stockpileAllocation = await measureProfiled(
+    profiler,
+    "allocateStockpile",
+    () =>
+      allocateStockpileStock(
+        planningRequest,
+        stockpiles,
+        planningData,
+        calculatePlanPass,
+        futureStockIndexes,
+        profiler,
+      ),
   );
   const stockpileResults: PlanCalculation[] = [];
   for (const [stockpileIndex, stockpile] of stockpiles.entries()) {
@@ -2973,29 +3011,43 @@ async function calculateStockpilePlan(
     const finalProductLocations = new Map(
       stockpile.items.map((item) => [item.typeId, stockpile.locations.stock] as const),
     );
-    const result = await calculateStockpilePlanPass(
-      {
-        ...planningRequest,
-        stockpiles: [],
-        items: stockpile.items,
-        stock: stockpileAllocation.stockpileStock[stockpileIndex],
-        reprocessingEfficiencies:
-          stockpile.reprocessingEfficiencies ?? request.reprocessingEfficiencies,
-        groupAssignments: stockpile.groupAssignments,
-      },
-      locations,
-      planningData,
-      {
-        blockedInputStock: stockpileAllocation.blockedInputStock[stockpileIndex],
-        finalProductLocations,
-      },
+    const result = await measureProfiled(
+      profiler,
+      `stockpilePass.${stockpileIndex}`,
+      () =>
+        calculateStockpilePlanPass(
+          {
+            ...planningRequest,
+            stockpiles: [],
+            items: stockpile.items,
+            stock: stockpileAllocation.stockpileStock[stockpileIndex],
+            reprocessingEfficiencies:
+              stockpile.reprocessingEfficiencies ?? request.reprocessingEfficiencies,
+            groupAssignments: stockpile.groupAssignments,
+          },
+          locations,
+          planningData,
+          {
+            blockedInputStock: stockpileAllocation.blockedInputStock[stockpileIndex],
+            finalProductLocations,
+          },
+        ),
     );
     stockpileResults.push(result);
   }
-  const mergedResult = await mergeStockpileResults(stockpileResults, request.stock, request);
-  return restorePlanResourceCounts(
-    restorePlanSourceCounts(restorePlanStockQuantities(mergedResult, request), request.stock),
-    request.stock,
+  const mergedResult = await measureProfiled(
+    profiler,
+    "mergeStockpiles",
+    () => mergeStockpileResults(stockpileResults, request.stock, request),
+  );
+  return measureProfiled(
+    profiler,
+    "restoreStock",
+    async () =>
+      restorePlanResourceCounts(
+        restorePlanSourceCounts(restorePlanStockQuantities(mergedResult, request), request.stock),
+        request.stock,
+      ),
   );
 }
 

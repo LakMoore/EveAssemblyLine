@@ -31,6 +31,7 @@ import {
   getBlueprintById,
   getSystems,
 } from "@/cache/services/sdeCache";
+import { createRequestProfiler, type RequestProfiler } from "@/lib/server/profiling";
 import {
   clearCharacterCorporationAuthorization,
   getCharacter,
@@ -825,72 +826,14 @@ function getCache(map: Map<string, OwnerCache>, id: number, sessionId: string): 
 }
 
 type RefreshOwnerKind = "character" | "corporation";
-type RefreshProfileValue =
-  | number
-  | {
-      totalMS: number;
-      sections: Record<string, RefreshProfileValue>;
-    };
+export type RefreshProfiler = RequestProfiler;
 
-export type RefreshProfiler = {
-  start(section: string): void;
-  end(section: string): void;
-  finish(): void;
-};
-
-/** Collects opt-in section timings for one owner refresh without affecting refresh outcomes. */
+/** Collects development-only section timings for one owner refresh without affecting outcomes. */
 export function createRefreshProfiler(
   kind: RefreshOwnerKind,
   ownerId: number | string,
 ): RefreshProfiler {
-  const enabled = process.env.NODE_ENV === "development";
-  const startedAt = performance.now();
-  type ActiveSection = {
-    name: string;
-    startedAt: number;
-    sections: Map<string, RefreshProfileValue>;
-  };
-  const rootSections = new Map<string, RefreshProfileValue>();
-  const activeSections: ActiveSection[] = [];
-
-  function finishSection(section: ActiveSection, totalMS: number): RefreshProfileValue {
-    if (section.sections.size === 0) return totalMS;
-    return {
-      totalMS,
-      sections: Object.fromEntries(section.sections),
-    };
-  }
-
-  return {
-    start(section: string) {
-      if (enabled) {
-        activeSections.push({ name: section, startedAt: performance.now(), sections: new Map() });
-      }
-    },
-    end(section: string) {
-      if (!enabled) return;
-      const activeSection = activeSections.pop();
-      if (!activeSection || activeSection.name !== section) return;
-      const totalMS = Math.round((performance.now() - activeSection.startedAt) * 100) / 100;
-      const parentSections = activeSections.at(-1)?.sections ?? rootSections;
-      parentSections.set(section, finishSection(activeSection, totalMS));
-    },
-    finish() {
-      if (!enabled) return;
-      console.info(
-        "[ESI refresh profile]",
-        JSON.stringify(
-          {
-            owner: `${kind}:${ownerId}`,
-            totalMS: Math.round((performance.now() - startedAt) * 100) / 100,
-            sections: Object.fromEntries(rootSections),
-          },
-          null,
-          2,
-        ),
-      );
-    },
-  };
+  return createRequestProfiler("ESI refresh", { owner: `${kind}:${ownerId}` });
 }
 
 function endpointStatus<T>(
