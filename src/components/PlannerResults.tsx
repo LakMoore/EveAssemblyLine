@@ -58,7 +58,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertTitle } from "@/components/ui/alert";
 import {
   Select,
   SelectContent,
@@ -585,6 +585,7 @@ function PlannerResultsContent({
   onExcludeHaulStockpile,
   haulItemExclusion,
   onToggleHaulItemExclusion,
+  onToggleHaulItemExclusions,
   haulPatches,
   onToggleHaulPatches,
 }: {
@@ -606,6 +607,7 @@ function PlannerResultsContent({
   onExcludeHaulStockpile: (fromLocationId: number) => Promise<void>;
   haulItemExclusion: HaulItemExclusion;
   onToggleHaulItemExclusion: (key: string, excluded: boolean) => Promise<void>;
+  onToggleHaulItemExclusions: (tasks: ResponseHaulTask[], excluded: boolean) => Promise<void>;
   haulPatches: ReadonlyMap<string, HaulPatch>;
   onToggleHaulPatches: (tasks: ResponseHaulTask[], patched: boolean) => Promise<void>;
 }) {
@@ -838,6 +840,7 @@ function PlannerResultsContent({
               stockpileLocations={stockpileLocations}
               haulItemExclusion={haulItemExclusion}
               onToggleHaulItemExclusion={onToggleHaulItemExclusion}
+              onToggleHaulItemExclusions={onToggleHaulItemExclusions}
               haulPatches={haulPatches}
               onToggleHaulPatches={onToggleHaulPatches}
               selectedTypeId={selectedTypeId}
@@ -929,21 +932,18 @@ function PlannerWarningGroup({
         <div className="flex flex-col gap-2 py-2" role="list">
           {bucket.items.map((warning) => (
             <Alert key={`${warning.code}:${warning.typeId}`} role="listitem">
-              <div className="flex min-w-0 flex-col gap-2 md:flex-row md:items-start md:gap-4">
+              <AlertTitle>
                 <TypeIdentity
-                  className="shrink-0"
-                  name={typeNamesById.get(warning.typeId) ?? `Type ${warning.typeId}`}
+                  name={planWarningPresentation[warning.code].title}
+                  typeName={typeNamesById.get(warning.typeId) ?? `Type ${warning.typeId}`}
                   typeId={warning.typeId}
+                  subline={planWarningPresentation[warning.code].detail}
                   linkPath="planner"
                   linkIcon={ClipboardList}
                   linkHash="plan-breakdown"
                   navigateInPlace
                 />
-                <div className="flex min-w-0 flex-col gap-0.5 text-right md:w-full md:justify-self-end">
-                  <AlertTitle>{planWarningPresentation[warning.code].title}</AlertTitle>
-                  <AlertDescription>{planWarningPresentation[warning.code].detail}</AlertDescription>
-                </div>
-              </div>
+              </AlertTitle>
             </Alert>
           ))}
         </div>
@@ -973,6 +973,7 @@ function PlanList({
   stockpileLocations,
   haulItemExclusion,
   onToggleHaulItemExclusion,
+  onToggleHaulItemExclusions,
   haulPatches,
   onToggleHaulPatches,
   selectedTypeId,
@@ -999,6 +1000,7 @@ function PlanList({
   stockpileLocations: ReadonlySet<number>;
   haulItemExclusion: HaulItemExclusion;
   onToggleHaulItemExclusion: (key: string, excluded: boolean) => Promise<void>;
+  onToggleHaulItemExclusions: (tasks: ResponseHaulTask[], excluded: boolean) => Promise<void>;
   haulPatches: ReadonlyMap<string, HaulPatch>;
   onToggleHaulPatches: (tasks: ResponseHaulTask[], patched: boolean) => Promise<void>;
   selectedTypeId: number | null;
@@ -1648,6 +1650,7 @@ function PlanList({
           onSelectedResultRowChange={toggleSelectedResultRow}
           onExcludeHaulStockpile={onExcludeHaulStockpile}
           onToggleHaulItemExclusion={onToggleHaulItemExclusion}
+          onToggleHaulItemExclusions={onToggleHaulItemExclusions}
           onToggleHaulPatches={onToggleHaulPatches}
         />
       ) : (

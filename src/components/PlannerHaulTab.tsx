@@ -4,6 +4,7 @@ import ResultRow from "@/components/ResultRow";
 import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { HaulPatch, ResponseHaulTask } from "@/lib/planning/types";
 import type { ClientJobsResponse } from "@/lib/client/requestCache";
@@ -77,6 +78,7 @@ type PlannerHaulTabProps = {
   onSelectedResultRowChange: (rowKey: string) => void;
   onExcludeHaulStockpile: (fromLocationId: number) => Promise<void>;
   onToggleHaulItemExclusion: (key: string, excluded: boolean) => Promise<void>;
+  onToggleHaulItemExclusions: (tasks: ResponseHaulTask[], excluded: boolean) => Promise<void>;
   onToggleHaulPatches: (tasks: ResponseHaulTask[], patched: boolean) => Promise<void>;
 };
 
@@ -102,6 +104,7 @@ export default function PlannerHaulTab({
   onSelectedResultRowChange,
   onExcludeHaulStockpile,
   onToggleHaulItemExclusion,
+  onToggleHaulItemExclusions,
   onToggleHaulPatches,
 }: PlannerHaulTabProps) {
   return (
@@ -111,110 +114,148 @@ export default function PlannerHaulTab({
           className={`${styles.haulGroup} w-full min-w-0`}
           key={`${group.fromLocationId}:${group.toLocationId}:${group.ownerType ?? "unassigned"}:${group.ownerId ?? 0}`}
         >
-          <header className="flex min-h-14 w-full min-w-0 flex-col justify-between py-3 md:grid md:grid-cols-[auto_minmax(0,1fr)_auto_auto] md:items-center md:gap-y-0">
-            <strong className="min-w-14 shrink-0 whitespace-nowrap">
-              {getHaulGroupVolume(group.tasks).toLocaleString()} m<sup>3</sup>
-            </strong>
-            <div className="flex min-w-0 flex-col gap-1 md:ml-2 md:gap-0">
-              <span className="flex min-w-0 items-baseline gap-2 truncate text-xs uppercase">
-                <span className="shrink-0">From</span>
-                <strong className="min-w-0 truncate normal-case">
-                  {locationNamesById.get(group.fromLocationId) ?? group.fromLocationId}
-                </strong>
-              </span>
-              <span className="flex min-w-0 items-baseline gap-2 truncate text-xs uppercase">
-                <span className="shrink-0">To</span>
-                <strong className="min-w-0 truncate normal-case">
-                  {locationNamesById.get(group.toLocationId) ?? group.toLocationId}
-                </strong>
-              </span>
-            </div>
-            {!stockpileLocations.has(group.fromLocationId) && (
-              <Button
-                className="w-full md:w-auto"
-                variant="outline"
-                disabled={excludingHaulFromLocationId !== null}
-                onClick={() => {
-                  onExcludingHaulFromLocationIdChange(group.fromLocationId);
-                  void onExcludeHaulStockpile(group.fromLocationId).finally(() => {
-                    onExcludingHaulFromLocationIdChange(null);
-                  });
-                }}
-              >
-                {excludingHaulFromLocationId === group.fromLocationId ? (
-                  <Spinner aria-hidden="true" />
-                ) : (
-                  <SquareX aria-hidden="true" />
-                )}
-                <span>
-                  {excludingHaulFromLocationId === group.fromLocationId
-                    ? "Recalculating..."
-                    : "Exclude Location"}
-                </span>
-              </Button>
-            )}
-            <span className="flex min-w-0 items-center justify-between gap-2 md:justify-end">
-              {group.ownerType !== undefined && group.ownerId !== undefined && (
-                <strong className="ml-4 flex min-w-0 items-center gap-2">
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        group.ownerType === "corporation" ? (
-                          <Image
-                            src={eveCorporationLogoUrl(group.ownerId, 64)}
-                            alt={`${corporationNamesById.get(group.ownerId) ?? `Corporation ${group.ownerId}`} logo`}
-                            width={24}
-                            height={24}
-                            className="size-6 rounded-none"
-                          />
-                        ) : (
-                          <Image
-                            src={eveCharacterPortraitUrl(group.ownerId, 64)}
-                            alt={`${characterNamesById.get(group.ownerId) ?? `Character ${group.ownerId}`} portrait`}
-                            width={24}
-                            height={24}
-                            className="size-6 rounded-none"
-                          />
-                        )
-                      }
-                    />
-                    <TooltipContent>
-                      Owner:&nbsp;
-                      {group.ownerType === "corporation"
-                        ? (
-                            corporationNamesById.get(group.ownerId)
-                            ?? `Corporation ${group.ownerId}`
-                          )
-                        : (characterNamesById.get(group.ownerId) ?? `Character ${group.ownerId}`)}
-                    </TooltipContent>
-                  </Tooltip>
-                  <span className="min-w-20 truncate">
-                    {group.ownerType === "corporation"
-                      ? (corporationNamesById.get(group.ownerId) ?? `Corporation ${group.ownerId}`)
-                      : (characterNamesById.get(group.ownerId) ?? `Character ${group.ownerId}`)}
+          {(() => {
+            const eligibleTasks = group.tasks.filter(
+              (task) => !haulItemExclusion.has(haulTaskKey(task)),
+            );
+            const includedCount = eligibleTasks.length;
+            const excludedCount = group.tasks.length - includedCount;
+            const groupChecked = includedCount > excludedCount;
+            const patchedCount = eligibleTasks.filter((task) =>
+              isHaulTaskPatched(task, haulPatches),
+            ).length;
+            const groupPatchChecked =
+              eligibleTasks.length > 0 && patchedCount === eligibleTasks.length;
+            const groupPatchIndeterminate = patchedCount > 0 && !groupPatchChecked;
+            const groupKey = `${group.fromLocationId}:${group.toLocationId}:${group.ownerType ?? "unassigned"}:${group.ownerId ?? 0}`;
+            const fromName = locationNamesById.get(group.fromLocationId) ?? group.fromLocationId;
+            const toName = locationNamesById.get(group.toLocationId) ?? group.toLocationId;
+            return (
+              <header className="flex min-h-14 w-full min-w-0 flex-col justify-between gap-3 py-3 md:grid md:grid-cols-[auto_auto_minmax(0,1fr)_auto_auto] md:items-center md:gap-3">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Switch
+                        aria-label={`Include all haul items from ${fromName} to ${toName}`}
+                        checked={groupChecked}
+                        className="shrink-0"
+                        disabled={
+                          group.tasks.length === 0
+                          || togglingHaulItemKey !== null
+                          || togglingHaulPatchGroupKey !== null
+                          || togglingHaulPatchKey !== null
+                        }
+                        onCheckedChange={(checked) => {
+                          onTogglingHaulItemKeyChange(groupKey);
+                          void onToggleHaulItemExclusions(group.tasks, !checked).finally(() => {
+                            onTogglingHaulItemKeyChange(null);
+                          });
+                        }}
+                      />
+                    }
+                  />
+                  <TooltipContent>Include all haul items?</TooltipContent>
+                </Tooltip>
+                <div className="flex min-w-0 flex-col gap-1 md:ml-2 md:gap-0">
+                  <span className="flex min-w-0 items-baseline gap-2 truncate text-xs uppercase">
+                    <span className="shrink-0">From</span>
+                    <strong className="min-w-0 truncate normal-case">
+                      {locationNamesById.get(group.fromLocationId) ?? group.fromLocationId}
+                    </strong>
                   </span>
+                  <span className="flex min-w-0 items-baseline gap-2 truncate text-xs uppercase">
+                    <span className="shrink-0">To</span>
+                    <strong className="min-w-0 truncate normal-case">
+                      {locationNamesById.get(group.toLocationId) ?? group.toLocationId}
+                    </strong>
+                  </span>
+                </div>
+                <strong className="min-w-14 shrink-0 whitespace-nowrap text-base text-(--theme-info)">
+                  {getHaulGroupVolume(
+                    group.tasks.filter((task) => !haulItemExclusion.has(haulTaskKey(task))),
+                  ).toLocaleString()}{" "}
+                  m<sup>3</sup>
                 </strong>
-              )}
-              {(() => {
-                const eligibleTasks = group.tasks.filter(
-                  (task) => !haulItemExclusion.has(haulTaskKey(task)),
-                );
-                const patchedCount = eligibleTasks.filter((task) =>
-                  isHaulTaskPatched(task, haulPatches),
-                ).length;
-                const groupChecked =
-                  eligibleTasks.length > 0 && patchedCount === eligibleTasks.length;
-                const groupIndeterminate = patchedCount > 0 && !groupChecked;
-                const groupKey = `${group.fromLocationId}:${group.toLocationId}:${group.ownerType ?? "unassigned"}:${group.ownerId ?? 0}`;
-                return (
+                {!stockpileLocations.has(group.fromLocationId) && (
+                  <Button
+                    className="w-full md:w-auto"
+                    variant="outline"
+                    disabled={excludingHaulFromLocationId !== null}
+                    onClick={() => {
+                      onExcludingHaulFromLocationIdChange(group.fromLocationId);
+                      void onExcludeHaulStockpile(group.fromLocationId).finally(() => {
+                        onExcludingHaulFromLocationIdChange(null);
+                      });
+                    }}
+                  >
+                    {excludingHaulFromLocationId === group.fromLocationId ? (
+                      <Spinner aria-hidden="true" />
+                    ) : (
+                      <SquareX aria-hidden="true" />
+                    )}
+                    <span>
+                      {excludingHaulFromLocationId === group.fromLocationId
+                        ? "Recalculating..."
+                        : "Exclude Location"}
+                    </span>
+                  </Button>
+                )}
+                <span className="flex min-w-0 items-center justify-between gap-2 md:justify-end">
+                  {group.ownerType !== undefined && group.ownerId !== undefined && (
+                    <strong className="ml-4 flex min-w-0 items-center gap-2">
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            group.ownerType === "corporation" ? (
+                              <Image
+                                src={eveCorporationLogoUrl(group.ownerId, 64)}
+                                alt={`${corporationNamesById.get(group.ownerId) ?? `Corporation ${group.ownerId}`} logo`}
+                                width={24}
+                                height={24}
+                                className="size-6 rounded-none"
+                              />
+                            ) : (
+                              <Image
+                                src={eveCharacterPortraitUrl(group.ownerId, 64)}
+                                alt={`${characterNamesById.get(group.ownerId) ?? `Character ${group.ownerId}`} portrait`}
+                                width={24}
+                                height={24}
+                                className="size-6 rounded-none"
+                              />
+                            )
+                          }
+                        />
+                        <TooltipContent>
+                          Owner:&nbsp;
+                          {group.ownerType === "corporation"
+                            ? (
+                                corporationNamesById.get(group.ownerId)
+                                ?? `Corporation ${group.ownerId}`
+                              )
+                            : (
+                                characterNamesById.get(group.ownerId)
+                                ?? `Character ${group.ownerId}`
+                              )}
+                        </TooltipContent>
+                      </Tooltip>
+                      <span className="min-w-20 truncate">
+                        {group.ownerType === "corporation"
+                          ? (
+                              corporationNamesById.get(group.ownerId)
+                              ?? `Corporation ${group.ownerId}`
+                            )
+                          : (characterNamesById.get(group.ownerId) ?? `Character ${group.ownerId}`)}
+                      </span>
+                    </strong>
+                  )}
                   <Tooltip>
                     <TooltipTrigger
                       render={
                         <Checkbox
                           aria-label="Mark all eligible items as moved"
                           className="ml-2 shrink-0"
-                          checked={groupChecked}
-                          indeterminate={groupIndeterminate}
+                          checked={groupPatchChecked}
+                          indeterminate={groupPatchIndeterminate}
                           disabled={
                             eligibleTasks.length === 0
                             || togglingHaulPatchGroupKey !== null
@@ -229,12 +270,12 @@ export default function PlannerHaulTab({
                         />
                       }
                     />
-                    <TooltipContent>Haul completed?</TooltipContent>
+                    <TooltipContent>Mark all eligible items as moved?</TooltipContent>
                   </Tooltip>
-                );
-              })()}
-            </span>
-          </header>
+                </span>
+              </header>
+            );
+          })()}
           <div className={styles.haulGroupRows}>
             {group.tasks.map((task) => {
               const key = haulTaskKey(task);
@@ -257,7 +298,9 @@ export default function PlannerHaulTab({
                   showSwitch
                   switchChecked={!isExcluded}
                   switchPending={togglingHaulItemKey === key}
-                  switchDisabled={isPatched || togglingHaulItemKey !== null}
+                  switchDisabled={
+                    isPatched || togglingHaulItemKey !== null || togglingHaulPatchGroupKey !== null
+                  }
                   switchTooltip="Include in haul plan?"
                   onSwitchChange={(checked) => {
                     onTogglingHaulItemKeyChange(key);

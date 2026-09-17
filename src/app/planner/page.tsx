@@ -912,6 +912,34 @@ function Planner() {
     }
   }
 
+  async function toggleHaulItemExclusions(tasks: ResponseHaulTask[], excluded: boolean) {
+    const nextExclusions = new Map(haulItemExclusion);
+    for (const task of tasks) {
+      const key = createHaulItemExclusionKey(
+        task.fromLocationId,
+        task.typeId,
+        task.toLocationId,
+        task.ownerType,
+        task.ownerId,
+      );
+      if (excluded) {
+        nextExclusions.set(
+          key,
+          {
+            neededQuantity: task.neededQuantity,
+            ...(task.ownerType ? { ownerType: task.ownerType } : {}),
+            ...(task.ownerId !== undefined ? { ownerId: task.ownerId } : {}),
+          },
+        );
+      }
+      else nextExclusions.delete(key);
+    }
+    if (await submitPlan(new Set(excludedLocationIds), nextExclusions)) {
+      setHaulItemExclusion(nextExclusions);
+      await saveHaulItemExclusions(nextExclusions);
+    }
+  }
+
   async function toggleHaulPatches(tasks: ResponseHaulTask[], patched: boolean) {
     const nextPatches = new Map(activeHaulPatches);
     const currentStock = getPlannerStock(clientAssets, includeStock, new Set(excludedLocationIds));
@@ -1987,6 +2015,7 @@ function Planner() {
         onExcludeHaulStockpile={excludeHaulStockpile}
         haulItemExclusion={haulItemExclusion}
         onToggleHaulItemExclusion={toggleHaulItemExclusion}
+        onToggleHaulItemExclusions={toggleHaulItemExclusions}
         haulPatches={activeHaulPatches}
         onToggleHaulPatches={toggleHaulPatches}
       />
