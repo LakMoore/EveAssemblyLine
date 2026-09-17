@@ -209,6 +209,80 @@ function projectMarketOrderStock(
   });
 }
 
+function projectMissingBlueprintAssets(
+  snapshot: ClientOwnerSnapshot,
+  metadataByTypeId: Map<number, TypeMetadata>,
+): StockItem[] {
+  const assetItemIds = new Set(snapshot.assets.data.map((asset) => asset.itemId));
+  return snapshot.blueprintInstances.data
+    .filter((blueprint) => !assetItemIds.has(blueprint.itemId))
+    .flatMap((blueprint) => {
+      const metadata = metadataByTypeId.get(blueprint.typeId);
+      if (metadata?.category !== "blueprint") return [];
+      const source = snapshot.corporationSources.data.find(
+        (candidate) =>
+          candidate.corporationId === blueprint.ownerId
+          && candidate.locationFlag === blueprint.locationFlag,
+      );
+      const rootLocation = snapshot.rootLocations.data.find(
+        (entry) => entry.itemId === blueprint.locationId,
+      )?.location;
+      const rootLocationId =
+        rootLocation?.locationId ?? source?.rootLocationId ?? blueprint.locationId;
+      const isBpo = blueprint.quantity === -1;
+      const corporationSource = source && {
+        rootLocationId: source.rootLocationId,
+        locationFlag: source.locationFlag,
+        containerItemIds: source.containerItemIds.includes(blueprint.locationId)
+          ? [blueprint.locationId]
+          : [],
+      };
+      return [
+        {
+          typeId: blueprint.typeId,
+          name: metadata.name,
+          quantity: isBpo ? 1 : Math.max(1, blueprint.quantity),
+          locationId: blueprint.locationId,
+          rootLocationId,
+          ownerType: blueprint.ownerType,
+          ownerId: blueprint.ownerId,
+          category: "blueprint" as const,
+          blueprintType: isBpo ? ("bpo" as const) : ("bpc" as const),
+          blueprintPrints: [
+            {
+              itemId: blueprint.itemId,
+              runs: blueprint.runs,
+              type: isBpo ? ("bpo" as const) : ("bpc" as const),
+              me: blueprint.me,
+              te: blueprint.te,
+            },
+          ],
+          ...(rootLocation
+            ? {
+                sourceLocationName: sourceLocationName(rootLocation),
+                sourceLocationKind: sourceLocationKind(rootLocation),
+                sourceSystemId:
+                  rootLocation.kind === "solar_system"
+                    ? (rootLocation.systemId ?? rootLocation.locationId)
+                    : rootLocation.systemId,
+              }
+            : {}),
+          ...(metadata.assembledVolume !== undefined
+            ? { assembledVolume: metadata.assembledVolume }
+            : {}),
+          ...(metadata.packagedVolume !== undefined
+            ? { packagedVolume: metadata.packagedVolume }
+            : {}),
+          ...(metadata.techLevel !== undefined ? { techLevel: metadata.techLevel } : {}),
+          ...(metadata.assemblyLineGroup !== undefined
+            ? { assemblyLineGroup: metadata.assemblyLineGroup }
+            : {}),
+          ...(corporationSource ? { corporationSource } : {}),
+        },
+      ];
+    });
+}
+
 function corporationSourceForJob(
   snapshot: ClientOwnerSnapshot,
   job: ClientOwnerSnapshot["jobs"]["data"][number],
@@ -415,6 +489,7 @@ export function projectOwnerSnapshotsToClientAssets(
     }
     return [
       ...snapshot.assets.data.map((asset) => projectAsset(snapshot, asset, metadataByTypeId)),
+      ...projectMissingBlueprintAssets(snapshot, metadataByTypeId),
       ...projectIndustryJobAssets(snapshot, metadataByTypeId, options),
       ...projectMarketOrderStock(snapshot, metadataByTypeId),
     ];

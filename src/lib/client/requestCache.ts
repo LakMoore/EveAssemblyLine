@@ -601,6 +601,7 @@ export async function loadClientOwnerSnapshotAssets(
     ...new Set(
       snapshots.flatMap((snapshot) => [
         ...snapshot.assets.data.map((asset) => asset.typeId),
+        ...snapshot.blueprintInstances.data.map((blueprint) => blueprint.typeId),
         ...snapshot.marketOrders.data.map((order) => order.typeId),
         ...snapshot.jobs.data.flatMap((job) => [job.blueprintTypeId, job.productTypeId ?? 0]),
       ]),

@@ -159,6 +159,10 @@ function isMultibuyMaterial(entry: PlanBuyEntry): boolean {
   return "typeName" in entry && !("bpoCount" in entry);
 }
 
+function isBlueprintBuyEntry(entry: PlanBuyEntry): entry is ResponseBlueprintBuy {
+  return "bpoCount" in entry;
+}
+
 function getEntryName(entry: { name?: string; typeName?: string }) {
   return entry.typeName ?? entry.name ?? "";
 }
@@ -198,6 +202,21 @@ function getReactionFormulaSummary(typeId: number, stock: PlanStockItem[]) {
   return {
     owned: formulaStock.reduce((total, stockItem) => total + stockItem.quantity, 0),
     inUse: formulaStock
+      .filter((stockItem) => stockItem.inUse)
+      .reduce((total, stockItem) => total + stockItem.quantity, 0),
+  };
+}
+
+function getBpoSummary(typeId: number, stock: PlanStockItem[]) {
+  const bpoStock = stock.filter(
+    (stockItem) =>
+      stockItem.category === "blueprint"
+      && stockItem.typeId === typeId
+      && stockItem.blueprintType === "bpo",
+  );
+  return {
+    total: bpoStock.reduce((total, stockItem) => total + stockItem.quantity, 0),
+    inUse: bpoStock
       .filter((stockItem) => stockItem.inUse)
       .reduce((total, stockItem) => total + stockItem.quantity, 0),
   };
@@ -649,6 +668,14 @@ function PlannerResultsContent({
     return () => window.cancelAnimationFrame(frame);
   }, [activeTab, selectedTypeId]);
 
+  useEffect(() => {
+    if (!plan) return;
+    const planTypeIds = new Set(plan.lists.planItems.all.map((entry) => entry.typeId));
+    if (activeTab === "Plan" && selectedTypeId !== null && !planTypeIds.has(selectedTypeId)) {
+      updatePlannerUrl("Plan", null);
+    }
+  }, [activeTab, plan, selectedTypeId]);
+
   function updatePlannerUrl(tab: PlannerTab, typeId: number | null) {
     const url = new URL(window.location.href);
     url.searchParams.set(plannerTabParam, tab);
@@ -1084,18 +1111,21 @@ function PlanList({
   const selectedType = planTypeOptions.find((option) => option.id === selectedTypeId);
   const planTypeNamesById = new Map(planTypeOptions.map((option) => [option.id, option.name]));
   const planTypeKindsById = new Map(planItems.map((entry) => [entry.typeId, entry.kind]));
+  const effectivePlanTypeId = planTypeOptions.some((option) => option.id === selectedTypeId)
+    ? selectedTypeId
+    : null;
   const filteredPlanItems =
-    selectedTypeId === null
+    effectivePlanTypeId === null
       ? planItems
-      : planItems.filter((entry) => entry.typeId === selectedTypeId);
+      : planItems.filter((entry) => entry.typeId === effectivePlanTypeId);
   const planItemsByActivityLocation = flattenLocationBuckets(
     plan.lists.planItems.byActivityLocation,
     "activityLocationId",
   );
   const filteredPlanItemsByActivityLocation =
-    selectedTypeId === null
+    effectivePlanTypeId === null
       ? planItemsByActivityLocation
-      : planItemsByActivityLocation.filter((entry) => entry.typeId === selectedTypeId);
+      : planItemsByActivityLocation.filter((entry) => entry.typeId === effectivePlanTypeId);
   const inventionJobs = flattenLocationBuckets(plan.lists.inventionJobs, "locationId");
   const reactionJobs = flattenLocationBuckets(plan.lists.reactionJobs, "locationId");
   const manufacturingJobs = flattenLocationBuckets(plan.lists.manufacturingJobs, "locationId");
@@ -1157,6 +1187,17 @@ function PlanList({
           .filter((bucket) => bucket.items.length > 0)
       : [];
   const buyEntries = buyBuckets.flatMap((bucket) => bucket.items);
+  const buyBpoSummary = buyEntries.flatMap((entry) => {
+    if (!isBlueprintBuyEntry(entry)) return [];
+    const summary = getBpoSummary(entry.typeId, stock);
+    return [
+      {
+        typeId: entry.typeId,
+        total: summary.total > 0 ? summary.total : entry.bpoCount,
+        inUse: summary.total > 0 ? summary.inUse : entry.bposInUse,
+      },
+    ];
+  });
   const rawList =
     activeTab === "Plan"
       ? planViewMode === "all"
@@ -2094,10 +2135,18 @@ function PlanList({
                             </>
                           ) : activeTab === "Buy" && buyBpoEntry ? (
                             <>
-                              <span className="text-right font-mono text-[11px] leading-normal whitespace-nowrap text-muted-foreground max-[640px]:col-span-1 max-[640px]:w-full max-[640px]:text-left">
-                                BPO: {buyBpoEntry.bpoCount.toLocaleString()} /{" "}
-                                {buyBpoEntry.bposInUse.toLocaleString()} in use
-                              </span>
+                              {(() => {
+                                const summary = buyBpoSummary.find(
+                                  (candidate) => candidate.typeId === buyBpoEntry.typeId,
+                                );
+                                const total = summary?.total ?? buyBpoEntry.bpoCount;
+                                const inUse = summary?.inUse ?? buyBpoEntry.bposInUse;
+                                return (
+                                  <span className="text-right font-mono text-[11px] leading-normal whitespace-nowrap text-muted-foreground max-[640px]:col-span-1 max-[640px]:w-full max-[640px]:text-left">
+                                    BPO: {inUse.toLocaleString()} / {total.toLocaleString()} in use
+                                  </span>
+                                );
+                              })()}
                               <span
                                 className={`${styles.planRowAmount} max-[640px]:col-span-1 max-[640px]:w-full`}
                               >

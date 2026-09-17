@@ -456,6 +456,43 @@ void test("classifies a blueprint original from the blueprint instance quantity"
   assert.equal(blueprint.blueprintPrints?.[0]?.type, "bpo");
 });
 
+void test("projects a blueprint instance when its asset record is unavailable", () => {
+  const blueprintSnapshot: ClientOwnerSnapshot = {
+    ...snapshot,
+    assets: slice([]),
+    blueprintInstances: slice([
+      {
+        itemId: 3840001,
+        typeId: 3840,
+        locationId: 600,
+        locationFlag: "CorpSAG1",
+        quantity: -2,
+        runs: 7,
+        me: 10,
+        te: 20,
+        ownerType: "corporation",
+        ownerId: 900,
+      },
+    ]),
+  };
+  const result = projectOwnerSnapshotsToClientAssets(
+    [blueprintSnapshot],
+    {
+      metadata: [
+        { typeId: 3840, name: "Large Shield Extender I Blueprint", category: "blueprint" },
+      ],
+    },
+  );
+  const blueprint = result.assets?.find((asset) => asset.typeId === 3840);
+
+  assert.ok(blueprint);
+  assert.equal(blueprint.quantity, 1);
+  assert.equal(blueprint.blueprintType, "bpc");
+  assert.equal(blueprint.blueprintPrints?.[0]?.type, "bpc");
+  assert.equal(blueprint.inUse, undefined);
+  assert.equal(filterClientAssetsForPlanning(result).assets?.length, 1);
+});
+
 void test("projects job output and remaining blueprint runs without an asset record", () => {
   const jobSnapshot: ClientOwnerSnapshot = {
     ...snapshot,
