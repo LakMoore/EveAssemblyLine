@@ -1017,15 +1017,15 @@ function toResponsePlanItem(
   };
   if (entry.kind === "material") {
     const availableQuantity =
-      Math.max(
-        0,
-        (availableQuantityOverride ?? entry.availableStockQuantity) - outboundHaulingQuantity,
-      ) + (includeHaulingQuantity ? haulingQuantity : 0);
+      (availableQuantityOverride ?? entry.availableStockQuantity)
+      + (includeHaulingQuantity ? haulingQuantity : 0);
+    const netAvailableQuantity = Math.max(0, availableQuantity - outboundHaulingQuantity);
     const plannedProductionQuantity = Math.max(
       0,
       entry.productionQuantity - (entry.reprocessingQuantity ?? 0),
     );
-    const effectiveAvailableQuantity = availableQuantity + additionalAvailableQuantity;
+    const effectiveAvailableQuantity = netAvailableQuantity + additionalAvailableQuantity;
+    const surplusAvailableQuantity = availableQuantity + additionalAvailableQuantity;
     const neededQuantity = Math.max(
       plannedProductionQuantity,
       entry.requiredQuantity - effectiveAvailableQuantity,
@@ -1038,7 +1038,7 @@ function toResponsePlanItem(
       neededQuantity,
       surplusQuantity: Math.max(
         0,
-        effectiveAvailableQuantity + plannedProductionQuantity - entry.requiredQuantity,
+        surplusAvailableQuantity + plannedProductionQuantity - entry.requiredQuantity,
       ),
     };
   }
@@ -3085,77 +3085,92 @@ function mergeHaulingTasks(tasks: PlanCalculation["lists"]["haulingTasks"]) {
 }
 
 /** Caps outbound haulage at a location to stock that remains after its own final-product demand. */
+/** Sums eligible stock quantities by their effective location and type. */
+function getStockQuantitiesByLocationAndType(
+  stock: readonly PlanStockItem[],
+  includesItem: (item: PlanStockItem) => boolean,
+): Map<string, number> {
+  const quantitiesByLocationAndType = new Map<string, number>();
+  for (const item of stock) {
+    const rootLocationId = getStockRootLocationId(item);
+    if (rootLocationId === undefined || !includesItem(item)) continue;
+    const key = locationTypeKey(rootLocationId, item.typeId);
+    quantitiesByLocationAndType.set(
+      key,
+      (quantitiesByLocationAndType.get(key) ?? 0) + item.quantity,
+    );
+  }
+  return quantitiesByLocationAndType;
+}
+
+/** Retains hauling tasks only while the capacity at their relevant endpoint remains. */
+function capHaulingTasksToCapacity(
+  tasks: PlanCalculation["lists"]["haulingTasks"],
+  capacityByLocationAndType: ReadonlyMap<string, number>,
+  getCapacityKey: (task: PlanCalculation["lists"]["haulingTasks"][number]) => string,
+) {
+  const allocatedByLocationAndType = new Map<string, number>();
+  return tasks
+    .map((task) => {
+      const key = getCapacityKey(task);
+      const capacity = capacityByLocationAndType.get(key);
+      if (capacity === undefined) return task;
+      const allocatedQuantity = allocatedByLocationAndType.get(key) ?? 0;
+      const retainedQuantity = Math.min(
+        task.neededQuantity,
+        Math.max(0, capacity - allocatedQuantity),
+      );
+      allocatedByLocationAndType.set(key, allocatedQuantity + retainedQuantity);
+      if (retainedQuantity === task.neededQuantity) return task;
+      return { ...task, neededQuantity: retainedQuantity };
+    })
+    .filter((task) => task.neededQuantity > 0);
+}
+
+/** Caps outbound hauling to surplus remaining after final-product demand at the source. */
 function capHaulingTasksToLocalStockpileSurplus(
   tasks: PlanCalculation["lists"]["haulingTasks"],
   stock: PlanStockItem[],
   stockpiles: NonNullable<PlannerRequest["stockpiles"]>,
 ) {
-  const stockByLocationAndType = new Map<string, number>();
-  for (const item of stock) {
-    const rootLocationId = getStockRootLocationId(item);
-    if (
-      rootLocationId === undefined
-      || item.category === "blueprint"
-      || item.category === "reactionformula"
-      || item.source === "marketOrder"
-      || !isAvailableIndustryProductionOutput(item)
-    ) continue;
-    const key = locationTypeKey(rootLocationId, item.typeId);
-    stockByLocationAndType.set(key, (stockByLocationAndType.get(key) ?? 0) + item.quantity);
-  }
-
-  const demandByLocationAndType = new Map<string, number>();
+  const stockByLocationAndType = getStockQuantitiesByLocationAndType(
+    stock,
+    (item) =>
+      item.category !== "blueprint"
+      && item.category !== "reactionformula"
+      && item.source !== "marketOrder"
+      && isAvailableIndustryProductionOutput(item),
+  );
+  const surplusByLocationAndType = new Map(stockByLocationAndType);
   for (const stockpile of stockpiles) {
     for (const item of stockpile.items) {
       const key = locationTypeKey(stockpile.locations.stock, item.typeId);
-      demandByLocationAndType.set(key, (demandByLocationAndType.get(key) ?? 0) + item.quantity);
+      surplusByLocationAndType.set(key, (surplusByLocationAndType.get(key) ?? 0) - item.quantity);
     }
   }
-
-  const outboundQuantityByLocationAndType = new Map<string, number>();
-  return tasks
-    .map((task) => {
-      const key = locationTypeKey(task.fromLocationId, task.typeId);
-      const stockQuantity = stockByLocationAndType.get(key);
-      if (stockQuantity === undefined) return task;
-      const localDemand = demandByLocationAndType.get(key) ?? 0;
-      const surplus = Math.max(0, stockQuantity - localDemand);
-      const alreadyOutbound = outboundQuantityByLocationAndType.get(key) ?? 0;
-      const availableSurplus = Math.max(0, surplus - alreadyOutbound);
-      const retainedQuantity = Math.min(task.neededQuantity, availableSurplus);
-      outboundQuantityByLocationAndType.set(key, alreadyOutbound + retainedQuantity);
-      if (retainedQuantity === task.neededQuantity) return task;
-
-      const cappedTask = {
-        ...task,
-        neededQuantity: retainedQuantity,
-      };
-      return cappedTask;
-    })
-    .filter((task) => task.neededQuantity > 0);
+  for (const [key, quantity] of surplusByLocationAndType) {
+    surplusByLocationAndType.set(key, Math.max(0, quantity));
+  }
+  return capHaulingTasksToCapacity(
+    tasks,
+    surplusByLocationAndType,
+    (task) => locationTypeKey(task.fromLocationId, task.typeId),
+  );
 }
 
+/** Caps inbound hauling to remaining material demand at the destination. */
 function capHaulingTasksToDestinationDemand(
   tasks: PlanCalculation["lists"]["haulingTasks"],
   stock: PlanStockItem[],
   results: PlanCalculation[],
 ) {
-  const localStockByLocationAndType = new Map<string, number>();
-  for (const item of stock) {
-    const locationId = getStockRootLocationId(item);
-    if (
-      locationId === undefined
-      || item.category !== "item"
-      || item.source === "marketOrder"
-      || !isUsableIndustryProductionOutput(item)
-    ) continue;
-    const key = locationTypeKey(locationId, item.typeId);
-    localStockByLocationAndType.set(
-      key,
-      (localStockByLocationAndType.get(key) ?? 0) + item.quantity,
-    );
-  }
-
+  const localStockByLocationAndType = getStockQuantitiesByLocationAndType(
+    stock,
+    (item) =>
+      item.category === "item"
+      && item.source !== "marketOrder"
+      && isUsableIndustryProductionOutput(item),
+  );
   const demandByLocationAndType = new Map<string, number>();
   for (const result of results) {
     for (const material of result.lists.materialsToBuy) {
@@ -3168,64 +3183,61 @@ function capHaulingTasksToDestinationDemand(
       );
     }
   }
-
-  const inboundByLocationAndType = new Map<string, number>();
-  return tasks
-    .map((task) => {
-      const key = locationTypeKey(task.toLocationId, task.typeId);
-      const demand = demandByLocationAndType.get(key);
-      if (demand === undefined) return task;
-      const localStock = localStockByLocationAndType.get(key) ?? 0;
-      const inbound = inboundByLocationAndType.get(key) ?? 0;
-      const remainingDemand = Math.max(0, demand - localStock - inbound);
-      const retainedQuantity = Math.min(task.neededQuantity, remainingDemand);
-      inboundByLocationAndType.set(key, inbound + retainedQuantity);
-      if (retainedQuantity === task.neededQuantity) return task;
-      return { ...task, neededQuantity: retainedQuantity };
-    })
-    .filter((task) => task.neededQuantity > 0);
+  const remainingDemandByLocationAndType = new Map(demandByLocationAndType);
+  for (const [key, localStockQuantity] of localStockByLocationAndType) {
+    const demand = remainingDemandByLocationAndType.get(key);
+    if (demand !== undefined) {
+      remainingDemandByLocationAndType.set(key, Math.max(0, demand - localStockQuantity));
+    }
+  }
+  return capHaulingTasksToCapacity(
+    tasks,
+    remainingDemandByLocationAndType,
+    (task) => locationTypeKey(task.toLocationId, task.typeId),
+  );
 }
 
-function countPlanBlueprints(
+/** Counts total and in-use resources at an activity location using the supplied quantity resolver. */
+function countPlanResources(
   stock: PlanStockItem[],
   typeId: number,
   locationId: number,
+  getQuantity: (item: PlanStockItem) => number,
 ): { total: number; available: number; inUse: number } {
   let total = 0;
   let inUse = 0;
   for (const item of stock) {
-    if (
-      item.category !== "blueprint"
-      || item.typeId !== typeId
-      || getStockRootLocationId(item) !== locationId
-    ) continue;
-    const bpoCount =
-      item.blueprintType === "bpo"
+    if (item.typeId !== typeId || getStockRootLocationId(item) !== locationId) continue;
+    const quantity = getQuantity(item);
+    total += quantity;
+    if (item.inUse) inUse += quantity;
+  }
+  return { total, available: Math.max(0, total - inUse), inUse };
+}
+
+/** Counts owned BPOs and BPO-backed prints at an activity location. */
+function countPlanBlueprints(stock: PlanStockItem[], typeId: number, locationId: number) {
+  return countPlanResources(
+    stock,
+    typeId,
+    locationId,
+    (item) => {
+      if (item.category !== "blueprint") return 0;
+      return item.blueprintType === "bpo"
         ? item.quantity
         : (item.blueprintPrints?.filter((print) => print.type === "bpo").length ?? 0);
-    total += bpoCount;
-    if (item.inUse) inUse += bpoCount;
-  }
-  return { total, available: Math.max(0, total - inUse), inUse };
+    },
+  );
 }
 
-function countPlanReactionFormulas(
-  stock: PlanStockItem[],
-  typeId: number,
-  locationId: number,
-): { total: number; available: number; inUse: number } {
-  let total = 0;
-  let inUse = 0;
-  for (const item of stock) {
-    if (
-      item.category !== "reactionformula"
-      || item.typeId !== typeId
-      || getStockRootLocationId(item) !== locationId
-    ) continue;
-    total += item.quantity;
-    if (item.inUse) inUse += item.quantity;
-  }
-  return { total, available: Math.max(0, total - inUse), inUse };
+/** Counts reaction formulas at an activity location. */
+function countPlanReactionFormulas(stock: PlanStockItem[], typeId: number, locationId: number) {
+  return countPlanResources(
+    stock,
+    typeId,
+    locationId,
+    (item) => (item.category === "reactionformula" ? item.quantity : 0),
+  );
 }
 
 function restorePlanStockQuantities(
@@ -3555,40 +3567,14 @@ function mergeBpcBuyEntries(entries: PlanCalculation["lists"]["bpcsToBuy"]) {
 
 /** Merges stockpile material requirements before calculating the shared shortage. */
 function mergeMaterialBuyEntries(entries: PlanCalculation["lists"]["materialsToBuy"]) {
-  const mergedByType = new Map<number, PlanCalculation["lists"]["materialsToBuy"][number]>();
-  const mergedTypes = new Set<number>();
-  for (const entry of entries) {
-    const existing = mergedByType.get(entry.typeId);
-    if (!existing) {
-      mergedByType.set(entry.typeId, { ...entry });
-      continue;
-    }
-    mergedTypes.add(entry.typeId);
-    mergedByType.set(
-      entry.typeId,
-      {
-        ...existing,
-        quantity: existing.quantity + entry.quantity,
-        requiredQuantity: existing.requiredQuantity + entry.requiredQuantity,
-        stockQuantity: existing.stockQuantity + entry.stockQuantity,
-        availableStockQuantity: existing.availableStockQuantity + entry.availableStockQuantity,
-        productionQuantity: existing.productionQuantity + entry.productionQuantity,
-        reprocessingQuantity:
-          (existing.reprocessingQuantity ?? 0) + (entry.reprocessingQuantity ?? 0),
-        buyQuantity: existing.buyQuantity + entry.buyQuantity,
-        remainingProductionQuantity:
-          existing.remainingProductionQuantity + entry.remainingProductionQuantity,
-        availableSourceCounts: mergeMaterialSourceCounts(
-          existing.availableSourceCounts,
-          entry.availableSourceCounts,
-        ),
-      },
-    );
-  }
-  return [...mergedByType.values()].map((entry) =>
-    mergedTypes.has(entry.typeId) && entry.reprocessingQuantity === 0 && entry.buyQuantity > 0
-      ? { ...entry, buyQuantity: calculateMergedMaterialBuyQuantity(entry) }
-      : entry,
+  return mergeMaterialEntries(
+    entries,
+    {
+      combineAvailableStockQuantity: (existing, entry) =>
+        existing.availableStockQuantity + entry.availableStockQuantity,
+      combineSourceCounts: mergeMaterialSourceCounts,
+      clearLocationsWhenMerged: false,
+    },
   );
 }
 
@@ -3604,6 +3590,35 @@ function calculateMergedMaterialBuyQuantity(
 }
 
 function mergeMaterialRowsWithinPass(entries: PlanCalculation["lists"]["materialsToBuy"]) {
+  return mergeMaterialEntries(
+    entries,
+    {
+      combineAvailableStockQuantity: (existing, entry) =>
+        Math.max(existing.availableStockQuantity, entry.availableStockQuantity),
+      combineSourceCounts: mergeMaterialSourceCountsByMaximum,
+      clearLocationsWhenMerged: true,
+    },
+  );
+}
+
+/** Defines the values whose aggregation differs between material merge contexts. */
+type MaterialMergePolicy = {
+  combineAvailableStockQuantity: (
+    existing: PlanCalculation["lists"]["materialsToBuy"][number],
+    entry: PlanCalculation["lists"]["materialsToBuy"][number],
+  ) => number;
+  combineSourceCounts: (
+    existing: PlanSourceCountsByLocation | undefined,
+    entry: PlanSourceCountsByLocation | undefined,
+  ) => PlanSourceCountsByLocation | undefined;
+  clearLocationsWhenMerged: boolean;
+};
+
+/** Merges material rows by type while retaining the caller's availability semantics. */
+function mergeMaterialEntries(
+  entries: PlanCalculation["lists"]["materialsToBuy"],
+  policy: MaterialMergePolicy,
+) {
   const mergedByType = new Map<number, PlanCalculation["lists"]["materialsToBuy"][number]>();
   const mergedTypes = new Set<number>();
   for (const entry of entries) {
@@ -3618,23 +3633,22 @@ function mergeMaterialRowsWithinPass(entries: PlanCalculation["lists"]["material
       quantity: existing.quantity + entry.quantity,
       requiredQuantity: existing.requiredQuantity + entry.requiredQuantity,
       stockQuantity: existing.stockQuantity + entry.stockQuantity,
-      availableStockQuantity: Math.max(
-        existing.availableStockQuantity,
-        entry.availableStockQuantity,
-      ),
+      availableStockQuantity: policy.combineAvailableStockQuantity(existing, entry),
       productionQuantity: existing.productionQuantity + entry.productionQuantity,
       reprocessingQuantity:
         (existing.reprocessingQuantity ?? 0) + (entry.reprocessingQuantity ?? 0),
       buyQuantity: existing.buyQuantity + entry.buyQuantity,
       remainingProductionQuantity:
         existing.remainingProductionQuantity + entry.remainingProductionQuantity,
-      availableSourceCounts: mergeMaterialSourceCountsByMaximum(
+      availableSourceCounts: policy.combineSourceCounts(
         existing.availableSourceCounts,
         entry.availableSourceCounts,
       ),
     };
-    delete merged.activityLocationId;
-    delete merged.stockpileLocationId;
+    if (policy.clearLocationsWhenMerged) {
+      delete merged.activityLocationId;
+      delete merged.stockpileLocationId;
+    }
     mergedByType.set(entry.typeId, merged);
   }
   return [...mergedByType.values()].map((entry) =>

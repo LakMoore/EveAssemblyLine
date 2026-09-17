@@ -3389,16 +3389,23 @@ void test("reports transferred stock as local availability", async () => {
   const localPlanItem = response.lists.planItems.byActivityLocation
     .find((bucket) => bucket.locationId === manufacturingLocationId)
     ?.items.find((item) => item.typeId === tritaniumTypeId);
+  const sourcePlanItem = response.lists.planItems.byActivityLocation
+    .find((bucket) => bucket.locationId === 21)
+    ?.items.find((item) => item.typeId === tritaniumTypeId);
   const material = result.lists.materialsToBuy.find((entry) => entry.typeId === tritaniumTypeId);
   const transfer = result.lists.haulingTasks.find(
     (task) => task.typeId === tritaniumTypeId && task.toLocationId === manufacturingLocationId,
   );
 
   assert(localPlanItem);
+  assert(sourcePlanItem);
   assert(material);
   assert(transfer);
   assert.equal(localPlanItem.availableQuantity, 100);
   assert.equal(localPlanItem.neededQuantity, 0);
+  assert.equal(sourcePlanItem.availableQuantity, 300);
+  assert.equal(sourcePlanItem.requiredQuantity, 200);
+  assert.equal(sourcePlanItem.surplusQuantity, 100);
   assert.equal(material.stockQuantity, 300);
   assert.equal(material.buyQuantity, 0);
   assert.equal(transfer.neededQuantity, 100);
@@ -3549,7 +3556,7 @@ void test("does not count hauled stock twice in aggregate purchases", async () =
   assert(sourceMaterial);
   assert(destinationMaterial);
   assert(responsePurchase);
-  assert.equal(sourceMaterial.availableQuantity, 5_006);
+  assert.equal(sourceMaterial.availableQuantity, 7_006);
   assert.equal(sourceMaterial.neededQuantity, 5_124);
   assert.equal(destinationMaterial.availableQuantity, 2_000);
   assert.equal(destinationMaterial.neededQuantity, 0);

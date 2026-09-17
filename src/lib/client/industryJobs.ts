@@ -96,5 +96,10 @@ export function getIndustryJobMinutesUntil(endTime: number | undefined, now = Da
 /** Formats the shared next-job detail used by production icon tooltips. */
 export function nextIndustryJobDetail(minutes: number | undefined) {
   if (minutes === undefined) return "";
-  return minutes === 0 ? "; Ready for Delivery" : `; next job ends in ${minutes} minutes`;
+  if (minutes === 0) return "; next job ready for delivery";
+  if (minutes < 60) return `; next job ends in ${minutes} minutes`;
+  const hours = Math.ceil(minutes / 60);
+  if (hours < 24) return `; next job ends in ${hours} hours`;
+  const days = Math.ceil(hours / 24);
+  return `; next job ends in ${days} days`;
 }
