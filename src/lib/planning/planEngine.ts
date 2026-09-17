@@ -1255,12 +1255,7 @@ async function calculatePlanPass(
       );
     }
   }
-  const jobAvailableByLocationAndType = new Map(
-    [...stockByLocationAndType].map(([locationId, quantities]) => [
-      locationId,
-      new Map(quantities),
-    ]),
-  );
+  const jobInputStockLots = stockLots.map((lot) => ({ ...lot }));
   const haulingByKey = new Map<string, PlanHaulTask>();
   function isHaulExcluded(
     typeId: number,
@@ -1437,6 +1432,21 @@ async function calculatePlanPass(
       );
     }
   }
+  /** Returns stock that can be delivered to a job without consuming the material-plan ledger. */
+  function getJobInputAvailability(typeId: number, locationId: number | undefined) {
+    if (locationId === undefined) return 0;
+    return jobInputStockLots
+      .filter(
+        (lot) =>
+          lot.typeId === typeId
+          && lot.quantity > 0
+          && canUseLotForDestination(lot, locationId)
+          && (!lot.industryJobOutput || lot.rootLocationId === locationId),
+      )
+      .reduce((total, lot) => total + lot.quantity, 0);
+  }
+
+  /** Reserves input lots in job order, including ordinary stock that must be hauled to the job. */
   function reserveJobInputAvailability(
     inputs: PlanJobInputs,
     requestedRuns: number,
@@ -1445,20 +1455,25 @@ async function calculatePlanPass(
     const installableRuns = getInstallableRuns(inputs, requestedRuns);
     if (installableRuns <= 0 || locationId === undefined) return;
     for (const material of inputs.materials) {
-      const available = getLocationQuantity(
-        jobAvailableByLocationAndType,
-        locationId,
-        material.typeId,
-      );
-      if (available <= 0) continue;
-      const reserved = Math.min(
-        available,
-        Math.ceil((material.requiredQuantity * installableRuns) / requestedRuns),
-      );
-      const remaining = available - reserved;
-      const quantities = jobAvailableByLocationAndType.get(locationId);
-      if (remaining > 0) quantities?.set(material.typeId, remaining);
-      else quantities?.delete(material.typeId);
+      let remaining = Math.ceil((material.requiredQuantity * installableRuns) / requestedRuns);
+      for (const lot of jobInputStockLots
+        .filter(
+          (lot) =>
+            lot.typeId === material.typeId
+            && lot.quantity > 0
+            && canUseLotForDestination(lot, locationId)
+            && (!lot.industryJobOutput || lot.rootLocationId === locationId),
+        )
+        .sort(
+          (left, right) =>
+            Number(left.rootLocationId !== locationId) - Number(right.rootLocationId !== locationId)
+            || left.rootLocationId - right.rootLocationId,
+        )) {
+        if (remaining <= 0) break;
+        const reserved = Math.min(lot.quantity, remaining);
+        lot.quantity -= reserved;
+        remaining -= reserved;
+      }
     }
   }
   function consumeAvailableStock(
@@ -1841,11 +1856,7 @@ async function calculatePlanPass(
           ),
         0,
       );
-      const availableQuantity = getLocationQuantity(
-        jobAvailableByLocationAndType,
-        locationId,
-        material.typeID,
-      );
+      const availableQuantity = getJobInputAvailability(material.typeID, locationId);
       const inBuildQuantity = Math.min(
         availableQuantity,
         getLocationQuantity(industryOutputByLocationAndType, locationId, material.typeID),
@@ -1937,10 +1948,7 @@ async function calculatePlanPass(
     number,
     ReturnType<typeof getBuildBlueprintByProductTypeId>
   >();
-  const defaultEfficiency: Efficiency = {
-    me: clampEfficiency(request.settings.defaultMe, 10),
-    te: clampEfficiency(request.settings.defaultTe, 20),
-  };
+  const defaultEfficiency: Efficiency = { me: 0, te: 0 };
   const manufacturingTimeMultiplier = request.facilityTimeMultipliers?.manufacturing ?? 1;
   const reactionTimeMultiplier = request.facilityTimeMultipliers?.reactions ?? 1;
   const manufacturingSkillTimeMultiplier = request.skillTimeMultipliers?.manufacturing ?? 1;
@@ -2015,11 +2023,24 @@ async function calculatePlanPass(
     return allocations;
   }
 
+  function fallbackManufacturingEfficiency(typeId: number): Efficiency {
+    const techLevel = typeRecords.get(typeId)?.techLevel;
+    if (techLevel === 2 || techLevel === 3) {
+      return {
+        me: clampEfficiency(request.settings.fallbackT2OrT3Me ?? 0, 10),
+        te: clampEfficiency(request.settings.fallbackT2OrT3Te ?? 0, 20),
+      };
+    }
+    return {
+      me: clampEfficiency(request.settings.fallbackT1Me ?? 0, 10),
+      te: clampEfficiency(request.settings.fallbackT1Te ?? 0, 20),
+    };
+  }
+
   function manufacturingEfficiency(
     typeId: number,
     blueprintTypeId: number,
     locationId: number | undefined,
-    te: number,
   ): Efficiency {
     const warningKey = `${blueprintTypeId}:${locationId ?? "unlocated"}`;
     const selectedEfficiency =
@@ -2027,19 +2048,22 @@ async function calculatePlanPass(
         ? undefined
         : blueprintMaterialEfficiencyByLocation.get(`${blueprintTypeId}:${locationId}`);
     if (selectedEfficiency !== undefined) {
-      return { me: selectedEfficiency, te };
+      return { me: selectedEfficiency, te: 0 };
     }
+    const fallbackEfficiency = fallbackManufacturingEfficiency(typeId);
     if (!zeroEfficiencyWarnings.has(warningKey)) {
       zeroEfficiencyWarnings.set(
         warningKey,
         {
           code: "manufacturing-blueprint-me-zero",
-          typeId,
+          typeId: blueprintTypeId,
           ...(locationId === undefined ? {} : { locationId }),
+          fallbackMe: fallbackEfficiency.me,
+          fallbackTe: fallbackEfficiency.te,
         },
       );
     }
-    return { me: 0, te };
+    return fallbackEfficiency;
   }
 
   function activityProfile(typeId: number, activity: "manufacturing" | "reaction") {
@@ -2389,7 +2413,7 @@ async function calculatePlanPass(
         const activityLocationId = profile.locationId;
         const fallbackEfficiency =
           candidate.activity === "manufacturing"
-            ? manufacturingEfficiency(typeId, blueprint._key, activityLocationId, efficiency.te)
+            ? manufacturingEfficiency(typeId, blueprint._key, activityLocationId)
             : efficiency;
         const productionActivity =
           candidate.activity === "manufacturing"
@@ -2498,13 +2522,14 @@ async function calculatePlanPass(
                 existing?.runsAvailable ?? Number.MAX_SAFE_INTEGER,
                 installableRuns,
               ),
-              totalTime:
+              totalTime: Math.ceil(
                 (existing?.totalTime ?? 0)
-                + manufacturingActivity.time
-                  * (1 - effectiveEfficiency.te / 100)
-                  * profile.timeMultiplier
-                  * manufacturingSkillTimeMultiplier
-                  * runsNeeded,
+                  + manufacturingActivity.time
+                    * (1 - effectiveEfficiency.te / 100)
+                    * profile.timeMultiplier
+                    * manufacturingSkillTimeMultiplier
+                    * runsNeeded,
+              ),
               inputs: mergedJobInputs,
               ...(activityLocationId !== undefined ? { locationId: activityLocationId } : {}),
             },

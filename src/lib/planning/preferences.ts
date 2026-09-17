@@ -48,8 +48,10 @@ export type PlannerSettings = {
   marketStations: ConfiguredMarketStation[];
   marketSalesTaxPercent: number;
   marketSignalThresholdIsk: number;
-  defaultMe: number;
-  defaultTe: number;
+  fallbackT1Me: number;
+  fallbackT1Te: number;
+  fallbackT2OrT3Me: number;
+  fallbackT2OrT3Te: number;
 };
 
 export const defaultLocations: PlannerLocations = {
@@ -72,8 +74,10 @@ export const defaultSettings: PlannerSettings = {
   marketStations: defaultMarketStations,
   marketSalesTaxPercent: 3.6,
   marketSignalThresholdIsk: 5_000_000,
-  defaultMe: 10,
-  defaultTe: 20,
+  fallbackT1Me: 8,
+  fallbackT1Te: 10,
+  fallbackT2OrT3Me: 2,
+  fallbackT2OrT3Te: 4,
 };
 
 export const locationsStorageKey = "assembly-line-locations";

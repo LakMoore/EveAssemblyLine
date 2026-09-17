@@ -318,43 +318,77 @@ export default function SettingsPage() {
         </Field>
         <Field className={styles.rule} orientation="horizontal">
           <FieldContent>
-            <FieldLabel htmlFor="default-intermediate-me">Default intermediate ME</FieldLabel>
-            <FieldDescription>
-              Material efficiency for blueprints not in the build list
-            </FieldDescription>
+            <FieldLabel>Fallback T1 Blueprint Bonus</FieldLabel>
+            <FieldDescription>Used when a Tech I blueprint is unavailable</FieldDescription>
           </FieldContent>
-          <Input
-            id="default-intermediate-me"
-            className={styles.ruleNumber}
-            type="number"
-            min="0"
-            max="10"
-            step="1"
-            value={settings.defaultMe}
-            onChange={(event) =>
-              setSettings({ ...settings, defaultMe: boundedNumber(event.target.value, 10) })
-            }
-          />
+          <div className="flex items-center gap-2">
+            <FieldLabel htmlFor="fallback-t1-me">ME</FieldLabel>
+            <Input
+              id="fallback-t1-me"
+              className={styles.ruleNumber}
+              type="number"
+              min="0"
+              max="10"
+              step="1"
+              value={settings.fallbackT1Me}
+              onChange={(event) =>
+                setSettings({ ...settings, fallbackT1Me: boundedNumber(event.target.value, 10) })
+              }
+            />
+            <FieldLabel htmlFor="fallback-t1-te">TE</FieldLabel>
+            <Input
+              id="fallback-t1-te"
+              className={styles.ruleNumber}
+              type="number"
+              min="0"
+              max="20"
+              step="1"
+              value={settings.fallbackT1Te}
+              onChange={(event) =>
+                setSettings({ ...settings, fallbackT1Te: boundedNumber(event.target.value, 20) })
+              }
+            />
+          </div>
         </Field>
         <Field className={styles.rule} orientation="horizontal">
           <FieldContent>
-            <FieldLabel htmlFor="default-intermediate-te">Default intermediate TE</FieldLabel>
-            <FieldDescription>
-              Time efficiency for blueprints not in the build list
-            </FieldDescription>
+            <FieldLabel>Fallback T2/3 Blueprint Bonus</FieldLabel>
+            <FieldDescription>Used when a Tech II or III blueprint is unavailable</FieldDescription>
           </FieldContent>
-          <Input
-            id="default-intermediate-te"
-            className={styles.ruleNumber}
-            type="number"
-            min="0"
-            max="20"
-            step="1"
-            value={settings.defaultTe}
-            onChange={(event) =>
-              setSettings({ ...settings, defaultTe: boundedNumber(event.target.value, 20) })
-            }
-          />
+          <div className="flex items-center gap-2">
+            <FieldLabel htmlFor="fallback-t2-or-t3-me">ME</FieldLabel>
+            <Input
+              id="fallback-t2-or-t3-me"
+              className={styles.ruleNumber}
+              type="number"
+              min="0"
+              max="10"
+              step="1"
+              value={settings.fallbackT2OrT3Me}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  fallbackT2OrT3Me: boundedNumber(event.target.value, 10),
+                })
+              }
+            />
+            <FieldLabel htmlFor="fallback-t2-or-t3-te">TE</FieldLabel>
+            <Input
+              id="fallback-t2-or-t3-te"
+              className={styles.ruleNumber}
+              type="number"
+              min="0"
+              max="20"
+              step="1"
+              value={settings.fallbackT2OrT3Te}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  fallbackT2OrT3Te: boundedNumber(event.target.value, 20),
+                })
+              }
+            />
+          </div>
         </Field>
         <Button className={styles.calculate} type="submit">
           <span>{saved ? "Settings saved" : "Save settings"}</span>

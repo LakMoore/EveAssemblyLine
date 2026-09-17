@@ -836,8 +836,10 @@ function Planner() {
               myCorporationSellOrdersAsStock: settings.myCorporationSellOrdersAsStock,
               buildBlacklist: settings.buildBlacklist.map((item) => item.typeId),
               buyBlacklist: [],
-              defaultMe: settings.defaultMe,
-              defaultTe: settings.defaultTe,
+              fallbackT1Me: settings.fallbackT1Me,
+              fallbackT1Te: settings.fallbackT1Te,
+              fallbackT2OrT3Me: settings.fallbackT2OrT3Me,
+              fallbackT2OrT3Te: settings.fallbackT2OrT3Te,
             },
           }),
         },
@@ -1364,7 +1366,7 @@ function Planner() {
                 Define what you want to stock and where each independent build plan finishes.
               </p>
             </div>
-            <div className="flex flex-wrap gap-2 mb-2 justify-end">
+            <div className="mb-2 flex flex-wrap justify-end gap-2">
               <input
                 key={planImportInputKey}
                 id="planner-plan-import"
@@ -2083,10 +2085,7 @@ function PlannerStockpileSummary({
 
   return (
     <article
-      className={cn(
-        "grid min-w-0 gap-3 border p-4",
-        stockpile.isActive === false && "opacity-60",
-      )}
+      className={cn("grid min-w-0 gap-3 border p-4", stockpile.isActive === false && "opacity-60")}
     >
       <div className="flex min-w-0 flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-start">
         <div className="flex min-w-0 flex-1 flex-row items-center gap-3">

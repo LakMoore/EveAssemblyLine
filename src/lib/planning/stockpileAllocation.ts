@@ -572,23 +572,73 @@ export async function allocateStockpileStock(
         ]),
       );
     });
-    const reservableJobInputDemandByStockpile = jobInputDemandByStockpile.map(
+    const reactionJobInputDemand = reactionJobInputDemandByStockpile.map(
+      (demand) => new Map(demand),
+    );
+    const fullJobInputQuantityByType = new Map<number, number>();
+    for (const demand of fullJobInputDemandByStockpile) {
+      for (const [typeId, quantity] of demand) {
+        fullJobInputQuantityByType.set(
+          typeId,
+          (fullJobInputQuantityByType.get(typeId) ?? 0) + quantity,
+        );
+      }
+    }
+    const availableStockByTypeId = getOrdinaryStockByTypeId(request.stock);
+    const manufacturingJobInputDemand = fullJobInputDemandByStockpile.map(
       (demand, stockpileIndex) => {
-        const reservableDemand = new Map(demand);
-        const reactionJobInputDemand = reactionJobInputDemandByStockpile[stockpileIndex];
-        for (const [typeId, quantity] of fullJobInputDemandByStockpile[stockpileIndex]) {
-          if (!buildableTypeIds.has(typeId) && !reactionJobInputDemand.has(typeId)) continue;
-          reservableDemand.set(typeId, Math.max(reservableDemand.get(typeId) ?? 0, quantity));
-        }
-        return reservableDemand;
+        const reactionDemand = reactionJobInputDemand[stockpileIndex];
+        return new Map(
+          [...demand]
+            .map(([typeId, quantity]) => {
+              const fullManufacturingQuantity = quantity - (reactionDemand.get(typeId) ?? 0);
+              const installableQuantity = Math.max(
+                0,
+                (jobInputDemandByStockpile[stockpileIndex].get(typeId) ?? 0)
+                  - (reactionDemand.get(typeId) ?? 0),
+              );
+              const totalFullDemand = fullJobInputQuantityByType.get(typeId) ?? 0;
+              const reserveFullManufacturingQuantity =
+                buildableTypeIds.has(typeId)
+                || totalFullDemand <= (availableStockByTypeId.get(typeId) ?? 0);
+              return [
+                typeId,
+                reserveFullManufacturingQuantity
+                  ? fullManufacturingQuantity
+                  : Math.min(fullManufacturingQuantity, installableQuantity),
+              ] as const;
+            })
+            .filter(([, quantity]) => quantity > 0),
+        );
       },
     );
     allocateTypes(
-      new Set(reservableJobInputDemandByStockpile.flatMap((demand) => [...demand.keys()])),
-      reservableJobInputDemandByStockpile,
+      new Set(reactionJobInputDemand.flatMap((demand) => [...demand.keys()])),
+      reactionJobInputDemand,
       true,
     );
-    const allocatedJobInputDemandByStockpile = reservableJobInputDemandByStockpile.map(
+    const allocatedReactionJobInputDemandByStockpile = reactionJobInputDemand.map(
+      (demand, stockpileIndex) =>
+        new Map(
+          [...demand].map(([typeId, quantity]) => [
+            typeId,
+            Math.max(0, quantity - (remainingDemand[stockpileIndex].get(typeId) ?? 0)),
+          ]),
+        ),
+    );
+    allocateTypes(
+      new Set(manufacturingJobInputDemand.flatMap((demand) => [...demand.keys()])),
+      manufacturingJobInputDemand,
+      true,
+    );
+    const remainingManufacturingJobInputDemand = manufacturingJobInputDemand.map(
+      (_, stockpileIndex) => new Map(remainingDemand[stockpileIndex]),
+    );
+    allocateTypes(
+      new Set(remainingManufacturingJobInputDemand.flatMap((demand) => [...demand.keys()])),
+      remainingManufacturingJobInputDemand,
+    );
+    const allocatedManufacturingJobInputDemandByStockpile = manufacturingJobInputDemand.map(
       (demand, stockpileIndex) =>
         new Map(
           [...demand].map(([typeId, quantity]) => [
@@ -606,7 +656,8 @@ export async function allocateStockpileStock(
     for (const [stockpileIndex, demand] of fullJobInputDemandByStockpile.entries()) {
       for (const [typeId, quantity] of demand) {
         const allocatedQuantity =
-          allocatedJobInputDemandByStockpile[stockpileIndex].get(typeId) ?? 0;
+          (allocatedReactionJobInputDemandByStockpile[stockpileIndex].get(typeId) ?? 0)
+          + (allocatedManufacturingJobInputDemandByStockpile[stockpileIndex].get(typeId) ?? 0);
         const blockedQuantity = Math.max(0, quantity - allocatedQuantity);
         if (blockedQuantity > 0) {
           remainingRemoteDemand[stockpileIndex].set(

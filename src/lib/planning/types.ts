@@ -211,8 +211,10 @@ export interface PlanRequest {
     myCorporationSellOrdersAsStock: boolean;
     buildBlacklist: number[];
     buyBlacklist: number[];
-    defaultMe: number;
-    defaultTe: number;
+    fallbackT1Me?: number;
+    fallbackT1Te?: number;
+    fallbackT2OrT3Me?: number;
+    fallbackT2OrT3Te?: number;
   };
 }
 
@@ -274,6 +276,8 @@ export type PlanWarning = {
   code: PlanWarningCode;
   typeId: number;
   locationId?: number;
+  fallbackMe?: number;
+  fallbackTe?: number;
 };
 
 interface ResponseMetadata {

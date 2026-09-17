@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import styles from "@/app/page.module.css";
 import { ChartLine, ClipboardList, Factory } from "lucide-react";
+import CopyableText from "./CopyableText";
 
 function statusLabel(status: PlanJobInputStatus) {
   return status === "ready" ? "Ready" : status === "partial" ? "Partial" : "Blocked";
@@ -181,15 +182,23 @@ export default function JobInputsResponsive({
               navigateInPlace
               className="min-w-0 flex-1"
             />
-            <div className="grid shrink-0 grid-cols-2 gap-x-4 text-right font-mono text-xs">
-              <span>
-                <strong className="block">{installableRuns.toLocaleString()}</strong>
+            <div className="grid shrink-0 grid-cols-2 gap-x-4 font-mono text-xs">
+              <div className="flex flex-col items-end">
+                <CopyableText
+                  className="font-bold"
+                  textToRender={installableRuns.toLocaleString()}
+                  textToCopy={installableRuns.toString()}
+                />
                 <small className="text-[9px] text-muted-foreground uppercase">Installable</small>
-              </span>
-              <span>
-                <strong className="block">{totalRuns.toLocaleString()}</strong>
+              </div>
+              <div className="flex flex-col items-end">
+                <CopyableText
+                  className="font-bold"
+                  textToRender={totalRuns.toLocaleString()}
+                  textToCopy={totalRuns.toString()}
+                />
                 <small className="text-[9px] text-muted-foreground uppercase">Total</small>
-              </span>
+              </div>
             </div>
           </div>
           <div className="flex items-center justify-between gap-3 border-t border-border pt-3">

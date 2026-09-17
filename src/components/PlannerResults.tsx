@@ -58,7 +58,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
-import { Alert, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Select,
   SelectContent,
@@ -87,6 +87,7 @@ import {
   ListTree,
   Truck,
   type LucideIcon,
+  AlertCircleIcon,
 } from "lucide-react";
 
 export type PlannerTab =
@@ -932,18 +933,24 @@ function PlannerWarningGroup({
         <div className="flex flex-col gap-2 py-2" role="list">
           {bucket.items.map((warning) => (
             <Alert key={`${warning.code}:${warning.typeId}`} role="listitem">
-              <AlertTitle>
+              <TriangleAlert />
+              <AlertTitle>{planWarningPresentation[warning.code].title}</AlertTitle>
+              <AlertDescription>
                 <TypeIdentity
-                  name={planWarningPresentation[warning.code].title}
-                  typeName={typeNamesById.get(warning.typeId) ?? `Type ${warning.typeId}`}
+                  name={typeNamesById.get(warning.typeId) ?? `Type ${warning.typeId}`}
                   typeId={warning.typeId}
-                  subline={planWarningPresentation[warning.code].detail}
+                  variation="bp"
                   linkPath="planner"
                   linkIcon={ClipboardList}
                   linkHash="plan-breakdown"
                   navigateInPlace
                 />
-              </AlertTitle>
+                {warning.code === "manufacturing-blueprint-me-zero"
+                && warning.fallbackMe !== undefined
+                && warning.fallbackTe !== undefined
+                  ? `${planWarningPresentation[warning.code].detail} ME ${warning.fallbackMe}, TE ${warning.fallbackTe} applied.`
+                  : planWarningPresentation[warning.code].detail}
+              </AlertDescription>
             </Alert>
           ))}
         </div>

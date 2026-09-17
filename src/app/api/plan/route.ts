@@ -41,6 +41,12 @@ const facilityTimeMultipliersSchema = z.object({
   reactions: z.number().finite().min(0).max(1),
 });
 const skillTimeMultipliersSchema = facilityTimeMultipliersSchema;
+const fallbackBlueprintSettingsSchema = z.object({
+  fallbackT1Me: z.number().finite().min(0).max(10).optional(),
+  fallbackT1Te: z.number().finite().min(0).max(20).optional(),
+  fallbackT2OrT3Me: z.number().finite().min(0).max(10).optional(),
+  fallbackT2OrT3Te: z.number().finite().min(0).max(20).optional(),
+});
 const planHaulExclusionSchema = z
   .object({
     typeId: z.number().int().positive(),
@@ -263,6 +269,14 @@ export async function calculatePlanRequest(
       );
     }
     const input = body as PlanRequest;
+    const parsedFallbackSettings = fallbackBlueprintSettingsSchema.safeParse(input.settings);
+    if (!parsedFallbackSettings.success) {
+      return NextResponse.json(
+        { error: "Fallback blueprint ME and TE settings must be valid percentages." },
+        { status: 400 },
+      );
+    }
+    input.settings = { ...input.settings, ...parsedFallbackSettings.data };
     const parsedEfficiencies = reprocessingEfficienciesSchema.safeParse(
       input.reprocessingEfficiencies ?? {},
     );

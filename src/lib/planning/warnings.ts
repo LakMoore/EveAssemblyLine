@@ -17,7 +17,8 @@ export type PlanWarningPresentation = {
 export const planWarningPresentation: Record<PlanWarningCode, PlanWarningPresentation> = {
   "manufacturing-blueprint-me-zero": {
     title: "No usable blueprint",
-    detail: "This product was calculated at ME 0 because no usable blueprint or BPC is available.",
+    detail:
+      "This product uses the configured fallback ME because no usable blueprint or BPC is available.",
   },
   "manufacturing-bpc-runs-insufficient": {
     title: "Insufficient BPC runs",

@@ -88,8 +88,10 @@ function request(
       myCorporationSellOrdersAsStock: true,
       buildBlacklist: [],
       buyBlacklist: [],
-      defaultMe: 10,
-      defaultTe: 20,
+      fallbackT1Me: 0,
+      fallbackT1Te: 0,
+      fallbackT2OrT3Me: 0,
+      fallbackT2OrT3Te: 0,
     },
     ...options,
   };
@@ -4322,6 +4324,82 @@ void test("does not reserve blocked manufacturing inputs before reaction demand"
   assert.equal(tritaniumHaul.neededQuantity, 1000);
 });
 
+void test("reserves abundant manufacturing inputs despite another blocked material", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: 38,
+          name: "Nocxium",
+          quantity: 51_000,
+          category: "item",
+          rootLocationId: sourceLocationId,
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "blocked-rifter",
+            name: "Blocked Rifter",
+            locations: {
+              stock: manufacturingLocationId,
+              manufacturing: manufacturingLocationId,
+              reactions: manufacturingLocationId,
+              reprocessing: manufacturingLocationId,
+              copying: manufacturingLocationId,
+              invention: manufacturingLocationId,
+            },
+            items: [
+              {
+                typeId: capitalCargoBayTypeId,
+                name: "Capital Cargo Bay",
+                quantity: 34,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "standing-nocxium",
+            name: "Standing Nocxium",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: sourceLocationId,
+              reactions: sourceLocationId,
+              reprocessing: sourceLocationId,
+              copying: sourceLocationId,
+              invention: sourceLocationId,
+            },
+            items: [
+              {
+                typeId: 38,
+                name: "Nocxium",
+                quantity: 100,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const manufacturingJob = result.lists.manufacturingJobs.find(
+    (job) => job.locationId === manufacturingLocationId && job.typeId === 21028,
+  );
+  const nocxiumInput = manufacturingJob?.inputs.materials.find((input) => input.typeId === 38);
+
+  assert(manufacturingJob);
+  assert(nocxiumInput);
+  assert.equal(nocxiumInput.requiredQuantity, 51_000);
+  assert.equal(nocxiumInput.availableQuantity, 51_000);
+  assert.equal(nocxiumInput.status, "ready");
+});
+
 void test("hauls remote Isogen surplus when destination manufacturing is blocked", async () => {
   const result = await calculatePlanCalculation(
     request(
@@ -4403,6 +4481,71 @@ void test("hauls remote Isogen surplus when destination manufacturing is blocked
   );
   assert(isogenHaul);
   assert.equal(isogenHaul.neededQuantity, 500);
+});
+
+void test("marks a manufacturing job ready when all inputs can be hauled to its location", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      1,
+      [
+        {
+          typeId: rifterBlueprintTypeId,
+          name: "Rifter Blueprint",
+          quantity: 1,
+          category: "blueprint",
+          rootLocationId: manufacturingLocationId,
+          blueprintPrints: [{ itemId: 9015, type: "bpo", runs: -1 }],
+        },
+        {
+          typeId: tritaniumTypeId,
+          name: "Tritanium",
+          quantity: 32_000,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: 35,
+          name: "Pyerite",
+          quantity: 6_000,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: 36,
+          name: "Mexallon",
+          quantity: 2_500,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: 37,
+          name: "Isogen",
+          quantity: 500,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+      ],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ),
+  );
+  const manufacturingJob = result.lists.manufacturingJobs.find(
+    (job) => job.typeId === rifterBlueprintTypeId,
+  );
+
+  assert(manufacturingJob);
+  assert.equal(manufacturingJob.runsAvailable, 1);
+  assert.equal(manufacturingJob.inputs.status, "ready");
 });
 
 void test("hauls remote mexallon for a reaction after blocked capital manufacturing", async () => {
@@ -5594,6 +5737,11 @@ void test("warns when manufacturing has no usable local blueprint", async () => 
       0,
       [],
       {
+        settings: {
+          ...request(0, []).settings,
+          fallbackT1Me: 8,
+          fallbackT1Te: 10,
+        },
         items: [
           {
             typeId: rifterTypeId,
@@ -5608,7 +5756,11 @@ void test("warns when manufacturing has no usable local blueprint", async () => 
     ),
   );
   const response = await toPlanResponse(result);
+  const tritanium = result.lists.manufacturingJobs[0]?.inputs.materials.find(
+    (input) => input.typeId === tritaniumTypeId,
+  );
 
+  assert.equal(tritanium?.requiredQuantity, 29_440);
   assert.deepEqual(
     response.lists.warnings,
     [
@@ -5617,6 +5769,8 @@ void test("warns when manufacturing has no usable local blueprint", async () => 
         items: [
           {
             code: "manufacturing-blueprint-me-zero",
+            fallbackMe: 8,
+            fallbackTe: 10,
             typeId: rifterTypeId,
           },
         ],
