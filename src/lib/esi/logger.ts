@@ -63,6 +63,13 @@ function schedulePersistence() {
   );
 }
 
+/** Cancels delayed log persistence without changing the in-memory or durable log. */
+export function clearEsiRequestLogTimer(): void {
+  if (!loggerRuntime.persistenceTimer) return;
+  clearTimeout(loggerRuntime.persistenceTimer);
+  loggerRuntime.persistenceTimer = undefined;
+}
+
 async function persistEsiRequestLogs() {
   if (loggerRuntime.persistenceRequest) return loggerRuntime.persistenceRequest;
   const request = Promise.resolve()
@@ -114,10 +121,7 @@ export async function getEsiRequestLogPage(
 
 /** Purges the in-memory and durable ESI request log. */
 export async function clearEsiRequestLogs(): Promise<void> {
-  if (loggerRuntime.persistenceTimer) {
-    clearTimeout(loggerRuntime.persistenceTimer);
-    loggerRuntime.persistenceTimer = undefined;
-  }
+  clearEsiRequestLogTimer();
   await loggerRuntime.persistenceRequest;
   const storage = await initStorage();
   await storage.deleteItem(storageKey);

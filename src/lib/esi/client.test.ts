@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { after } from "node:test";
 import type { CharacterTokenRecord, TokenSet } from "@/lib/auth/model";
+import { clearEsiRequestLogTimer } from "./logger";
 import {
   fetchCharacterCorporationAuthorization,
   fetchCharacterIndustryJobs,
@@ -13,6 +14,10 @@ import {
   fetchStructureMetadataPerCharacter,
   getUsableToken,
 } from "./client";
+
+after(() => {
+  clearEsiRequestLogTimer();
+});
 
 const token: TokenSet = {
   refreshToken: "refresh-token",
