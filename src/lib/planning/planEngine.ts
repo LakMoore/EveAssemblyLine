@@ -48,6 +48,7 @@ import {
   specialReprocessableTypeIds,
 } from "./reprocessStock";
 import { allocateStockpileStock } from "./stockpileAllocation";
+import type { PlanningLedger } from "./planningLedger";
 import {
   getStockRootLocationId,
   isAvailableIndustryProductionOutput,
@@ -3035,20 +3036,27 @@ async function calculateStockpilePlan(
     );
     stockpileResults.push(result);
   }
-  const mergedResult = await measureProfiled(
-    profiler,
-    "mergeStockpiles",
-    () => mergeStockpileResults(stockpileResults, request.stock, request),
-  );
   return measureProfiled(
     profiler,
-    "restoreStock",
-    async () =>
-      restorePlanResourceCounts(
-        restorePlanSourceCounts(restorePlanStockQuantities(mergedResult, request), request.stock),
-        request.stock,
-      ),
+    "reconcileStockpiles",
+    () => reconcileStockpilePlan(stockpileResults, request, stockpileAllocation.ledger),
   );
+}
+
+/** Produces the final plan from stockpile outputs and their immutable allocation ledger. */
+async function reconcileStockpilePlan(
+  stockpileResults: PlanCalculation[],
+  request: PlannerRequest,
+  ledger: PlanningLedger,
+): Promise<PlanCalculation> {
+  const finalPhase = ledger.phases.at(-1);
+  if (finalPhase?.name !== (request.stockpiles.length === 1 ? "single-stockpile" : "final")) {
+    throw new Error("Stockpile allocation did not produce a final ledger phase.");
+  }
+  const mergedResult = await mergeStockpileResults(stockpileResults, request.stock, request);
+  const restoredStock = restorePlanStockQuantities(mergedResult, request);
+  const restoredSources = restorePlanSourceCounts(restoredStock, request.stock);
+  return restorePlanResourceCounts(restoredSources, request.stock);
 }
 
 function mergeHaulingTasks(tasks: PlanCalculation["lists"]["haulingTasks"]) {

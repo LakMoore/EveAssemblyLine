@@ -5,10 +5,18 @@ export type PlanningLedgerAllocation = Readonly<{
   quantity: number;
 }>;
 
+/** Unfulfilled demand recorded for one stockpile at the end of a planning phase. */
+export type PlanningLedgerDemand = Readonly<{
+  stockpileIndex: number;
+  typeId: number;
+  quantity: number;
+}>;
+
 /** Immutable result of one allocation phase. */
 export type PlanningLedgerPhase = Readonly<{
   name: string;
   allocations: readonly PlanningLedgerAllocation[];
+  remainingDemand: readonly PlanningLedgerDemand[];
 }>;
 
 /** Immutable audit trail for allocations made from the request's original stock lots. */
@@ -41,22 +49,51 @@ export function recordPlanningLedgerPhase(
   ledger: PlanningLedger,
   name: string,
   allocationsByStockpile: ReadonlyArray<ReadonlyMap<number, number>>,
+  remainingDemandByStockpile: ReadonlyArray<ReadonlyMap<number, number>>,
 ): PlanningLedger {
-  if (allocationsByStockpile.length !== ledger.stockpileCount) {
+  if (
+    allocationsByStockpile.length !== ledger.stockpileCount
+    || remainingDemandByStockpile.length !== ledger.stockpileCount
+  ) {
     throw new Error(`Planning ledger phase ${name} has an unexpected stockpile count.`);
   }
   const allocations = allocationsByStockpile.flatMap((allocations, stockpileIndex) =>
     [...allocations].map(([stockIndex, quantity]) => ({ stockIndex, stockpileIndex, quantity })),
   );
+  const remainingDemand = remainingDemandByStockpile.flatMap((demand, stockpileIndex) =>
+    [...demand].map(([typeId, quantity]) => ({ typeId, stockpileIndex, quantity })),
+  );
   assertPlanningLedgerConservation(ledger.sourceQuantities, ledger.stockpileCount, allocations);
+  assertPlanningLedgerDemand(ledger.stockpileCount, remainingDemand);
   const phase = Object.freeze({
     name,
     allocations: Object.freeze(allocations.map((allocation) => Object.freeze(allocation))),
+    remainingDemand: Object.freeze(remainingDemand.map((demand) => Object.freeze(demand))),
   });
   return Object.freeze({
     ...ledger,
     phases: Object.freeze([...ledger.phases, phase]),
   });
+}
+
+/** Verifies that demand snapshots contain valid stockpile and type identifiers. */
+function assertPlanningLedgerDemand(
+  stockpileCount: number,
+  demands: readonly PlanningLedgerDemand[],
+): void {
+  for (const demand of demands) {
+    if (
+      !Number.isInteger(demand.stockpileIndex)
+      || demand.stockpileIndex < 0
+      || demand.stockpileIndex >= stockpileCount
+      || !Number.isInteger(demand.typeId)
+      || demand.typeId <= 0
+      || !Number.isFinite(demand.quantity)
+      || demand.quantity < 0
+    ) {
+      throw new Error("Planning ledger contains invalid remaining demand.");
+    }
+  }
 }
 
 /** Verifies that one phase neither creates nor over-allocates any source lot. */

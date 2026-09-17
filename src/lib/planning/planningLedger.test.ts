@@ -55,7 +55,12 @@ function flattenAllocations(
 void test("captures independent immutable phase outputs", () => {
   const scenario = createSharedStockScenario();
   const ledger = createPlanningLedger(scenario.sourceQuantities, 2);
-  const recorded = recordPlanningLedgerPhase(ledger, "ordinary", scenario.allocationsByStockpile);
+  const recorded = recordPlanningLedgerPhase(
+    ledger,
+    "ordinary",
+    scenario.allocationsByStockpile,
+    [new Map([[34, 20]]), new Map([[35, 10]])],
+  );
 
   scenario.sourceQuantities[0] = 0;
   scenario.allocationsByStockpile[0].set(0, 1);
@@ -67,6 +72,13 @@ void test("captures independent immutable phase outputs", () => {
       { stockIndex: 0, stockpileIndex: 0, quantity: 50 },
       { stockIndex: 0, stockpileIndex: 1, quantity: 30 },
       { stockIndex: 1, stockpileIndex: 1, quantity: 30 },
+    ],
+  );
+  assert.deepEqual(
+    recorded.phases[0].remainingDemand,
+    [
+      { stockpileIndex: 0, typeId: 34, quantity: 20 },
+      { stockpileIndex: 1, typeId: 35, quantity: 10 },
     ],
   );
   assert.equal(Object.isFrozen(recorded), true);
@@ -98,6 +110,7 @@ void test("preserves conservation across generated stockpile allocation scenario
         createPlanningLedger(scenario.sourceQuantities, stockpileCount),
         `generated-${stockpileCount}-${rotation}`,
         scenario.allocationsByStockpile,
+        Array.from({ length: stockpileCount }, () => new Map()),
       );
       assert.deepEqual(
         ledger.phases[0].allocations,

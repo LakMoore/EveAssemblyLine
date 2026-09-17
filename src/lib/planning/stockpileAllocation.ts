@@ -195,6 +195,7 @@ export async function allocateStockpileStock(
       ledger,
       "single-stockpile",
       [new Map(request.stock.map((item, index) => [index, item.quantity]))],
+      [new Map()],
     );
     return {
       stockpileStock: [request.stock.map((item) => ({ ...item }))],
@@ -563,22 +564,6 @@ export async function allocateStockpileStock(
         ]),
       );
     });
-    const blockedJobInputDemandByStockpile = fullJobInputDemandByStockpile.map(
-      (fullJobInputDemand, stockpileIndex) => {
-        const installableJobInputDemand = jobInputDemandByStockpile[stockpileIndex];
-        return new Map(
-          [...fullJobInputDemand]
-            .map(
-              ([typeId, quantity]) =>
-                [
-                  typeId,
-                  Math.max(0, quantity - (installableJobInputDemand.get(typeId) ?? 0)),
-                ] as const,
-            )
-            .filter(([, quantity]) => quantity > 0),
-        );
-      },
-    );
     const reservableJobInputDemandByStockpile = jobInputDemandByStockpile.map(
       (demand, stockpileIndex) => {
         const reservableDemand = new Map(demand);
@@ -702,7 +687,7 @@ export async function allocateStockpileStock(
         reactionJobInputDemandByStockpile,
       ),
   );
-  ledger = recordPlanningLedgerPhase(ledger, "ordinary", allocations);
+  ledger = recordPlanningLedgerPhase(ledger, "ordinary", allocations, remainingDemand);
   const ordinaryStockpileStock = ordinaryStockpileAllocation.stockpileStock;
   const ordinaryStockpileResults = await measureProfiled(
     profiler,
@@ -756,7 +741,7 @@ export async function allocateStockpileStock(
         ordinaryReactionJobInputDemandByStockpile,
       ),
   );
-  ledger = recordPlanningLedgerPhase(ledger, "corrected", allocations);
+  ledger = recordPlanningLedgerPhase(ledger, "corrected", allocations, remainingDemand);
   const correctedStockpileStock = correctedStockpileAllocation.stockpileStock;
   const specialDemandByStockpile: StockpileDemand[] = await measureProfiled(
     profiler,
@@ -807,7 +792,6 @@ export async function allocateStockpileStock(
         }),
       ),
   );
-  remainingDemand = specialDemandByStockpile;
   const specialTypeIds = new Set(specialDemandByStockpile.flatMap((demand) => [...demand.keys()]));
   for (const [index, item] of request.stock.entries()) {
     if (isBlueprintOrReactionFormula(item) && item.source !== "marketOrder") {
@@ -815,7 +799,7 @@ export async function allocateStockpileStock(
     }
   }
   allocateTypes(specialTypeIds, specialDemandByStockpile);
-  ledger = recordPlanningLedgerPhase(ledger, "special", allocations);
+  ledger = recordPlanningLedgerPhase(ledger, "special", allocations, remainingDemand);
 
   const specialAllocations = allocations.map((allocation) =>
     [...allocation.entries()].filter(([stockIndex]) =>
@@ -875,7 +859,7 @@ export async function allocateStockpileStock(
       allocation.set(stockIndex, quantity);
     }
   }
-  ledger = recordPlanningLedgerPhase(ledger, "final", allocations);
+  ledger = recordPlanningLedgerPhase(ledger, "final", allocations, remainingDemand);
 
   return {
     stockpileStock: allocatedStockpileStock(),
