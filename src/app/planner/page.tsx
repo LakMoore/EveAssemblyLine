@@ -2,7 +2,7 @@
 
 import { type ChangeEvent, FormEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import Link from "next/link";
+import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import type {
   ClientBuildItem,
   ClientPlanStockpile,
@@ -1438,7 +1438,7 @@ function Planner() {
               type="button"
               variant="outline"
               nativeButton={false}
-              render={<Link href="/corp-hangars" />}
+              render={<NoPrefetchLink href="/corp-hangars" />}
             >
               <Settings2 data-icon="inline-start" aria-hidden="true" />
               Edit sources
@@ -1804,7 +1804,10 @@ function Planner() {
                   <div className={styles.locationAlertContent}>
                     <AlertTitle>No build or reaction locations available.</AlertTitle>
                     <AlertDescription>
-                      Optionally add structures on the <Link href="/structures">Structures</Link>{" "}
+                      Optionally add structures on the{" "}
+                      <NoPrefetchLink href="/structures">
+                        Structures
+                      </NoPrefetchLink>{" "}
                       page or{" "}
                       <EveAuthorizationWarning href="/api/auth/eve/start">
                         <Button
@@ -1877,9 +1880,9 @@ function Planner() {
               <div className={styles.checkboxOption}>
                 <div className={`${styles.planOptionHeader} text-xs`}>
                   <span>PLANNING SOURCES</span>
-                  <Link href="/assets" className="text-primary">
+                  <NoPrefetchLink href="/assets" className="text-primary">
                     Edit
-                  </Link>
+                  </NoPrefetchLink>
                 </div>
                 <span className="text-sm text-muted-foreground">{selectedSourceLabel}</span>
               </div>

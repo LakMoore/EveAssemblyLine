@@ -2,7 +2,7 @@
 
 import { FormEvent, KeyboardEvent, Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
+import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import { useAppLanguage } from "../AppShell";
 import CalculateButton from "@/components/CalculateButton";
 import DialogBody from "@/components/DialogBody";
@@ -628,8 +628,11 @@ function CompressContent() {
                 <Info aria-hidden="true" />
                 <AlertTitle>No reprocessing locations found.</AlertTitle>
                 <AlertDescription>
-                  Add a reprocessing location on the <Link href="/structures">Structures</Link> page
-                  or{" "}
+                  Add a reprocessing location on the{" "}
+                  <NoPrefetchLink href="/structures">
+                    Structures
+                  </NoPrefetchLink>{" "}
+                  page or{" "}
                   <EveAuthorizationWarning href="/api/auth/eve/start">
                     <Button
                       type="button"

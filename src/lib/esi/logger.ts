@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { initStorage } from "@/lib/storage";
 
 const storageKey = "esi-request-log";
-const maximumLogEntries = 200;
+const maximumLogEntries = 2000;
 const persistenceDelayMs = 15_000;
 
 export type EsiRequestLog = {
@@ -38,6 +38,7 @@ export type EsiRequestLogPage = {
 
 type EsiLoggerRuntime = {
   entries: EsiRequestLog[];
+  pendingEntries: EsiRequestLog[];
   persistenceTimer?: ReturnType<typeof setTimeout>;
   persistenceRequest?: Promise<void>;
 };
@@ -46,10 +47,20 @@ const runtime = globalThis as typeof globalThis & {
   __assemblyLineEsiLogger?: EsiLoggerRuntime;
 };
 const loggerRuntime =
-  runtime.__assemblyLineEsiLogger ?? (runtime.__assemblyLineEsiLogger = { entries: [] });
+  runtime.__assemblyLineEsiLogger
+  ?? (runtime.__assemblyLineEsiLogger = { entries: [], pendingEntries: [] });
+loggerRuntime.pendingEntries ??= [];
 
 function trimEntries(entries: EsiRequestLog[]) {
   return entries.slice(-maximumLogEntries);
+}
+
+function mergeEntries(...entryLists: EsiRequestLog[][]) {
+  const entriesById = new Map<string, EsiRequestLog>();
+  for (const entries of entryLists) {
+    for (const entry of entries) entriesById.set(entry.id, entry);
+  }
+  return trimEntries([...entriesById.values()]);
 }
 
 function schedulePersistence() {
@@ -74,11 +85,21 @@ async function persistEsiRequestLogs() {
   if (loggerRuntime.persistenceRequest) return loggerRuntime.persistenceRequest;
   const request = Promise.resolve()
     .then(async () => {
+      const pendingEntries = [...loggerRuntime.pendingEntries];
+      if (!pendingEntries.length) return;
       const storage = await initStorage();
       const stored = await storage.getItem<EsiRequestLog[]>(storageKey);
       const storedEntries = Array.isArray(stored) ? stored : [];
-      await storage.setItem(storageKey, trimEntries([...storedEntries, ...loggerRuntime.entries]));
-      loggerRuntime.entries = [];
+      await storage.setItem(storageKey, mergeEntries(storedEntries, pendingEntries));
+      const persistedIds = new Set(pendingEntries.map((entry) => entry.id));
+      loggerRuntime.pendingEntries = loggerRuntime.pendingEntries.filter(
+        (entry) => !persistedIds.has(entry.id),
+      );
+      loggerRuntime.entries = mergeEntries(
+        storedEntries,
+        pendingEntries,
+        loggerRuntime.pendingEntries,
+      );
     })
     .catch(() => {
       // Logging must never make an ESI request fail.
@@ -92,7 +113,9 @@ async function persistEsiRequestLogs() {
 
 /** Records one ESI attempt in memory and schedules an asynchronous durable snapshot. */
 export function logEsiRequest(entry: Omit<EsiRequestLog, "id">) {
-  loggerRuntime.entries = trimEntries([...loggerRuntime.entries, { ...entry, id: randomUUID() }]);
+  const loggedEntry = { ...entry, id: randomUUID() };
+  loggerRuntime.entries = mergeEntries(loggerRuntime.entries, [loggedEntry]);
+  loggerRuntime.pendingEntries = trimEntries([...loggerRuntime.pendingEntries, loggedEntry]);
   schedulePersistence();
 }
 
@@ -106,7 +129,8 @@ export async function getEsiRequestLogPage(
   const storage = await initStorage();
   const stored = await storage.getItem<EsiRequestLog[]>(storageKey);
   const entries = Array.isArray(stored) ? stored : [];
-  const filteredEntries = [...entries, ...loggerRuntime.entries]
+  loggerRuntime.entries = mergeEntries(entries, loggerRuntime.pendingEntries);
+  const filteredEntries = loggerRuntime.entries
     .sort((left, right) => right.requestedAt.localeCompare(left.requestedAt))
     .filter((entry) => outcome === "all" || entry.outcome === outcome);
   const totalPages = Math.max(1, Math.ceil(filteredEntries.length / pageSize));
@@ -126,4 +150,5 @@ export async function clearEsiRequestLogs(): Promise<void> {
   const storage = await initStorage();
   await storage.deleteItem(storageKey);
   loggerRuntime.entries = [];
+  loggerRuntime.pendingEntries = [];
 }

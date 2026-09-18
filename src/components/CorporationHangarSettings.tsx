@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import Image from "next/image";
 import { useAppLanguage } from "@/app/AppShell";
 import {
@@ -520,9 +520,9 @@ export default function CorporationHangarSettings() {
               type="search"
               value={filterText}
             />
-            <Link className={styles.dialogLink} href="/characters">
+            <NoPrefetchLink className={styles.dialogLink} href="/characters">
               Manage corporation access
-            </Link>
+            </NoPrefetchLink>
           </div>
         </div>
         {corporations.length === 0 ? (

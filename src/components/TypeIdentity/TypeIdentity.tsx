@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
+import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import { useState } from "react";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import { cn } from "@/lib/utils";
@@ -78,7 +78,7 @@ export default function TypeIdentity({
               <LinkIcon size={12} strokeWidth={2} aria-hidden="true" />
             </button>
           ) : linkHref ? (
-            <Link
+            <NoPrefetchLink
               className={styles.searchLink}
               href={linkHref}
               title={`View ${name}`}
@@ -86,7 +86,7 @@ export default function TypeIdentity({
               prefetch={false}
             >
               <LinkIcon size={12} strokeWidth={2} aria-hidden="true" />
-            </Link>
+            </NoPrefetchLink>
           ) : null}
           <CopyableText
             className={styles.name}

@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import {
   cloneElement,
   useEffect,
@@ -114,7 +114,7 @@ export default function EveAuthorizationWarning({ href, children }: EveAuthoriza
             &quot;Query&quot; permissions on Corporation Hangars in-game.
           </p>
           <p>
-            Learn more on our <Link href="/privacy">privacy page.</Link>
+            Learn more on our <NoPrefetchLink href="/privacy">privacy page.</NoPrefetchLink>
           </p>
           <Label className="flex items-start gap-2">
             <input

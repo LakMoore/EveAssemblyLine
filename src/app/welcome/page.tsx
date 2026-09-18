@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import styles from "../page.module.css";
@@ -14,9 +14,9 @@ export default function WelcomePage() {
             Plan production, inspect your assets, and keep every industrial decision in one place.
           </p>
         </div>
-        <Link className={cn(buttonVariants({ variant: "link" }), styles.addButton)} href="/planner">
+        <NoPrefetchLink className={cn(buttonVariants({ variant: "link" }), styles.addButton)} href="/planner">
           Open production planner
-        </Link>
+        </NoPrefetchLink>
       </div>
       <div className={styles.welcomeGrid}>
         <section className={styles.welcomePanel}>
@@ -85,7 +85,7 @@ export default function WelcomePage() {
             visibility rules.
           </p>
           <p>
-            Read the full details on the <Link href="/privacy">privacy page</Link> before connecting
+            Read the full details on the <NoPrefetchLink href="/privacy">privacy page</NoPrefetchLink> before connecting
             a character.
           </p>
         </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import { useAppLanguage } from "../AppShell";
 import {
   deleteStock,
@@ -799,9 +799,9 @@ function AddLocationModal({
                 </SelectContent>
               </Select>
             </div>
-            <Link className={styles.dialogLink} href="/structures">
+            <NoPrefetchLink className={styles.dialogLink} href="/structures">
               Add or manage structures
-            </Link>
+            </NoPrefetchLink>
           </div>
         </DialogBody>
         <DialogFooter>

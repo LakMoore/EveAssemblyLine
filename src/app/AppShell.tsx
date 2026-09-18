@@ -9,10 +9,9 @@ import {
   useRef,
   useState,
 } from "react";
-import Link from "next/link";
+import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import EveAuthorizationWarning from "@/components/EveAuthorizationWarning";
-import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { isSdeLanguage, sdeLanguages, type SdeLanguage } from "@/lib/reference/languages";
 import { replaceEsiStock } from "@/lib/planning/stockStore";
@@ -743,12 +742,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
       <RefreshContext.Provider value={isRefreshingData}>
         <main className={styles.shell}>
           <header className={styles.topbar}>
-            <Link className={styles.brand} href="/">
+            <NoPrefetchLink className={styles.brand} href="/">
               <span className={styles.brandMark}>E</span>
               <span>
                 Eve <span className={styles.brandAccent}>AssemblyLine</span>
               </span>
-            </Link>
+            </NoPrefetchLink>
             <div className={styles.topbarActions}>
               <div
                 className={`${styles.topMeta} ${isMobileMetaExpanded || isMobileMetaCollapsing ? styles.topMetaExpanded : ""} ${isMobileMetaCollapsing ? styles.topMetaCollapsing : ""}`}
@@ -909,7 +908,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 </button>
               )}
               <div className={`${styles.sectionLabel} ${styles.firstSectionLabel}`}>TOOLS</div>
-              <Link
+              <NoPrefetchLink
                 className={`${styles.navItem} ${activePage === "planner" ? styles.navActive : ""}`}
                 href="/planner"
                 onClick={closeSidebarOnNavigation}
@@ -918,8 +917,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <ClipboardList size={17} strokeWidth={1.8} aria-hidden="true" />
                 </span>
                 <span className={styles.navText}>Production planner</span>
-              </Link>
-              <Link
+              </NoPrefetchLink>
+              <NoPrefetchLink
+                prefetch={false}
                 className={`${styles.navItem} ${activePage === "compress" ? styles.navActive : ""}`}
                 href="/compress"
                 onClick={closeSidebarOnNavigation}
@@ -928,8 +928,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <Minimize2 size={17} strokeWidth={1.8} aria-hidden="true" />
                 </span>
                 <span className={styles.navText}>Compress</span>
-              </Link>
-              <Link
+              </NoPrefetchLink>
+              <NoPrefetchLink
+                prefetch={false}
                 className={`${styles.navItem} ${activePage === "appraise" ? styles.navActive : ""}`}
                 href="/appraise"
                 onClick={closeSidebarOnNavigation}
@@ -938,8 +939,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <BadgeDollarSign size={17} strokeWidth={1.8} aria-hidden="true" />
                 </span>
                 <span className={styles.navText}>Appraise</span>
-              </Link>
-              <Link
+              </NoPrefetchLink>
+              <NoPrefetchLink
+                prefetch={false}
                 className={`${styles.navItem} ${activePage === "signals" ? styles.navActive : ""}`}
                 href="/signals"
                 onClick={closeSidebarOnNavigation}
@@ -948,9 +950,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <TrendingUp size={17} strokeWidth={1.8} aria-hidden="true" />
                 </span>
                 <span className={styles.navText}>Signals</span>
-              </Link>
+              </NoPrefetchLink>
               <div className={styles.sectionLabel}>INFORMATION</div>
-              <Link
+              <NoPrefetchLink
+                prefetch={false}
                 className={`${styles.navItem} ${activePage === "assets" ? styles.navActive : ""}`}
                 href="/assets"
                 onClick={closeSidebarOnNavigation}
@@ -959,8 +962,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <Boxes size={17} strokeWidth={1.8} aria-hidden="true" />
                 </span>
                 <span className={styles.navText}>Assets</span>
-              </Link>
-              <Link
+              </NoPrefetchLink>
+              <NoPrefetchLink
+                prefetch={false}
                 className={`${styles.navItem} ${activePage === "jobs" ? styles.navActive : ""}`}
                 href="/jobs"
                 onClick={closeSidebarOnNavigation}
@@ -969,8 +973,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <Factory size={17} strokeWidth={1.8} aria-hidden="true" />
                 </span>
                 <span className={styles.navText}>Jobs</span>
-              </Link>
-              <Link
+              </NoPrefetchLink>
+              <NoPrefetchLink
+                prefetch={false}
                 className={`${styles.navItem} ${activePage === "ships" ? styles.navActive : ""}`}
                 href="/ships"
                 onClick={closeSidebarOnNavigation}
@@ -979,9 +984,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <Rocket size={17} strokeWidth={1.8} aria-hidden="true" />
                 </span>
                 <span className={styles.navText}>Ships</span>
-              </Link>
+              </NoPrefetchLink>
               <div className={styles.sectionLabel}>CONFIGURATION</div>
-              <Link
+              <NoPrefetchLink
+                prefetch={false}
                 className={`${styles.navItem} ${activePage === "structures" ? styles.navActive : ""}`}
                 href="/structures"
                 onClick={closeSidebarOnNavigation}
@@ -990,8 +996,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <MapPinned size={17} strokeWidth={1.8} aria-hidden="true" />
                 </span>
                 <span className={styles.navText}>Structures</span>
-              </Link>
-              <Link
+              </NoPrefetchLink>
+              <NoPrefetchLink
+                prefetch={false}
                 className={`${styles.navItem} ${activePage === "corpHangars" ? styles.navActive : ""}`}
                 href="/corp-hangars"
                 onClick={closeSidebarOnNavigation}
@@ -1000,8 +1007,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <Warehouse size={17} strokeWidth={1.8} aria-hidden="true" />
                 </span>
                 <span className={styles.navText}>Corp Hangers</span>
-              </Link>
-              <Link
+              </NoPrefetchLink>
+              <NoPrefetchLink
+                prefetch={false}
                 className={`${styles.navItem} ${activePage === "settings" ? styles.navActive : ""}`}
                 href="/settings"
                 onClick={closeSidebarOnNavigation}
@@ -1010,8 +1018,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <Settings2 size={17} strokeWidth={1.8} aria-hidden="true" />
                 </span>
                 <span className={styles.navText}>Settings</span>
-              </Link>
-              <Link
+              </NoPrefetchLink>
+              <NoPrefetchLink
+                prefetch={false}
                 className={`${styles.navItem} ${activePage === "characters" ? styles.navActive : ""}`}
                 href="/characters"
                 onClick={closeSidebarOnNavigation}
@@ -1021,9 +1030,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 </span>
                 <span className={styles.navText}>Characters</span>
                 <b>{characters.length}</b>
-              </Link>
+              </NoPrefetchLink>
               <div className={styles.sectionLabel}>UTILITY</div>
-              <Link
+              <NoPrefetchLink
+                prefetch={false}
                 className={`${styles.navItem} ${activePage === "imagechecker" ? styles.navActive : ""}`}
                 href="/imagechecker"
                 onClick={closeSidebarOnNavigation}
@@ -1032,7 +1042,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <ImageIcon size={17} strokeWidth={1.8} aria-hidden="true" />
                 </span>
                 <span className={styles.navText}>Image checker</span>
-              </Link>
+              </NoPrefetchLink>
               <div className={styles.sidebarBottom}>
                 <div className={styles.sectionLabel}>CONNECTED PILOTS</div>
                 <div className={styles.pilotList}>
@@ -1138,12 +1148,24 @@ export default function AppShell({ children }: { children: ReactNode }) {
               <div className={styles.siteFooterInner}>
                 <span>Independent industry planning for EVE Online.</span>
                 <nav className={styles.siteFooterLinks} aria-label="Site information">
-                  <Link href="/guides">Guides</Link>
-                  <Link href="/about">About</Link>
-                  <Link href="/contact">Contact</Link>
-                  <Link href="/privacy">Privacy</Link>
-                  <Link href="/terms">Terms</Link>
-                  <Link href="/cookies">Cookies</Link>
+                  <NoPrefetchLink href="/guides">
+                    Guides
+                  </NoPrefetchLink>
+                  <NoPrefetchLink href="/about">
+                    About
+                  </NoPrefetchLink>
+                  <NoPrefetchLink href="/contact">
+                    Contact
+                  </NoPrefetchLink>
+                  <NoPrefetchLink href="/privacy">
+                    Privacy
+                  </NoPrefetchLink>
+                  <NoPrefetchLink href="/terms">
+                    Terms
+                  </NoPrefetchLink>
+                  <NoPrefetchLink href="/cookies">
+                    Cookies
+                  </NoPrefetchLink>
                 </nav>
               </div>
             </footer>

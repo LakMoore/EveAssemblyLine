@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import Image from "next/image";
 import { GitMerge, LogOut, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { languageStorageKey, useAppRefreshStatus } from "../AppShell";

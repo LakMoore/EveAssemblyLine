@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -93,12 +93,12 @@ export default function PlanLogReview() {
                     {new Date(log.requestedAt).toLocaleString()}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs">
-                    <Link
+                    <NoPrefetchLink
                       className="underline decoration-muted-foreground/50 underline-offset-2 hover:decoration-foreground"
                       href={`/admin/plans/${log.id}`}
                     >
                       {log.id}
-                    </Link>
+                    </NoPrefetchLink>
                   </td>
                   <td className="px-4 py-3">{log.responseStatus}</td>
                   <td className="px-4 py-3">

@@ -1,5 +1,5 @@
 import InfoPage from "@/components/InfoPage";
-import Link from "next/link";
+import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 export const metadata = {
   title: "Privacy | Eve AssemblyLine",
   description: "How Eve AssemblyLine handles account, ESI, and planning data.",
@@ -69,7 +69,7 @@ export default function PrivacyPage() {
               </p>
               <p>
                 If you revoke EVE Authorization using the buttons on the{" "}
-                <Link href="/characters">Characters</Link> page your data will be removed
+                <NoPrefetchLink href="/characters">Characters</NoPrefetchLink> page your data will be removed
                 immediately.
               </p>
               <p>The app does not gather personal information.</p>
