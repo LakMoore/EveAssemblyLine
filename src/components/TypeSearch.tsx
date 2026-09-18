@@ -28,6 +28,7 @@ type TypeSearchProps = {
   placeholder: string;
   ariaLabel: string;
   inputId?: string;
+  searchEndpoint?: string;
 };
 
 function resultVariation(category?: string) {
@@ -42,10 +43,12 @@ export default function TypeSearch({
   placeholder,
   ariaLabel,
   inputId,
+  searchEndpoint = "/api/reference/types",
 }: TypeSearchProps) {
   const anchor = useComboboxAnchor();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<TypeSearchResult[]>([]);
+  const [searchError, setSearchError] = useState("");
   const [isOpen, setIsOpen] = useState(false);
   const requestId = useRef(0);
 
@@ -58,18 +61,23 @@ export default function TypeSearch({
       async () => {
         try {
           const response = await fetch(
-            `/api/reference/types?query=${encodeURIComponent(trimmedQuery)}&language=${language}`,
+            `${searchEndpoint}?query=${encodeURIComponent(trimmedQuery)}&language=${language}`,
             { signal: controller.signal },
           );
-          const data = (await response.json()) as { items?: TypeSearchResult[] };
+          const data = (await response.json()) as { error?: string; items?: TypeSearchResult[] };
+          if (!response.ok) throw new Error(data.error ?? "Search data is unavailable.");
           if (currentRequestId === requestId.current) {
             setResults(data.items ?? []);
+            setSearchError("");
             setIsOpen(true);
           }
         }
         catch (error) {
           if (error instanceof DOMException && error.name === "AbortError") return;
+          if (currentRequestId !== requestId.current) return;
           setResults([]);
+          setSearchError(error instanceof Error ? error.message : "Search data is unavailable.");
+          setIsOpen(true);
         }
       },
       180,
@@ -78,12 +86,13 @@ export default function TypeSearch({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [language, query]);
+  }, [language, query, searchEndpoint]);
 
   function choose(item: TypeSearchResult) {
     onSelect(item);
     setQuery("");
     setResults([]);
+    setSearchError("");
     setIsOpen(false);
   }
 
@@ -104,13 +113,17 @@ export default function TypeSearch({
           if (eventDetails.reason !== "input-change") {
             setQuery("");
             setResults([]);
+            setSearchError("");
             setIsOpen(false);
             return;
           }
           const hasSearchQuery = value.trim().length >= minimumQueryLength;
           setQuery(value);
           setIsOpen(hasSearchQuery);
-          if (!hasSearchQuery) setResults([]);
+          if (!hasSearchQuery) {
+            setResults([]);
+            setSearchError("");
+          }
         }}
         onValueChange={(value) => {
           if (value) choose(value);
@@ -128,7 +141,7 @@ export default function TypeSearch({
           aria-label={ariaLabel}
         />
         <ComboboxContent anchor={anchor}>
-          <ComboboxEmpty>No matching published items.</ComboboxEmpty>
+          <ComboboxEmpty>{searchError || "No matching published items."}</ComboboxEmpty>
           <ComboboxList>
             {results.map((item) => (
               <ComboboxItem key={item.typeId} value={item}>

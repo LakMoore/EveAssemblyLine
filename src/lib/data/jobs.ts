@@ -14,6 +14,7 @@ import {
   getSystems,
   getTypesByIds,
 } from "@/cache/services/sdeCache";
+import { getNoDecryptorInventionOutput } from "@/lib/sde/invention";
 import {
   assertCharacterOwner,
   assertCorporationOwner,
@@ -106,21 +107,27 @@ function outputQuantity(
   job: Awaited<ReturnType<typeof getRunningIndustryJobs>>[number],
   blueprint: Awaited<ReturnType<typeof getBlueprintById>>,
 ) {
+  if (job.activityId === 5) return job.runs;
+  if (job.activityId === 8) return Math.floor(job.runs * (job.probability ?? 1));
   const installedRuns = job.installedRuns ?? 0;
-  if (job.activityId === 5) return installedRuns;
-  if (!blueprint || ![1, 8, 9].includes(job.activityId)) return 0;
+  if (!blueprint || ![1, 9].includes(job.activityId)) return 0;
   const activity =
     job.activityId === 9
       ? blueprint.activities.reaction
       : job.activityId === 1
         ? blueprint.activities.manufacturing
-        : blueprint.activities.invention;
+        : undefined;
   const product = activity?.products?.find((candidate) => candidate.typeID === job.productTypeId);
   return (product?.quantity ?? 0) * installedRuns;
 }
 
-function outputRunsPerCopy(job: Awaited<ReturnType<typeof getRunningIndustryJobs>>[number]) {
-  return job.activityId === 5 ? job.licensedRuns : undefined;
+function outputRunsPerCopy(
+  job: Awaited<ReturnType<typeof getRunningIndustryJobs>>[number],
+  blueprint: Awaited<ReturnType<typeof getBlueprintById>>,
+) {
+  if (job.activityId === 5) return job.licensedRuns;
+  if (job.activityId !== 8 || !blueprint || job.productTypeId === undefined) return undefined;
+  return getNoDecryptorInventionOutput(blueprint, job.productTypeId)?.runs;
 }
 
 function jobUsesBpo(
@@ -250,37 +257,40 @@ async function buildJobsResponse(
     slotUsage,
     jobs: jobs
       .sort((left, right) => Date.parse(left.endDate) - Date.parse(right.endDate))
-      .map((job) => ({
-        jobId: job.jobId,
-        characterId: job.installerId,
-        ownerId: job.ownerId,
-        ownerType: job.ownerType,
-        activityId: job.activityId,
-        activity: activityNames[job.activityId] ?? "Industry job",
-        status: job.status,
-        runs: job.runs,
-        outputQuantity: outputQuantity(job, blueprints.get(job.blueprintTypeId) ?? null),
-        ...(outputRunsPerCopy(job) !== undefined
-          ? { outputRunsPerCopy: outputRunsPerCopy(job) }
-          : {}),
-        ...(jobUsesBpo(job, blueprintInstances, assets) ? { usesBpo: true } : {}),
-        startDate: job.startDate,
-        endDate: job.endDate,
-        facilityId: job.facilityId,
-        outputLocationId: job.outputLocationId,
-        outputLocationName: outputLocationNames.get(job.outputLocationId) ?? "Location unavailable",
-        ...(job.discoveredByCharacterId !== undefined
-          ? { discoveredByCharacterId: job.discoveredByCharacterId }
-          : {}),
-        blueprintTypeId: job.blueprintTypeId,
-        blueprintTypeName: types.get(job.blueprintTypeId)?.name.en,
-        ...(job.productTypeId !== undefined
-          ? {
-              productTypeId: job.productTypeId,
-              productTypeName: types.get(job.productTypeId)?.name.en,
-            }
-          : {}),
-      })),
+      .map((job) => {
+        const blueprint = blueprints.get(job.blueprintTypeId) ?? null;
+        const runsPerCopy = outputRunsPerCopy(job, blueprint);
+        return {
+          jobId: job.jobId,
+          characterId: job.installerId,
+          ownerId: job.ownerId,
+          ownerType: job.ownerType,
+          activityId: job.activityId,
+          activity: activityNames[job.activityId] ?? "Industry job",
+          status: job.status,
+          runs: job.runs,
+          outputQuantity: outputQuantity(job, blueprint),
+          ...(runsPerCopy !== undefined ? { outputRunsPerCopy: runsPerCopy } : {}),
+          ...(jobUsesBpo(job, blueprintInstances, assets) ? { usesBpo: true } : {}),
+          startDate: job.startDate,
+          endDate: job.endDate,
+          facilityId: job.facilityId,
+          outputLocationId: job.outputLocationId,
+          outputLocationName:
+            outputLocationNames.get(job.outputLocationId) ?? "Location unavailable",
+          ...(job.discoveredByCharacterId !== undefined
+            ? { discoveredByCharacterId: job.discoveredByCharacterId }
+            : {}),
+          blueprintTypeId: job.blueprintTypeId,
+          blueprintTypeName: types.get(job.blueprintTypeId)?.name.en,
+          ...(job.productTypeId !== undefined
+            ? {
+                productTypeId: job.productTypeId,
+                productTypeName: types.get(job.productTypeId)?.name.en,
+              }
+            : {}),
+        };
+      }),
   };
 }
 

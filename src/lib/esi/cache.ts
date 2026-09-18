@@ -110,6 +110,7 @@ type OwnerCache = {
   allAssetsRaw?: EndpointCache<AssetRecord[]>;
   assetItemIds: Set<number>;
   blueprintInstances?: EndpointCache<BlueprintInstanceRecord[]>;
+  previousBlueprintInstances: BlueprintInstanceRecord[];
   currentLocation?: EndpointCache<CharacterLocationRecord | null>;
   currentShip?: EndpointCache<CharacterShipRecord | null>;
   clones?: EndpointCache<EsiCharacterClones | null>;
@@ -745,6 +746,7 @@ async function refreshBlueprintInstances(
     );
     return cache.blueprintInstances;
   }
+  const previousBlueprintInstances = cache.blueprintInstances?.lastBody ?? [];
   const result = await fetchBlueprints(character, cache.blueprintInstances?.etag);
   cache.blueprintInstances =
     result.notModified && cache.blueprintInstances
@@ -756,6 +758,16 @@ async function refreshBlueprintInstances(
           false,
           character.characterId,
         );
+  if (!result.notModified) {
+    cache.previousBlueprintInstances = [
+      ...new Map(
+        [...cache.previousBlueprintInstances, ...previousBlueprintInstances].map((blueprint) => [
+          blueprint.itemId,
+          blueprint,
+        ]),
+      ).values(),
+    ];
+  }
   return cache.blueprintInstances;
 }
 
@@ -811,6 +823,7 @@ function getCache(map: Map<string, OwnerCache>, id: number, sessionId: string): 
   if (existing) return existing;
   const created: OwnerCache = {
     assetItemIds: new Set(),
+    previousBlueprintInstances: [],
     assembledStructureRigs: [],
     rootLocationsByItemId: new Map(),
     shipAssetsByItemId: new Map(),
@@ -1034,17 +1047,16 @@ function getJobOutputQuantity(
   blueprint: Awaited<ReturnType<typeof getBlueprintById>>,
 ) {
   if (job.productTypeId === undefined) return 0;
+  if (job.activityId === 5) return job.runs;
+  if (job.activityId === 8) return Math.floor(job.runs * (job.probability ?? 1));
   const installedRuns = job.installedRuns ?? Math.floor(job.runs * (job.probability ?? 1));
-  if (job.activityId === 5) return installedRuns;
   if (!blueprint) return 0;
   const activity =
     job.activityId === 1
       ? blueprint.activities.manufacturing
-      : job.activityId === 8
-        ? blueprint.activities.invention
-        : job.activityId === 9
-          ? blueprint.activities.reaction
-          : undefined;
+      : job.activityId === 9
+        ? blueprint.activities.reaction
+        : undefined;
   const product = activity?.products?.find((candidate) => candidate.typeID === job.productTypeId);
   return (product?.quantity ?? 0) * installedRuns;
 }
@@ -1112,6 +1124,8 @@ async function refreshJobAdjustments(
   cache.jobAssetAdditions = new Map();
   cache.jobBlueprintAdjustments = new Map();
   if (!assetsLastModified && !blueprintsLastModified) return;
+
+  reconcileMissingJobBlueprints(cache, jobs, blueprintsLastModified);
 
   const blueprintIds = [
     ...new Set(
@@ -1218,21 +1232,73 @@ async function refreshJobAdjustments(
       }
     }
 
-    // Completed jobs returned their blueprint; adjust stale BPC runs until blueprints catches up.
-    if (job.activityId === 9) continue;
-    if (
-      !jobStartedAfter(job, blueprintsLastModified)
-      && !jobDeliveredAfter(job, blueprintsLastModified)
-    ) continue;
+    // Reconcile blueprint state until the Blueprints endpoint reflects the job transition.
+    const jobIsActive = job.status !== "delivered";
+    const blueprintChangedSinceRefresh =
+      jobStartedAfter(job, blueprintsLastModified)
+      || jobDeliveredAfter(job, blueprintsLastModified);
+    if (!jobIsActive && !blueprintChangedSinceRefresh) continue;
     const blueprintInstance = blueprintInstances.get(job.blueprintId);
     if (!blueprintInstance) continue;
     const adjustment = cache.jobBlueprintAdjustments.get(job.blueprintId) ?? {
       consumedRuns: 0,
       inUse: false,
     };
-    if (blueprintInstance.quantity === -1) adjustment.inUse = true;
-    else adjustment.consumedRuns += job.runs;
+    if (blueprintInstance.quantity !== -1 && (jobIsActive || blueprintChangedSinceRefresh)) {
+      adjustment.consumedRuns += job.runs;
+    }
+    adjustment.inUse = adjustment.inUse || jobIsActive;
     cache.jobBlueprintAdjustments.set(job.blueprintId, adjustment);
+  }
+}
+
+/** Restores blueprint instances temporarily omitted by ESI while an industry job owns them. */
+function reconcileMissingJobBlueprints(
+  cache: OwnerCache,
+  jobs: readonly IndustryJobRecord[],
+  blueprintsLastModified: string | undefined,
+) {
+  if (!cache.blueprintInstances) return;
+  const currentBlueprintIds = new Set(
+    cache.blueprintInstances.lastBody.map((blueprint) => blueprint.itemId),
+  );
+  const previousBlueprintsByItemId = new Map(
+    cache.previousBlueprintInstances.map((blueprint) => [blueprint.itemId, blueprint]),
+  );
+
+  for (const job of jobs) {
+    if (
+      currentBlueprintIds.has(job.blueprintId)
+      || (
+        !jobStartedAfter(job, blueprintsLastModified)
+        && !jobDeliveredAfter(job, blueprintsLastModified)
+      )
+    ) continue;
+
+    const previousBlueprint = previousBlueprintsByItemId.get(job.blueprintId);
+    if (previousBlueprint) {
+      cache.blueprintInstances.lastBody.push(previousBlueprint);
+      currentBlueprintIds.add(job.blueprintId);
+      continue;
+    }
+
+    // Research and reactions can only use originals; the Industry Jobs response does not reveal
+    // the kind or pre-install runs of other missing blueprints.
+    if (![3, 4, 9].includes(job.activityId)) continue;
+    cache.blueprintInstances.lastBody.push({
+      itemId: job.blueprintId,
+      typeId: job.blueprintTypeId,
+      locationId: job.blueprintLocationId,
+      locationFlag: "",
+      quantity: -1,
+      runs: -1,
+      me: 0,
+      te: 0,
+      ownerType: job.ownerType,
+      ownerId: job.ownerId,
+      discoveredByCharacterId: job.discoveredByCharacterId,
+    });
+    currentBlueprintIds.add(job.blueprintId);
   }
 }
 

@@ -69,8 +69,8 @@ export default function PrivacyPage() {
               </p>
               <p>
                 If you revoke EVE Authorization using the buttons on the{" "}
-                <NoPrefetchLink href="/characters">Characters</NoPrefetchLink> page your data will be removed
-                immediately.
+                <NoPrefetchLink href="/characters">Characters</NoPrefetchLink> page your data will
+                be removed immediately.
               </p>
               <p>The app does not gather personal information.</p>
               <p>

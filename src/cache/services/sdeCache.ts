@@ -96,6 +96,11 @@ export function getTypes() {
   return getMap(loadTypes);
 }
 
+/** Returns the indexed SDE blueprint records. */
+export function getBlueprints() {
+  return loadBlueprints();
+}
+
 export function getGroups() {
   return getMap(loadGroups);
 }

@@ -14,7 +14,10 @@ export default function WelcomePage() {
             Plan production, inspect your assets, and keep every industrial decision in one place.
           </p>
         </div>
-        <NoPrefetchLink className={cn(buttonVariants({ variant: "link" }), styles.addButton)} href="/planner">
+        <NoPrefetchLink
+          className={cn(buttonVariants({ variant: "link" }), styles.addButton)}
+          href="/planner"
+        >
           Open production planner
         </NoPrefetchLink>
       </div>
@@ -85,8 +88,9 @@ export default function WelcomePage() {
             visibility rules.
           </p>
           <p>
-            Read the full details on the <NoPrefetchLink href="/privacy">privacy page</NoPrefetchLink> before connecting
-            a character.
+            Read the full details on the{" "}
+            <NoPrefetchLink href="/privacy">privacy page</NoPrefetchLink> before connecting a
+            character.
           </p>
         </div>
       </section>

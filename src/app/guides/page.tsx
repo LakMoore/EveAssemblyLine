@@ -19,13 +19,10 @@ export default function GuidesPage() {
           content: (
             <>
               <p>
-                Open the{" "}
-                <NoPrefetchLink href="/planner">
-                  Production planner
-                </NoPrefetchLink>
-                , add the items and quantities you want to produce, then choose the locations and
-                settings that describe your operation. The result separates materials to buy, prints
-                to source, jobs to install, and work that needs to move.
+                Open the <NoPrefetchLink href="/planner">Production planner</NoPrefetchLink>, add
+                the items and quantities you want to produce, then choose the locations and settings
+                that describe your operation. The result separates materials to buy, prints to
+                source, jobs to install, and work that needs to move.
               </p>
               <p>
                 Plans can be created without authentication. Connect a character when you want the
@@ -58,28 +55,20 @@ export default function GuidesPage() {
           content: (
             <ul>
               <li>
-                <NoPrefetchLink href="/compress">
-                  Compress
-                </NoPrefetchLink>{" "}
-                shows you shows you which ores to buy for reprocessing at your build location.
+                <NoPrefetchLink href="/compress">Compress</NoPrefetchLink> shows you shows you which
+                ores to buy for reprocessing at your build location.
               </li>
               <li>
-                <NoPrefetchLink href="/appraise">
-                  Appraise
-                </NoPrefetchLink>{" "}
-                turns a pasted item list into ISK and volume totals.
+                <NoPrefetchLink href="/appraise">Appraise</NoPrefetchLink> turns a pasted item list
+                into ISK and volume totals.
               </li>
               <li>
-                <NoPrefetchLink href="/signals">
-                  Signals
-                </NoPrefetchLink>{" "}
-                helps you decide what to sell today.
+                <NoPrefetchLink href="/signals">Signals</NoPrefetchLink> helps you decide what to
+                sell today.
               </li>
               <li>
-                <NoPrefetchLink href="/imagechecker">
-                  Image checker
-                </NoPrefetchLink>{" "}
-                helps diagnose EVE artwork identifiers.
+                <NoPrefetchLink href="/imagechecker">Image checker</NoPrefetchLink> helps diagnose
+                EVE artwork identifiers.
               </li>
             </ul>
           ),

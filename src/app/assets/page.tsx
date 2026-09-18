@@ -996,8 +996,10 @@ type StockTypeBucket = {
   bpoInUseCount: number;
   bpcProductionCount: number;
   bpcProductionRuns: number;
-  bpcStockCount: number;
-  bpcStockRuns: number;
+  bpcAvailableCount: number;
+  bpcAvailableRuns: number;
+  bpcInUseCount: number;
+  bpcInUseRuns: number;
   category: StockItem["category"];
   assemblyLineGroup?: string;
 };
@@ -1051,9 +1053,14 @@ function ViewItemsModal({
       bpoCount: isBpo ? item.quantity : 0,
       bpoInUseCount: isBpo && item.inUse ? item.quantity : 0,
       bpcProductionCount: isBpc && item.inBuild ? item.quantity : 0,
-      bpcProductionRuns: isBpc && item.inBuild ? (item.jobRuns ?? 0) * (item.licensedRuns ?? 0) : 0,
-      bpcStockCount: isBpc && !item.inBuild ? item.quantity : 0,
-      bpcStockRuns: isBpc && !item.inBuild ? bpcRuns : 0,
+      bpcProductionRuns:
+        isBpc && item.inBuild
+          ? (item.inBuildQuantity ?? item.quantity) * (item.licensedRuns ?? 0)
+          : 0,
+      bpcAvailableCount: isBpc && !item.inBuild && !item.inUse ? item.quantity : 0,
+      bpcAvailableRuns: isBpc && !item.inBuild && !item.inUse ? bpcRuns : 0,
+      bpcInUseCount: isBpc && !item.inBuild && item.inUse ? item.quantity : 0,
+      bpcInUseRuns: isBpc && !item.inBuild && item.inUse ? bpcRuns : 0,
     };
     if (!existing) {
       displayItems.set(
@@ -1077,8 +1084,10 @@ function ViewItemsModal({
     existing.bpoInUseCount += blueprintSummary.bpoInUseCount;
     existing.bpcProductionCount += blueprintSummary.bpcProductionCount;
     existing.bpcProductionRuns += blueprintSummary.bpcProductionRuns;
-    existing.bpcStockCount += blueprintSummary.bpcStockCount;
-    existing.bpcStockRuns += blueprintSummary.bpcStockRuns;
+    existing.bpcAvailableCount += blueprintSummary.bpcAvailableCount;
+    existing.bpcAvailableRuns += blueprintSummary.bpcAvailableRuns;
+    existing.bpcInUseCount += blueprintSummary.bpcInUseCount;
+    existing.bpcInUseRuns += blueprintSummary.bpcInUseRuns;
     if (isProduction && !existing.item.inBuild) existing.item = item;
   }
   const buckets = [...displayItems.values()];
@@ -1161,8 +1170,10 @@ function ViewItemsModal({
                 bpoInUseCount,
                 bpcProductionCount,
                 bpcProductionRuns,
-                bpcStockCount,
-                bpcStockRuns,
+                bpcAvailableCount,
+                bpcAvailableRuns,
+                bpcInUseCount,
+                bpcInUseRuns,
               },
               itemIndex,
             ) => {
@@ -1209,12 +1220,23 @@ function ViewItemsModal({
                           <small>In production</small>
                         </span>
                       )}
+                      {bpcInUseCount > 0 && (
+                        <span>
+                          <Files aria-hidden="true" />
+                          <b>
+                            {`${bpcInUseRuns.toLocaleString()} runs on ${bpcInUseCount.toLocaleString()}`}
+                          </b>
+                          <small>BPC Busy</small>
+                        </span>
+                      )}
                       <span>
                         <Package aria-hidden="true" />
                         <b>
-                          {`${bpcStockRuns.toLocaleString()} Runs on ${bpcStockCount.toLocaleString()} BPC`}
+                          {bpcAvailableCount === 0
+                            ? "0"
+                            : `${bpcAvailableRuns.toLocaleString()} runs on ${bpcAvailableCount.toLocaleString()}`}
                         </b>
-                        <small>Available</small>
+                        <small>BPC Available</small>
                       </span>
                     </div>
                   ) : (

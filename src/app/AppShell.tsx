@@ -52,6 +52,7 @@ import {
   Boxes,
   ClipboardList,
   Factory,
+  FlaskConical,
   Image as ImageIcon,
   MapPinned,
   Minimize2,
@@ -91,6 +92,7 @@ type ActivePage =
   | "welcome"
   | "public"
   | "compress"
+  | "invention"
   | "appraise"
   | "signals"
   | "assets"
@@ -272,36 +274,38 @@ export default function AppShell({ children }: { children: ReactNode }) {
         ? "planner"
         : pathname === "/compress"
           ? "compress"
-          : pathname === "/appraise"
-            ? "appraise"
-            : pathname === "/signals"
-              ? "signals"
-              : pathname === "/assets"
-                ? "assets"
-                : pathname === "/jobs"
-                  ? "jobs"
-                  : pathname === "/ships"
-                    ? "ships"
-                    : pathname === "/structures"
-                      ? "structures"
-                      : pathname === "/corp-hangars"
-                        ? "corpHangars"
-                        : pathname === "/settings"
-                          ? "settings"
-                          : pathname === "/imagechecker"
-                            ? "imagechecker"
-                            : pathname === "/characters"
-                              ? "characters"
-                              : [
-                                    "/guides",
-                                    "/about",
-                                    "/contact",
-                                    "/privacy",
-                                    "/terms",
-                                    "/cookies",
-                                  ].includes(pathname)
-                                ? "public"
-                                : "planner";
+          : pathname === "/invention"
+            ? "invention"
+            : pathname === "/appraise"
+              ? "appraise"
+              : pathname === "/signals"
+                ? "signals"
+                : pathname === "/assets"
+                  ? "assets"
+                  : pathname === "/jobs"
+                    ? "jobs"
+                    : pathname === "/ships"
+                      ? "ships"
+                      : pathname === "/structures"
+                        ? "structures"
+                        : pathname === "/corp-hangars"
+                          ? "corpHangars"
+                          : pathname === "/settings"
+                            ? "settings"
+                            : pathname === "/imagechecker"
+                              ? "imagechecker"
+                              : pathname === "/characters"
+                                ? "characters"
+                                : [
+                                      "/guides",
+                                      "/about",
+                                      "/contact",
+                                      "/privacy",
+                                      "/terms",
+                                      "/cookies",
+                                    ].includes(pathname)
+                                  ? "public"
+                                  : "planner";
   const hasExpiredState =
     authenticated
     && characters.length > 0
@@ -942,6 +946,17 @@ export default function AppShell({ children }: { children: ReactNode }) {
               </NoPrefetchLink>
               <NoPrefetchLink
                 prefetch={false}
+                className={`${styles.navItem} ${activePage === "invention" ? styles.navActive : ""}`}
+                href="/invention"
+                onClick={closeSidebarOnNavigation}
+              >
+                <span>
+                  <FlaskConical size={17} strokeWidth={1.8} aria-hidden="true" />
+                </span>
+                <span className={styles.navText}>Invention</span>
+              </NoPrefetchLink>
+              <NoPrefetchLink
+                prefetch={false}
                 className={`${styles.navItem} ${activePage === "signals" ? styles.navActive : ""}`}
                 href="/signals"
                 onClick={closeSidebarOnNavigation}
@@ -1148,24 +1163,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
               <div className={styles.siteFooterInner}>
                 <span>Independent industry planning for EVE Online.</span>
                 <nav className={styles.siteFooterLinks} aria-label="Site information">
-                  <NoPrefetchLink href="/guides">
-                    Guides
-                  </NoPrefetchLink>
-                  <NoPrefetchLink href="/about">
-                    About
-                  </NoPrefetchLink>
-                  <NoPrefetchLink href="/contact">
-                    Contact
-                  </NoPrefetchLink>
-                  <NoPrefetchLink href="/privacy">
-                    Privacy
-                  </NoPrefetchLink>
-                  <NoPrefetchLink href="/terms">
-                    Terms
-                  </NoPrefetchLink>
-                  <NoPrefetchLink href="/cookies">
-                    Cookies
-                  </NoPrefetchLink>
+                  <NoPrefetchLink href="/guides">Guides</NoPrefetchLink>
+                  <NoPrefetchLink href="/about">About</NoPrefetchLink>
+                  <NoPrefetchLink href="/contact">Contact</NoPrefetchLink>
+                  <NoPrefetchLink href="/privacy">Privacy</NoPrefetchLink>
+                  <NoPrefetchLink href="/terms">Terms</NoPrefetchLink>
+                  <NoPrefetchLink href="/cookies">Cookies</NoPrefetchLink>
                 </nav>
               </div>
             </footer>

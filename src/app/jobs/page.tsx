@@ -275,19 +275,10 @@ export default function JobsPage() {
                 </div>
                 <div className={styles.jobsSlotGrid}>
                   {slotTypes.map((type) => (
-                    <span key={type}>
+                    <div key={type}>
                       <small>
                         {type === "Manufacturing" ? (
-                          <span
-                            className={styles.availableSourceIcon}
-                            data-source="industry"
-                            data-tooltip={`${type}${nextIndustryJobDetail(getIndustryJobMinutesUntil(getNextIndustryActivityJobEndTime("manufacturing", data, character.characterId)))}`}
-                            aria-label={`${type}${nextIndustryJobDetail(getIndustryJobMinutesUntil(getNextIndustryActivityJobEndTime("manufacturing", data, character.characterId)))}`}
-                            role="img"
-                            tabIndex={0}
-                          >
-                            <Factory aria-hidden="true" />
-                          </span>
+                          <Factory aria-hidden="true" />
                         ) : type === "Reactions" ? (
                           <Atom aria-hidden="true" />
                         ) : type === "Science" ? (
@@ -298,7 +289,7 @@ export default function JobsPage() {
                       <b>
                         {usage.slots[type] ?? 0} / {usage.availableSlots[type] ?? 0}
                       </b>
-                    </span>
+                    </div>
                   ))}
                 </div>
               </div>

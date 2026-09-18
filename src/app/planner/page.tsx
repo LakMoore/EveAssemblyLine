@@ -1805,10 +1805,7 @@ function Planner() {
                     <AlertTitle>No build or reaction locations available.</AlertTitle>
                     <AlertDescription>
                       Optionally add structures on the{" "}
-                      <NoPrefetchLink href="/structures">
-                        Structures
-                      </NoPrefetchLink>{" "}
-                      page or{" "}
+                      <NoPrefetchLink href="/structures">Structures</NoPrefetchLink> page or{" "}
                       <EveAuthorizationWarning href="/api/auth/eve/start">
                         <Button
                           type="button"

@@ -1095,7 +1095,7 @@
   margin-top: 12px;
 }
 
-.jobsSlotGrid span {
+.jobsSlotGrid div {
   display: grid;
   gap: 5px;
   border-left: 2px solid var(--border);
@@ -1122,7 +1122,7 @@
 }
 
 .jobsSlotGrid b {
-  color: var(--cyan);
+  color: var(--theme-info);
   font: 13px "DM Mono";
 }
 

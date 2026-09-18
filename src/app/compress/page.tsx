@@ -629,10 +629,7 @@ function CompressContent() {
                 <AlertTitle>No reprocessing locations found.</AlertTitle>
                 <AlertDescription>
                   Add a reprocessing location on the{" "}
-                  <NoPrefetchLink href="/structures">
-                    Structures
-                  </NoPrefetchLink>{" "}
-                  page or{" "}
+                  <NoPrefetchLink href="/structures">Structures</NoPrefetchLink> page or{" "}
                   <EveAuthorizationWarning href="/api/auth/eve/start">
                     <Button
                       type="button"

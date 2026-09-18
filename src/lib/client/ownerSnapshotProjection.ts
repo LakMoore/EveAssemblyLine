@@ -129,10 +129,12 @@ function projectAsset(
   const isBpo =
     category === "blueprint"
     && (
-      blueprintInstance?.quantity === -1
-      || (blueprintInstance === undefined && asset.quantity === -1)
+      blueprintInstance?.runs === -1
+      || (blueprintInstance === undefined && asset.runCount === -1)
     );
-  const quantity = isBpo ? 1 : asset.quantity;
+  const quantity = isBpo
+    ? Math.max(1, blueprintInstance?.quantity ?? asset.quantity)
+    : asset.quantity;
   const blueprintPrint: BlueprintPrint | undefined = blueprintInstance
     ? {
         itemId: blueprintInstance.itemId,
@@ -229,7 +231,7 @@ function projectMissingBlueprintAssets(
       )?.location;
       const rootLocationId =
         rootLocation?.locationId ?? source?.rootLocationId ?? blueprint.locationId;
-      const isBpo = blueprint.quantity === -1;
+      const isBpo = blueprint.runs === -1;
       const corporationSource = source && {
         rootLocationId: source.rootLocationId,
         locationFlag: source.locationFlag,
@@ -241,11 +243,12 @@ function projectMissingBlueprintAssets(
         {
           typeId: blueprint.typeId,
           name: metadata.name,
-          quantity: isBpo ? 1 : Math.max(1, blueprint.quantity),
+          quantity: Math.max(1, blueprint.quantity),
           locationId: blueprint.locationId,
           rootLocationId,
           ownerType: blueprint.ownerType,
           ownerId: blueprint.ownerId,
+          ...(blueprint.inUse ? { inUse: true } : {}),
           category: "blueprint" as const,
           blueprintType: isBpo ? ("bpo" as const) : ("bpc" as const),
           blueprintPrints: [
@@ -368,19 +371,17 @@ function projectIndustryJobAssets(
         && instance.ownerType === job.ownerType
         && instance.ownerId === job.ownerId,
     );
+    if (blueprintInstance) continue;
     const isCopying = jobRecord.activityId === 5;
     const installedRunCount =
-      blueprintInstance?.runs
-      ?? blueprintAsset?.runCount
+      blueprintAsset?.runCount
       ?? (jobRecord.licensedRuns !== undefined && jobRecord.licensedRuns > 0
         ? jobRecord.licensedRuns
         : undefined);
     const isBpo =
-      blueprintInstance?.quantity === -1
-      || (blueprintInstance === undefined && installedRunCount === -1)
+      installedRunCount === -1
       || (
-        blueprintInstance === undefined
-        && installedRunCount === undefined
+        installedRunCount === undefined
         && (jobRecord.activityId === 1 || isCopying)
         && (jobRecord.licensedRuns === undefined || jobRecord.licensedRuns <= 0)
       );
@@ -426,8 +427,8 @@ function projectIndustryJobAssets(
                 itemId: jobRecord.blueprintId,
                 runs: remainingRuns,
                 type: isBpo ? ("bpo" as const) : ("bpc" as const),
-                me: blueprintInstance?.me ?? blueprintAsset?.me,
-                te: blueprintInstance?.te ?? blueprintAsset?.te,
+                me: blueprintAsset?.me,
+                te: blueprintAsset?.te,
                 activity: activityName(job.activityId),
               },
             ],

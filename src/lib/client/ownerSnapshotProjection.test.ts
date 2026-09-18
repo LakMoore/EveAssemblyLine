@@ -456,6 +456,36 @@ void test("classifies a blueprint original from the blueprint instance quantity"
   assert.equal(blueprint.blueprintPrints?.[0]?.type, "bpo");
 });
 
+void test("preserves a stacked original blueprint quantity", () => {
+  const blueprintSnapshot: ClientOwnerSnapshot = {
+    ...snapshot,
+    assets: slice([]),
+    blueprintInstances: slice([
+      {
+        itemId: 415831,
+        typeId: 41583,
+        locationId: 44,
+        locationFlag: "CorpSAG1",
+        quantity: 3,
+        runs: -1,
+        me: 0,
+        te: 0,
+        ownerType: "corporation",
+        ownerId: 900,
+      },
+    ]),
+  };
+  const result = projectOwnerSnapshotsToClientAssets(
+    [blueprintSnapshot],
+    { metadata: [{ typeId: 41583, name: "Minokawa Blueprint", category: "blueprint" }] },
+  );
+  const blueprint = result.assets?.[0];
+
+  assert.ok(blueprint);
+  assert.equal(blueprint.quantity, 3);
+  assert.equal(blueprint.blueprintType, "bpo");
+});
+
 void test("projects a blueprint instance when its asset record is unavailable", () => {
   const blueprintSnapshot: ClientOwnerSnapshot = {
     ...snapshot,
@@ -497,6 +527,21 @@ void test("projects job output and remaining blueprint runs without an asset rec
   const jobSnapshot: ClientOwnerSnapshot = {
     ...snapshot,
     assets: slice([]),
+    blueprintInstances: slice([
+      {
+        itemId: 701,
+        typeId: 21018,
+        locationId: 600,
+        locationFlag: "CorpSAG1",
+        quantity: -2,
+        runs: 10,
+        me: 0,
+        te: 0,
+        inUse: true,
+        ownerType: "corporation",
+        ownerId: 900,
+      },
+    ]),
     industryJobs: slice([
       {
         jobId: 700,
@@ -557,6 +602,8 @@ void test("projects job output and remaining blueprint runs without an asset rec
   assert.equal(output.inBuildQuantity, 30);
   assert.equal(blueprint.blueprintType, "bpc");
   assert.equal(blueprint.blueprintPrints?.[0]?.runs, 10);
+  assert.equal(blueprint.inUse, true);
+  assert.equal(result.assets?.filter((item) => item.typeId === 21018).length, 1);
   assert.deepEqual(
     filterClientAssetsForPlanning(result).assets?.filter((item) => item.jobId === 700),
     [],
