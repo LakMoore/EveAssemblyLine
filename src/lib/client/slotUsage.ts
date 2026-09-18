@@ -24,15 +24,15 @@ export function getAvailableSlotCount(
 
 /** Aggregates slot capacity and usage for the requested attached characters. */
 export function getSlotUsageTotals(
-  slotUsage: Readonly<Record<string, SlotUsage>>,
+  slotUsage: Readonly<Partial<Record<string, SlotUsage>>>,
   activity: IndustrySlotCategory,
   characterIds: readonly number[],
 ): SlotUsageTotals {
   return characterIds.reduce(
     (summary, characterId) => {
       const usage = slotUsage[String(characterId)];
-      const totalSlots = usage.availableSlots[activity] ?? 0;
-      const inUseSlots = usage.slots[activity] ?? 0;
+      const totalSlots = usage?.availableSlots[activity] ?? 0;
+      const inUseSlots = usage?.slots[activity] ?? 0;
       return {
         totalSlots: summary.totalSlots + totalSlots,
         inUseSlots: summary.inUseSlots + inUseSlots,

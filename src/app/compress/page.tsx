@@ -241,7 +241,7 @@ function CompressContent() {
     Promise
       .all([
         loadCompressSettings(),
-        loadClientSession(isRefreshLoad),
+        loadClientSession(),
         loadEndpointRecord<Partial<CompressOptionsData>>("compress/options"),
         loadClientAssets(language, isRefreshLoad).catch(() => null),
         loadStructures().catch(() => []),

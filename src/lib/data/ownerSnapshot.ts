@@ -3,6 +3,7 @@ import type {
   AssetLocation,
   AssetRecord,
   BlueprintInstanceRecord,
+  CharacterSkillRecord,
   IndustryJobRecord,
 } from "@/lib/auth/model";
 import { getAssetsForCharacter, getAssetsForCorporation, type OwnerAssetData } from "./assets";
@@ -20,6 +21,8 @@ import {
   type OwnerShipItem,
   type OwnerShipsResponse,
 } from "./ships";
+import { getOwnerSnapshotEndpointStatuses, getOwnerSnapshotSkills } from "@/lib/esi/cache";
+import type { ClientIndustrySlots } from "@/lib/client/requestCache";
 import type { DataOwner, OwnerDataContext } from "./types";
 
 export type OwnerSnapshotLocation = AssetLocation;
@@ -59,7 +62,7 @@ export type OwnerSnapshotShipItem = Omit<
 };
 
 export type OwnerSnapshotData = {
-  schemaVersion: 4;
+  schemaVersion: 5;
   owner: DataOwner;
   assets: OwnerSnapshotAsset[];
   industryJobs: IndustryJobRecord[];
@@ -86,13 +89,26 @@ export type OwnerSnapshotData = {
   jobs: OwnerSnapshotJob[];
   marketOrders: OwnerMarketOrder[];
   ships: OwnerSnapshotShip[];
+  skills: CharacterSkillRecord[];
 };
 
 export type OwnerSnapshotSlice<T extends readonly unknown[]> = {
   eTag: string;
   isEmpty: boolean;
   isModified: boolean;
+  status: OwnerSnapshotEndpointStatus;
   data?: T;
+};
+
+export type OwnerSnapshotEndpointStatus = {
+  status: "fresh" | "cached" | "stale" | "rate_limited" | "error";
+  hasBody: boolean;
+  lastModified?: string;
+  lastUpdated?: string;
+  expires?: string;
+  rateLimitedUntil?: string;
+  error?: string;
+  reauthorizeRequired?: boolean;
 };
 
 export type OwnerSnapshotEtags = Partial<{
@@ -104,11 +120,13 @@ export type OwnerSnapshotEtags = Partial<{
   marketOrders: string;
   rootLocations: string;
   ships: string;
+  skills: string;
 }>;
 
 export type OwnerSnapshot = {
-  schemaVersion: 4;
+  schemaVersion: 5;
   owner: DataOwner;
+  industrySlots?: ClientIndustrySlots;
   assets: OwnerSnapshotSlice<OwnerSnapshotData["assets"]>;
   blueprintInstances: OwnerSnapshotSlice<OwnerSnapshotData["blueprintInstances"]>;
   corporationSources: OwnerSnapshotSlice<OwnerSnapshotData["corporationSources"]>;
@@ -117,6 +135,7 @@ export type OwnerSnapshot = {
   marketOrders: OwnerSnapshotSlice<OwnerSnapshotData["marketOrders"]>;
   rootLocations: OwnerSnapshotSlice<OwnerSnapshotData["rootLocations"]>;
   ships: OwnerSnapshotSlice<OwnerSnapshotData["ships"]>;
+  skills: OwnerSnapshotSlice<OwnerSnapshotData["skills"]>;
 };
 
 function snapshotLocation(location: AssetLocation): OwnerSnapshotLocation {
@@ -223,14 +242,16 @@ function buildOwnerSnapshot(
   jobs: OwnerJobsResponse,
   marketOrders: OwnerMarketOrdersResponse,
   ships: OwnerShipsResponse,
+  skills: CharacterSkillRecord[],
 ): OwnerSnapshotData {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     owner,
     ...snapshotAssets(assets),
     jobs: snapshotJobs(jobs),
     marketOrders: snapshotMarketOrders(marketOrders),
     ships: snapshotShips(ships),
+    skills,
   };
 }
 
@@ -242,6 +263,7 @@ function createSnapshotSlice<T extends readonly unknown[]>(
   data: T,
   previousETag: string | undefined,
   isEmpty: boolean,
+  status: OwnerSnapshotEndpointStatus,
 ) {
   const eTag = createETag(data);
   const isModified = isEmpty || previousETag !== eTag;
@@ -249,6 +271,7 @@ function createSnapshotSlice<T extends readonly unknown[]>(
     eTag,
     isEmpty,
     isModified,
+    status,
     ...(isModified ? { data } : {}),
   } satisfies OwnerSnapshotSlice<T>;
 }
@@ -256,38 +279,67 @@ function createSnapshotSlice<T extends readonly unknown[]>(
 function snapshotResponse(
   data: OwnerSnapshotData,
   previousETags: OwnerSnapshotEtags,
+  endpointStatuses: ReturnType<typeof getOwnerSnapshotEndpointStatuses>,
+  industrySlots?: ClientIndustrySlots,
 ): OwnerSnapshot {
   return {
     schemaVersion: data.schemaVersion,
     owner: data.owner,
-    assets: createSnapshotSlice(data.assets, previousETags.assets, data.assets.length === 0),
+    ...(industrySlots ? { industrySlots } : {}),
+    assets: createSnapshotSlice(
+      data.assets,
+      previousETags.assets,
+      data.assets.length === 0,
+      endpointStatuses.assets,
+    ),
     blueprintInstances: createSnapshotSlice(
       data.blueprintInstances,
       previousETags.blueprintInstances,
       data.blueprintInstances.length === 0,
+      endpointStatuses.blueprintInstances,
     ),
     corporationSources: createSnapshotSlice(
       data.corporationSources,
       previousETags.corporationSources,
       data.corporationSources.length === 0,
+      endpointStatuses.corporationSources,
     ),
     industryJobs: createSnapshotSlice(
       data.industryJobs,
       previousETags.industryJobs,
       data.industryJobs.length === 0,
+      endpointStatuses.industryJobs,
     ),
-    jobs: createSnapshotSlice(data.jobs, previousETags.jobs, data.jobs.length === 0),
+    jobs: createSnapshotSlice(
+      data.jobs,
+      previousETags.jobs,
+      data.jobs.length === 0,
+      endpointStatuses.jobs,
+    ),
     marketOrders: createSnapshotSlice(
       data.marketOrders,
       previousETags.marketOrders,
       data.marketOrders.length === 0,
+      endpointStatuses.marketOrders,
     ),
     rootLocations: createSnapshotSlice(
       data.rootLocations,
       previousETags.rootLocations,
       data.rootLocations.length === 0,
+      endpointStatuses.rootLocations,
     ),
-    ships: createSnapshotSlice(data.ships, previousETags.ships, data.ships.length === 0),
+    ships: createSnapshotSlice(
+      data.ships,
+      previousETags.ships,
+      data.ships.length === 0,
+      endpointStatuses.ships,
+    ),
+    skills: createSnapshotSlice(
+      data.skills,
+      previousETags.skills,
+      data.skills.length === 0,
+      endpointStatuses.skills,
+    ),
   };
 }
 
@@ -297,6 +349,7 @@ export async function getOwnerSnapshot(
   context: OwnerDataContext,
   marketOrderOptions: MarketOrderOptions,
   previousETags: OwnerSnapshotEtags = {},
+  industrySlots?: ClientIndustrySlots,
 ): Promise<OwnerSnapshot> {
   if (owner.kind === "character") {
     const [assets, jobs, marketOrders, ships] = await Promise.all([
@@ -306,8 +359,17 @@ export async function getOwnerSnapshot(
       getShipsForCharacter(owner.id, context),
     ]);
     return snapshotResponse(
-      buildOwnerSnapshot(owner, assets, jobs, marketOrders, ships),
+      buildOwnerSnapshot(
+        owner,
+        assets,
+        jobs,
+        marketOrders,
+        ships,
+        getOwnerSnapshotSkills(owner, context.sessionId),
+      ),
       previousETags,
+      getOwnerSnapshotEndpointStatuses(owner, context.sessionId),
+      industrySlots,
     );
   }
 
@@ -318,7 +380,15 @@ export async function getOwnerSnapshot(
     getShipsForCorporation(owner.id, context),
   ]);
   return snapshotResponse(
-    buildOwnerSnapshot(owner, assets, jobs, marketOrders, ships),
+    buildOwnerSnapshot(
+      owner,
+      assets,
+      jobs,
+      marketOrders,
+      ships,
+      getOwnerSnapshotSkills(owner, context.sessionId),
+    ),
     previousETags,
+    getOwnerSnapshotEndpointStatuses(owner, context.sessionId),
   );
 }

@@ -27,7 +27,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { inventionSkillsByTypeId } from "@/lib/invention/skills";
-import { loadClientSession, type ClientSession } from "@/lib/client/requestCache";
+import {
+  isCompleteClientOwnerSnapshotResponse,
+  loadOwnerSnapshot,
+  mergeOwnerSnapshot,
+  saveOwnerSnapshot,
+} from "@/lib/client/ownerSnapshotCache";
+import {
+  loadClientSession,
+  refreshClientSession,
+  type ClientSession,
+} from "@/lib/client/requestCache";
 import { Label } from "@/components/ui/label";
 import { useAppLanguage } from "../AppShell";
 
@@ -233,7 +243,27 @@ export default function InventionPage() {
     )
       .then(async (response) => {
         if (!response.ok) throw new Error("Could not refresh this character's ESI skills.");
-        return loadClientSession(true);
+        const data = (await response.json()) as { ownerSnapshot?: unknown };
+        const snapshotScope = session?.snapshotScope;
+        if (!data.ownerSnapshot || !snapshotScope) {
+          throw new Error("Refresh did not return the required owner snapshot.");
+        }
+        if (!isCompleteClientOwnerSnapshotResponse(data.ownerSnapshot)) {
+          throw new Error("Refresh returned an invalid owner snapshot.");
+        }
+        const owner = { kind: "character" as const, id: selectedCharacter.characterId };
+        if (
+          data.ownerSnapshot.owner.kind !== owner.kind
+          || data.ownerSnapshot.owner.id !== owner.id
+        ) {
+          throw new Error("Refresh returned an owner snapshot for the wrong owner.");
+        }
+        const cachedSnapshot = await loadOwnerSnapshot(owner, snapshotScope);
+        await saveOwnerSnapshot(
+          mergeOwnerSnapshot(cachedSnapshot?.snapshot ?? null, data.ownerSnapshot),
+          snapshotScope,
+        );
+        return refreshClientSession();
       })
       .then((refreshedSession) => {
         if (!cancelled) setSession(refreshedSession);
@@ -250,7 +280,7 @@ export default function InventionPage() {
     return () => {
       cancelled = true;
     };
-  }, [characterSkillsUnavailable, selectedCharacter]);
+  }, [characterSkillsUnavailable, selectedCharacter, session?.snapshotScope]);
 
   useEffect(() => {
     const currentRequestId = ++requestId.current;

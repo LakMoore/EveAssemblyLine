@@ -9,11 +9,11 @@ import type { ClientOwnerSnapshot } from "./ownerSnapshotCache";
 import { filterClientAssetsForPlanning } from "./requestCache";
 
 function slice<T>(data: T) {
-  return { eTag: "test", data };
+  return { eTag: "test", data, status: { status: "cached" as const, hasBody: true } };
 }
 
 const snapshot: ClientOwnerSnapshot = {
-  schemaVersion: 4,
+  schemaVersion: 5,
   owner: { kind: "corporation", id: 900 },
   assets: slice([
     {
@@ -73,6 +73,7 @@ const snapshot: ClientOwnerSnapshot = {
   jobs: slice([]),
   marketOrders: slice([]),
   ships: slice([]),
+  skills: slice([]),
 };
 
 void test("projects ship ownership and nested fitting items", () => {

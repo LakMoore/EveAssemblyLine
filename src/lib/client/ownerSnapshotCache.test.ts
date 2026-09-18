@@ -11,11 +11,11 @@ import {
 } from "./ownerSnapshotCache";
 
 function slice<T>(data: T) {
-  return { eTag: "test", data };
+  return { eTag: "test", data, status: { status: "cached" as const, hasBody: true } };
 }
 
 const completeSnapshot = {
-  schemaVersion: 4,
+  schemaVersion: 5,
   owner: { kind: "character", id: 123 },
   assets: slice([]),
   industryJobs: slice([]),
@@ -25,6 +25,7 @@ const completeSnapshot = {
   jobs: slice([]),
   marketOrders: slice([]),
   ships: slice([]),
+  skills: slice([]),
 } satisfies ClientOwnerSnapshot;
 
 void test("keys snapshots by owner kind and ID", () => {
@@ -47,50 +48,75 @@ void test("accepts complete owner snapshots", () => {
 
 void test("merges modified slices and retains unchanged cached data", () => {
   const response = {
-    schemaVersion: 4,
+    schemaVersion: 5,
     owner: completeSnapshot.owner,
-    assets: { eTag: completeSnapshot.assets.eTag, isEmpty: false, isModified: false },
+    assets: {
+      eTag: completeSnapshot.assets.eTag,
+      isEmpty: false,
+      isModified: false,
+      status: completeSnapshot.assets.status,
+    },
     industryJobs: {
       eTag: "industry-jobs",
       isEmpty: true,
       isModified: true,
+      status: { status: "fresh", hasBody: true },
       data: [],
     },
     blueprintInstances: {
       eTag: completeSnapshot.blueprintInstances.eTag,
       isEmpty: true,
       isModified: false,
+      status: completeSnapshot.blueprintInstances.status,
     },
     rootLocations: {
       eTag: completeSnapshot.rootLocations.eTag,
       isEmpty: true,
       isModified: false,
+      status: completeSnapshot.rootLocations.status,
     },
     corporationSources: {
       eTag: completeSnapshot.corporationSources.eTag,
       isEmpty: true,
       isModified: false,
+      status: completeSnapshot.corporationSources.status,
     },
     jobs: {
       eTag: completeSnapshot.jobs.eTag,
       isEmpty: true,
       isModified: false,
+      status: completeSnapshot.jobs.status,
     },
     marketOrders: {
       eTag: completeSnapshot.marketOrders.eTag,
       isEmpty: true,
       isModified: false,
+      status: completeSnapshot.marketOrders.status,
     },
     ships: {
       eTag: completeSnapshot.ships.eTag,
       isEmpty: true,
       isModified: false,
+      status: completeSnapshot.ships.status,
+    },
+    skills: {
+      eTag: completeSnapshot.skills.eTag,
+      isEmpty: true,
+      isModified: false,
+      status: completeSnapshot.skills.status,
     },
   } satisfies ClientOwnerSnapshotResponse;
   const merged = mergeOwnerSnapshot(completeSnapshot, response);
 
   assert.equal(merged.assets.data, completeSnapshot.assets.data);
-  assert.deepEqual(merged.industryJobs, { eTag: "industry-jobs", data: [] });
+  assert.deepEqual(
+    merged.industryJobs,
+    {
+      eTag: "industry-jobs",
+      data: [],
+      status: { status: "fresh", hasBody: true },
+    },
+  );
   assert.deepEqual(
     getOwnerSnapshotETags(merged),
     {
@@ -102,6 +128,7 @@ void test("merges modified slices and retains unchanged cached data", () => {
       marketOrders: "test",
       rootLocations: "test",
       ships: "test",
+      skills: "test",
     },
   );
 });

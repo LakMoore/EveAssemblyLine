@@ -12,7 +12,7 @@ import { RefreshCoordinator, type RefreshUnit } from "@/lib/esi/refreshOrchestra
 import {
   copyRefreshCache,
   createRefreshProfiler,
-  getStateStatus,
+  getCharacterIndustrySlots,
   refreshCharacterState,
   refreshCorporationState,
   type RefreshProfiler,
@@ -34,6 +34,7 @@ const refreshRequestSchema = z
         marketOrders: z.string().min(1).optional(),
         rootLocations: z.string().min(1).optional(),
         ships: z.string().min(1).optional(),
+        skills: z.string().min(1).optional(),
       })
       .strict()
       .optional()
@@ -251,8 +252,12 @@ async function handleRefreshRequestInternal(
     profiler.end("refresh");
   }
   let ownerSnapshot: OwnerSnapshot | undefined;
+  let industrySlots: OwnerSnapshot["industrySlots"];
   let snapshotError: unknown;
   if (!refreshError) {
+    if (kind === "character") {
+      industrySlots = (await getCharacterIndustrySlots([ownerId], session.sessionId)).get(ownerId);
+    }
     if (kind === "corporation") {
       profiler.start("loadCorporationPolicies");
       try {
@@ -295,6 +300,7 @@ async function handleRefreshRequestInternal(
           myCorporationSellOrdersAsStock: true,
         },
         previousETags,
+        industrySlots,
       );
     }
     catch (error) {

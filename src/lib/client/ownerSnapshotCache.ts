@@ -2,6 +2,7 @@ import type {
   AssetLocation,
   AssetRecord,
   BlueprintInstanceRecord,
+  CharacterSkillRecord,
   IndustryJobRecord,
 } from "@/lib/auth/model";
 import { getPlanningDatabase, ownerSnapshotStoreName } from "@/lib/planning/planningDatabase";
@@ -72,18 +73,36 @@ type ClientOwnerSnapshotShip = {
 export type ClientOwnerSnapshotSlice<T extends readonly unknown[]> = {
   eTag: string;
   data: T;
+  status: ClientOwnerSnapshotEndpointStatus;
+};
+
+export type ClientOwnerSnapshotEndpointStatus = {
+  status: "fresh" | "cached" | "stale" | "rate_limited" | "error";
+  hasBody: boolean;
+  lastModified?: string;
+  lastUpdated?: string;
+  expires?: string;
+  rateLimitedUntil?: string;
+  error?: string;
+  reauthorizeRequired?: boolean;
 };
 
 export type ClientOwnerSnapshotResponseSlice<T extends readonly unknown[]> = {
   eTag: string;
   isEmpty: boolean;
   isModified: boolean;
+  status: ClientOwnerSnapshotEndpointStatus;
   data?: T;
 };
 
 export type ClientOwnerSnapshot = {
-  schemaVersion: 4;
+  schemaVersion: 5;
   owner: ClientOwner;
+  industrySlots?: {
+    Manufacturing: number;
+    Reactions: number;
+    Science: number;
+  };
   assets: ClientOwnerSnapshotSlice<ClientOwnerSnapshotAsset[]>;
   industryJobs: ClientOwnerSnapshotSlice<IndustryJobRecord[]>;
   blueprintInstances: ClientOwnerSnapshotSlice<BlueprintInstanceRecord[]>;
@@ -113,11 +132,13 @@ export type ClientOwnerSnapshot = {
   jobs: ClientOwnerSnapshotSlice<ClientOwnerSnapshotJob[]>;
   marketOrders: ClientOwnerSnapshotSlice<ClientOwnerSnapshotMarketOrder[]>;
   ships: ClientOwnerSnapshotSlice<ClientOwnerSnapshotShip[]>;
+  skills: ClientOwnerSnapshotSlice<CharacterSkillRecord[]>;
 };
 
 export type ClientOwnerSnapshotResponse = {
-  schemaVersion: 4;
+  schemaVersion: 5;
   owner: ClientOwner;
+  industrySlots?: ClientOwnerSnapshot["industrySlots"];
   assets: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["assets"]["data"]>;
   industryJobs: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["industryJobs"]["data"]>;
   blueprintInstances: ClientOwnerSnapshotResponseSlice<
@@ -130,6 +151,7 @@ export type ClientOwnerSnapshotResponse = {
   jobs: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["jobs"]["data"]>;
   marketOrders: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["marketOrders"]["data"]>;
   ships: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["ships"]["data"]>;
+  skills: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["skills"]["data"]>;
 };
 
 type OwnerSnapshotRecord = {
@@ -316,11 +338,38 @@ function isBlueprintInstance(value: unknown): value is BlueprintInstanceRecord {
   );
 }
 
+function isCharacterSkill(value: unknown): value is CharacterSkillRecord {
+  return (
+    isRecord(value)
+    && isPositiveInteger(value.skillId)
+    && isNonNegativeNumber(value.activeSkillLevel)
+  );
+}
+
 function isSnapshotSlice<T extends readonly unknown[]>(
   value: unknown,
   isData: (candidate: unknown) => candidate is T,
 ): value is ClientOwnerSnapshotSlice<T> {
-  return isRecord(value) && typeof value.eTag === "string" && isData(value.data);
+  return (
+    isRecord(value)
+    && typeof value.eTag === "string"
+    && isSnapshotEndpointStatus(value.status)
+    && isData(value.data)
+  );
+}
+
+function isSnapshotEndpointStatus(value: unknown): value is ClientOwnerSnapshotEndpointStatus {
+  return (
+    isRecord(value)
+    && ["fresh", "cached", "stale", "rate_limited", "error"].includes(String(value.status))
+    && typeof value.hasBody === "boolean"
+    && isOptional(value.lastModified, (candidate) => typeof candidate === "string")
+    && isOptional(value.lastUpdated, (candidate) => typeof candidate === "string")
+    && isOptional(value.expires, (candidate) => typeof candidate === "string")
+    && isOptional(value.rateLimitedUntil, (candidate) => typeof candidate === "string")
+    && isOptional(value.error, (candidate) => typeof candidate === "string")
+    && isOptional(value.reauthorizeRequired, (candidate) => typeof candidate === "boolean")
+  );
 }
 
 function isSnapshotResponseSlice<T extends readonly unknown[]>(
@@ -333,6 +382,7 @@ function isSnapshotResponseSlice<T extends readonly unknown[]>(
     && value.eTag.length > 0
     && typeof value.isEmpty === "boolean"
     && typeof value.isModified === "boolean"
+    && isSnapshotEndpointStatus(value.status)
     && (value.isModified ? isData(value.data) : value.data === undefined)
   );
 }
@@ -367,17 +417,28 @@ function isSnapshotMarketOrder(value: unknown): value is ClientOwnerSnapshotMark
   );
 }
 
+function isIndustrySlots(value: unknown) {
+  return (
+    isRecord(value)
+    && isNonNegativeNumber(value.Manufacturing)
+    && isNonNegativeNumber(value.Reactions)
+    && isNonNegativeNumber(value.Science)
+  );
+}
+
 export function isCompleteClientOwnerSnapshot(value: unknown): value is ClientOwnerSnapshot {
   if (!isRecord(value)) return false;
   const owner = value.owner;
   const jobs = value.jobs;
   const marketOrders = value.marketOrders;
   const ships = value.ships;
+  const skills = value.skills;
   return (
-    value.schemaVersion === 4
+    value.schemaVersion === 5
     && isRecord(owner)
     && isPositiveInteger(owner.id)
     && (owner.kind === "character" || owner.kind === "corporation")
+    && isOptional(value.industrySlots, isIndustrySlots)
     && isSnapshotSlice(
       value.assets,
       (data): data is ClientOwnerSnapshotAsset[] =>
@@ -452,6 +513,11 @@ export function isCompleteClientOwnerSnapshot(value: unknown): value is ClientOw
       (data): data is ClientOwnerSnapshotShip[] =>
         Array.isArray(data) && data.every((ship) => isSnapshotShip(ship)),
     )
+    && isSnapshotSlice(
+      skills,
+      (data): data is CharacterSkillRecord[] =>
+        Array.isArray(data) && data.every((skill) => isCharacterSkill(skill)),
+    )
   );
 }
 
@@ -462,10 +528,11 @@ export function isCompleteClientOwnerSnapshotResponse(
   if (!isRecord(value)) return false;
   const owner = value.owner;
   return (
-    value.schemaVersion === 4
+    value.schemaVersion === 5
     && isRecord(owner)
     && isPositiveInteger(owner.id)
     && (owner.kind === "character" || owner.kind === "corporation")
+    && isOptional(value.industrySlots, isIndustrySlots)
     && isSnapshotResponseSlice(
       value.assets,
       (data): data is ClientOwnerSnapshot["assets"]["data"] =>
@@ -526,6 +593,11 @@ export function isCompleteClientOwnerSnapshotResponse(
       (data): data is ClientOwnerSnapshot["ships"]["data"] =>
         Array.isArray(data) && data.every((ship) => isSnapshotShip(ship)),
     )
+    && isSnapshotResponseSlice(
+      value.skills,
+      (data): data is ClientOwnerSnapshot["skills"]["data"] =>
+        Array.isArray(data) && data.every((skill) => isCharacterSkill(skill)),
+    )
   );
 }
 
@@ -540,6 +612,7 @@ export function getOwnerSnapshotETags(snapshot: ClientOwnerSnapshot) {
     marketOrders: snapshot.marketOrders.eTag,
     rootLocations: snapshot.rootLocations.eTag,
     ships: snapshot.ships.eTag,
+    skills: snapshot.skills.eTag,
   };
 }
 
@@ -551,12 +624,12 @@ function mergeSnapshotSlice<T extends readonly unknown[]>(
     if (!previous || previous.eTag !== response.eTag) {
       throw new Error("Refresh returned an unchanged slice without a matching cached snapshot.");
     }
-    return previous;
+    return { ...previous, status: response.status };
   }
   if (response.data === undefined) {
     throw new Error("Refresh returned a modified slice without data.");
   }
-  return { eTag: response.eTag, data: response.data };
+  return { eTag: response.eTag, data: response.data, status: response.status };
 }
 
 /** Merges a partial refresh response with the previously persisted owner snapshot. */
@@ -565,8 +638,9 @@ export function mergeOwnerSnapshot(
   response: ClientOwnerSnapshotResponse,
 ): ClientOwnerSnapshot {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     owner: response.owner,
+    ...(response.industrySlots ? { industrySlots: response.industrySlots } : {}),
     assets: mergeSnapshotSlice(previous?.assets ?? null, response.assets),
     industryJobs: mergeSnapshotSlice(previous?.industryJobs ?? null, response.industryJobs),
     blueprintInstances: mergeSnapshotSlice(
@@ -581,6 +655,7 @@ export function mergeOwnerSnapshot(
     jobs: mergeSnapshotSlice(previous?.jobs ?? null, response.jobs),
     marketOrders: mergeSnapshotSlice(previous?.marketOrders ?? null, response.marketOrders),
     ships: mergeSnapshotSlice(previous?.ships ?? null, response.ships),
+    skills: mergeSnapshotSlice(previous?.skills ?? null, response.skills),
   };
 }
 

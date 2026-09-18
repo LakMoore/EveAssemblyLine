@@ -22,6 +22,7 @@ import {
   loadClientJobs,
   ownerSnapshotsNeedRefresh,
   loadClientSession,
+  refreshClientSession,
   loadClientShips,
   loadClientAssets,
   type ClientAssetsResponse,
@@ -361,7 +362,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         setCharacters([]);
       });
     const handleCorporationSettingsChanged = () => {
-      void loadClientSession(true)
+      void refreshClientSession()
         .then(
           (data: {
             authenticated?: boolean;
@@ -391,8 +392,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
       return;
     }
     let cancelled = false;
-    const loadStatuses = (reload = false, state?: ClientCharacterState) => {
-      void (state ? Promise.resolve(state) : loadClientCharacterState(reload))
+    const loadStatuses = (state?: ClientCharacterState) => {
+      void (state ? Promise.resolve(state) : loadClientCharacterState())
         .then((data) => {
           if (cancelled) return;
           const nextStatuses = data.characters ?? [];
@@ -419,7 +420,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     const handleRefresh = (event: Event) => {
       if (activePage === "imagechecker" || activePage === "characters") return;
       const detail = (event as CustomEvent<ClientRefreshEventDetail>).detail;
-      loadStatuses(!detail.state, detail.state);
+      loadStatuses(detail.state);
     };
     const statusTimer = window.setInterval(() => setStatusCheckAt(Date.now()), 5_000);
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
@@ -540,7 +541,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
           }
         },
         {
-          concurrency: units.length,
+          concurrency: 5,
           onSettled: () => {
             setRefreshProgress((current) =>
               current
@@ -558,6 +559,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         );
       }
       const refreshedAt = new Date().toISOString();
+      await refreshClientSession();
       const requiredEndpoints = new Set<string>(refreshDependentEndpoints[activePage]);
       let jobsResponse;
       let shipsResponse;
@@ -571,7 +573,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         requiredEndpoints.has("owner-assets")
           ? loadClientAssets(language, true).catch(() => undefined)
           : Promise.resolve(undefined),
-        loadClientCharacterState(true).catch(() => undefined),
+        loadClientCharacterState().catch(() => undefined),
         requiredEndpoints.has("compress/options")
           ? loadCompressOptions(language, true).catch(() => undefined)
           : Promise.resolve(undefined),

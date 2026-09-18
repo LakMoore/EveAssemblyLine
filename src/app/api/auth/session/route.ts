@@ -4,7 +4,6 @@ import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/sessio
 import { getCharacter, getCollectionCorporationSettings } from "@/lib/auth/tokensStore";
 import { isCorpRefreshOptInEnabled } from "@/lib/auth/corpRefreshOptIn";
 import { fetchUniverseNames } from "@/lib/esi/client";
-import { getStateStatus } from "@/lib/esi/cache";
 
 export async function GET(request: Request) {
   try {
@@ -63,14 +62,6 @@ export async function GET(request: Request) {
           : false,
       }),
     );
-    const state = await getStateStatus(characterIds, session.sessionId, characters);
-    const stateByCharacterId = new Map(
-      state.characters.map((character) => [character.characterId, character]),
-    );
-    const responseCharacters = projectedCharacters.map((character) => ({
-      ...character,
-      ...stateByCharacterId.get(character.characterId),
-    }));
     const snapshotScope = createHash("sha256")
       .update(
         `${session.collectionId}:${session.sessionId}:${characterIds
@@ -80,8 +71,8 @@ export async function GET(request: Request) {
       )
       .digest("hex");
     return NextResponse.json({
-      authenticated: responseCharacters.length > 0,
-      characters: responseCharacters,
+      authenticated: projectedCharacters.length > 0,
+      characters: projectedCharacters,
       snapshotScope,
     });
   }

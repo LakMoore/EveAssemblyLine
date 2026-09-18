@@ -269,8 +269,8 @@ export default function CharactersPage() {
     );
   }
 
-  async function loadStatuses(reload = false) {
-    const data = await loadClientCharacterState(reload);
+  async function loadStatuses() {
+    const data = await loadClientCharacterState();
     setStatuses(data.characters ?? []);
     setFreshnessTick((tick) => tick + 1);
   }
@@ -282,7 +282,7 @@ export default function CharactersPage() {
       .finally(() => setIsLoading(false));
     const freshnessTimer = window.setInterval(() => setFreshnessTick((tick) => tick + 1), 5_000);
     const handleRefreshFinished = () => {
-      void loadStatuses(true);
+      void loadStatuses();
     };
     window.addEventListener("assembly-line-esi-refresh-finished", handleRefreshFinished);
     return () => {

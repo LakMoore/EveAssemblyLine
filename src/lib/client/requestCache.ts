@@ -452,6 +452,7 @@ export type ClientEndpointStatus = {
 };
 
 let sessionRequest: Promise<ClientSession> | undefined;
+let sessionRefreshRequest: Promise<ClientSession> | undefined;
 const assetsRequests = new Map<string, Promise<ClientAssetsResponse>>();
 const assetsResponses = new Map<string, { scope: string; data: ClientAssetsResponse }>();
 let assetsCacheGeneration = 0;
@@ -468,13 +469,34 @@ let ownerSnapshotsScope: string | undefined;
 
 const emptyJobsResponse: ClientJobsResponse = { slotUsage: {}, jobs: [] };
 
-export function loadClientSession(reload = false) {
-  if (reload) {
-    sessionRequest = undefined;
-  }
+function createClientSessionRequest() {
   if (!sessionRequest) {
     const request = fetch("/api/auth/session")
       .then((response) => response.json() as Promise<ClientSession>)
+      .then(async (session) => {
+        if (!session.authenticated || !session.snapshotScope) return session;
+        const snapshots = await loadOwnerSnapshots(
+          getClientOwnerSnapshotOwners(session),
+          session.snapshotScope,
+        ).catch(() => []);
+        const snapshotsByCharacterId = new Map(
+          snapshots
+            .filter((record) => record.snapshot.owner.kind === "character")
+            .map((record) => [record.snapshot.owner.id, record.snapshot]),
+        );
+        return {
+          ...session,
+          characters: (session.characters ?? []).map((character) => {
+            const snapshot = snapshotsByCharacterId.get(character.characterId);
+            return {
+              ...character,
+              ...(snapshot
+                ? { skills: { ...snapshot.skills.status, body: snapshot.skills.data } }
+                : {}),
+            };
+          }),
+        };
+      })
       .catch((error) => {
         if (sessionRequest === request) sessionRequest = undefined;
         throw error;
@@ -482,6 +504,23 @@ export function loadClientSession(reload = false) {
     sessionRequest = request;
   }
   return sessionRequest;
+}
+
+/** Returns the process-wide client session cache populated during application startup. */
+export function loadClientSession() {
+  return createClientSessionRequest();
+}
+
+/** Replaces the cached session once after session-affecting mutations or completed ESI refreshes. */
+export function refreshClientSession() {
+  if (sessionRefreshRequest) return sessionRefreshRequest;
+  sessionRequest = undefined;
+  const request = createClientSessionRequest();
+  const refreshRequest = request.finally(() => {
+    if (sessionRefreshRequest === refreshRequest) sessionRefreshRequest = undefined;
+  });
+  sessionRefreshRequest = refreshRequest;
+  return refreshRequest;
 }
 
 function invalidateClientAssetRequests() {
@@ -499,7 +538,7 @@ export function loadClientAssets(language: SdeLanguage, reload = false) {
   if (!reload && pending) return pending;
   const generation = assetsCacheGeneration;
   let request: Promise<ClientAssetsResponse>;
-  request = loadClientSession(reload)
+  request = loadClientSession()
     .then(async (session) => {
       const scope = session.authenticated ? session.snapshotScope : undefined;
       const cachedResponse = assetsResponses.get(key);
@@ -550,7 +589,7 @@ export function loadClientOwnerSnapshots(reload = false) {
     ownerSnapshotsRequest = undefined;
     ownerSnapshotsScope = undefined;
   }
-  return loadClientSession(reload).then(async (session) => {
+  return loadClientSession().then(async (session) => {
     if (!session.authenticated || !session.snapshotScope) return [];
     if (ownerSnapshotsRequest && ownerSnapshotsScope === session.snapshotScope) {
       return ownerSnapshotsRequest;
@@ -665,7 +704,7 @@ export function loadClientShips(reload = false) {
   shipsRequest
     ??= (async () => {
       const [session, snapshots] = await Promise.all([
-        loadClientSession(reload),
+        loadClientSession(),
         loadClientOwnerSnapshots(reload),
       ]);
       const typeIds = [
@@ -720,7 +759,7 @@ export function loadClientJobs(reload = false) {
   jobsRequest = (async () => {
     const [snapshots, state] = await Promise.all([
       loadClientOwnerSnapshots(reload),
-      loadClientCharacterState(reload),
+      loadClientCharacterState(),
     ]);
     const typeIds = [
       ...new Set(
@@ -746,8 +785,8 @@ export function loadClientJobs(reload = false) {
   return jobsRequest;
 }
 
-export function loadClientCharacters(reload = false) {
-  return loadClientSession(reload).then((session) => session.characters ?? []);
+export function loadClientCharacters() {
+  return loadClientSession().then((session) => session.characters ?? []);
 }
 
 export function loadClientCorporationSettings(reload = false) {
@@ -801,15 +840,64 @@ export async function saveClientCorporationSettings(requestedSettings: ClientCor
   return settings;
 }
 
-export function loadClientCharacterState(reload = false): Promise<ClientCharacterState> {
-  return loadClientSession(reload).then((session) => ({
-    characters: session.characters ?? [],
-  }));
+export function loadClientCharacterState(): Promise<ClientCharacterState> {
+  return loadClientSession().then(async (session) => {
+    const records =
+      session.authenticated && session.snapshotScope
+        ? await loadOwnerSnapshots(
+            getClientOwnerSnapshotOwners(session),
+            session.snapshotScope,
+          ).catch(() => [])
+        : [];
+    const snapshots = records.map((record) => record.snapshot);
+    return {
+      characters: (session.characters ?? []).map((character) => {
+        const personalSnapshot = snapshots.find(
+          (snapshot) =>
+            snapshot.owner.kind === "character" && snapshot.owner.id === character.characterId,
+        );
+        const corporationSnapshot =
+          character.corporationId === undefined
+            ? undefined
+            : snapshots.find(
+                (snapshot) =>
+                  snapshot.owner.kind === "corporation"
+                  && snapshot.owner.id === character.corporationId,
+              );
+        return {
+          characterId: character.characterId,
+          industrySlots: personalSnapshot?.industrySlots,
+          assets: personalSnapshot?.assets.status,
+          blueprints: personalSnapshot?.blueprintInstances.status,
+          jobs: personalSnapshot?.industryJobs.status,
+          orders: personalSnapshot?.marketOrders.status,
+          ship: personalSnapshot?.ships.status,
+          skills: personalSnapshot
+            ? { ...personalSnapshot.skills.status, body: personalSnapshot.skills.data }
+            : undefined,
+          corporations:
+            character.corporationId === undefined
+              ? []
+              : [
+                  {
+                    corporationId: character.corporationId,
+                    assets: corporationSnapshot?.assets.status,
+                    blueprints: corporationSnapshot?.blueprintInstances.status,
+                    jobs: corporationSnapshot?.industryJobs.status,
+                    orders: corporationSnapshot?.marketOrders.status,
+                    structures: corporationSnapshot?.corporationSources.status,
+                  },
+                ],
+        } satisfies ClientCharacterStatus;
+      }),
+    };
+  });
 }
 
 export function invalidateClientCharacterData() {
   invalidateClientAssetRequests();
   sessionRequest = undefined;
+  sessionRefreshRequest = undefined;
   corporationSettingsResponse = undefined;
   corporationSettingsRequest = undefined;
   ownerSnapshotsRequest = undefined;

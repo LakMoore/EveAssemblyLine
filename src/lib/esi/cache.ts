@@ -106,6 +106,13 @@ export function toClientEndpointStatus<T>(cache: EndpointCache<T> | undefined) {
   };
 }
 
+type SnapshotEndpointStatus = NonNullable<ReturnType<typeof toClientEndpointStatus>>;
+
+const unavailableSnapshotEndpointStatus: SnapshotEndpointStatus = {
+  status: "cached",
+  hasBody: false,
+};
+
 type OwnerCache = {
   allAssetsRaw?: EndpointCache<AssetRecord[]>;
   assetItemIds: Set<number>;
@@ -3319,6 +3326,43 @@ export async function getStateStatus(
       })),
     })),
   };
+}
+
+/** Returns the client-safe cache facts persisted with one owner snapshot. */
+export function getOwnerSnapshotEndpointStatuses(
+  owner: { kind: "character" | "corporation"; id: number },
+  sessionId: string,
+) {
+  const cache = getCache(
+    owner.kind === "character" ? characterCaches : corporationCaches,
+    owner.id,
+    sessionId,
+  );
+  const endpointStatusOrUnavailable = <T>(endpoint: EndpointCache<T> | undefined) =>
+    toClientEndpointStatus(endpoint) ?? unavailableSnapshotEndpointStatus;
+  const assetStatus = endpointStatusOrUnavailable(cache.allAssetsRaw);
+  const jobStatus = endpointStatusOrUnavailable(cache.jobs);
+  return {
+    assets: assetStatus,
+    blueprintInstances: endpointStatusOrUnavailable(cache.blueprintInstances),
+    corporationSources:
+      owner.kind === "corporation" ? endpointStatusOrUnavailable(cache.structures) : assetStatus,
+    industryJobs: jobStatus,
+    jobs: jobStatus,
+    marketOrders: endpointStatusOrUnavailable(cache.marketOrders),
+    rootLocations: assetStatus,
+    ships: endpointStatusOrUnavailable(cache.currentShip),
+    skills: endpointStatusOrUnavailable(cache.skills),
+  };
+}
+
+/** Returns the cached skills that are safe to persist in a character snapshot. */
+export function getOwnerSnapshotSkills(
+  owner: { kind: "character" | "corporation"; id: number },
+  sessionId: string,
+): CharacterSkillRecord[] {
+  if (owner.kind === "corporation") return [];
+  return getCache(characterCaches, owner.id, sessionId).skills?.lastBody ?? [];
 }
 
 export async function getCharacterIndustrySlots(characterIds: number[], sessionId: string) {
