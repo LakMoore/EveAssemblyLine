@@ -60,6 +60,7 @@ function demand(
       stockpileId: "main",
       typeId,
       quantity,
+      inputQuantity: quantity,
       destinationLocationId: locationId,
     },
     blockedByBuyBlacklist,

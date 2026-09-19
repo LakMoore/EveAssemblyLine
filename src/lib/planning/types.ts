@@ -235,13 +235,13 @@ export type PlanSourceCountsByLocation = Partial<Record<number, PlanSourceCounts
 export type PlanSourceCountsByType = Map<number, PlanSourceCountsByLocation>;
 export interface PlanDemandSource {
   quantity: number;
-  headlineQuantity: number;
+  inputQuantity: number;
 }
 export type PlanDemandSources = Map<number, PlanDemandSource>;
 export interface ResponsePlanDemandSource {
   typeId: number;
   quantity: number;
-  headlineQuantity: number;
+  inputQuantity: number;
 }
 export type PlanJobInputKind = "blueprint" | "material";
 export type PlanJobInputStatus = "ready" | "partial" | "blocked";

@@ -66,6 +66,7 @@ export interface SimulationDemandSource {
   stockpileId: string;
   typeId: number;
   quantity: number;
+  inputQuantity: number;
   destinationLocationId: number;
   demandingJobId?: string;
 }

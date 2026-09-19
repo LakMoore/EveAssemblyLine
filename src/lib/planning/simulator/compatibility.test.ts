@@ -76,6 +76,90 @@ void test("maps the native result into every legacy planner list", async () => {
       + nativeMaterial.availableFromInvention
       + nativeMaterial.availableFromReprocessing,
   );
+  const nativeInputMaterial = native.lists.planItems.find(
+    (balance) =>
+      balance.typeId !== 587 && balance.demandSources.some((source) => source.typeId === 587),
+  );
+  const compatibleInputMaterial = compatible.lists.planItems.all.find(
+    (item) => item.typeId === nativeInputMaterial?.typeId,
+  );
+  const nativeDemandSource = nativeInputMaterial?.demandSources.find(
+    (source) => source.typeId === 587,
+  );
+  const compatibleDemandSource = compatibleInputMaterial?.demandSources?.find(
+    (source) => source.typeId === 587,
+  );
+  assert.ok(nativeInputMaterial);
+  assert.ok(nativeDemandSource);
+  assert.ok(compatibleDemandSource);
+  assert.equal(nativeDemandSource.quantity, 1);
+  assert.equal(nativeDemandSource.inputQuantity, nativeInputMaterial.required);
+  assert.deepEqual(
+    compatibleDemandSource,
+    {
+      typeId: 587,
+      quantity: nativeDemandSource.quantity,
+      inputQuantity: nativeDemandSource.inputQuantity,
+    },
+  );
+
+  const compatibleHauls = toCompatiblePlanResponse(
+    request,
+    context,
+    {
+      ...native,
+      lists: {
+        ...native.lists,
+        haulingTasks: [
+          {
+            transferId: "first",
+            lotId: "first",
+            typeId: 34,
+            typeName: "Tritanium",
+            quantity: 12,
+            unitVolume: 0.01,
+            fromLocationId: 1,
+            toLocationId: 2,
+            ownerType: "character",
+            ownerId: 3,
+            purpose: "industry-input",
+          },
+          {
+            transferId: "second",
+            lotId: "second",
+            typeId: 34,
+            typeName: "Tritanium",
+            quantity: 8,
+            unitVolume: 0.01,
+            fromLocationId: 1,
+            toLocationId: 2,
+            ownerType: "character",
+            ownerId: 3,
+            purpose: "industry-input",
+          },
+        ],
+      },
+    },
+  );
+  assert.deepEqual(
+    compatibleHauls.lists.haulingTasks,
+    [
+      {
+        fromLocationId: 1,
+        toLocationId: 2,
+        ownerType: "character",
+        ownerId: 3,
+        items: [
+          {
+            typeId: 34,
+            typeName: "Tritanium",
+            unitVolume: 0.01,
+            neededQuantity: 20,
+          },
+        ],
+      },
+    ],
+  );
 
   const balanceWithAcquisitionSources = {
     ...nativeMaterial,

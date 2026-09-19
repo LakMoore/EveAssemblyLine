@@ -194,7 +194,7 @@ void test("records the demanding type for discovered material requirements", asy
     tritanium.demandSources.get(rifterTypeId),
     {
       quantity: 1,
-      headlineQuantity: 32000,
+      inputQuantity: 32000,
     },
   );
   assert.deepEqual(rifter.demandSources, new Map());
@@ -206,7 +206,7 @@ void test("records the demanding type for discovered material requirements", asy
   assert(tritaniumPlanItem);
   assert.deepEqual(
     tritaniumPlanItem.demandSources?.find((source) => source.typeId === rifterTypeId),
-    { typeId: rifterTypeId, quantity: 1, headlineQuantity: 32000 },
+    { typeId: rifterTypeId, quantity: 1, inputQuantity: 32000 },
   );
 });
 

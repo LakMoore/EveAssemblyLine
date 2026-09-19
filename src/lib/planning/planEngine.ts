@@ -117,9 +117,9 @@ function addDemandSource(
   demandSources: PlanDemandSources,
   demandingTypeId: number | undefined,
   quantity: number,
-  headlineQuantity: number,
+  inputQuantity: number,
 ) {
-  if (demandingTypeId === undefined || quantity <= 0 || headlineQuantity <= 0) {
+  if (demandingTypeId === undefined || quantity <= 0 || inputQuantity <= 0) {
     return demandSources;
   }
   const next = new Map(demandSources);
@@ -128,7 +128,7 @@ function addDemandSource(
     demandingTypeId,
     {
       quantity: (existing?.quantity ?? 0) + quantity,
-      headlineQuantity: (existing?.headlineQuantity ?? 0) + headlineQuantity,
+      inputQuantity: (existing?.inputQuantity ?? 0) + inputQuantity,
     },
   );
   return next;
@@ -143,7 +143,7 @@ function mergeDemandSources(existing: PlanDemandSources, next: PlanDemandSources
       typeId,
       {
         quantity: (current?.quantity ?? 0) + source.quantity,
-        headlineQuantity: (current?.headlineQuantity ?? 0) + source.headlineQuantity,
+        inputQuantity: (current?.inputQuantity ?? 0) + source.inputQuantity,
       },
     );
   }
@@ -1034,7 +1034,7 @@ function toResponsePlanItem(
     demandSources: [...entry.demandSources].map(([typeId, source]) => ({
       typeId,
       quantity: source.quantity,
-      headlineQuantity: source.headlineQuantity,
+      inputQuantity: source.inputQuantity,
     })),
     availableSourceCounts: availableSourceCountsOverride ?? entry.availableSourceCounts,
     haulingQuantity,

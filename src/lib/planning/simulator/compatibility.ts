@@ -66,7 +66,7 @@ function demandSources(balance: SimulationMaterialBalance) {
   return balance.demandSources.map((source) => ({
     typeId: source.typeId,
     quantity: source.quantity,
-    headlineQuantity: source.quantity,
+    inputQuantity: source.inputQuantity,
   }));
 }
 
@@ -234,13 +234,15 @@ export function toCompatiblePlanResponse(
       ownerId: task.ownerId,
       items: [],
     };
-    const item: ResponseMaterial = {
+    const existingItem = bucket.items.find((item) => item.typeId === task.typeId);
+    const item: ResponseMaterial = existingItem ?? {
       typeId: task.typeId,
       typeName: task.typeName,
       unitVolume: task.unitVolume,
-      neededQuantity: task.quantity,
+      neededQuantity: 0,
     };
-    bucket.items.push(item);
+    item.neededQuantity += task.quantity;
+    if (!existingItem) bucket.items.push(item);
     haulBuckets.set(key, bucket);
   }
   return {

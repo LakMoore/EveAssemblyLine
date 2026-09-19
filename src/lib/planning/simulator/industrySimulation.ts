@@ -182,7 +182,13 @@ class IndustryDemandSimulation {
             : stockpile.locations.stock,
           typeId: item.typeId,
         };
-        const source = this.demandSource(stockpile, item.typeId, item.quantity, account.locationId);
+        const source = this.demandSource(
+          stockpile,
+          item.typeId,
+          item.quantity,
+          item.quantity,
+          account.locationId,
+        );
         this.declareDemand(account, item.quantity, source);
         const existing = this.allocator.claimOrdinarySupply(
           item.typeId,
@@ -390,7 +396,8 @@ class IndustryDemandSimulation {
         );
         const source = this.demandSource(
           stockpile,
-          material.typeID,
+          productTypeId,
+          outputPerRun * blueprint.runs,
           requiredQuantity,
           profile.locationId,
           jobId,
@@ -640,6 +647,8 @@ class IndustryDemandSimulation {
         "invention",
         inventionLocationId,
         inventionJobId,
+        sourceBlueprint._key,
+        attempts,
       ),
     );
 
@@ -768,6 +777,8 @@ class IndustryDemandSimulation {
         "copying",
         locationId,
         jobId,
+        sourceBlueprint._key,
+        copies,
       ),
     );
     this.copyJobs.push({
@@ -806,6 +817,8 @@ class IndustryDemandSimulation {
     activity: "copying" | "invention",
     locationId: number,
     jobId: string,
+    demandingTypeId: number,
+    demandingQuantity: number,
   ): SimulationJobInput {
     const account: SimulationLedgerAccount = {
       stockpileId: stockpile.id,
@@ -813,7 +826,14 @@ class IndustryDemandSimulation {
       locationId,
       typeId,
     };
-    const source = this.demandSource(stockpile, typeId, quantity, locationId, jobId);
+    const source = this.demandSource(
+      stockpile,
+      demandingTypeId,
+      demandingQuantity,
+      quantity,
+      locationId,
+      jobId,
+    );
     this.declareDemand(account, quantity, source);
     const claim = this.allocator.claimOrdinarySupply(typeId, quantity, locationId, account, jobId);
     const existing = claim.local + claim.remote + claim.future;
@@ -1112,6 +1132,7 @@ class IndustryDemandSimulation {
     stockpile: PlanStockpile,
     typeId: number,
     quantity: number,
+    inputQuantity: number,
     destinationLocationId: number,
     demandingJobId?: string,
   ): SimulationDemandSource {
@@ -1120,6 +1141,7 @@ class IndustryDemandSimulation {
       stockpileId: stockpile.id,
       typeId,
       quantity,
+      inputQuantity,
       destinationLocationId,
       demandingJobId,
     };

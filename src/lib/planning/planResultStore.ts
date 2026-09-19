@@ -72,8 +72,8 @@ export function isPlanResponse(value: unknown): value is PlanResponse {
           && (demandSource.typeId as number) > 0
           && Number.isSafeInteger(demandSource.quantity)
           && (demandSource.quantity as number) >= 0
-          && Number.isSafeInteger(demandSource.headlineQuantity)
-          && (demandSource.headlineQuantity as number) >= 0
+          && Number.isSafeInteger(demandSource.inputQuantity)
+          && (demandSource.inputQuantity as number) >= 0
         );
       })
     );

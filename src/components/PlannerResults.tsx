@@ -2386,7 +2386,7 @@ function DemandSourcesDrawer({
   const entryName = getEntryName(entry);
   const entryUnit = entry.kind === "bpc" || entry.kind === "reaction" ? "runs" : "units";
   const totalInputQuantity = demandSources.reduce(
-    (total, source) => total + source.headlineQuantity,
+    (total, source) => total + source.inputQuantity,
     0,
   );
   const footerContent = (
@@ -2456,9 +2456,9 @@ function DemandSourcesDrawer({
               </div>
               <div
                 className="py-3 text-right font-mono text-xs text-foreground"
-                aria-label={`Input quantity: ${formatQuantity(source.headlineQuantity, entryUnit)}`}
+                aria-label={`Input quantity: ${formatQuantity(source.inputQuantity, entryUnit)}`}
               >
-                {formatQuantity(source.headlineQuantity, entryUnit)}
+                {formatQuantity(source.inputQuantity, entryUnit)}
               </div>
             </div>
           );

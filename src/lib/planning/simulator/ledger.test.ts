@@ -25,6 +25,7 @@ void test("projects demand and horizon-specific reservations", () => {
         stockpileId: "main",
         typeId: 34,
         quantity: 10,
+        inputQuantity: 10,
         destinationLocationId: 20,
       },
     },
