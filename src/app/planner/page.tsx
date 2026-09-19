@@ -113,6 +113,7 @@ import styles from "../page.module.css";
 import {
   Clipboard,
   Copy as CopyIcon,
+  FlaskConical,
   Info,
   ClipboardList,
   Minimize2,
@@ -139,6 +140,7 @@ import type { ProductionGroupKey, ProductionGroupReference } from "@/lib/plannin
 import { fetchProductionGroups } from "@/lib/reference/productionGroups";
 
 type StockpileEditorMode = "details" | "items";
+type PlanRunMode = "calculate" | "simulate";
 type PlanLocationOption = {
   id: string;
   locationId: number;
@@ -400,6 +402,7 @@ function Planner() {
   const [isBuildListLoaded, setIsBuildListLoaded] = useState(false);
   const [planStatus, setPlanStatus] = useState("Ready to calculate");
   const [isPlanLoading, setIsPlanLoading] = useState(false);
+  const [activePlanRun, setActivePlanRun] = useState<PlanRunMode | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
   const [isExcludedLocationsModalOpen, setIsExcludedLocationsModalOpen] = useState(false);
@@ -745,13 +748,15 @@ function Planner() {
     exclusions: Set<number>,
     itemExclusions: HaulItemExclusion = haulItemExclusion,
     patches: ReadonlyMap<string, HaulPatch> = activeHaulPatches,
+    mode: PlanRunMode = "calculate",
   ): Promise<boolean> {
     const activeStockpiles = stockpiles.filter((stockpile) => stockpile.isActive !== false);
     const plannerItems = activeStockpiles.flatMap((stockpile) => stockpile.items);
     if (plannerItems.length === 0 || isPlanLoading) return false;
     flushSync(() => {
       setIsPlanLoading(true);
-      setPlanStatus("Calculating...");
+      setActivePlanRun(mode);
+      setPlanStatus(mode === "simulate" ? "Simulating..." : "Calculating...");
     });
     await waitForNextPaint();
     try {
@@ -784,7 +789,7 @@ function Planner() {
       );
       const planningSkills = planningCharacter?.skills?.body ?? undefined;
       const response = await fetch(
-        "/api/plan",
+        mode === "simulate" ? "/api/plan/simulate?format=plan-response" : "/api/plan",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -841,12 +846,15 @@ function Planner() {
               fallbackT2OrT3Me: settings.fallbackT2OrT3Me,
               fallbackT2OrT3Te: settings.fallbackT2OrT3Te,
             },
+            ...(mode === "simulate" ? { simulation: { version: 1 } } : {}),
           }),
         },
       );
       const data = (await response.json()) as PlanResponse | { error?: string };
       if (!response.ok) {
-        setPlanStatus("error" in data && data.error ? data.error : "Could not calculate plan");
+        const fallbackError =
+          mode === "simulate" ? "Could not simulate plan" : "Could not calculate plan";
+        setPlanStatus("error" in data && data.error ? data.error : fallbackError);
         return false;
       }
       const calculatedPlan = applyHaulItemExclusionsToPlan(data as PlanResponse, itemExclusions);
@@ -857,7 +865,7 @@ function Planner() {
         setPlan(calculatedPlan);
       });
       await savePlannerLocations(locations);
-      setPlanStatus("Plan updated just now");
+      setPlanStatus(mode === "simulate" ? "Simulation updated just now" : "Plan updated just now");
       return true;
     }
     catch {
@@ -866,6 +874,7 @@ function Planner() {
     }
     finally {
       setIsPlanLoading(false);
+      setActivePlanRun(null);
     }
   }
 
@@ -1452,21 +1461,43 @@ function Planner() {
             >
               Excluded asset locations ({excludedLocationIds.length})
             </Button>
-            <CalculateButton
-              type="button"
-              className="ml-auto"
-              disabled={
-                isPlanLoading
-                || stockpiles.every(
-                  (stockpile) => stockpile.isActive === false || stockpile.items.length === 0,
-                )
-              }
-              icon={ClipboardList}
-              isLoading={isPlanLoading}
-              label="Calculate production plan"
-              loadingLabel="Calculating..."
-              onClick={() => void submitPlan(new Set(excludedLocationIds))}
-            />
+            <div className="ml-auto grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
+              <CalculateButton
+                type="button"
+                disabled={
+                  isPlanLoading
+                  || stockpiles.every(
+                    (stockpile) => stockpile.isActive === false || stockpile.items.length === 0,
+                  )
+                }
+                icon={ClipboardList}
+                isLoading={activePlanRun === "calculate"}
+                label="Calculate production plan"
+                loadingLabel="Calculating..."
+                onClick={() => void submitPlan(new Set(excludedLocationIds))}
+              />
+              <CalculateButton
+                type="button"
+                disabled={
+                  isPlanLoading
+                  || stockpiles.every(
+                    (stockpile) => stockpile.isActive === false || stockpile.items.length === 0,
+                  )
+                }
+                icon={FlaskConical}
+                isLoading={activePlanRun === "simulate"}
+                label="Simulate"
+                loadingLabel="Simulating..."
+                onClick={() =>
+                  void submitPlan(
+                    new Set(excludedLocationIds),
+                    haulItemExclusion,
+                    activeHaulPatches,
+                    "simulate",
+                  )
+                }
+              />
+            </div>
           </div>
         </div>
       </section>

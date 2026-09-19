@@ -17,6 +17,27 @@ The final `sde:prepare` step bulk uploads the SDE-backed cache entries when the 
 
 Without SDE data the application still builds, but SDE-backed routes should call `ensureSdeLoaded()` and report its setup error. This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Industry simulator
+
+`POST /api/plan/simulate` runs the version-one ledger-based industry simulator alongside the
+legacy `/api/plan` endpoint. It accepts the current planner request plus a `simulation` object,
+uses only client-supplied state and the cached SDE, and never authenticates or calls ESI. Responses
+use `Cache-Control: no-store`.
+
+The simulator reports availability at `now`, `after-hauling`, `after-upstream`, and
+`after-purchase` horizons. Physical item lots and finite BPC runs are conserved once across all
+stockpiles. Manufacturing, reactions, copying, and invention are assigned to reusable character
+capacity lanes when character profiles are supplied. Reprocessing runs after industry expansion
+and is limited to eligible ore, compressed gas, and scrap types; buying is the final settlement
+phase.
+
+The request policy defaults to a 1.2 expected invention-output factor, level-3 fallback invention
+skills, no decryptor, a 10,000-node graph limit, and a depth limit of 100. A type cannot appear in
+both build and buy blacklists. The response contains the ten native result lists, activity/location
+ledger views, stable input and policy metadata, warnings, and invariant counts. The pure
+`toCompatiblePlanResponse()` adapter in `src/lib/planning/simulator/compatibility.ts` maps native
+facts to the existing `PlanResponse` contract; the visible planner continues to use `/api/plan`.
+
 ## Firebase persistence
 
 Durable server-side accounts, sessions, EVE tokens, and pending SSO state are stored in Cloud Firestore through the Firebase Admin SDK. The application uses one document per storage key in the `assemblyLineStorage` collection. Plan request logs use the dedicated `planRequests/{requestId}` collection for metadata and store their compressed request/response JSON in Cloud Storage at `plan-logs/{requestId}.json.gz`. SDE data remains a build/runtime input loaded into process memory; it is not stored in Firestore.

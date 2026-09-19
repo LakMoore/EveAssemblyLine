@@ -46,6 +46,13 @@ This section is authoritative where the older design below differs from the runn
 - Corporation support is opted in per corporation and stored on the collection. Corporation source selections are shared by that collection: direct hangar contents and named containers are selected independently, selected containers include nested contents, new sources default to excluded, and inaccessible roots are hidden. Query-only access contributes blueprints only; Take access contributes materials and blueprints. The Director used for a corporation refresh may be found across collections and is never returned as an attached character.
 - `/api/state/assets` is the boundary between ESI state and planning. It resolves and groups assets by root location, includes blueprint/job/market-order context, filters special ship and structure records as appropriate, and carries personal/corporation ownership into the planner input.
 - `/api/plan` is intentionally unauthenticated and makes no ESI calls. It accepts stockpiles with their per-stockpile locations, client-supplied assets, and settings. Do not reintroduce `characterIds` ownership checks or server-side refreshes into this endpoint; authenticated state preparation belongs in the state routes.
+- `/api/plan/simulate` is the version-one ledger-based simulator running alongside `/api/plan`. It
+  accepts the same asset-driven planner data plus character/science profiles and simulation policy,
+  makes no ESI calls, conserves physical lots and finite BPC runs, exposes four readiness horizons,
+  schedules industry work, settles reprocessing late, and creates buying requirements last. Its
+  native ten-list response includes activity/location ledgers and invariant metadata. The legacy
+  route and visible planner remain unchanged; `toCompatiblePlanResponse()` provides the explicit
+  adapter to the established `PlanResponse` shape.
 - The planner is asset-aware and supports compressed/reprocessable material handling, blueprint print/run accounting, industry-in-progress output, market orders, localized SDE names, ME/TE settings, and source metadata. Its request model is not the original minimal `typeId + quantity` plus raw assets model.
 - The UI is a multi-page production-control application. The build planner is one workflow alongside assets, jobs, ships, compression, locations, characters, and settings. The original component-only single-page layout is descriptive history, not an implementation requirement.
 - The deployment target is Firebase App Hosting with a Cloud Run backend configuration and Firestore. The repository does not currently define a Dockerfile-based deployment contract; do not add container-specific storage assumptions without deciding whether App Hosting remains the target.
@@ -102,6 +109,7 @@ src/
       auth/logout/route.ts          # Clear session cookie
       characters/[id]/route.ts      # Remove attached character
       plan/route.ts                 # Asset-driven plan calculation
+      plan/simulate/route.ts        # Versioned ledger-based industry simulation
       state/refresh/route.ts        # Refresh active collection state
       state/assets/route.ts         # Planner asset projection
       state/jobs/route.ts           # Industry jobs projection
@@ -133,6 +141,7 @@ src/
     planning/
       types.ts           # Types for /plan inputs and outputs
       planEngine.ts      # Main planning logic: compute 6 action lists
+      simulator/         # Graph, ledgers, allocation, schedules, settlement, and adapters
       util.ts            # Helper functions (e.g., BOM expansion)
 
   components/
