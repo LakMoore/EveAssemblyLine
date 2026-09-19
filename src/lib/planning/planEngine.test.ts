@@ -26,6 +26,9 @@ const sharedTritaniumProductTypeId = 586;
 const sharedTritaniumBlueprintTypeId = 690;
 const reactionProductTypeId = 16672;
 const reactionFormulaTypeId = 46207;
+const crystalliteAlloyTypeId = 16655;
+const crystallineCarbonideTypeId = 16670;
+const crystallineCarbonideFormulaTypeId = 46205;
 const oxyOrganicSolventsTypeId = 57454;
 const oxyOrganicSolventsFormulaTypeId = 57491;
 const hydrocarbonsTypeId = 16633;
@@ -6645,6 +6648,97 @@ void test("merges reaction jobs by reaction location and formula type", async ()
     response.lists.planItems.all.filter((entry) => entry.typeId === reactionFormulaTypeId).length,
     1,
   );
+});
+
+void test("does not reuse stock assigned to another reaction stockpile", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [
+        {
+          typeId: crystalliteAlloyTypeId,
+          name: "Crystallite Alloy",
+          quantity: 100,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: 16659,
+          name: "Carbon Polymers",
+          quantity: 100,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+        {
+          typeId: heliumFuelBlockTypeId,
+          name: "Helium Fuel Block",
+          quantity: 5,
+          category: "item",
+          rootLocationId: alternateSourceLocationId,
+        },
+      ],
+      {
+        items: [],
+        stockpiles: [
+          {
+            id: "unstocked-reaction",
+            name: "Unstocked reaction",
+            locations: {
+              stock: sourceLocationId,
+              manufacturing: sourceLocationId,
+              reactions: sourceLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: sourceLocationId,
+              invention: sourceLocationId,
+            },
+            items: [
+              {
+                typeId: crystallineCarbonideTypeId,
+                name: "Crystalline Carbonide",
+                quantity: 10_000,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+          {
+            id: "stocked-reaction",
+            name: "Stocked reaction",
+            locations: {
+              stock: alternateSourceLocationId,
+              manufacturing: alternateSourceLocationId,
+              reactions: alternateSourceLocationId,
+              reprocessing: reprocessingLocationId,
+              copying: alternateSourceLocationId,
+              invention: alternateSourceLocationId,
+            },
+            items: [
+              {
+                typeId: crystallineCarbonideTypeId,
+                name: "Crystalline Carbonide",
+                quantity: 10_000,
+                me: 0,
+                te: 0,
+                fromCompression: false,
+              },
+            ],
+          },
+        ],
+      },
+    ),
+  );
+  const reactionJob = result.lists.reactionJobs.find(
+    (job) =>
+      job.typeId === crystallineCarbonideFormulaTypeId && job.locationId === sourceLocationId,
+  );
+  assert(reactionJob);
+  const crystalliteAlloy = reactionJob.inputs.materials.find(
+    (input) => input.typeId === crystalliteAlloyTypeId,
+  );
+  assert(crystalliteAlloy);
+  assert.equal(crystalliteAlloy.availableQuantity, 0);
+  assert.equal(reactionJob.runsAvailable, 0);
 });
 
 void test("merges manufacturing jobs by blueprint type across stockpiles", async () => {

@@ -50,12 +50,7 @@ import {
   specialReprocessableTypeIds,
 } from "./reprocessStock";
 import { allocateStockpileStock } from "./stockpileAllocation";
-import {
-  getFinalPlanningLedgerTransfers,
-  getPlanningLedgerJobInputAvailability,
-  recordPlanningLedgerJobInputReservations,
-  type PlanningLedger,
-} from "./planningLedger";
+import { getFinalPlanningLedgerTransfers, type PlanningLedger } from "./planningLedger";
 import {
   getStockRootLocationId,
   isAvailableIndustryProductionOutput,
@@ -3319,139 +3314,6 @@ async function reconcileStockpilePlan(
   return restorePlanResourceCounts(restoredSources, request.stock);
 }
 
-/** Records local-first, haul-aware source-lot reservations for all merged industry job inputs. */
-function reserveMergedJobInputs(
-  ledger: PlanningLedger,
-  request: PlannerRequest,
-  reactionJobs: PlanCalculation["lists"]["reactionJobs"],
-  manufacturingJobs: PlanCalculation["lists"]["manufacturingJobs"],
-) {
-  const availableStock = request.stock
-    .map((item, stockIndex) => ({ item, stockIndex, remainingQuantity: item.quantity }))
-    .filter(
-      ({ item }) =>
-        item.category === "item"
-        && item.source !== "marketOrder"
-        && isUsableIndustryProductionOutput(item)
-        && getStockRootLocationId(item) !== undefined,
-    );
-  const reservations: Array<{
-    stockIndex: number;
-    quantity: number;
-    activity: "manufacturing" | "reaction";
-    jobTypeId: number;
-    jobLocationId?: number;
-  }> = [];
-  for (const [activity, jobs] of [
-    ["reaction", reactionJobs],
-    ["manufacturing", manufacturingJobs],
-  ] as const) {
-    for (const job of jobs) {
-      for (const input of job.inputs.materials) {
-        let remainingQuantity = input.requiredQuantity;
-        for (const item of availableStock
-          .filter((candidate) => {
-            const sourceLocationId = getStockRootLocationId(candidate.item);
-            return (
-              candidate.item.typeId === input.typeId
-              && candidate.remainingQuantity > 0
-              && sourceLocationId !== undefined
-              && (sourceLocationId === job.locationId || !candidate.item.inBuild)
-              && !(
-                job.locationId !== undefined
-                && request.haulExclusions?.some(
-                  (exclusion) =>
-                    exclusion.typeId === input.typeId
-                    && exclusion.fromLocationId === sourceLocationId
-                    && exclusion.toLocationId === job.locationId
-                    && (
-                      exclusion.ownerType === undefined
-                      || (
-                        exclusion.ownerType === candidate.item.ownerType
-                        && exclusion.ownerId === candidate.item.ownerId
-                      )
-                    ),
-                )
-              )
-            );
-          })
-          .sort(
-            (left, right) =>
-              Number(getStockRootLocationId(left.item) !== job.locationId)
-                - Number(getStockRootLocationId(right.item) !== job.locationId)
-              || (getStockRootLocationId(left.item) ?? 0)
-                - (getStockRootLocationId(right.item) ?? 0),
-          )) {
-          if (remainingQuantity <= 0) break;
-          const allocatedQuantity = Math.min(remainingQuantity, item.remainingQuantity);
-          item.remainingQuantity -= allocatedQuantity;
-          remainingQuantity -= allocatedQuantity;
-          reservations.push({
-            stockIndex: item.stockIndex,
-            quantity: allocatedQuantity,
-            activity,
-            jobTypeId: job.typeId,
-            ...(job.locationId === undefined ? {} : { jobLocationId: job.locationId }),
-          });
-        }
-      }
-    }
-  }
-  return recordPlanningLedgerJobInputReservations(ledger, reservations);
-}
-
-/** Rebuilds merged job input states from immutable source-lot reservations. */
-function reconcileMergedJobInputs<T extends PlanCalculation["lists"]["reactionJobs"][number]>(
-  activity: "reaction" | "manufacturing",
-  jobs: T[],
-  ledger: PlanningLedger,
-): T[] {
-  return jobs.map((job) => {
-    const materials = job.inputs.materials.map((input) => {
-      const availableQuantity = getPlanningLedgerJobInputAvailability(
-        ledger,
-        {
-          activity,
-          jobTypeId: job.typeId,
-          ...(job.locationId === undefined ? {} : { jobLocationId: job.locationId }),
-          typeId: input.typeId,
-        },
-      );
-      const completionPercent =
-        input.requiredQuantity <= 0
-          ? 100
-          : Math.min(100, Math.round((availableQuantity / input.requiredQuantity) * 100));
-      return {
-        ...input,
-        availableQuantity,
-        ...(input.inBuildQuantity === undefined
-          ? {}
-          : { inBuildQuantity: Math.min(input.inBuildQuantity, availableQuantity) }),
-        completionPercent,
-        status:
-          completionPercent >= 100
-            ? ("ready" as const)
-            : completionPercent > 0
-              ? ("partial" as const)
-              : ("blocked" as const),
-      };
-    });
-    const inputs = summarizePlanJobInputs(
-      job.inputs.blueprint,
-      materials,
-      {
-        bpoCount: job.inputs.bpoCount,
-        bpcRuns: job.inputs.bpcRuns,
-      },
-    );
-    return {
-      ...job,
-      runsAvailable: getInstallableRunsFromInputs(inputs, job.countNeeded),
-      inputs,
-    };
-  });
-}
-
 function mergeHaulingTasks(tasks: PlanCalculation["lists"]["haulingTasks"]) {
   const mergedByRoute = new Map<string, PlanCalculation["lists"]["haulingTasks"][number]>();
   for (const task of tasks) {
@@ -4515,12 +4377,6 @@ async function mergeStockpileResults(
   const mergedManufacturingJobs = mergeManufacturingJobs(
     results.flatMap((result) => result.lists.manufacturingJobs),
   );
-  const jobInputLedger = reserveMergedJobInputs(
-    ledger,
-    request,
-    mergedReactionJobs,
-    mergedManufacturingJobs,
-  );
   const mergedResult: PlanCalculation = {
     metadata: {
       generatedAt: new Date().toISOString(),
@@ -4541,12 +4397,8 @@ async function mergeStockpileResults(
       bpcsNeeded: mergedBpcRequirements.filter((entry) => entry.bpoCount > 0),
       bpcsToBuy: mergedBpcRequirements.filter((entry) => entry.bpoCount === 0),
       inventionJobs: mergeInventionJobs(results.flatMap((result) => result.lists.inventionJobs)),
-      reactionJobs: reconcileMergedJobInputs("reaction", mergedReactionJobs, jobInputLedger),
-      manufacturingJobs: reconcileMergedJobInputs(
-        "manufacturing",
-        mergedManufacturingJobs,
-        jobInputLedger,
-      ),
+      reactionJobs: mergedReactionJobs,
+      manufacturingJobs: mergedManufacturingJobs,
       reprocessingJobs: results.flatMap((result) => result.lists.reprocessingJobs),
       skillsRequired: [...skillsById.values()],
       haulingTasks,
