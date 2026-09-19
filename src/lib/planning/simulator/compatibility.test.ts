@@ -57,7 +57,27 @@ void test("maps the native result into every legacy planner list", async () => {
     .find((job) => job.typeId === 587);
   assert.ok(nativeJob);
   assert.ok(compatibleJob);
-  assert.equal(compatibleJob.runsAvailable, nativeJob.readyAfterHaulingRuns);
+  assert.equal(compatibleJob.runsAvailable, nativeJob.readyNowRuns);
+  assert.deepEqual(
+    compatibleJob.inputs.materials.map((input) => input.availableQuantity),
+    nativeJob.inputs.map((input) => input.availableNow),
+  );
+  const compatibleMergedJobs = toCompatiblePlanResponse(
+    request,
+    context,
+    {
+      ...native,
+      lists: {
+        ...native.lists,
+        manufacturingJobs: [nativeJob, { ...nativeJob, jobId: `${nativeJob.jobId}:duplicate` }],
+      },
+    },
+  ).lists.manufacturingJobs.flatMap((bucket) => bucket.items);
+  assert.equal(compatibleMergedJobs.filter((job) => job.typeId === 587).length, 1);
+  assert.equal(
+    compatibleMergedJobs.find((job) => job.typeId === 587)?.countNeeded,
+    nativeJob.requiredRuns * 2,
+  );
   const nativeMaterial = native.lists.planItems.find((balance) => balance.required > 0);
   const compatibleMaterial = compatible.lists.planItems.all.find(
     (item) => item.typeId === nativeMaterial?.typeId,
@@ -183,5 +203,75 @@ void test("maps the native result into every legacy planner list", async () => {
   assert.equal(
     compatibleWithAcquisitionSources.lists.planItems.all[0].neededQuantity,
     5 + 7 + 11 + 13 + 17,
+  );
+
+  const duplicateBalanceAtSameLocation = {
+    ...nativeMaterial,
+    stockpileId: "second-stockpile",
+    required: 3,
+    availableNow: 2,
+    availableAfterHauling: 1,
+    availableFromProduction: 4,
+    availableFromCopying: 0,
+    availableFromInvention: 0,
+    availableFromReprocessing: 0,
+    unsatisfied: 5,
+    surplus: 0,
+    demandSources: [],
+  };
+  const compatibleMergedPlanItems = toCompatiblePlanResponse(
+    request,
+    context,
+    {
+      ...native,
+      lists: {
+        ...native.lists,
+        planItems: [nativeMaterial, duplicateBalanceAtSameLocation],
+      },
+    },
+  );
+  const mergedPlanItem = compatibleMergedPlanItems.lists.planItems.all.find(
+    (item) => item.typeId === nativeMaterial.typeId,
+  );
+  const mergedLocationItems = compatibleMergedPlanItems.lists.planItems.byActivityLocation.flatMap(
+    (bucket) => bucket.items.filter((item) => item.typeId === nativeMaterial.typeId),
+  );
+  assert.ok(mergedPlanItem);
+  assert.equal(mergedPlanItem.requiredQuantity, nativeMaterial.required + 3);
+  assert.equal(
+    mergedPlanItem.availableQuantity,
+    nativeMaterial.availableNow + nativeMaterial.availableAfterHauling + 3,
+  );
+  assert.equal(mergedLocationItems.length, 1);
+
+  const compatibleWithPhysicalHaul = toCompatiblePlanResponse(
+    request,
+    context,
+    {
+      ...native,
+      lists: {
+        ...native.lists,
+        planItems: [nativeMaterial],
+        haulingTasks: [
+          {
+            transferId: "material-haul",
+            lotId: "material-lot",
+            typeId: nativeMaterial.typeId,
+            typeName: nativeMaterial.typeName,
+            quantity: 9,
+            unitVolume: nativeMaterial.unitVolume,
+            fromLocationId: nativeMaterial.locationId + 1,
+            toLocationId: nativeMaterial.locationId,
+            purpose: "industry-input",
+          },
+        ],
+      },
+    },
+  );
+  assert.equal(
+    compatibleWithPhysicalHaul.lists.planItems.all.find(
+      (item) => item.typeId === nativeMaterial.typeId,
+    )?.haulingQuantity,
+    9,
   );
 });

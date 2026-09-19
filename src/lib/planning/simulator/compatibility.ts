@@ -89,15 +89,78 @@ function planItem(balance: SimulationMaterialBalance): ResponsePlanItem {
     requiredQuantity: balance.required,
     availableQuantity: physicalSupply,
     surplusQuantity: balance.surplus,
-    haulingQuantity: balance.availableAfterHauling,
+    haulingQuantity: 0,
   };
 }
 
+/** Creates a lookup for physical transfers entering each activity location. */
+function haulingQuantityByTypeAndDestination(
+  tasks: ReadonlyArray<SimulationResultV1["lists"]["haulingTasks"][number]>,
+): ReadonlyMap<string, number> {
+  const quantities = new Map<string, number>();
+  for (const task of tasks) {
+    const key = `${task.toLocationId}:${task.typeId}`;
+    quantities.set(key, (quantities.get(key) ?? 0) + task.quantity);
+  }
+  return quantities;
+}
+
+/** Combines legacy material rows whose native stockpile identity is not representable. */
+function mergePlanItem(left: ResponsePlanItem, right: ResponsePlanItem): ResponsePlanItem {
+  return {
+    ...left,
+    neededQuantity: left.neededQuantity + right.neededQuantity,
+    inBuildQuantity: (left.inBuildQuantity ?? 0) + (right.inBuildQuantity ?? 0),
+    demandSources: [...(left.demandSources ?? []), ...(right.demandSources ?? [])],
+    requiredQuantity: left.requiredQuantity + right.requiredQuantity,
+    availableQuantity: left.availableQuantity + right.availableQuantity,
+    surplusQuantity: left.surplusQuantity + right.surplusQuantity,
+    haulingQuantity: left.haulingQuantity + right.haulingQuantity,
+  };
+}
+
+/** Merges Plan rows by type for the aggregate legacy Plan view. */
+function mergePlanItems(items: readonly ResponsePlanItem[]): ResponsePlanItem[] {
+  const mergedByTypeId = new Map<number, ResponsePlanItem>();
+  for (const item of items) {
+    const existing = mergedByTypeId.get(item.typeId);
+    mergedByTypeId.set(item.typeId, existing ? mergePlanItem(existing, item) : item);
+  }
+  return [...mergedByTypeId.values()];
+}
+
+/** Merges Plan rows by type and activity location for the location-specific legacy view. */
+function mergePlanItemEntriesByLocation(
+  entries: ReadonlyArray<{ item: ResponsePlanItem; locationId: number }>,
+): Array<{ item: ResponsePlanItem; locationId: number }> {
+  const mergedByTypeAndLocation = new Map<string, { item: ResponsePlanItem; locationId: number }>();
+  for (const entry of entries) {
+    const key = `${entry.locationId}:${entry.item.typeId}`;
+    const existing = mergedByTypeAndLocation.get(key);
+    mergedByTypeAndLocation.set(
+      key,
+      existing ? { ...existing, item: mergePlanItem(existing.item, entry.item) } : entry,
+    );
+  }
+  return [...mergedByTypeAndLocation.values()];
+}
+
+/** Applies physical-transfer quantities after rows sharing an activity location are merged. */
+function applyPlanItemHaulingQuantities(
+  entries: ReadonlyArray<{ item: ResponsePlanItem; locationId: number }>,
+  quantities: ReadonlyMap<string, number>,
+): Array<{ item: ResponsePlanItem; locationId: number }> {
+  return entries.map((entry) => ({
+    ...entry,
+    item: {
+      ...entry.item,
+      haulingQuantity: quantities.get(`${entry.locationId}:${entry.item.typeId}`) ?? 0,
+    },
+  }));
+}
+
 /** Computes the legacy status once from one horizon's complete-kit reservation. */
-function jobInput(
-  input: SimulationJobInput,
-  availableQuantity = input.availableAfterHauling,
-): PlanJobInput {
+function jobInput(input: SimulationJobInput, availableQuantity = input.availableNow): PlanJobInput {
   const completionPercent =
     input.requiredQuantity === 0
       ? 100
@@ -159,10 +222,79 @@ function manufacturingResponse(
     name: job.productName,
     countNeeded: job.requiredRuns,
     inputs: jobInputs(context, request, job),
-    runsAvailable: job.readyAfterHaulingRuns,
+    runsAvailable: job.readyNowRuns,
     totalTime: job.durationPerRunSeconds * job.requiredRuns,
     locationId: job.locationId,
   };
+}
+
+/** Combines input quantities while preserving the conservative readiness status. */
+function mergeJobInput(left: PlanJobInput, right: PlanJobInput): PlanJobInput {
+  const requiredQuantity = left.requiredQuantity + right.requiredQuantity;
+  const availableQuantity = left.availableQuantity + right.availableQuantity;
+  const completionPercent =
+    requiredQuantity === 0 ? 100 : Math.min(100, (availableQuantity / requiredQuantity) * 100);
+  return {
+    ...left,
+    availableQuantity,
+    inBuildQuantity: (left.inBuildQuantity ?? 0) + (right.inBuildQuantity ?? 0),
+    requiredQuantity,
+    completionPercent,
+    status: completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked",
+  };
+}
+
+/** Merges same-product allocations that the legacy planner cannot identify separately. */
+function mergeIndustryResponses<
+  T extends ManufacturingResponse & {
+    locationId: number;
+  },
+>(jobs: readonly T[]): T[] {
+  const mergedByKey = new Map<string, T>();
+  for (const job of jobs) {
+    const key = `${job.locationId}:${job.typeId}`;
+    const existing = mergedByKey.get(key);
+    if (!existing) {
+      mergedByKey.set(key, job);
+      continue;
+    }
+    const materialsByTypeId = new Map(
+      existing.inputs.materials.map((input) => [input.typeId, input]),
+    );
+    for (const material of job.inputs.materials) {
+      const existingMaterial = materialsByTypeId.get(material.typeId);
+      materialsByTypeId.set(
+        material.typeId,
+        existingMaterial ? mergeJobInput(existingMaterial, material) : material,
+      );
+    }
+    const blueprint = mergeJobInput(existing.inputs.blueprint, job.inputs.blueprint);
+    const completionPercent = Math.min(
+      blueprint.completionPercent,
+      ...[...materialsByTypeId.values()].map((material) => material.completionPercent),
+    );
+    mergedByKey.set(
+      key,
+      {
+        ...existing,
+        countNeeded: existing.countNeeded + job.countNeeded,
+        runsAvailable: existing.runsAvailable + job.runsAvailable,
+        totalTime: existing.totalTime + job.totalTime,
+        inputs: {
+          blueprint,
+          materials: [...materialsByTypeId.values()].sort(
+            (left, right) => left.typeId - right.typeId,
+          ),
+          bpoCount: Math.max(existing.inputs.bpoCount, job.inputs.bpoCount),
+          bpcRuns: existing.inputs.bpcRuns + job.inputs.bpcRuns,
+          completionPercent,
+          status:
+            completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked",
+        },
+      },
+    );
+  }
+  return [...mergedByKey.values()];
 }
 
 /** Adapts a native simulator result for the unchanged ten-tab planner UI contract. */
@@ -175,7 +307,11 @@ export function toCompatiblePlanResponse(
     item: planItem(balance),
     locationId: balance.locationId,
   }));
-  const planItems = planItemEntries.map((entry) => entry.item);
+  const planItemsByActivityLocation = applyPlanItemHaulingQuantities(
+    mergePlanItemEntriesByLocation(planItemEntries),
+    haulingQuantityByTypeAndDestination(result.lists.haulingTasks),
+  );
+  const planItems = mergePlanItems(planItemsByActivityLocation.map((entry) => entry.item));
   const materialsToBuy = result.lists.materialsToBuy.map(
     (purchase): ResponseMaterialBuy & { assemblyLineGroup: string } => ({
       typeId: purchase.typeId,
@@ -202,11 +338,11 @@ export function toCompatiblePlanResponse(
       locationId: job.locationId,
     }),
   );
-  const manufacturingJobs = result.lists.manufacturingJobs.map((job) =>
-    manufacturingResponse(context, request, job),
+  const manufacturingJobs = mergeIndustryResponses(
+    result.lists.manufacturingJobs.map((job) => manufacturingResponse(context, request, job)),
   );
-  const reactionJobs = result.lists.reactionJobs.map((job) =>
-    manufacturingResponse(context, request, job),
+  const reactionJobs = mergeIndustryResponses(
+    result.lists.reactionJobs.map((job) => manufacturingResponse(context, request, job)),
   );
   const reprocessingJobs = result.lists.reprocessingJobs.map(
     (job): ReprocessingResponse & { locationId: number } => ({
@@ -254,12 +390,13 @@ export function toCompatiblePlanResponse(
       warnings: byLocation(warningRows, (warning) => warning.locationId),
       planItems: {
         all: planItems,
-        byActivityLocation: byLocation(planItemEntries, (entry) => entry.locationId).map(
-          (bucket) => ({
-            locationId: bucket.locationId,
-            items: bucket.items.map((entry) => entry.item),
-          }),
-        ),
+        byActivityLocation: byLocation(
+          planItemsByActivityLocation,
+          (entry) => entry.locationId,
+        ).map((bucket) => ({
+          locationId: bucket.locationId,
+          items: bucket.items.map((entry) => entry.item),
+        })),
       },
       materialsToBuy: AssemblyLineGroups.groupBy(materialsToBuy, (item) => item.assemblyLineGroup),
       bpcToCopy: byLocation(
