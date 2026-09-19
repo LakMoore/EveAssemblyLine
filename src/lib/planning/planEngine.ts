@@ -558,6 +558,7 @@ async function getFutureCompressedMaterialStock(
         name: types.get(typeId)?.name.en ?? `Type ${typeId}`,
         quantity,
         category: "item",
+        futureReprocessingOutput: true,
         rootLocationId: stockpile.locations.reprocessing,
         locationId: stockpile.locations.reprocessing,
       });
@@ -1415,6 +1416,7 @@ async function calculatePlanPass(
   ) {
     return (stockLotsByTypeId.get(typeId) ?? [])
       .filter((lot) => !lot.industryJobOutput)
+      .filter((lot) => !lot.sourceItem.futureReprocessingOutput)
       .filter((lot) => canUseLotForDestination(lot, destinationRootLocationId))
       .reduce((total, lot) => total + lot.quantity, 0);
   }
@@ -1460,6 +1462,7 @@ async function calculatePlanPass(
         (lot) =>
           lot.typeId === typeId
           && lot.quantity > 0
+          && !lot.sourceItem.futureReprocessingOutput
           && canUseLotForDestination(lot, locationId)
           && (!lot.industryJobOutput || lot.rootLocationId === locationId),
       )
@@ -1481,6 +1484,7 @@ async function calculatePlanPass(
           (lot) =>
             lot.typeId === material.typeId
             && lot.quantity > 0
+            && !lot.sourceItem.futureReprocessingOutput
             && canUseLotForDestination(lot, locationId)
             && (!lot.industryJobOutput || lot.rootLocationId === locationId),
         )
@@ -1608,7 +1612,9 @@ async function calculatePlanPass(
   const jobInputsByActivityAndBlueprint = new Map<string, PlanJobInputs>();
   const requiredSkillLevels = new Map<number, number>();
   const inventedBpcTypeIds = new Set<number>();
-  const producedParts = new Map(reprocessing?.producedMaterials ?? []);
+  // Reprocessing output reduces demand, but is not an asset until its source job is installed.
+  const reprocessingOutputsByTypeId = new Map(reprocessing?.producedMaterials ?? []);
+  const producedParts = new Map(reprocessingOutputsByTypeId);
   const sourceCountsByTypeId = new Map<number, Map<number, Map<PlanSourceIcon, number>>>();
   for (const stockItem of request.stock) {
     const locationId = getStockRootLocationId(stockItem);
@@ -1688,7 +1694,7 @@ async function calculatePlanPass(
     if (!initialBuildTypeIds.has(typeId)) continue;
     totalStock.set(typeId, (totalStock.get(typeId) ?? 0) + quantity);
   }
-  for (const [typeId, quantity] of reprocessing?.producedMaterials ?? []) {
+  for (const [typeId, quantity] of reprocessingOutputsByTypeId) {
     totalStock.set(typeId, (totalStock.get(typeId) ?? 0) + quantity);
   }
   const availableStockQuantitiesByLocationAndType = new Map<string, number>();
@@ -1713,7 +1719,7 @@ async function calculatePlanPass(
     ) continue;
     addAvailableStock(stockItem.typeId, stockItem.quantity, getStockRootLocationId(stockItem));
   }
-  for (const [typeId, quantity] of reprocessing?.producedMaterials ?? []) {
+  for (const [typeId, quantity] of reprocessingOutputsByTypeId) {
     addAvailableStock(typeId, quantity, reprocessingLocationId);
   }
   const allBlueprintStockItems = request.stock.filter((item) => item.category === "blueprint");
@@ -1834,6 +1840,7 @@ async function calculatePlanPass(
     availableQuantity: number,
     requiredQuantity: number,
     inBuildQuantity = 0,
+    reprocessingQuantity = 0,
   ): PlanJobInput {
     return {
       kind,
@@ -1841,6 +1848,7 @@ async function calculatePlanPass(
       name,
       availableQuantity,
       ...(inBuildQuantity > 0 ? { inBuildQuantity } : {}),
+      ...(reprocessingQuantity > 0 ? { reprocessingQuantity } : {}),
       requiredQuantity,
       completionPercent:
         requiredQuantity <= 0
@@ -1888,6 +1896,7 @@ async function calculatePlanPass(
         availableQuantity,
         adjustedRequiredQuantity,
         inBuildQuantity,
+        Math.min(adjustedRequiredQuantity, reprocessingOutputsByTypeId.get(material.typeID) ?? 0),
       );
     });
     const bpoCount =
@@ -1938,6 +1947,10 @@ async function calculatePlanPass(
           previous?.availableQuantity ?? material.availableQuantity,
           (previous?.requiredQuantity ?? 0) + material.requiredQuantity,
           Math.max(previous?.inBuildQuantity ?? 0, material.inBuildQuantity ?? 0),
+          Math.min(
+            (previous?.requiredQuantity ?? 0) + material.requiredQuantity,
+            Math.max(previous?.reprocessingQuantity ?? 0, material.reprocessingQuantity ?? 0),
+          ),
         ),
       );
     }

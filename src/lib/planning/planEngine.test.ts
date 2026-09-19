@@ -221,6 +221,48 @@ void test("reports the explicit unresolved asset count", async () => {
   assert.equal(result.metadata.unresolvedAssetCount, 3);
 });
 
+void test("keeps reprocessing output out of manufacturing input availability", async () => {
+  const result = await calculatePlanCalculation(
+    request(
+      0,
+      [],
+      {
+        items: [
+          {
+            typeId: rifterTypeId,
+            name: "Rifter",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+          {
+            typeId: compressedVeldsparTypeId,
+            name: "Compressed Veldspar",
+            quantity: 100,
+            me: 0,
+            te: 0,
+            fromCompression: true,
+          },
+        ],
+      },
+    ),
+  );
+  const rifterJob = result.lists.manufacturingJobs.find(
+    (job) => job.typeId === rifterBlueprintTypeId,
+  );
+  const tritaniumInput = rifterJob?.inputs.materials.find(
+    (input) => input.typeId === tritaniumTypeId,
+  );
+
+  assert(rifterJob);
+  assert(tritaniumInput);
+  assert.equal(tritaniumInput.availableQuantity, 0);
+  assert.equal((tritaniumInput.reprocessingQuantity ?? 0) > 0, true);
+  assert.equal(tritaniumInput.status, "blocked");
+  assert.equal(rifterJob.runsAvailable, 0);
+});
+
 void test("returns aggregate material purchases in the plan response", async () => {
   const planRequest = request(
     33_750,

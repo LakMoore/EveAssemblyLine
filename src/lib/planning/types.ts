@@ -148,6 +148,7 @@ export interface PlanStockItem extends StockItemBase {
   sourceSystemName?: string;
   category?: "blueprint" | "reactionformula" | "item";
   inBuildQuantity?: number;
+  futureReprocessingOutput?: boolean;
   source?: "marketOrder";
 }
 
@@ -251,6 +252,7 @@ export interface PlanJobInput {
   name: string;
   availableQuantity: number;
   inBuildQuantity?: number;
+  reprocessingQuantity?: number;
   requiredQuantity: number;
   completionPercent: number;
   status: PlanJobInputStatus;

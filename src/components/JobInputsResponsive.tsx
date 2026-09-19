@@ -11,9 +11,10 @@ import ResultRow from "@/components/ResultRow";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import styles from "@/app/page.module.css";
-import { ChartLine, ClipboardList, Factory } from "lucide-react";
+import { ChartLine, ClipboardList, Factory, Minimize2 } from "lucide-react";
 import CopyableText from "./CopyableText";
 
 function statusLabel(status: PlanJobInputStatus) {
@@ -26,6 +27,24 @@ function statusClassName(status: PlanJobInputStatus) {
     : status === "partial"
       ? "border-warning/40 text-warning"
       : "border-destructive/40 text-destructive";
+}
+
+/** Returns material available for installation before pending reprocessing completes. */
+function currentInputAvailability(input: PlanJobInput) {
+  return Math.max(0, input.availableQuantity - (input.reprocessingQuantity ?? 0));
+}
+
+/** Calculates the currently installable completion percentage for one job input. */
+function currentInputCompletionPercent(input: PlanJobInput) {
+  return input.requiredQuantity <= 0
+    ? 100
+    : Math.min(100, Math.round((currentInputAvailability(input) / input.requiredQuantity) * 100));
+}
+
+/** Derives the current availability status for one job input. */
+function currentInputStatus(input: PlanJobInput): PlanJobInputStatus {
+  const completionPercent = currentInputCompletionPercent(input);
+  return completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked";
 }
 
 function SourceIcon({
@@ -54,8 +73,38 @@ function SourceIcon({
 /** Calculates the readiness percentage shown for an industry's inputs trigger. */
 export function getJobInputsCompletionPercent(inputs: PlanJobInputs): number {
   return inputs.materials.length
-    ? Math.min(...inputs.materials.map((input) => input.completionPercent))
+    ? Math.min(...inputs.materials.map(currentInputCompletionPercent))
     : 100;
+}
+
+/** Calculates runs installable now, excluding material that is pending reprocessing. */
+export function getCurrentInstallableRuns(inputs: PlanJobInputs, totalRuns: number) {
+  if (totalRuns <= 0) return 0;
+  const requiredInputs = [inputs.blueprint, ...inputs.materials].filter(
+    (input) => input.requiredQuantity > 0,
+  );
+  if (requiredInputs.length === 0) return totalRuns;
+  return Math.min(
+    totalRuns,
+    ...requiredInputs.map((input) =>
+      Math.floor(
+        (
+          (input.kind === "material" ? currentInputAvailability(input) : input.availableQuantity)
+          * totalRuns
+        )
+          / input.requiredQuantity,
+      ),
+    ),
+  );
+}
+
+/** Calculates the installable run count constrained by both inputs and the plan result. */
+export function getDisplayedInstallableRuns(
+  inputs: PlanJobInputs,
+  installableRuns: number,
+  totalRuns: number,
+) {
+  return Math.min(installableRuns, getCurrentInstallableRuns(inputs, totalRuns));
 }
 
 function InputRow({
@@ -69,7 +118,10 @@ function InputRow({
   jobs: ClientJobsResponse | null;
   marketBuyOrderQuantity: number;
 }) {
-  const isIncomplete = input.completionPercent < 100;
+  const availableQuantity = currentInputAvailability(input);
+  const completionPercent = currentInputCompletionPercent(input);
+  const status = currentInputStatus(input);
+  const isIncomplete = completionPercent < 100;
   const industrySummary = isIncomplete
     ? getIndustryJobSummary(input.typeId, jobs, locationId)
     : null;
@@ -89,7 +141,7 @@ function InputRow({
       name={input.name}
       typeId={input.typeId}
       imageSize={28}
-      subline={`•\t${input.availableQuantity.toLocaleString()} / ${input.requiredQuantity.toLocaleString()} available`}
+      subline={`•\t${availableQuantity.toLocaleString()} / ${input.requiredQuantity.toLocaleString()} available`}
       linkPath="planner"
       linkIcon={ClipboardList}
       linkSearchParams={{ tab: "Plan" }}
@@ -99,6 +151,26 @@ function InputRow({
       identityClassName="[&>span]:min-w-0"
     >
       <div className="flex shrink-0 items-center gap-2 self-center">
+        {input.reprocessingQuantity && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  aria-label={`${input.reprocessingQuantity.toLocaleString()} available after reprocessing`}
+                  className="text-muted-foreground"
+                  role="img"
+                  tabIndex={0}
+                >
+                  <Minimize2 aria-hidden="true" />
+                </span>
+              }
+            />
+            <TooltipContent>
+              {input.reprocessingQuantity.toLocaleString()} units can come from reprocessing to
+              allow more job installs
+            </TooltipContent>
+          </Tooltip>
+        )}
         {isIncomplete && (industryQuantity > 0 || readyIndustryQuantity > 0) && (
           <SourceIcon source="industry" label={industryLabel} Icon={Factory} />
         )}
@@ -109,16 +181,14 @@ function InputRow({
             Icon={ChartLine}
           />
         )}
-        <span className={cn("font-mono", statusClassName(input.status))}>
-          {input.completionPercent}%
-        </span>
+        <span className={cn("font-mono", statusClassName(status))}>{completionPercent}%</span>
         <span
-          aria-label={`${input.name}: ${statusLabel(input.status)}`}
+          aria-label={`${input.name}: ${statusLabel(status)}`}
           className={cn(
             "size-1.5 rounded-full",
-            input.status === "ready" && "bg-success",
-            input.status === "partial" && "bg-warning",
-            input.status === "blocked" && "bg-destructive",
+            status === "ready" && "bg-success",
+            status === "partial" && "bg-warning",
+            status === "blocked" && "bg-destructive",
           )}
         />
       </div>
@@ -149,6 +219,7 @@ export default function JobInputsResponsive({
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
 }) {
   const completionPercent = getJobInputsCompletionPercent(inputs);
+  const currentInstallableRuns = getDisplayedInstallableRuns(inputs, installableRuns, totalRuns);
   const status: PlanJobInputStatus =
     completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked";
   return (
@@ -186,8 +257,8 @@ export default function JobInputsResponsive({
               <div className="flex flex-col items-end">
                 <CopyableText
                   className="font-bold"
-                  textToRender={installableRuns.toLocaleString()}
-                  textToCopy={installableRuns.toString()}
+                  textToRender={currentInstallableRuns.toLocaleString()}
+                  textToCopy={currentInstallableRuns.toString()}
                 />
                 <small className="text-[9px] text-muted-foreground uppercase">Installable</small>
               </div>

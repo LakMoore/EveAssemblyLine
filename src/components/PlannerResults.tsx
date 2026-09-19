@@ -38,6 +38,7 @@ import { getDisplayedActivityQuantity } from "@/lib/planning/activityQuantities"
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import JobInputsResponsive, {
+  getDisplayedInstallableRuns,
   getJobInputsCompletionPercent,
 } from "@/components/JobInputsResponsive";
 import {
@@ -406,6 +407,10 @@ function getReactionScheduleRuns(schedules: ReactionSchedule[] | undefined) {
   return Math.max(...(schedules ?? []).map((schedule) => schedule.runs), 0);
 }
 
+function getReactionInstallableRuns(job: ResponseReactionJob) {
+  return getDisplayedInstallableRuns(job.inputs, job.runsAvailable, job.countNeeded);
+}
+
 type ActivitySlot = "Manufacturing" | "Reactions";
 type ActivitySlotCharacter = {
   characterId: number;
@@ -487,7 +492,7 @@ function buildReactionSchedule(
           && getStockLocationId(item) === job.locationId,
       )
       .reduce((total, item) => total + item.quantity, 0);
-    const runs = showTotalRunCounts ? job.countNeeded : job.runsAvailable;
+    const runs = showTotalRunCounts ? job.countNeeded : getReactionInstallableRuns(job);
     return { job, blueprintCount, runs, maxInstalls: Math.min(blueprintCount, Math.max(0, runs)) };
   });
   const enabledRows = rows.filter((row) => enabledJobKeys.has(reactionJobKey(row.job)));
@@ -1330,7 +1335,9 @@ function PlanList({
         }
         return {
           coverage: {
-            installable: result.coverage.installable + Math.min(job.runsAvailable, coveredRuns),
+            installable:
+              result.coverage.installable
+              + Math.min(getReactionInstallableRuns(job), coveredRuns),
             total: result.coverage.total + coveredRuns,
           },
           remainingSlots,
@@ -1342,7 +1349,7 @@ function PlanList({
       },
     ).coverage;
   const totalInstallableReactionRuns = reactionJobs.reduce(
-    (total, job) => total + job.runsAvailable,
+    (total, job) => total + getReactionInstallableRuns(job),
     0,
   );
   const totalReactionRuns = reactionJobs.reduce((total, job) => total + job.countNeeded, 0);
@@ -1886,7 +1893,9 @@ function PlanList({
                     const isSplitReactionRow = rowSchedules.length > 1;
                     const totalNeeded =
                       activeTab === "React" && "countNeeded" in entry && "runsAvailable" in entry
-                        ? getDisplayedActivityQuantity(entry, showTotalRunCounts)
+                        ? showTotalRunCounts
+                          ? entry.countNeeded
+                          : getReactionInstallableRuns(entry as ResponseReactionJob)
                         : null;
                     const scheduledRuns = rowSchedules.reduce(
                       (total, schedule) => total + schedule.totalRuns,
