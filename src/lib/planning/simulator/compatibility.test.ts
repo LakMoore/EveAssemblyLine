@@ -68,5 +68,36 @@ void test("maps the native result into every legacy planner list", async () => {
     compatibleMaterial.availableQuantity,
     nativeMaterial.availableNow + nativeMaterial.availableAfterHauling,
   );
-  assert.equal(compatibleMaterial.neededQuantity, nativeMaterial.unsatisfied);
+  assert.equal(
+    compatibleMaterial.neededQuantity,
+    nativeMaterial.unsatisfied
+      + nativeMaterial.availableFromProduction
+      + nativeMaterial.availableFromCopying
+      + nativeMaterial.availableFromInvention
+      + nativeMaterial.availableFromReprocessing,
+  );
+
+  const balanceWithAcquisitionSources = {
+    ...nativeMaterial,
+    unsatisfied: 5,
+    availableFromProduction: 7,
+    availableFromCopying: 11,
+    availableFromInvention: 13,
+    availableFromReprocessing: 17,
+  };
+  const compatibleWithAcquisitionSources = toCompatiblePlanResponse(
+    request,
+    context,
+    {
+      ...native,
+      lists: {
+        ...native.lists,
+        planItems: [balanceWithAcquisitionSources],
+      },
+    },
+  );
+  assert.equal(
+    compatibleWithAcquisitionSources.lists.planItems.all[0].neededQuantity,
+    5 + 7 + 11 + 13 + 17,
+  );
 });

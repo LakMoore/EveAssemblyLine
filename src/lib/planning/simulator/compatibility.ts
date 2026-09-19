@@ -83,7 +83,7 @@ function planItem(balance: SimulationMaterialBalance): ResponsePlanItem {
     typeId: balance.typeId,
     typeName: balance.typeName,
     unitVolume: balance.unitVolume,
-    neededQuantity: balance.unsatisfied,
+    neededQuantity: balance.unsatisfied + upstreamSupply,
     inBuildQuantity: upstreamSupply,
     demandSources: demandSources(balance),
     requiredQuantity: balance.required,
