@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { usePathname } from "next/navigation";
 import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import { useState } from "react";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
@@ -41,12 +42,15 @@ export default function TypeIdentity({
   className,
 }: TypeIdentityProps) {
   const [useIconFallback, setUseIconFallback] = useState(false);
+  const pathname = usePathname();
   const blueprintVariation = blueprintType === "bpo" ? "bp" : "bpc";
   const activeVariation = useIconFallback ? "icon" : blueprintType ? blueprintVariation : variation;
+  const resolvedLinkPath =
+    linkPath === "planner" && pathname.startsWith("planner") ? linkPath : pathname.slice(1);
   const linkHref =
     linkPath === null
       ? null
-      : `/${linkPath}?${new URLSearchParams({
+      : `/${resolvedLinkPath}?${new URLSearchParams({
           ...linkSearchParams,
           typeId: String(typeId),
         }).toString()}${linkHash ? `#${encodeURIComponent(linkHash)}` : ""}`;

@@ -1336,8 +1336,7 @@ function PlanList({
         return {
           coverage: {
             installable:
-              result.coverage.installable
-              + Math.min(getReactionInstallableRuns(job), coveredRuns),
+              result.coverage.installable + Math.min(getReactionInstallableRuns(job), coveredRuns),
             total: result.coverage.total + coveredRuns,
           },
           remainingSlots,
