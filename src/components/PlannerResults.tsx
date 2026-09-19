@@ -1976,9 +1976,7 @@ function PlanList({
                           ? "bp"
                           : isReactionFormulaName
                             ? "bpc"
-                            : activeTab === "Manufacture"
-                                || activeTab === "React"
-                                || isPlanBpc
+                            : isPlanBpc
                                 || isBpcPurchase
                                 || isPlanReaction
                                 || activeTab === "Copy"
