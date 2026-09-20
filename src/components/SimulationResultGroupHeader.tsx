@@ -8,37 +8,36 @@ import {
 import { Button } from "@/components/ui/button";
 import { CollapsibleTrigger } from "@/components/ui/collapsible";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
-import styles from "@/app/page.module.css";
 import { ChevronsDownUp, ChevronsUpDown, Copy as CopyIcon } from "lucide-react";
 
-type PlannerGroupAvatar = {
+export type SimulationGroupAvatar = {
   typeId: number;
   name: string;
   imageVariation: "icon" | "bpc" | "bp";
 };
 
-type PlannerResultGroupHeaderProps = {
+type SimulationResultGroupHeaderProps = {
   label: string;
   isOpen: boolean;
-  avatarRows: PlannerGroupAvatar[];
+  avatarRows: SimulationGroupAvatar[];
   remainingCount: number;
   onCopyGroup?: () => void;
   copyLabel?: string;
 };
 
-/** Renders a collapsible planner group label, previews, and optional group action. */
-export default function PlannerResultGroupHeader({
+/** Renders a collapsible simulation group label, previews, and optional group action. */
+export default function SimulationResultGroupHeader({
   label,
   isOpen,
   avatarRows,
   remainingCount,
   onCopyGroup,
   copyLabel,
-}: PlannerResultGroupHeaderProps) {
+}: SimulationResultGroupHeaderProps) {
   return (
     <h3 className="flex flex-1 flex-row items-center justify-between gap-4 py-4 text-foreground uppercase">
       <span className="flex min-w-0 shrink grow truncate">{label}</span>
-      <AvatarGroup className="ml-auto hidden group-data-closed/plan-group:flex">
+      <AvatarGroup className="ml-auto hidden group-data-closed/simulation-group:flex">
         {avatarRows.map((avatar, index) => (
           <Avatar key={`${avatar.typeId}-${index}`} size="lg">
             <AvatarImage

@@ -109,9 +109,9 @@ void test("defers available Tritanium when another job prerequisite blocks insta
   );
   assert.ok(tritaniumDemand);
   assert.equal(tritaniumDemand.source.requiredNow, 0);
+  assert.equal(tritaniumDemand.source.reserved, tritaniumDemand.source.plannedQuantity);
   assert.equal(
-    tritaniumDemand.source.reserved,
-    tritaniumDemand.source.plannedQuantity,
+    result.unmetDemands.some((demand) => demand.account.typeId === 34),
+    false,
   );
-  assert.equal(result.unmetDemands.some((demand) => demand.account.typeId === 34), false);
 });

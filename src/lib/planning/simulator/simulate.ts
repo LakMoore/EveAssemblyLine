@@ -154,8 +154,8 @@ function presentationItems(
         return (
           connected
           && (
-                balance.requiredNow > 0
-                || balance.reserved > 0
+            balance.requiredNow > 0
+            || balance.reserved > 0
             || balance.availableNow > 0
             || balance.availableFromHauling > 0
             || balance.availableFromProduction > 0
