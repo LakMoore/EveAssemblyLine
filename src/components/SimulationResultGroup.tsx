@@ -1,16 +1,17 @@
 "use client";
 
 import type { ReactNode } from "react";
-import SimulatorResultGroupHeader, {
-  type SimulatorGroupAvatar,
-} from "@/components/SimulatorResultGroupHeader";
+import SimulationResultGroupHeader, {
+  type SimulationGroupAvatar,
+} from "@/components/SimulationResultGroupHeader";
+import { Card } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 
-type SimulatorResultGroupProps = {
+type SimulationResultGroupProps = {
   groupKey: string;
   label: ReactNode;
   isOpen: boolean;
-  avatarRows: SimulatorGroupAvatar[];
+  avatarRows: SimulationGroupAvatar[];
   remainingCount: number;
   onOpenChange: (open: boolean) => void;
   onCopyGroup?: () => void;
@@ -19,7 +20,7 @@ type SimulatorResultGroupProps = {
 };
 
 /** Renders a collapsible named result group with optional type previews and copy action. */
-export default function SimulatorResultGroup({
+export default function SimulationResultGroup({
   groupKey,
   label,
   isOpen,
@@ -29,15 +30,15 @@ export default function SimulatorResultGroup({
   onCopyGroup,
   copyLabel,
   children,
-}: SimulatorResultGroupProps) {
-  return (
+}: SimulationResultGroupProps) {
+  const group = (
     <Collapsible
       className="group/simulation-group"
       data-result-group={groupKey}
       open={isOpen}
       onOpenChange={onOpenChange}
     >
-      <SimulatorResultGroupHeader
+      <SimulationResultGroupHeader
         label={label}
         isOpen={isOpen}
         avatarRows={avatarRows}
@@ -45,7 +46,9 @@ export default function SimulatorResultGroup({
         onCopyGroup={onCopyGroup}
         copyLabel={copyLabel}
       />
-      <CollapsibleContent className="border-l-2 border-border pl-2">{children}</CollapsibleContent>
+      <CollapsibleContent className="px-2">{children}</CollapsibleContent>
     </Collapsible>
   );
+
+  return <Card className="p-0">{group}</Card>;
 }

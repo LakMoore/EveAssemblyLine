@@ -71,12 +71,11 @@ import {
   type PlannerSettings,
 } from "@/lib/planning/preferences";
 import type { SdeLanguage } from "@/lib/reference/languages";
-import { formatLocationName } from "@/lib/reference/locationName";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import { useAppLanguage } from "../AppShell";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import PlannerResults from "@/components/PlannerResults";
-import SimulatorResults from "@/components/SimulatorResults";
+import SimulatorResults from "@/components/SimulationResults";
 import CalculateButton from "@/components/CalculateButton";
 import TypeSearch from "@/components/TypeSearch";
 import { toast } from "@/components/ui/toast";
@@ -92,7 +91,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";

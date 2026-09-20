@@ -17,7 +17,7 @@ import {
   TestTubes,
 } from "lucide-react";
 import SimpleResultRow from "@/components/SimpleResultRow";
-import SimulatorResultGroup from "@/components/SimulatorResultGroup";
+import SimulationResultGroup from "@/components/SimulationResultGroup";
 import SimulatorResultsTab from "@/components/SimulatorResultsTab";
 import SwitchedResultRow from "@/components/SwitchedResultRow";
 import CopyableText from "@/components/CopyableText";
@@ -36,7 +36,7 @@ import type {
   SimulationResultV1,
 } from "@/lib/planning/simulator/types";
 
-type SimulatorTab =
+type SimulationTab =
   | "warnings"
   | "plan"
   | "reprocess"
@@ -49,17 +49,17 @@ type SimulatorTab =
   | "buy"
   | "surplus";
 
-const tabs: Array<{ value: SimulatorTab; label: string; icon: LucideIcon }> = [
+const tabs: Array<{ value: SimulationTab; label: string; icon: LucideIcon }> = [
   { value: "warnings", label: "Warnings", icon: AlertTriangle },
   { value: "plan", label: "Plan", icon: ClipboardList },
+  { value: "haul", label: "Haul", icon: Truck },
+  { value: "buy", label: "Buy", icon: ShoppingCart },
   { value: "reprocess", label: "Reprocess", icon: Minimize2 },
   { value: "copy", label: "Copy", icon: TestTubes },
   { value: "invent", label: "Invent", icon: FlaskConical },
   { value: "react", label: "React", icon: Atom },
   { value: "manufacture", label: "Manufacture", icon: Factory },
   { value: "skills", label: "Skills", icon: Brain },
-  { value: "haul", label: "Haul", icon: Truck },
-  { value: "buy", label: "Buy", icon: ShoppingCart },
   { value: "surplus", label: "Surplus", icon: Boxes },
 ];
 
@@ -145,7 +145,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
   groupHeader,
   renderRow,
 }: {
-  tab: SimulatorTab;
+  tab: SimulationTab;
   items: readonly T[];
   locationNamesById: ReadonlyMap<number, string>;
   openGroups: Record<string, boolean>;
@@ -171,7 +171,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
         const groupKey = `${tab}:${locationId}`;
         const avatars = createGroupAvatars(groupItems, getAvatar);
         return (
-          <SimulatorResultGroup
+          <SimulationResultGroup
             groupKey={groupKey}
             key={groupKey}
             label={locationName(locationNamesById, locationId)}
@@ -186,7 +186,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
                 <div key={getRowKey(item)}>{renderRow(item)}</div>
               ))}
             </div>
-          </SimulatorResultGroup>
+          </SimulationResultGroup>
         );
       })}
     </div>
@@ -592,7 +592,7 @@ function SimulationHaulTab({
             }),
           );
           return (
-            <SimulatorResultGroup
+            <SimulationResultGroup
               groupKey={sourceKey}
               key={sourceKey}
               label={
@@ -623,7 +623,7 @@ function SimulationHaulTab({
                       }),
                     );
                     return (
-                      <SimulatorResultGroup
+                      <SimulationResultGroup
                         groupKey={destinationKey}
                         key={destinationKey}
                         label={
@@ -646,11 +646,11 @@ function SimulationHaulTab({
                             />
                           ))}
                         </div>
-                      </SimulatorResultGroup>
+                      </SimulationResultGroup>
                     );
                   })}
               </div>
-            </SimulatorResultGroup>
+            </SimulationResultGroup>
           );
         })}
       </div>
@@ -811,7 +811,7 @@ function SimulationWarningsTab({
           const label =
             locationId === undefined ? "Unlocated" : locationName(locationNamesById, locationId);
           return (
-            <SimulatorResultGroup
+            <SimulationResultGroup
               key={groupKey}
               groupKey={groupKey}
               label={label}
@@ -829,7 +829,7 @@ function SimulationWarningsTab({
                   </Alert>
                 ))}
               </div>
-            </SimulatorResultGroup>
+            </SimulationResultGroup>
           );
         })}
       </div>
@@ -851,7 +851,7 @@ export default function SimulatorResults({
   stockpileNamesById: ReadonlyMap<string, string>;
   onOpenPlan: () => void;
 }) {
-  const [activeTab, setActiveTab] = useState<SimulatorTab>("warnings");
+  const [activeTab, setActiveTab] = useState<SimulationTab>("warnings");
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [includedRows, setIncludedRows] = useState<Record<string, boolean>>({});
@@ -910,7 +910,7 @@ export default function SimulatorResults({
           </span>
         </div>
       </div>
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as SimulatorTab)}>
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as SimulationTab)}>
         <TabsList className="w-full max-w-full justify-start overflow-x-auto" variant="line">
           {tabs.map(({ value, label, icon: Icon }) => (
             <TabsTrigger key={value} value={value}>
@@ -945,7 +945,7 @@ function SimulationTabContent({
   openGroups,
   onOpenGroupChange,
 }: {
-  activeTab: SimulatorTab;
+  activeTab: SimulationTab;
   result: SimulationResultV1;
   locationNamesById: ReadonlyMap<number, string>;
   stockpileNamesById: ReadonlyMap<string, string>;

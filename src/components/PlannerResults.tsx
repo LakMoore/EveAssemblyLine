@@ -52,7 +52,7 @@ import PlannerHaulTab, {
   type PlannerHaulGroup,
 } from "@/components/PlannerHaulTab";
 import PlannerListToolbar, { PlannerCopyHeader } from "@/components/PlannerListToolbar";
-import SimulatorResultGroupHeader from "@/components/SimulatorResultGroupHeader";
+import SimulationResultGroupHeader from "@/components/SimulationResultGroupHeader";
 import ResultRow from "@/components/ResultRow";
 import PlannerSkillsTab, { type PlannerSkillCharacter } from "@/components/PlannerSkillsTab";
 import { toast } from "@/components/ui/toast";
@@ -956,7 +956,7 @@ function PlannerWarningGroup({
     }));
   return (
     <Collapsible className="group/simulation-group" open={isOpen} onOpenChange={setIsOpen}>
-      <SimulatorResultGroupHeader
+      <SimulationResultGroupHeader
         label={locationName}
         isOpen={isOpen}
         avatarRows={avatarRows}
@@ -1802,7 +1802,7 @@ function PlanList({
                 }
               >
                 {(locationGroupedTab || categoryGroupedTab) && (
-                  <SimulatorResultGroupHeader
+                  <SimulationResultGroupHeader
                     label={
                       categoryGroupedTab
                         ? String(locationId)

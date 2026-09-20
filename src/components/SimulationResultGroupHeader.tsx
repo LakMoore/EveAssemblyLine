@@ -11,7 +11,7 @@ import { CollapsibleTrigger } from "@/components/ui/collapsible";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import { ChevronsDownUp, ChevronsUpDown, Copy as CopyIcon } from "lucide-react";
 
-export type SimulatorGroupAvatar = {
+export type SimulationGroupAvatar = {
   typeId: number;
   name: string;
   imageVariation: "icon" | "bpc" | "bp";
@@ -20,14 +20,14 @@ export type SimulatorGroupAvatar = {
 type SimulationResultGroupHeaderProps = {
   label: ReactNode;
   isOpen: boolean;
-  avatarRows: SimulatorGroupAvatar[];
+  avatarRows: SimulationGroupAvatar[];
   remainingCount: number;
   onCopyGroup?: () => void;
   copyLabel?: string;
 };
 
 /** Renders a collapsible simulation group label, previews, and optional group action. */
-export default function SimulatorResultGroupHeader({
+export default function SimulationResultGroupHeader({
   label,
   isOpen,
   avatarRows,
@@ -36,12 +36,12 @@ export default function SimulatorResultGroupHeader({
   copyLabel,
 }: SimulationResultGroupHeaderProps) {
   return (
-    <div className="border-b-2 border-border py-4 text-foreground uppercase">
-      <div className="flex flex-1 flex-row items-center justify-between gap-4 pl-2">
-        <h3 className="flex min-w-0 shrink grow truncate">{label}</h3>
+    <div className="py-4 text-foreground uppercase">
+      <div className="flex flex-1 flex-row items-center justify-between gap-4 px-2">
+        <h3 className="flex min-w-0 shrink grow truncate pl-2 text-lg">{label}</h3>
         <AvatarGroup className="ml-auto hidden group-data-closed/simulation-group:flex">
           {avatarRows.map((avatar, index) => (
-            <Avatar key={`${avatar.typeId}-${index}`} size="sm" className="md:size-10">
+            <Avatar key={`${avatar.typeId}-${index}`} className="size-6 md:size-10">
               <AvatarImage
                 className="bg-muted"
                 src={eveTypeImageUrl(avatar.typeId, avatar.imageVariation, 64)}
@@ -51,7 +51,7 @@ export default function SimulatorResultGroupHeader({
             </Avatar>
           ))}
           {remainingCount > 0 && (
-            <AvatarGroupCount className="size-6 md:size-10!">+{remainingCount}</AvatarGroupCount>
+            <AvatarGroupCount className="size-6 md:size-10">+{remainingCount}</AvatarGroupCount>
           )}
         </AvatarGroup>
         {onCopyGroup && copyLabel && (
@@ -67,7 +67,7 @@ export default function SimulatorResultGroupHeader({
         )}
         <CollapsibleTrigger
           type="button"
-          className="flex min-h-10 min-w-0 items-center justify-between gap-3 border-0 bg-transparent p-0 text-left font-[inherit] text-inherit uppercase"
+          className="flex min-h-10 min-w-0 items-center justify-between gap-3 border-0 bg-transparent p-0 text-left font-[inherit] text-inherit uppercase outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50"
           aria-label={`${isOpen ? "Collapse" : "Expand"} ${label}`}
         >
           {isOpen ? <ChevronsDownUp /> : <ChevronsUpDown />}
