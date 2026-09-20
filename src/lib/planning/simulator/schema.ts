@@ -79,6 +79,7 @@ const planStockItemSchema = z
     industryJobStatus: z
       .enum(["active", "cancelled", "delivered", "paused", "ready", "reverted"])
       .optional(),
+    industryJobEndDate: z.string().max(100).optional(),
     blueprintRunsAtInstall: z.number().int().min(-1).max(Number.MAX_SAFE_INTEGER).optional(),
     licensedRuns: nonNegativeInteger.optional(),
     blueprintType: z.enum(["bpo", "bpc"]).optional(),

@@ -23,7 +23,9 @@ export interface SimulationItemLot extends SimulationSourceLot {
   horizon: "now" | "after-upstream";
   source: "asset" | "market-order" | "industry-output";
   activity?: "manufacturing" | "reaction";
+  industryJobId?: number;
   industryJobStatus?: IndustryJobStatus;
+  industryJobEndDate?: string;
   eligibleForReprocessing: boolean;
 }
 
@@ -299,7 +301,9 @@ export function normalizeSimulatorInventory(
       source:
         item.source === "marketOrder" ? "market-order" : item.inBuild ? "industry-output" : "asset",
       activity: productionActivity(item.activityName),
+      industryJobId: item.jobId,
       industryJobStatus: item.industryJobStatus,
+      industryJobEndDate: item.industryJobEndDate,
       eligibleForReprocessing: eligibleTypeIds.has(item.typeId),
     });
   }

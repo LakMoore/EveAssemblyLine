@@ -348,6 +348,7 @@ function projectIndustryJobAssets(
         isPackaged: false,
         jobId: job.jobId,
         industryJobStatus: status === "paused" ? "paused" : "active",
+        industryJobEndDate: job.endDate,
         jobRuns: job.runs,
         licensedRuns: job.outputRunsPerCopy,
         category: metadata?.category ?? "item",

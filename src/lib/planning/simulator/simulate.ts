@@ -232,6 +232,38 @@ function presentationItems(
 
 type SimulationInputJob = SimulationIndustryJob | SimulationInventionJob | SimulationCopyJob;
 
+/** Adds simulated completion offsets to reservations for scheduled upstream jobs. */
+function annotateUpstreamReservations(
+  jobs: readonly SimulationIndustryJob[],
+  producingJobs: readonly SimulationIndustryJob[],
+  generatedAt: string,
+): SimulationIndustryJob[] {
+  const jobsById = new Map(producingJobs.map((job) => [job.jobId, job]));
+  const generatedAtMilliseconds = Date.parse(generatedAt);
+  return jobs.map((job) => ({
+    ...job,
+    inputs: job.inputs.map((input) => ({
+      ...input,
+      upstreamReservations: input.upstreamReservations?.map((reservation) => {
+        if (
+          typeof reservation.sourceJobId !== "string"
+          || reservation.sourceCompletionOffsetSeconds !== undefined
+        ) return reservation;
+        const producingJob = jobsById.get(reservation.sourceJobId);
+        const endOffsetSeconds = producingJob?.installs[0]?.endOffsetSeconds;
+        return endOffsetSeconds === undefined
+          ? reservation
+          : {
+              ...reservation,
+              sourceCompletionAt: new Date(
+                generatedAtMilliseconds + endOffsetSeconds * 1000,
+              ).toISOString(),
+            };
+      }),
+    })),
+  }));
+}
+
 /** Adds settled Buy-tab quantities to the job inputs that require them. */
 function annotatePurchaseQuantities<T extends SimulationInputJob>(
   jobs: readonly T[],
@@ -301,6 +333,7 @@ export async function simulateIndustry(
   request: SimulationRequestV1,
 ): Promise<SimulationResultWithDiagnostics> {
   const startedAt = performance.now();
+  const generatedAt = new Date().toISOString();
   const context = await loadSimulationContext();
   const graph = buildDependencyGraph(
     request.stockpiles.flatMap((stockpile) => stockpile.items.map((item) => item.typeId)),
@@ -321,12 +354,19 @@ export async function simulateIndustry(
     industry.copyJobs,
     request.simulation.characters,
   );
+  const producingJobs = [...schedules.manufacturingJobs, ...schedules.reactionJobs];
   const reprocessing = settleReprocessing(request, context, inventory, industry);
   const buying = settleBuying(request, context, industry, reprocessing.remainingDemands);
   const annotatedSchedules: SimulationScheduleResult = {
     ...schedules,
-    manufacturingJobs: annotatePurchaseQuantities(schedules.manufacturingJobs, buying.materials),
-    reactionJobs: annotatePurchaseQuantities(schedules.reactionJobs, buying.materials),
+    manufacturingJobs: annotatePurchaseQuantities(
+      annotateUpstreamReservations(schedules.manufacturingJobs, producingJobs, generatedAt),
+      buying.materials,
+    ),
+    reactionJobs: annotatePurchaseQuantities(
+      annotateUpstreamReservations(schedules.reactionJobs, producingJobs, generatedAt),
+      buying.materials,
+    ),
     inventionJobs: annotatePurchaseQuantities(schedules.inventionJobs, buying.materials),
     copyJobs: annotatePurchaseQuantities(schedules.copyJobs, buying.materials),
   };
@@ -371,7 +411,7 @@ export async function simulateIndustry(
     metadata: {
       simulatorVersion: 1,
       policyVersion: 1,
-      generatedAt: new Date().toISOString(),
+      generatedAt,
       sdeRevision: context.sdeRevision,
       normalizedInputHash: inputHash(request),
       elapsedMilliseconds: performance.now() - startedAt,

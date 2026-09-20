@@ -124,6 +124,7 @@ export interface StockItemBase {
   inUse?: boolean;
   jobId?: number;
   industryJobStatus?: IndustryJobStatus;
+  industryJobEndDate?: string;
   blueprintRunsAtInstall?: number;
   licensedRuns?: number;
   blueprintType?: BlueprintType;

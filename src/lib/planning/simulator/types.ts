@@ -112,6 +112,10 @@ export interface SimulationUpstreamReservation {
   activity: "manufacturing" | "reaction";
   quantity: number;
   state: SimulationUpstreamSupplyState;
+  sourceJobId?: number | string;
+  sourceOutputQuantity?: number;
+  sourceCompletionAt?: string;
+  sourceCompletionOffsetSeconds?: number;
 }
 
 /** Exact material requirement and availability for an industry allocation. */

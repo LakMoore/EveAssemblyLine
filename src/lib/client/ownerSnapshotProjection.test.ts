@@ -601,6 +601,7 @@ void test("projects job output and remaining blueprint runs without an asset rec
   assert.ok(blueprint);
   assert.equal(output.quantity, 30);
   assert.equal(output.inBuildQuantity, 30);
+  assert.equal(output.industryJobEndDate, "2026-01-02T00:00:00.000Z");
   assert.equal(blueprint.blueprintType, "bpc");
   assert.equal(blueprint.blueprintPrints?.[0]?.runs, 10);
   assert.equal(blueprint.inUse, true);

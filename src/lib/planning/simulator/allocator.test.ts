@@ -72,7 +72,9 @@ void test("distinguishes active production from planned future output", () => {
           horizon: "after-upstream",
           source: "industry-output",
           activity: "manufacturing",
+          industryJobId: 123,
           industryJobStatus: "active",
+          industryJobEndDate: "2026-01-01T01:00:00.000Z",
         },
         {
           ...inventory.itemLots[0],
@@ -102,9 +104,54 @@ void test("distinguishes active production from planned future output", () => {
   assert.deepEqual(
     claim.reservations,
     [
-      { activity: "manufacturing", quantity: 4, state: "in-production" },
+      {
+        activity: "manufacturing",
+        quantity: 4,
+        state: "in-production",
+        sourceJobId: 123,
+        sourceOutputQuantity: 4,
+        sourceCompletionAt: "2026-01-01T01:00:00.000Z",
+      },
       { activity: "manufacturing", quantity: 4, state: "paused" },
       { activity: "reaction", quantity: 4, state: "planned" },
+    ],
+  );
+});
+
+void test("retains the full output when an active job only supplies part of demand", () => {
+  const allocator = new SimulationAllocator(
+    {
+      ...inventory,
+      itemLots: [
+        {
+          ...inventory.itemLots[0],
+          lotId: "active-job-output",
+          quantity: 32,
+          horizon: "after-upstream",
+          source: "industry-output",
+          activity: "manufacturing",
+          industryJobId: 456,
+          industryJobStatus: "active",
+          industryJobEndDate: "2026-01-01T02:00:00.000Z",
+        },
+      ],
+    },
+    [],
+  );
+
+  const claim = allocator.claimFuture(34, 29, account, "demanding-job");
+
+  assert.deepEqual(
+    claim.reservations,
+    [
+      {
+        activity: "manufacturing",
+        quantity: 29,
+        state: "in-production",
+        sourceJobId: 456,
+        sourceOutputQuantity: 32,
+        sourceCompletionAt: "2026-01-01T02:00:00.000Z",
+      },
     ],
   );
 });

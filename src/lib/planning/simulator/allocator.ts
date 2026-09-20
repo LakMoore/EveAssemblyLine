@@ -188,6 +188,13 @@ export class SimulationAllocator {
               : lot.industryJobStatus === "paused"
                 ? "paused"
                 : "planned",
+          ...(lot.industryJobId !== undefined ? { sourceJobId: lot.industryJobId } : {}),
+          ...(lot.industryJobId !== undefined && lot.quantity > 0
+            ? { sourceOutputQuantity: lot.quantity }
+            : {}),
+          ...(lot.industryJobStatus === "active" && lot.industryJobEndDate
+            ? { sourceCompletionAt: lot.industryJobEndDate }
+            : {}),
         });
       }
     }

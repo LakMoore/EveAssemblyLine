@@ -88,6 +88,7 @@ void test("preserves industry job status on future output lots", () => {
       jobId: 123,
       activityName: "manufacturing",
       industryJobStatus: "active",
+      industryJobEndDate: "2026-01-01T01:00:00.000Z",
     },
     {
       typeId: 34,
@@ -111,6 +112,8 @@ void test("preserves industry job status on future output lots", () => {
   assert.equal(futureOutput.horizon, "after-upstream");
   assert.equal(futureOutput.industryJobStatus, "active");
   assert.equal(futureOutput.activity, "manufacturing");
+  assert.equal(futureOutput.industryJobId, 123);
+  assert.equal(futureOutput.industryJobEndDate, "2026-01-01T01:00:00.000Z");
   const pausedOutput = inventory.itemLots.find((lot) => lot.industryJobStatus === "paused");
   assert.ok(pausedOutput);
   assert.equal(pausedOutput.activity, "reaction");

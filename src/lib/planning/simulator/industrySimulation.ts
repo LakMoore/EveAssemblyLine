@@ -21,6 +21,7 @@ import type {
   SimulationWarning,
   SimulationActivity,
   SimulationRequestV1,
+  SimulationUpstreamReservation,
 } from "./types";
 
 type ProductionActivity = "manufacturing" | "reaction";
@@ -79,7 +80,7 @@ interface MaterialSpecification {
 interface ProductionSupply {
   plannedQuantity: number;
   readyQuantity: number;
-  activity?: ProductionActivity;
+  reservations: SimulationUpstreamReservation[];
 }
 
 interface ActivityProfile {
@@ -245,7 +246,7 @@ class IndustryDemandSimulation {
     demandSource: SimulationDemandSource,
     stack: ReadonlySet<number>,
   ): ProductionSupply {
-    if (quantity <= 0) return { plannedQuantity: 0, readyQuantity: 0 };
+    if (quantity <= 0) return { plannedQuantity: 0, readyQuantity: 0, reservations: [] };
     if (stack.has(productTypeId)) {
       this.recordUnmet(destinationAccount, quantity, demandSource);
       this.warnings.push({
@@ -253,11 +254,11 @@ class IndustryDemandSimulation {
         typeId: productTypeId,
         message: `Quantity expansion stopped at cyclic type ${productTypeId}.`,
       });
-      return { plannedQuantity: 0, readyQuantity: 0 };
+      return { plannedQuantity: 0, readyQuantity: 0, reservations: [] };
     }
     if (this.request.settings.buildBlacklist.includes(productTypeId)) {
       this.recordUnmet(destinationAccount, quantity, demandSource);
-      return { plannedQuantity: 0, readyQuantity: 0 };
+      return { plannedQuantity: 0, readyQuantity: 0, reservations: [] };
     }
     const production = this.context.blueprints.byBuildProductTypeId.get(productTypeId);
     const details = production ? productionDetails(production, productTypeId) : undefined;
@@ -270,7 +271,7 @@ class IndustryDemandSimulation {
           message: `Type ${productTypeId} cannot be built and is prohibited from purchase.`,
         });
       }
-      return { plannedQuantity: 0, readyQuantity: 0 };
+      return { plannedQuantity: 0, readyQuantity: 0, reservations: [] };
     }
 
     const profile = this.activityProfile(stockpile, productTypeId, production.activity);
@@ -328,6 +329,7 @@ class IndustryDemandSimulation {
     nextStack.add(productTypeId);
     let plannedOutput = 0;
     let readyOutput = 0;
+    const reservations: SimulationUpstreamReservation[] = [];
     for (const [allocationIndex, allocation] of allocations.entries()) {
       const jobId = `${baseJobId}:${allocationIndex}`;
       const job = this.planIndustryJob(
@@ -342,6 +344,7 @@ class IndustryDemandSimulation {
         nextStack,
       );
       const outputQuantity = allocation.runs * details.product.quantity;
+      const reservedQuantity = Math.min(outputQuantity, Math.max(0, quantity - plannedOutput));
       this.transactions.push({
         id: this.nextId("production"),
         kind: "production-commitment",
@@ -355,6 +358,13 @@ class IndustryDemandSimulation {
       else this.reactionJobs.push(job);
       plannedOutput += outputQuantity;
       readyOutput += job.readyAfterUpstreamRuns * details.product.quantity;
+      reservations.push({
+        activity: production.activity,
+        quantity: reservedQuantity,
+        state: "planned",
+        sourceJobId: jobId,
+        sourceOutputQuantity: outputQuantity,
+      });
       this.addActivitySkills(details.activity.skills, jobId);
       if (allocation.blueprintKind === "fallback") {
         this.recordBlueprintShortage(
@@ -369,7 +379,7 @@ class IndustryDemandSimulation {
     return {
       plannedQuantity: Math.min(quantity, plannedOutput),
       readyQuantity: Math.min(quantity, readyOutput),
-      activity: production.activity,
+      reservations,
     };
   }
 
@@ -529,18 +539,7 @@ class IndustryDemandSimulation {
             - claimedFuture
             - productionSupply.plannedQuantity,
         ),
-        upstreamReservations: [
-          ...futureClaim.reservations,
-          ...(productionSupply.activity && productionSupply.plannedQuantity > 0
-            ? [
-                {
-                  activity: productionSupply.activity,
-                  quantity: productionSupply.plannedQuantity,
-                  state: "planned" as const,
-                },
-              ]
-            : []),
-        ],
+        upstreamReservations: [...futureClaim.reservations, ...productionSupply.reservations],
       });
     }
 
@@ -857,18 +856,7 @@ class IndustryDemandSimulation {
       source,
       new Set(),
     );
-    const upstreamReservations = [
-      ...claim.futureReservations,
-      ...(production.activity && production.plannedQuantity > 0
-        ? [
-            {
-              activity: production.activity,
-              quantity: production.plannedQuantity,
-              state: "planned" as const,
-            },
-          ]
-        : []),
-    ];
+    const upstreamReservations = [...claim.futureReservations, ...production.reservations];
     return {
       typeId,
       typeName: typeName(this.context, typeId, this.request.language),
