@@ -154,6 +154,7 @@ type SimulationRowControls = {
   isCompleted: (rowKey: string) => boolean;
   onCompletedChange: (rowKey: string, completed: boolean) => void;
   onOpenPlan: () => void;
+  onOpenBuy: () => void;
 };
 
 type SimulationGroupAvatar = {
@@ -1052,7 +1053,11 @@ function SimulationActivityTab({
               onCheckboxChange={(checked) => controls.onCompletedChange(rowKey, checked)}
               contentClassName="self-end text-right font-mono text-xs sm:self-auto"
             >
-              <SimulationJobInputsResponsive job={job} onOpenPlan={controls.onOpenPlan} />
+              <SimulationJobInputsResponsive
+                job={job}
+                onOpenPlan={controls.onOpenPlan}
+                onOpenBuy={controls.onOpenBuy}
+              />
               <CopyableNumber value={job.readyNowRuns} suffix=" / " copyLabel="Ready runs" />
               <CopyableNumber value={job.requiredRuns} suffix=" runs" copyLabel="Required runs" />
             </SwitchedResultRow>
@@ -1539,6 +1544,7 @@ export default function SimulationResults({
     onCompletedChange: (rowKey, completed) =>
       setCompletedRows((current) => ({ ...current, [rowKey]: completed })),
     onOpenPlan: () => setActiveTab("plan"),
+    onOpenBuy: () => setActiveTab("buy"),
   };
   const onOpenGroupChange = (groupKey: string, open: boolean) =>
     setOpenGroups((current) => ({ ...current, [groupKey]: open }));
@@ -1570,7 +1576,7 @@ export default function SimulationResults({
 
   return (
     <section className="flex min-w-0 flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-xs text-muted-foreground">SIMULATOR OUTPUT</p>
           <h2 className="text-lg font-medium">Plan breakdown</h2>

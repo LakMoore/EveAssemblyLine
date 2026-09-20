@@ -5,6 +5,7 @@ import type {
   SimulationBlueprintAllocation,
   SimulationHaulTask,
   SimulationActivity,
+  SimulationUpstreamReservation,
 } from "./types";
 
 /** Quantity visible at each physical/future supply horizon. */
@@ -19,6 +20,13 @@ export interface ItemClaim {
   local: number;
   remote: number;
   future: number;
+  futureReservations: SimulationUpstreamReservation[];
+}
+
+/** Existing future output claimed for one demand and its known provenance. */
+export interface FutureClaim {
+  quantity: number;
+  reservations: SimulationUpstreamReservation[];
 }
 
 /** Blueprint allocation with the horizon at which the print becomes usable. */
@@ -145,9 +153,10 @@ export class SimulationAllocator {
     quantity: number,
     account: SimulationLedgerAccount,
     demandingJobId?: string,
-  ): number {
+  ): FutureClaim {
     let remaining = quantity;
     let claimed = 0;
+    const quantitiesByActivity = new Map<SimulationUpstreamReservation["activity"], number>();
     for (const lot of this.sortedItemLots(
       this.inventory.itemLots.filter(
         (candidate) => candidate.typeId === typeId && candidate.horizon === "after-upstream",
@@ -169,8 +178,20 @@ export class SimulationAllocator {
       });
       remaining -= next;
       claimed += next;
+      if (lot.activity) {
+        quantitiesByActivity.set(
+          lot.activity,
+          (quantitiesByActivity.get(lot.activity) ?? 0) + next,
+        );
+      }
     }
-    return claimed;
+    return {
+      quantity: claimed,
+      reservations: (["manufacturing", "reaction"] as const).flatMap((activity) => {
+        const quantity = quantitiesByActivity.get(activity) ?? 0;
+        return quantity > 0 ? [{ activity, quantity }] : [];
+      }),
+    };
   }
 
   /** Claims a target quantity across local, remote, then existing future output. */
@@ -202,8 +223,18 @@ export class SimulationAllocator {
       stockpileId,
       demandActivity,
     );
-    const future = this.claimFuture(typeId, quantity - local - remote, account, demandingJobId);
-    return { local, remote, future };
+    const futureClaim = this.claimFuture(
+      typeId,
+      quantity - local - remote,
+      account,
+      demandingJobId,
+    );
+    return {
+      local,
+      remote,
+      future: futureClaim.quantity,
+      futureReservations: futureClaim.reservations,
+    };
   }
 
   /** Allocates manufacturing blueprint runs in stable locality/ME/TE order. */

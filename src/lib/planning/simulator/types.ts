@@ -104,6 +104,12 @@ export interface SimulationMaterialLocationBucket {
   items: SimulationMaterialBalance[];
 }
 
+/** Identifies the upstream activity and quantity reserved for an input. */
+export interface SimulationUpstreamReservation {
+  activity: "manufacturing" | "reaction";
+  quantity: number;
+}
+
 /** Exact material requirement and availability for an industry allocation. */
 export interface SimulationJobInput {
   typeId: number;
@@ -113,6 +119,8 @@ export interface SimulationJobInput {
   availableFromHauling: number;
   availableAfterUpstream: number;
   unsatisfiedQuantity: number;
+  upstreamReservations?: readonly SimulationUpstreamReservation[];
+  purchaseQuantity?: number;
 }
 
 /** Blueprint or reaction formula selected for an industry allocation. */

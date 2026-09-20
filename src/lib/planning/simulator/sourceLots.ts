@@ -21,6 +21,7 @@ export interface SimulationItemLot extends SimulationSourceLot {
   unitVolume: number;
   horizon: "now" | "after-upstream";
   source: "asset" | "market-order" | "industry-output";
+  activity?: "manufacturing" | "reaction";
   eligibleForReprocessing: boolean;
 }
 
@@ -58,6 +59,11 @@ function localizedTypeName(context: SimulationContext, typeId: number, language 
 function unitVolume(context: SimulationContext, typeId: number): number {
   const type = context.types.get(typeId);
   return type?.packagedVolume ?? type?.volume ?? 0;
+}
+
+/** Narrows an external industry activity name to a production activity. */
+function productionActivity(activityName?: string): SimulationItemLot["activity"] {
+  return activityName === "manufacturing" || activityName === "reaction" ? activityName : undefined;
 }
 
 /** Returns the only type IDs the simulator may ever select for reprocessing. */
@@ -285,6 +291,7 @@ export function normalizeSimulatorInventory(
       horizon: isUsableIndustryProductionOutput(item) ? "now" : "after-upstream",
       source:
         item.source === "marketOrder" ? "market-order" : item.inBuild ? "industry-output" : "asset",
+      activity: productionActivity(item.activityName),
       eligibleForReprocessing: eligibleTypeIds.has(item.typeId),
     });
   }

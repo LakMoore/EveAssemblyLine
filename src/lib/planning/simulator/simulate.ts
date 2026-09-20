@@ -15,6 +15,9 @@ import type {
   SimulationHaulTask,
   SimulationMaterialBalance,
   SimulationLedgerView,
+  SimulationCopyJob,
+  SimulationIndustryJob,
+  SimulationInventionJob,
   SimulationResultV1,
   SimulationResultWithDiagnostics,
   SimulationWarning,
@@ -227,6 +230,33 @@ function presentationItems(
     .sort((left, right) => left.locationId - right.locationId);
 }
 
+type SimulationInputJob = SimulationIndustryJob | SimulationInventionJob | SimulationCopyJob;
+
+/** Adds settled Buy-tab quantities to the job inputs that require them. */
+function annotatePurchaseQuantities<T extends SimulationInputJob>(
+  jobs: readonly T[],
+  purchases: SimulationResultV1["lists"]["materialsToBuy"],
+): T[] {
+  const quantitiesByJobAndType = new Map<string, number>();
+  for (const purchase of purchases) {
+    for (const destination of purchase.destinations) {
+      if (!destination.demandingJobId) continue;
+      const key = `${destination.demandingJobId}:${purchase.typeId}`;
+      quantitiesByJobAndType.set(
+        key,
+        (quantitiesByJobAndType.get(key) ?? 0) + destination.quantity,
+      );
+    }
+  }
+  return jobs.map((job) => ({
+    ...job,
+    inputs: job.inputs.map((input) => {
+      const purchaseQuantity = quantitiesByJobAndType.get(`${job.jobId}:${input.typeId}`);
+      return purchaseQuantity && purchaseQuantity > 0 ? { ...input, purchaseQuantity } : input;
+    }),
+  }));
+}
+
 /** Builds the presentation lists from settled domain facts. */
 function assembleLists(
   request: SimulationRequestV1,
@@ -293,6 +323,13 @@ export async function simulateIndustry(
   );
   const reprocessing = settleReprocessing(request, context, inventory, industry);
   const buying = settleBuying(request, context, industry, reprocessing.remainingDemands);
+  const annotatedSchedules: SimulationScheduleResult = {
+    ...schedules,
+    manufacturingJobs: annotatePurchaseQuantities(schedules.manufacturingJobs, buying.materials),
+    reactionJobs: annotatePurchaseQuantities(schedules.reactionJobs, buying.materials),
+    inventionJobs: annotatePurchaseQuantities(schedules.inventionJobs, buying.materials),
+    copyJobs: annotatePurchaseQuantities(schedules.copyJobs, buying.materials),
+  };
   const transactions = uniqueTransactions([
     ...industry.transactions,
     ...industry.allocator.transactions,
@@ -323,7 +360,7 @@ export async function simulateIndustry(
   const lists = assembleLists(
     request,
     industry,
-    schedules,
+    annotatedSchedules,
     reprocessing,
     buying,
     ledgers,

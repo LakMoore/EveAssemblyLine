@@ -5,9 +5,14 @@ import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import type { SimulationIndustryJob, SimulationJobInput } from "@/lib/planning/simulator/types";
-import { ClipboardList } from "lucide-react";
+import type {
+  SimulationIndustryJob,
+  SimulationJobInput,
+  SimulationUpstreamReservation,
+} from "@/lib/planning/simulator/types";
+import { Atom, ClipboardList, Factory, ShoppingCart, Truck, type LucideIcon } from "lucide-react";
 
 type InputStatus = "ready" | "partial" | "blocked";
 
@@ -32,18 +37,71 @@ function statusClassName(status: InputStatus): string {
       : "border-destructive/40 text-destructive";
 }
 
+/** Formats one quantity with the correct singular or plural unit label. */
+function quantityLabel(quantity: number): string {
+  return `${quantity.toLocaleString()} ${quantity === 1 ? "unit" : "units"}`;
+}
+
+type InputSupplySource = {
+  label: string;
+  quantity: number;
+  Icon: LucideIcon;
+};
+
+/** Combines reservations from the same upstream activity for source tooltips. */
+function reservationSources(
+  reservations: readonly SimulationUpstreamReservation[],
+): InputSupplySource[] {
+  const quantitiesByActivity = new Map<SimulationUpstreamReservation["activity"], number>();
+  for (const reservation of reservations) {
+    quantitiesByActivity.set(
+      reservation.activity,
+      (quantitiesByActivity.get(reservation.activity) ?? 0) + reservation.quantity,
+    );
+  }
+  return (["manufacturing", "reaction"] as const).flatMap((activity) => {
+    const quantity = quantitiesByActivity.get(activity) ?? 0;
+    return quantity > 0
+      ? [
+          {
+            label: activity === "manufacturing" ? "Manufacturing" : "Reaction",
+            quantity,
+            Icon: activity === "manufacturing" ? Factory : Atom,
+          },
+        ]
+      : [];
+  });
+}
+
+/** Returns the upstream sources that supply an input's missing quantity. */
+function inputSupplySources(input: SimulationJobInput): InputSupplySource[] {
+  if (input.availableNow >= input.requiredQuantity) return [];
+  return [
+    ...(input.availableFromHauling > 0
+      ? [{ label: "Hauling", quantity: input.availableFromHauling, Icon: Truck }]
+      : []),
+    ...reservationSources(input.upstreamReservations ?? []),
+    ...(input.purchaseQuantity && input.purchaseQuantity > 0
+      ? [{ label: "Buy", quantity: input.purchaseQuantity, Icon: ShoppingCart }]
+      : []),
+  ];
+}
+
 /** Renders one material input and its immediate, future, and missing quantities. */
 function SimulationInputRow({
   input,
   onNavigate,
+  onOpenBuy,
 }: {
   input: SimulationJobInput;
   onNavigate: () => void;
+  onOpenBuy: () => void;
 }) {
   const percent = inputCompletionPercent(input);
   const status = inputStatus(input);
+  const supplySources = inputSupplySources(input);
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-t border-border/60 py-2 first:border-t-0">
+    <div className="grid grid-cols-1 gap-x-3 gap-y-2 border-t border-border/60 py-2 first:border-t-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
       <TypeIdentity
         name={input.typeName}
         typeId={input.typeId}
@@ -55,16 +113,49 @@ function SimulationInputRow({
         onNavigate={onNavigate}
         className="min-w-0"
       />
-      <div className="flex flex-col items-end gap-1 font-mono text-xs">
-        <span>
-          {input.availableNow.toLocaleString()} / {input.requiredQuantity.toLocaleString()}
+      <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 font-mono text-xs sm:w-auto sm:grid-cols-[5rem_5rem_minmax(5rem,max-content)] sm:gap-2">
+        <span className="flex items-center justify-start gap-1 sm:w-20 sm:justify-end">
+          {supplySources.map(({ label, quantity, Icon }) => (
+            <Tooltip key={label}>
+              <TooltipTrigger
+                render={
+                  label === "Buy" ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={`${label}: ${quantityLabel(quantity)}. View buy list`}
+                      className="size-5 p-0 text-muted-foreground"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenBuy();
+                      }}
+                    >
+                      <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
+                    </Button>
+                  ) : (
+                    <span
+                      aria-label={`${label}: ${quantityLabel(quantity)}`}
+                      className="inline-flex size-5 items-center justify-center text-muted-foreground"
+                      role="img"
+                      tabIndex={0}
+                    >
+                      <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
+                    </span>
+                  )
+                }
+              />
+              <TooltipContent>
+                {label}: {quantityLabel(quantity)}
+              </TooltipContent>
+            </Tooltip>
+          ))}
         </span>
-        <Badge variant="outline" className={statusClassName(status)}>
+        <Badge variant="outline" className={cn("w-20 justify-center", statusClassName(status))}>
           {percent}%
         </Badge>
-        <span className="text-[10px] text-muted-foreground">
-          {input.availableFromHauling.toLocaleString()} after hauling,{" "}
-          {input.availableAfterUpstream.toLocaleString()} after upstream
+        <span className="justify-self-end text-right whitespace-nowrap sm:min-w-20">
+          {input.availableNow.toLocaleString()} / {input.requiredQuantity.toLocaleString()}
         </span>
       </div>
     </div>
@@ -75,16 +166,22 @@ function SimulationInputRow({
 export default function SimulationJobInputsResponsive({
   job,
   onOpenPlan,
+  onOpenBuy,
   variation = "icon",
 }: {
   job: SimulationIndustryJob;
   onOpenPlan: () => void;
+  onOpenBuy: () => void;
   variation?: "icon" | "render" | "bp" | "bpc";
 }) {
   const [open, setOpen] = useState(false);
   const navigateToPlan = () => {
     setOpen(false);
     onOpenPlan();
+  };
+  const navigateToBuy = () => {
+    setOpen(false);
+    onOpenBuy();
   };
   const installableRuns = Math.min(job.requiredRuns, Math.max(0, job.readyNowRuns));
   const completionPercent =
@@ -157,7 +254,12 @@ export default function SimulationJobInputsResponsive({
         </p>
         {job.inputs.length > 0 ? (
           job.inputs.map((input) => (
-            <SimulationInputRow input={input} key={input.typeId} onNavigate={navigateToPlan} />
+            <SimulationInputRow
+              input={input}
+              key={input.typeId}
+              onNavigate={navigateToPlan}
+              onOpenBuy={navigateToBuy}
+            />
           ))
         ) : (
           <p className="py-2 text-muted-foreground">No material inputs</p>

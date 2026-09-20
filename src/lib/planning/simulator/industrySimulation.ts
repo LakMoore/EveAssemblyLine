@@ -79,6 +79,7 @@ interface MaterialSpecification {
 interface ProductionSupply {
   plannedQuantity: number;
   readyQuantity: number;
+  activity?: ProductionActivity;
 }
 
 interface ActivityProfile {
@@ -368,6 +369,7 @@ class IndustryDemandSimulation {
     return {
       plannedQuantity: Math.min(quantity, plannedOutput),
       readyQuantity: Math.min(quantity, readyOutput),
+      activity: production.activity,
     };
   }
 
@@ -494,12 +496,13 @@ class IndustryDemandSimulation {
         activity,
       );
       const physicalClaimed = claimedNow + claimedRemote;
-      const claimedFuture = this.allocator.claimFuture(
+      const futureClaim = this.allocator.claimFuture(
         material.typeId,
         material.requiredQuantity - physicalClaimed,
         material.account,
         jobId,
       );
+      const claimedFuture = futureClaim.quantity;
       const remaining = Math.max(0, material.requiredQuantity - physicalClaimed - claimedFuture);
       const productionSupply = this.planProduction(
         material.typeId,
@@ -526,6 +529,12 @@ class IndustryDemandSimulation {
             - claimedFuture
             - productionSupply.plannedQuantity,
         ),
+        upstreamReservations: [
+          ...futureClaim.reservations,
+          ...(productionSupply.activity && productionSupply.plannedQuantity > 0
+            ? [{ activity: productionSupply.activity, quantity: productionSupply.plannedQuantity }]
+            : []),
+        ],
       });
     }
 
@@ -842,6 +851,12 @@ class IndustryDemandSimulation {
       source,
       new Set(),
     );
+    const upstreamReservations = [
+      ...claim.futureReservations,
+      ...(production.activity && production.plannedQuantity > 0
+        ? [{ activity: production.activity, quantity: production.plannedQuantity }]
+        : []),
+    ];
     return {
       typeId,
       typeName: typeName(this.context, typeId, this.request.language),
@@ -850,6 +865,7 @@ class IndustryDemandSimulation {
       availableFromHauling: claim.remote,
       availableAfterUpstream: existing + production.readyQuantity,
       unsatisfiedQuantity: Math.max(0, quantity - existing - production.plannedQuantity),
+      upstreamReservations,
     };
   }
 
