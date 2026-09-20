@@ -11,7 +11,7 @@ import { CollapsibleTrigger } from "@/components/ui/collapsible";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import { ChevronsDownUp, ChevronsUpDown, Copy as CopyIcon } from "lucide-react";
 
-export type SimulationGroupAvatar = {
+export type SimulatorGroupAvatar = {
   typeId: number;
   name: string;
   imageVariation: "icon" | "bpc" | "bp";
@@ -20,14 +20,14 @@ export type SimulationGroupAvatar = {
 type SimulationResultGroupHeaderProps = {
   label: ReactNode;
   isOpen: boolean;
-  avatarRows: SimulationGroupAvatar[];
+  avatarRows: SimulatorGroupAvatar[];
   remainingCount: number;
   onCopyGroup?: () => void;
   copyLabel?: string;
 };
 
 /** Renders a collapsible simulation group label, previews, and optional group action. */
-export default function SimulationResultGroupHeader({
+export default function SimulatorResultGroupHeader({
   label,
   isOpen,
   avatarRows,

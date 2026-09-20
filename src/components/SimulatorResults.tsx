@@ -17,8 +17,8 @@ import {
   TestTubes,
 } from "lucide-react";
 import SimpleResultRow from "@/components/SimpleResultRow";
-import SimulationResultGroup from "@/components/SimulationResultGroup";
-import SimulationsResultsTab from "@/components/SimulationsResultsTab";
+import SimulatorResultGroup from "@/components/SimulatorResultGroup";
+import SimulatorResultsTab from "@/components/SimulatorResultsTab";
 import SwitchedResultRow from "@/components/SwitchedResultRow";
 import CopyableText from "@/components/CopyableText";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -171,7 +171,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
         const groupKey = `${tab}:${locationId}`;
         const avatars = createGroupAvatars(groupItems, getAvatar);
         return (
-          <SimulationResultGroup
+          <SimulatorResultGroup
             groupKey={groupKey}
             key={groupKey}
             label={locationName(locationNamesById, locationId)}
@@ -186,7 +186,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
                 <div key={getRowKey(item)}>{renderRow(item)}</div>
               ))}
             </div>
-          </SimulationResultGroup>
+          </SimulatorResultGroup>
         );
       })}
     </div>
@@ -213,7 +213,7 @@ function SimulationMaterialsTab({
 }) {
   const items = buckets.flatMap((bucket) => bucket.items);
   return (
-    <SimulationsResultsTab hasResults={items.length > 0}>
+    <SimulatorResultsTab hasResults={items.length > 0}>
       <SimulationLocationResultGroups
         tab={tab}
         items={items}
@@ -242,7 +242,7 @@ function SimulationMaterialsTab({
           );
         }}
       />
-    </SimulationsResultsTab>
+    </SimulatorResultsTab>
   );
 }
 
@@ -317,7 +317,7 @@ function SimulationReprocessingTab({
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
   return (
-    <SimulationsResultsTab hasResults={jobs.length > 0}>
+    <SimulatorResultsTab hasResults={jobs.length > 0}>
       <SimulationLocationResultGroups
         tab="reprocess"
         items={jobs}
@@ -337,7 +337,7 @@ function SimulationReprocessingTab({
           />
         )}
       />
-    </SimulationsResultsTab>
+    </SimulatorResultsTab>
   );
 }
 
@@ -356,7 +356,7 @@ function SimulationCopyTab({
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
   return (
-    <SimulationsResultsTab hasResults={jobs.length > 0}>
+    <SimulatorResultsTab hasResults={jobs.length > 0}>
       <SimulationLocationResultGroups
         tab="copy"
         items={jobs}
@@ -387,7 +387,7 @@ function SimulationCopyTab({
           />
         )}
       />
-    </SimulationsResultsTab>
+    </SimulatorResultsTab>
   );
 }
 
@@ -406,7 +406,7 @@ function SimulationInventionTab({
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
   return (
-    <SimulationsResultsTab hasResults={jobs.length > 0}>
+    <SimulatorResultsTab hasResults={jobs.length > 0}>
       <SimulationLocationResultGroups
         tab="invent"
         items={jobs}
@@ -439,7 +439,7 @@ function SimulationInventionTab({
           />
         )}
       />
-    </SimulationsResultsTab>
+    </SimulatorResultsTab>
   );
 }
 
@@ -499,7 +499,7 @@ function SimulationActivityTab({
 }) {
   const activityLabel = tab === "react" ? "reaction" : "manufacturing";
   return (
-    <SimulationsResultsTab hasResults={jobs.length > 0}>
+    <SimulatorResultsTab hasResults={jobs.length > 0}>
       <SimulationLocationResultGroups
         tab={tab}
         items={jobs}
@@ -547,7 +547,7 @@ function SimulationActivityTab({
           );
         }}
       />
-    </SimulationsResultsTab>
+    </SimulatorResultsTab>
   );
 }
 
@@ -579,7 +579,7 @@ function SimulationHaulTab({
   );
 
   return (
-    <SimulationsResultsTab hasResults={tasks.length > 0}>
+    <SimulatorResultsTab hasResults={tasks.length > 0}>
       <div className="flex min-w-0 flex-col gap-4">
         {sourceGroups.map(([fromLocationId, destinations]) => {
           const sourceTasks = [...destinations.values()].flat();
@@ -592,7 +592,7 @@ function SimulationHaulTab({
             }),
           );
           return (
-            <SimulationResultGroup
+            <SimulatorResultGroup
               groupKey={sourceKey}
               key={sourceKey}
               label={
@@ -623,7 +623,7 @@ function SimulationHaulTab({
                       }),
                     );
                     return (
-                      <SimulationResultGroup
+                      <SimulatorResultGroup
                         groupKey={destinationKey}
                         key={destinationKey}
                         label={
@@ -646,15 +646,15 @@ function SimulationHaulTab({
                             />
                           ))}
                         </div>
-                      </SimulationResultGroup>
+                      </SimulatorResultGroup>
                     );
                   })}
               </div>
-            </SimulationResultGroup>
+            </SimulatorResultGroup>
           );
         })}
       </div>
-    </SimulationsResultsTab>
+    </SimulatorResultsTab>
   );
 }
 
@@ -712,7 +712,7 @@ function SimulationBuyTab({
 }) {
   const purchases = [...result.lists.materialsToBuy, ...result.lists.bpoToBuy];
   return (
-    <SimulationsResultsTab hasResults={purchases.length > 0}>
+    <SimulatorResultsTab hasResults={purchases.length > 0}>
       <div className="flex min-w-0 flex-col">
         {purchases.map((purchase) => {
           const rowKey = `buy:${purchase.typeId}:${purchase.destinations
@@ -738,7 +738,7 @@ function SimulationBuyTab({
           );
         })}
       </div>
-    </SimulationsResultsTab>
+    </SimulatorResultsTab>
   );
 }
 
@@ -751,7 +751,7 @@ function SimulationSkillsTab({
   controls: SimulationRowControls;
 }) {
   return (
-    <SimulationsResultsTab hasResults={result.lists.skillsRequired.length > 0}>
+    <SimulatorResultsTab hasResults={result.lists.skillsRequired.length > 0}>
       <div className="flex min-w-0 flex-col">
         {result.lists.skillsRequired.map((skill) => (
           <SimulationSimpleJobRow
@@ -771,7 +771,7 @@ function SimulationSkillsTab({
           />
         ))}
       </div>
-    </SimulationsResultsTab>
+    </SimulatorResultsTab>
   );
 }
 
@@ -800,7 +800,7 @@ function SimulationWarningsTab({
   );
 
   return (
-    <SimulationsResultsTab
+    <SimulatorResultsTab
       hasResults={result.lists.warnings.length > 0}
       emptyTitle="No warnings"
       emptyDescription="This simulation has no calculation warnings."
@@ -811,7 +811,7 @@ function SimulationWarningsTab({
           const label =
             locationId === undefined ? "Unlocated" : locationName(locationNamesById, locationId);
           return (
-            <SimulationResultGroup
+            <SimulatorResultGroup
               key={groupKey}
               groupKey={groupKey}
               label={label}
@@ -829,11 +829,11 @@ function SimulationWarningsTab({
                   </Alert>
                 ))}
               </div>
-            </SimulationResultGroup>
+            </SimulatorResultGroup>
           );
         })}
       </div>
-    </SimulationsResultsTab>
+    </SimulatorResultsTab>
   );
 }
 
