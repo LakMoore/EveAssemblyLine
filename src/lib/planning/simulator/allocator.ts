@@ -87,6 +87,7 @@ export class SimulationAllocator {
     account: SimulationLedgerAccount,
     demandingJobId?: string,
     reservationHorizon: "now" | "after-hauling" = "now",
+    stockpileId?: string,
   ): number {
     return this.claimItemLots(
       this.inventory.itemLots.filter(
@@ -100,6 +101,7 @@ export class SimulationAllocator {
       account,
       demandingJobId,
       reservationHorizon,
+      stockpileId,
     );
   }
 
@@ -110,6 +112,7 @@ export class SimulationAllocator {
     destinationLocationId: number,
     account: SimulationLedgerAccount,
     demandingJobId?: string,
+    stockpileId?: string,
   ): number {
     return this.claimItemLots(
       this.inventory.itemLots.filter(
@@ -124,6 +127,7 @@ export class SimulationAllocator {
       account,
       demandingJobId,
       "after-hauling",
+      stockpileId,
     );
   }
 
@@ -150,6 +154,7 @@ export class SimulationAllocator {
         id: this.nextTransactionId("existing-output"),
         kind: "production-commitment",
         account,
+        destinationAccount: account,
         quantity: next,
         source: "production",
         producingJobId: demandingJobId ?? `existing:${lot.lotId}`,
@@ -167,14 +172,24 @@ export class SimulationAllocator {
     destinationLocationId: number,
     account: SimulationLedgerAccount,
     demandingJobId?: string,
+    stockpileId?: string,
   ): ItemClaim {
-    const local = this.claimLocal(typeId, quantity, destinationLocationId, account, demandingJobId);
+    const local = this.claimLocal(
+      typeId,
+      quantity,
+      destinationLocationId,
+      account,
+      demandingJobId,
+      "now",
+      stockpileId,
+    );
     const remote = this.claimRemote(
       typeId,
       quantity - local,
       destinationLocationId,
       account,
       demandingJobId,
+      stockpileId,
     );
     const future = this.claimFuture(typeId, quantity - local - remote, account, demandingJobId);
     return { local, remote, future };
@@ -446,6 +461,7 @@ export class SimulationAllocator {
     account: SimulationLedgerAccount,
     demandingJobId: string | undefined,
     reservationHorizon: "now" | "after-hauling",
+    stockpileId?: string,
   ): number {
     let remaining = quantity;
     let claimed = 0;
@@ -463,6 +479,7 @@ export class SimulationAllocator {
         quantity: next,
         horizon: reservationHorizon,
         demandingJobId,
+        stockpileId,
       });
       if (lot.locationId !== undefined && lot.locationId !== destinationLocationId) {
         this.transactions.push({

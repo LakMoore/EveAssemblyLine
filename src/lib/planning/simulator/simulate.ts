@@ -75,21 +75,25 @@ function graphPrimingTransactions(
   graph: DependencyGraph,
 ): SimulationTransaction[] {
   const typeIds = [...graph.reachableTypeIds].sort((left, right) => left - right);
-  return request.stockpiles.flatMap((stockpile) =>
-    ledgerActivities.flatMap((activity) =>
-      typeIds.map((typeId) => ({
-        id: `prime:${stockpile.id}:${activity}:${typeId}`,
-        kind: "prime-account" as const,
-        account: {
-          stockpileId: stockpile.id,
-          activity,
-          locationId: activityLocation(stockpile, activity),
-          typeId,
-        },
-        quantity: 0 as const,
-      })),
-    ),
-  );
+  const transactions = new Map<string, SimulationTransaction>();
+  for (const stockpile of request.stockpiles) {
+    for (const activity of ledgerActivities) {
+      const locationId = activityLocation(stockpile, activity);
+      for (const typeId of typeIds) {
+        const account: SimulationLedgerAccount = { activity, locationId, typeId };
+        transactions.set(
+          simulationAccountKey(account),
+          {
+            id: `prime:${activity}:${locationId}:${typeId}`,
+            kind: "prime-account",
+            account,
+            quantity: 0,
+          },
+        );
+      }
+    }
+  }
+  return [...transactions.values()];
 }
 
 /** Exposes each relevant unreserved physical lot to exactly one ledger account. */
@@ -123,33 +127,35 @@ function sourceAvailabilityTransactions(
       demandedAccounts.set(transaction.account.typeId, accounts);
     }
   }
-  const sortedStockpiles = [...request.stockpiles].sort((left, right) =>
-    left.id.localeCompare(right.id),
-  );
   return inventory.itemLots.flatMap((lot) => {
     const quantity = industry.allocator.remainingItemQuantity(lot.lotId);
-    if (quantity <= 0 || lot.horizon !== "now" || !graph.reachableTypeIds.has(lot.typeId)) {
+    if (
+      quantity <= 0
+      || lot.horizon !== "now"
+      || lot.locationId === undefined
+      || !graph.reachableTypeIds.has(lot.typeId)
+    ) {
       return [];
     }
+    const lotLocationId = lot.locationId;
     const accounts = [...(demandedAccounts.get(lot.typeId) ?? [])]
       .filter((account) => canReachAccount(lot, account))
       .sort(
         (left, right) =>
-          Number(right.locationId === lot.locationId) - Number(left.locationId === lot.locationId)
-          || left.stockpileId.localeCompare(right.stockpileId)
+          Number(right.locationId === lotLocationId) - Number(left.locationId === lotLocationId)
           || left.activity.localeCompare(right.activity),
       );
-    const localFallback = sortedStockpiles
+    const localFallback = request.stockpiles
       .flatMap((stockpile) =>
         ledgerActivities
-          .filter((activity) => activityLocation(stockpile, activity) === lot.locationId)
+          .filter((activity) => activityLocation(stockpile, activity) === lotLocationId)
           .map((activity) => ({
-            stockpileId: stockpile.id,
             activity,
-            locationId: activityLocation(stockpile, activity),
+            locationId: lotLocationId,
             typeId: lot.typeId,
           })),
       )
+      .sort((left, right) => left.activity.localeCompare(right.activity))
       .at(0);
     const account = accounts.at(0) ?? localFallback;
     if (!account) return [];
@@ -161,7 +167,7 @@ function sourceAvailabilityTransactions(
         lotId: lot.lotId,
         quantity,
         horizon:
-          account.locationId === lot.locationId ? ("now" as const) : ("after-hauling" as const),
+          account.locationId === lotLocationId ? ("now" as const) : ("after-hauling" as const),
       },
     ];
   });
@@ -183,7 +189,7 @@ function ledgerViews(
 ): SimulationResultV1["ledgers"] {
   const views = new Map<string, SimulationResultV1["ledgers"][number]>();
   for (const transaction of transactions) {
-    const ledgerId = `${transaction.account.stockpileId}:${transaction.account.activity}:${transaction.account.locationId}`;
+    const ledgerId = `${transaction.account.activity}:${transaction.account.locationId}`;
     const view = views.get(ledgerId) ?? {
       ledgerId,
       activity: transaction.account.activity,

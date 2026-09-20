@@ -273,18 +273,6 @@ export const simulatorRequestSchema = z
         });
       }
     }
-    const stockpileKeys = new Set<string>();
-    for (const [index, stockpile] of request.stockpiles.entries()) {
-      const key = `${stockpile.locations.stock}:${stockpile.locations.manufacturing}`;
-      if (stockpileKeys.has(key)) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["stockpiles", index, "locations"],
-          message: "Stock and manufacturing locations must be unique across stockpiles.",
-        });
-      }
-      stockpileKeys.add(key);
-    }
   });
 
 /** Validates and defaults an unknown simulator request. */

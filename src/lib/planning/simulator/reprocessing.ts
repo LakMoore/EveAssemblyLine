@@ -72,7 +72,7 @@ function allocateYields(
       .filter(
         (candidate) =>
           candidate.purpose === "material"
-          && candidate.account.stockpileId === stockpileId
+          && candidate.source.stockpileId === stockpileId
           && candidate.account.typeId === material.typeId
           && candidate.quantity > 0,
       )
@@ -105,7 +105,7 @@ function candidateScore(
       .filter(
         (demand) =>
           demand.purpose === "material"
-          && demand.account.stockpileId === candidate.stockpile.id
+          && demand.source.stockpileId === candidate.stockpile.id
           && demand.account.typeId === material.typeId,
       )
       .reduce((total, demand) => total + demand.quantity, 0);
@@ -124,7 +124,7 @@ function candidateScore(
       .filter(
         (demand) =>
           demand.purpose === "material"
-          && demand.account.stockpileId === candidate.stockpile.id
+          && demand.source.stockpileId === candidate.stockpile.id
           && demand.account.typeId === material.typeId,
       )
       .reduce((total, demand) => total + demand.quantity, 0);
@@ -203,7 +203,12 @@ export function settleReprocessing(
         transactions.push({
           id: `reprocessing-output:${sequence++}`,
           kind: "reprocessing-output",
-          account: allocation.account,
+          account: {
+            activity: "reprocessing",
+            locationId: stockpile.locations.reprocessing,
+            typeId: material.typeId,
+          },
+          destinationAccount: allocation.account,
           quantity: allocation.quantity,
           reprocessingJobId: jobId,
         });
@@ -214,7 +219,6 @@ export function settleReprocessing(
           id: `reprocessing-surplus:${sequence++}`,
           kind: "reprocessing-output",
           account: {
-            stockpileId: stockpile.id,
             activity: "reprocessing",
             locationId: stockpile.locations.reprocessing,
             typeId: material.typeId,
@@ -231,7 +235,7 @@ export function settleReprocessing(
     { stockpile: PlanStockpile; typeId: number; local: number; remote: number; purchase: number }
   >();
   for (const reservation of reservationTransactions) {
-    const stockpile = stockpileById.get(reservation.account.stockpileId);
+    const stockpile = stockpileById.get(reservation.stockpileId ?? "");
     if (!stockpile) continue;
     const key = `${stockpile.id}:${reservation.account.typeId}`;
     const committed = committedByStockpileAndType.get(key) ?? {
@@ -248,7 +252,7 @@ export function settleReprocessing(
   for (const commitment of demands.filter(
     (demand) => demand.purpose === "reprocessing-input" && demand.quantity > 0,
   )) {
-    const stockpile = stockpileById.get(commitment.account.stockpileId);
+    const stockpile = stockpileById.get(commitment.source.stockpileId);
     if (!stockpile) continue;
     const key = `${stockpile.id}:${commitment.account.typeId}`;
     const committed = committedByStockpileAndType.get(key) ?? {
@@ -324,7 +328,6 @@ export function settleReprocessing(
     const { candidate, score } = selected;
     const sourceQuantity = score.portions * candidate.portionSize;
     const account: SimulationLedgerAccount = {
-      stockpileId: candidate.stockpile.id,
       activity: "reprocessing",
       locationId: candidate.stockpile.locations.reprocessing,
       typeId: candidate.lot.typeId,

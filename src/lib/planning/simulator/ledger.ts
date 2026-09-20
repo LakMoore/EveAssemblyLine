@@ -17,7 +17,6 @@ export interface SimulationSourceLot {
 
 /** Exact identity of one projected ledger account. */
 export interface SimulationLedgerAccount {
-  stockpileId: string;
   activity: SimulatorActivity;
   locationId: number;
   typeId: number;
@@ -54,11 +53,13 @@ export type SimulationTransaction =
       quantity: number;
       horizon: Extract<SupplyHorizon, "now" | "after-hauling">;
       demandingJobId?: string;
+      stockpileId?: string;
     }
   | {
       id: string;
       kind: "production-commitment";
       account: SimulationLedgerAccount;
+      destinationAccount: SimulationLedgerAccount;
       quantity: number;
       source: "production" | "copying" | "invention";
       producingJobId: string;
@@ -67,6 +68,7 @@ export type SimulationTransaction =
       id: string;
       kind: "reprocessing-output";
       account: SimulationLedgerAccount;
+      destinationAccount?: SimulationLedgerAccount;
       quantity: number;
       reprocessingJobId: string;
     }
@@ -105,7 +107,7 @@ export interface SimulationLedgerProjection {
 
 /** Produces the stable string identity for a simulator ledger account. */
 export function simulationAccountKey(account: SimulationLedgerAccount): string {
-  return `${account.stockpileId}:${account.activity}:${account.locationId}:${account.typeId}`;
+  return `${account.activity}:${account.locationId}:${account.typeId}`;
 }
 
 function emptyBalance(
@@ -117,7 +119,6 @@ function emptyBalance(
     typeId: account.typeId,
     typeName,
     unitVolume,
-    stockpileId: account.stockpileId,
     locationId: account.locationId,
     required: 0,
     availableNow: 0,
@@ -126,6 +127,7 @@ function emptyBalance(
     availableFromCopying: 0,
     availableFromInvention: 0,
     availableFromReprocessing: 0,
+    transferredOut: 0,
     reservedNow: 0,
     reservedAfterHauling: 0,
     unreserved: 0,
@@ -204,20 +206,50 @@ export function projectSimulationLedger(
       }
     }
     else if (transaction.kind === "production-commitment") {
+      const destinationKey = simulationAccountKey(transaction.destinationAccount);
+      const destination =
+        mutableBalances.get(destinationKey)
+        ?? emptyBalance(
+          transaction.destinationAccount,
+          names.get(transaction.destinationAccount.typeId)
+            ?? `Type ${transaction.destinationAccount.typeId}`,
+          volumes.get(transaction.destinationAccount.typeId) ?? 0,
+        );
       switch (transaction.source) {
       case "production":
         balance.availableFromProduction += transaction.quantity;
+        if (destinationKey !== key) destination.availableFromProduction += transaction.quantity;
         break;
       case "copying":
         balance.availableFromCopying += transaction.quantity;
+        if (destinationKey !== key) destination.availableFromCopying += transaction.quantity;
         break;
       case "invention":
         balance.availableFromInvention += transaction.quantity;
+        if (destinationKey !== key) destination.availableFromInvention += transaction.quantity;
         break;
       }
+      if (destinationKey !== key) balance.transferredOut += transaction.quantity;
+      mutableBalances.set(destinationKey, destination);
     }
     else if (transaction.kind === "reprocessing-output") {
       balance.availableFromReprocessing += transaction.quantity;
+      if (transaction.destinationAccount) {
+        const destinationKey = simulationAccountKey(transaction.destinationAccount);
+        if (destinationKey !== key) {
+          const destination =
+            mutableBalances.get(destinationKey)
+            ?? emptyBalance(
+              transaction.destinationAccount,
+              names.get(transaction.destinationAccount.typeId)
+                ?? `Type ${transaction.destinationAccount.typeId}`,
+              volumes.get(transaction.destinationAccount.typeId) ?? 0,
+            );
+          destination.availableFromReprocessing += transaction.quantity;
+          balance.transferredOut += transaction.quantity;
+          mutableBalances.set(destinationKey, destination);
+        }
+      }
     }
     else {
       // These retain provenance; material supply is projected by the paired reservation.
@@ -267,7 +299,7 @@ export function projectSimulationLedger(
           physicalAvailable - balance.reservedNow - balance.reservedAfterHauling,
         ),
         unsatisfied: Math.max(0, balance.required - nonPurchaseSupply),
-        surplus: Math.max(0, nonPurchaseSupply - balance.required),
+        surplus: Math.max(0, nonPurchaseSupply - balance.required - balance.transferredOut),
       });
       if (finalized.reservedNow > finalized.availableNow) {
         invariantViolations.push(`Account ${key} reserved more local stock than was available.`);

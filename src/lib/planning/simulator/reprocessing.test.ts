@@ -10,7 +10,6 @@ import type { SimulatorInventory } from "./sourceLots";
 import type { SimulatorRequestV1 } from "./types";
 
 const materialAccount: SimulationLedgerAccount = {
-  stockpileId: "main",
   activity: "manufacturing",
   locationId: 20,
   typeId: 34,

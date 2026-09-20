@@ -89,6 +89,54 @@ void test("produces identical facts for equivalent input permutations", async ()
   assert.deepEqual(first.ledgers, second.ledgers);
 });
 
+void test("uses one manufacturing ledger for stockpiles sharing a facility", async () => {
+  const sharedLocations = {
+    stock: 10,
+    manufacturing: 20,
+    reactions: 30,
+    reprocessing: 40,
+    copying: 50,
+    invention: 60,
+  };
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "alpha",
+        name: "Alpha",
+        locations: sharedLocations,
+        items: [{ typeId: 587, quantity: 1, me: 0, te: 0, fromCompression: false }],
+      },
+      {
+        id: "beta",
+        name: "Beta",
+        locations: sharedLocations,
+        items: [{ typeId: 587, quantity: 1, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [],
+    settings: {
+      includeCorporationAssets: true,
+      personalSellOrdersAsStock: false,
+      allCorporationSellOrdersAsStock: false,
+      myCorporationSellOrdersAsStock: false,
+      buildBlacklist: [],
+      buyBlacklist: [],
+    },
+    simulation: { version: 1 },
+  });
+  const result = await simulateIndustry(request);
+  const manufacturingLedgers = result.ledgers.filter(
+    (ledger) => ledger.activity === "manufacturing" && ledger.locationId === 20,
+  );
+  assert.equal(manufacturingLedgers.length, 1);
+  assert.equal(manufacturingLedgers[0].ledgerId, "manufacturing:20");
+  assert.ok(
+    manufacturingLedgers[0].balances.some(
+      (balance) => new Set(balance.demandSources.map((source) => source.stockpileId)).size === 2,
+    ),
+  );
+});
+
 void test("does not expose haul-excluded remote stock to destination demand", async () => {
   const request = parseSimulatorRequest({
     stockpiles: [

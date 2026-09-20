@@ -53,17 +53,20 @@ function locationName(locationNamesById: ReadonlyMap<number, string>, locationId
   return locationNamesById.get(locationId) ?? `Location ${locationId}`;
 }
 
-/** Groups direct simulator material balances by their activity location. */
-function balancesByLocation(
-  balances: readonly SimulationMaterialBalance[],
-): Array<[number, SimulationMaterialBalance[]]> {
-  const grouped = new Map<number, SimulationMaterialBalance[]>();
-  for (const balance of balances) {
-    const current = grouped.get(balance.locationId) ?? [];
-    current.push(balance);
-    grouped.set(balance.locationId, current);
-  }
-  return [...grouped.entries()].sort(([left], [right]) => left - right);
+/** Formats a ledger activity for the operational result heading. */
+function activityName(activity: SimulationResultV1["ledgers"][number]["activity"]): string {
+  return activity[0].toUpperCase() + activity.slice(1);
+}
+
+/** Returns named stockpiles that contributed demand to an aggregate ledger balance. */
+function demandStockpiles(
+  balance: SimulationMaterialBalance,
+  stockpileNamesById: ReadonlyMap<string, string>,
+): string {
+  const stockpiles = [...new Set(balance.demandSources.map((source) => source.stockpileId))];
+  return stockpiles.length > 0
+    ? `Stockpiles: ${stockpiles.map((stockpileId) => stockpileNamesById.get(stockpileId) ?? stockpileId).join(", ")}`
+    : "Ledger balance";
 }
 
 /** Renders one native row with its type identity and simulator-owned operational facts. */
@@ -95,12 +98,14 @@ function NativeRow({
   );
 }
 
-/** Groups native rows by a physical activity location. */
-function LocationGroup({
+/** Renders one canonical ledger identified by activity and physical location. */
+function LedgerGroup({
+  activity,
   locationId,
   locationNamesById,
   children,
 }: {
+  activity: SimulationResultV1["ledgers"][number]["activity"];
   locationId: number;
   locationNamesById: ReadonlyMap<number, string>;
   children: ReactNode;
@@ -108,7 +113,7 @@ function LocationGroup({
   return (
     <section>
       <h3 className="border-b border-border py-3 text-sm font-medium uppercase">
-        {locationName(locationNamesById, locationId)}
+        {activityName(activity)} | {locationName(locationNamesById, locationId)}
       </h3>
       {children}
     </section>
@@ -120,14 +125,30 @@ export default function SimulatorResults({
   result,
   status,
   locationNamesById,
+  stockpileNamesById,
 }: {
   result: SimulationResultV1 | null;
   status: string;
   locationNamesById: ReadonlyMap<number, string>;
+  stockpileNamesById: ReadonlyMap<string, string>;
 }) {
   const [activeTab, setActiveTab] = useState<SimulatorTab>("plan");
-  const balancesByActivityLocation = useMemo(
-    () => (result ? balancesByLocation(result.lists.planItems) : []),
+  const ledgers = useMemo(
+    () =>
+      result
+        ? result.ledgers
+            .map((ledger) => ({
+              ...ledger,
+              balances: ledger.balances.filter(
+                (balance) =>
+                  balance.required > 0
+                  || balance.unreserved > 0
+                  || balance.surplus > 0
+                  || balance.transferredOut > 0,
+              ),
+            }))
+            .filter((ledger) => ledger.balances.length > 0)
+        : [],
     [result],
   );
   const statusIsError = status.startsWith("Error:");
@@ -177,6 +198,7 @@ export default function SimulatorResults({
                     : activeTab === "skills"
                       ? result.lists.skillsRequired
                       : warnings;
+  const hasRows = activeTab === "plan" ? ledgers.length > 0 : currentRows.length > 0;
 
   return (
     <section className="flex min-w-0 flex-col gap-4">
@@ -202,7 +224,7 @@ export default function SimulatorResults({
           ))}
         </TabsList>
         <TabsContent value={activeTab} className="pt-3">
-          {currentRows.length === 0 ? (
+          {!hasRows ? (
             <Empty>
               <strong>
                 Nothing to {tabs.find((tab) => tab.value === activeTab)?.label.toLowerCase()}
@@ -210,18 +232,19 @@ export default function SimulatorResults({
             </Empty>
           ) : activeTab === "plan" ? (
             <div className="flex flex-col gap-4">
-              {balancesByActivityLocation.map(([locationId, balances]) => (
-                <LocationGroup
-                  key={locationId}
-                  locationId={locationId}
+              {ledgers.map((ledger) => (
+                <LedgerGroup
+                  key={ledger.ledgerId}
+                  activity={ledger.activity}
+                  locationId={ledger.locationId}
                   locationNamesById={locationNamesById}
                 >
-                  {balances.map((balance) => (
+                  {ledger.balances.map((balance) => (
                     <NativeRow
-                      key={`${balance.stockpileId}:${balance.typeId}`}
+                      key={`${ledger.ledgerId}:${balance.typeId}`}
                       typeId={balance.typeId}
                       name={balance.typeName}
-                      subline={`Stockpile ${balance.stockpileId}`}
+                      subline={demandStockpiles(balance, stockpileNamesById)}
                       summary={
                         <div className="flex gap-3">
                           <span>
@@ -233,14 +256,19 @@ export default function SimulatorResults({
                             {quantity(balance.required)}
                           </span>
                           <span>
-                            <span className="mr-1 text-muted-foreground">Buy</span>
-                            {quantity(balance.unsatisfied)}
+                            <span className="mr-1 text-muted-foreground">Upstream</span>
+                            {quantity(
+                              balance.availableFromProduction
+                                + balance.availableFromCopying
+                                + balance.availableFromInvention
+                                + balance.availableFromReprocessing,
+                            )}
                           </span>
                         </div>
                       }
                     />
                   ))}
-                </LocationGroup>
+                </LedgerGroup>
               ))}
             </div>
           ) : activeTab === "buy" ? (

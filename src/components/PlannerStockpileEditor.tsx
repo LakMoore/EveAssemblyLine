@@ -209,7 +209,6 @@ type PlannerStockpileDialogProps = {
 type PlannerStockpileDetailsDialogProps = PlannerStockpileDialogProps & {
   activityLocations: ActivityLocationOption[];
   stockLocations: StockLocationOption[];
-  excludedStockLocationIds: number[];
   productionGroups: ProductionGroupOption[];
   onAutoAssign: (stockpile: ClientPlanStockpile) => Partial<Record<ProductionGroupKey, number>>;
 };
@@ -275,7 +274,6 @@ function StockpileDetailsContent({
   draft,
   activityLocations,
   stockLocations,
-  excludedStockLocationIds,
   productionGroups,
   error,
   onChange,
@@ -283,7 +281,6 @@ function StockpileDetailsContent({
   draft: ClientPlanStockpile;
   activityLocations: ActivityLocationOption[];
   stockLocations: StockLocationOption[];
-  excludedStockLocationIds: number[];
   productionGroups: ProductionGroupOption[];
   error: string;
   onChange: (stockpile: ClientPlanStockpile) => void;
@@ -325,12 +322,7 @@ function StockpileDetailsContent({
           </span>
           <LocationCombobox
             label="Stockpile location (end destination)"
-            options={stockLocations.map((location) => ({
-              ...location,
-              disabled:
-                excludedStockLocationIds.includes(location.locationId)
-                && location.locationId !== draft.locations.stock,
-            }))}
+            options={stockLocations}
             selected={stockLocations.find(
               (location) => location.locationId === draft.locations.stock,
             )}
@@ -740,7 +732,6 @@ export function PlannerStockpileDetailsDialog({
   open,
   activityLocations,
   stockLocations,
-  excludedStockLocationIds,
   productionGroups,
   onAutoAssign,
   onOpenChange,
@@ -766,7 +757,6 @@ export function PlannerStockpileDetailsDialog({
       draft={draft}
       activityLocations={activityLocations}
       stockLocations={stockLocations}
-      excludedStockLocationIds={excludedStockLocationIds}
       productionGroups={productionGroups}
       error={error}
       onChange={setDraft}

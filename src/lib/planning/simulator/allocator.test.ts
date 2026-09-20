@@ -5,7 +5,6 @@ import type { SimulationLedgerAccount } from "./ledger";
 import type { SimulatorInventory } from "./sourceLots";
 
 const account: SimulationLedgerAccount = {
-  stockpileId: "main",
   activity: "manufacturing",
   locationId: 20,
   typeId: 34,

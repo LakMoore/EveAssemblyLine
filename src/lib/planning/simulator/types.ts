@@ -71,12 +71,11 @@ export interface SimulationDemandSource {
   demandingJobId?: string;
 }
 
-/** Presentation-ready balance for one type in one stockpile/location ledger. */
+/** Presentation-ready balance for one type in one activity/location ledger. */
 export interface SimulationMaterialBalance {
   typeId: number;
   typeName: string;
   unitVolume: number;
-  stockpileId: string;
   locationId: number;
   required: number;
   availableNow: number;
@@ -85,6 +84,7 @@ export interface SimulationMaterialBalance {
   availableFromCopying: number;
   availableFromInvention: number;
   availableFromReprocessing: number;
+  transferredOut: number;
   reservedNow: number;
   reservedAfterHauling: number;
   unreserved: number;

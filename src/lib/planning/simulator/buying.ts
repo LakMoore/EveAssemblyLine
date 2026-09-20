@@ -41,7 +41,7 @@ function aggregateMaterialPurchases(
     };
     existing.quantity += demand.quantity;
     existing.destinations.push({
-      stockpileId: demand.account.stockpileId,
+      stockpileId: demand.source.stockpileId,
       locationId: demand.account.locationId,
       quantity: demand.quantity,
       demandingJobId: demand.source.demandingJobId,

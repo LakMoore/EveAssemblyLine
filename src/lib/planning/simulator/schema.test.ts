@@ -56,6 +56,16 @@ void test("rejects conflicting build and buy policies", () => {
   assert.match(parsed.error.issues[0].message, /both build and buy/);
 });
 
+void test("accepts stockpiles that share a physical activity location", () => {
+  const input = request();
+  input.stockpiles.push({
+    ...input.stockpiles[0],
+    id: "shared-facility",
+    name: "Shared facility",
+  });
+  assert.equal(simulatorRequestSchema.safeParse(input).success, true);
+});
+
 void test("accepts unlimited BPO runs and rejects negative BPC runs", () => {
   const bpoInput = request();
   bpoInput.assets = [

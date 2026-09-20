@@ -175,7 +175,6 @@ class IndustryDemandSimulation {
       for (const item of items) {
         const isReprocessingInput = isSimulatorReprocessingType(this.context, item.typeId);
         const account: SimulationLedgerAccount = {
-          stockpileId: stockpile.id,
           activity: isReprocessingInput ? "reprocessing" : "market",
           locationId: isReprocessingInput
             ? stockpile.locations.reprocessing
@@ -195,6 +194,8 @@ class IndustryDemandSimulation {
           item.quantity,
           account.locationId,
           account,
+          undefined,
+          stockpile.id,
         );
         const remaining = item.quantity - existing.local - existing.remote - existing.future;
         if (remaining > 0) {
@@ -269,8 +270,12 @@ class IndustryDemandSimulation {
 
     const profile = this.activityProfile(stockpile, productTypeId, production.activity);
     const requiredRuns = Math.ceil(quantity / details.product.quantity);
+    const outputAccount: SimulationLedgerAccount = {
+      activity: production.activity,
+      locationId: profile.locationId,
+      typeId: productTypeId,
+    };
     const blueprintAccount: SimulationLedgerAccount = {
-      stockpileId: stockpile.id,
       activity: production.activity,
       locationId: profile.locationId,
       typeId: production.blueprint._key,
@@ -337,7 +342,8 @@ class IndustryDemandSimulation {
       this.transactions.push({
         id: this.nextId("production"),
         kind: "production-commitment",
-        account: destinationAccount,
+        account: outputAccount,
+        destinationAccount,
         quantity: outputQuantity,
         source: "production",
         producingJobId: jobId,
@@ -382,7 +388,6 @@ class IndustryDemandSimulation {
     const materialSpecifications: MaterialSpecification[] = (details.activity.materials ?? []).map(
       (material) => {
         const account: SimulationLedgerAccount = {
-          stockpileId: stockpile.id,
           activity,
           locationId: profile.locationId,
           typeId: material.typeID,
@@ -653,7 +658,6 @@ class IndustryDemandSimulation {
     );
 
     const sourceBlueprintAccount: SimulationLedgerAccount = {
-      stockpileId: shortage.stockpile.id,
       activity: "invention",
       locationId: inventionLocationId,
       typeId: sourceBlueprint._key,
@@ -702,7 +706,11 @@ class IndustryDemandSimulation {
       id: this.nextId("invention-output"),
       kind: "production-commitment",
       account: {
-        stockpileId: shortage.stockpile.id,
+        activity: "invention",
+        locationId: inventionLocationId,
+        typeId: shortage.outputBlueprintTypeId,
+      },
+      destinationAccount: {
         activity: "manufacturing",
         locationId: shortage.manufacturingLocationId,
         typeId: shortage.outputBlueprintTypeId,
@@ -738,7 +746,6 @@ class IndustryDemandSimulation {
       this.sequence,
     );
     const blueprintAccount: SimulationLedgerAccount = {
-      stockpileId: shortage.stockpile.id,
       activity: "copying",
       locationId,
       typeId: sourceBlueprint._key,
@@ -802,7 +809,8 @@ class IndustryDemandSimulation {
     this.transactions.push({
       id: this.nextId("copy-output"),
       kind: "production-commitment",
-      account: outputAccount,
+      account: blueprintAccount,
+      destinationAccount: outputAccount,
       quantity: totalLicensedRuns,
       source: "copying",
       producingJobId: jobId,
@@ -821,7 +829,6 @@ class IndustryDemandSimulation {
     demandingQuantity: number,
   ): SimulationJobInput {
     const account: SimulationLedgerAccount = {
-      stockpileId: stockpile.id,
       activity,
       locationId,
       typeId,

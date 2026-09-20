@@ -1050,19 +1050,6 @@ function Planner() {
   }
 
   function saveStockpile(stockpile: ClientPlanStockpile): boolean {
-    const duplicate = stockpiles.some(
-      (existing) =>
-        existing.id !== stockpile.id
-        && existing.locations.stock === stockpile.locations.stock
-        && existing.locations.manufacturing === stockpile.locations.manufacturing,
-    );
-    if (duplicate) {
-      toast.add({
-        description: "A stockpile already uses this stock destination and build location.",
-        type: "error",
-      });
-      return false;
-    }
     const nextStockpiles = stockpiles.some((existing) => existing.id === stockpile.id)
       ? stockpiles.map((existing) => (existing.id === stockpile.id ? stockpile : existing))
       : [...stockpiles, stockpile];
@@ -1546,7 +1533,6 @@ function Planner() {
         open={stockpileEditorMode === "details"}
         activityLocations={activityLocationOptions}
         stockLocations={stockLocationOptions}
-        excludedStockLocationIds={stockpiles.map((stockpile) => stockpile.locations.stock)}
         productionGroups={productionGroupOptions}
         onAutoAssign={autoAssignGroupFacilities}
         onOpenChange={(open) => !open && closeStockpileEditor()}
@@ -2131,6 +2117,9 @@ function Planner() {
           result={simulationResult}
           status={planStatus}
           locationNamesById={plannerLocationNames}
+          stockpileNamesById={
+            new Map(stockpiles.map((stockpile) => [stockpile.id, stockpile.name]))
+          }
         />
       )}
     </>
