@@ -1,109 +1,96 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isPlanResponse } from "./planResultStore";
+import { isPlanResponse, isSimulationResultV1 } from "./planResultStore";
 
-const planListNames = [
+const listNames = [
+  "warnings",
   "planItems",
+  "haulingTasks",
   "materialsToBuy",
-  "bpcToCopy",
   "bpoToBuy",
+  "reprocessingJobs",
+  "bpcToCopy",
   "inventionJobs",
   "reactionJobs",
   "manufacturingJobs",
-  "reprocessingJobs",
   "skillsRequired",
-  "haulingTasks",
 ] as const;
 
-void test("accepts a complete cached plan", () => {
-  const plan = {
-    metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
-    lists: {
-      ...Object.fromEntries(planListNames.map((name) => [name, []])),
-      planItems: { all: [], byActivityLocation: [] },
+function simulationResult() {
+  return {
+    metadata: {
+      simulatorVersion: 1,
+      generatedAt: "2026-09-19T00:00:00.000Z",
+      normalizedInputHash: "result-hash",
     },
+    lists: Object.fromEntries(listNames.map((name) => [name, []])),
   };
+}
 
-  assert.equal(isPlanResponse(plan), true);
+void test("accepts a complete cached native simulation result", () => {
+  assert.equal(isSimulationResultV1(simulationResult()), true);
 });
 
-void test("rejects a cached plan with a missing output list", () => {
-  const plan = {
-    metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
-    lists: Object.fromEntries(planListNames.slice(0, -1).map((name) => [name, []])),
-  };
-
-  assert.equal(isPlanResponse(plan), false);
-});
-
-void test("rejects legacy context output buckets", () => {
-  const plan = {
-    metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
-    lists: {
-      ...Object.fromEntries(planListNames.map((name) => [name, []])),
-      planItems: {
-        all: [{ context: { stockpileId: "stockpile" } }],
-        byActivityLocation: [],
+void test("accepts a complete cached legacy plan response", () => {
+  assert.equal(
+    isPlanResponse({
+      metadata: { generatedAt: "2026-09-19T00:00:00.000Z" },
+      lists: {
+        planItems: { all: [], byActivityLocation: [] },
+        materialsToBuy: [],
+        bpcToCopy: [],
+        bpoToBuy: [],
+        inventionJobs: [],
+        reactionJobs: [],
+        manufacturingJobs: [],
+        reprocessingJobs: [],
+        skillsRequired: [],
+        haulingTasks: [],
       },
-    },
-  };
-
-  assert.equal(isPlanResponse(plan), false);
+    }),
+    true,
+  );
 });
 
-void test("rejects haul buckets with legacy context", () => {
-  const plan = {
-    metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
-    lists: {
-      ...Object.fromEntries(planListNames.map((name) => [name, []])),
-      haulingTasks: [{ fromLocationId: 1, toLocationId: 2, context: {}, items: [] }],
-    },
-  };
-
-  assert.equal(isPlanResponse(plan), false);
+void test("rejects a cached legacy planner response", () => {
+  assert.equal(
+    isSimulationResultV1({
+      metadata: { generatedAt: "2026-09-19T00:00:00.000Z" },
+      lists: { planItems: { all: [], byActivityLocation: [] } },
+    }),
+    false,
+  );
 });
 
-void test("accepts bucketed market purchase lists", () => {
-  const plan = {
-    metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
-    lists: {
-      ...Object.fromEntries(planListNames.map((name) => [name, []])),
-      planItems: { all: [], byActivityLocation: [] },
-      materialsToBuy: [
-        {
-          assemblyLineGroup: "Materials",
-          items: [
-            {
-              typeId: 34,
-              typeName: "Tritanium",
-              unitVolume: 0.01,
-              neededQuantity: 100,
-            },
-          ],
-        },
-      ],
-    },
-  };
-
-  assert.equal(isPlanResponse(plan), true);
+void test("rejects cached plan items without the required result arrays", () => {
+  assert.equal(
+    isPlanResponse({
+      metadata: { generatedAt: "2026-09-19T00:00:00.000Z" },
+      lists: {
+        planItems: { all: {} },
+        materialsToBuy: [],
+        bpcToCopy: [],
+        bpoToBuy: [],
+        inventionJobs: [],
+        reactionJobs: [],
+        manufacturingJobs: [],
+        reprocessingJobs: [],
+        skillsRequired: [],
+        haulingTasks: [],
+      },
+    }),
+    false,
+  );
 });
 
-void test("rejects flat market purchase rows", () => {
-  const plan = {
-    metadata: { generatedAt: "2026-09-06T00:00:00.000Z" },
-    lists: {
-      ...Object.fromEntries(planListNames.map((name) => [name, []])),
-      planItems: { all: [], byActivityLocation: [] },
-      materialsToBuy: [
-        {
-          typeId: 34,
-          typeName: "Tritanium",
-          unitVolume: 0.01,
-          neededQuantity: 100,
-        },
-      ],
-    },
-  };
+void test("rejects a native result with a missing list", () => {
+  const result = simulationResult();
+  delete (result.lists as Record<string, unknown>).haulingTasks;
+  assert.equal(isSimulationResultV1(result), false);
+});
 
-  assert.equal(isPlanResponse(plan), false);
+void test("rejects cached simulator rows missing display identity", () => {
+  const result = simulationResult();
+  (result.lists as Record<string, unknown>).planItems = [{ typeId: 34 }];
+  assert.equal(isSimulationResultV1(result), false);
 });

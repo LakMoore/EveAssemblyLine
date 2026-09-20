@@ -1,6 +1,6 @@
 "use client";
 
-import { type ChangeEvent, FormEvent, type RefObject, useEffect, useRef, useState } from "react";
+import { type ChangeEvent, type RefObject, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import type {
@@ -40,11 +40,16 @@ import {
   type ClientCorporationSource,
   type ClientJobsResponse,
 } from "@/lib/client/requestCache";
-import { loadPlanResponse, savePlanResponse } from "@/lib/planning/planResultStore";
 import {
+  loadPlanResponse,
+  loadSimulationResult,
+  savePlanResponse,
+  saveSimulationResult,
+} from "@/lib/planning/planResultStore";
+import {
+  applyHaulItemExclusionsToPlan,
   createHaulItemExclusionKey,
   parseHaulItemExclusionKey,
-  applyHaulItemExclusionsToPlan,
   toPlanHaulExclusions,
   type HaulItemExclusion,
 } from "@/lib/planning/planView";
@@ -71,6 +76,7 @@ import { fetchTypeMetadata } from "@/lib/reference/types";
 import { useAppLanguage } from "../AppShell";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import PlannerResults from "@/components/PlannerResults";
+import SimulatorResults from "@/components/SimulatorResults";
 import CalculateButton from "@/components/CalculateButton";
 import TypeSearch from "@/components/TypeSearch";
 import { toast } from "@/components/ui/toast";
@@ -138,6 +144,7 @@ import {
 import type { FacilityGroupBonus } from "@/lib/planning/facilityBonuses";
 import type { ProductionGroupKey, ProductionGroupReference } from "@/lib/planning/productionGroups";
 import { fetchProductionGroups } from "@/lib/reference/productionGroups";
+import type { SimulationResultV1 } from "@/lib/planning/simulator/types";
 
 type StockpileEditorMode = "details" | "items";
 type PlanRunMode = "calculate" | "simulate";
@@ -400,13 +407,15 @@ function Planner() {
   const buildListHeaderRef = useRef<HTMLDivElement>(null);
   const { language } = useAppLanguage();
   const [isBuildListLoaded, setIsBuildListLoaded] = useState(false);
-  const [planStatus, setPlanStatus] = useState("Ready to calculate");
+  const [planStatus, setPlanStatus] = useState("Ready to calculate or simulate");
   const [isPlanLoading, setIsPlanLoading] = useState(false);
   const [activePlanRun, setActivePlanRun] = useState<PlanRunMode | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
   const [isExcludedLocationsModalOpen, setIsExcludedLocationsModalOpen] = useState(false);
   const [plan, setPlan] = useState<PlanResponse | null>(null);
+  const [simulationResult, setSimulationResult] = useState<SimulationResultV1 | null>(null);
+  const [displayedResult, setDisplayedResult] = useState<PlanRunMode | null>(null);
   const [isDeleteAllDialogOpen, setIsDeleteAllDialogOpen] = useState(false);
   const [isClearExcludedLocationsDialogOpen, setIsClearExcludedLocationsDialogOpen] =
     useState(false);
@@ -454,12 +463,24 @@ function Planner() {
 
   useEffect(() => {
     void Promise
-      .all([loadPlanResponse(), loadHaulItemExclusions()])
-      .then(([savedPlan, savedExclusions]) => {
+      .all([loadPlanResponse(), loadSimulationResult(), loadHaulItemExclusions()])
+      .then(([savedPlan, savedSimulation, savedExclusions]) => {
         setHaulItemExclusion(savedExclusions);
-        if (savedPlan) {
-          setPlan(applyHaulItemExclusionsToPlan(savedPlan, savedExclusions));
+        if (savedPlan) setPlan(applyHaulItemExclusionsToPlan(savedPlan, savedExclusions));
+        if (savedSimulation) setSimulationResult(savedSimulation);
+        if (
+          savedPlan
+          && (
+            !savedSimulation
+            || savedPlan.metadata.generatedAt >= savedSimulation.metadata.generatedAt
+          )
+        ) {
+          setDisplayedResult("calculate");
           setPlanStatus("Plan loaded from this browser");
+        }
+        else if (savedSimulation) {
+          setDisplayedResult("simulate");
+          setPlanStatus("Simulation loaded from this browser");
         }
       });
   }, []);
@@ -756,6 +777,7 @@ function Planner() {
     flushSync(() => {
       setIsPlanLoading(true);
       setActivePlanRun(mode);
+      setDisplayedResult(mode);
       setPlanStatus(mode === "simulate" ? "Simulating..." : "Calculating...");
     });
     await waitForNextPaint();
@@ -789,7 +811,7 @@ function Planner() {
       );
       const planningSkills = planningCharacter?.skills?.body ?? undefined;
       const response = await fetch(
-        mode === "simulate" ? "/api/plan/simulate?format=plan-response" : "/api/plan",
+        mode === "simulate" ? "/api/plan/simulate" : "/api/plan",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -850,37 +872,54 @@ function Planner() {
           }),
         },
       );
-      const data = (await response.json()) as PlanResponse | { error?: string };
+      const data = (await response.json()) as
+        | PlanResponse
+        | SimulationResultV1
+        | { error?: string };
       if (!response.ok) {
-        const fallbackError =
-          mode === "simulate" ? "Could not simulate plan" : "Could not calculate plan";
-        setPlanStatus("error" in data && data.error ? data.error : fallbackError);
+        setPlanStatus(
+          `Error: ${
+            "error" in data && data.error
+              ? data.error
+              : mode === "simulate"
+                ? "Could not simulate plan"
+                : "Could not calculate plan"
+          }`,
+        );
         return false;
       }
-      const calculatedPlan = applyHaulItemExclusionsToPlan(data as PlanResponse, itemExclusions);
-      await savePlanResponse(calculatedPlan);
+      if (mode === "simulate") {
+        const nextSimulationResult = data as SimulationResultV1;
+        await saveSimulationResult(nextSimulationResult);
+        flushSync(() => {
+          setSimulationResult(nextSimulationResult);
+          setDisplayedResult("simulate");
+        });
+      }
+      else {
+        const calculatedPlan = applyHaulItemExclusionsToPlan(data as PlanResponse, itemExclusions);
+        await savePlanResponse(calculatedPlan);
+        flushSync(() => {
+          setPlan(calculatedPlan);
+          setDisplayedResult("calculate");
+        });
+      }
       flushSync(() => {
         setHaulItemExclusion(new Map(itemExclusions));
         setHaulPatches(new Map(patches));
-        setPlan(calculatedPlan);
       });
       await savePlannerLocations(locations);
       setPlanStatus(mode === "simulate" ? "Simulation updated just now" : "Plan updated just now");
       return true;
     }
     catch {
-      setPlanStatus("Could not reach the planning service");
+      setPlanStatus("Error: Could not reach the planning service");
       return false;
     }
     finally {
       setIsPlanLoading(false);
       setActivePlanRun(null);
     }
-  }
-
-  async function calculatePlan(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    await submitPlan(new Set(excludedLocationIds));
   }
 
   async function excludeHaulStockpile(fromLocationId: number) {
@@ -1521,7 +1560,13 @@ function Planner() {
         onOpenChange={(open) => !open && closeStockpileEditor()}
         onSave={saveStockpile}
       />
-      <form className="hidden" onSubmit={calculatePlan}>
+      <form
+        className="hidden"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submitPlan(new Set(excludedLocationIds));
+        }}
+      >
         <div className={styles.workspaceGrid}>
           <div className={styles.panel}>
             <div className={styles.panelHeader}>
@@ -1942,14 +1987,6 @@ function Planner() {
                 </div>
               </div>
             </div>
-            <CalculateButton
-              type="submit"
-              disabled={isPlanLoading || items.length === 0}
-              icon={ClipboardList}
-              isLoading={isPlanLoading}
-              label="Calculate production plan"
-              loadingLabel="Calculating..."
-            />
           </div>
         </div>
       </form>
@@ -2057,37 +2094,45 @@ function Planner() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <PlannerResults
-        language={language}
-        plan={plan}
-        planStatus={planStatus}
-        characterStatuses={characterStatuses}
-        characterNamesById={characterNamesById}
-        slotCharacterNamesById={activeCharacterNamesById}
-        corporationNamesById={corporationNamesById}
-        jobs={jobs}
-        stock={stock}
-        marketBuyOrderQuantities={clientAssets?.marketBuyOrderQuantities}
-        locations={locations}
-        stockpiles={stockpiles}
-        stockpileLocations={stockpileLocations}
-        locationOptions={locationOptions}
-        onAddBuildItem={(item) =>
-          importItems([
-            {
-              ...item,
-              categoryName: "Reaction Formula",
-              iconCategory: "reactionformula",
-            },
-          ])
-        }
-        onExcludeHaulStockpile={excludeHaulStockpile}
-        haulItemExclusion={haulItemExclusion}
-        onToggleHaulItemExclusion={toggleHaulItemExclusion}
-        onToggleHaulItemExclusions={toggleHaulItemExclusions}
-        haulPatches={activeHaulPatches}
-        onToggleHaulPatches={toggleHaulPatches}
-      />
+      {displayedResult === "calculate" ? (
+        <PlannerResults
+          language={language}
+          plan={plan}
+          planStatus={planStatus}
+          characterStatuses={characterStatuses}
+          characterNamesById={characterNamesById}
+          slotCharacterNamesById={activeCharacterNamesById}
+          corporationNamesById={corporationNamesById}
+          jobs={jobs}
+          stock={stock}
+          marketBuyOrderQuantities={clientAssets?.marketBuyOrderQuantities}
+          locations={locations}
+          stockpiles={stockpiles}
+          stockpileLocations={stockpileLocations}
+          locationOptions={locationOptions}
+          onAddBuildItem={(item) =>
+            importItems([
+              {
+                ...item,
+                categoryName: "Reaction Formula",
+                iconCategory: "reactionformula",
+              },
+            ])
+          }
+          onExcludeHaulStockpile={excludeHaulStockpile}
+          haulItemExclusion={haulItemExclusion}
+          onToggleHaulItemExclusion={toggleHaulItemExclusion}
+          onToggleHaulItemExclusions={toggleHaulItemExclusions}
+          haulPatches={activeHaulPatches}
+          onToggleHaulPatches={toggleHaulPatches}
+        />
+      ) : (
+        <SimulatorResults
+          result={simulationResult}
+          status={planStatus}
+          locationNamesById={plannerLocationNames}
+        />
+      )}
     </>
   );
 }

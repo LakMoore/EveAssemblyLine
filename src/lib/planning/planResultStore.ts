@@ -1,178 +1,86 @@
+import type { SimulationResultV1 } from "./simulator/types";
 import type { PlanResponse } from "./types";
 import { getPlanningDatabase, plannerPreferencesStoreName } from "./planningDatabase";
 
 const planResponseKey = "latest-plan-response";
+const simulationResultKey = "latest-simulation-result-v1";
 
+/** Narrows unknown persisted JSON-like values to plain record values. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Narrows a persisted quantity to a non-negative finite number. */
+function isQuantity(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+/** Narrows a persisted EVE ID to a positive safe integer. */
+function isPositiveInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) > 0;
+}
+
+/** Confirms the shared type identity fields used by result rows. */
+function hasTypeIdentity(value: unknown): value is Record<string, unknown> {
+  return isRecord(value) && isPositiveInteger(value.typeId) && typeof value.typeName === "string";
+}
+
+/** Narrows archived legacy planner payloads for the admin replay screen only. */
 export function isPlanResponse(value: unknown): value is PlanResponse {
-  if (!value || typeof value !== "object") return false;
-  const result = value as Record<string, unknown>;
-  if (
-    typeof result.metadata !== "object"
-    || result.metadata === null
-    || typeof (result.metadata as Record<string, unknown>).generatedAt !== "string"
-    || typeof result.lists !== "object"
-    || result.lists === null
-  ) return false;
-  const lists = result.lists as Record<string, unknown>;
-  const hasAllLists =
-    [
-      "materialsToBuy",
-      "bpcToCopy",
-      "bpoToBuy",
-      "inventionJobs",
-      "reactionJobs",
-      "manufacturingJobs",
-      "reprocessingJobs",
-      "skillsRequired",
-      "haulingTasks",
-    ].every((key) => Array.isArray(lists[key])) && lists.planItems !== undefined;
-  if (!hasAllLists) return false;
-  const internalContextKeys = [
-    "context",
-    "stockpileId",
-    "stockpileName",
-    "buildLocationId",
-    "stockLocationId",
-    "activityLocationId",
-  ];
-  const validLocationBuckets = (value: unknown) =>
-    Array.isArray(value)
-    && value.every((entry) => {
-      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
-      const bucket = entry as Record<string, unknown>;
-      return (
-        (bucket.locationId === undefined || Number.isInteger(bucket.locationId))
+  if (!isRecord(value) || !isRecord(value.metadata) || !isRecord(value.lists)) return false;
+  const metadata = value.metadata;
+  const lists = value.lists;
+  const hasLocationBuckets = (buckets: unknown) =>
+    Array.isArray(buckets)
+    && buckets.every(
+      (bucket) =>
+        isRecord(bucket)
+        && (bucket.locationId === undefined || isPositiveInteger(bucket.locationId))
         && Array.isArray(bucket.items)
-        && !internalContextKeys.some((key) => key in bucket)
-        && bucket.items.every(
-          (item) =>
-            item
-            && typeof item === "object"
-            && !Array.isArray(item)
-            && !internalContextKeys.some((key) => key in (item as Record<string, unknown>)),
-        )
-      );
-    });
-  const validBucketLists = [
-    lists.bpcToCopy,
-    lists.inventionJobs,
-    lists.reactionJobs,
-    lists.manufacturingJobs,
-    lists.reprocessingJobs,
-  ].every(validLocationBuckets);
-  const validDemandSources = (value: unknown) =>
-    value === undefined
-    || (
-      Array.isArray(value)
-      && value.every((source) => {
-        if (!source || typeof source !== "object" || Array.isArray(source)) return false;
-        const demandSource = source as Record<string, unknown>;
-        return (
-          Number.isSafeInteger(demandSource.typeId)
-          && (demandSource.typeId as number) > 0
-          && Number.isSafeInteger(demandSource.quantity)
-          && (demandSource.quantity as number) >= 0
-          && Number.isSafeInteger(demandSource.inputQuantity)
-          && (demandSource.inputQuantity as number) >= 0
-        );
-      })
+        && bucket.items.every(isRecord),
     );
-  const validPlanItemsInLocationBuckets = (value: unknown) =>
-    validLocationBuckets(value)
-    && (value as Array<{ items: unknown[] }>).every((bucket) =>
-      bucket.items.every((item) =>
-        validDemandSources((item as Record<string, unknown>).demandSources),
-      ),
+  const planItems = lists.planItems;
+  const hasPlanItems =
+    isRecord(planItems)
+    && Array.isArray(planItems.all)
+    && planItems.all.every(hasTypeIdentity)
+    && hasLocationBuckets(planItems.byActivityLocation);
+  const hasPurchaseGroups = (groups: unknown) =>
+    Array.isArray(groups)
+    && groups.every(
+      (group) =>
+        isRecord(group)
+        && typeof group.assemblyLineGroup === "string"
+        && Array.isArray(group.items)
+        && group.items.every((item) => hasTypeIdentity(item) && isQuantity(item.neededQuantity)),
     );
-  const validPlanRows = (value: unknown) =>
-    Array.isArray(value)
-    && value.every(
-      (item: unknown) =>
-        item
-        && typeof item === "object"
-        && !Array.isArray(item)
-        && !internalContextKeys.some((key) => key in (item as Record<string, unknown>))
-        && validDemandSources((item as Record<string, unknown>).demandSources),
-    );
-  const validPlanItems =
-    lists.planItems
-    && typeof lists.planItems === "object"
-    && !Array.isArray(lists.planItems)
-    && validPlanRows((lists.planItems as Record<string, unknown>).all)
-    && validPlanItemsInLocationBuckets(
-      (lists.planItems as Record<string, unknown>).byActivityLocation,
-    );
-  if (!validBucketLists) return false;
-  const validMaterialItem = (entry: unknown) => {
-    if (!entry || typeof entry !== "object") return false;
-    const material = entry as Record<string, unknown>;
-    return (
-      Number.isInteger(material.typeId)
-      && typeof material.typeName === "string"
-      && Number.isFinite(material.unitVolume)
-      && Number.isFinite(material.neededQuantity)
-    );
-  };
-  const validMarketBuckets = (value: unknown[], validateItem: (entry: unknown) => boolean) =>
-    value.every((entry) => {
-      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
-      const bucket = entry as Record<string, unknown>;
-      return (
-        typeof bucket.assemblyLineGroup === "string"
+  const hasHaulBuckets =
+    Array.isArray(lists.haulingTasks)
+    && lists.haulingTasks.every(
+      (bucket) =>
+        isRecord(bucket)
+        && isPositiveInteger(bucket.fromLocationId)
+        && isPositiveInteger(bucket.toLocationId)
         && Array.isArray(bucket.items)
-        && bucket.items.every(validateItem)
-      );
-    });
-  const validMaterialRows = validMarketBuckets(
-    lists.materialsToBuy as unknown[],
-    validMaterialItem,
-  );
-  const validBpoItem = (entry: unknown) => {
-    if (!entry || typeof entry !== "object") return false;
-    const blueprint = entry as Record<string, unknown>;
-    return Number.isInteger(blueprint.bpoCount) && Number.isInteger(blueprint.bposInUse);
-  };
-  const validBpoRows = validMarketBuckets(
-    lists.bpoToBuy as unknown[],
-    (entry) => validMaterialItem(entry) && validBpoItem(entry),
-  );
-  const validBpcRows =
-    validLocationBuckets(lists.bpcToCopy)
-    && (lists.bpcToCopy as Array<{ items: unknown[] }>).every((bucket) =>
-      bucket.items.every((entry) => validMaterialItem(entry) && validBpoItem(entry)),
+        && bucket.items.every((item) => hasTypeIdentity(item) && isQuantity(item.neededQuantity)),
     );
-  const validHaulBuckets = (lists.haulingTasks as unknown[]).every((entry) => {
-    if (!entry || typeof entry !== "object") return false;
-    const bucket = entry as Record<string, unknown>;
-    if (
-      !Number.isInteger(bucket.fromLocationId)
-      || !Number.isInteger(bucket.toLocationId)
-      || !Array.isArray(bucket.items)
-      || (
-        bucket.ownerType !== undefined
-        && bucket.ownerType !== "character"
-        && bucket.ownerType !== "corporation"
-      )
-      || (bucket.ownerId !== undefined && !Number.isInteger(bucket.ownerId))
-      || "context" in bucket
-    ) return false;
-    return bucket.items.every((item) => {
-      if (!item || typeof item !== "object") return false;
-      const haulItem = item as Record<string, unknown>;
-      return (
-        Number.isInteger(haulItem.typeId)
-        && typeof haulItem.typeName === "string"
-        && Number.isFinite(haulItem.unitVolume)
-        && Number.isFinite(haulItem.neededQuantity)
-      );
-    });
-  });
   return (
-    Boolean(validPlanItems) && validMaterialRows && validBpoRows && validBpcRows && validHaulBuckets
+    typeof metadata.generatedAt === "string"
+    && hasPlanItems
+    && hasPurchaseGroups(lists.materialsToBuy)
+    && hasPurchaseGroups(lists.bpoToBuy)
+    && hasLocationBuckets(lists.bpcToCopy)
+    && hasLocationBuckets(lists.inventionJobs)
+    && hasLocationBuckets(lists.reactionJobs)
+    && hasLocationBuckets(lists.manufacturingJobs)
+    && hasLocationBuckets(lists.reprocessingJobs)
+    && Array.isArray(lists.skillsRequired)
+    && lists.skillsRequired.every(isRecord)
+    && hasHaulBuckets
   );
 }
 
-/** Loads the latest calculated planner result from IndexedDB. */
+/** Loads the most recent legacy calculation result from IndexedDB. */
 export async function loadPlanResponse(): Promise<PlanResponse | null> {
   try {
     const database = await getPlanningDatabase();
@@ -182,8 +90,7 @@ export async function loadPlanResponse(): Promise<PlanResponse | null> {
         .objectStore(plannerPreferencesStoreName)
         .get(planResponseKey);
       request.onsuccess = () => resolve(isPlanResponse(request.result) ? request.result : null);
-      request.onerror = () =>
-        reject(request.error ?? new Error("Could not load the latest plan result."));
+      request.onerror = () => reject(request.error ?? new Error("Could not load the latest plan."));
     });
   }
   catch {
@@ -191,7 +98,7 @@ export async function loadPlanResponse(): Promise<PlanResponse | null> {
   }
 }
 
-/** Saves the latest calculated planner result in the browser planning database. */
+/** Saves a legacy calculation result for browser-local restoration. */
 export async function savePlanResponse(plan: PlanResponse): Promise<void> {
   try {
     const database = await getPlanningDatabase();
@@ -200,7 +107,157 @@ export async function savePlanResponse(plan: PlanResponse): Promise<void> {
       transaction.objectStore(plannerPreferencesStoreName).put(plan, planResponseKey);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () =>
-        reject(transaction.error ?? new Error("Could not save the latest plan result."));
+        reject(transaction.error ?? new Error("Could not save the plan."));
+    });
+  }
+  catch {}
+}
+
+/** Validates the durable browser representation of a native simulator result. */
+export function isSimulationResultV1(value: unknown): value is SimulationResultV1 {
+  if (!isRecord(value) || !isRecord(value.metadata) || !isRecord(value.lists)) return false;
+  const metadata = value.metadata;
+  const lists = value.lists;
+  const hasSimulationRows = (rows: unknown, validator: (row: unknown) => boolean) =>
+    Array.isArray(rows) && rows.every(validator);
+  const hasBalances = hasSimulationRows(
+    lists.planItems,
+    (balance) =>
+      hasTypeIdentity(balance)
+      && typeof balance.stockpileId === "string"
+      && isPositiveInteger(balance.locationId)
+      && ["required", "availableNow", "unsatisfied"].every((key) => isQuantity(balance[key])),
+  );
+  const hasPurchases = (purchases: unknown) =>
+    hasSimulationRows(
+      purchases,
+      (purchase) =>
+        hasTypeIdentity(purchase)
+        && isQuantity(purchase.quantity)
+        && Array.isArray(purchase.destinations)
+        && purchase.destinations.every(
+          (destination) =>
+            isRecord(destination)
+            && typeof destination.stockpileId === "string"
+            && isPositiveInteger(destination.locationId)
+            && isQuantity(destination.quantity),
+        ),
+    );
+  const hasJobs = (jobs: unknown, validator: (job: Record<string, unknown>) => boolean) =>
+    hasSimulationRows(jobs, (job) => isRecord(job) && validator(job));
+  return (
+    metadata.simulatorVersion === 1
+    && typeof metadata.generatedAt === "string"
+    && typeof metadata.normalizedInputHash === "string"
+    && hasSimulationRows(
+      lists.warnings,
+      (warning) =>
+        isRecord(warning)
+        && typeof warning.code === "string"
+        && typeof warning.message === "string",
+    )
+    && hasBalances
+    && hasSimulationRows(
+      lists.haulingTasks,
+      (task) =>
+        hasTypeIdentity(task)
+        && typeof task.transferId === "string"
+        && isQuantity(task.quantity)
+        && isPositiveInteger(task.fromLocationId)
+        && isPositiveInteger(task.toLocationId),
+    )
+    && hasPurchases(lists.materialsToBuy)
+    && hasPurchases(lists.bpoToBuy)
+    && hasJobs(
+      lists.reprocessingJobs,
+      (job) =>
+        typeof job.jobId === "string"
+        && isPositiveInteger(job.sourceTypeId)
+        && typeof job.sourceTypeName === "string"
+        && isQuantity(job.sourceQuantity)
+        && isPositiveInteger(job.locationId),
+    )
+    && hasJobs(
+      lists.bpcToCopy,
+      (job) =>
+        typeof job.jobId === "string"
+        && isPositiveInteger(job.blueprintTypeId)
+        && isQuantity(job.copies)
+        && isPositiveInteger(job.locationId),
+    )
+    && hasJobs(
+      lists.inventionJobs,
+      (job) =>
+        typeof job.jobId === "string"
+        && isPositiveInteger(job.outputBlueprintTypeId)
+        && isQuantity(job.attempts)
+        && isPositiveInteger(job.locationId),
+    )
+    && hasJobs(
+      lists.reactionJobs,
+      (job) =>
+        typeof job.jobId === "string"
+        && isPositiveInteger(job.productTypeId)
+        && typeof job.productName === "string"
+        && isQuantity(job.readyNowRuns)
+        && isQuantity(job.requiredRuns)
+        && Array.isArray(job.inputs)
+        && isPositiveInteger(job.locationId),
+    )
+    && hasJobs(
+      lists.manufacturingJobs,
+      (job) =>
+        typeof job.jobId === "string"
+        && isPositiveInteger(job.productTypeId)
+        && typeof job.productName === "string"
+        && isQuantity(job.readyNowRuns)
+        && isQuantity(job.requiredRuns)
+        && Array.isArray(job.inputs)
+        && isPositiveInteger(job.locationId),
+    )
+    && hasSimulationRows(
+      lists.skillsRequired,
+      (skill) =>
+        isRecord(skill)
+        && isPositiveInteger(skill.skillId)
+        && typeof skill.name === "string"
+        && isPositiveInteger(skill.requiredLevel)
+        && Array.isArray(skill.jobIds)
+        && skill.jobIds.every((jobId) => typeof jobId === "string"),
+    )
+  );
+}
+
+/** Loads the most recent native simulation result from IndexedDB. */
+export async function loadSimulationResult(): Promise<SimulationResultV1 | null> {
+  try {
+    const database = await getPlanningDatabase();
+    return await new Promise<SimulationResultV1 | null>((resolve, reject) => {
+      const request = database
+        .transaction(plannerPreferencesStoreName, "readonly")
+        .objectStore(plannerPreferencesStoreName)
+        .get(simulationResultKey);
+      request.onsuccess = () =>
+        resolve(isSimulationResultV1(request.result) ? request.result : null);
+      request.onerror = () =>
+        reject(request.error ?? new Error("Could not load the latest simulation result."));
+    });
+  }
+  catch {
+    return null;
+  }
+}
+
+/** Saves a native simulation result for browser-local restoration. */
+export async function saveSimulationResult(result: SimulationResultV1): Promise<void> {
+  try {
+    const database = await getPlanningDatabase();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(plannerPreferencesStoreName, "readwrite");
+      transaction.objectStore(plannerPreferencesStoreName).put(result, simulationResultKey);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("Could not save the simulation result."));
     });
   }
   catch {}

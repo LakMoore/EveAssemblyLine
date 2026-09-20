@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { toCompatiblePlanResponse } from "@/lib/planning/simulator/compatibility";
-import { loadSimulationContext } from "@/lib/planning/simulator/context";
 import { simulatorRequestSchema } from "@/lib/planning/simulator/schema";
 import { simulateIndustry } from "@/lib/planning/simulator/simulate";
 import { createRequestProfiler } from "@/lib/server/profiling";
@@ -41,14 +39,6 @@ export async function POST(request: Request) {
       );
     }
     const result = await profiler.measure("simulate", () => simulateIndustry(parsed.data));
-    const responseFormat = new URL(request.url).searchParams.get("format");
-    if (responseFormat === "plan-response") {
-      const context = await profiler.measure("load-context", loadSimulationContext);
-      return NextResponse.json(
-        toCompatiblePlanResponse(parsed.data, context, result),
-        noStoreResponseInit,
-      );
-    }
     return NextResponse.json(result, noStoreResponseInit);
   }
   catch (error) {

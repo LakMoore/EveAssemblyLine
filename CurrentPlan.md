@@ -50,9 +50,9 @@ This section is authoritative where the older design below differs from the runn
   accepts the same asset-driven planner data plus character/science profiles and simulation policy,
   makes no ESI calls, conserves physical lots and finite BPC runs, exposes four readiness horizons,
   schedules industry work, settles reprocessing late, and creates buying requirements last. Its
-  native ten-list response includes activity/location ledgers and invariant metadata. The legacy
-  route and visible planner remain unchanged; `toCompatiblePlanResponse()` provides the explicit
-  adapter to the established `PlanResponse` shape.
+  native ten-list response includes activity/location ledgers and invariant metadata. The visible
+  planner offers both workflows: Calculate displays the legacy `/api/plan` response, while
+  Simulate displays the native simulator response. The browser stores each result independently.
 - The planner is asset-aware and supports compressed/reprocessable material handling, blueprint print/run accounting, industry-in-progress output, market orders, localized SDE names, ME/TE settings, and source metadata. Its request model is not the original minimal `typeId + quantity` plus raw assets model.
 - The UI is a multi-page production-control application. The build planner is one workflow alongside assets, jobs, ships, compression, locations, characters, and settings. The original component-only single-page layout is descriptive history, not an implementation requirement.
 - The deployment target is Firebase App Hosting with a Cloud Run backend configuration and Firestore. The repository does not currently define a Dockerfile-based deployment contract; do not add container-specific storage assumptions without deciding whether App Hosting remains the target.
@@ -141,7 +141,7 @@ src/
     planning/
       types.ts           # Types for /plan inputs and outputs
       planEngine.ts      # Main planning logic: compute 6 action lists
-      simulator/         # Graph, ledgers, allocation, schedules, settlement, and adapters
+      simulator/         # Graph, ledgers, allocation, schedules, and settlement
       util.ts            # Helper functions (e.g., BOM expansion)
 
   components/
