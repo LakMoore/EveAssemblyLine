@@ -29,6 +29,7 @@ export interface SimulatorBlueprintLot {
   lotId: string;
   itemId?: number;
   typeId: number;
+  name: string;
   kind: "bpo" | "bpc" | "formula";
   runs: number;
   materialEfficiency: number;
@@ -235,6 +236,7 @@ export function normalizeSimulatorInventory(
             lotId: `blueprint:${stockIndex}:${print.itemId}:${printIndex}`,
             itemId: print.itemId,
             typeId: item.typeId,
+            name: item.name || localizedTypeName(context, item.typeId, request.language),
             kind: item.category === "reactionformula" ? "formula" : print.type,
             runs: print.type === "bpo" ? Number.MAX_SAFE_INTEGER : Math.max(0, print.runs),
             materialEfficiency: print.me ?? item.me ?? 0,
@@ -252,6 +254,7 @@ export function normalizeSimulatorInventory(
           blueprintLots.push({
             lotId: `blueprint:${stockIndex}:${index}`,
             typeId: item.typeId,
+            name: item.name || localizedTypeName(context, item.typeId, request.language),
             kind: item.category === "reactionformula" ? "formula" : (item.blueprintType ?? "bpc"),
             runs:
               item.category === "reactionformula" || item.blueprintType === "bpo"

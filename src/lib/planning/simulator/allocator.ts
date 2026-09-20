@@ -545,7 +545,7 @@ export class SimulationAllocator {
     ) return;
     const pseudoItem: SimulatorItemLot = {
       ...lot,
-      name: `Blueprint ${lot.typeId}`,
+      name: lot.name,
       quantity: 1,
       unitVolume: 0.01,
       source: "asset",
@@ -557,7 +557,8 @@ export class SimulationAllocator {
       transferId: `haul:${lot.lotId}:${destinationLocationId}:${demandingJobId}`,
       lotId: lot.lotId,
       typeId: lot.typeId,
-      typeName: `Blueprint ${lot.typeId}`,
+      typeName: lot.name,
+      blueprintKind: lot.kind,
       quantity: 1,
       unitVolume: 0.01,
       fromLocationId: lot.locationId,

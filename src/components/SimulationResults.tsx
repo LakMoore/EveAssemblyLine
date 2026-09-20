@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
   AlertTriangle,
   Atom,
@@ -12,6 +12,7 @@ import {
   TriangleAlert,
   Truck,
   ClipboardList,
+  Copy as CopyIcon,
   type LucideIcon,
   Minimize2,
   TestTubes,
@@ -23,8 +24,20 @@ import SwitchedResultRow from "@/components/SwitchedResultRow";
 import CopyableText from "@/components/CopyableText";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Combobox,
+  ComboboxCollection,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "@/components/ui/combobox";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "@/components/ui/toast";
 import type {
   SimulationCopyJob,
   SimulationHaulTask,
@@ -62,6 +75,53 @@ const tabs: Array<{ value: SimulationTab; label: string; icon: LucideIcon }> = [
   { value: "skills", label: "Skills", icon: Brain },
   { value: "surplus", label: "Surplus", icon: Boxes },
 ];
+
+const materialBalanceColumns = [
+  "Available",
+  "Immediate Demand",
+  "Future Supply",
+  "Future Demand",
+  "Transferred Out",
+  "Surplus",
+] as const;
+const typeIdChangedEvent = "assembly-line-planner-type-id-changed";
+
+/** Parses a positive type ID from the planner URL query string. */
+function parseTypeId(value: string | null): number | null {
+  const typeId = Number(value);
+  return Number.isSafeInteger(typeId) && typeId > 0 ? typeId : null;
+}
+
+/** Reads the shared planner type filter from the current URL. */
+function readTypeIdFromUrl(): number | null {
+  if (typeof window === "undefined") return null;
+  return parseTypeId(new URLSearchParams(window.location.search).get("typeId"));
+}
+
+/** Subscribes a simulator filter to browser URL and history changes. */
+function subscribeToTypeId(onStoreChange: () => void): () => void {
+  window.addEventListener("popstate", onStoreChange);
+  window.addEventListener(typeIdChangedEvent, onStoreChange);
+  return () => {
+    window.removeEventListener("popstate", onStoreChange);
+    window.removeEventListener(typeIdChangedEvent, onStoreChange);
+  };
+}
+
+/** Provides the server snapshot for the browser-only planner type filter. */
+function getServerTypeIdSnapshot(): number | null {
+  return null;
+}
+
+/** Updates the shared planner type filter without navigating away from the result view. */
+function updateTypeIdInUrl(typeId: number | null): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (typeId === null) url.searchParams.delete("typeId");
+  else url.searchParams.set("typeId", String(typeId));
+  window.history.replaceState(null, "", url);
+  window.dispatchEvent(new Event(typeIdChangedEvent));
+}
 
 type SimulationRowControls = {
   selectedRowKey: string | null;
@@ -131,6 +191,24 @@ function createGroupAvatars<T>(items: readonly T[], getAvatar: (item: T) => Simu
       const avatar = getAvatar(item);
       return { ...avatar, imageVariation: avatar.imageVariation ?? "icon" };
     });
+}
+
+/** Calculates the total future material supply shown in a simulator balance row. */
+function futureSupply(item: SimulationMaterialBalance): number {
+  return (
+    item.availableFromHauling
+    + item.availableFromProduction
+    + item.availableFromCopying
+    + item.availableFromInvention
+    + item.availableFromReprocessing
+    + item.availableFromMarket
+  );
+}
+
+/** Maps simulator blueprint kinds to the corresponding EVE image variation. */
+function haulImageVariation(kind: SimulationHaulTask["blueprintKind"]): "icon" | "bp" | "bpc" {
+  if (kind === "bpc") return "bpc";
+  return kind === undefined ? "icon" : "bp";
 }
 
 /** Renders location-scoped rows inside collapsible result groups. */
@@ -212,49 +290,160 @@ function SimulationMaterialsTab({
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
   const items = buckets.flatMap((bucket) => bucket.items);
+  const selectedTypeId = useSyncExternalStore(
+    subscribeToTypeId,
+    readTypeIdFromUrl,
+    getServerTypeIdSnapshot,
+  );
+  const [copyStatus, setCopyStatus] = useState("");
+  useEffect(() => {
+    const rawTypeId = new URLSearchParams(window.location.search).get("typeId");
+    if (rawTypeId !== null && selectedTypeId === null) updateTypeIdInUrl(null);
+  }, [selectedTypeId]);
+  const typeOptions = [...new Map(items.map((item) => [item.typeId, item.typeName])).entries()]
+    .map(([id, name]) => ({ id, name }))
+    .sort((left, right) => left.name.localeCompare(right.name) || left.id - right.id);
+  useEffect(() => {
+    if (selectedTypeId === null || typeOptions.some((option) => option.id === selectedTypeId)) {
+      return;
+    }
+    if (readTypeIdFromUrl() === selectedTypeId) updateTypeIdInUrl(null);
+  }, [selectedTypeId, typeOptions]);
+  const effectiveSelectedTypeId = typeOptions.some((option) => option.id === selectedTypeId)
+    ? selectedTypeId
+    : null;
+  const filteredItems =
+    effectiveSelectedTypeId === null
+      ? items
+      : items.filter((item) => item.typeId === effectiveSelectedTypeId);
+  const selectedType = typeOptions.find((option) => option.id === effectiveSelectedTypeId) ?? null;
+
+  async function copyTable() {
+    const lines = [
+      ["Type", ...materialBalanceColumns].join("\t"),
+      ...filteredItems.map((item) =>
+        [
+          item.typeName,
+          item.availableNow.toLocaleString(),
+          item.requiredNow.toLocaleString(),
+          futureSupply(item).toLocaleString(),
+          item.reserved.toLocaleString(),
+          item.transferredOut.toLocaleString(),
+          item.surplus.toLocaleString(),
+        ].join("\t"),
+      ),
+    ];
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setCopyStatus("Copied");
+      toast.add({ description: "Material table copied to clipboard" });
+      window.setTimeout(() => setCopyStatus(""), 1600);
+    }
+    catch {
+      setCopyStatus("Copy failed");
+      toast.add({ description: "Could not copy material table", type: "error" });
+    }
+  }
+
   return (
-    <SimulatorResultsTab hasResults={items.length > 0}>
-      <SimulationLocationResultGroups
-        tab={tab}
-        items={items}
-        locationNamesById={locationNamesById}
-        openGroups={openGroups}
-        onOpenGroupChange={onOpenGroupChange}
-        getRowKey={(item) => `${tab}:${item.locationId}:${item.typeId}`}
-        getAvatar={(item) => ({ typeId: item.typeId, name: item.typeName })}
-        groupHeader={<MaterialBalanceHeader />}
-        renderRow={(item) => {
-          const rowKey = `${tab}:${item.locationId}:${item.typeId}`;
-          return (
-            <SimpleResultRow
-              name={item.typeName}
-              typeId={item.typeId}
-              subline={demandStockpiles(item, stockpileNamesById)}
-              linkPath="planner"
-              navigateInPlace
-              selected={controls.selectedRowKey === rowKey}
-              onClick={() => controls.onSelectRow(rowKey)}
-              wideBreakpoint="md"
-              contentClassName="self-end text-right font-mono text-xs md:w-full md:self-auto"
+    <SimulatorResultsTab
+      hasResults={items.length > 0}
+      settings={
+        items.length > 0 ? (
+          <div className="flex flex-wrap justify-end gap-2.5 py-3.5 pb-2.5 max-[640px]:flex-col max-[640px]:items-stretch">
+            <div className="flex w-auto items-center gap-2.5 max-[640px]:w-full max-[640px]:flex-col max-[640px]:items-stretch">
+              <Label className="max-[640px]:self-start" htmlFor={`simulation-${tab}-type`}>
+                TYPE
+              </Label>
+              <div className="w-full min-w-0 max-[640px]:overflow-hidden sm:w-72 lg:w-96">
+                <Combobox
+                  items={typeOptions}
+                  itemToStringLabel={(option) => option.name}
+                  value={selectedType}
+                  onValueChange={(value) => {
+                    const nextTypeId = value?.id ?? null;
+                    updateTypeIdInUrl(nextTypeId);
+                  }}
+                >
+                  <ComboboxInput
+                    id={`simulation-${tab}-type`}
+                    placeholder="Filter by type"
+                    aria-label="Filter simulation by material type"
+                    showClear
+                    className="w-full [&>input]:text-xs!"
+                  />
+                  <ComboboxContent>
+                    <ComboboxEmpty>No matching material types.</ComboboxEmpty>
+                    <ComboboxList>
+                      <ComboboxCollection>
+                        {(option) => (
+                          <ComboboxItem key={option.id} value={option}>
+                            {option.name}
+                          </ComboboxItem>
+                        )}
+                      </ComboboxCollection>
+                    </ComboboxList>
+                  </ComboboxContent>
+                </Combobox>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="max-[640px]:w-full"
+              onClick={() => void copyTable()}
+              disabled={filteredItems.length === 0}
             >
-              <MaterialBalanceSummary item={item} />
-            </SimpleResultRow>
-          );
-        }}
-      />
+              <CopyIcon aria-hidden="true" />
+              {copyStatus || "Copy table"}
+            </Button>
+          </div>
+        ) : undefined
+      }
+    >
+      {filteredItems.length === 0 ? (
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>No matching materials</EmptyTitle>
+            <EmptyDescription>Clear the type filter to show all materials.</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <SimulationLocationResultGroups
+          tab={tab}
+          items={filteredItems}
+          locationNamesById={locationNamesById}
+          openGroups={openGroups}
+          onOpenGroupChange={onOpenGroupChange}
+          getRowKey={(item) => `${tab}:${item.locationId}:${item.typeId}`}
+          getAvatar={(item) => ({ typeId: item.typeId, name: item.typeName })}
+          groupHeader={<MaterialBalanceHeader />}
+          renderRow={(item) => {
+            const rowKey = `${tab}:${item.locationId}:${item.typeId}`;
+            return (
+              <SimpleResultRow
+                name={item.typeName}
+                typeId={item.typeId}
+                subline={demandStockpiles(item, stockpileNamesById)}
+                linkPath="planner"
+                navigateInPlace
+                selected={controls.selectedRowKey === rowKey}
+                onClick={() => controls.onSelectRow(rowKey)}
+                wideBreakpoint="md"
+                contentClassName="self-end text-right font-mono text-xs md:w-full md:self-auto"
+              >
+                <MaterialBalanceSummary item={item} />
+              </SimpleResultRow>
+            );
+          }}
+        />
+      )}
     </SimulatorResultsTab>
   );
 }
 
 /** Renders the detail columns for a simulator material balance. */
 function MaterialBalanceSummary({ item }: { item: SimulationMaterialBalance }) {
-  const futureSupply =
-    item.availableFromHauling
-    + item.availableFromProduction
-    + item.availableFromCopying
-    + item.availableFromInvention
-    + item.availableFromReprocessing
-    + item.availableFromMarket;
   return (
     <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-right md:grid-cols-6 md:gap-x-3">
       <span className="text-muted-foreground md:hidden">Available</span>
@@ -267,7 +456,7 @@ function MaterialBalanceSummary({ item }: { item: SimulationMaterialBalance }) {
       </span>
       <span className="text-muted-foreground md:hidden">Future Supply</span>
       <span>
-        <CopyableNumber value={futureSupply} copyLabel="Future supply" />
+        <CopyableNumber value={futureSupply(item)} copyLabel="Future supply" />
       </span>
       <span className="text-muted-foreground md:hidden">Future Demand</span>
       <span>
@@ -291,12 +480,9 @@ function MaterialBalanceHeader() {
     <div className="hidden min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-[13px] p-2 md:grid">
       <span aria-hidden="true" />
       <div className="grid grid-cols-6 gap-x-3 text-right font-mono text-[10px] text-muted-foreground uppercase">
-        <span>Available</span>
-        <span>Immediate Demand</span>
-        <span>Future Supply</span>
-        <span>Future Demand</span>
-        <span>Transferred Out</span>
-        <span>Surplus</span>
+        {materialBalanceColumns.map((column) => (
+          <span key={column}>{column}</span>
+        ))}
       </div>
     </div>
   );
@@ -468,6 +654,7 @@ function SimulationSimpleJobRow({
       subline={subline}
       variation={variation}
       linkPath="planner"
+      linkIcon={ClipboardList}
       linkSearchParams={{ tab: "Plan" }}
       linkHash="plan-breakdown"
       navigateInPlace
@@ -523,6 +710,7 @@ function SimulationActivityTab({
               subline={` | ${job.inputs.length} inputs`}
               variation="icon"
               linkPath="planner"
+              linkIcon={ClipboardList}
               linkSearchParams={{ tab: "Plan" }}
               linkHash="plan-breakdown"
               navigateInPlace
@@ -589,6 +777,7 @@ function SimulationHaulTab({
             (task) => ({
               typeId: task.typeId,
               name: task.typeName,
+              imageVariation: haulImageVariation(task.blueprintKind),
             }),
           );
           return (
@@ -620,6 +809,7 @@ function SimulationHaulTab({
                       (task) => ({
                         typeId: task.typeId,
                         name: task.typeName,
+                        imageVariation: haulImageVariation(task.blueprintKind),
                       }),
                     );
                     return (
@@ -673,6 +863,7 @@ function SimulationHaulRow({
     <SwitchedResultRow
       name={task.typeName}
       typeId={task.typeId}
+      variation={haulImageVariation(task.blueprintKind)}
       subline={
         <CopyableNumber
           value={Math.ceil(task.quantity * task.unitVolume)}
@@ -681,6 +872,7 @@ function SimulationHaulRow({
         />
       }
       linkPath="planner"
+      linkIcon={ClipboardList}
       linkSearchParams={{ tab: "Plan" }}
       linkHash="plan-breakdown"
       navigateInPlace
@@ -866,7 +1058,10 @@ export default function SimulatorResults({
     isCompleted: (rowKey) => completedRows[rowKey] ?? false,
     onCompletedChange: (rowKey, completed) =>
       setCompletedRows((current) => ({ ...current, [rowKey]: completed })),
-    onOpenPlan,
+    onOpenPlan: () => {
+      setActiveTab("plan");
+      onOpenPlan();
+    },
   };
   const onOpenGroupChange = (groupKey: string, open: boolean) =>
     setOpenGroups((current) => ({ ...current, [groupKey]: open }));

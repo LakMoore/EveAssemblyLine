@@ -39,6 +39,7 @@ const inventory: SimulatorInventory = {
       lotId: "bpc",
       itemId: 99,
       typeId: 100,
+      name: "Test Blueprint",
       kind: "bpc",
       runs: 5,
       materialEfficiency: 10,
@@ -92,4 +93,17 @@ void test("depletes only the runs used from each copy", () => {
   );
   assert.equal(allocator.remainingBlueprintRuns("first"), 0);
   assert.equal(allocator.remainingBlueprintRuns("second"), 3);
+});
+
+void test("preserves blueprint names on blueprint hauls", () => {
+  const allocator = new SimulationAllocator(
+    {
+      ...inventory,
+      blueprintLots: [{ ...inventory.blueprintLots[0], locationId: 30 }],
+    },
+    [],
+  );
+  allocator.claimManufacturingBlueprints(100, 1, 20, account, "job", 10);
+  assert.equal(allocator.haulingTasks[0].typeName, "Test Blueprint");
+  assert.equal(allocator.haulingTasks[0].blueprintKind, "bpc");
 });

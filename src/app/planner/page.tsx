@@ -2126,7 +2126,7 @@ function Planner() {
           result={simulationResult}
           status={planStatus}
           locationNamesById={plannerLocationNames}
-          onOpenPlan={() => setDisplayedResult("calculate")}
+          onOpenPlan={() => setDisplayedResult("simulate")}
           stockpileNamesById={
             new Map(stockpiles.map((stockpile) => [stockpile.id, stockpile.name]))
           }

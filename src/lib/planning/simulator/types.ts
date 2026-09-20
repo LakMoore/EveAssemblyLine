@@ -234,6 +234,7 @@ export interface SimulationHaulTask {
   lotId: string;
   typeId: number;
   typeName: string;
+  blueprintKind?: "bpo" | "bpc" | "formula";
   quantity: number;
   unitVolume: number;
   fromLocationId: number;
