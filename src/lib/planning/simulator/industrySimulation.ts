@@ -19,6 +19,7 @@ import type {
   SimulationPurchaseDestination,
   SimulationSkillRequirement,
   SimulationWarning,
+  SimulatorActivity,
   SimulatorRequestV1,
 } from "./types";
 
@@ -175,7 +176,6 @@ class IndustryDemandSimulation {
       for (const item of items) {
         const isReprocessingInput = isSimulatorReprocessingType(this.context, item.typeId);
         const account: SimulationLedgerAccount = {
-          activity: isReprocessingInput ? "reprocessing" : "stock",
           locationId: isReprocessingInput
             ? stockpile.locations.reprocessing
             : stockpile.locations.stock,
@@ -185,8 +185,10 @@ class IndustryDemandSimulation {
           stockpile,
           item.typeId,
           item.quantity,
+          item.typeId,
           item.quantity,
           account.locationId,
+          isReprocessingInput ? "reprocessing" : "stock",
         );
         this.declareDemand(account, item.quantity, source);
         const existing = this.allocator.claimOrdinarySupply(
@@ -196,7 +198,9 @@ class IndustryDemandSimulation {
           account,
           undefined,
           stockpile.id,
+          isReprocessingInput ? "reprocessing" : "stock",
         );
+        this.setDemandReadiness(source, existing.local);
         const remaining = item.quantity - existing.local - existing.remote - existing.future;
         if (remaining > 0) {
           if (isReprocessingInput) {
@@ -271,12 +275,10 @@ class IndustryDemandSimulation {
     const profile = this.activityProfile(stockpile, productTypeId, production.activity);
     const requiredRuns = Math.ceil(quantity / details.product.quantity);
     const outputAccount: SimulationLedgerAccount = {
-      activity: production.activity,
       locationId: profile.locationId,
       typeId: productTypeId,
     };
     const blueprintAccount: SimulationLedgerAccount = {
-      activity: production.activity,
       locationId: profile.locationId,
       typeId: production.blueprint._key,
     };
@@ -388,7 +390,6 @@ class IndustryDemandSimulation {
     const materialSpecifications: MaterialSpecification[] = (details.activity.materials ?? []).map(
       (material) => {
         const account: SimulationLedgerAccount = {
-          activity,
           locationId: profile.locationId,
           typeId: material.typeID,
         };
@@ -403,8 +404,10 @@ class IndustryDemandSimulation {
           stockpile,
           productTypeId,
           outputPerRun * blueprint.runs,
+          material.typeID,
           requiredQuantity,
           profile.locationId,
+          activity,
           jobId,
         );
         this.declareDemand(account, requiredQuantity, source);
@@ -471,47 +474,29 @@ class IndustryDemandSimulation {
         blueprint,
         profile.materialMultiplier,
       );
-      const afterHaulingQuantity = this.materialQuantityForRuns(
-        activity,
-        material,
-        readyAfterHaulingRuns,
-        blueprint,
-        profile.materialMultiplier,
-      );
-      const existingSupplyQuantity = this.materialQuantityForRuns(
-        activity,
-        material,
-        readyFromExistingSupplyRuns,
-        blueprint,
-        profile.materialMultiplier,
-      );
       const claimedNow = this.allocator.claimLocal(
         material.typeId,
-        nowQuantity,
+        material.requiredQuantity,
         profile.locationId,
         material.account,
         jobId,
-      );
-      const additionalAfterHauling = Math.max(0, afterHaulingQuantity - claimedNow);
-      const claimedLocalForHaulingHorizon = this.allocator.claimLocal(
-        material.typeId,
-        additionalAfterHauling,
-        profile.locationId,
-        material.account,
-        jobId,
-        "after-hauling",
+        "now",
+        undefined,
+        activity,
       );
       const claimedRemote = this.allocator.claimRemote(
         material.typeId,
-        additionalAfterHauling - claimedLocalForHaulingHorizon,
+        material.requiredQuantity - claimedNow,
         profile.locationId,
         material.account,
         jobId,
+        undefined,
+        activity,
       );
-      const physicalClaimed = claimedNow + claimedLocalForHaulingHorizon + claimedRemote;
+      const physicalClaimed = claimedNow + claimedRemote;
       const claimedFuture = this.allocator.claimFuture(
         material.typeId,
-        Math.max(0, existingSupplyQuantity - physicalClaimed),
+        material.requiredQuantity - physicalClaimed,
         material.account,
         jobId,
       );
@@ -526,15 +511,14 @@ class IndustryDemandSimulation {
       );
       const availableAfterUpstream =
         physicalClaimed + claimedFuture + productionSupply.readyQuantity;
+      this.setDemandReadiness(material.source, nowQuantity);
       inputs.push({
         typeId: material.typeId,
         typeName: typeName(this.context, material.typeId, this.request.language),
         requiredQuantity: material.requiredQuantity,
         availableNow: claimedNow,
-        availableAfterHauling: physicalClaimed,
+        availableFromHauling: physicalClaimed - claimedNow,
         availableAfterUpstream,
-        reservedNow: claimedNow,
-        reservedAfterHauling: physicalClaimed - claimedNow,
         unsatisfiedQuantity: Math.max(
           0,
           material.requiredQuantity
@@ -658,7 +642,6 @@ class IndustryDemandSimulation {
     );
 
     const sourceBlueprintAccount: SimulationLedgerAccount = {
-      activity: "invention",
       locationId: inventionLocationId,
       typeId: sourceBlueprint._key,
     };
@@ -706,12 +689,10 @@ class IndustryDemandSimulation {
       id: this.nextId("invention-output"),
       kind: "production-commitment",
       account: {
-        activity: "invention",
         locationId: inventionLocationId,
         typeId: shortage.outputBlueprintTypeId,
       },
       destinationAccount: {
-        activity: "manufacturing",
         locationId: shortage.manufacturingLocationId,
         typeId: shortage.outputBlueprintTypeId,
       },
@@ -746,7 +727,6 @@ class IndustryDemandSimulation {
       this.sequence,
     );
     const blueprintAccount: SimulationLedgerAccount = {
-      activity: "copying",
       locationId,
       typeId: sourceBlueprint._key,
     };
@@ -829,7 +809,6 @@ class IndustryDemandSimulation {
     demandingQuantity: number,
   ): SimulationJobInput {
     const account: SimulationLedgerAccount = {
-      activity,
       locationId,
       typeId,
     };
@@ -837,12 +816,23 @@ class IndustryDemandSimulation {
       stockpile,
       demandingTypeId,
       demandingQuantity,
+      typeId,
       quantity,
       locationId,
+      activity,
       jobId,
     );
     this.declareDemand(account, quantity, source);
-    const claim = this.allocator.claimOrdinarySupply(typeId, quantity, locationId, account, jobId);
+    const claim = this.allocator.claimOrdinarySupply(
+      typeId,
+      quantity,
+      locationId,
+      account,
+      jobId,
+      undefined,
+      activity,
+    );
+    this.setDemandReadiness(source, claim.local);
     const existing = claim.local + claim.remote + claim.future;
     const production = this.planProduction(
       typeId,
@@ -857,10 +847,8 @@ class IndustryDemandSimulation {
       typeName: typeName(this.context, typeId, this.request.language),
       requiredQuantity: quantity,
       availableNow: claim.local,
-      availableAfterHauling: claim.local + claim.remote,
+      availableFromHauling: claim.remote,
       availableAfterUpstream: existing + production.readyQuantity,
-      reservedNow: claim.local,
-      reservedAfterHauling: claim.remote,
       unsatisfiedQuantity: Math.max(0, quantity - existing - production.plannedQuantity),
     };
   }
@@ -1137,21 +1125,33 @@ class IndustryDemandSimulation {
 
   private demandSource(
     stockpile: PlanStockpile,
-    typeId: number,
-    quantity: number,
-    inputQuantity: number,
+    productTypeId: number,
+    productQuantity: number,
+    materialTypeId: number,
+    plannedQuantity: number,
     destinationLocationId: number,
+    activity: Exclude<SimulatorActivity, "surplus">,
     demandingJobId?: string,
   ): SimulationDemandSource {
     return {
       demandId: this.nextId("source"),
       stockpileId: stockpile.id,
-      typeId,
-      quantity,
-      inputQuantity,
+      materialTypeId,
+      productTypeId,
+      productQuantity,
+      plannedQuantity,
+      requiredNow: 0,
+      reserved: plannedQuantity,
       destinationLocationId,
+      activity,
       demandingJobId,
     };
+  }
+
+  /** Splits one material demand into immediately installable and deferred quantities. */
+  private setDemandReadiness(source: SimulationDemandSource, requiredNow: number): void {
+    source.requiredNow = Math.min(source.plannedQuantity, Math.max(0, requiredNow));
+    source.reserved = source.plannedQuantity - source.requiredNow;
   }
 
   private stableId(...parts: Array<string | number>): string {

@@ -1,7 +1,7 @@
 import type { PlanHaulExclusion } from "@/lib/planning/types";
 import type { SimulationLedgerAccount, SimulationTransaction } from "./ledger";
 import type { SimulatorBlueprintLot, SimulatorInventory, SimulatorItemLot } from "./sourceLots";
-import type { SimulationBlueprintAllocation, SimulationHaulTask } from "./types";
+import type { SimulationBlueprintAllocation, SimulationHaulTask, SimulatorActivity } from "./types";
 
 /** Quantity visible at each physical/future supply horizon. */
 export interface SupplyAvailability {
@@ -88,6 +88,7 @@ export class SimulationAllocator {
     demandingJobId?: string,
     reservationHorizon: "now" | "after-hauling" = "now",
     stockpileId?: string,
+    demandActivity?: Exclude<SimulatorActivity, "surplus">,
   ): number {
     return this.claimItemLots(
       this.inventory.itemLots.filter(
@@ -102,6 +103,7 @@ export class SimulationAllocator {
       demandingJobId,
       reservationHorizon,
       stockpileId,
+      demandActivity,
     );
   }
 
@@ -113,6 +115,7 @@ export class SimulationAllocator {
     account: SimulationLedgerAccount,
     demandingJobId?: string,
     stockpileId?: string,
+    demandActivity?: Exclude<SimulatorActivity, "surplus">,
   ): number {
     return this.claimItemLots(
       this.inventory.itemLots.filter(
@@ -128,6 +131,7 @@ export class SimulationAllocator {
       demandingJobId,
       "after-hauling",
       stockpileId,
+      demandActivity,
     );
   }
 
@@ -173,6 +177,7 @@ export class SimulationAllocator {
     account: SimulationLedgerAccount,
     demandingJobId?: string,
     stockpileId?: string,
+    demandActivity?: Exclude<SimulatorActivity, "surplus">,
   ): ItemClaim {
     const local = this.claimLocal(
       typeId,
@@ -182,6 +187,7 @@ export class SimulationAllocator {
       demandingJobId,
       "now",
       stockpileId,
+      demandActivity,
     );
     const remote = this.claimRemote(
       typeId,
@@ -190,6 +196,7 @@ export class SimulationAllocator {
       account,
       demandingJobId,
       stockpileId,
+      demandActivity,
     );
     const future = this.claimFuture(typeId, quantity - local - remote, account, demandingJobId);
     return { local, remote, future };
@@ -425,16 +432,16 @@ export class SimulationAllocator {
       quantity: claimed,
       horizon: remote ? "after-hauling" : "now",
       demandingJobId: reprocessingJobId,
+      demandActivity: "reprocessing",
     });
     if (remote && lot.locationId !== undefined) {
       this.transactions.push({
         id: this.nextTransactionId("reprocessing-transfer"),
         kind: "transfer-commitment",
-        account,
+        sourceAccount: { locationId: lot.locationId, typeId: lot.typeId },
+        destinationAccount: account,
         lotId,
         quantity: claimed,
-        fromLocationId: lot.locationId,
-        toLocationId: destinationLocationId,
         demandingJobId: reprocessingJobId,
       });
       this.haulingTasks.push({
@@ -462,6 +469,7 @@ export class SimulationAllocator {
     demandingJobId: string | undefined,
     reservationHorizon: "now" | "after-hauling",
     stockpileId?: string,
+    demandActivity?: Exclude<SimulatorActivity, "surplus">,
   ): number {
     let remaining = quantity;
     let claimed = 0;
@@ -480,16 +488,16 @@ export class SimulationAllocator {
         horizon: reservationHorizon,
         demandingJobId,
         stockpileId,
+        demandActivity,
       });
       if (lot.locationId !== undefined && lot.locationId !== destinationLocationId) {
         this.transactions.push({
           id: this.nextTransactionId("transfer"),
           kind: "transfer-commitment",
-          account,
+          sourceAccount: { locationId: lot.locationId, typeId: lot.typeId },
+          destinationAccount: account,
           lotId: lot.lotId,
           quantity: next,
-          fromLocationId: lot.locationId,
-          toLocationId: destinationLocationId,
           demandingJobId,
         });
         this.haulingTasks.push({

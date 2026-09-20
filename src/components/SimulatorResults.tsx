@@ -18,10 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type {
-  SimulationMaterialListItem,
-  SimulationResultV1,
-} from "@/lib/planning/simulator/types";
+import type { SimulationMaterialBalance, SimulationResultV1 } from "@/lib/planning/simulator/types";
 
 type SimulatorTab =
   | "plan"
@@ -60,14 +57,9 @@ function locationName(locationNamesById: ReadonlyMap<number, string>, locationId
   return locationNamesById.get(locationId) ?? `Location ${locationId}`;
 }
 
-/** Formats a simulator activity for the operational result row. */
-function activityName(activity: SimulationMaterialListItem["activity"]): string {
-  return activity[0].toUpperCase() + activity.slice(1);
-}
-
 /** Returns named stockpiles that contributed demand to an aggregate ledger balance. */
 function demandStockpiles(
-  balance: SimulationMaterialListItem,
+  balance: SimulationMaterialBalance,
   stockpileNamesById: ReadonlyMap<string, string>,
 ): string {
   const stockpiles = [...new Set(balance.demandSources.map((source) => source.stockpileId))];
@@ -91,7 +83,7 @@ function NativeRow({
   variation?: "icon" | "bp" | "bpc";
 }) {
   return (
-    <div className="flex min-w-0 items-center justify-between gap-4 border-b border-border py-3 last:border-b-0">
+    <div className="flex min-w-0 flex-col gap-2 border-b border-border py-3 last:border-b-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
       <TypeIdentity
         name={name}
         typeId={typeId}
@@ -100,7 +92,9 @@ function NativeRow({
         linkPath="planner"
         navigateInPlace
       />
-      <div className="shrink-0 text-right font-mono text-xs">{summary}</div>
+      <div className="self-end text-right font-mono text-xs sm:shrink-0 sm:self-auto">
+        {summary}
+      </div>
     </div>
   );
 }
@@ -228,28 +222,42 @@ export default function SimulatorResults({
                     <CollapsibleContent>
                       {bucket.items.map((item) => (
                         <NativeRow
-                          key={`${item.activity}:${item.locationId}:${item.typeId}`}
+                          key={`${item.locationId}:${item.typeId}`}
                           typeId={item.typeId}
                           name={item.typeName}
-                          subline={`${activityName(item.activity)} | ${demandStockpiles(item, stockpileNamesById)}`}
+                          subline={demandStockpiles(item, stockpileNamesById)}
                           summary={
-                            <div className="flex gap-3">
+                            <div className="grid grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-3 lg:flex lg:gap-3">
                               <span>
                                 <span className="mr-1 text-muted-foreground">Avail</span>
                                 {quantity(item.availableNow)}
                               </span>
                               <span>
-                                <span className="mr-1 text-muted-foreground">Need</span>
-                                {quantity(item.required)}
+                                <span className="mr-1 text-muted-foreground">Immediate Demand</span>
+                                {quantity(item.requiredNow)}
                               </span>
                               <span>
-                                <span className="mr-1 text-muted-foreground">Upstream</span>
+                                <span className="mr-1 text-muted-foreground">Future Supply</span>
                                 {quantity(
-                                  item.availableFromProduction
+                                  item.availableFromHauling
+                                    + item.availableFromProduction
                                     + item.availableFromCopying
                                     + item.availableFromInvention
-                                    + item.availableFromReprocessing,
+                                    + item.availableFromReprocessing
+                                    + item.availableFromMarket,
                                 )}
+                              </span>
+                              <span>
+                                <span className="mr-1 text-muted-foreground">Future Demand</span>
+                                {quantity(item.reserved)}
+                              </span>
+                              <span>
+                                <span className="mr-1 text-muted-foreground">Transferred Out</span>
+                                {quantity(item.transferredOut)}
+                              </span>
+                              <span className="col-span-2 sm:col-span-1">
+                                <span className="mr-1 text-muted-foreground">Surplus</span>
+                                {quantity(item.surplus)}
                               </span>
                             </div>
                           }

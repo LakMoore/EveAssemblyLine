@@ -62,48 +62,46 @@ export interface SimulatorRequestV1 extends PlanRequest {
   simulation: SimulationOptionsV1;
 }
 
-/** Stable provenance connecting demand to its stockpile and demanding activity. */
+/** Stable, readiness-aware provenance for one planned material requirement. */
 export interface SimulationDemandSource {
   demandId: string;
   stockpileId: string;
-  typeId: number;
-  quantity: number;
-  inputQuantity: number;
+  materialTypeId: number;
+  productTypeId: number;
+  productQuantity: number;
+  plannedQuantity: number;
+  requiredNow: number;
+  reserved: number;
   destinationLocationId: number;
+  activity: Exclude<SimulatorActivity, "surplus">;
   demandingJobId?: string;
 }
 
-/** Presentation-ready balance for one type in one activity/location ledger. */
+/** Presentation-ready balance for one material type at one physical location. */
 export interface SimulationMaterialBalance {
   typeId: number;
   typeName: string;
   unitVolume: number;
   locationId: number;
-  required: number;
+  requiredNow: number;
+  reserved: number;
   availableNow: number;
-  availableAfterHauling: number;
+  availableFromHauling: number;
   availableFromProduction: number;
   availableFromCopying: number;
   availableFromInvention: number;
   availableFromReprocessing: number;
+  availableFromMarket: number;
   transferredOut: number;
-  reservedNow: number;
-  reservedAfterHauling: number;
-  unreserved: number;
   unsatisfied: number;
   surplus: number;
   demandSources: SimulationDemandSource[];
 }
 
-/** Material balance row assembled for direct simulator presentation. */
-export interface SimulationMaterialListItem extends SimulationMaterialBalance {
-  activity: Exclude<SimulatorActivity, "surplus"> | "surplus";
-}
-
 /** Location bucket containing simulator material rows for direct presentation. */
 export interface SimulationMaterialLocationBucket {
   locationId: number;
-  items: SimulationMaterialListItem[];
+  items: SimulationMaterialBalance[];
 }
 
 /** Exact material requirement and availability for an industry allocation. */
@@ -112,10 +110,8 @@ export interface SimulationJobInput {
   typeName: string;
   requiredQuantity: number;
   availableNow: number;
-  availableAfterHauling: number;
+  availableFromHauling: number;
   availableAfterUpstream: number;
-  reservedNow: number;
-  reservedAfterHauling: number;
   unsatisfiedQuantity: number;
 }
 
@@ -293,10 +289,9 @@ export interface SimulationWarning {
   jobId?: string;
 }
 
-/** Auditable summary of one activity/location ledger. */
+/** Auditable summary of one location's canonical material ledger. */
 export interface SimulationLedgerView {
   ledgerId: string;
-  activity: SimulatorActivity;
   locationId: number;
   balances: SimulationMaterialBalance[];
 }

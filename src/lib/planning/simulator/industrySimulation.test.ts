@@ -61,3 +61,57 @@ void test("declares an exact SDE-backed manufacturing job without inventing avai
   const projection = projectSimulationLedger(inventory.itemLots, result.transactions);
   assert.deepEqual(projection.invariantViolations, []);
 });
+
+void test("defers available Tritanium when another job prerequisite blocks installation", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "main",
+        name: "Main",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 587, quantity: 1, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [{ typeId: 34, name: "Tritanium", quantity: 1_000_000, locationId: 20 }],
+    settings: {
+      includeCorporationAssets: true,
+      personalSellOrdersAsStock: false,
+      allCorporationSellOrdersAsStock: false,
+      myCorporationSellOrdersAsStock: false,
+      buildBlacklist: [],
+      buyBlacklist: [],
+    },
+    simulation: { version: 1 },
+  });
+  const context = await loadSimulationContext();
+  const graph = buildDependencyGraph(
+    [587],
+    context,
+    {
+      buildBlacklist: new Set(),
+      buyBlacklist: new Set(),
+      maxNodes: request.simulation.policy.maxGraphNodes,
+      maxDepth: request.simulation.policy.maxGraphDepth,
+    },
+  );
+  const inventory = normalizeSimulatorInventory(request, context);
+  const result = simulateIndustryDemand(request, context, inventory, graph);
+  const tritaniumDemand = result.transactions.find(
+    (transaction): transaction is Extract<typeof transaction, { kind: "demand" }> =>
+      transaction.kind === "demand" && transaction.source.materialTypeId === 34,
+  );
+  assert.ok(tritaniumDemand);
+  assert.equal(tritaniumDemand.source.requiredNow, 0);
+  assert.equal(
+    tritaniumDemand.source.reserved,
+    tritaniumDemand.source.plannedQuantity,
+  );
+  assert.equal(result.unmetDemands.some((demand) => demand.account.typeId === 34), false);
+});

@@ -15,9 +15,8 @@ export interface SimulationSourceLot {
   ownerId?: number;
 }
 
-/** Exact identity of one projected ledger account. */
+/** Exact identity of one physical material ledger account. */
 export interface SimulationLedgerAccount {
-  activity: SimulatorActivity;
   locationId: number;
   typeId: number;
 }
@@ -48,6 +47,7 @@ export type SimulationTransaction =
       horizon: Extract<SupplyHorizon, "now" | "after-hauling">;
       demandingJobId?: string;
       stockpileId?: string;
+      demandActivity?: Exclude<SimulatorActivity, "surplus">;
     }
   | {
       id: string;
@@ -84,11 +84,10 @@ export type SimulationTransaction =
   | {
       id: string;
       kind: "transfer-commitment";
-      account: SimulationLedgerAccount;
+      sourceAccount: SimulationLedgerAccount;
+      destinationAccount: SimulationLedgerAccount;
       lotId: string;
       quantity: number;
-      fromLocationId: number;
-      toLocationId: number;
       demandingJobId?: string;
     };
 
@@ -101,7 +100,7 @@ export interface SimulationLedgerProjection {
 
 /** Produces the stable string identity for a simulator ledger account. */
 export function simulationAccountKey(account: SimulationLedgerAccount): string {
-  return `${account.activity}:${account.locationId}:${account.typeId}`;
+  return `${account.locationId}:${account.typeId}`;
 }
 
 function emptyBalance(
@@ -114,17 +113,16 @@ function emptyBalance(
     typeName,
     unitVolume,
     locationId: account.locationId,
-    required: 0,
+    requiredNow: 0,
+    reserved: 0,
     availableNow: 0,
-    availableAfterHauling: 0,
+    availableFromHauling: 0,
     availableFromProduction: 0,
     availableFromCopying: 0,
     availableFromInvention: 0,
     availableFromReprocessing: 0,
+    availableFromMarket: 0,
     transferredOut: 0,
-    reservedNow: 0,
-    reservedAfterHauling: 0,
-    unreserved: 0,
     unsatisfied: 0,
     surplus: 0,
     demandSources: [],
@@ -149,6 +147,30 @@ export function projectSimulationLedger(
       invariantViolations.push(`Transaction ${transaction.id} has an invalid quantity.`);
       continue;
     }
+    if (transaction.kind === "transfer-commitment") {
+      const sourceKey = simulationAccountKey(transaction.sourceAccount);
+      const source =
+        mutableBalances.get(sourceKey)
+        ?? emptyBalance(
+          transaction.sourceAccount,
+          names.get(transaction.sourceAccount.typeId) ?? `Type ${transaction.sourceAccount.typeId}`,
+          volumes.get(transaction.sourceAccount.typeId) ?? 0,
+        );
+      const destinationKey = simulationAccountKey(transaction.destinationAccount);
+      const destination =
+        mutableBalances.get(destinationKey)
+        ?? emptyBalance(
+          transaction.destinationAccount,
+          names.get(transaction.destinationAccount.typeId)
+            ?? `Type ${transaction.destinationAccount.typeId}`,
+          volumes.get(transaction.destinationAccount.typeId) ?? 0,
+        );
+      source.transferredOut += transaction.quantity;
+      destination.availableFromHauling += transaction.quantity;
+      mutableBalances.set(sourceKey, source);
+      mutableBalances.set(destinationKey, destination);
+      continue;
+    }
     const key = simulationAccountKey(transaction.account);
     const balance =
       mutableBalances.get(key)
@@ -170,10 +192,20 @@ export function projectSimulationLedger(
         (exposedByLotId.get(transaction.lotId) ?? 0) + transaction.quantity,
       );
       if (transaction.horizon === "now") balance.availableNow += transaction.quantity;
-      else balance.availableAfterHauling += transaction.quantity;
+      else balance.availableFromHauling += transaction.quantity;
     }
     else if (transaction.kind === "demand") {
-      balance.required += transaction.quantity;
+      if (
+        transaction.quantity !== transaction.source.plannedQuantity
+        || transaction.account.typeId !== transaction.source.materialTypeId
+        || transaction.source.requiredNow + transaction.source.reserved
+          !== transaction.source.plannedQuantity
+      ) {
+        invariantViolations.push(`Demand ${transaction.id} has inconsistent readiness quantities.`);
+        continue;
+      }
+      balance.requiredNow += transaction.source.requiredNow;
+      balance.reserved += transaction.source.reserved;
       balance.demandSources.push(transaction.source);
     }
     else if (transaction.kind === "source-reservation") {
@@ -187,12 +219,10 @@ export function projectSimulationLedger(
         (reservedByLotId.get(transaction.lotId) ?? 0) + transaction.quantity,
       );
       if (transaction.horizon === "now") {
-        balance.availableNow += transaction.quantity;
-        balance.reservedNow += transaction.quantity;
+        // Local reservations consume availability already posted from the source lot.
       }
       else {
-        balance.availableAfterHauling += transaction.quantity;
-        balance.reservedAfterHauling += transaction.quantity;
+        // The paired transfer commitment posts the inbound hauled quantity.
       }
     }
     else if (transaction.kind === "production-commitment") {
@@ -241,14 +271,13 @@ export function projectSimulationLedger(
         }
       }
     }
+    else if (transaction.kind === "purchase-requirement") {
+      balance.availableFromMarket += transaction.quantity;
+    }
     else {
-      // These retain provenance; material supply is projected by the paired reservation.
-      const provenanceOnly: Extract<
-        SimulationTransaction,
-        {
-          kind: "purchase-requirement" | "blueprint-run-reservation" | "transfer-commitment";
-        }
-      > = transaction;
+      // Blueprint reservations retain provenance but do not add material supply.
+      const provenanceOnly: Extract<SimulationTransaction, { kind: "blueprint-run-reservation" }> =
+        transaction;
       void provenanceOnly;
     }
     mutableBalances.set(key, balance);
@@ -263,43 +292,31 @@ export function projectSimulationLedger(
     }
   }
   for (const lot of sourceLots) {
-    const accountedQuantity =
-      (reservedByLotId.get(lot.lotId) ?? 0) + (exposedByLotId.get(lot.lotId) ?? 0);
-    if (accountedQuantity > lot.quantity) {
+    const exposedQuantity = exposedByLotId.get(lot.lotId) ?? 0;
+    if (exposedQuantity > lot.quantity) {
       invariantViolations.push(
-        `Source lot ${lot.lotId} exposed or reserved ${accountedQuantity - lot.quantity} excess units.`,
+        `Source lot ${lot.lotId} exposed ${exposedQuantity - lot.quantity} excess units.`,
       );
     }
   }
 
   const balances = new Map(
     [...mutableBalances].map(([key, balance]) => {
-      const physicalAvailable = balance.availableNow + balance.availableAfterHauling;
-      const nonPurchaseSupply =
+      const plannedRequirement = balance.requiredNow + balance.reserved;
+      const physicalAvailable = balance.availableNow + balance.availableFromHauling;
+      const plannedSupply =
         physicalAvailable
         + balance.availableFromProduction
         + balance.availableFromCopying
         + balance.availableFromInvention
-        + balance.availableFromReprocessing;
+        + balance.availableFromReprocessing
+        + balance.availableFromMarket;
       const finalized = Object.freeze({
         ...balance,
         demandSources: [...balance.demandSources],
-        unreserved: Math.max(
-          0,
-          physicalAvailable - balance.reservedNow - balance.reservedAfterHauling,
-        ),
-        unsatisfied: Math.max(0, balance.required - nonPurchaseSupply),
-        surplus: Math.max(0, nonPurchaseSupply - balance.required - balance.transferredOut),
+        unsatisfied: Math.max(0, plannedRequirement - plannedSupply),
+        surplus: Math.max(0, plannedSupply - plannedRequirement - balance.transferredOut),
       });
-      if (finalized.reservedNow > finalized.availableNow) {
-        invariantViolations.push(`Account ${key} reserved more local stock than was available.`);
-      }
-      if (
-        finalized.reservedNow + finalized.reservedAfterHauling
-        > finalized.availableNow + finalized.availableAfterHauling
-      ) {
-        invariantViolations.push(`Account ${key} reserved more physical stock than was available.`);
-      }
       return [key, finalized] as const;
     }),
   );

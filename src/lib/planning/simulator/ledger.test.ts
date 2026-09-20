@@ -7,12 +7,11 @@ import {
 } from "./ledger";
 
 const account: SimulationLedgerAccount = {
-  activity: "manufacturing",
   locationId: 20,
   typeId: 34,
 };
 
-void test("projects demand and horizon-specific reservations", () => {
+void test("projects source availability before demand reservations and hauling", () => {
   const transactions: SimulationTransaction[] = [
     {
       id: "demand-1",
@@ -22,11 +21,39 @@ void test("projects demand and horizon-specific reservations", () => {
       source: {
         demandId: "demand-1",
         stockpileId: "main",
-        typeId: 34,
-        quantity: 10,
-        inputQuantity: 10,
+        materialTypeId: 34,
+        productTypeId: 34,
+        productQuantity: 10,
+        plannedQuantity: 10,
+        requiredNow: 4,
+        reserved: 6,
         destinationLocationId: 20,
+        activity: "manufacturing",
       },
+    },
+    {
+      id: "local-availability",
+      kind: "source-availability",
+      account,
+      lotId: "local",
+      quantity: 4,
+      horizon: "now",
+    },
+    {
+      id: "remote-availability",
+      kind: "source-availability",
+      account: { locationId: 30, typeId: 34 },
+      lotId: "remote",
+      quantity: 3,
+      horizon: "now",
+    },
+    {
+      id: "remote-transfer",
+      kind: "transfer-commitment",
+      sourceAccount: { locationId: 30, typeId: 34 },
+      destinationAccount: account,
+      lotId: "remote",
+      quantity: 3,
     },
     {
       id: "reserve-local",
@@ -52,11 +79,14 @@ void test("projects demand and horizon-specific reservations", () => {
     ],
     transactions,
   );
-  const balance = [...projection.balances.values()][0];
-  assert.equal(balance.required, 10);
+  const balance = projection.balances.get("20:34");
+  assert.ok(balance);
+  assert.equal(balance.requiredNow, 4);
+  assert.equal(balance.reserved, 6);
   assert.equal(balance.availableNow, 4);
-  assert.equal(balance.availableAfterHauling, 3);
+  assert.equal(balance.availableFromHauling, 3);
   assert.equal(balance.unsatisfied, 3);
+  assert.equal(projection.balances.get("30:34")?.transferredOut, 3);
   assert.deepEqual(projection.invariantViolations, []);
 });
 
@@ -100,10 +130,14 @@ void test("combines stockpile demand sources in one activity and location accoun
         source: {
           demandId: "main-demand",
           stockpileId: "main",
-          typeId: 34,
-          quantity: 4,
-          inputQuantity: 4,
+          materialTypeId: 34,
+          productTypeId: 34,
+          productQuantity: 4,
+          plannedQuantity: 4,
+          requiredNow: 4,
+          reserved: 0,
           destinationLocationId: 20,
+          activity: "manufacturing",
         },
       },
       {
@@ -114,17 +148,22 @@ void test("combines stockpile demand sources in one activity and location accoun
         source: {
           demandId: "other-demand",
           stockpileId: "other",
-          typeId: 34,
-          quantity: 6,
-          inputQuantity: 6,
+          materialTypeId: 34,
+          productTypeId: 34,
+          productQuantity: 6,
+          plannedQuantity: 6,
+          requiredNow: 0,
+          reserved: 6,
           destinationLocationId: 20,
+          activity: "reaction",
         },
       },
     ],
   );
   const balances = [...projection.balances.values()];
   assert.equal(balances.length, 1);
-  assert.equal(balances[0].required, 10);
+  assert.equal(balances[0].requiredNow, 4);
+  assert.equal(balances[0].reserved, 6);
   assert.deepEqual(
     balances[0].demandSources.map((source) => source.stockpileId),
     ["main", "other"],
@@ -133,7 +172,6 @@ void test("combines stockpile demand sources in one activity and location accoun
 
 void test("posts production at its source ledger before crediting another location", () => {
   const destinationAccount: SimulationLedgerAccount = {
-    activity: "stock",
     locationId: 10,
     typeId: 34,
   };
@@ -148,10 +186,14 @@ void test("posts production at its source ledger before crediting another locati
         source: {
           demandId: "target-demand",
           stockpileId: "main",
-          typeId: 34,
-          quantity: 8,
-          inputQuantity: 8,
+          materialTypeId: 34,
+          productTypeId: 34,
+          productQuantity: 8,
+          plannedQuantity: 8,
+          requiredNow: 8,
+          reserved: 0,
           destinationLocationId: 10,
+          activity: "stock",
         },
       },
       {
@@ -165,8 +207,8 @@ void test("posts production at its source ledger before crediting another locati
       },
     ],
   );
-  const sourceBalance = projection.balances.get("manufacturing:20:34");
-  const destinationBalance = projection.balances.get("stock:10:34");
+  const sourceBalance = projection.balances.get("20:34");
+  const destinationBalance = projection.balances.get("10:34");
   assert.ok(sourceBalance);
   assert.ok(destinationBalance);
   assert.equal(sourceBalance.availableFromProduction, 8);
@@ -174,4 +216,41 @@ void test("posts production at its source ledger before crediting another locati
   assert.equal(sourceBalance.surplus, 0);
   assert.equal(destinationBalance.availableFromProduction, 8);
   assert.equal(destinationBalance.unsatisfied, 0);
+});
+
+void test("projects an allowed purchase as market supply at its destination", () => {
+  const projection = projectSimulationLedger(
+    [],
+    [
+      {
+        id: "demand",
+        kind: "demand",
+        account,
+        quantity: 8,
+        source: {
+          demandId: "demand",
+          stockpileId: "main",
+          materialTypeId: 34,
+          productTypeId: 34,
+          productQuantity: 8,
+          plannedQuantity: 8,
+          requiredNow: 8,
+          reserved: 0,
+          destinationLocationId: 20,
+          activity: "manufacturing",
+        },
+      },
+      {
+        id: "purchase",
+        kind: "purchase-requirement",
+        account,
+        quantity: 8,
+      },
+    ],
+  );
+  const balance = projection.balances.get("20:34");
+  assert.ok(balance);
+  assert.equal(balance.availableFromMarket, 8);
+  assert.equal(balance.unsatisfied, 0);
+  assert.equal(balance.surplus, 0);
 });

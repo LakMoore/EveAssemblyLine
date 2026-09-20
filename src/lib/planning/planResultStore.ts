@@ -118,23 +118,30 @@ export function isSimulationResultV1(value: unknown): value is SimulationResultV
   if (!isRecord(value) || !isRecord(value.metadata) || !isRecord(value.lists)) return false;
   const metadata = value.metadata;
   const lists = value.lists;
+  const demandActivities = new Set([
+    "manufacturing",
+    "reaction",
+    "copying",
+    "invention",
+    "reprocessing",
+    "stock",
+  ]);
   const hasSimulationRows = (rows: unknown, validator: (row: unknown) => boolean) =>
     Array.isArray(rows) && rows.every(validator);
   const hasBalance = (balance: unknown) =>
     hasTypeIdentity(balance)
     && isPositiveInteger(balance.locationId)
     && [
-      "required",
+      "requiredNow",
+      "reserved",
       "availableNow",
-      "availableAfterHauling",
+      "availableFromHauling",
       "availableFromProduction",
       "availableFromCopying",
       "availableFromInvention",
       "availableFromReprocessing",
+      "availableFromMarket",
       "transferredOut",
-      "reservedNow",
-      "reservedAfterHauling",
-      "unreserved",
       "unsatisfied",
       "surplus",
     ].every((key) => isQuantity(balance[key]))
@@ -143,49 +150,27 @@ export function isSimulationResultV1(value: unknown): value is SimulationResultV
       (source) =>
         isRecord(source)
         && typeof source.stockpileId === "string"
-        && isPositiveInteger(source.typeId)
-        && isQuantity(source.quantity)
-        && isQuantity(source.inputQuantity)
-        && isPositiveInteger(source.destinationLocationId),
+        && isPositiveInteger(source.materialTypeId)
+        && isPositiveInteger(source.productTypeId)
+        && isQuantity(source.productQuantity)
+        && isQuantity(source.plannedQuantity)
+        && isQuantity(source.requiredNow)
+        && isQuantity(source.reserved)
+        && source.requiredNow + source.reserved === source.plannedQuantity
+        && isPositiveInteger(source.destinationLocationId)
+        && demandActivities.has(String(source.activity)),
     );
-  const listActivities = new Set([
-    "manufacturing",
-    "reaction",
-    "copying",
-    "invention",
-    "reprocessing",
-    "stock",
-    "surplus",
-  ]);
-  const hasPresentationBuckets = (items: unknown, expectedActivity?: "surplus") =>
+  const hasPresentationBuckets = (items: unknown) =>
     hasSimulationRows(
       items,
       (bucket) =>
         isRecord(bucket)
         && isPositiveInteger(bucket.locationId)
         && Array.isArray(bucket.items)
-        && bucket.items.every(
-          (item) =>
-            hasBalance(item)
-            && isRecord(item)
-            && listActivities.has(String(item.activity))
-            && (expectedActivity === undefined
-              ? item.activity !== "surplus"
-              : item.activity === expectedActivity)
-            && item.locationId === bucket.locationId,
-        ),
+        && bucket.items.every((item) => hasBalance(item) && item.locationId === bucket.locationId),
     );
-  const hasSurplusBalances = hasPresentationBuckets(lists.surplusItems, "surplus");
+  const hasSurplusBalances = hasPresentationBuckets(lists.surplusItems);
   const hasPlanPresentationBalances = hasPresentationBuckets(lists.planItems);
-  const activities = new Set([
-    "manufacturing",
-    "reaction",
-    "copying",
-    "invention",
-    "reprocessing",
-    "stock",
-    "surplus",
-  ]);
   const hasLedgers =
     value.ledgers === undefined
     || (
@@ -194,8 +179,6 @@ export function isSimulationResultV1(value: unknown): value is SimulationResultV
         (ledger) =>
           isRecord(ledger)
           && typeof ledger.ledgerId === "string"
-          && typeof ledger.activity === "string"
-          && activities.has(ledger.activity)
           && isPositiveInteger(ledger.locationId)
           && Array.isArray(ledger.balances)
           && ledger.balances.every(hasBalance),

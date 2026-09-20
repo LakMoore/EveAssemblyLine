@@ -39,11 +39,13 @@ void test("assembles a versioned invariant-safe result from the cached SDE", asy
   assert.ok(first.lists.manufacturingJobs.some((job) => job.productTypeId === 587));
   assert.ok(
     first.lists.planItems.some((bucket) =>
-      bucket.items.some((item) => item.activity === "manufacturing"),
+      bucket.items.some((item) => item.requiredNow + item.reserved > 0),
     ),
   );
   assert.ok(
-    first.ledgers.some((ledger) => ledger.balances.some((balance) => balance.required > 0)),
+    first.ledgers.some((ledger) =>
+      ledger.balances.some((balance) => balance.requiredNow + balance.reserved > 0),
+    ),
   );
 });
 
@@ -94,7 +96,7 @@ void test("produces identical facts for equivalent input permutations", async ()
   assert.deepEqual(first.ledgers, second.ledgers);
 });
 
-void test("uses one manufacturing ledger for stockpiles sharing a facility", async () => {
+void test("combines stockpile demand in one canonical location ledger", async () => {
   const sharedLocations = {
     stock: 10,
     manufacturing: 20,
@@ -130,19 +132,17 @@ void test("uses one manufacturing ledger for stockpiles sharing a facility", asy
     simulation: { version: 1 },
   });
   const result = await simulateIndustry(request);
-  const manufacturingLedgers = result.ledgers.filter(
-    (ledger) => ledger.activity === "manufacturing" && ledger.locationId === 20,
-  );
-  assert.equal(manufacturingLedgers.length, 1);
-  assert.equal(manufacturingLedgers[0].ledgerId, "manufacturing:20");
+  const manufacturingLedger = result.ledgers.find((ledger) => ledger.locationId === 20);
+  assert.ok(manufacturingLedger);
+  assert.equal(manufacturingLedger.ledgerId, "location:20");
   assert.ok(
-    manufacturingLedgers[0].balances.some(
+    manufacturingLedger.balances.some(
       (balance) => new Set(balance.demandSources.map((source) => source.stockpileId)).size === 2,
     ),
   );
 });
 
-void test("posts unreserved items only to their location surplus ledger", async () => {
+void test("shows unrelated stock only on the surplus tab", async () => {
   const request = parseSimulatorRequest({
     stockpiles: [
       {
@@ -178,21 +178,18 @@ void test("posts unreserved items only to their location surplus ledger", async 
     simulation: { version: 1 },
   });
   const result = await simulateIndustry(request);
-  const surplus = result.ledgers.find(
-    (ledger) => ledger.activity === "surplus" && ledger.locationId === 50,
-  );
-  const copying = result.ledgers.find(
-    (ledger) => ledger.activity === "copying" && ledger.locationId === 50,
-  );
-  assert.ok(surplus);
-  const amplifier = surplus.balances.find((balance) => balance.typeId === 4393);
+  const ledger = result.ledgers.find((candidate) => candidate.locationId === 50);
+  assert.ok(ledger);
+  const amplifier = ledger.balances.find((balance) => balance.typeId === 4393);
   assert.ok(amplifier);
   assert.equal(amplifier.availableNow, 252);
-  assert.equal(amplifier.unreserved, 252);
+  assert.equal(amplifier.reserved, 0);
   assert.ok(
     result.lists.surplusItems.some((bucket) => bucket.items.some((item) => item.typeId === 4393)),
   );
-  assert.ok(!copying || !copying.balances.some((balance) => balance.typeId === 4393));
+  assert.ok(
+    !result.lists.planItems.some((bucket) => bucket.items.some((item) => item.typeId === 4393)),
+  );
 });
 
 void test("includes surplus at an unconfigured location only when requested", async () => {
@@ -231,11 +228,11 @@ void test("includes surplus at an unconfigured location only when requested", as
     }),
   );
   assert.equal(
-    limited.ledgers.some((ledger) => ledger.activity === "surplus" && ledger.locationId === 70),
+    limited.lists.surplusItems.some((bucket) => bucket.locationId === 70),
     false,
   );
   assert.equal(
-    expanded.ledgers.some((ledger) => ledger.activity === "surplus" && ledger.locationId === 70),
+    expanded.lists.surplusItems.some((bucket) => bucket.locationId === 70),
     true,
   );
 });
@@ -274,8 +271,51 @@ void test("does not expose haul-excluded remote stock to destination demand", as
     .find((bucket) => bucket.locationId === 10)
     ?.items.find((item) => item.typeId === 34);
   assert.ok(destination);
-  assert.equal(destination.availableAfterHauling, 0);
-  assert.equal(destination.unsatisfied, 50);
+  assert.equal(destination.availableFromHauling, 0);
+  assert.equal(destination.availableFromMarket, 50);
+  assert.equal(destination.unsatisfied, 0);
   assert.equal(result.lists.haulingTasks.length, 0);
   assert.equal(result.lists.materialsToBuy[0].quantity, 50);
+});
+
+void test("keeps connected material surplus on the plan tab", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "main",
+        name: "Main",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 34, quantity: 50, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [{ typeId: 34, name: "Tritanium", quantity: 75, locationId: 10 }],
+    settings: {
+      includeCorporationAssets: true,
+      personalSellOrdersAsStock: false,
+      allCorporationSellOrdersAsStock: false,
+      myCorporationSellOrdersAsStock: false,
+      buildBlacklist: [],
+      buyBlacklist: [],
+    },
+    simulation: { version: 1 },
+  });
+  const result = await simulateIndustry(request);
+  const tritanium = result.lists.planItems
+    .find((bucket) => bucket.locationId === 10)
+    ?.items.find((item) => item.typeId === 34);
+  assert.ok(tritanium);
+  assert.equal(tritanium.availableNow, 75);
+  assert.equal(tritanium.requiredNow, 50);
+  assert.equal(tritanium.reserved, 0);
+  assert.equal(tritanium.surplus, 25);
+  assert.ok(
+    !result.lists.surplusItems.some((bucket) => bucket.items.some((item) => item.typeId === 34)),
+  );
 });

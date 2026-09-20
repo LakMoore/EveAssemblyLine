@@ -54,15 +54,19 @@ function demand(
   blockedByBuyBlacklist = false,
 ): SimulationUnmetDemand {
   return {
-    account: { activity: "manufacturing", locationId, typeId },
+    account: { locationId, typeId },
     quantity,
     source: {
       demandId: `${typeId}:${locationId}`,
       stockpileId: "main",
-      typeId,
-      quantity,
-      inputQuantity: quantity,
+      materialTypeId: typeId,
+      productTypeId: typeId,
+      productQuantity: quantity,
+      plannedQuantity: quantity,
+      requiredNow: quantity,
+      reserved: 0,
       destinationLocationId: locationId,
+      activity: "manufacturing",
     },
     blockedByBuyBlacklist,
     purpose: "material",

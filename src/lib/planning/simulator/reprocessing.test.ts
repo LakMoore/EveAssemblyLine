@@ -10,7 +10,6 @@ import type { SimulatorInventory } from "./sourceLots";
 import type { SimulatorRequestV1 } from "./types";
 
 const materialAccount: SimulationLedgerAccount = {
-  activity: "manufacturing",
   locationId: 20,
   typeId: 34,
 };
@@ -99,10 +98,14 @@ void test("allocates complete reprocessing portions and keeps surplus out of Buy
         source: {
           demandId: "source",
           stockpileId: "main",
-          typeId: 34,
-          quantity: 150,
-          inputQuantity: 150,
+          materialTypeId: 34,
+          productTypeId: 34,
+          productQuantity: 150,
+          plannedQuantity: 150,
+          requiredNow: 150,
+          reserved: 0,
           destinationLocationId: 20,
+          activity: "manufacturing",
         },
       },
     ],
@@ -117,10 +120,14 @@ void test("allocates complete reprocessing portions and keeps surplus out of Buy
         source: {
           demandId: "source",
           stockpileId: "main",
-          typeId: 34,
-          quantity: 150,
-          inputQuantity: 150,
+          materialTypeId: 34,
+          productTypeId: 34,
+          productQuantity: 150,
+          plannedQuantity: 150,
+          requiredNow: 150,
+          reserved: 0,
           destinationLocationId: 20,
+          activity: "manufacturing",
         },
         blockedByBuyBlacklist: false,
         purpose: "material",

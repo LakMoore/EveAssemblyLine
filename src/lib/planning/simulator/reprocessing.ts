@@ -158,7 +158,7 @@ export function settleReprocessing(
   const stockpileById = new Map(request.stockpiles.map((stockpile) => [stockpile.id, stockpile]));
   const reservationTransactions = industry.transactions.filter(
     (transaction): transaction is Extract<SimulationTransaction, { kind: "source-reservation" }> =>
-      transaction.kind === "source-reservation" && transaction.account.activity === "reprocessing",
+      transaction.kind === "source-reservation" && transaction.demandActivity === "reprocessing",
   );
 
   const createJob = (
@@ -204,7 +204,6 @@ export function settleReprocessing(
           id: `reprocessing-output:${sequence++}`,
           kind: "reprocessing-output",
           account: {
-            activity: "reprocessing",
             locationId: stockpile.locations.reprocessing,
             typeId: material.typeId,
           },
@@ -219,7 +218,6 @@ export function settleReprocessing(
           id: `reprocessing-surplus:${sequence++}`,
           kind: "reprocessing-output",
           account: {
-            activity: "reprocessing",
             locationId: stockpile.locations.reprocessing,
             typeId: material.typeId,
           },
@@ -328,7 +326,6 @@ export function settleReprocessing(
     const { candidate, score } = selected;
     const sourceQuantity = score.portions * candidate.portionSize;
     const account: SimulationLedgerAccount = {
-      activity: "reprocessing",
       locationId: candidate.stockpile.locations.reprocessing,
       typeId: candidate.lot.typeId,
     };

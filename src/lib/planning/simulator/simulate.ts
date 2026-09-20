@@ -49,8 +49,45 @@ function typeName(context: SimulationContext, request: SimulatorRequestV1, typeI
   return names?.[request.language ?? "en"] ?? names?.en ?? `Type ${typeId}`;
 }
 
+/** Posts every physical item lot to its canonical location/type ledger before allocation. */
+function sourceAvailabilityTransactions(inventory: SimulatorInventory): SimulationTransaction[] {
+  return inventory.itemLots.flatMap((lot) => {
+    if (lot.horizon !== "now" || lot.locationId === undefined) {
+      return [];
+    }
+    return [
+      {
+        id: `availability:${lot.lotId}`,
+        kind: "source-availability" as const,
+        account: { locationId: lot.locationId, typeId: lot.typeId },
+        lotId: lot.lotId,
+        quantity: lot.quantity,
+        horizon: "now" as const,
+      },
+    ];
+  });
+}
+
+/** Returns accounts participating in the requested plan, excluding unrelated source availability. */
+function connectedAccountKeys(transactions: readonly SimulationTransaction[]): ReadonlySet<string> {
+  const keys = new Set<string>();
+  for (const transaction of transactions) {
+    if (transaction.kind === "source-availability") continue;
+    if (transaction.kind === "transfer-commitment") {
+      keys.add(simulationAccountKey(transaction.sourceAccount));
+      keys.add(simulationAccountKey(transaction.destinationAccount));
+      continue;
+    }
+    keys.add(simulationAccountKey(transaction.account));
+    if ("destinationAccount" in transaction && transaction.destinationAccount) {
+      keys.add(simulationAccountKey(transaction.destinationAccount));
+    }
+  }
+  return keys;
+}
+
 /** Returns physical locations configured for a stockpile or activity-specific facility assignment. */
-function configuredSurplusLocationIds(request: SimulatorRequestV1): ReadonlySet<number> {
+function configuredLocationIds(request: SimulatorRequestV1): ReadonlySet<number> {
   const locationIds = new Set<number>();
   for (const stockpile of request.stockpiles) {
     for (const locationId of Object.values(stockpile.locations)) locationIds.add(locationId);
@@ -59,39 +96,6 @@ function configuredSurplusLocationIds(request: SimulatorRequestV1): ReadonlySet<
     }
   }
   return locationIds;
-}
-
-/** Posts each unreserved physical item lot to its canonical location surplus ledger. */
-function sourceAvailabilityTransactions(
-  request: SimulatorRequestV1,
-  inventory: SimulatorInventory,
-  industry: IndustrySimulationResult,
-): SimulationTransaction[] {
-  const configuredLocationIds = configuredSurplusLocationIds(request);
-  return inventory.itemLots.flatMap((lot) => {
-    const quantity = industry.allocator.remainingItemQuantity(lot.lotId);
-    if (
-      quantity <= 0
-      || lot.horizon !== "now"
-      || lot.locationId === undefined
-      || (
-        !request.simulation.includeSurplusForAllLocations
-        && !configuredLocationIds.has(lot.locationId)
-      )
-    ) {
-      return [];
-    }
-    return [
-      {
-        id: `availability:${lot.lotId}`,
-        kind: "source-availability" as const,
-        account: { activity: "surplus", locationId: lot.locationId, typeId: lot.typeId },
-        lotId: lot.lotId,
-        quantity,
-        horizon: "now" as const,
-      },
-    ];
-  });
 }
 
 /** De-duplicates journal entries accumulated across mutable allocator phases. */
@@ -103,23 +107,19 @@ function uniqueTransactions(
   return [...byId.values()];
 }
 
-/** Sorts material balances into stable activity ledgers. */
+/** Sorts canonical material balances into stable location ledgers. */
 function ledgerViews(
-  transactions: readonly SimulationTransaction[],
   balances: ReadonlyMap<string, SimulationMaterialBalance>,
 ): SimulationLedgerView[] {
   const views = new Map<string, SimulationLedgerView>();
-  for (const transaction of transactions) {
-    const ledgerId = `${transaction.account.activity}:${transaction.account.locationId}`;
+  for (const balance of balances.values()) {
+    const ledgerId = `location:${balance.locationId}`;
     const view = views.get(ledgerId) ?? {
       ledgerId,
-      activity: transaction.account.activity,
-      locationId: transaction.account.locationId,
+      locationId: balance.locationId,
       balances: [],
     };
-    const balanceKey = simulationAccountKey(transaction.account);
-    const balance = balances.get(balanceKey);
-    if (balance && !view.balances.includes(balance)) view.balances.push(balance);
+    view.balances.push(balance);
     views.set(ledgerId, view);
   }
   return [...views.values()]
@@ -129,34 +129,49 @@ function ledgerViews(
     }))
     .sort(
       (left, right) =>
-        left.activity.localeCompare(right.activity)
-        || left.locationId - right.locationId
-        || left.ledgerId.localeCompare(right.ledgerId),
+        left.locationId - right.locationId || left.ledgerId.localeCompare(right.ledgerId),
     );
 }
 
 /** Selects non-empty balances for one direct presentation list. */
 function presentationItems(
   ledgers: readonly SimulationLedgerView[],
-  activity: "plan" | "surplus",
+  connectedKeys: ReadonlySet<string>,
+  kind: "plan" | "surplus",
+  visibleSurplusLocations: ReadonlySet<number>,
+  includeSurplusForAllLocations: boolean,
 ): SimulationResultV1["lists"]["planItems"] {
   const itemsByLocation = new Map<
     number,
     SimulationResultV1["lists"]["planItems"][number]["items"]
   >();
   for (const ledger of ledgers) {
-    if (activity === "surplus" ? ledger.activity !== "surplus" : ledger.activity === "surplus") {
-      continue;
-    }
-    const items = ledger.balances
-      .filter(
-        (balance) =>
-          balance.required > 0
-          || balance.unreserved > 0
-          || balance.surplus > 0
-          || balance.transferredOut > 0,
-      )
-      .map((balance) => ({ ...balance, activity: ledger.activity }));
+    const items = ledger.balances.filter((balance) => {
+      const connected = connectedKeys.has(
+        simulationAccountKey({ locationId: balance.locationId, typeId: balance.typeId }),
+      );
+      if (kind === "plan") {
+        return (
+          connected
+          && (
+                balance.requiredNow > 0
+                || balance.reserved > 0
+            || balance.availableNow > 0
+            || balance.availableFromHauling > 0
+            || balance.availableFromProduction > 0
+            || balance.availableFromCopying > 0
+            || balance.availableFromInvention > 0
+            || balance.availableFromReprocessing > 0
+            || balance.transferredOut > 0
+          )
+        );
+      }
+      return (
+        !connected
+        && balance.surplus > 0
+        && (includeSurplusForAllLocations || visibleSurplusLocations.has(balance.locationId))
+      );
+    });
     if (items.length === 0) continue;
     const locationItems = itemsByLocation.get(ledger.locationId) ?? [];
     locationItems.push(...items);
@@ -165,26 +180,38 @@ function presentationItems(
   return [...itemsByLocation.entries()]
     .map(([locationId, items]) => ({
       locationId,
-      items: items.sort(
-        (left, right) => left.activity.localeCompare(right.activity) || left.typeId - right.typeId,
-      ),
+      items: items.sort((left, right) => left.typeId - right.typeId),
     }))
     .sort((left, right) => left.locationId - right.locationId);
 }
 
 /** Builds the presentation lists from settled domain facts. */
 function assembleLists(
+  request: SimulatorRequestV1,
   industry: IndustrySimulationResult,
   schedules: SimulationScheduleResult,
   reprocessing: ReturnType<typeof settleReprocessing>,
   buying: ReturnType<typeof settleBuying>,
   ledgers: readonly SimulationLedgerView[],
+  connectedKeys: ReadonlySet<string>,
   warnings: SimulationWarning[],
 ): SimulationResultV1["lists"] {
   return {
     warnings,
-    planItems: presentationItems(ledgers, "plan"),
-    surplusItems: presentationItems(ledgers, "surplus"),
+    planItems: presentationItems(
+      ledgers,
+      connectedKeys,
+      "plan",
+      configuredLocationIds(request),
+      request.simulation.includeSurplusForAllLocations,
+    ),
+    surplusItems: presentationItems(
+      ledgers,
+      connectedKeys,
+      "surplus",
+      configuredLocationIds(request),
+      request.simulation.includeSurplusForAllLocations,
+    ),
     materialsToBuy: buying.materials,
     bpoToBuy: buying.blueprints,
     reprocessingJobs: reprocessing.jobs,
@@ -234,7 +261,7 @@ export async function simulateIndustry(
     ...industry.allocator.transactions,
     ...reprocessing.transactions,
     ...buying.transactions,
-    ...sourceAvailabilityTransactions(request, inventory, industry),
+    ...sourceAvailabilityTransactions(inventory),
   ]);
   const names = new Map(
     [...context.types].map(([typeId]) => [typeId, typeName(context, request, typeId)]),
@@ -243,7 +270,8 @@ export async function simulateIndustry(
     [...context.types].map(([typeId, type]) => [typeId, type.packagedVolume ?? type.volume ?? 0]),
   );
   const projection = projectSimulationLedger(inventory.itemLots, transactions, names, volumes);
-  const ledgers = ledgerViews(transactions, projection.balances);
+  const ledgers = ledgerViews(projection.balances);
+  const connectedKeys = connectedAccountKeys(transactions);
   const invariantWarnings: SimulationWarning[] = projection.invariantViolations.map((message) => ({
     code: "invariant-violation",
     message,
@@ -255,7 +283,16 @@ export async function simulateIndustry(
     ...buying.warnings,
     ...invariantWarnings,
   ];
-  const lists = assembleLists(industry, schedules, reprocessing, buying, ledgers, warnings);
+  const lists = assembleLists(
+    request,
+    industry,
+    schedules,
+    reprocessing,
+    buying,
+    ledgers,
+    connectedKeys,
+    warnings,
+  );
   return {
     metadata: {
       simulatorVersion: 1,

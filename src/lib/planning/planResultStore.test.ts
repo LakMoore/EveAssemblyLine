@@ -33,18 +33,18 @@ void test("accepts a complete cached native simulation result", () => {
   assert.equal(isSimulationResultV1(simulationResult()), true);
 });
 
-void test("accepts stock ledgers and rejects deprecated market ledgers", () => {
+void test("accepts canonical location ledgers and rejects ledgers without a location", () => {
   const current = {
     ...simulationResult(),
-    ledgers: [{ ledgerId: "stock:10", activity: "stock", locationId: 10, balances: [] }],
+    ledgers: [{ ledgerId: "location:10", locationId: 10, balances: [] }],
   };
   assert.equal(isSimulationResultV1(current), true);
 
-  const deprecated = {
+  const invalid = {
     ...simulationResult(),
-    ledgers: [{ ledgerId: "market:10", activity: "market", locationId: 10, balances: [] }],
+    ledgers: [{ ledgerId: "location:10", balances: [] }],
   };
-  assert.equal(isSimulationResultV1(deprecated), false);
+  assert.equal(isSimulationResultV1(invalid), false);
 });
 
 void test("accepts a complete cached legacy plan response", () => {
