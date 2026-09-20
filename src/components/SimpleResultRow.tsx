@@ -15,6 +15,7 @@ export type SimpleResultRowProps = Omit<
   installed?: boolean;
   selected?: boolean;
   onClick?: () => void;
+  wideBreakpoint?: "sm" | "md";
   className?: string;
   identityClassName?: string;
   contentClassName?: string;
@@ -29,6 +30,7 @@ export default function SimpleResultRow({
   installed = false,
   selected = false,
   onClick,
+  wideBreakpoint = "sm",
   className,
   identityClassName,
   contentClassName,
@@ -44,8 +46,10 @@ export default function SimpleResultRow({
       tabIndex={onClick ? 0 : undefined}
       aria-label={onClick ? `Select ${name}` : undefined}
       className={cn(
-        "group/result-row flex min-h-14 min-w-0 flex-col gap-2 border-b border-border px-2 py-2.5 transition-colors hover:bg-muted/50 data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[installed=true]:hover:bg-transparent data-[installed=true]:**:data-result-row-content:opacity-50 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:hover:bg-accent sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-[13px]",
-        "last:border-b-0",
+        "group/result-row mb-2 flex min-h-14 min-w-0 flex-col gap-2 border-b border-border px-2 py-2.5 transition-colors hover:bg-muted/50 data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[installed=true]:hover:bg-transparent data-[installed=true]:**:data-result-row-content:opacity-50 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:hover:bg-accent",
+        wideBreakpoint === "md"
+          ? "md:grid md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] md:items-center md:gap-[13px]"
+          : "sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-[13px]",
         className,
       )}
       onClick={onClick}
@@ -66,7 +70,16 @@ export default function SimpleResultRow({
         typeId={typeId}
         className={cn("min-w-0", identityClassName)}
       />
-      <div className={cn("contents", contentClassName)}>{children}</div>
+      <div
+        className={cn(
+          wideBreakpoint === "md"
+            ? "contents md:flex md:min-w-0 md:items-center md:justify-end md:gap-1"
+            : "contents sm:flex sm:min-w-0 sm:items-center sm:justify-end sm:gap-1",
+          contentClassName,
+        )}
+      >
+        {children}
+      </div>
     </div>
   );
 }

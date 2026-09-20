@@ -35,8 +35,12 @@ export default function CopyableText({
     <button
       {...buttonProps}
       type="button"
+      aria-label={buttonProps["aria-label"] ?? `Copy ${copyLabel}`}
       className={cn("cursor-copy!", className)}
-      onClick={() => void copyText()}
+      onClick={(event) => {
+        event.stopPropagation();
+        void copyText();
+      }}
     >
       {textToRender}
     </button>

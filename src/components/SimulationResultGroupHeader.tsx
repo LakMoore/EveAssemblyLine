@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
   Avatar,
   AvatarFallback,
@@ -17,7 +18,7 @@ export type SimulationGroupAvatar = {
 };
 
 type SimulationResultGroupHeaderProps = {
-  label: string;
+  label: ReactNode;
   isOpen: boolean;
   avatarRows: SimulationGroupAvatar[];
   remainingCount: number;
@@ -35,39 +36,43 @@ export default function SimulationResultGroupHeader({
   copyLabel,
 }: SimulationResultGroupHeaderProps) {
   return (
-    <h3 className="flex flex-1 flex-row items-center justify-between gap-4 py-4 text-foreground uppercase">
-      <span className="flex min-w-0 shrink grow truncate">{label}</span>
-      <AvatarGroup className="ml-auto hidden group-data-closed/simulation-group:flex">
-        {avatarRows.map((avatar, index) => (
-          <Avatar key={`${avatar.typeId}-${index}`} size="lg">
-            <AvatarImage
-              className="bg-muted"
-              src={eveTypeImageUrl(avatar.typeId, avatar.imageVariation, 64)}
-              alt={`${avatar.name} icon`}
-            />
-            <AvatarFallback>{avatar.name.slice(0, 2)}</AvatarFallback>
-          </Avatar>
-        ))}
-        {remainingCount > 0 && <AvatarGroupCount>+{remainingCount}</AvatarGroupCount>}
-      </AvatarGroup>
-      {onCopyGroup && copyLabel && (
-        <Button
+    <div className="border-b-2 border-border py-4 text-foreground uppercase">
+      <div className="flex flex-1 flex-row items-center justify-between gap-4 pl-2">
+        <h3 className="flex min-w-0 shrink grow truncate">{label}</h3>
+        <AvatarGroup className="ml-auto hidden group-data-closed/simulation-group:flex">
+          {avatarRows.map((avatar, index) => (
+            <Avatar key={`${avatar.typeId}-${index}`} size="sm" className="md:size-10">
+              <AvatarImage
+                className="bg-muted"
+                src={eveTypeImageUrl(avatar.typeId, avatar.imageVariation, 64)}
+                alt={`${avatar.name} icon`}
+              />
+              <AvatarFallback>{avatar.name.slice(0, 2)}</AvatarFallback>
+            </Avatar>
+          ))}
+          {remainingCount > 0 && (
+            <AvatarGroupCount className="size-6 md:size-10!">+{remainingCount}</AvatarGroupCount>
+          )}
+        </AvatarGroup>
+        {onCopyGroup && copyLabel && (
+          <Button
+            type="button"
+            variant="outline"
+            className="shrink-0 normal-case"
+            onClick={onCopyGroup}
+          >
+            <CopyIcon aria-hidden="true" />
+            {copyLabel}
+          </Button>
+        )}
+        <CollapsibleTrigger
           type="button"
-          variant="outline"
-          className="shrink-0 normal-case"
-          onClick={onCopyGroup}
+          className="flex min-h-10 min-w-0 items-center justify-between gap-3 border-0 bg-transparent p-0 text-left font-[inherit] text-inherit uppercase"
+          aria-label={`${isOpen ? "Collapse" : "Expand"} ${label}`}
         >
-          <CopyIcon aria-hidden="true" />
-          {copyLabel}
-        </Button>
-      )}
-      <CollapsibleTrigger
-        type="button"
-        className="flex min-h-10 min-w-0 items-center justify-between gap-3 border-0 bg-transparent p-0 text-left font-[inherit] text-inherit uppercase"
-        aria-label={`${isOpen ? "Collapse" : "Expand"} ${label}`}
-      >
-        {isOpen ? <ChevronsDownUp /> : <ChevronsUpDown />}
-      </CollapsibleTrigger>
-    </h3>
+          {isOpen ? <ChevronsDownUp /> : <ChevronsUpDown />}
+        </CollapsibleTrigger>
+      </div>
+    </div>
   );
 }

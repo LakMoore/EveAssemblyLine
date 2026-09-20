@@ -9,13 +9,18 @@ import {
   Factory,
   FlaskConical,
   ShoppingCart,
+  TriangleAlert,
   Truck,
+  ClipboardList,
   type LucideIcon,
+  Minimize2,
+  TestTubes,
 } from "lucide-react";
 import SimpleResultRow from "@/components/SimpleResultRow";
 import SimulationResultGroup from "@/components/SimulationResultGroup";
 import SimulationsResultsTab from "@/components/SimulationsResultsTab";
 import SwitchedResultRow from "@/components/SwitchedResultRow";
+import CopyableText from "@/components/CopyableText";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -46,10 +51,10 @@ type SimulatorTab =
 
 const tabs: Array<{ value: SimulatorTab; label: string; icon: LucideIcon }> = [
   { value: "warnings", label: "Warnings", icon: AlertTriangle },
-  { value: "plan", label: "Plan", icon: Boxes },
-  { value: "reprocess", label: "Reprocess", icon: FlaskConical },
-  { value: "copy", label: "Copy", icon: Boxes },
-  { value: "invent", label: "Invent", icon: Atom },
+  { value: "plan", label: "Plan", icon: ClipboardList },
+  { value: "reprocess", label: "Reprocess", icon: Minimize2 },
+  { value: "copy", label: "Copy", icon: TestTubes },
+  { value: "invent", label: "Invent", icon: FlaskConical },
   { value: "react", label: "React", icon: Atom },
   { value: "manufacture", label: "Manufacture", icon: Factory },
   { value: "skills", label: "Skills", icon: Brain },
@@ -65,6 +70,7 @@ type SimulationRowControls = {
   onIncludedChange: (rowKey: string, included: boolean) => void;
   isCompleted: (rowKey: string) => boolean;
   onCompletedChange: (rowKey: string, completed: boolean) => void;
+  onOpenPlan: () => void;
 };
 
 type SimulationGroupAvatar = {
@@ -76,6 +82,27 @@ type SimulationGroupAvatar = {
 /** Formats simulator quantities for compact operational rows. */
 function quantity(value: number): string {
   return value.toLocaleString();
+}
+
+/** Renders a simulator number with its raw value available for copying. */
+function CopyableNumber({
+  value,
+  suffix = "",
+  copyLabel = "Number",
+}: {
+  value: number;
+  suffix?: string;
+  copyLabel?: string;
+}) {
+  return (
+    <CopyableText
+      aria-label={`${copyLabel}: ${quantity(value)}${suffix}. Copy to clipboard.`}
+      className="font-[inherit] text-inherit"
+      textToRender={`${quantity(value)}${suffix}`}
+      textToCopy={String(value)}
+      copyLabel={copyLabel}
+    />
+  );
 }
 
 /** Resolves a readable location label from current planner reference data. */
@@ -115,6 +142,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
   onOpenGroupChange,
   getRowKey,
   getAvatar,
+  groupHeader,
   renderRow,
 }: {
   tab: SimulatorTab;
@@ -124,6 +152,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
   getRowKey: (item: T) => string;
   getAvatar: (item: T) => SimulationGroupAvatar;
+  groupHeader?: ReactNode;
   renderRow: (item: T) => ReactNode;
 }) {
   const itemsByLocation = new Map<number, T[]>();
@@ -152,6 +181,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
             remainingCount={groupItems.length - avatars.length}
           >
             <div className="flex min-w-0 flex-col">
+              {groupHeader}
               {groupItems.map((item) => (
                 <div key={getRowKey(item)}>{renderRow(item)}</div>
               ))}
@@ -192,6 +222,7 @@ function SimulationMaterialsTab({
         onOpenGroupChange={onOpenGroupChange}
         getRowKey={(item) => `${tab}:${item.locationId}:${item.typeId}`}
         getAvatar={(item) => ({ typeId: item.typeId, name: item.typeName })}
+        groupHeader={<MaterialBalanceHeader />}
         renderRow={(item) => {
           const rowKey = `${tab}:${item.locationId}:${item.typeId}`;
           return (
@@ -203,7 +234,8 @@ function SimulationMaterialsTab({
               navigateInPlace
               selected={controls.selectedRowKey === rowKey}
               onClick={() => controls.onSelectRow(rowKey)}
-              contentClassName="self-end text-right font-mono text-xs sm:self-auto"
+              wideBreakpoint="md"
+              contentClassName="self-end text-right font-mono text-xs md:w-full md:self-auto"
             >
               <MaterialBalanceSummary item={item} />
             </SimpleResultRow>
@@ -224,31 +256,48 @@ function MaterialBalanceSummary({ item }: { item: SimulationMaterialBalance }) {
     + item.availableFromReprocessing
     + item.availableFromMarket;
   return (
-    <div className="grid grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-3 lg:flex lg:gap-3">
+    <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-right md:grid-cols-6 md:gap-x-3">
+      <span className="text-muted-foreground md:hidden">Available</span>
       <span>
-        <span className="mr-1 text-muted-foreground">Avail</span>
-        {quantity(item.availableNow)}
+        <CopyableNumber value={item.availableNow} copyLabel="Available quantity" />
       </span>
+      <span className="text-muted-foreground md:hidden">Immediate Demand</span>
       <span>
-        <span className="mr-1 text-muted-foreground">Immediate Demand</span>
-        {quantity(item.requiredNow)}
+        <CopyableNumber value={item.requiredNow} copyLabel="Immediate demand" />
       </span>
+      <span className="text-muted-foreground md:hidden">Future Supply</span>
       <span>
-        <span className="mr-1 text-muted-foreground">Future Supply</span>
-        {quantity(futureSupply)}
+        <CopyableNumber value={futureSupply} copyLabel="Future supply" />
       </span>
+      <span className="text-muted-foreground md:hidden">Future Demand</span>
       <span>
-        <span className="mr-1 text-muted-foreground">Future Demand</span>
-        {quantity(item.reserved)}
+        <CopyableNumber value={item.reserved} copyLabel="Future demand" />
       </span>
+      <span className="text-muted-foreground md:hidden">Transferred Out</span>
       <span>
-        <span className="mr-1 text-muted-foreground">Transferred Out</span>
-        {quantity(item.transferredOut)}
+        <CopyableNumber value={item.transferredOut} copyLabel="Transferred quantity" />
       </span>
-      <span className="col-span-2 sm:col-span-1">
-        <span className="mr-1 text-muted-foreground">Surplus</span>
-        {quantity(item.surplus)}
+      <span className="text-muted-foreground md:hidden">Surplus</span>
+      <span>
+        <CopyableNumber value={item.surplus} copyLabel="Surplus quantity" />
       </span>
+    </div>
+  );
+}
+
+/** Renders the desktop labels for the Plan and Surplus material columns. */
+function MaterialBalanceHeader() {
+  return (
+    <div className="hidden min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-[13px] p-2 md:grid">
+      <span aria-hidden="true" />
+      <div className="grid grid-cols-6 gap-x-3 text-right font-mono text-[10px] text-muted-foreground uppercase">
+        <span>Available</span>
+        <span>Immediate Demand</span>
+        <span>Future Supply</span>
+        <span>Future Demand</span>
+        <span>Transferred Out</span>
+        <span>Surplus</span>
+      </div>
     </div>
   );
 }
@@ -283,7 +332,7 @@ function SimulationReprocessingTab({
             typeId={job.sourceTypeId}
             name={job.sourceTypeName}
             subline={job.state}
-            summary={quantity(job.sourceQuantity)}
+            summary={<CopyableNumber value={job.sourceQuantity} copyLabel="Source quantity" />}
             controls={controls}
           />
         )}
@@ -325,8 +374,14 @@ function SimulationCopyTab({
             rowKey={`copy:${job.jobId}`}
             typeId={job.blueprintTypeId}
             name={`Blueprint ${job.blueprintTypeId}`}
-            subline={`${quantity(job.totalLicensedRuns)} licensed runs`}
-            summary={`${quantity(job.copies)} copies`}
+            subline={
+              <CopyableNumber
+                value={job.totalLicensedRuns}
+                suffix=" licensed runs"
+                copyLabel="Licensed runs"
+              />
+            }
+            summary={<CopyableNumber value={job.copies} suffix=" copies" copyLabel="Copies" />}
             variation="bp"
             controls={controls}
           />
@@ -369,8 +424,16 @@ function SimulationInventionTab({
             rowKey={`invent:${job.jobId}`}
             typeId={job.outputBlueprintTypeId}
             name={`Blueprint ${job.outputBlueprintTypeId}`}
-            subline={`${Math.round(job.successProbability * 100)}% success probability`}
-            summary={`${quantity(job.attempts)} attempts`}
+            subline={
+              <CopyableNumber
+                value={Math.round(job.successProbability * 100)}
+                suffix="% success probability"
+                copyLabel="Success probability"
+              />
+            }
+            summary={
+              <CopyableNumber value={job.attempts} suffix=" attempts" copyLabel="Attempts" />
+            }
             variation="bpc"
             controls={controls}
           />
@@ -393,8 +456,8 @@ function SimulationSimpleJobRow({
   rowKey: string;
   typeId: number;
   name: string;
-  subline: string;
-  summary: string;
+  subline: ReactNode;
+  summary: ReactNode;
   variation?: "icon" | "bp" | "bpc";
   controls: SimulationRowControls;
 }) {
@@ -405,7 +468,10 @@ function SimulationSimpleJobRow({
       subline={subline}
       variation={variation}
       linkPath="planner"
+      linkSearchParams={{ tab: "Plan" }}
+      linkHash="plan-breakdown"
       navigateInPlace
+      onNavigate={controls.onOpenPlan}
       selected={controls.selectedRowKey === rowKey}
       onClick={() => controls.onSelectRow(rowKey)}
       contentClassName="self-end text-right font-mono text-xs sm:self-auto"
@@ -444,7 +510,7 @@ function SimulationActivityTab({
         getAvatar={(job) => ({
           typeId: job.productTypeId,
           name: job.productName,
-          imageVariation: "bpc",
+          imageVariation: "icon",
         })}
         renderRow={(job) => {
           const rowKey = `${tab}:${job.jobId}`;
@@ -454,10 +520,13 @@ function SimulationActivityTab({
             <SwitchedResultRow
               name={job.productName}
               typeId={job.productTypeId}
-              subline={`${quantity(job.inputs.length)} inputs | ${activityLabel}`}
-              variation="bpc"
+              subline={` | ${job.inputs.length} inputs`}
+              variation="icon"
               linkPath="planner"
+              linkSearchParams={{ tab: "Plan" }}
+              linkHash="plan-breakdown"
               navigateInPlace
+              onNavigate={controls.onOpenPlan}
               selected={!completed && controls.selectedRowKey === rowKey}
               installed={completed}
               onClick={completed ? undefined : () => controls.onSelectRow(rowKey)}
@@ -472,7 +541,8 @@ function SimulationActivityTab({
               onCheckboxChange={(checked) => controls.onCompletedChange(rowKey, checked)}
               contentClassName="self-end text-right font-mono text-xs sm:self-auto"
             >
-              {quantity(job.readyNowRuns)} / {quantity(job.requiredRuns)} runs
+              <CopyableNumber value={job.readyNowRuns} suffix=" / " copyLabel="Ready runs" />
+              <CopyableNumber value={job.requiredRuns} suffix=" runs" copyLabel="Required runs" />
             </SwitchedResultRow>
           );
         }}
@@ -525,7 +595,12 @@ function SimulationHaulTab({
             <SimulationResultGroup
               groupKey={sourceKey}
               key={sourceKey}
-              label={`From ${locationName(locationNamesById, fromLocationId)}`}
+              label={
+                <>
+                  <span className="text-(--theme-info)">From:&nbsp;</span>
+                  {locationName(locationNamesById, fromLocationId)}
+                </>
+              }
               isOpen={openGroups[sourceKey] ?? true}
               onOpenChange={(open) => onOpenGroupChange(sourceKey, open)}
               avatarRows={sourceAvatars}
@@ -551,7 +626,12 @@ function SimulationHaulTab({
                       <SimulationResultGroup
                         groupKey={destinationKey}
                         key={destinationKey}
-                        label={`To ${locationName(locationNamesById, toLocationId)}`}
+                        label={
+                          <>
+                            <span className="text-(--theme-info)">To:&nbsp;</span>
+                            {locationName(locationNamesById, toLocationId)}
+                          </>
+                        }
                         isOpen={openGroups[destinationKey] ?? true}
                         onOpenChange={(open) => onOpenGroupChange(destinationKey, open)}
                         avatarRows={destinationAvatars}
@@ -593,9 +673,18 @@ function SimulationHaulRow({
     <SwitchedResultRow
       name={task.typeName}
       typeId={task.typeId}
-      subline={`${quantity(Math.ceil(task.quantity * task.unitVolume))} m3 | ${task.purpose}`}
+      subline={
+        <CopyableNumber
+          value={Math.ceil(task.quantity * task.unitVolume)}
+          suffix={` m3 | ${task.purpose}`}
+          copyLabel="Haul volume"
+        />
+      }
       linkPath="planner"
+      linkSearchParams={{ tab: "Plan" }}
+      linkHash="plan-breakdown"
       navigateInPlace
+      onNavigate={controls.onOpenPlan}
       selected={!completed && controls.selectedRowKey === rowKey}
       installed={completed}
       onClick={completed ? undefined : () => controls.onSelectRow(rowKey)}
@@ -608,7 +697,7 @@ function SimulationHaulRow({
       onCheckboxChange={(checked) => controls.onCompletedChange(rowKey, checked)}
       contentClassName="self-end text-right font-mono text-xs sm:self-auto"
     >
-      {quantity(task.quantity)} units
+      <CopyableNumber value={task.quantity} suffix=" units" copyLabel="Haul quantity" />
     </SwitchedResultRow>
   );
 }
@@ -635,10 +724,14 @@ function SimulationBuyTab({
               rowKey={rowKey}
               typeId={purchase.typeId}
               name={purchase.typeName}
-              subline={`${purchase.destinations.length} destination${
-                purchase.destinations.length === 1 ? "" : "s"
-              }`}
-              summary={quantity(purchase.quantity)}
+              subline={
+                <CopyableNumber
+                  value={purchase.destinations.length}
+                  suffix={` destination${purchase.destinations.length === 1 ? "" : "s"}`}
+                  copyLabel="Destinations"
+                />
+              }
+              summary={<CopyableNumber value={purchase.quantity} copyLabel="Purchase quantity" />}
               variation={result.lists.bpoToBuy.includes(purchase) ? "bp" : "icon"}
               controls={controls}
             />
@@ -666,8 +759,14 @@ function SimulationSkillsTab({
             rowKey={`skills:${skill.skillId}`}
             typeId={skill.skillId}
             name={skill.name}
-            subline={`${quantity(skill.jobIds.length)} jobs`}
-            summary={`Level ${skill.requiredLevel}`}
+            subline={<CopyableNumber value={skill.jobIds.length} suffix=" jobs" copyLabel="Jobs" />}
+            summary={
+              <CopyableNumber
+                value={skill.requiredLevel}
+                suffix=" required level"
+                copyLabel="Required skill level"
+              />
+            }
             controls={controls}
           />
         ))}
@@ -680,30 +779,59 @@ function SimulationSkillsTab({
 function SimulationWarningsTab({
   result,
   locationNamesById,
+  openGroups,
+  onOpenGroupChange,
 }: {
   result: SimulationResultV1;
   locationNamesById: ReadonlyMap<number, string>;
+  openGroups: Record<string, boolean>;
+  onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
+  const warningsByLocation = new Map<number | undefined, SimulationResultV1["lists"]["warnings"]>();
+  for (const warning of result.lists.warnings) {
+    const group = warningsByLocation.get(warning.locationId) ?? [];
+    group.push(warning);
+    warningsByLocation.set(warning.locationId, group);
+  }
+  const sortedGroups = [...warningsByLocation.entries()].sort(([leftId], [rightId]) =>
+    (leftId === undefined ? "Unlocated" : locationName(locationNamesById, leftId)).localeCompare(
+      rightId === undefined ? "Unlocated" : locationName(locationNamesById, rightId),
+    ),
+  );
+
   return (
     <SimulationsResultsTab
       hasResults={result.lists.warnings.length > 0}
       emptyTitle="No warnings"
       emptyDescription="This simulation has no calculation warnings."
     >
-      <div className="flex min-w-0 flex-col gap-2">
-        {result.lists.warnings.map((warning, index) => (
-          <Alert key={`${warning.code}:${warning.jobId ?? index}`}>
-            <AlertTitle>{warning.code}</AlertTitle>
-            <AlertDescription>
-              {warning.message}
-              {warning.locationId !== undefined && (
-                <span className="block pt-1 text-xs">
-                  {locationName(locationNamesById, warning.locationId)}
-                </span>
-              )}
-            </AlertDescription>
-          </Alert>
-        ))}
+      <div className="flex min-w-0 flex-col gap-4">
+        {sortedGroups.map(([locationId, warnings]) => {
+          const groupKey = `warnings:${locationId ?? "unlocated"}`;
+          const label =
+            locationId === undefined ? "Unlocated" : locationName(locationNamesById, locationId);
+          return (
+            <SimulationResultGroup
+              key={groupKey}
+              groupKey={groupKey}
+              label={label}
+              isOpen={openGroups[groupKey] ?? true}
+              onOpenChange={(open) => onOpenGroupChange(groupKey, open)}
+              avatarRows={[]}
+              remainingCount={0}
+            >
+              <div className="flex min-w-0 flex-col gap-2">
+                {warnings.map((warning, index) => (
+                  <Alert key={`${warning.code}:${warning.jobId ?? index}`}>
+                    <TriangleAlert />
+                    <AlertTitle>{warning.code}</AlertTitle>
+                    <AlertDescription>{warning.message}</AlertDescription>
+                  </Alert>
+                ))}
+              </div>
+            </SimulationResultGroup>
+          );
+        })}
       </div>
     </SimulationsResultsTab>
   );
@@ -715,11 +843,13 @@ export default function SimulatorResults({
   status,
   locationNamesById,
   stockpileNamesById,
+  onOpenPlan,
 }: {
   result: SimulationResultV1 | null;
   status: string;
   locationNamesById: ReadonlyMap<number, string>;
   stockpileNamesById: ReadonlyMap<string, string>;
+  onOpenPlan: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<SimulatorTab>("warnings");
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
@@ -736,6 +866,7 @@ export default function SimulatorResults({
     isCompleted: (rowKey) => completedRows[rowKey] ?? false,
     onCompletedChange: (rowKey, completed) =>
       setCompletedRows((current) => ({ ...current, [rowKey]: completed })),
+    onOpenPlan,
   };
   const onOpenGroupChange = (groupKey: string, open: boolean) =>
     setOpenGroups((current) => ({ ...current, [groupKey]: open }));
@@ -823,7 +954,14 @@ function SimulationTabContent({
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
   if (activeTab === "warnings") {
-    return <SimulationWarningsTab result={result} locationNamesById={locationNamesById} />;
+    return (
+      <SimulationWarningsTab
+        result={result}
+        locationNamesById={locationNamesById}
+        openGroups={openGroups}
+        onOpenGroupChange={onOpenGroupChange}
+      />
+    );
   }
   if (activeTab === "plan" || activeTab === "surplus") {
     return (

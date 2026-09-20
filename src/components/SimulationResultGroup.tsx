@@ -8,7 +8,7 @@ import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 
 type SimulationResultGroupProps = {
   groupKey: string;
-  label: string;
+  label: ReactNode;
   isOpen: boolean;
   avatarRows: SimulationGroupAvatar[];
   remainingCount: number;
@@ -45,7 +45,7 @@ export default function SimulationResultGroup({
         onCopyGroup={onCopyGroup}
         copyLabel={copyLabel}
       />
-      <CollapsibleContent>{children}</CollapsibleContent>
+      <CollapsibleContent className="border-l-2 border-border pl-2">{children}</CollapsibleContent>
     </Collapsible>
   );
 }

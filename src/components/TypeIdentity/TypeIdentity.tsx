@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { NoPrefetchLink } from "@/components/NoPrefetchLink";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import { cn } from "@/lib/utils";
 import CopyableText from "@/components/CopyableText";
@@ -13,7 +13,7 @@ import { PackageSearch, type LucideIcon } from "lucide-react";
 type TypeIdentityProps = {
   name: string;
   typeName?: string;
-  subline?: string;
+  subline?: ReactNode;
   typeId: number;
   imageSize?: number;
   variation?: "icon" | "render" | "bp" | "bpc";
@@ -23,6 +23,7 @@ type TypeIdentityProps = {
   linkSearchParams?: Record<string, string>;
   linkHash?: string;
   navigateInPlace?: boolean;
+  onNavigate?: () => void;
   className?: string;
 };
 
@@ -39,6 +40,7 @@ export default function TypeIdentity({
   linkSearchParams,
   linkHash,
   navigateInPlace = false,
+  onNavigate,
   className,
 }: TypeIdentityProps) {
   const [useIconFallback, setUseIconFallback] = useState(false);
@@ -75,6 +77,7 @@ export default function TypeIdentity({
               title={`View ${name}`}
               aria-label={`View ${name}`}
               onClick={() => {
+                onNavigate?.();
                 window.history.pushState(null, "", linkHref);
                 window.dispatchEvent(new PopStateEvent("popstate"));
               }}

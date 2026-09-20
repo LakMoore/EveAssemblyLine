@@ -76,8 +76,7 @@ export default function SwitchedResultRow({
       tabIndex={onClick ? 0 : undefined}
       aria-label={onClick ? `Select ${name}` : undefined}
       className={cn(
-        "group/result-row grid min-h-14 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-[13px] gap-y-2 border-b border-border px-2 py-2.5 transition-colors hover:bg-muted/50 data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[installed=true]:hover:bg-transparent data-[installed=true]:**:data-result-row-content:opacity-50 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:hover:bg-accent sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)_auto] sm:items-center",
-        "last:border-b-0",
+        "group/result-row mb-2 grid min-h-14 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-[13px] gap-y-2 border-b border-border px-2 py-2.5 transition-colors hover:bg-muted/50 data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[installed=true]:hover:bg-transparent data-[installed=true]:**:data-result-row-content:opacity-50 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:hover:bg-accent sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)_auto] sm:items-center",
         className,
       )}
       onClick={onClick}
@@ -126,7 +125,7 @@ export default function SwitchedResultRow({
       />
       <div
         className={cn(
-          "col-span-2 col-start-2 row-start-2 contents sm:col-span-1 sm:col-start-3 sm:row-auto",
+          "col-span-2 col-start-2 row-start-2 flex min-w-0 items-center justify-end gap-1 sm:col-span-1 sm:col-start-3 sm:row-auto",
           !showSwitch && "col-start-1",
           contentClassName,
         )}
