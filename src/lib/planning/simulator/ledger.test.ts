@@ -133,7 +133,7 @@ void test("combines stockpile demand sources in one activity and location accoun
 
 void test("posts production at its source ledger before crediting another location", () => {
   const destinationAccount: SimulationLedgerAccount = {
-    activity: "market",
+    activity: "stock",
     locationId: 10,
     typeId: 34,
   };
@@ -166,10 +166,12 @@ void test("posts production at its source ledger before crediting another locati
     ],
   );
   const sourceBalance = projection.balances.get("manufacturing:20:34");
-  const destinationBalance = projection.balances.get("market:10:34");
-  assert.equal(sourceBalance?.availableFromProduction, 8);
-  assert.equal(sourceBalance?.transferredOut, 8);
-  assert.equal(sourceBalance?.surplus, 0);
-  assert.equal(destinationBalance?.availableFromProduction, 8);
-  assert.equal(destinationBalance?.unsatisfied, 0);
+  const destinationBalance = projection.balances.get("stock:10:34");
+  assert.ok(sourceBalance);
+  assert.ok(destinationBalance);
+  assert.equal(sourceBalance.availableFromProduction, 8);
+  assert.equal(sourceBalance.transferredOut, 8);
+  assert.equal(sourceBalance.surplus, 0);
+  assert.equal(destinationBalance.availableFromProduction, 8);
+  assert.equal(destinationBalance.unsatisfied, 0);
 });

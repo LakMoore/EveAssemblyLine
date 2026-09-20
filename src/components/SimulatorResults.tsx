@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   Atom,
@@ -12,14 +12,20 @@ import {
   Truck,
 } from "lucide-react";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
+import PlannerResultGroupHeader from "@/components/PlannerResultGroupHeader";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { SimulationMaterialBalance, SimulationResultV1 } from "@/lib/planning/simulator/types";
+import type {
+  SimulationMaterialListItem,
+  SimulationResultV1,
+} from "@/lib/planning/simulator/types";
 
 type SimulatorTab =
   | "plan"
+  | "surplus"
   | "buy"
   | "reprocess"
   | "copy"
@@ -32,6 +38,7 @@ type SimulatorTab =
 
 const tabs: Array<{ value: SimulatorTab; label: string; icon: typeof Boxes }> = [
   { value: "plan", label: "Plan", icon: Boxes },
+  { value: "surplus", label: "Surplus", icon: Boxes },
   { value: "buy", label: "Buy", icon: ShoppingCart },
   { value: "reprocess", label: "Reprocess", icon: FlaskConical },
   { value: "copy", label: "Copy", icon: Boxes },
@@ -53,14 +60,14 @@ function locationName(locationNamesById: ReadonlyMap<number, string>, locationId
   return locationNamesById.get(locationId) ?? `Location ${locationId}`;
 }
 
-/** Formats a ledger activity for the operational result heading. */
-function activityName(activity: SimulationResultV1["ledgers"][number]["activity"]): string {
+/** Formats a simulator activity for the operational result row. */
+function activityName(activity: SimulationMaterialListItem["activity"]): string {
   return activity[0].toUpperCase() + activity.slice(1);
 }
 
 /** Returns named stockpiles that contributed demand to an aggregate ledger balance. */
 function demandStockpiles(
-  balance: SimulationMaterialBalance,
+  balance: SimulationMaterialListItem,
   stockpileNamesById: ReadonlyMap<string, string>,
 ): string {
   const stockpiles = [...new Set(balance.demandSources.map((source) => source.stockpileId))];
@@ -98,28 +105,6 @@ function NativeRow({
   );
 }
 
-/** Renders one canonical ledger identified by activity and physical location. */
-function LedgerGroup({
-  activity,
-  locationId,
-  locationNamesById,
-  children,
-}: {
-  activity: SimulationResultV1["ledgers"][number]["activity"];
-  locationId: number;
-  locationNamesById: ReadonlyMap<number, string>;
-  children: ReactNode;
-}) {
-  return (
-    <section>
-      <h3 className="border-b border-border py-3 text-sm font-medium uppercase">
-        {activityName(activity)} | {locationName(locationNamesById, locationId)}
-      </h3>
-      {children}
-    </section>
-  );
-}
-
 /** Renders the native simulator response without a legacy PlanResponse conversion. */
 export default function SimulatorResults({
   result,
@@ -133,24 +118,7 @@ export default function SimulatorResults({
   stockpileNamesById: ReadonlyMap<string, string>;
 }) {
   const [activeTab, setActiveTab] = useState<SimulatorTab>("plan");
-  const ledgers = useMemo(
-    () =>
-      result
-        ? result.ledgers
-            .map((ledger) => ({
-              ...ledger,
-              balances: ledger.balances.filter(
-                (balance) =>
-                  balance.required > 0
-                  || balance.unreserved > 0
-                  || balance.surplus > 0
-                  || balance.transferredOut > 0,
-              ),
-            }))
-            .filter((ledger) => ledger.balances.length > 0)
-        : [],
-    [result],
-  );
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const statusIsError = status.startsWith("Error:");
 
   if (!result) {
@@ -178,27 +146,27 @@ export default function SimulatorResults({
 
   const warnings = result.lists.warnings;
   const purchases = [...result.lists.materialsToBuy, ...result.lists.bpoToBuy];
+  const materialRows = activeTab === "plan" ? result.lists.planItems : result.lists.surplusItems;
   const currentRows =
-    activeTab === "plan"
-      ? result.lists.planItems
-      : activeTab === "buy"
-        ? purchases
-        : activeTab === "reprocess"
-          ? result.lists.reprocessingJobs
-          : activeTab === "copy"
-            ? result.lists.bpcToCopy
-            : activeTab === "invent"
-              ? result.lists.inventionJobs
-              : activeTab === "react"
-                ? result.lists.reactionJobs
-                : activeTab === "manufacture"
-                  ? result.lists.manufacturingJobs
-                  : activeTab === "haul"
-                    ? result.lists.haulingTasks
-                    : activeTab === "skills"
-                      ? result.lists.skillsRequired
-                      : warnings;
-  const hasRows = activeTab === "plan" ? ledgers.length > 0 : currentRows.length > 0;
+    activeTab === "buy"
+      ? purchases
+      : activeTab === "reprocess"
+        ? result.lists.reprocessingJobs
+        : activeTab === "copy"
+          ? result.lists.bpcToCopy
+          : activeTab === "react"
+            ? result.lists.reactionJobs
+            : activeTab === "manufacture"
+              ? result.lists.manufacturingJobs
+              : activeTab === "haul"
+                ? result.lists.haulingTasks
+                : activeTab === "skills"
+                  ? result.lists.skillsRequired
+                  : warnings;
+  const hasRows =
+    activeTab === "plan" || activeTab === "surplus"
+      ? materialRows.length > 0
+      : currentRows.length > 0;
 
   return (
     <section className="flex min-w-0 flex-col gap-4">
@@ -230,46 +198,67 @@ export default function SimulatorResults({
                 Nothing to {tabs.find((tab) => tab.value === activeTab)?.label.toLowerCase()}
               </strong>
             </Empty>
-          ) : activeTab === "plan" ? (
+          ) : activeTab === "plan" || activeTab === "surplus" ? (
             <div className="flex flex-col gap-4">
-              {ledgers.map((ledger) => (
-                <LedgerGroup
-                  key={ledger.ledgerId}
-                  activity={ledger.activity}
-                  locationId={ledger.locationId}
-                  locationNamesById={locationNamesById}
-                >
-                  {ledger.balances.map((balance) => (
-                    <NativeRow
-                      key={`${ledger.ledgerId}:${balance.typeId}`}
-                      typeId={balance.typeId}
-                      name={balance.typeName}
-                      subline={demandStockpiles(balance, stockpileNamesById)}
-                      summary={
-                        <div className="flex gap-3">
-                          <span>
-                            <span className="mr-1 text-muted-foreground">Avail</span>
-                            {quantity(balance.availableNow)}
-                          </span>
-                          <span>
-                            <span className="mr-1 text-muted-foreground">Need</span>
-                            {quantity(balance.required)}
-                          </span>
-                          <span>
-                            <span className="mr-1 text-muted-foreground">Upstream</span>
-                            {quantity(
-                              balance.availableFromProduction
-                                + balance.availableFromCopying
-                                + balance.availableFromInvention
-                                + balance.availableFromReprocessing,
-                            )}
-                          </span>
-                        </div>
-                      }
+              {materialRows.map((bucket) => {
+                const groupKey = `${activeTab}:${bucket.locationId}`;
+                const isGroupOpen = openGroups[groupKey] ?? true;
+                const avatarRows = bucket.items
+                  .slice(0, 5)
+                  .map((item) => ({
+                    typeId: item.typeId,
+                    name: item.typeName,
+                    imageVariation: "icon" as const,
+                  }));
+                return (
+                  <Collapsible
+                    className="group/plan-group"
+                    key={groupKey}
+                    open={isGroupOpen}
+                    onOpenChange={(open) =>
+                      setOpenGroups((current) => ({ ...current, [groupKey]: open }))
+                    }
+                  >
+                    <PlannerResultGroupHeader
+                      label={locationName(locationNamesById, bucket.locationId)}
+                      isOpen={isGroupOpen}
+                      avatarRows={avatarRows}
+                      remainingCount={bucket.items.length - avatarRows.length}
                     />
-                  ))}
-                </LedgerGroup>
-              ))}
+                    <CollapsibleContent>
+                      {bucket.items.map((item) => (
+                        <NativeRow
+                          key={`${item.activity}:${item.locationId}:${item.typeId}`}
+                          typeId={item.typeId}
+                          name={item.typeName}
+                          subline={`${activityName(item.activity)} | ${demandStockpiles(item, stockpileNamesById)}`}
+                          summary={
+                            <div className="flex gap-3">
+                              <span>
+                                <span className="mr-1 text-muted-foreground">Avail</span>
+                                {quantity(item.availableNow)}
+                              </span>
+                              <span>
+                                <span className="mr-1 text-muted-foreground">Need</span>
+                                {quantity(item.required)}
+                              </span>
+                              <span>
+                                <span className="mr-1 text-muted-foreground">Upstream</span>
+                                {quantity(
+                                  item.availableFromProduction
+                                    + item.availableFromCopying
+                                    + item.availableFromInvention
+                                    + item.availableFromReprocessing,
+                                )}
+                              </span>
+                            </div>
+                          }
+                        />
+                      ))}
+                    </CollapsibleContent>
+                  </Collapsible>
+                );
+              })}
             </div>
           ) : activeTab === "buy" ? (
             <div>

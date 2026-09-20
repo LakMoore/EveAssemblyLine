@@ -35,6 +35,7 @@ function request() {
 
 void test("defaults the simulator policy", () => {
   const parsed = parseSimulatorRequest(request());
+  assert.equal(parsed.simulation.includeSurplusForAllLocations, false);
   assert.equal(parsed.simulation.policy.inventionExpectedOutputFactor, 1.2);
   assert.equal(parsed.simulation.policy.fallbackInventionSkillLevel, 3);
   assert.deepEqual(parsed.simulation.characters, []);

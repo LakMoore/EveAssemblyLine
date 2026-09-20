@@ -60,7 +60,7 @@ function activityForBlueprint(blueprint: BlueprintsRecord, activity: "manufactur
     : blueprint.activities.reaction;
 }
 
-/** Builds the cycle-safe type graph used to prime ledgers and quantity expansion. */
+/** Builds the cycle-safe type graph used for bounded quantity expansion. */
 export function buildDependencyGraph(
   rootTypeIds: readonly number[],
   context: Pick<SimulationContext, "blueprints">,

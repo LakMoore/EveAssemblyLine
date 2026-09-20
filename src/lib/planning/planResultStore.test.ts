@@ -5,6 +5,7 @@ import { isPlanResponse, isSimulationResultV1 } from "./planResultStore";
 const listNames = [
   "warnings",
   "planItems",
+  "surplusItems",
   "haulingTasks",
   "materialsToBuy",
   "bpoToBuy",
@@ -24,11 +25,26 @@ function simulationResult() {
       normalizedInputHash: "result-hash",
     },
     lists: Object.fromEntries(listNames.map((name) => [name, []])),
+    ledgers: [],
   };
 }
 
 void test("accepts a complete cached native simulation result", () => {
   assert.equal(isSimulationResultV1(simulationResult()), true);
+});
+
+void test("accepts stock ledgers and rejects deprecated market ledgers", () => {
+  const current = {
+    ...simulationResult(),
+    ledgers: [{ ledgerId: "stock:10", activity: "stock", locationId: 10, balances: [] }],
+  };
+  assert.equal(isSimulationResultV1(current), true);
+
+  const deprecated = {
+    ...simulationResult(),
+    ledgers: [{ ledgerId: "market:10", activity: "market", locationId: 10, balances: [] }],
+  };
+  assert.equal(isSimulationResultV1(deprecated), false);
 });
 
 void test("accepts a complete cached legacy plan response", () => {
@@ -93,4 +109,10 @@ void test("rejects cached simulator rows missing display identity", () => {
   const result = simulationResult();
   (result.lists as Record<string, unknown>).planItems = [{ typeId: 34 }];
   assert.equal(isSimulationResultV1(result), false);
+});
+
+void test("accepts a cached simulator result without diagnostic ledgers", () => {
+  const result = simulationResult();
+  delete (result as { ledgers?: unknown }).ledgers;
+  assert.equal(isSimulationResultV1(result), true);
 });

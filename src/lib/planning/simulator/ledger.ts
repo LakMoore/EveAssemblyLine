@@ -26,12 +26,6 @@ export interface SimulationLedgerAccount {
 export type SimulationTransaction =
   | {
       id: string;
-      kind: "prime-account";
-      account: SimulationLedgerAccount;
-      quantity: 0;
-    }
-  | {
-      id: string;
       kind: "source-availability";
       account: SimulationLedgerAccount;
       lotId: string;
@@ -163,10 +157,6 @@ export function projectSimulationLedger(
         names.get(transaction.account.typeId) ?? `Type ${transaction.account.typeId}`,
         volumes.get(transaction.account.typeId) ?? 0,
       );
-    if (transaction.kind === "prime-account") {
-      mutableBalances.set(key, balance);
-      continue;
-    }
     if (transaction.kind === "source-availability") {
       const lot = sourceLotsById.get(transaction.lotId);
       if (!lot || lot.typeId !== transaction.account.typeId) {

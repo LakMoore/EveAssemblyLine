@@ -445,6 +445,7 @@ function Planner() {
     ProductionGroupReference[]
   >([]);
   const [includeStock, setIncludeStock] = useState(true);
+  const [includeSurplusForAllLocations, setIncludeSurplusForAllLocations] = useState(false);
   const [haulItemExclusion, setHaulItemExclusion] = useState<HaulItemExclusion>(() => new Map());
   const [haulPatches, setHaulPatches] = useState<Map<string, HaulPatch>>(() => new Map());
   const [haulPatchesLoaded, setHaulPatchesLoaded] = useState(false);
@@ -868,7 +869,9 @@ function Planner() {
               fallbackT2OrT3Me: settings.fallbackT2OrT3Me,
               fallbackT2OrT3Te: settings.fallbackT2OrT3Te,
             },
-            ...(mode === "simulate" ? { simulation: { version: 1 } } : {}),
+            ...(mode === "simulate"
+              ? { simulation: { version: 1, includeSurplusForAllLocations } }
+              : {}),
           }),
         },
       );
@@ -1466,6 +1469,14 @@ function Planner() {
                 onCheckedChange={setIncludeStock}
               />
               Include selected assets
+            </Label>
+            <Label className="flex items-center gap-2 text-sm">
+              <Switch
+                aria-label="Simulate surplus for all locations"
+                checked={includeSurplusForAllLocations}
+                onCheckedChange={setIncludeSurplusForAllLocations}
+              />
+              Simulate surplus for all locations
             </Label>
             <span className="text-sm text-muted-foreground">{selectedSourceLabel}</span>
             <Button

@@ -14,6 +14,7 @@ const defaultSimulationPolicy = {
 } as const;
 const defaultSimulationOptions = {
   version: 1 as const,
+  includeSurplusForAllLocations: false,
   characters: [],
   scienceProfiles: [],
   policy: defaultSimulationPolicy,
@@ -159,6 +160,7 @@ const facilityBonusSchema = z.object({
 const simulationSchema = z
   .object({
     version: z.literal(1).default(1),
+    includeSurplusForAllLocations: z.boolean().default(false),
     characters: z
       .array(
         z.object({

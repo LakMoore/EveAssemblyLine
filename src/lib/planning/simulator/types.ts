@@ -7,7 +7,8 @@ export type SimulatorActivity =
   | "copying"
   | "invention"
   | "reprocessing"
-  | "market";
+  | "stock"
+  | "surplus";
 
 /** Availability horizons used to prevent projected stock from becoming physical stock. */
 export type SupplyHorizon = "now" | "after-hauling" | "after-upstream" | "after-purchase";
@@ -50,6 +51,7 @@ export interface SimulationPolicyV1 {
 /** Additive simulator controls carried beside the current planning request. */
 export interface SimulationOptionsV1 {
   version: 1;
+  includeSurplusForAllLocations: boolean;
   characters: SimulationCharacterProfile[];
   scienceProfiles: SimulationScienceProfile[];
   policy: SimulationPolicyV1;
@@ -91,6 +93,17 @@ export interface SimulationMaterialBalance {
   unsatisfied: number;
   surplus: number;
   demandSources: SimulationDemandSource[];
+}
+
+/** Material balance row assembled for direct simulator presentation. */
+export interface SimulationMaterialListItem extends SimulationMaterialBalance {
+  activity: Exclude<SimulatorActivity, "surplus"> | "surplus";
+}
+
+/** Location bucket containing simulator material rows for direct presentation. */
+export interface SimulationMaterialLocationBucket {
+  locationId: number;
+  items: SimulationMaterialListItem[];
 }
 
 /** Exact material requirement and availability for an industry allocation. */
@@ -303,7 +316,8 @@ export interface SimulationResultV1 {
   };
   lists: {
     warnings: SimulationWarning[];
-    planItems: SimulationMaterialBalance[];
+    planItems: SimulationMaterialLocationBucket[];
+    surplusItems: SimulationMaterialLocationBucket[];
     haulingTasks: SimulationHaulTask[];
     materialsToBuy: SimulationPurchase[];
     bpoToBuy: SimulationPurchase[];
@@ -314,5 +328,11 @@ export interface SimulationResultV1 {
     manufacturingJobs: SimulationIndustryJob[];
     skillsRequired: SimulationSkillRequirement[];
   };
-  ledgers: SimulationLedgerView[];
+  /** Development-only diagnostic projection; never required for presentation. */
+  ledgers?: SimulationLedgerView[];
 }
+
+/** Internal simulator result with the diagnostic ledger projection available. */
+export type SimulationResultWithDiagnostics = SimulationResultV1 & {
+  ledgers: SimulationLedgerView[];
+};

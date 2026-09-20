@@ -49,6 +49,7 @@ function request(): SimulatorRequestV1 {
     },
     simulation: {
       version: 1,
+      includeSurplusForAllLocations: false,
       characters: [],
       scienceProfiles: [],
       policy: {

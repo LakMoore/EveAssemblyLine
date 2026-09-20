@@ -21,6 +21,7 @@ const request = {
   },
   simulation: {
     version: 1,
+    includeSurplusForAllLocations: false,
     characters: [],
     scienceProfiles: [],
     policy: {

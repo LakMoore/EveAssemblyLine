@@ -175,7 +175,7 @@ class IndustryDemandSimulation {
       for (const item of items) {
         const isReprocessingInput = isSimulatorReprocessingType(this.context, item.typeId);
         const account: SimulationLedgerAccount = {
-          activity: isReprocessingInput ? "reprocessing" : "market",
+          activity: isReprocessingInput ? "reprocessing" : "stock",
           locationId: isReprocessingInput
             ? stockpile.locations.reprocessing
             : stockpile.locations.stock,
