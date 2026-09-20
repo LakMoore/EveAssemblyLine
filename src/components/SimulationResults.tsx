@@ -14,15 +14,18 @@ import {
   Truck,
   ClipboardList,
   Copy as CopyIcon,
+  UsersRound,
   type LucideIcon,
   Minimize2,
   TestTubes,
 } from "lucide-react";
 import SimpleResultRow from "@/components/SimpleResultRow";
+import SimulationJobInputsResponsive from "@/components/SimulationJobInputsResponsive";
 import SimulationResultGroup from "@/components/SimulationResultGroup";
 import SimulationResultsTab from "@/components/SimulatorResultsTab";
 import SwitchedResultRow from "@/components/SwitchedResultRow";
 import CopyableText from "@/components/CopyableText";
+import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,12 +39,27 @@ import {
   ComboboxList,
 } from "@/components/ui/combobox";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/components/ui/toast";
+import type { ClientCharacterStatus, ClientJobsResponse } from "@/lib/client/requestCache";
+import { getAvailableSlotCount } from "@/lib/client/slotUsage";
 import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageServer";
 import { AssemblyLineGroups } from "@/lib/reference/assemblyLineGroups";
+import {
+  getSimulationInstallableRuns,
+  solveSimulationActivity,
+  type ClientSimulationSolveMode,
+} from "@/lib/planning/simulator/clientScheduler";
 import type {
   SimulationCopyJob,
   SimulationHaulTask,
@@ -221,6 +239,57 @@ function haulImageVariation(kind: SimulationHaulTask["blueprintKind"]): "icon" |
   return kind === undefined ? "icon" : "bp";
 }
 
+/** Formats a solver duration for the compact activity summary. */
+function simulationDuration(totalSeconds: number): string {
+  const totalMinutes = Math.ceil(totalSeconds / 60);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  const parts = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  return parts.length > 0 ? parts.join(" ") : "0m";
+}
+
+/** Formats a covered-run ratio for the activity summary. */
+function simulationCoverage(coveredRuns: number, totalRuns: number): string {
+  return totalRuns > 0 ? `${((coveredRuns / totalRuns) * 100).toFixed(1)}%` : "0.0%";
+}
+
+type SimulationActivitySlotCharacter = {
+  characterId: number;
+  name: string;
+  availableSlots: number;
+};
+
+type SimulationGroupCopyStatus = {
+  locationId: number;
+  label: "Copied" | "Copy failed";
+} | null;
+
+/** Returns characters with free slots for one simulator activity. */
+function simulationSlotCharacters(
+  characterStatuses: readonly ClientCharacterStatus[],
+  characterNamesById: ReadonlyMap<number, string>,
+  slotUsage: ClientJobsResponse["slotUsage"],
+  activity: "react" | "manufacture",
+): SimulationActivitySlotCharacter[] {
+  const slotKey = activity === "react" ? "Reactions" : "Manufacturing";
+  return characterStatuses
+    .flatMap((character) => {
+      const availableSlots = getAvailableSlotCount(
+        slotUsage?.[String(character.characterId)],
+        slotKey,
+      );
+      const name = characterNamesById.get(character.characterId);
+      return name && availableSlots > 0
+        ? [{ characterId: character.characterId, name, availableSlots }]
+        : [];
+    })
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
 /** Selects blueprint artwork for blueprint-named balances in the plan ledger. */
 function materialImageVariation(typeName: string): "icon" | "bp" {
   return /\bblueprint$/i.test(typeName) ? "bp" : "icon";
@@ -236,6 +305,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
   getRowKey,
   getAvatar,
   groupHeader,
+  getGroupAction,
   renderRow,
 }: {
   tab: SimulationTab;
@@ -246,6 +316,10 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
   getRowKey: (item: T) => string;
   getAvatar: (item: T) => SimulationGroupAvatar;
   groupHeader?: ReactNode;
+  getGroupAction?: (
+    locationId: number,
+    items: readonly T[],
+  ) => { onCopyGroup: () => void; copyLabel: string } | undefined;
   renderRow: (item: T) => ReactNode;
 }) {
   const itemsByLocation = new Map<number, T[]>();
@@ -263,6 +337,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
       {sortedGroups.map(([locationId, groupItems]) => {
         const groupKey = `${tab}:${locationId}`;
         const avatars = createGroupAvatars(groupItems, getAvatar);
+        const groupAction = getGroupAction?.(locationId, groupItems);
         return (
           <SimulationResultGroup
             groupKey={groupKey}
@@ -272,6 +347,8 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
             onOpenChange={(open) => onOpenGroupChange(groupKey, open)}
             avatarRows={avatars}
             remainingCount={groupItems.length - avatars.length}
+            onCopyGroup={groupAction?.onCopyGroup}
+            copyLabel={groupAction?.copyLabel}
           >
             <div className="flex min-w-0 flex-col">
               {groupHeader}
@@ -702,6 +779,9 @@ function SimulationActivityTab({
   tab,
   jobs,
   locationNamesById,
+  characterNamesById,
+  characterStatuses,
+  slotUsage,
   controls,
   openGroups,
   onOpenGroupChange,
@@ -709,13 +789,220 @@ function SimulationActivityTab({
   tab: "react" | "manufacture";
   jobs: SimulationIndustryJob[];
   locationNamesById: ReadonlyMap<number, string>;
+  characterNamesById: ReadonlyMap<number, string>;
+  characterStatuses: readonly ClientCharacterStatus[];
+  slotUsage: ClientJobsResponse["slotUsage"];
   controls: SimulationRowControls;
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
   const activityLabel = tab === "react" ? "reaction" : "manufacturing";
+  const [solveMode, setSolveMode] = useState<ClientSimulationSolveMode>("available-slots");
+  const [targetTime, setTargetTime] = useState("24");
+  const [copyStatus, setCopyStatus] = useState("");
+  const [groupCopyStatus, setGroupCopyStatus] = useState<SimulationGroupCopyStatus>(null);
+  const slotCharacters = simulationSlotCharacters(
+    characterStatuses,
+    characterNamesById,
+    slotUsage,
+    tab,
+  );
+  const availableSlots = slotCharacters.reduce(
+    (total, character) => total + character.availableSlots,
+    0,
+  );
+  const activeJobs = jobs.filter((job) => !controls.isCompleted(`${tab}:${job.jobId}`));
+  const enabledJobIds = new Set(
+    activeJobs.filter((job) => controls.isIncluded(`${tab}:${job.jobId}`)).map((job) => job.jobId),
+  );
+  const schedules = solveSimulationActivity(
+    activeJobs,
+    availableSlots,
+    solveMode,
+    Number(targetTime),
+    enabledJobIds,
+  );
+  const scheduledRuns = activeJobs.reduce(
+    (total, job) => total + (schedules.get(job.jobId)?.runs ?? 0),
+    0,
+  );
+  const installableRuns = activeJobs.reduce(
+    (total, job) => total + getSimulationInstallableRuns(job),
+    0,
+  );
+  const totalRuns = activeJobs.reduce((total, job) => total + job.requiredRuns, 0);
+  const suggestedInstalls = activeJobs.reduce(
+    (total, job) => total + (schedules.get(job.jobId)?.installs.length ?? 0),
+    0,
+  );
+  const maxJobLength = Math.max(
+    ...activeJobs.map((job) => schedules.get(job.jobId)?.timeSeconds ?? 0),
+    0,
+  );
+
+  async function copyEntries(entries: readonly SimulationIndustryJob[], status: "list" | number) {
+    const lines = entries.flatMap((job) => {
+      const runs = schedules.get(job.jobId)?.runs ?? 0;
+      return runs > 0 ? [`${job.productName}\t${runs}`] : [];
+    });
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      if (status === "list") {
+        setCopyStatus("Copied");
+      }
+      else {
+        setGroupCopyStatus({ locationId: status, label: "Copied" });
+      }
+      toast.add({
+        description: `${activityLabel[0].toUpperCase()}${activityLabel.slice(1)} list copied to clipboard`,
+      });
+      window.setTimeout(
+        () => {
+          if (status === "list") setCopyStatus("");
+          else {
+            setGroupCopyStatus((current) => (current?.locationId === status ? null : current));
+          }
+        },
+        1600,
+      );
+    }
+    catch {
+      if (status === "list") setCopyStatus("Copy failed");
+      else setGroupCopyStatus({ locationId: status, label: "Copy failed" });
+      toast.add({ description: "Could not copy to clipboard", type: "error" });
+    }
+  }
+
   return (
-    <SimulationResultsTab hasResults={jobs.length > 0}>
+    <SimulationResultsTab
+      hasResults={jobs.length > 0}
+      settings={
+        <div className="flex flex-col gap-2.5 py-3.5 pb-2.5">
+          <div className="flex flex-wrap items-center gap-2.5 max-[640px]:items-stretch">
+            <Label className="shrink-0 whitespace-nowrap" htmlFor={`${tab}-solve-mode`}>
+              Solve for
+            </Label>
+            <Select
+              value={solveMode}
+              onValueChange={(value) => setSolveMode(value as ClientSimulationSolveMode)}
+            >
+              <SelectTrigger
+                id={`${tab}-solve-mode`}
+                aria-label={`${activityLabel} solve mode`}
+                className="min-w-44"
+              >
+                <SelectValue>
+                  {solveMode === "available-slots"
+                    ? "available slots"
+                    : solveMode === "run-time-hours"
+                      ? "run time (hours)"
+                      : "run time (days)"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="available-slots">available slots</SelectItem>
+                <SelectItem value="run-time-hours">run time (hours)</SelectItem>
+                <SelectItem value="run-time-days">run time (days)</SelectItem>
+              </SelectContent>
+            </Select>
+            {solveMode !== "available-slots" && (
+              <Input
+                type="number"
+                min="1"
+                step="1"
+                value={targetTime}
+                onChange={(event) => setTargetTime(event.target.value)}
+                aria-label={`Target ${activityLabel} run time`}
+                className="w-28"
+              />
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              className="ml-auto max-[640px]:ml-0 max-[640px]:w-full"
+              onClick={() => void copyEntries(jobs, "list")}
+            >
+              <CopyIcon aria-hidden="true" />
+              {copyStatus || "Copy list"}
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-start gap-x-6 gap-y-3 font-mono">
+            <span className="flex flex-col">
+              <strong className="flex items-center gap-1 text-sm">
+                {availableSlots.toLocaleString()}
+                <ResponsiveDialogDrawer
+                  trigger={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className="size-5 text-muted-foreground transition-colors hover:text-foreground"
+                      aria-label={`View characters with available ${activityLabel} slots`}
+                      title={`View characters with available ${activityLabel} slots`}
+                    >
+                      <UsersRound aria-hidden="true" />
+                    </Button>
+                  }
+                  title={`${activityLabel[0].toUpperCase()}${activityLabel.slice(1)} slots by character`}
+                  description={`Characters with available ${activityLabel} slots.`}
+                >
+                  <div className="flex flex-col gap-2">
+                    {slotCharacters.length > 0 ? (
+                      slotCharacters.map((character) => (
+                        <div
+                          className="grid grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 border-t border-border/60 py-2 first:border-t-0"
+                          key={character.characterId}
+                        >
+                          <Image
+                            src={eveCharacterPortraitUrl(character.characterId, 64)}
+                            alt={`${character.name} portrait`}
+                            width={32}
+                            height={32}
+                            className="size-8 rounded-none"
+                          />
+                          <span className="min-w-0 truncate font-medium">{character.name}</span>
+                          <Badge variant="outline">
+                            {character.availableSlots.toLocaleString()} slot
+                            {character.availableSlots === 1 ? "" : "s"}
+                          </Badge>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="py-4 text-muted-foreground">
+                        No characters have available {activityLabel} slots.
+                      </p>
+                    )}
+                  </div>
+                </ResponsiveDialogDrawer>
+              </strong>
+              <small className="text-[10px] text-muted-foreground uppercase">Available slots</small>
+            </span>
+            <span className="flex flex-col">
+              <strong className="text-sm">{suggestedInstalls.toLocaleString()}</strong>
+              <small className="text-[10px] text-muted-foreground uppercase">
+                Suggested installs
+              </small>
+            </span>
+            <span className="flex flex-col">
+              <strong className="text-sm">{simulationDuration(maxJobLength)}</strong>
+              <small className="text-[10px] text-muted-foreground uppercase">Max job length</small>
+            </span>
+            <span className="flex flex-col">
+              <strong className="text-sm">
+                {simulationCoverage(scheduledRuns, installableRuns)}
+              </strong>
+              <small className="text-[10px] text-muted-foreground uppercase">
+                Installable coverage
+              </small>
+            </span>
+            <span className="flex flex-col">
+              <strong className="text-sm">{simulationCoverage(scheduledRuns, totalRuns)}</strong>
+              <small className="text-[10px] text-muted-foreground uppercase">Total coverage</small>
+            </span>
+          </div>
+        </div>
+      }
+    >
       <SimulationLocationResultGroups
         tab={tab}
         items={jobs}
@@ -723,6 +1010,13 @@ function SimulationActivityTab({
         openGroups={openGroups}
         onOpenGroupChange={onOpenGroupChange}
         getRowKey={(job) => job.jobId}
+        getGroupAction={(locationId, groupItems) => ({
+          onCopyGroup: () => void copyEntries(groupItems, locationId),
+          copyLabel:
+            groupCopyStatus?.locationId === locationId
+              ? groupCopyStatus.label
+              : "Copy location list",
+        })}
         getAvatar={(job) => ({
           typeId: job.productTypeId,
           name: job.productName,
@@ -758,6 +1052,7 @@ function SimulationActivityTab({
               onCheckboxChange={(checked) => controls.onCompletedChange(rowKey, checked)}
               contentClassName="self-end text-right font-mono text-xs sm:self-auto"
             >
+              <SimulationJobInputsResponsive job={job} onOpenPlan={controls.onOpenPlan} />
               <CopyableNumber value={job.readyNowRuns} suffix=" / " copyLabel="Ready runs" />
               <CopyableNumber value={job.requiredRuns} suffix=" runs" copyLabel="Required runs" />
             </SwitchedResultRow>
@@ -1214,17 +1509,19 @@ export default function SimulationResults({
   status,
   locationNamesById,
   characterNamesById,
+  characterStatuses,
+  slotUsage,
   corporationNamesById,
   stockpileNamesById,
-  onOpenPlan,
 }: {
   result: SimulationResultV1 | null;
   status: string;
   locationNamesById: ReadonlyMap<number, string>;
   characterNamesById: ReadonlyMap<number, string>;
+  characterStatuses: readonly ClientCharacterStatus[];
+  slotUsage: ClientJobsResponse["slotUsage"];
   corporationNamesById: ReadonlyMap<number, string>;
   stockpileNamesById: ReadonlyMap<string, string>;
-  onOpenPlan: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<SimulationTab>("warnings");
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
@@ -1241,10 +1538,7 @@ export default function SimulationResults({
     isCompleted: (rowKey) => completedRows[rowKey] ?? false,
     onCompletedChange: (rowKey, completed) =>
       setCompletedRows((current) => ({ ...current, [rowKey]: completed })),
-    onOpenPlan: () => {
-      setActiveTab("plan");
-      onOpenPlan();
-    },
+    onOpenPlan: () => setActiveTab("plan"),
   };
   const onOpenGroupChange = (groupKey: string, open: boolean) =>
     setOpenGroups((current) => ({ ...current, [groupKey]: open }));
@@ -1303,6 +1597,8 @@ export default function SimulationResults({
             result={result}
             locationNamesById={locationNamesById}
             characterNamesById={characterNamesById}
+            characterStatuses={characterStatuses}
+            slotUsage={slotUsage}
             corporationNamesById={corporationNamesById}
             stockpileNamesById={stockpileNamesById}
             controls={controls}
@@ -1321,6 +1617,8 @@ function SimulationTabContent({
   result,
   locationNamesById,
   characterNamesById,
+  characterStatuses,
+  slotUsage,
   corporationNamesById,
   stockpileNamesById,
   controls,
@@ -1331,6 +1629,8 @@ function SimulationTabContent({
   result: SimulationResultV1;
   locationNamesById: ReadonlyMap<number, string>;
   characterNamesById: ReadonlyMap<number, string>;
+  characterStatuses: readonly ClientCharacterStatus[];
+  slotUsage: ClientJobsResponse["slotUsage"];
   corporationNamesById: ReadonlyMap<number, string>;
   stockpileNamesById: ReadonlyMap<string, string>;
   controls: SimulationRowControls;
@@ -1399,6 +1699,9 @@ function SimulationTabContent({
         tab={activeTab}
         jobs={activeTab === "react" ? result.lists.reactionJobs : result.lists.manufacturingJobs}
         locationNamesById={locationNamesById}
+        characterNamesById={characterNamesById}
+        characterStatuses={characterStatuses}
+        slotUsage={slotUsage}
         controls={controls}
         openGroups={openGroups}
         onOpenGroupChange={onOpenGroupChange}

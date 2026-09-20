@@ -45,7 +45,11 @@ function inputHash(request: SimulationRequestV1): string {
 }
 
 /** Resolves a localized SDE type name with a stable fallback. */
-function typeName(context: SimulationContext, request: SimulationRequestV1, typeId: number): string {
+function typeName(
+  context: SimulationContext,
+  request: SimulationRequestV1,
+  typeId: number,
+): string {
   const names = context.types.get(typeId)?.name;
   return names?.[request.language ?? "en"] ?? names?.en ?? `Type ${typeId}`;
 }

@@ -1,7 +1,11 @@
 import type { PlanHaulExclusion } from "@/lib/planning/types";
 import type { SimulationLedgerAccount, SimulationTransaction } from "./ledger";
 import type { SimulatorBlueprintLot, SimulatorInventory, SimulationItemLot } from "./sourceLots";
-import type { SimulationBlueprintAllocation, SimulationHaulTask, SimulationActivity } from "./types";
+import type {
+  SimulationBlueprintAllocation,
+  SimulationHaulTask,
+  SimulationActivity,
+} from "./types";
 
 /** Quantity visible at each physical/future supply horizon. */
 export interface SupplyAvailability {
