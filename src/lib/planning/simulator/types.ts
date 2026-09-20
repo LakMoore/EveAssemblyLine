@@ -1,7 +1,7 @@
 import type { PlanRequest, StockOwnerType } from "@/lib/planning/types";
 
 /** Activity kinds represented by simulator ledgers and schedules. */
-export type SimulatorActivity =
+export type SimulationActivity =
   | "manufacturing"
   | "reaction"
   | "copying"
@@ -58,7 +58,7 @@ export interface SimulationOptionsV1 {
 }
 
 /** Public request accepted by the versioned simulator endpoint. */
-export interface SimulatorRequestV1 extends PlanRequest {
+export interface SimulationRequestV1 extends PlanRequest {
   simulation: SimulationOptionsV1;
 }
 
@@ -73,7 +73,7 @@ export interface SimulationDemandSource {
   requiredNow: number;
   reserved: number;
   destinationLocationId: number;
-  activity: Exclude<SimulatorActivity, "surplus">;
+  activity: Exclude<SimulationActivity, "surplus">;
   demandingJobId?: string;
 }
 
@@ -228,7 +228,13 @@ export interface SimulationReprocessingJob {
   yields: Array<{ typeId: number; typeName: string; quantity: number; allocatedQuantity: number }>;
 }
 
-/** Exact movement of a reserved physical source lot. */
+/** One job's contribution to an aggregated haul task. */
+export interface SimulationHaulDemand {
+  jobId?: string;
+  quantity: number;
+}
+
+/** Physical haul requirement aggregated by source, type, and owner. */
 export interface SimulationHaulTask {
   transferId: string;
   lotId: string;
@@ -242,6 +248,7 @@ export interface SimulationHaulTask {
   ownerType?: StockOwnerType;
   ownerId?: number;
   purpose: "industry-input" | "completion" | "reprocessing-input";
+  demands: SimulationHaulDemand[];
 }
 
 /** One destination contribution retained under an aggregated purchase row. */
@@ -257,6 +264,7 @@ export interface SimulationPurchaseDestination {
 export interface SimulationPurchase {
   typeId: number;
   typeName: string;
+  assemblyLineGroup: string;
   unitVolume: number;
   quantity: number;
   destinations: SimulationPurchaseDestination[];

@@ -19,6 +19,8 @@ export type SimulationGroupAvatar = {
 
 type SimulationResultGroupHeaderProps = {
   label: ReactNode;
+  ariaLabel?: string;
+  trailingContent?: ReactNode;
   isOpen: boolean;
   avatarRows: SimulationGroupAvatar[];
   remainingCount: number;
@@ -29,6 +31,8 @@ type SimulationResultGroupHeaderProps = {
 /** Renders a collapsible simulation group label, previews, and optional group action. */
 export default function SimulationResultGroupHeader({
   label,
+  ariaLabel,
+  trailingContent,
   isOpen,
   avatarRows,
   remainingCount,
@@ -39,6 +43,7 @@ export default function SimulationResultGroupHeader({
     <div className="py-4 text-foreground uppercase">
       <div className="flex flex-1 flex-row items-center justify-between gap-4 px-2">
         <h3 className="flex min-w-0 shrink grow truncate pl-2 text-lg">{label}</h3>
+        {trailingContent}
         <AvatarGroup className="ml-auto hidden group-data-closed/simulation-group:flex">
           {avatarRows.map((avatar, index) => (
             <Avatar key={`${avatar.typeId}-${index}`} className="size-6 md:size-10">
@@ -68,7 +73,7 @@ export default function SimulationResultGroupHeader({
         <CollapsibleTrigger
           type="button"
           className="flex min-h-10 min-w-0 items-center justify-between gap-3 border-0 bg-transparent p-0 text-left font-[inherit] text-inherit uppercase outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50"
-          aria-label={`${isOpen ? "Collapse" : "Expand"} ${label}`}
+          aria-label={`${isOpen ? "Collapse" : "Expand"} ${ariaLabel ?? (typeof label === "string" ? label : "result group")}`}
         >
           {isOpen ? <ChevronsDownUp /> : <ChevronsUpDown />}
         </CollapsibleTrigger>

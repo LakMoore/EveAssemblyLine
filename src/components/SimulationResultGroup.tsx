@@ -10,6 +10,9 @@ import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 type SimulationResultGroupProps = {
   groupKey: string;
   label: ReactNode;
+  ariaLabel?: string;
+  trailingContent?: ReactNode;
+  variant?: "card" | "nested";
   isOpen: boolean;
   avatarRows: SimulationGroupAvatar[];
   remainingCount: number;
@@ -23,6 +26,9 @@ type SimulationResultGroupProps = {
 export default function SimulationResultGroup({
   groupKey,
   label,
+  ariaLabel,
+  trailingContent,
+  variant = "card",
   isOpen,
   avatarRows,
   remainingCount,
@@ -33,13 +39,19 @@ export default function SimulationResultGroup({
 }: SimulationResultGroupProps) {
   const group = (
     <Collapsible
-      className="group/simulation-group"
+      className={
+        variant === "nested"
+          ? "group/simulation-group border-t border-border"
+          : "group/simulation-group"
+      }
       data-result-group={groupKey}
       open={isOpen}
       onOpenChange={onOpenChange}
     >
       <SimulationResultGroupHeader
         label={label}
+        ariaLabel={ariaLabel}
+        trailingContent={trailingContent}
         isOpen={isOpen}
         avatarRows={avatarRows}
         remainingCount={remainingCount}
@@ -50,5 +62,5 @@ export default function SimulationResultGroup({
     </Collapsible>
   );
 
-  return <Card className="p-0">{group}</Card>;
+  return variant === "nested" ? group : <Card className="pt-0">{group}</Card>;
 }

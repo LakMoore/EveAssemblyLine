@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { SimulatorRequestV1 } from "./types";
+import type { SimulationRequestV1 } from "./types";
 
 const positiveSafeInteger = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const nonNegativeInteger = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -278,6 +278,6 @@ export const simulatorRequestSchema = z
   });
 
 /** Validates and defaults an unknown simulator request. */
-export function parseSimulatorRequest(input: unknown): SimulatorRequestV1 {
-  return simulatorRequestSchema.parse(input) as SimulatorRequestV1;
+export function parseSimulatorRequest(input: unknown): SimulationRequestV1 {
+  return simulatorRequestSchema.parse(input) as SimulationRequestV1;
 }

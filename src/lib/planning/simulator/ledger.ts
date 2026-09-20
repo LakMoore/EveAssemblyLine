@@ -1,7 +1,7 @@
 import type {
   SimulationDemandSource,
   SimulationMaterialBalance,
-  SimulatorActivity,
+  SimulationActivity,
   SupplyHorizon,
 } from "./types";
 
@@ -47,7 +47,7 @@ export type SimulationTransaction =
       horizon: Extract<SupplyHorizon, "now" | "after-hauling">;
       demandingJobId?: string;
       stockpileId?: string;
-      demandActivity?: Exclude<SimulatorActivity, "surplus">;
+      demandActivity?: Exclude<SimulationActivity, "surplus">;
     }
   | {
       id: string;

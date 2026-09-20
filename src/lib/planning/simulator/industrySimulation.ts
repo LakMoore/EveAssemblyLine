@@ -19,8 +19,8 @@ import type {
   SimulationPurchaseDestination,
   SimulationSkillRequirement,
   SimulationWarning,
-  SimulatorActivity,
-  SimulatorRequestV1,
+  SimulationActivity,
+  SimulationRequestV1,
 } from "./types";
 
 type ProductionActivity = "manufacturing" | "reaction";
@@ -117,7 +117,7 @@ function horizonRunLimit(claim: BlueprintClaim, requiredRuns: number) {
 
 /** Declares industry work and reserves only complete physical run kits. */
 export function simulateIndustryDemand(
-  request: SimulatorRequestV1,
+  request: SimulationRequestV1,
   context: SimulationContext,
   inventory: SimulatorInventory,
   dependencyGraph: DependencyGraph,
@@ -145,7 +145,7 @@ class IndustryDemandSimulation {
 
   /** Creates one isolated deterministic simulation state. */
   constructor(
-    private readonly request: SimulatorRequestV1,
+    private readonly request: SimulationRequestV1,
     private readonly context: SimulationContext,
     inventory: SimulatorInventory,
     dependencyGraph: DependencyGraph,
@@ -1130,7 +1130,7 @@ class IndustryDemandSimulation {
     materialTypeId: number,
     plannedQuantity: number,
     destinationLocationId: number,
-    activity: Exclude<SimulatorActivity, "surplus">,
+    activity: Exclude<SimulationActivity, "surplus">,
     demandingJobId?: string,
   ): SimulationDemandSource {
     return {

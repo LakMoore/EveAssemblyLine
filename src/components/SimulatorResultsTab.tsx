@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 
-type SimulatorResultsTabProps = {
+type SimulationResultsTabProps = {
   settings?: ReactNode;
   children: ReactNode;
   hasResults: boolean;
@@ -10,13 +10,13 @@ type SimulatorResultsTabProps = {
 };
 
 /** Renders shared simulation-tab settings and a generic empty result state. */
-export default function SimulatorResultsTab({
+export default function SimulationResultsTab({
   settings,
   children,
   hasResults,
   emptyTitle = "No results",
   emptyDescription = "This simulation has no results in this category.",
-}: SimulatorResultsTabProps) {
+}: SimulationResultsTabProps) {
   if (!hasResults) {
     return (
       <Empty>

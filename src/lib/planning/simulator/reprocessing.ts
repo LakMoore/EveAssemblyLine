@@ -2,8 +2,8 @@ import type { PlanStockpile } from "@/lib/planning/types";
 import type { SimulationContext } from "./context";
 import type { IndustrySimulationResult, SimulationUnmetDemand } from "./industrySimulation";
 import type { SimulationLedgerAccount, SimulationTransaction } from "./ledger";
-import type { SimulatorInventory, SimulatorItemLot } from "./sourceLots";
-import type { SimulationReprocessingJob, SimulationWarning, SimulatorRequestV1 } from "./types";
+import type { SimulatorInventory, SimulationItemLot } from "./sourceLots";
+import type { SimulationReprocessingJob, SimulationWarning, SimulationRequestV1 } from "./types";
 
 /** Result of applying selected reprocessing yields to residual material demand. */
 export interface ReprocessingSettlementResult {
@@ -18,7 +18,7 @@ interface MutableDemand extends SimulationUnmetDemand {
 }
 
 interface ReprocessingCandidate {
-  lot: SimulatorItemLot;
+  lot: SimulationItemLot;
   stockpile: PlanStockpile;
   portionSize: number;
   efficiency: number;
@@ -38,7 +38,7 @@ function typeName(context: SimulationContext, typeId: number, language = "en"): 
 }
 
 function efficiencyFor(
-  request: SimulatorRequestV1,
+  request: SimulationRequestV1,
   stockpile: PlanStockpile,
   typeId: number,
 ): number {
@@ -145,7 +145,7 @@ function candidateScore(
 
 /** Settles residual material demand from commitments and eligible unreserved owned assets. */
 export function settleReprocessing(
-  request: SimulatorRequestV1,
+  request: SimulationRequestV1,
   context: SimulationContext,
   inventory: SimulatorInventory,
   industry: IndustrySimulationResult,

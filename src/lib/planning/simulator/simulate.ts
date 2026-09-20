@@ -12,12 +12,13 @@ import { settleReprocessing } from "./reprocessing";
 import { scheduleSimulationJobs, type SimulationScheduleResult } from "./scheduler";
 import { normalizeSimulatorInventory, type SimulatorInventory } from "./sourceLots";
 import type {
+  SimulationHaulTask,
   SimulationMaterialBalance,
   SimulationLedgerView,
   SimulationResultV1,
   SimulationResultWithDiagnostics,
   SimulationWarning,
-  SimulatorRequestV1,
+  SimulationRequestV1,
 } from "./types";
 
 /** Converts an input into a recursively key-sorted JSON-compatible value. */
@@ -37,16 +38,53 @@ function canonicalize(value: unknown): unknown {
 }
 
 /** Creates a stable content hash without retaining request data in the response. */
-function inputHash(request: SimulatorRequestV1): string {
+function inputHash(request: SimulationRequestV1): string {
   return createHash("sha256")
     .update(JSON.stringify(canonicalize(request)))
     .digest("hex");
 }
 
 /** Resolves a localized SDE type name with a stable fallback. */
-function typeName(context: SimulationContext, request: SimulatorRequestV1, typeId: number): string {
+function typeName(context: SimulationContext, request: SimulationRequestV1, typeId: number): string {
   const names = context.types.get(typeId)?.name;
   return names?.[request.language ?? "en"] ?? names?.en ?? `Type ${typeId}`;
+}
+
+/**
+ * Combines allocator lot transfers into one source/type/owner haul requirement.
+ *
+ * @param tasks - Exact lot-level transfers produced during allocation.
+ * @returns Stable presentation tasks with the job demands that compose each total.
+ */
+export function aggregateHaulingTasks(tasks: readonly SimulationHaulTask[]): SimulationHaulTask[] {
+  const groupedTasks = new Map<string, SimulationHaulTask>();
+  for (const task of tasks) {
+    const key = [task.fromLocationId, task.typeId, task.ownerType ?? "", task.ownerId ?? ""].join(
+      ":",
+    );
+    const existingTask = groupedTasks.get(key);
+    if (!existingTask) {
+      groupedTasks.set(key, { ...task, demands: [...task.demands] });
+      continue;
+    }
+    existingTask.quantity += task.quantity;
+    existingTask.demands.push(...task.demands);
+  }
+  return [...groupedTasks.values()]
+    .map((task) => ({
+      ...task,
+      demands: task.demands.sort(
+        (left, right) =>
+          (left.jobId ?? "").localeCompare(right.jobId ?? "") || left.quantity - right.quantity,
+      ),
+    }))
+    .sort(
+      (left, right) =>
+        left.fromLocationId - right.fromLocationId
+        || left.typeId - right.typeId
+        || (left.ownerType ?? "").localeCompare(right.ownerType ?? "")
+        || (left.ownerId ?? 0) - (right.ownerId ?? 0),
+    );
 }
 
 /** Posts every physical item lot to its canonical location/type ledger before allocation. */
@@ -87,7 +125,7 @@ function connectedAccountKeys(transactions: readonly SimulationTransaction[]): R
 }
 
 /** Returns physical locations configured for a stockpile or activity-specific facility assignment. */
-function configuredLocationIds(request: SimulatorRequestV1): ReadonlySet<number> {
+function configuredLocationIds(request: SimulationRequestV1): ReadonlySet<number> {
   const locationIds = new Set<number>();
   for (const stockpile of request.stockpiles) {
     for (const locationId of Object.values(stockpile.locations)) locationIds.add(locationId);
@@ -187,7 +225,7 @@ function presentationItems(
 
 /** Builds the presentation lists from settled domain facts. */
 function assembleLists(
-  request: SimulatorRequestV1,
+  request: SimulationRequestV1,
   industry: IndustrySimulationResult,
   schedules: SimulationScheduleResult,
   reprocessing: ReturnType<typeof settleReprocessing>,
@@ -219,19 +257,14 @@ function assembleLists(
     inventionJobs: schedules.inventionJobs,
     reactionJobs: schedules.reactionJobs,
     manufacturingJobs: schedules.manufacturingJobs,
-    haulingTasks: [...industry.allocator.haulingTasks].sort(
-      (left, right) =>
-        left.fromLocationId - right.fromLocationId
-        || left.toLocationId - right.toLocationId
-        || left.typeId - right.typeId,
-    ),
+    haulingTasks: aggregateHaulingTasks(industry.allocator.haulingTasks),
     skillsRequired: industry.skillsRequired,
   };
 }
 
 /** Executes one deterministic, cached-SDE-only industry simulation. */
 export async function simulateIndustry(
-  request: SimulatorRequestV1,
+  request: SimulationRequestV1,
 ): Promise<SimulationResultWithDiagnostics> {
   const startedAt = performance.now();
   const context = await loadSimulationContext();

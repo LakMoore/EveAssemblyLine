@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
   AlertTriangle,
@@ -19,7 +20,7 @@ import {
 } from "lucide-react";
 import SimpleResultRow from "@/components/SimpleResultRow";
 import SimulationResultGroup from "@/components/SimulationResultGroup";
-import SimulatorResultsTab from "@/components/SimulatorResultsTab";
+import SimulationResultsTab from "@/components/SimulatorResultsTab";
 import SwitchedResultRow from "@/components/SwitchedResultRow";
 import CopyableText from "@/components/CopyableText";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -37,7 +38,10 @@ import {
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "@/components/ui/toast";
+import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageServer";
+import { AssemblyLineGroups } from "@/lib/reference/assemblyLineGroups";
 import type {
   SimulationCopyJob,
   SimulationHaulTask,
@@ -45,6 +49,7 @@ import type {
   SimulationInventionJob,
   SimulationMaterialBalance,
   SimulationMaterialLocationBucket,
+  SimulationPurchase,
   SimulationReprocessingJob,
   SimulationResultV1,
 } from "@/lib/planning/simulator/types";
@@ -144,6 +149,11 @@ function quantity(value: number): string {
   return value.toLocaleString();
 }
 
+/** Returns the rounded total volume represented by a group of simulation haul tasks. */
+function simulationHaulVolume(tasks: readonly SimulationHaulTask[]): number {
+  return Math.ceil(tasks.reduce((total, task) => total + task.quantity * task.unitVolume, 0));
+}
+
 /** Renders a simulator number with its raw value available for copying. */
 function CopyableNumber({
   value,
@@ -209,6 +219,11 @@ function futureSupply(item: SimulationMaterialBalance): number {
 function haulImageVariation(kind: SimulationHaulTask["blueprintKind"]): "icon" | "bp" | "bpc" {
   if (kind === "bpc") return "bpc";
   return kind === undefined ? "icon" : "bp";
+}
+
+/** Selects blueprint artwork for blueprint-named balances in the plan ledger. */
+function materialImageVariation(typeName: string): "icon" | "bp" {
+  return /\bblueprint$/i.test(typeName) ? "bp" : "icon";
 }
 
 /** Renders location-scoped rows inside collapsible result groups. */
@@ -346,7 +361,7 @@ function SimulationMaterialsTab({
   }
 
   return (
-    <SimulatorResultsTab
+    <SimulationResultsTab
       hasResults={items.length > 0}
       settings={
         items.length > 0 ? (
@@ -429,6 +444,7 @@ function SimulationMaterialsTab({
                 navigateInPlace
                 selected={controls.selectedRowKey === rowKey}
                 onClick={() => controls.onSelectRow(rowKey)}
+                variation={materialImageVariation(item.typeName)}
                 wideBreakpoint="md"
                 contentClassName="self-end text-right font-mono text-xs md:w-full md:self-auto"
               >
@@ -438,7 +454,7 @@ function SimulationMaterialsTab({
           }}
         />
       )}
-    </SimulatorResultsTab>
+    </SimulationResultsTab>
   );
 }
 
@@ -503,7 +519,7 @@ function SimulationReprocessingTab({
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
   return (
-    <SimulatorResultsTab hasResults={jobs.length > 0}>
+    <SimulationResultsTab hasResults={jobs.length > 0}>
       <SimulationLocationResultGroups
         tab="reprocess"
         items={jobs}
@@ -523,7 +539,7 @@ function SimulationReprocessingTab({
           />
         )}
       />
-    </SimulatorResultsTab>
+    </SimulationResultsTab>
   );
 }
 
@@ -542,7 +558,7 @@ function SimulationCopyTab({
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
   return (
-    <SimulatorResultsTab hasResults={jobs.length > 0}>
+    <SimulationResultsTab hasResults={jobs.length > 0}>
       <SimulationLocationResultGroups
         tab="copy"
         items={jobs}
@@ -573,7 +589,7 @@ function SimulationCopyTab({
           />
         )}
       />
-    </SimulatorResultsTab>
+    </SimulationResultsTab>
   );
 }
 
@@ -592,7 +608,7 @@ function SimulationInventionTab({
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
   return (
-    <SimulatorResultsTab hasResults={jobs.length > 0}>
+    <SimulationResultsTab hasResults={jobs.length > 0}>
       <SimulationLocationResultGroups
         tab="invent"
         items={jobs}
@@ -625,7 +641,7 @@ function SimulationInventionTab({
           />
         )}
       />
-    </SimulatorResultsTab>
+    </SimulationResultsTab>
   );
 }
 
@@ -668,6 +684,19 @@ function SimulationSimpleJobRow({
   );
 }
 
+type SimulationBuyEntry = {
+  purchase: SimulationPurchase;
+  isMaterial: boolean;
+};
+
+/** Serializes material purchases in the format accepted by EVE Multibuy. */
+function multibuyText(entries: readonly SimulationBuyEntry[]): string {
+  return entries
+    .filter((entry) => entry.isMaterial)
+    .map(({ purchase }) => `${purchase.typeName}\t${purchase.quantity}`)
+    .join("\n");
+}
+
 /** Renders reaction or manufacturing jobs grouped by their working location. */
 function SimulationActivityTab({
   tab,
@@ -686,7 +715,7 @@ function SimulationActivityTab({
 }) {
   const activityLabel = tab === "react" ? "reaction" : "manufacturing";
   return (
-    <SimulatorResultsTab hasResults={jobs.length > 0}>
+    <SimulationResultsTab hasResults={jobs.length > 0}>
       <SimulationLocationResultGroups
         tab={tab}
         items={jobs}
@@ -735,7 +764,7 @@ function SimulationActivityTab({
           );
         }}
       />
-    </SimulatorResultsTab>
+    </SimulationResultsTab>
   );
 }
 
@@ -743,12 +772,16 @@ function SimulationActivityTab({
 function SimulationHaulTab({
   tasks,
   locationNamesById,
+  characterNamesById,
+  corporationNamesById,
   controls,
   openGroups,
   onOpenGroupChange,
 }: {
   tasks: SimulationHaulTask[];
   locationNamesById: ReadonlyMap<number, string>;
+  characterNamesById: ReadonlyMap<number, string>;
+  corporationNamesById: ReadonlyMap<number, string>;
   controls: SimulationRowControls;
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
@@ -767,7 +800,7 @@ function SimulationHaulTab({
   );
 
   return (
-    <SimulatorResultsTab hasResults={tasks.length > 0}>
+    <SimulationResultsTab hasResults={tasks.length > 0}>
       <div className="flex min-w-0 flex-col gap-4">
         {sourceGroups.map(([fromLocationId, destinations]) => {
           const sourceTasks = [...destinations.values()].flat();
@@ -790,6 +823,7 @@ function SimulationHaulTab({
                   {locationName(locationNamesById, fromLocationId)}
                 </>
               }
+              ariaLabel={`From: ${locationName(locationNamesById, fromLocationId)}`}
               isOpen={openGroups[sourceKey] ?? true}
               onOpenChange={(open) => onOpenGroupChange(sourceKey, open)}
               avatarRows={sourceAvatars}
@@ -804,6 +838,8 @@ function SimulationHaulTab({
                   )
                   .map(([toLocationId, destinationTasks]) => {
                     const destinationKey = `${sourceKey}:to:${toLocationId}`;
+                    const destinationVolume = simulationHaulVolume(destinationTasks);
+                    const destinationVolumeLabel = `${quantity(destinationVolume)} cubic meters`;
                     const destinationAvatars = createGroupAvatars(
                       destinationTasks,
                       (task) => ({
@@ -822,6 +858,13 @@ function SimulationHaulTab({
                             {locationName(locationNamesById, toLocationId)}
                           </>
                         }
+                        trailingContent={
+                          <strong className="shrink-0 text-lg whitespace-nowrap text-(--theme-info) lowercase">
+                            {quantity(destinationVolume)} m<sup>3</sup>
+                          </strong>
+                        }
+                        ariaLabel={`To: ${locationName(locationNamesById, toLocationId)}, ${destinationVolumeLabel}`}
+                        variant="nested"
                         isOpen={openGroups[destinationKey] ?? true}
                         onOpenChange={(open) => onOpenGroupChange(destinationKey, open)}
                         avatarRows={destinationAvatars}
@@ -832,6 +875,8 @@ function SimulationHaulTab({
                             <SimulationHaulRow
                               key={task.transferId}
                               task={task}
+                              characterNamesById={characterNamesById}
+                              corporationNamesById={corporationNamesById}
                               controls={controls}
                             />
                           ))}
@@ -844,21 +889,29 @@ function SimulationHaulTab({
           );
         })}
       </div>
-    </SimulatorResultsTab>
+    </SimulationResultsTab>
   );
 }
 
 /** Renders a selectable, completion-trackable haul task. */
 function SimulationHaulRow({
   task,
+  characterNamesById,
+  corporationNamesById,
   controls,
 }: {
   task: SimulationHaulTask;
+  characterNamesById: ReadonlyMap<number, string>;
+  corporationNamesById: ReadonlyMap<number, string>;
   controls: SimulationRowControls;
 }) {
   const rowKey = `haul:${task.transferId}`;
   const included = controls.isIncluded(rowKey);
   const completed = controls.isCompleted(rowKey);
+  const owner =
+    task.ownerType !== undefined && task.ownerId !== undefined
+      ? { type: task.ownerType, id: task.ownerId }
+      : null;
   return (
     <SwitchedResultRow
       name={task.typeName}
@@ -889,48 +942,174 @@ function SimulationHaulRow({
       onCheckboxChange={(checked) => controls.onCompletedChange(rowKey, checked)}
       contentClassName="self-end text-right font-mono text-xs sm:self-auto"
     >
-      <CopyableNumber value={task.quantity} suffix=" units" copyLabel="Haul quantity" />
+      <span
+        className={
+          owner !== null
+            ? "flex w-full items-center justify-between gap-2 sm:grid sm:w-auto sm:grid-cols-[auto_128px] sm:justify-normal"
+            : "flex items-center"
+        }
+      >
+        {owner !== null && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                owner.type === "corporation" ? (
+                  <Image
+                    src={eveCorporationLogoUrl(owner.id, 64)}
+                    alt={`${corporationNamesById.get(owner.id) ?? `Corporation ${owner.id}`} logo`}
+                    width={24}
+                    height={24}
+                    className="size-6 shrink-0 rounded-none"
+                  />
+                ) : (
+                  <Image
+                    src={eveCharacterPortraitUrl(owner.id, 64)}
+                    alt={`${characterNamesById.get(owner.id) ?? `Character ${owner.id}`} portrait`}
+                    width={24}
+                    height={24}
+                    className="size-6 shrink-0 rounded-none"
+                  />
+                )
+              }
+            />
+            <TooltipContent>
+              Owner:&nbsp;
+              {owner.type === "corporation"
+                ? (corporationNamesById.get(owner.id) ?? `Corporation ${owner.id}`)
+                : (characterNamesById.get(owner.id) ?? `Character ${owner.id}`)}
+            </TooltipContent>
+          </Tooltip>
+        )}
+        <span className={owner !== null ? "justify-self-end" : undefined}>
+          <CopyableNumber value={task.quantity} suffix=" units" copyLabel="Haul quantity" />
+        </span>
+      </span>
     </SwitchedResultRow>
   );
 }
 
-/** Renders simulator purchases as a simple result list. */
+/** Renders simulator purchases grouped by AssemblyLineGroup with multibuy actions. */
 function SimulationBuyTab({
   result,
   controls,
+  openGroups,
+  onOpenGroupChange,
 }: {
   result: SimulationResultV1;
   controls: SimulationRowControls;
+  openGroups: Record<string, boolean>;
+  onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
-  const purchases = [...result.lists.materialsToBuy, ...result.lists.bpoToBuy];
+  const entries: SimulationBuyEntry[] = [
+    ...result.lists.materialsToBuy.map((purchase) => ({ purchase, isMaterial: true })),
+    ...result.lists.bpoToBuy.map((purchase) => ({ purchase, isMaterial: false })),
+  ];
+  const groups = AssemblyLineGroups
+    .groupBy(entries, (entry) => entry.purchase.assemblyLineGroup)
+    .sort((left, right) => left.assemblyLineGroup.localeCompare(right.assemblyLineGroup));
+  const materialEntries = entries.filter((entry) => entry.isMaterial);
+  const [copyStatus, setCopyStatus] = useState<{ scope: string; label: string } | null>(null);
+
+  async function copyGroupMultibuy(scope: string, groupEntries: readonly SimulationBuyEntry[]) {
+    try {
+      await navigator.clipboard.writeText(multibuyText(groupEntries));
+      setCopyStatus({ scope, label: "Copied" });
+      toast.add({ description: `All ${scope} copied to clipboard` });
+      window.setTimeout(
+        () => {
+          setCopyStatus((current) => (current?.scope === scope ? null : current));
+        },
+        1600,
+      );
+    }
+    catch {
+      setCopyStatus({ scope, label: "Copy failed" });
+      toast.add({ description: "Could not copy multibuy group", type: "error" });
+    }
+  }
+
   return (
-    <SimulatorResultsTab hasResults={purchases.length > 0}>
-      <div className="flex min-w-0 flex-col">
-        {purchases.map((purchase) => {
-          const rowKey = `buy:${purchase.typeId}:${purchase.destinations
-            .map((destination) => destination.locationId)
-            .join(":")}`;
+    <SimulationResultsTab
+      hasResults={entries.length > 0}
+      settings={
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={materialEntries.length === 0}
+            onClick={() => void copyGroupMultibuy("all materials", materialEntries)}
+          >
+            <CopyIcon aria-hidden="true" />
+            {copyStatus?.scope === "all materials" ? copyStatus.label : "Multibuy Materials"}
+          </Button>
+        </div>
+      }
+    >
+      <div className="flex min-w-0 flex-col gap-4">
+        {groups.map((group) => {
+          const groupKey = `buy:${group.assemblyLineGroup}`;
+          const materialGroupEntries = group.items.filter((entry) => entry.isMaterial);
+          const groupAvatars = createGroupAvatars(
+            group.items,
+            (entry) => ({
+              typeId: entry.purchase.typeId,
+              name: entry.purchase.typeName,
+              imageVariation: entry.isMaterial ? "icon" : "bp",
+            }),
+          );
           return (
-            <SimulationSimpleJobRow
-              key={rowKey}
-              rowKey={rowKey}
-              typeId={purchase.typeId}
-              name={purchase.typeName}
-              subline={
-                <CopyableNumber
-                  value={purchase.destinations.length}
-                  suffix={` destination${purchase.destinations.length === 1 ? "" : "s"}`}
-                  copyLabel="Destinations"
-                />
+            <SimulationResultGroup
+              key={groupKey}
+              groupKey={groupKey}
+              label={group.assemblyLineGroup}
+              ariaLabel={group.assemblyLineGroup}
+              isOpen={openGroups[groupKey] ?? true}
+              onOpenChange={(open) => onOpenGroupChange(groupKey, open)}
+              avatarRows={groupAvatars}
+              remainingCount={group.items.length - groupAvatars.length}
+              onCopyGroup={
+                materialGroupEntries.length > 0
+                  ? () => void copyGroupMultibuy(group.assemblyLineGroup, materialGroupEntries)
+                  : undefined
               }
-              summary={<CopyableNumber value={purchase.quantity} copyLabel="Purchase quantity" />}
-              variation={result.lists.bpoToBuy.includes(purchase) ? "bp" : "icon"}
-              controls={controls}
-            />
+              copyLabel={
+                copyStatus?.scope === group.assemblyLineGroup
+                  ? copyStatus.label
+                  : "Copy Group Multibuy"
+              }
+            >
+              <div className="flex min-w-0 flex-col">
+                {group.items.map(({ purchase, isMaterial }) => {
+                  const rowKey = `buy:${isMaterial ? "material" : "blueprint"}:${purchase.typeId}:${purchase.destinations
+                    .map((destination) => destination.locationId)
+                    .join(":")}`;
+                  return (
+                    <SimulationSimpleJobRow
+                      key={rowKey}
+                      rowKey={rowKey}
+                      typeId={purchase.typeId}
+                      name={purchase.typeName}
+                      subline={
+                        <CopyableNumber
+                          value={purchase.destinations.length}
+                          suffix={` destination${purchase.destinations.length === 1 ? "" : "s"}`}
+                          copyLabel="Destinations"
+                        />
+                      }
+                      summary={
+                        <CopyableNumber value={purchase.quantity} copyLabel="Purchase quantity" />
+                      }
+                      variation={isMaterial ? "icon" : "bp"}
+                      controls={controls}
+                    />
+                  );
+                })}
+              </div>
+            </SimulationResultGroup>
           );
         })}
       </div>
-    </SimulatorResultsTab>
+    </SimulationResultsTab>
   );
 }
 
@@ -943,7 +1122,7 @@ function SimulationSkillsTab({
   controls: SimulationRowControls;
 }) {
   return (
-    <SimulatorResultsTab hasResults={result.lists.skillsRequired.length > 0}>
+    <SimulationResultsTab hasResults={result.lists.skillsRequired.length > 0}>
       <div className="flex min-w-0 flex-col">
         {result.lists.skillsRequired.map((skill) => (
           <SimulationSimpleJobRow
@@ -963,7 +1142,7 @@ function SimulationSkillsTab({
           />
         ))}
       </div>
-    </SimulatorResultsTab>
+    </SimulationResultsTab>
   );
 }
 
@@ -992,7 +1171,7 @@ function SimulationWarningsTab({
   );
 
   return (
-    <SimulatorResultsTab
+    <SimulationResultsTab
       hasResults={result.lists.warnings.length > 0}
       emptyTitle="No warnings"
       emptyDescription="This simulation has no calculation warnings."
@@ -1025,21 +1204,25 @@ function SimulationWarningsTab({
           );
         })}
       </div>
-    </SimulatorResultsTab>
+    </SimulationResultsTab>
   );
 }
 
 /** Renders the native simulator response without converting it to legacy planner result shapes. */
-export default function SimulatorResults({
+export default function SimulationResults({
   result,
   status,
   locationNamesById,
+  characterNamesById,
+  corporationNamesById,
   stockpileNamesById,
   onOpenPlan,
 }: {
   result: SimulationResultV1 | null;
   status: string;
   locationNamesById: ReadonlyMap<number, string>;
+  characterNamesById: ReadonlyMap<number, string>;
+  corporationNamesById: ReadonlyMap<number, string>;
   stockpileNamesById: ReadonlyMap<string, string>;
   onOpenPlan: () => void;
 }) {
@@ -1119,6 +1302,8 @@ export default function SimulatorResults({
             activeTab={activeTab}
             result={result}
             locationNamesById={locationNamesById}
+            characterNamesById={characterNamesById}
+            corporationNamesById={corporationNamesById}
             stockpileNamesById={stockpileNamesById}
             controls={controls}
             openGroups={openGroups}
@@ -1135,6 +1320,8 @@ function SimulationTabContent({
   activeTab,
   result,
   locationNamesById,
+  characterNamesById,
+  corporationNamesById,
   stockpileNamesById,
   controls,
   openGroups,
@@ -1143,6 +1330,8 @@ function SimulationTabContent({
   activeTab: SimulationTab;
   result: SimulationResultV1;
   locationNamesById: ReadonlyMap<number, string>;
+  characterNamesById: ReadonlyMap<number, string>;
+  corporationNamesById: ReadonlyMap<number, string>;
   stockpileNamesById: ReadonlyMap<string, string>;
   controls: SimulationRowControls;
   openGroups: Record<string, boolean>;
@@ -1221,6 +1410,8 @@ function SimulationTabContent({
       <SimulationHaulTab
         tasks={result.lists.haulingTasks}
         locationNamesById={locationNamesById}
+        characterNamesById={characterNamesById}
+        corporationNamesById={corporationNamesById}
         controls={controls}
         openGroups={openGroups}
         onOpenGroupChange={onOpenGroupChange}
@@ -1228,7 +1419,14 @@ function SimulationTabContent({
     );
   }
   if (activeTab === "buy") {
-    return <SimulationBuyTab result={result} controls={controls} />;
+    return (
+      <SimulationBuyTab
+        result={result}
+        controls={controls}
+        openGroups={openGroups}
+        onOpenGroupChange={onOpenGroupChange}
+      />
+    );
   }
   return <SimulationSkillsTab result={result} controls={controls} />;
 }

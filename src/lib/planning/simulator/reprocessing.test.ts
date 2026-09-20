@@ -7,7 +7,7 @@ import type { IndustrySimulationResult } from "./industrySimulation";
 import type { SimulationLedgerAccount } from "./ledger";
 import { settleReprocessing } from "./reprocessing";
 import type { SimulatorInventory } from "./sourceLots";
-import type { SimulatorRequestV1 } from "./types";
+import type { SimulationRequestV1 } from "./types";
 
 const materialAccount: SimulationLedgerAccount = {
   locationId: 20,
@@ -32,7 +32,7 @@ const inventory: SimulatorInventory = {
   unresolvedLotCount: 0,
 };
 
-const request: SimulatorRequestV1 = {
+const request: SimulationRequestV1 = {
   stockpiles: [
     {
       id: "main",

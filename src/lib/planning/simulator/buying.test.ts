@@ -5,7 +5,7 @@ import { settleBuying } from "./buying";
 import type { SimulationContext } from "./context";
 import type { IndustrySimulationResult, SimulationUnmetDemand } from "./industrySimulation";
 import type { SimulatorInventory } from "./sourceLots";
-import type { SimulatorRequestV1 } from "./types";
+import type { SimulationRequestV1 } from "./types";
 
 const request = {
   language: "en",
@@ -32,13 +32,15 @@ const request = {
       maxGraphDepth: 10,
     },
   },
-} satisfies SimulatorRequestV1;
+} satisfies SimulationRequestV1;
 
 const context = {
   types: new Map([
     [34, { _key: 34, name: { en: "Tritanium" }, volume: 0.01 }],
     [35, { _key: 35, name: { en: "Pyerite" }, volume: 0.01 }],
   ]),
+  groups: new Map(),
+  marketGroups: new Map(),
 } as unknown as SimulationContext;
 
 const inventory: SimulatorInventory = {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SimulationContext } from "./context";
 import { normalizeSimulatorInventory } from "./sourceLots";
-import type { SimulatorRequestV1 } from "./types";
+import type { SimulationRequestV1 } from "./types";
 
 const context = {
   types: new Map([
@@ -17,7 +17,7 @@ const context = {
 } as unknown as SimulationContext;
 
 /** Builds a minimal normalized simulator request. */
-function request(): SimulatorRequestV1 {
+function request(): SimulationRequestV1 {
   return {
     stockpiles: [],
     assets: [

@@ -1,7 +1,63 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseSimulatorRequest } from "./schema";
-import { simulateIndustry } from "./simulate";
+import { aggregateHaulingTasks, simulateIndustry } from "./simulate";
+
+void test("aggregates hauling tasks by source, type, and owner with demand provenance", () => {
+  const tasks = aggregateHaulingTasks([
+    {
+      transferId: "haul:one",
+      lotId: "one",
+      typeId: 40,
+      typeName: "Megacyte",
+      quantity: 10,
+      unitVolume: 0.01,
+      fromLocationId: 100,
+      toLocationId: 200,
+      ownerType: "character",
+      ownerId: 1,
+      purpose: "industry-input",
+      demands: [{ jobId: "job-a", quantity: 10 }],
+    },
+    {
+      transferId: "haul:two",
+      lotId: "two",
+      typeId: 40,
+      typeName: "Megacyte",
+      quantity: 5,
+      unitVolume: 0.01,
+      fromLocationId: 100,
+      toLocationId: 300,
+      ownerType: "character",
+      ownerId: 1,
+      purpose: "industry-input",
+      demands: [{ jobId: "job-b", quantity: 5 }],
+    },
+    {
+      transferId: "haul:other-owner",
+      lotId: "three",
+      typeId: 40,
+      typeName: "Megacyte",
+      quantity: 7,
+      unitVolume: 0.01,
+      fromLocationId: 100,
+      toLocationId: 200,
+      ownerType: "corporation",
+      ownerId: 1,
+      purpose: "industry-input",
+      demands: [{ jobId: "job-c", quantity: 7 }],
+    },
+  ]);
+  assert.equal(tasks.length, 2);
+  assert.equal(tasks[0].quantity, 15);
+  assert.deepEqual(
+    tasks[0].demands,
+    [
+      { jobId: "job-a", quantity: 10 },
+      { jobId: "job-b", quantity: 5 },
+    ],
+  );
+});
 
 void test("assembles a versioned invariant-safe result from the cached SDE", async () => {
   const request = parseSimulatorRequest({

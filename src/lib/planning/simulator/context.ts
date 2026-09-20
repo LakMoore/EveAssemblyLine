@@ -3,6 +3,7 @@ import {
   getCompressibleTypes,
   getGroups,
   getIndustryTargetFilters,
+  getMarketGroups,
   getSdeBuildNumber,
   getSkillPrerequisites,
   getTypeDogma,
@@ -14,6 +15,7 @@ import { getProductionGroupReferences } from "@/lib/planning/productionGroups";
 /** Immutable SDE indexes used throughout one simulator request. */
 export interface SimulationContext {
   types: Awaited<ReturnType<typeof getTypes>>;
+  marketGroups: Awaited<ReturnType<typeof getMarketGroups>>;
   blueprints: Awaited<ReturnType<typeof getBlueprints>>;
   compressibleTypes: Awaited<ReturnType<typeof getCompressibleTypes>>;
   typeMaterials: Awaited<ReturnType<typeof getTypeMaterials>>;
@@ -28,6 +30,7 @@ export interface SimulationContext {
 export async function loadSimulationContext(): Promise<SimulationContext> {
   const [
     types,
+    marketGroups,
     blueprints,
     compressibleTypes,
     typeMaterials,
@@ -38,6 +41,7 @@ export async function loadSimulationContext(): Promise<SimulationContext> {
     sdeRevision,
   ] = await Promise.all([
     getTypes(),
+    getMarketGroups(),
     getBlueprints(),
     getCompressibleTypes(),
     getTypeMaterials(),
@@ -49,6 +53,7 @@ export async function loadSimulationContext(): Promise<SimulationContext> {
   ]);
   return {
     types,
+    marketGroups,
     blueprints,
     compressibleTypes,
     typeMaterials,

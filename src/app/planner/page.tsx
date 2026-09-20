@@ -75,7 +75,7 @@ import { fetchTypeMetadata } from "@/lib/reference/types";
 import { useAppLanguage } from "../AppShell";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import PlannerResults from "@/components/PlannerResults";
-import SimulatorResults from "@/components/SimulationResults";
+import SimulationResults from "@/components/SimulationResults";
 import CalculateButton from "@/components/CalculateButton";
 import TypeSearch from "@/components/TypeSearch";
 import { toast } from "@/components/ui/toast";
@@ -2122,10 +2122,12 @@ function Planner() {
           onToggleHaulPatches={toggleHaulPatches}
         />
       ) : (
-        <SimulatorResults
+        <SimulationResults
           result={simulationResult}
           status={planStatus}
           locationNamesById={plannerLocationNames}
+          characterNamesById={characterNamesById}
+          corporationNamesById={corporationNamesById}
           onOpenPlan={() => setDisplayedResult("simulate")}
           stockpileNamesById={
             new Map(stockpiles.map((stockpile) => [stockpile.id, stockpile.name]))

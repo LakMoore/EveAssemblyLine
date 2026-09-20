@@ -1,7 +1,7 @@
 import type { PlanHaulExclusion } from "@/lib/planning/types";
 import type { SimulationLedgerAccount, SimulationTransaction } from "./ledger";
-import type { SimulatorBlueprintLot, SimulatorInventory, SimulatorItemLot } from "./sourceLots";
-import type { SimulationBlueprintAllocation, SimulationHaulTask, SimulatorActivity } from "./types";
+import type { SimulatorBlueprintLot, SimulatorInventory, SimulationItemLot } from "./sourceLots";
+import type { SimulationBlueprintAllocation, SimulationHaulTask, SimulationActivity } from "./types";
 
 /** Quantity visible at each physical/future supply horizon. */
 export interface SupplyAvailability {
@@ -25,7 +25,7 @@ export interface BlueprintClaim extends SimulationBlueprintAllocation {
 
 function excluded(
   exclusions: readonly PlanHaulExclusion[],
-  lot: Pick<SimulatorItemLot, "typeId" | "locationId" | "ownerType" | "ownerId">,
+  lot: Pick<SimulationItemLot, "typeId" | "locationId" | "ownerType" | "ownerId">,
   destinationLocationId: number,
 ): boolean {
   if (lot.locationId === undefined) return true;
@@ -88,7 +88,7 @@ export class SimulationAllocator {
     demandingJobId?: string,
     reservationHorizon: "now" | "after-hauling" = "now",
     stockpileId?: string,
-    demandActivity?: Exclude<SimulatorActivity, "surplus">,
+    demandActivity?: Exclude<SimulationActivity, "surplus">,
   ): number {
     return this.claimItemLots(
       this.inventory.itemLots.filter(
@@ -115,7 +115,7 @@ export class SimulationAllocator {
     account: SimulationLedgerAccount,
     demandingJobId?: string,
     stockpileId?: string,
-    demandActivity?: Exclude<SimulatorActivity, "surplus">,
+    demandActivity?: Exclude<SimulationActivity, "surplus">,
   ): number {
     return this.claimItemLots(
       this.inventory.itemLots.filter(
@@ -177,7 +177,7 @@ export class SimulationAllocator {
     account: SimulationLedgerAccount,
     demandingJobId?: string,
     stockpileId?: string,
-    demandActivity?: Exclude<SimulatorActivity, "surplus">,
+    demandActivity?: Exclude<SimulationActivity, "surplus">,
   ): ItemClaim {
     const local = this.claimLocal(
       typeId,
@@ -456,20 +456,21 @@ export class SimulationAllocator {
         ownerType: lot.ownerType,
         ownerId: lot.ownerId,
         purpose: "reprocessing-input",
+        demands: [{ jobId: reprocessingJobId, quantity: claimed }],
       });
     }
     return claimed;
   }
 
   private claimItemLots(
-    lots: readonly SimulatorItemLot[],
+    lots: readonly SimulationItemLot[],
     quantity: number,
     destinationLocationId: number,
     account: SimulationLedgerAccount,
     demandingJobId: string | undefined,
     reservationHorizon: "now" | "after-hauling",
     stockpileId?: string,
-    demandActivity?: Exclude<SimulatorActivity, "surplus">,
+    demandActivity?: Exclude<SimulationActivity, "surplus">,
   ): number {
     let remaining = quantity;
     let claimed = 0;
@@ -512,6 +513,7 @@ export class SimulationAllocator {
           ownerType: lot.ownerType,
           ownerId: lot.ownerId,
           purpose: "industry-input",
+          demands: [{ jobId: demandingJobId, quantity: next }],
         });
       }
       remaining -= next;
@@ -520,7 +522,7 @@ export class SimulationAllocator {
     return claimed;
   }
 
-  private sortedItemLots(lots: readonly SimulatorItemLot[]): SimulatorItemLot[] {
+  private sortedItemLots(lots: readonly SimulationItemLot[]): SimulationItemLot[] {
     return lots.slice().sort((left, right) => left.lotId.localeCompare(right.lotId));
   }
 
@@ -543,7 +545,7 @@ export class SimulationAllocator {
       || lot.locationId === destinationLocationId
       || this.transferredBlueprintLotIds.has(lot.lotId)
     ) return;
-    const pseudoItem: SimulatorItemLot = {
+    const pseudoItem: SimulationItemLot = {
       ...lot,
       name: lot.name,
       quantity: 1,
@@ -566,6 +568,7 @@ export class SimulationAllocator {
       ownerType: lot.ownerType,
       ownerId: lot.ownerId,
       purpose: "industry-input",
+      demands: [{ jobId: demandingJobId, quantity: 1 }],
     });
   }
 

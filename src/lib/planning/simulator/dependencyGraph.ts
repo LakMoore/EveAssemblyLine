@@ -1,6 +1,6 @@
 import type { BlueprintsRecord } from "@/lib/sde/generated";
 import type { SimulationContext } from "./context";
-import type { SimulationWarning, SimulatorActivity } from "./types";
+import type { SimulationWarning, SimulationActivity } from "./types";
 
 /** Semantic role represented by a dependency graph node. */
 export type DependencyNodeKind =
@@ -16,7 +16,7 @@ export interface DependencyNode {
   id: string;
   kind: DependencyNodeKind;
   typeId: number;
-  activity?: SimulatorActivity;
+  activity?: SimulationActivity;
   blueprintTypeId?: number;
   terminalReason?: "purchase" | "missing-blueprint" | "cycle" | "limit";
 }

@@ -13,10 +13,10 @@ import type {
 } from "@/lib/planning/types";
 import type { SimulationContext } from "./context";
 import type { SimulationSourceLot } from "./ledger";
-import type { SimulatorRequestV1 } from "./types";
+import type { SimulationRequestV1 } from "./types";
 
 /** Physical or committed ordinary stock available to the simulator. */
-export interface SimulatorItemLot extends SimulationSourceLot {
+export interface SimulationItemLot extends SimulationSourceLot {
   name: string;
   unitVolume: number;
   horizon: "now" | "after-upstream";
@@ -43,12 +43,12 @@ export interface SimulatorBlueprintLot {
 
 /** Canonical inventory registry consumed by every simulation phase. */
 export interface SimulatorInventory {
-  itemLots: readonly SimulatorItemLot[];
+  itemLots: readonly SimulationItemLot[];
   blueprintLots: readonly SimulatorBlueprintLot[];
   unresolvedLotCount: number;
 }
 
-type CategorizedAssets = Exclude<SimulatorRequestV1["assets"], PlanStockItem[] | undefined>;
+type CategorizedAssets = Exclude<SimulationRequestV1["assets"], PlanStockItem[] | undefined>;
 
 function localizedTypeName(context: SimulationContext, typeId: number, language = "en"): string {
   const name = context.types.get(typeId)?.name;
@@ -201,7 +201,7 @@ function normalizeCategorizedAssets(
 
 /** Converts request assets into immutable ordinary and blueprint source lots. */
 export function normalizeSimulatorInventory(
-  request: SimulatorRequestV1,
+  request: SimulationRequestV1,
   context: SimulationContext,
 ): SimulatorInventory {
   const assets = request.assets ?? [];
@@ -218,7 +218,7 @@ export function normalizeSimulatorInventory(
         || JSON.stringify(left).localeCompare(JSON.stringify(right)),
     );
   const eligibleTypeIds = getEligibleReprocessingTypeIds(context);
-  const itemLots: SimulatorItemLot[] = [];
+  const itemLots: SimulationItemLot[] = [];
   const blueprintLots: SimulatorBlueprintLot[] = [];
 
   for (const [stockIndex, item] of stock.entries()) {
