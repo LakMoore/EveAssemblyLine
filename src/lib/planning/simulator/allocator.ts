@@ -156,7 +156,7 @@ export class SimulationAllocator {
   ): FutureClaim {
     let remaining = quantity;
     let claimed = 0;
-    const quantitiesByActivity = new Map<SimulationUpstreamReservation["activity"], number>();
+    const reservations: SimulationUpstreamReservation[] = [];
     for (const lot of this.sortedItemLots(
       this.inventory.itemLots.filter(
         (candidate) => candidate.typeId === typeId && candidate.horizon === "after-upstream",
@@ -179,18 +179,21 @@ export class SimulationAllocator {
       remaining -= next;
       claimed += next;
       if (lot.activity) {
-        quantitiesByActivity.set(
-          lot.activity,
-          (quantitiesByActivity.get(lot.activity) ?? 0) + next,
-        );
+        reservations.push({
+          activity: lot.activity,
+          quantity: next,
+          state:
+            lot.industryJobStatus === "active"
+              ? "in-production"
+              : lot.industryJobStatus === "paused"
+                ? "paused"
+                : "planned",
+        });
       }
     }
     return {
       quantity: claimed,
-      reservations: (["manufacturing", "reaction"] as const).flatMap((activity) => {
-        const quantity = quantitiesByActivity.get(activity) ?? 0;
-        return quantity > 0 ? [{ activity, quantity }] : [];
-      }),
+      reservations,
     };
   }
 

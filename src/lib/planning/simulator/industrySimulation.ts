@@ -532,7 +532,13 @@ class IndustryDemandSimulation {
         upstreamReservations: [
           ...futureClaim.reservations,
           ...(productionSupply.activity && productionSupply.plannedQuantity > 0
-            ? [{ activity: productionSupply.activity, quantity: productionSupply.plannedQuantity }]
+            ? [
+                {
+                  activity: productionSupply.activity,
+                  quantity: productionSupply.plannedQuantity,
+                  state: "planned" as const,
+                },
+              ]
             : []),
         ],
       });
@@ -854,7 +860,13 @@ class IndustryDemandSimulation {
     const upstreamReservations = [
       ...claim.futureReservations,
       ...(production.activity && production.plannedQuantity > 0
-        ? [{ activity: production.activity, quantity: production.plannedQuantity }]
+        ? [
+            {
+              activity: production.activity,
+              quantity: production.plannedQuantity,
+              state: "planned" as const,
+            },
+          ]
         : []),
     ];
     return {

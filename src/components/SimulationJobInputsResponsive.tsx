@@ -43,34 +43,44 @@ function quantityLabel(quantity: number): string {
 }
 
 type InputSupplySource = {
+  key: string;
   label: string;
   quantity: number;
   Icon: LucideIcon;
 };
 
-/** Combines reservations from the same upstream activity for source tooltips. */
+/** Combines reservations from the same upstream activity and execution state for source tooltips. */
 function reservationSources(
   reservations: readonly SimulationUpstreamReservation[],
 ): InputSupplySource[] {
-  const quantitiesByActivity = new Map<SimulationUpstreamReservation["activity"], number>();
+  const quantitiesBySource = new Map<string, number>();
   for (const reservation of reservations) {
-    quantitiesByActivity.set(
-      reservation.activity,
-      (quantitiesByActivity.get(reservation.activity) ?? 0) + reservation.quantity,
-    );
+    const key = `${reservation.activity}:${reservation.state}`;
+    quantitiesBySource.set(key, (quantitiesBySource.get(key) ?? 0) + reservation.quantity);
   }
-  return (["manufacturing", "reaction"] as const).flatMap((activity) => {
-    const quantity = quantitiesByActivity.get(activity) ?? 0;
-    return quantity > 0
-      ? [
-          {
-            label: activity === "manufacturing" ? "Manufacturing" : "Reaction",
-            quantity,
-            Icon: activity === "manufacturing" ? Factory : Atom,
-          },
-        ]
-      : [];
-  });
+  return (["manufacturing", "reaction"] as const).flatMap((activity) =>
+    (["in-production", "paused", "planned"] as const).flatMap((state) => {
+      const key = `${activity}:${state}`;
+      const quantity = quantitiesBySource.get(key) ?? 0;
+      if (quantity <= 0) return [];
+      const activityLabel = activity === "manufacturing" ? "Manufacturing" : "Reaction";
+      return [
+        {
+          key,
+          label:
+            state === "in-production"
+              ? `${activityLabel}: In Production`
+              : state === "paused"
+                ? `${activityLabel}: Paused Production`
+                : activity === "manufacturing"
+                  ? "To Be Manufactured"
+                  : "To Be Reacted",
+          quantity,
+          Icon: activity === "manufacturing" ? Factory : Atom,
+        },
+      ];
+    }),
+  );
 }
 
 /** Returns the upstream sources that supply an input's missing quantity. */
@@ -78,11 +88,11 @@ function inputSupplySources(input: SimulationJobInput): InputSupplySource[] {
   if (input.availableNow >= input.requiredQuantity) return [];
   return [
     ...(input.availableFromHauling > 0
-      ? [{ label: "Hauling", quantity: input.availableFromHauling, Icon: Truck }]
+      ? [{ key: "hauling", label: "Hauling", quantity: input.availableFromHauling, Icon: Truck }]
       : []),
     ...reservationSources(input.upstreamReservations ?? []),
     ...(input.purchaseQuantity && input.purchaseQuantity > 0
-      ? [{ label: "Buy", quantity: input.purchaseQuantity, Icon: ShoppingCart }]
+      ? [{ key: "buy", label: "Buy", quantity: input.purchaseQuantity, Icon: ShoppingCart }]
       : []),
   ];
 }
@@ -115,8 +125,8 @@ function SimulationInputRow({
       />
       <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 font-mono text-xs sm:w-auto sm:grid-cols-[5rem_5rem_minmax(5rem,max-content)] sm:gap-2">
         <span className="flex items-center justify-start gap-1 sm:w-20 sm:justify-end">
-          {supplySources.map(({ label, quantity, Icon }) => (
-            <Tooltip key={label}>
+          {supplySources.map(({ key, label, quantity, Icon }) => (
+            <Tooltip key={key}>
               <TooltipTrigger
                 render={
                   label === "Buy" ? (

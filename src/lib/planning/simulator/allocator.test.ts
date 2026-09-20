@@ -55,9 +55,58 @@ const inventory: SimulatorInventory = {
 void test("claims local stock before remote stock and creates an exact haul", () => {
   const allocator = new SimulationAllocator(inventory, []);
   const claim = allocator.claimOrdinarySupply(34, 10, 20, account, "job");
-  assert.deepEqual(claim, { local: 4, remote: 6, future: 0 });
+  assert.deepEqual(claim, { local: 4, remote: 6, future: 0, futureReservations: [] });
   assert.equal(allocator.haulingTasks[0].quantity, 6);
   assert.equal(allocator.remainingItemQuantity("remote"), 2);
+});
+
+void test("distinguishes active production from planned future output", () => {
+  const allocator = new SimulationAllocator(
+    {
+      ...inventory,
+      itemLots: [
+        {
+          ...inventory.itemLots[0],
+          lotId: "active-output",
+          quantity: 4,
+          horizon: "after-upstream",
+          source: "industry-output",
+          activity: "manufacturing",
+          industryJobStatus: "active",
+        },
+        {
+          ...inventory.itemLots[0],
+          lotId: "planned-output",
+          quantity: 4,
+          horizon: "after-upstream",
+          source: "industry-output",
+          activity: "reaction",
+          industryJobStatus: "ready",
+        },
+        {
+          ...inventory.itemLots[0],
+          lotId: "paused-output",
+          quantity: 4,
+          horizon: "after-upstream",
+          source: "industry-output",
+          activity: "manufacturing",
+          industryJobStatus: "paused",
+        },
+      ],
+    },
+    [],
+  );
+
+  const claim = allocator.claimFuture(34, 12, account, "job");
+
+  assert.deepEqual(
+    claim.reservations,
+    [
+      { activity: "manufacturing", quantity: 4, state: "in-production" },
+      { activity: "manufacturing", quantity: 4, state: "paused" },
+      { activity: "reaction", quantity: 4, state: "planned" },
+    ],
+  );
 });
 
 void test("conserves finite BPC runs across allocations", () => {

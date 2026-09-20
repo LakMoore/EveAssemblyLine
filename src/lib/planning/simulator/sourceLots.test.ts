@@ -70,3 +70,48 @@ void test("normalizes ordinary assets and finite blueprint runs", () => {
   assert.equal(inventory.blueprintLots[0].runs, 5);
   assert.equal(inventory.blueprintLots[0].materialEfficiency, 10);
 });
+
+void test("preserves industry job status on future output lots", () => {
+  const simulationRequest = request();
+  if (!Array.isArray(simulationRequest.assets)) {
+    throw new Error("Expected the test request to contain an asset array.");
+  }
+  simulationRequest.assets = [
+    ...simulationRequest.assets,
+    {
+      typeId: 34,
+      name: "Tritanium",
+      quantity: 4,
+      category: "item",
+      rootLocationId: 20,
+      inBuild: true,
+      jobId: 123,
+      activityName: "manufacturing",
+      industryJobStatus: "active",
+    },
+    {
+      typeId: 34,
+      name: "Tritanium",
+      quantity: 2,
+      category: "item",
+      rootLocationId: 20,
+      inBuild: true,
+      jobId: 124,
+      activityName: "Reactions",
+      industryJobStatus: "paused",
+    },
+  ];
+
+  const inventory = normalizeSimulatorInventory(simulationRequest, context);
+  const futureOutput = inventory.itemLots.find(
+    (lot) => lot.source === "industry-output" && lot.industryJobStatus === "active",
+  );
+
+  assert.ok(futureOutput);
+  assert.equal(futureOutput.horizon, "after-upstream");
+  assert.equal(futureOutput.industryJobStatus, "active");
+  assert.equal(futureOutput.activity, "manufacturing");
+  const pausedOutput = inventory.itemLots.find((lot) => lot.industryJobStatus === "paused");
+  assert.ok(pausedOutput);
+  assert.equal(pausedOutput.activity, "reaction");
+});

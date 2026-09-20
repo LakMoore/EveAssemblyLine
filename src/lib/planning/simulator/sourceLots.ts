@@ -10,6 +10,7 @@ import type {
   PlanMarketInput,
   PlanStockItem,
   StockOwnerType,
+  IndustryJobStatus,
 } from "@/lib/planning/types";
 import type { SimulationContext } from "./context";
 import type { SimulationSourceLot } from "./ledger";
@@ -22,6 +23,7 @@ export interface SimulationItemLot extends SimulationSourceLot {
   horizon: "now" | "after-upstream";
   source: "asset" | "market-order" | "industry-output";
   activity?: "manufacturing" | "reaction";
+  industryJobStatus?: IndustryJobStatus;
   eligibleForReprocessing: boolean;
 }
 
@@ -63,7 +65,12 @@ function unitVolume(context: SimulationContext, typeId: number): number {
 
 /** Narrows an external industry activity name to a production activity. */
 function productionActivity(activityName?: string): SimulationItemLot["activity"] {
-  return activityName === "manufacturing" || activityName === "reaction" ? activityName : undefined;
+  const normalizedActivity = activityName?.toLowerCase();
+  if (normalizedActivity === "manufacturing") return "manufacturing";
+  if (normalizedActivity === "reaction" || normalizedActivity === "reactions") {
+    return "reaction";
+  }
+  return undefined;
 }
 
 /** Returns the only type IDs the simulator may ever select for reprocessing. */
@@ -292,6 +299,7 @@ export function normalizeSimulatorInventory(
       source:
         item.source === "marketOrder" ? "market-order" : item.inBuild ? "industry-output" : "asset",
       activity: productionActivity(item.activityName),
+      industryJobStatus: item.industryJobStatus,
       eligibleForReprocessing: eligibleTypeIds.has(item.typeId),
     });
   }

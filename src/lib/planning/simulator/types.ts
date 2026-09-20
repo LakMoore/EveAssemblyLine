@@ -105,9 +105,13 @@ export interface SimulationMaterialLocationBucket {
 }
 
 /** Identifies the upstream activity and quantity reserved for an input. */
+export type SimulationUpstreamSupplyState = "in-production" | "paused" | "planned";
+
+/** Identifies the upstream activity, quantity, and execution state reserved for an input. */
 export interface SimulationUpstreamReservation {
   activity: "manufacturing" | "reaction";
   quantity: number;
+  state: SimulationUpstreamSupplyState;
 }
 
 /** Exact material requirement and availability for an industry allocation. */
