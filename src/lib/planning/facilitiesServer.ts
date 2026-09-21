@@ -481,9 +481,19 @@ async function loadFacilityCalculationContext(
     corporationSettings,
     session.sessionId,
   );
+  const requesterCharacterId =
+    session.authenticatedCharacterId !== undefined
+    && characterIds.includes(session.authenticatedCharacterId)
+      ? session.authenticatedCharacterId
+      : undefined;
   const [roots, corporationSources, stations, systems, groups] = await Promise.all([
     getRootLocationsByItemId(characterIds, true, session.sessionId, corporationPolicies),
-    getCorporationSourceCatalog(characterIds, corporationPolicies, session.sessionId),
+    getCorporationSourceCatalog(
+      characterIds,
+      corporationPolicies,
+      session.sessionId,
+      requesterCharacterId,
+    ),
     getStations(),
     getSystems(),
     getGroups(),

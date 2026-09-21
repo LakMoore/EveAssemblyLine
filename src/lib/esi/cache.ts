@@ -35,6 +35,7 @@ import { createRequestProfiler, type RequestProfiler } from "@/lib/server/profil
 import {
   clearCharacterCorporationAuthorization,
   getCharacter,
+  findCorporationDirector,
   updateCharacterCorporationAuthorization,
 } from "@/lib/auth/tokensStore";
 import {
@@ -565,6 +566,7 @@ export async function getCorporationSourceCatalog(
   characterIds: readonly number[],
   policies: readonly CorporationSourcePolicy[],
   sessionId = "default",
+  requesterCharacterId?: number,
 ): Promise<CorporationSourceCatalogEntry[]> {
   const characters = await getCharactersByIds(characterIds);
   const [types, groups, marketGroups, systems] = await Promise.all([
@@ -741,13 +743,9 @@ export async function getCorporationSourceCatalog(
           ),
         ),
       ];
-      const nameResolver = characters.find(
-        (character) =>
-          character.corporationId === policy.corporationId
-          && (
-            character.hasDirectorRole === true
-            || character.corporationRoles?.includes("Director") === true
-          ),
+      const nameResolver = await findCorporationDirector(
+        policy.corporationId,
+        requesterCharacterId,
       );
       if (unnamedContainerIds.length > 0 && nameResolver) {
         try {

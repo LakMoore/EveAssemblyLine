@@ -53,7 +53,12 @@ async function loadOwnerAssetData(
         policies,
       ),
       includeCorporationData
-        ? getCorporationSourceCatalog([...characterIds], policies, context.sessionId)
+        ? getCorporationSourceCatalog(
+            [...characterIds],
+            policies,
+            context.sessionId,
+            context.authorizationCharacterId,
+          )
         : Promise.resolve([]),
     ]);
 
