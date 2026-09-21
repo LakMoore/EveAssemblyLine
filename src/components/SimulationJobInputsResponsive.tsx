@@ -94,6 +94,39 @@ type InputSupplySource = {
   Icon: LucideIcon;
 };
 
+/** Merges repeated material inputs for grouped presentation rows by material type. */
+function aggregateSimulationInputs(inputs: readonly SimulationJobInput[]): SimulationJobInput[] {
+  const inputsByType = new Map<number, SimulationJobInput>();
+  for (const input of inputs) {
+    const existing = inputsByType.get(input.typeId);
+    if (!existing) {
+      inputsByType.set(
+        input.typeId,
+        {
+          ...input,
+          upstreamReservations: [...(input.upstreamReservations ?? [])],
+        },
+      );
+      continue;
+    }
+    existing.requiredQuantity += input.requiredQuantity;
+    existing.availableNow += input.availableNow;
+    existing.availableFromHauling += input.availableFromHauling;
+    existing.availableAfterUpstream += input.availableAfterUpstream;
+    existing.unsatisfiedQuantity += input.unsatisfiedQuantity;
+    existing.upstreamReservations = [
+      ...(existing.upstreamReservations ?? []),
+      ...(input.upstreamReservations ?? []),
+    ];
+    const purchaseQuantity = (existing.purchaseQuantity ?? 0) + (input.purchaseQuantity ?? 0);
+    if (purchaseQuantity > 0) existing.purchaseQuantity = purchaseQuantity;
+    if (existing.quantityPerRun !== input.quantityPerRun) existing.quantityPerRun = undefined;
+  }
+  return [...inputsByType.values()].sort(
+    (left, right) => left.typeName.localeCompare(right.typeName) || left.typeId - right.typeId,
+  );
+}
+
 /** Combines reservations from the same upstream activity and execution state for source tooltips. */
 function reservationSources(
   reservations: readonly SimulationUpstreamReservation[],
@@ -229,8 +262,8 @@ function SimulationInputRow({
         onNavigate={onNavigate}
         className="min-w-0"
       />
-      <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 font-mono text-xs sm:w-auto sm:grid-cols-[5rem_5rem_minmax(5rem,max-content)] sm:gap-2">
-        <span className="flex items-center justify-start gap-1 sm:w-20 sm:justify-end">
+      <div className="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 font-mono text-xs sm:w-auto sm:grid-cols-[5rem_5rem_12rem] sm:gap-2">
+        <span className="order-2 flex items-center justify-start gap-1 sm:order-1 sm:w-20 sm:justify-end">
           {supplySources.map(
             ({ key, label, quantity, claimedQuantity, showJobOutput, completion = "", Icon }) => (
               <Tooltip key={key}>
@@ -270,10 +303,13 @@ function SimulationInputRow({
             ),
           )}
         </span>
-        <Badge variant="outline" className={cn("w-20 justify-center", statusClassName(status))}>
+        <Badge
+          variant="outline"
+          className={cn("order-1 w-20 justify-center sm:order-2", statusClassName(status))}
+        >
           {percent}%
         </Badge>
-        <span className="justify-self-end text-right whitespace-nowrap sm:min-w-20">
+        <span className="order-3 justify-self-end text-right whitespace-nowrap sm:min-w-20">
           {input.availableNow.toLocaleString()} / {input.requiredQuantity.toLocaleString()}
         </span>
       </div>
@@ -284,11 +320,13 @@ function SimulationInputRow({
 /** Renders the immediate input percentage and its responsive detail drawer. */
 export default function SimulationJobInputsResponsive({
   job,
+  jobs,
   onOpenPlan,
   onOpenBuy,
   variation = "icon",
 }: {
   job: SimulationIndustryJob;
+  jobs?: readonly SimulationIndustryJob[];
   onOpenPlan: () => void;
   onOpenBuy: () => void;
   variation?: "icon" | "render" | "bp" | "bpc";
@@ -310,11 +348,16 @@ export default function SimulationJobInputsResponsive({
     setOpen(false);
     onOpenBuy();
   };
-  const installableRuns = Math.min(job.requiredRuns, Math.max(0, job.readyNowRuns));
+  const inputJobs = jobs && jobs.length > 0 ? jobs : [job];
+  const installableRuns = inputJobs.reduce(
+    (total, inputJob) =>
+      total + Math.min(inputJob.requiredRuns, Math.max(0, inputJob.readyNowRuns)),
+    0,
+  );
+  const totalRuns = inputJobs.reduce((total, inputJob) => total + inputJob.requiredRuns, 0);
+  const inputs = aggregateSimulationInputs(inputJobs.flatMap((inputJob) => inputJob.inputs));
   const completionPercent =
-    job.requiredRuns > 0
-      ? Math.min(100, Math.round((installableRuns / job.requiredRuns) * 100))
-      : 100;
+    totalRuns > 0 ? Math.min(100, Math.round((installableRuns / totalRuns) * 100)) : 100;
   const status: InputStatus =
     completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked";
   const description: ReactNode = "Material availability for this simulation job.";
@@ -337,8 +380,12 @@ export default function SimulationJobInputsResponsive({
           Inputs
         </Button>
       }
-      title="Job inputs"
-      description={description}
+      title={inputJobs.length > 1 ? "Grouped job inputs" : "Job inputs"}
+      description={
+        inputJobs.length > 1
+          ? "Material availability for the grouped simulation jobs."
+          : description
+      }
       headerContent={
         <div className="flex flex-col gap-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -361,7 +408,7 @@ export default function SimulationJobInputsResponsive({
                 <small className="text-[9px] text-muted-foreground uppercase">Installable</small>
               </div>
               <div className="flex flex-col items-end">
-                <strong>{job.requiredRuns.toLocaleString()}</strong>
+                <strong>{totalRuns.toLocaleString()}</strong>
                 <small className="text-[9px] text-muted-foreground uppercase">Total</small>
               </div>
             </div>
@@ -379,8 +426,8 @@ export default function SimulationJobInputsResponsive({
         <p className="pt-2 text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
           Materials
         </p>
-        {job.inputs.length > 0 ? (
-          job.inputs.map((input) => (
+        {inputs.length > 0 ? (
+          inputs.map((input) => (
             <SimulationInputRow
               input={input}
               key={input.typeId}

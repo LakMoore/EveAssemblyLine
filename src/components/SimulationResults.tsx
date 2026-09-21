@@ -115,6 +115,27 @@ const materialBalanceColumns = [
   "Surplus",
 ] as const;
 const typeIdChangedEvent = "assembly-line-planner-type-id-changed";
+const simulationTabParam = "simulationTab";
+
+/** Returns whether a URL value identifies a simulator output tab. */
+function isSimulationTab(value: string | null): value is SimulationTab {
+  return tabs.some((tab) => tab.value === value);
+}
+
+/** Reads the selected simulator tab from the current URL. */
+function readSimulationTabFromUrl(): SimulationTab {
+  if (typeof window === "undefined") return "warnings";
+  const value = new URLSearchParams(window.location.search).get(simulationTabParam);
+  return isSimulationTab(value) ? value : "warnings";
+}
+
+/** Writes the selected simulator tab without navigating away from the planner. */
+function updateSimulationTabInUrl(tab: SimulationTab): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  url.searchParams.set(simulationTabParam, tab);
+  window.history.replaceState(null, "", url);
+}
 
 /** Parses a positive type ID from the planner URL query string. */
 function parseTypeId(value: string | null): number | null {
@@ -365,10 +386,76 @@ function simulationBlueprintCounts(
 
 type SimulationInstallPlanView = "compact" | "full";
 
+type SimulationInstallPlanEntry = {
+  job: SimulationIndustryJob;
+  schedule: ClientSimulationSchedule | undefined;
+  installedRuns: number;
+  completedInstallIds: Readonly<Record<string, boolean>>;
+  scheduleRevision: string;
+  blueprintCounts: SimulationBlueprintCounts;
+  onInstalledRunsChange: (
+    installedRuns: number,
+    scheduleIdentity: string,
+    completedInstallIds: Readonly<Record<string, boolean>>,
+    schedule: ClientSimulationSchedule | undefined,
+  ) => void;
+};
+
+type SimulationInstallDetail = {
+  install: ClientSimulationInstall;
+  entry: SimulationInstallPlanEntry;
+  scheduleIdentity: string;
+};
+
 type CompactInstallGroup = {
   runs: number;
-  installs: ClientSimulationInstall[];
+  installs: SimulationInstallDetail[];
 };
+
+type SimulationActivityJobGroup = {
+  groupKey: string;
+  locationId: number;
+  productTypeId: number;
+  productName: string;
+  jobs: SimulationIndustryJob[];
+};
+
+/** Groups Manufacture rows by location and product type for presentation. */
+function simulationActivityJobGroups(
+  tab: "react" | "manufacture",
+  jobs: readonly SimulationIndustryJob[],
+): SimulationActivityJobGroup[] {
+  if (tab === "react") {
+    return jobs.map((job) => ({
+      groupKey: `${tab}:${job.jobId}`,
+      locationId: job.locationId,
+      productTypeId: job.productTypeId,
+      productName: job.productName,
+      jobs: [job],
+    }));
+  }
+
+  const groups = new Map<string, SimulationActivityJobGroup>();
+  for (const job of jobs) {
+    const groupKey = `${tab}:${job.locationId}:${job.productTypeId}`;
+    const group = groups.get(groupKey);
+    if (group) {
+      group.jobs.push(job);
+      continue;
+    }
+    groups.set(
+      groupKey,
+      {
+        groupKey,
+        locationId: job.locationId,
+        productTypeId: job.productTypeId,
+        productName: job.productName,
+        jobs: [job],
+      },
+    );
+  }
+  return [...groups.values()];
+}
 
 /** Identifies one generated install plan for completion-state reconciliation. */
 function simulationInstallScheduleIdentity(
@@ -396,76 +483,94 @@ function simulationCompletionMatchesSchedule(
 }
 
 /** Groups scheduled installs that contain the same number of runs. */
-function compactInstallGroups(installs: readonly ClientSimulationInstall[]): CompactInstallGroup[] {
-  const groups = new Map<number, ClientSimulationInstall[]>();
-  for (const install of installs) {
-    const group = groups.get(install.runs) ?? [];
-    group.push(install);
-    groups.set(install.runs, group);
+function compactInstallGroups(installs: readonly SimulationInstallDetail[]): CompactInstallGroup[] {
+  const groups = new Map<number, SimulationInstallDetail[]>();
+  for (const detail of installs) {
+    const group = groups.get(detail.install.runs) ?? [];
+    group.push(detail);
+    groups.set(detail.install.runs, group);
   }
   return [...groups.entries()]
     .sort(([leftRuns], [rightRuns]) => rightRuns - leftRuns)
     .map(([runs, groupedInstalls]) => ({ runs, installs: groupedInstalls }));
 }
 
-/** Renders the install plan for one simulator activity row. */
+/** Renders the install plan for one or more simulator activity rows. */
 function SimulationInstallPlanDialog({
-  job,
-  schedule,
-  installedRuns,
-  completedInstallIds: parentCompletedInstallIds = {},
-  onInstalledRunsChange,
+  entries,
   activityLabel,
-  blueprintCounts,
   characterNamesById,
-  scheduleRevision,
   onOpenPlan,
 }: {
-  job: SimulationIndustryJob;
-  schedule: ClientSimulationSchedule | undefined;
-  installedRuns: number;
-  completedInstallIds: Readonly<Record<string, boolean>>;
-  onInstalledRunsChange: (
-    installedRuns: number,
-    scheduleIdentity: string,
-    completedInstallIds: Readonly<Record<string, boolean>>,
-  ) => void;
+  entries: readonly SimulationInstallPlanEntry[];
   activityLabel: string;
-  blueprintCounts: SimulationBlueprintCounts;
   characterNamesById: ReadonlyMap<number, string>;
-  scheduleRevision: string;
   onOpenPlan: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<SimulationInstallPlanView>("compact");
-  const installs = schedule?.installs ?? [];
-  const hasInsufficientInputs =
-    job.inputs.length > 0 && Math.min(...job.inputs.map((input) => input.availableNow)) === 0;
-  const compactGroups = compactInstallGroups(installs);
-  const scheduleIdentity = simulationInstallScheduleIdentity(scheduleRevision, installs);
-  const totalInstallRuns = installs.reduce((total, install) => total + install.runs, 0);
-  const allRunsInstalled = totalInstallRuns > 0 && installedRuns >= totalInstallRuns;
-  const completedInstallIds = allRunsInstalled
-    ? Object.fromEntries(installs.map((install) => [install.installId, true]))
-    : parentCompletedInstallIds;
-  const completed = (installId: string) =>
-    allRunsInstalled || completedInstallIds[installId] === true;
-  const setInstallCompleted = (installIds: readonly string[], checked: boolean) => {
-    const next = { ...completedInstallIds };
-    let installedRunsDelta = 0;
-    for (const installId of installIds) {
-      const wasCompleted = next[installId] ?? false;
-      const install = installs.find((entry) => entry.installId === installId);
-      if (!install || wasCompleted === checked) continue;
-      installedRunsDelta += checked ? install.runs : -install.runs;
-      next[installId] = checked;
-    }
-    onInstalledRunsChange(Math.max(0, installedRuns + installedRunsDelta), scheduleIdentity, next);
+  const installDetails = entries.flatMap((entry) => {
+    const installs = entry.schedule?.installs ?? [];
+    const scheduleIdentity = simulationInstallScheduleIdentity(entry.scheduleRevision, installs);
+    return installs.map((install) => ({ install, entry, scheduleIdentity }));
+  });
+  const compactGroups = compactInstallGroups(installDetails);
+  const installableRuns = entries.reduce((total, entry) => total + entry.job.readyNowRuns, 0);
+  const totalRuns = entries.reduce((total, entry) => total + entry.job.requiredRuns, 0);
+  const blueprintCounts = entries.reduce(
+    (counts, entry) => ({
+      owned: counts.owned + entry.blueprintCounts.owned,
+      available: counts.available + entry.blueprintCounts.available,
+    }),
+    { owned: 0, available: 0 },
+  );
+  const hasInsufficientInputs = entries.some(
+    (entry) =>
+      entry.job.inputs.length > 0
+      && Math.min(...entry.job.inputs.map((input) => input.availableNow)) === 0,
+  );
+  const productName = entries[0]?.job.productName ?? "Item";
+  const completed = (detail: SimulationInstallDetail) => {
+    const totalEntryRuns = detail.entry.schedule?.runs ?? 0;
+    return (
+      (totalEntryRuns > 0 && detail.entry.installedRuns >= totalEntryRuns)
+      || detail.entry.completedInstallIds[detail.install.installId] === true
+    );
   };
-  const someCompleted = (installIds: readonly string[]) =>
-    installIds.some((installId) => completed(installId));
-  const allCompleted = (installIds: readonly string[]) =>
-    installIds.length > 0 && installIds.every((installId) => completed(installId));
+  const setInstallCompleted = (details: readonly SimulationInstallDetail[], checked: boolean) => {
+    const detailsByEntry = new Map<SimulationInstallPlanEntry, SimulationInstallDetail[]>();
+    for (const detail of details) {
+      const entryDetails = detailsByEntry.get(detail.entry) ?? [];
+      entryDetails.push(detail);
+      detailsByEntry.set(detail.entry, entryDetails);
+    }
+    for (const [entry, entryDetails] of detailsByEntry) {
+      const entryInstalls = entry.schedule?.installs ?? [];
+      const allRunsInstalled =
+        entryInstalls.length > 0
+        && entry.installedRuns >= entryInstalls.reduce((total, install) => total + install.runs, 0);
+      const next = allRunsInstalled
+        ? Object.fromEntries(entryInstalls.map((install) => [install.installId, true]))
+        : { ...entry.completedInstallIds };
+      let installedRunsDelta = 0;
+      for (const detail of entryDetails) {
+        const wasCompleted = completed(detail);
+        if (wasCompleted === checked) continue;
+        installedRunsDelta += checked ? detail.install.runs : -detail.install.runs;
+        next[detail.install.installId] = checked;
+      }
+      entry.onInstalledRunsChange(
+        Math.max(0, entry.installedRuns + installedRunsDelta),
+        entryDetails[0].scheduleIdentity,
+        next,
+        entry.schedule,
+      );
+    }
+  };
+  const someCompleted = (details: readonly SimulationInstallDetail[]) =>
+    details.some((detail) => completed(detail));
+  const allCompleted = (details: readonly SimulationInstallDetail[]) =>
+    details.length > 0 && details.every((detail) => completed(detail));
   const navigateToPlan = () => {
     setOpen(false);
     onOpenPlan();
@@ -480,31 +585,31 @@ function SimulationInstallPlanDialog({
           type="button"
           variant="outline"
           size="icon-xs"
-          aria-label={`View ${job.productName} install plan`}
+          aria-label={`View ${productName} install plan`}
           className="size-6 text-muted-foreground transition-colors hover:text-foreground"
           onClick={(event) => event.stopPropagation()}
         >
           <ListChecks aria-hidden="true" />
         </Button>
       }
-      triggerTooltip={`View ${job.productName} install plan`}
-      title={`${job.productName} install plan`}
+      triggerTooltip={`View ${productName} install plan`}
+      title={`${productName} install plan`}
       description={`Planned ${activityLabel} installs for this item.`}
       headerContent={
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-3 font-mono text-xs sm:grid-cols-4">
             <div className="flex flex-col">
-              <strong>{job.readyNowRuns.toLocaleString()}</strong>
+              <strong>{installableRuns.toLocaleString()}</strong>
               <small className="text-[10px] text-muted-foreground uppercase">
                 Installable runs
               </small>
             </div>
             <div className="flex flex-col">
-              <strong>{job.requiredRuns.toLocaleString()}</strong>
+              <strong>{totalRuns.toLocaleString()}</strong>
               <small className="text-[10px] text-muted-foreground uppercase">Total runs</small>
             </div>
             <div className="flex flex-col">
-              <strong>{installs.length.toLocaleString()}</strong>
+              <strong>{installDetails.length.toLocaleString()}</strong>
               <small className="text-[10px] text-muted-foreground uppercase">Slots allocated</small>
             </div>
             <div className="flex flex-col">
@@ -533,7 +638,8 @@ function SimulationInstallPlanDialog({
     >
       <div className="flex flex-col">
         {view === "full"
-          ? installs.map((install, index) => {
+          ? installDetails.map((detail, index) => {
+              const install = detail.install;
               const characterName =
                 install.characterId === undefined
                   ? undefined
@@ -541,8 +647,8 @@ function SimulationInstallPlanDialog({
               return (
                 <SwitchedResultRow
                   key={install.installId}
-                  name={job.productName}
-                  typeId={job.productTypeId}
+                  name={detail.entry.job.productName}
+                  typeId={detail.entry.job.productTypeId}
                   linkPath="planner"
                   linkIcon={ClipboardList}
                   linkSearchParams={{ tab: "Plan" }}
@@ -556,10 +662,10 @@ function SimulationInstallPlanDialog({
                   }
                   variation="icon"
                   showSwitch={false}
-                  checkboxChecked={completed(install.installId)}
-                  installed={completed(install.installId)}
+                  checkboxChecked={completed(detail)}
+                  installed={completed(detail)}
                   checkboxTooltip="Mark install complete"
-                  onCheckboxChange={(checked) => setInstallCompleted([install.installId], checked)}
+                  onCheckboxChange={(checked) => setInstallCompleted([detail], checked)}
                   contentClassName="w-full justify-between gap-3 self-end text-right font-mono text-xs sm:grid sm:min-w-[11rem] sm:grid-cols-[minmax(0,1fr)_max-content] sm:gap-x-4 sm:justify-normal sm:self-auto"
                 >
                   {install.characterId !== undefined && (
@@ -576,12 +682,12 @@ function SimulationInstallPlanDialog({
               );
             })
           : compactGroups.map((group) => {
-              const installIds = group.installs.map((install) => install.installId);
+              const firstDetail = group.installs[0];
               return (
                 <SwitchedResultRow
                   key={group.runs}
-                  name={job.productName}
-                  typeId={job.productTypeId}
+                  name={firstDetail.entry.job.productName}
+                  typeId={firstDetail.entry.job.productTypeId}
                   linkPath="planner"
                   linkIcon={ClipboardList}
                   linkSearchParams={{ tab: "Plan" }}
@@ -591,11 +697,13 @@ function SimulationInstallPlanDialog({
                   subline={`${group.installs.length} install${group.installs.length === 1 ? "" : "s"} grouped by runs per install`}
                   variation="icon"
                   showSwitch={false}
-                  checkboxChecked={allCompleted(installIds)}
-                  checkboxIndeterminate={!allCompleted(installIds) && someCompleted(installIds)}
-                  installed={allCompleted(installIds)}
+                  checkboxChecked={allCompleted(group.installs)}
+                  checkboxIndeterminate={
+                    !allCompleted(group.installs) && someCompleted(group.installs)
+                  }
+                  installed={allCompleted(group.installs)}
                   checkboxTooltip="Mark grouped installs complete"
-                  onCheckboxChange={(checked) => setInstallCompleted(installIds, checked)}
+                  onCheckboxChange={(checked) => setInstallCompleted(group.installs, checked)}
                   contentClassName="w-full justify-between gap-3 self-end text-right font-mono text-xs sm:grid sm:min-w-[11rem] sm:grid-cols-[minmax(0,1fr)_max-content] sm:gap-x-4 sm:justify-normal sm:self-auto"
                 >
                   <span>{quantity(group.installs.length)} installs</span>
@@ -607,7 +715,7 @@ function SimulationInstallPlanDialog({
                 </SwitchedResultRow>
               );
             })}
-        {installs.length === 0 && (
+        {installDetails.length === 0 && (
           <p className="py-4 text-muted-foreground">
             No slots are allocated for this item.
             {blueprintCounts.available === 0
@@ -1171,9 +1279,10 @@ function SimulationActivityTab({
     (total, character) => total + character.availableSlots,
     0,
   );
+  const effectiveSolveMode = tab === "react" ? solveMode : "available-slots";
   const baseScheduleRevision = [
     simulationInputRevision,
-    solveMode,
+    effectiveSolveMode,
     targetTime,
     protectReactionMaterialBonus,
     availableSlots,
@@ -1201,7 +1310,7 @@ function SimulationActivityTab({
   const schedules = solveSimulationActivity(
     jobs,
     availableSlots,
-    solveMode,
+    effectiveSolveMode,
     Number(targetTime),
     enabledJobIds,
     slotCharacters.map(
@@ -1232,6 +1341,8 @@ function SimulationActivityTab({
     ...activeJobs.map((job) => schedules.get(job.jobId)?.timeSeconds ?? 0),
     0,
   );
+  const presentationGroups = simulationActivityJobGroups(tab, jobs);
+  const activeJobIds = new Set(activeJobs.map((job) => job.jobId));
 
   async function copyEntries(entries: readonly SimulationIndustryJob[], status: "list" | number) {
     const lines = entries.flatMap((job) => {
@@ -1285,39 +1396,43 @@ function SimulationActivityTab({
       settings={
         <div className="flex flex-col gap-2.5 py-3.5 pb-2.5">
           <div className="flex flex-wrap items-center gap-2.5 max-[640px]:items-stretch">
-            <Label className="shrink-0 whitespace-nowrap" htmlFor={`${tab}-solve-mode`}>
-              Solve for
-            </Label>
-            <Select value={solveMode} onValueChange={handleSolveModeChange}>
-              <SelectTrigger
-                id={`${tab}-solve-mode`}
-                aria-label={`${activityLabel} solve mode`}
-                className="min-w-44"
-              >
-                <SelectValue>
-                  {solveMode === "available-slots"
-                    ? "available slots"
-                    : solveMode === "run-time-hours"
-                      ? "run time (hours)"
-                      : "run time (days)"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="available-slots">available slots</SelectItem>
-                <SelectItem value="run-time-hours">run time (hours)</SelectItem>
-                <SelectItem value="run-time-days">run time (days)</SelectItem>
-              </SelectContent>
-            </Select>
-            {solveMode !== "available-slots" && (
-              <Input
-                type="number"
-                min="1"
-                step="1"
-                value={targetTime}
-                onChange={(event) => setTargetTime(event.target.value)}
-                aria-label={`Target ${activityLabel} run time`}
-                className="w-28"
-              />
+            {tab === "react" && (
+              <>
+                <Label className="shrink-0 whitespace-nowrap" htmlFor={`${tab}-solve-mode`}>
+                  Solve for
+                </Label>
+                <Select value={solveMode} onValueChange={handleSolveModeChange}>
+                  <SelectTrigger
+                    id={`${tab}-solve-mode`}
+                    aria-label={`${activityLabel} solve mode`}
+                    className="min-w-44"
+                  >
+                    <SelectValue>
+                      {solveMode === "available-slots"
+                        ? "available slots"
+                        : solveMode === "run-time-hours"
+                          ? "run time (hours)"
+                          : "run time (days)"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="available-slots">available slots</SelectItem>
+                    <SelectItem value="run-time-hours">run time (hours)</SelectItem>
+                    <SelectItem value="run-time-days">run time (days)</SelectItem>
+                  </SelectContent>
+                </Select>
+                {solveMode !== "available-slots" && (
+                  <Input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={targetTime}
+                    onChange={(event) => setTargetTime(event.target.value)}
+                    aria-label={`Target ${activityLabel} run time`}
+                    className="w-28"
+                  />
+                )}
+              </>
             )}
             {tab === "react" && (
               <Label
@@ -1421,66 +1536,142 @@ function SimulationActivityTab({
     >
       <SimulationLocationResultGroups
         tab={tab}
-        items={jobs}
+        items={presentationGroups}
         locationNamesById={locationNamesById}
         reactionMaterialBonusesByLocation={
           tab === "react" ? reactionMaterialBonusesByLocation : undefined
         }
         openGroups={openGroups}
         onOpenGroupChange={onOpenGroupChange}
-        getRowKey={(job) => job.jobId}
+        getRowKey={(group) => group.groupKey}
         getGroupAction={(locationId, groupItems) => ({
-          onCopyGroup: () => void copyEntries(groupItems, locationId),
+          onCopyGroup: () =>
+            void copyEntries(
+              groupItems.flatMap((group) => group.jobs),
+              locationId,
+            ),
           copyLabel:
             groupCopyStatus?.locationId === locationId
               ? groupCopyStatus.label
               : "Copy location list",
         })}
-        getAvatar={(job) => ({
-          typeId: job.productTypeId,
-          name: job.productName,
+        getAvatar={(group) => ({
+          typeId: group.productTypeId,
+          name: group.productName,
           imageVariation: "icon",
         })}
-        renderRow={(job) => {
-          const rowKey = `${tab}:${job.jobId}`;
-          const generatedSchedule = schedules.get(job.jobId);
-          const scheduleIdentity = simulationInstallScheduleIdentity(
-            scheduleRevision,
-            generatedSchedule?.installs ?? [],
+        renderRow={(group) => {
+          const groupEntries = group.jobs.map((job) => {
+            const rowKey = `${tab}:${job.jobId}`;
+            const generatedSchedule = schedules.get(job.jobId);
+            const active = activeJobIds.has(job.jobId);
+            const generatedScheduleIdentity = simulationInstallScheduleIdentity(
+              scheduleRevision,
+              generatedSchedule?.installs ?? [],
+            );
+            const jobScheduleRevision = active ? scheduleRevision : baseScheduleRevision;
+            const scheduleIdentity = active
+              ? generatedScheduleIdentity
+              : simulationInstallScheduleIdentity(
+                  baseScheduleRevision,
+                  generatedSchedule?.installs ?? [],
+                );
+            const completedSchedule = controls.getCompletedSchedule(
+              rowKey,
+              active ? generatedScheduleIdentity : baseScheduleRevision,
+              !active,
+            );
+            const schedule =
+              generatedSchedule && generatedSchedule.installs.length > 0
+                ? generatedSchedule
+                : completedSchedule;
+            const included = controls.isIncluded(rowKey);
+            const installableRuns = schedule?.runs ?? 0;
+            const installedRuns = controls.getInstalledRuns(
+              rowKey,
+              active ? generatedScheduleIdentity : baseScheduleRevision,
+              !active,
+            );
+            const completed = controls.isCompleted(
+              rowKey,
+              active ? generatedScheduleIdentity : baseScheduleRevision,
+              !active,
+            );
+            const completedInstallIds = controls.getCompletedInstallIds(
+              rowKey,
+              active ? generatedScheduleIdentity : baseScheduleRevision,
+              !active,
+            );
+            return {
+              job,
+              rowKey,
+              schedule,
+              scheduleIdentity,
+              scheduleRevision: jobScheduleRevision,
+              included,
+              installableRuns,
+              installedRuns,
+              completed,
+              completedInstallIds,
+              blueprintCounts: simulationBlueprintCounts(job, stock),
+            };
+          });
+          const groupInstallableRuns = groupEntries.reduce(
+            (total, entry) => total + entry.installableRuns,
+            0,
           );
-          const active = activeJobs.some((activeJob) => activeJob.jobId === job.jobId);
-          const completedSchedule = controls.getCompletedSchedule(
-            rowKey,
-            active ? scheduleIdentity : baseScheduleRevision,
-            !active,
+          const groupInstalledRuns = groupEntries.reduce(
+            (total, entry) => total + entry.installedRuns,
+            0,
           );
-          const schedule =
-            generatedSchedule && generatedSchedule.installs.length > 0
-              ? generatedSchedule
-              : completedSchedule;
-          const included = controls.isIncluded(rowKey);
-          const installableRuns = schedule?.runs ?? 0;
-          const installedRuns = controls.getInstalledRuns(
-            rowKey,
-            active ? scheduleIdentity : baseScheduleRevision,
-            !active,
-          );
-          const completed = controls.isCompleted(
-            rowKey,
-            active ? scheduleIdentity : baseScheduleRevision,
-            !active,
-          );
-          const completedInstallIds = controls.getCompletedInstallIds(
-            rowKey,
-            active ? scheduleIdentity : baseScheduleRevision,
-            !active,
-          );
-          const partiallyInstalled = installedRuns > 0 && installedRuns < installableRuns;
+          const groupCompleted =
+            groupEntries.length > 0 && groupEntries.every((entry) => entry.completed);
+          const groupPartiallyInstalled = groupInstalledRuns > 0 && !groupCompleted;
+          const groupIncluded = groupEntries.every((entry) => entry.included);
+          const groupReadyRuns = group.jobs.reduce((total, job) => total + job.readyNowRuns, 0);
+          const groupRequiredRuns = group.jobs.reduce((total, job) => total + job.requiredRuns, 0);
+          const updateGroupCompletion = (checked: boolean) => {
+            for (const entry of groupEntries) {
+              controls.onInstalledRunsChange(
+                entry.rowKey,
+                checked ? entry.installableRuns : 0,
+                entry.installableRuns,
+                entry.scheduleIdentity,
+                checked
+                  ? Object.fromEntries(
+                      (entry.schedule?.installs ?? []).map((install) => [install.installId, true]),
+                    )
+                  : {},
+                entry.schedule,
+              );
+            }
+          };
+          const installPlanEntries: SimulationInstallPlanEntry[] = groupEntries.map((entry) => ({
+            job: entry.job,
+            schedule: entry.schedule,
+            installedRuns: entry.installedRuns,
+            completedInstallIds: entry.completedInstallIds,
+            scheduleRevision: entry.scheduleRevision,
+            blueprintCounts: entry.blueprintCounts,
+            onInstalledRunsChange: (runs, dialogScheduleIdentity, installIds, schedule) =>
+              controls.onInstalledRunsChange(
+                entry.rowKey,
+                runs,
+                entry.installableRuns,
+                dialogScheduleIdentity,
+                installIds,
+                schedule,
+              ),
+          }));
           return (
             <SwitchedResultRow
-              name={job.productName}
-              typeId={job.productTypeId}
-              subline={` | ${job.inputs.length} inputs`}
+              name={group.productName}
+              typeId={group.productTypeId}
+              subline={
+                group.jobs.length === 1
+                  ? ` | ${group.jobs[0].inputs.length} inputs`
+                  : `${group.jobs.length} jobs grouped by type ID`
+              }
               variation="icon"
               linkPath="planner"
               linkIcon={ClipboardList}
@@ -1488,67 +1679,46 @@ function SimulationActivityTab({
               linkHash="plan-breakdown"
               navigateInPlace
               onNavigate={controls.onOpenPlan}
-              selected={!completed && controls.selectedRowKey === rowKey}
-              installed={completed}
-              onClick={completed ? undefined : () => controls.onSelectRow(rowKey)}
-              switchChecked={included}
+              selected={!groupCompleted && controls.selectedRowKey === group.groupKey}
+              installed={groupCompleted}
+              onClick={groupCompleted ? undefined : () => controls.onSelectRow(group.groupKey)}
+              switchChecked={groupIncluded}
               switchTooltip={`Include in ${activityLabel} schedule`}
-              onSwitchChange={(checked) => controls.onIncludedChange(rowKey, checked)}
-              checkboxChecked={completed}
-              checkboxIndeterminate={partiallyInstalled}
-              checkboxDisabled={!included && !completed}
+              onSwitchChange={(checked) =>
+                groupEntries.forEach((entry) => controls.onIncludedChange(entry.rowKey, checked))
+              }
+              checkboxChecked={groupCompleted}
+              checkboxIndeterminate={groupPartiallyInstalled}
+              checkboxDisabled={!groupIncluded && !groupCompleted}
               checkboxTooltip={
                 tab === "react" ? "Mark reaction installed" : "Mark manufacturing job installed"
               }
-              onCheckboxChange={(checked) =>
-                controls.onInstalledRunsChange(
-                  rowKey,
-                  checked || partiallyInstalled ? installableRuns : 0,
-                  installableRuns,
-                  scheduleIdentity,
-                  checked || partiallyInstalled
-                    ? Object.fromEntries(
-                        (schedule?.installs ?? []).map((install) => [install.installId, true]),
-                      )
-                    : {},
-                  schedule,
-                )
-              }
+              onCheckboxChange={updateGroupCompletion}
               contentClassName="grid w-full grid-cols-[max-content_minmax(0,max-content)_minmax(0,max-content)] items-center justify-around gap-3 self-end text-right font-mono text-xs sm:w-auto sm:grid-cols-[3rem_9rem_minmax(11rem,max-content)] sm:justify-end sm:gap-x-5 sm:self-auto"
             >
               <span className="flex items-center justify-center">
                 <SimulationInstallPlanDialog
-                  job={job}
-                  schedule={schedule}
+                  entries={installPlanEntries}
                   activityLabel={activityLabel}
-                  blueprintCounts={simulationBlueprintCounts(job, stock)}
                   characterNamesById={characterNamesById}
-                  scheduleRevision={scheduleRevision}
-                  installedRuns={installedRuns}
-                  completedInstallIds={completedInstallIds}
-                  onInstalledRunsChange={(runs, dialogScheduleIdentity, installIds) =>
-                    controls.onInstalledRunsChange(
-                      rowKey,
-                      runs,
-                      installableRuns,
-                      dialogScheduleIdentity,
-                      installIds,
-                      schedule,
-                    )
-                  }
                   onOpenPlan={controls.onOpenPlan}
                 />
               </span>
               <span className="flex items-center justify-center">
                 <SimulationJobInputsResponsive
-                  job={job}
+                  job={group.jobs[0]}
+                  jobs={group.jobs}
                   onOpenPlan={controls.onOpenPlan}
                   onOpenBuy={controls.onOpenBuy}
                 />
               </span>
               <span className="flex min-w-0 items-center justify-end gap-1 whitespace-normal sm:whitespace-nowrap">
-                <CopyableNumber value={job.readyNowRuns} suffix=" / " copyLabel="Ready runs" />
-                <CopyableNumber value={job.requiredRuns} suffix=" runs" copyLabel="Required runs" />
+                <CopyableNumber value={groupReadyRuns} suffix=" / " copyLabel="Ready runs" />
+                <CopyableNumber
+                  value={groupRequiredRuns}
+                  suffix=" runs"
+                  copyLabel="Required runs"
+                />
               </span>
             </SwitchedResultRow>
           );
@@ -2115,11 +2285,30 @@ export default function SimulationResults({
         },
       }));
     },
-    onOpenPlan: () => setActiveTab("plan"),
-    onOpenBuy: () => setActiveTab("buy"),
+    onOpenPlan: () => selectTab("plan"),
+    onOpenBuy: () => selectTab("buy"),
   };
   const onOpenGroupChange = (groupKey: string, open: boolean) =>
     setOpenGroups((current) => ({ ...current, [groupKey]: open }));
+
+  function selectTab(value: string) {
+    if (!isSimulationTab(value)) return;
+    setActiveTab(value);
+    updateSimulationTabInUrl(value);
+  }
+
+  useEffect(() => {
+    const applyUrlState = () => {
+      const nextTab = readSimulationTabFromUrl();
+      setActiveTab(nextTab);
+      if (new URLSearchParams(window.location.search).get(simulationTabParam) !== nextTab) {
+        updateSimulationTabInUrl(nextTab);
+      }
+    };
+    applyUrlState();
+    window.addEventListener("popstate", applyUrlState);
+    return () => window.removeEventListener("popstate", applyUrlState);
+  }, []);
 
   if (!result) {
     return (
@@ -2160,7 +2349,7 @@ export default function SimulationResults({
           </span>
         </div>
       </div>
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as SimulationTab)}>
+      <Tabs value={activeTab} onValueChange={selectTab}>
         <TabsList className="w-full max-w-full justify-start overflow-x-auto" variant="line">
           {tabs.map(({ value, label, icon: Icon }) => (
             <TabsTrigger key={value} value={value}>
