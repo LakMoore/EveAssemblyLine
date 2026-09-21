@@ -198,6 +198,41 @@ void test("groups anchored assets under their solar system", () => {
   );
 });
 
+void test("groups resolved non-facility structure assets by their root location", () => {
+  const locations = groupClientAssetsByLocation({
+    facilities: [],
+    assets: [
+      {
+        typeId: 62457,
+        name: "Compressed Coesite",
+        quantity: 100,
+        rootLocationId: 1050181032181,
+        sourceLocationName: "Munory - A-55",
+        sourceLocationKind: "structure",
+        sourceSystemId: 30004129,
+        sourceSystemName: "Munory",
+        ownerType: "character",
+        ownerId: 2118225169,
+      },
+    ],
+  });
+
+  assert.deepEqual(
+    locations.map((location) => ({
+      locationId: location.locationId,
+      locationType: location.locationType,
+      name: location.name,
+    })),
+    [
+      {
+        locationId: 1050181032181,
+        locationType: "structure",
+        name: "Munory - A-55",
+      },
+    ],
+  );
+});
+
 void test("excludes assembled ships and containers from location volume", () => {
   const locations = groupClientAssetsByLocation({
     facilities: [

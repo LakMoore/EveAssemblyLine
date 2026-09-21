@@ -281,6 +281,44 @@ export function groupClientAssetsByLocation(data: ClientAssetsResponse) {
       };
     });
   const facilityIds = new Set(facilityLocations.map((location) => location.locationId));
+  const assetLocations = new Map<number, StockItem[]>();
+  for (const item of data.assets ?? []) {
+    const locationId = item.rootLocationId;
+    if (
+      locationId === undefined
+      || facilityIds.has(locationId)
+      || item.sourceLocationKind === "anchored"
+    ) continue;
+    const items = assetLocations.get(locationId) ?? [];
+    items.push(item);
+    assetLocations.set(locationId, items);
+  }
+  const resolvedAssetLocations = [...assetLocations].flatMap(([locationId, items]) => {
+    const firstItem = items.find((item) => item.sourceLocationName !== undefined);
+    if (
+      !firstItem?.sourceLocationName
+      || !firstItem.sourceLocationKind
+      || firstItem.sourceLocationKind === "anchored"
+    ) return [];
+    return [
+      {
+        locationId,
+        name: firstItem.sourceLocationName,
+        locationType: firstItem.sourceLocationKind,
+        typeId: undefined,
+        systemId: firstItem.sourceSystemId,
+        systemName: firstItem.sourceSystemName,
+        securityStatus: undefined,
+        resolved: items.every((item) => item.sourceLocationName !== undefined),
+        assetCount: items.length,
+        personalAssetCount: items.filter((item) => item.ownerType !== "corporation").length,
+        corporationAssetCount: items.filter((item) => item.ownerType === "corporation").length,
+        totalCount: items.reduce((total, item) => total + item.quantity, 0),
+        totalVolume: items.reduce((total, item) => total + volumeForItem(item), 0),
+        items,
+      },
+    ];
+  });
   const anchoredItemsBySystem = new Map<number, StockItem[]>();
   for (const item of data.assets ?? []) {
     if (
@@ -306,7 +344,7 @@ export function groupClientAssetsByLocation(data: ClientAssetsResponse) {
     totalVolume: items.reduce((total, item) => total + volumeForItem(item), 0),
     items,
   }));
-  return [...facilityLocations, ...anchoredLocations];
+  return [...facilityLocations, ...resolvedAssetLocations, ...anchoredLocations];
 }
 
 export type ClientShipItem = {
