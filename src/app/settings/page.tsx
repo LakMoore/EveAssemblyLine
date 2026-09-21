@@ -188,7 +188,7 @@ export default function SettingsPage() {
               Check assets held at these exact stations or known structures, not their whole systems
             </FieldDescription>
           </FieldContent>
-          <div className="flex min-w-0 max-w-xl flex-wrap items-center justify-end gap-2">
+          <div className="flex max-w-xl min-w-0 flex-wrap items-center justify-end gap-2">
             <span
               className="max-w-sm truncate text-right text-sm text-muted-foreground"
               title={settings.marketStations.map((station) => station.name).join(", ")}

@@ -582,7 +582,7 @@ function CompressContent() {
           <div className={styles.compressOptions}>
             {locationOptions.length > 0 ? (
               <Label className="flex-col items-start gap-1.5">
-                <span className="text-muted-foreground text-xs">LOCATION</span>
+                <span className="text-xs text-muted-foreground">LOCATION</span>
                 <Select
                   value={settings.locationId}
                   onValueChange={(value) => value && updateSettings({ locationId: value })}
@@ -645,7 +645,7 @@ function CompressContent() {
               </Alert>
             )}
             <Label className="flex-col items-start gap-1.5">
-              <span className="text-muted-foreground text-xs">CHARACTER / SKILLS</span>
+              <span className="text-xs text-muted-foreground">CHARACTER / SKILLS</span>
               <Select
                 value={settings.characterId}
                 onValueChange={(value) =>
@@ -679,7 +679,7 @@ function CompressContent() {
               </Select>
             </Label>
             <Label className="flex-col items-start gap-1.5">
-              <span className="text-muted-foreground text-xs">IMPLANT</span>
+              <span className="text-xs text-muted-foreground">IMPLANT</span>
               <Select
                 value={
                   implantOptions.some((implant) => implant.id === settings.implantId)
@@ -712,7 +712,7 @@ function CompressContent() {
               </Select>
             </Label>
             <Label className="flex-col items-start gap-1.5">
-              <span className="text-muted-foreground text-xs">MARKET</span>
+              <span className="text-xs text-muted-foreground">MARKET</span>
               <Select
                 value={settings.marketId}
                 onValueChange={(value) => value && updateSettings({ marketId: value })}
@@ -736,7 +736,7 @@ function CompressContent() {
               </Select>
             </Label>
             <Label className="flex-col items-start gap-1.5">
-              <span className="text-muted-foreground text-xs">ORDER TYPE</span>
+              <span className="text-xs text-muted-foreground">ORDER TYPE</span>
               <Select
                 value={settings.orderType}
                 onValueChange={(value) =>

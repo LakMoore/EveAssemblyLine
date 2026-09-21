@@ -170,7 +170,7 @@ export default function PlannerHaulTab({
                     </strong>
                   </span>
                 </div>
-                <strong className="min-w-14 shrink-0 whitespace-nowrap text-base text-(--theme-info)">
+                <strong className="min-w-14 shrink-0 text-base whitespace-nowrap text-(--theme-info)">
                   {getHaulGroupVolume(
                     group.tasks.filter((task) => !haulItemExclusion.has(haulTaskKey(task))),
                   ).toLocaleString()}{" "}

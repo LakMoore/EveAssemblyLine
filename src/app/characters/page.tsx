@@ -216,14 +216,19 @@ async function reloadStockAfterCharacterRemoval() {
   const assetsData = await loadClientAssets(language, true);
   const assetLocations = groupClientAssetsByLocation(filterClientAssetsForPlanning(assetsData));
   await replaceEsiStock(
-    assetLocations.map((location) => ({
-      systemId: location.systemId,
-      systemName: location.systemName ?? "Unknown system",
-      structureId: String(location.locationId),
-      structureName: location.name,
-      source: "esi" as const,
-      items: location.items,
-    })),
+    assetLocations.flatMap((location) => {
+      if (location.systemId === undefined) return [];
+      return [
+        {
+          systemId: location.systemId,
+          systemName: location.systemName ?? "Unknown system",
+          structureId: String(location.locationId),
+          structureName: location.name,
+          source: "esi" as const,
+          items: location.items,
+        },
+      ];
+    }),
   );
   window.dispatchEvent(
     new CustomEvent(

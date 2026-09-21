@@ -272,7 +272,7 @@ export default function SignalsPage() {
                 </Empty>
               ) : (
                 <div className="mt-5 overflow-x-auto">
-                  <table className="w-full min-w-[1000px] table-fixed text-left text-xs">
+                  <table className="w-full min-w-250 table-fixed text-left text-xs">
                     <thead className="border-b text-muted-foreground">
                       <tr>
                         <th className="w-[29%] px-3 py-2 font-medium">Item</th>
@@ -289,29 +289,29 @@ export default function SignalsPage() {
                     <tbody className="divide-y">
                       {stationItems.map((item) => (
                         <tr key={item.typeId}>
-                          <td className="px-3 py-3">
+                          <td className="p-3">
                             <TypeIdentity
                               name={item.name}
                               typeId={item.typeId}
                               subline={`7d regional average: ${formatIsk(item.averagePrice)}; standard deviation: ${formatIsk(item.priceStandardDeviation)}`}
                             />
                           </td>
-                          <td className="px-3 py-3 text-right tabular-nums">
+                          <td className="p-3 text-right tabular-nums">
                             {formatQuantity(item.quantity)}
                           </td>
-                          <td className="px-3 py-3 text-right tabular-nums">
+                          <td className="p-3 text-right tabular-nums">
                             {formatQuantity(item.dailyVolume)}
                           </td>
-                          <td className="px-3 py-3 text-right tabular-nums">
+                          <td className="p-3 text-right tabular-nums">
                             {formatIsk(item.maxBuyPrice)}
                           </td>
-                          <td className="px-3 py-3 text-right tabular-nums">
+                          <td className="p-3 text-right tabular-nums">
                             {formatIsk(item.minSellPrice)}
                           </td>
-                          <td className="px-3 py-3 text-right">
+                          <td className="p-3 text-right">
                             <Badge>{item.percentageOverAverage.toFixed(1)}%</Badge>
                           </td>
-                          <td className="px-3 py-3 text-right font-medium tabular-nums">
+                          <td className="p-3 text-right font-medium tabular-nums">
                             {formatIsk(item.totalPriceAfterTax)}
                           </td>
                         </tr>

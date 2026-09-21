@@ -705,13 +705,13 @@ function PlannerStockpileDialogLayout({
         title={title}
         description={description}
         drawerFooterContent={
-          <DrawerFooter className="flex-row justify-between sm:!justify-between">
+          <DrawerFooter className="flex-row justify-between sm:justify-between!">
             {actionButtons}
             {standardFooterActions}
           </DrawerFooter>
         }
         dialogFooterContent={
-          <DialogFooter className="flex-row justify-between sm:!justify-between">
+          <DialogFooter className="flex-row justify-between sm:justify-between!">
             {actionButtons}
             {standardFooterActions}
           </DialogFooter>

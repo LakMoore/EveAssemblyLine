@@ -255,13 +255,15 @@ export default function StockPage() {
             structureName: structure.name,
           };
         });
-        const esiRecords = esiLocations.map((location) => {
+        const esiRecords = esiLocations.flatMap((location) => {
           const isAnchored = location.locationType === "anchored";
           const knownStructure = isAnchored
             ? undefined
             : structures.find((structure) => structure.esiStructureId === location.locationId);
+          const systemId = location.systemId ?? knownStructure?.systemId;
+          if (systemId === undefined) return [];
           return {
-            systemId: location.systemId,
+            systemId,
             systemName: location.systemName ?? knownStructure?.systemName ?? "Unknown system",
             structureId: isAnchored ? null : String(location.locationId),
             structureName: isAnchored
@@ -541,7 +543,7 @@ export default function StockPage() {
                 </SelectContent>
               </Select>
             </Label>
-            <Label className="self-center text-muted-foreground text-xs">
+            <Label className="self-center text-xs text-muted-foreground">
               {selectedAssetTypeId === null
                 ? `${locations.length} location${locations.length !== 1 ? "s" : ""}`
                 : `${visibleLocations.length} of ${locations.length} location${locations.length !== 1 ? "s" : ""}`}
@@ -896,7 +898,7 @@ function StockLocationCard({
           <p className={styles.panelKicker}>{location.systemName}</p>
           <h3>{location.structureName}</h3>
         </div>
-        <div className="ml-auto flex items-center gap-2 whitespace-nowrap text-xs text-foreground font-mono">
+        <div className="ml-auto flex items-center gap-2 font-mono text-xs whitespace-nowrap text-foreground">
           <Label htmlFor={`include-location-${stockLocationId(location)}`}>Include Location</Label>
           <Switch
             id={`include-location-${stockLocationId(location)}`}
@@ -940,7 +942,7 @@ function StockLocationCard({
             {stockMetrics.map((metric) => (
               <Item
                 aria-label={`View ${metric.label.toLowerCase()}`}
-                className="w-fit min-w-0 flex-[0_1_auto] max-w-28 hover:bg-muted"
+                className="w-fit max-w-28 min-w-0 flex-[0_1_auto] hover:bg-muted"
                 key={metric.id}
                 onClick={() => onView(location, metric.filter)}
                 render={<button type="button" />}
@@ -948,7 +950,7 @@ function StockLocationCard({
                 variant="outline"
               >
                 <ItemContent className="w-fit min-w-0 flex-[0_1_auto] items-end text-right">
-                  <ItemTitle className="w-fit min-w-0 max-w-full justify-start gap-1 overflow-visible text-left text-muted-foreground whitespace-normal break-words">
+                  <ItemTitle className="w-fit max-w-full min-w-0 justify-start gap-1 overflow-visible text-left wrap-break-word whitespace-normal text-muted-foreground">
                     <metric.icon className="shrink-0" aria-hidden="true" />
                     <span className="w-min">{metric.label}</span>
                   </ItemTitle>

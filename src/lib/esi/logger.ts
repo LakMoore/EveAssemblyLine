@@ -49,7 +49,6 @@ const runtime = globalThis as typeof globalThis & {
 const loggerRuntime =
   runtime.__assemblyLineEsiLogger
   ?? (runtime.__assemblyLineEsiLogger = { entries: [], pendingEntries: [] });
-loggerRuntime.pendingEntries ??= [];
 
 function trimEntries(entries: EsiRequestLog[]) {
   return entries.slice(-maximumLogEntries);

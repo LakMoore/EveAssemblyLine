@@ -559,7 +559,7 @@ export default function CorporationHangarSettings() {
                 >
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0">
-                      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                         {locationTypeLabel}
                       </span>
                       <h3 className="text-lg font-semibold">{group.locationName}</h3>
@@ -612,7 +612,7 @@ export default function CorporationHangarSettings() {
                           </div>
                           {source.containers.length > 0 && (
                             <div className="flex flex-col gap-2 border-l border-border pl-4">
-                              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                              <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                                 Named containers
                               </span>
                               {source.containers.map((container) => {
