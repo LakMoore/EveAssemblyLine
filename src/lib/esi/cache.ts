@@ -174,6 +174,66 @@ type CorporationPolicyCharacter = Pick<
 
 const characterCaches = new Map<string, OwnerCache>();
 const corporationCaches = new Map<string, OwnerCache>();
+const verifiedRootLocationIds = new WeakMap<object, ReadonlySet<number>>();
+
+function getVerifiedRootLocationIds(rawAssetsByItemId: ReadonlyMap<number, AssetRecord>) {
+  const cached = verifiedRootLocationIds.get(rawAssetsByItemId);
+  if (cached) return cached;
+  const roots = new Set(
+    [...rawAssetsByItemId.values()]
+      .filter((asset) => asset.locationType === "station" || asset.locationType === "structure")
+      .map((asset) => asset.locationId),
+  );
+  verifiedRootLocationIds.set(rawAssetsByItemId, roots);
+  return roots;
+}
+
+function isVerifiedRootLocation(
+  locationId: number,
+  locationType: AssetRecord["locationType"] | undefined,
+  rawAssetsByItemId: ReadonlyMap<number, AssetRecord>,
+  knownStructureIds: ReadonlySet<number> = new Set(),
+) {
+  return (
+    locationType === "station"
+    || locationType === "structure"
+    || knownStructureIds.has(locationId)
+    || getVerifiedRootLocationIds(rawAssetsByItemId).has(locationId)
+  );
+}
+
+function knownStructureIds(cache: OwnerCache) {
+  return new Set((cache.structures?.lastBody ?? []).map((structure) => structure.structure_id));
+}
+
+/** Combines owner assets with the reporting character's accessible parent containers. */
+function assetResolutionIndex(
+  ownerAssets: readonly AssetRecord[],
+  resolverAssets: readonly AssetRecord[] = [],
+) {
+  return new Map(
+    [...resolverAssets, ...ownerAssets].map((asset) => [asset.itemId, asset] as const),
+  );
+}
+
+/** Returns the personal assets available to the character that reported an owner's assets. */
+function getResolverAssets(cache: OwnerCache, sessionId: string) {
+  const resolverCharacterId = cache.allAssetsRaw?.sourceCharacterId;
+  return resolverCharacterId === undefined
+    ? []
+    : (getCache(characterCaches, resolverCharacterId, sessionId).allAssetsRaw?.lastBody ?? []);
+}
+
+/** Returns the cached personal assets of every character attached to the current collection. */
+function getAttachedCharacterAssets(
+  characters: readonly Pick<CharacterTokenRecord, "characterId">[],
+  sessionId: string,
+) {
+  return characters.flatMap(
+    (character) =>
+      getCache(characterCaches, character.characterId, sessionId).allAssetsRaw?.lastBody ?? [],
+  );
+}
 
 async function getCharactersByIds(characterIds: readonly number[]) {
   return (await Promise.all(characterIds.map((characterId) => getCharacter(characterId)))).filter(
@@ -208,6 +268,8 @@ function corporationSourceRoot(
   locationId: number,
   locationFlag: string,
   rawAssetsByItemId: ReadonlyMap<number, AssetRecord>,
+  locationType?: AssetRecord["locationType"],
+  structureIds: ReadonlySet<number> = new Set(),
 ) {
   const visited = new Set<number>();
   const directParent = rawAssetsByItemId.get(locationId);
@@ -290,6 +352,7 @@ function selectedContainerSource(
   record: { itemId?: number; locationId: number },
   policy: CorporationSourcePolicy,
   rawAssetsByItemId: ReadonlyMap<number, AssetRecord>,
+  structureIds: ReadonlySet<number>,
 ) {
   for (const containerItemId of policy.containerItemIds) {
     if (
@@ -306,6 +369,8 @@ function selectedContainerSource(
       container.locationId,
       container.locationFlag,
       rawAssetsByItemId,
+      container.locationType,
+      structureIds,
     );
     if (source?.locationFlag) return source;
   }
@@ -317,6 +382,7 @@ export function isCorporationRecordAllowed(
   record: {
     itemId?: number;
     locationId: number;
+    locationType?: AssetRecord["locationType"];
     locationFlag: string;
     typeId?: number;
   },
@@ -324,10 +390,17 @@ export function isCorporationRecordAllowed(
   characters: readonly CorporationPolicyCharacter[],
   blueprintItemIds: ReadonlySet<number>,
   rawAssetsByItemId: ReadonlyMap<number, AssetRecord>,
+  structureIds: ReadonlySet<number> = new Set(),
 ) {
   const source =
-    selectedContainerSource(record, policy, rawAssetsByItemId)
-    ?? corporationSourceRoot(record.locationId, record.locationFlag, rawAssetsByItemId);
+    selectedContainerSource(record, policy, rawAssetsByItemId, structureIds)
+    ?? corporationSourceRoot(
+      record.locationId,
+      record.locationFlag,
+      rawAssetsByItemId,
+      record.locationType,
+      structureIds,
+    );
   if (!source?.locationFlag) return false;
   const permission = getCorporationHangarPermissions(
     characters,
@@ -354,6 +427,7 @@ export function isCorporationRecordAccessible(
   record: {
     itemId?: number;
     locationId: number;
+    locationType?: AssetRecord["locationType"];
     locationFlag: string;
     typeId?: number;
   },
@@ -361,8 +435,15 @@ export function isCorporationRecordAccessible(
   characters: readonly CorporationPolicyCharacter[],
   blueprintItemIds: ReadonlySet<number>,
   rawAssetsByItemId: ReadonlyMap<number, AssetRecord>,
+  structureIds: ReadonlySet<number> = new Set(),
 ) {
-  const source = corporationSourceRoot(record.locationId, record.locationFlag, rawAssetsByItemId);
+  const source = corporationSourceRoot(
+    record.locationId,
+    record.locationFlag,
+    rawAssetsByItemId,
+    record.locationType,
+    structureIds,
+  );
   if (!source?.locationFlag) return false;
   const permission = getCorporationHangarPermissions(
     characters,
@@ -381,10 +462,17 @@ export function isCorporationRecordAccessible(
 
 /** Identifies a corporation asset's hangar and all ancestor container IDs for client filtering. */
 export function getCorporationAssetSource(
-  record: Pick<AssetRecord, "itemId" | "locationId" | "locationFlag">,
+  record: Pick<AssetRecord, "itemId" | "locationId" | "locationFlag" | "locationType">,
   rawAssetsByItemId: ReadonlyMap<number, AssetRecord>,
+  structureIds: ReadonlySet<number> = new Set(),
 ) {
-  const source = corporationSourceRoot(record.locationId, record.locationFlag, rawAssetsByItemId);
+  const source = corporationSourceRoot(
+    record.locationId,
+    record.locationFlag,
+    rawAssetsByItemId,
+    record.locationType,
+    structureIds,
+  );
   if (!source?.locationFlag) return undefined;
   const containerItemIds: number[] = [];
   const visited = new Set<number>();
@@ -407,9 +495,16 @@ export function getCorporationAssetSource(
 export function getCorporationLocationSource(
   locationId: number,
   rawAssetsByItemId: ReadonlyMap<number, AssetRecord>,
+  structureIds: ReadonlySet<number> = new Set(),
 ) {
   for (const asset of rawAssetsByItemId.values()) {
-    const source = corporationSourceRoot(asset.locationId, asset.locationFlag, rawAssetsByItemId);
+    const source = corporationSourceRoot(
+      asset.locationId,
+      asset.locationFlag,
+      rawAssetsByItemId,
+      asset.locationType,
+      structureIds,
+    );
     if (source?.rootLocationId === locationId) {
       return {
         rootLocationId: source.rootLocationId,
@@ -427,9 +522,16 @@ function isCorporationLocationAccessible(
   policy: CorporationSourcePolicy,
   characters: readonly CorporationPolicyCharacter[],
   rawAssetsByItemId: ReadonlyMap<number, AssetRecord>,
+  structureIds: ReadonlySet<number> = new Set(),
 ) {
   for (const asset of rawAssetsByItemId.values()) {
-    const source = corporationSourceRoot(asset.locationId, asset.locationFlag, rawAssetsByItemId);
+    const source = corporationSourceRoot(
+      asset.locationId,
+      asset.locationFlag,
+      rawAssetsByItemId,
+      asset.locationType,
+      structureIds,
+    );
     if (!source || source.rootLocationId !== locationId) continue;
     const permission = getCorporationHangarPermissions(
       characters,
@@ -475,19 +577,38 @@ export async function getCorporationSourceCatalog(
     policies.map(async (policy) => {
       const cache = getCache(corporationCaches, policy.corporationId, sessionId);
       const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
-      const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+      const rawAssetsByItemId = assetResolutionIndex(
+        rawAssets,
+        getAttachedCharacterAssets(characters, sessionId),
+      );
       const structuresById = new Map(
         (cache.structures?.lastBody ?? []).map((structure) => [structure.structure_id, structure]),
       );
+      const structureIds = knownStructureIds(cache);
       const sourceEntries = new Map<string, CorporationSourceCatalogEntry>();
       for (const asset of rawAssets) {
         if (asset.ownerType !== "corporation") continue;
-        const source = corporationSourceRoot(
+        const sourceCandidate = corporationSourceRoot(
           asset.locationId,
           asset.locationFlag,
           rawAssetsByItemId,
+          asset.locationType,
+          structureIds,
         );
-        if (!source?.locationFlag) continue;
+        const resolvedRoot =
+          cache.rootLocationsByItemId.get(asset.locationId)
+          ?? cache.stockAssetsByItemId?.get(asset.itemId)?.rootLocation;
+        if (
+          !sourceCandidate?.locationFlag
+          || !isAssetLocation(resolvedRoot)
+          || !resolvedRoot.resolved
+        ) {
+          continue;
+        }
+        const source = {
+          ...sourceCandidate,
+          rootLocationId: resolvedRoot.locationId,
+        };
         const permission = getCorporationHangarPermissions(
           characters,
           policy.corporationId,
@@ -500,9 +621,11 @@ export async function getCorporationSourceCatalog(
           const rootLocationCandidate =
             cache.rootLocationsByItemId.get(asset.itemId)
             ?? cache.stockAssetsByItemId?.get(asset.itemId)?.rootLocation;
-          let rootLocation = isAssetLocation(rootLocationCandidate)
-            ? rootLocationCandidate
-            : undefined;
+          let rootLocation =
+            isAssetLocation(rootLocationCandidate)
+            && rootLocationCandidate.locationId === source.rootLocationId
+              ? rootLocationCandidate
+              : undefined;
           const station = await getStation(source.rootLocationId);
           if (station) {
             const names = await fetchUniverseNames([source.rootLocationId]).catch(() => new Map());
@@ -709,11 +832,19 @@ function getProjectedCorporationAssets(
   if (!policy) return effectiveAssets(cache);
   const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
   const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+  const structureIds = knownStructureIds(cache);
   const blueprintItemIds = new Set(
     (cache.blueprintInstances?.lastBody ?? []).map((blueprint) => blueprint.itemId),
   );
   return effectiveAssets(cache).filter((asset) =>
-    isCorporationRecordAccessible(asset, policy, characters, blueprintItemIds, rawAssetsByItemId),
+    isCorporationRecordAccessible(
+      asset,
+      policy,
+      characters,
+      blueprintItemIds,
+      rawAssetsByItemId,
+      structureIds,
+    ),
   );
 }
 
@@ -1583,6 +1714,8 @@ async function cacheResolvedAssets(
   assetNamePath?: string,
   preserveLastModified = false,
   resolverCharacterId?: number,
+  structureIds: ReadonlySet<number> = new Set(),
+  resolverAssets: readonly AssetRecord[] = [],
 ) {
   const initialAssetIndexes = await indexAssetsByPurpose(rawAssets);
   let namedAssets = rawAssets;
@@ -1594,19 +1727,24 @@ async function cacheResolvedAssets(
   const indexedAssets = includeCurrentShip(namedAssets, cache);
   const assetIndexes =
     indexedAssets === rawAssets ? initialAssetIndexes : await indexAssetsByPurpose(indexedAssets);
-  const assetItemIds = new Set(indexedAssets.map((asset) => asset.itemId));
+  const resolutionAssetsByItemId = assetResolutionIndex(indexedAssets, resolverAssets);
+  const assetItemIds = new Set(resolutionAssetsByItemId.keys());
   const knownNonStructureItemIds = getKnownNonStructureItemIds(
     assetItemIds,
     cache.currentShip?.lastBody?.itemId,
   );
   const rootLocationsByItemId = await resolveRootLocations(
-    assetIndexes.stockLocationItemsByItemId,
+    new Map([
+      ...resolverAssets.map((asset) => [asset.itemId, asset] as const),
+      ...assetIndexes.stockLocationItemsByItemId,
+    ]),
     assetIndexes.shipTypeIds,
     token,
     knownNonStructureItemIds,
     resolverCharacterId,
+    structureIds,
   );
-  const indexedAssetsByItemId = new Map(indexedAssets.map((asset) => [asset.itemId, asset]));
+  const indexedAssetsByItemId = resolutionAssetsByItemId;
 
   function addLocationIds(asset: AssetRecord): AssetRecord {
     return {
@@ -1620,7 +1758,13 @@ async function cacheResolvedAssets(
   function inferRoot(locationId: number, asset: AssetRecord) {
     const existing = inferredRoots.get(locationId);
     if (existing) return existing;
-    const resolution = getRealParent(asset, token, knownNonStructureItemIds, resolverCharacterId);
+    const resolution = getRealParent(
+      asset,
+      token,
+      knownNonStructureItemIds,
+      resolverCharacterId,
+      structureIds,
+    );
     inferredRoots.set(locationId, resolution);
     return resolution;
   }
@@ -1765,20 +1909,43 @@ function directKind(locationType: AssetRecord["locationType"]): AssetLocation["k
   return null;
 }
 
+/** Returns whether an ID is in EVE Online's documented NPC station range. */
+export function isStationLocationId(locationId: number) {
+  return locationId >= 60_000_000 && locationId < 70_000_000;
+}
+
+/** Returns whether an unresolved non-station root can be queried as a structure. */
+export function isStructureLocationCandidate(
+  locationId: number,
+  locationType: AssetRecord["locationType"],
+  assetItemIds: ReadonlySet<number>,
+) {
+  return (
+    locationType !== "solar_system"
+    && locationType !== "station"
+    && !isStationLocationId(locationId)
+    && !assetItemIds.has(locationId)
+  );
+}
+
 async function getRealParent(
   current: AssetRecord,
   token: TokenSet,
   assetItemIds: ReadonlySet<number>,
   discoveredByCharacterId?: number,
+  structureIds: ReadonlySet<number> = new Set(),
 ): Promise<AssetLocation | null> {
   if (current.rootLocation && "kind" in current.rootLocation) return current.rootLocation;
   const locationId = current.locationId;
   const kind = directKind(current.locationType);
-  const station = kind === "station" || kind === null ? await getStation(locationId) : null;
+  const station =
+    kind === "station" || (kind === null && isStationLocationId(locationId))
+      ? await getStation(locationId)
+      : null;
   if (station) {
     let name: string | undefined;
     try {
-      name = (await fetchStationMetadata(locationId, token)).data?.name;
+      name = (await fetchStationMetadata(locationId)).data?.name;
     }
     catch {
       // SDE still provides the station identity when ESI name lookup is unavailable.
@@ -1794,13 +1961,18 @@ async function getRealParent(
     };
   }
   if (assetItemIds.has(locationId)) return null;
-  if (kind === "solar_system" || kind === "structure" || kind === null) {
+  const isKnownStructure = kind === "structure" || structureIds.has(locationId);
+  const isStructure =
+    isKnownStructure
+    || isStructureLocationCandidate(locationId, current.locationType, assetItemIds);
+  if (kind === "solar_system" || isStructure) {
     const result = await (
       kind === "solar_system"
         ? fetchSolarSystemMetadata(locationId, token)
         : fetchStructureMetadataPerCharacter(locationId, token)
     ).catch(() => null);
     if (!result?.data) {
+      if (kind !== "solar_system" && !isKnownStructure) return null;
       return {
         locationId,
         kind: kind === "solar_system" ? "solar_system" : "structure",
@@ -1867,6 +2039,7 @@ async function resolveRootLocations(
   token: TokenSet,
   assetItemIds: ReadonlySet<number>,
   discoveredByCharacterId?: number,
+  structureIds: ReadonlySet<number> = new Set(),
 ) {
   // Cache already-resolved roots
   const rootCache = new Map<number, AssetLocation>();
@@ -1890,6 +2063,7 @@ async function resolveRootLocations(
           token,
           assetItemIds,
           discoveredByCharacterId,
+          structureIds,
         );
         if (!realParent) return null;
         for (const id of visited) rootCache.set(id, realParent);
@@ -1903,6 +2077,7 @@ async function resolveRootLocations(
           token,
           assetItemIds,
           discoveredByCharacterId,
+          structureIds,
         );
         if (!realParent) return null;
         for (const id of visited) rootCache.set(id, realParent);
@@ -1964,6 +2139,7 @@ async function rebuildResolvedAssets(
   cache: OwnerCache,
   record: Awaited<ReturnType<typeof getCharacter>>,
   purpose: "personal" | "corp",
+  sessionId: string,
   rebuildEvenIfComplete = false,
 ) {
   if (
@@ -1993,6 +2169,8 @@ async function rebuildResolvedAssets(
       ownerPath,
       false,
       resolution.sourceCharacterId,
+      purpose === "corp" ? knownStructureIds(cache) : undefined,
+      purpose === "corp" ? getResolverAssets(cache, sessionId) : undefined,
     );
   }
   catch {
@@ -2156,7 +2334,7 @@ export async function refreshCharacterState(
     }
   }
   catch (error) {
-    await rebuildResolvedAssets(cache, character, "personal");
+    await rebuildResolvedAssets(cache, character, "personal", sessionId);
     cache.allAssetsRaw = {
       ...(cache.allAssetsRaw ?? { lastBody: [] }),
       ...endpointStatus(error),
@@ -2168,7 +2346,7 @@ export async function refreshCharacterState(
   profiler.start("assetRebuild");
   try {
     if (currentShipStateChanged && !assetsRebuilt) {
-      await rebuildResolvedAssets(cache, character, "personal", true);
+      await rebuildResolvedAssets(cache, character, "personal", sessionId, true);
     }
   }
   finally {
@@ -2381,6 +2559,8 @@ async function refreshCorporationCache(
           `/corporations/${character.corporationId}`,
           true,
           resolution.sourceCharacterId,
+          knownStructureIds(corpCache),
+          getResolverAssets(corpCache, sessionId),
         );
         corpCache.allAssetsRaw.status = endpointDataStatus(
           corpCache.allAssetsRaw.lastModified,
@@ -2402,6 +2582,8 @@ async function refreshCorporationCache(
           `/corporations/${character.corporationId}`,
           false,
           resolution.sourceCharacterId,
+          knownStructureIds(corpCache),
+          getResolverAssets(corpCache, sessionId),
         );
       }
       corpSummary.assets = corpCache.allAssetsRaw;
@@ -2412,7 +2594,7 @@ async function refreshCorporationCache(
       ...(corpCache.allAssetsRaw ?? { lastBody: [] }),
       ...endpointStatus(error),
     };
-    await rebuildResolvedAssets(corpCache, character, "corp");
+    await rebuildResolvedAssets(corpCache, character, "corp", sessionId);
     corpSummary.assets = {
       ...corpCache.allAssetsRaw,
     };
@@ -2599,12 +2781,14 @@ export async function getRunningIndustryJobs(
       const rawAssets =
         getCache(corporationCaches, corporationId, sessionId).allAssetsRaw?.lastBody ?? [];
       const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+      const structureIds = knownStructureIds(getCache(corporationCaches, corporationId, sessionId));
       return corporationJobs.filter((job) =>
         isCorporationLocationAccessible(
           job.facilityId,
           policy,
           projection.characters,
           rawAssetsByItemId,
+          structureIds,
         ),
       );
     }),
@@ -2689,6 +2873,7 @@ export async function getAllAssetsRaw(
       const policy = projection.policiesByCorporationId.get(corporationId);
       if (!policy) return rawAssets;
       const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+      const structureIds = knownStructureIds(cache);
       const blueprintItemIds = new Set(
         (cache.blueprintInstances?.lastBody ?? []).map((blueprint) => blueprint.itemId),
       );
@@ -2701,6 +2886,7 @@ export async function getAllAssetsRaw(
               projection.characters,
               blueprintItemIds,
               rawAssetsByItemId,
+              structureIds,
             ),
           )
           .map((asset) => asset.itemId),
@@ -2749,6 +2935,7 @@ function getProjectedCorporationRootLocations(
   if (!policy) return new Map(cache.rootLocationsByItemId);
   const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
   const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+  const structureIds = knownStructureIds(cache);
   const blueprintItemIds = new Set(
     (cache.blueprintInstances?.lastBody ?? []).map((blueprint) => blueprint.itemId),
   );
@@ -2760,6 +2947,7 @@ function getProjectedCorporationRootLocations(
       characters,
       blueprintItemIds,
       rawAssetsByItemId,
+      structureIds,
     );
     if (!allowed) continue;
     allowedLocationIds.add(asset.itemId);
@@ -2898,6 +3086,10 @@ export async function resolveStructureLocationForOwner(
     isKnownShipItemId(locationId, source, sessionId)
     || isAssetItemId(locationId, source, sessionId)
   ) return undefined;
+  const ownerCache = getSourceOwnerCache(source, sessionId);
+  const isKnownStructure =
+    cachedRoot?.kind === "structure" || knownStructureIds(ownerCache).has(locationId);
+  if (!isKnownStructure) return undefined;
 
   const character = await getStructureResolverCharacter(
     source,
@@ -3082,6 +3274,7 @@ export async function getMarketOrderStock(
     const policy = projection.policiesByCorporationId.get(corporationId);
     const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
     const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+    const structureIds = knownStructureIds(cache);
     for (const order of orders as MarketOrderRecord[]) {
       if (order.isBuyOrder || order.volumeRemain <= 0) continue;
       if (
@@ -3091,6 +3284,7 @@ export async function getMarketOrderStock(
           policy,
           projection.characters,
           rawAssetsByItemId,
+          structureIds,
         )
       ) continue;
       const isMyCorporationOrder =
@@ -3101,7 +3295,11 @@ export async function getMarketOrderStock(
         );
       if (!options.allCorporationSellOrdersAsStock && !isMyCorporationOrder) continue;
       typeIds.add(order.typeId);
-      const corporationSource = getCorporationLocationSource(order.locationId, rawAssetsByItemId);
+      const corporationSource = getCorporationLocationSource(
+        order.locationId,
+        rawAssetsByItemId,
+        structureIds,
+      );
       stock.push({
         typeId: order.typeId,
         name: `Type ${order.typeId}`,
@@ -3165,6 +3363,7 @@ export async function getMarketOrderBuyQuantities(
       const policy = projection.policiesByCorporationId.get(corporationId);
       const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
       const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+      const structureIds = knownStructureIds(cache);
       addMarketBuyOrderQuantitiesByLocation(
         quantities,
         (cache.marketOrders?.lastBody ?? []).filter(
@@ -3175,6 +3374,7 @@ export async function getMarketOrderBuyQuantities(
               policy,
               projection.characters,
               rawAssetsByItemId,
+              structureIds,
             ),
         ),
         seenOrderIds,
@@ -3206,6 +3406,7 @@ export async function getBlueprintInstances(
       if (!policy) return corporationBlueprints;
       const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
       const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
+      const structureIds = knownStructureIds(cache);
       const blueprintItemIds = new Set(corporationBlueprints.map((blueprint) => blueprint.itemId));
       return corporationBlueprints.filter((blueprint) =>
         isCorporationRecordAccessible(
@@ -3214,6 +3415,7 @@ export async function getBlueprintInstances(
           projection.characters,
           blueprintItemIds,
           rawAssetsByItemId,
+          structureIds,
         ),
       );
     }),

@@ -62,7 +62,7 @@ export type OwnerSnapshotShipItem = Omit<
 };
 
 export type OwnerSnapshotData = {
-  schemaVersion: 5;
+  schemaVersion: 6;
   owner: DataOwner;
   assets: OwnerSnapshotAsset[];
   industryJobs: IndustryJobRecord[];
@@ -124,7 +124,7 @@ export type OwnerSnapshotEtags = Partial<{
 }>;
 
 export type OwnerSnapshot = {
-  schemaVersion: 5;
+  schemaVersion: 6;
   owner: DataOwner;
   industrySlots?: ClientIndustrySlots;
   assets: OwnerSnapshotSlice<OwnerSnapshotData["assets"]>;
@@ -245,7 +245,7 @@ function buildOwnerSnapshot(
   skills: CharacterSkillRecord[],
 ): OwnerSnapshotData {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     owner,
     ...snapshotAssets(assets),
     jobs: snapshotJobs(jobs),

@@ -4,11 +4,14 @@ import { getEsiTtlMs } from "@/cache/esiTtl";
 import {
   buildCurrentShipAsset,
   endpointDataStatus,
+  getCorporationAssetSource,
   getCorporationIdsForCharacters,
   getStateStatus,
   getMarketOrderAssetDeductions,
   getJobAssetRootLocationId,
   getKnownNonStructureItemIds,
+  isStationLocationId,
+  isStructureLocationCandidate,
   buildDeliveredJobAsset,
   canMergeDeliveredAsset,
   getStructureResolverCharacterId,
@@ -124,6 +127,46 @@ void test("resolves asset container, hangar, and root location IDs", () => {
       containerId: nestedContainer.itemId,
       rootLocationId: rootLocation.locationId,
       hangarId: hangar.itemId,
+    },
+  );
+});
+
+void test("uses a CorpSAG container location ID as the structure root", () => {
+  const hangarContainer = {
+    itemId: 1_054_061_681_947,
+    typeId: 3465,
+    quantity: 1,
+    locationId: 1_050_827_709_022,
+    locationType: "other" as const,
+    locationFlag: "CorpSAG3",
+    isSingleton: true,
+    ownerType: "character" as const,
+    ownerId: 42,
+  } satisfies AssetRecord;
+  const corporationAsset = {
+    itemId: 400,
+    typeId: 34,
+    quantity: 1,
+    locationId: hangarContainer.itemId,
+    locationType: "item" as const,
+    locationFlag: "CorpSAG3",
+    isSingleton: false,
+    ownerType: "corporation" as const,
+    ownerId: 900,
+  } satisfies AssetRecord;
+
+  assert.deepEqual(
+    getCorporationAssetSource(
+      corporationAsset,
+      new Map<number, AssetRecord>([
+        [hangarContainer.itemId, hangarContainer],
+        [corporationAsset.itemId, corporationAsset],
+      ]),
+    ),
+    {
+      rootLocationId: hangarContainer.locationId,
+      locationFlag: "CorpSAG3",
+      containerItemIds: [hangarContainer.itemId],
     },
   );
 });
@@ -669,6 +712,23 @@ void test("blocks a current ship ID without requiring a location snapshot", () =
   assert.equal(knownItemIds.has(100), true);
   assert.equal(knownItemIds.has(200), true);
   assert.equal(knownItemIds.has(300), false);
+});
+
+void test("identifies only documented station IDs as station locations", () => {
+  assert.equal(isStationLocationId(59_999_999), false);
+  assert.equal(isStationLocationId(60_000_000), true);
+  assert.equal(isStationLocationId(69_999_999), true);
+  assert.equal(isStationLocationId(70_000_000), false);
+  assert.equal(isStationLocationId(1_050_000_000_001), false);
+});
+
+void test("only probes unknown non-item roots as structures", () => {
+  const assetItemIds = new Set([1_050_000_000_001]);
+
+  assert.equal(isStructureLocationCandidate(60_000_000, "other", assetItemIds), false);
+  assert.equal(isStructureLocationCandidate(1_050_000_000_001, "other", assetItemIds), false);
+  assert.equal(isStructureLocationCandidate(1_050_000_000_002, "other", assetItemIds), true);
+  assert.equal(isStructureLocationCandidate(30_000_142, "solar_system", assetItemIds), false);
 });
 
 void test("preserves Last-Modified when a 304 response omits it", () => {

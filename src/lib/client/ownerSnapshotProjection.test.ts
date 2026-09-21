@@ -13,7 +13,7 @@ function slice<T>(data: T) {
 }
 
 const snapshot: ClientOwnerSnapshot = {
-  schemaVersion: 5,
+  schemaVersion: 6,
   owner: { kind: "corporation", id: 900 },
   assets: slice([
     {

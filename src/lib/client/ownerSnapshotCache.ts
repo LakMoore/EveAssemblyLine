@@ -96,7 +96,7 @@ export type ClientOwnerSnapshotResponseSlice<T extends readonly unknown[]> = {
 };
 
 export type ClientOwnerSnapshot = {
-  schemaVersion: 5;
+  schemaVersion: 6;
   owner: ClientOwner;
   industrySlots?: {
     Manufacturing: number;
@@ -136,7 +136,7 @@ export type ClientOwnerSnapshot = {
 };
 
 export type ClientOwnerSnapshotResponse = {
-  schemaVersion: 5;
+  schemaVersion: 6;
   owner: ClientOwner;
   industrySlots?: ClientOwnerSnapshot["industrySlots"];
   assets: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["assets"]["data"]>;
@@ -434,7 +434,7 @@ export function isCompleteClientOwnerSnapshot(value: unknown): value is ClientOw
   const ships = value.ships;
   const skills = value.skills;
   return (
-    value.schemaVersion === 5
+    value.schemaVersion === 6
     && isRecord(owner)
     && isPositiveInteger(owner.id)
     && (owner.kind === "character" || owner.kind === "corporation")
@@ -528,7 +528,7 @@ export function isCompleteClientOwnerSnapshotResponse(
   if (!isRecord(value)) return false;
   const owner = value.owner;
   return (
-    value.schemaVersion === 5
+    value.schemaVersion === 6
     && isRecord(owner)
     && isPositiveInteger(owner.id)
     && (owner.kind === "character" || owner.kind === "corporation")
@@ -638,7 +638,7 @@ export function mergeOwnerSnapshot(
   response: ClientOwnerSnapshotResponse,
 ): ClientOwnerSnapshot {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     owner: response.owner,
     ...(response.industrySlots ? { industrySlots: response.industrySlots } : {}),
     assets: mergeSnapshotSlice(previous?.assets ?? null, response.assets),

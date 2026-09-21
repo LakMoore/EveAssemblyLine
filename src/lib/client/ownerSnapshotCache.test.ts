@@ -15,7 +15,7 @@ function slice<T>(data: T) {
 }
 
 const completeSnapshot = {
-  schemaVersion: 5,
+  schemaVersion: 6,
   owner: { kind: "character", id: 123 },
   assets: slice([]),
   industryJobs: slice([]),
@@ -46,9 +46,15 @@ void test("accepts complete owner snapshots", () => {
   assert.equal(isCompleteClientOwnerSnapshot(completeSnapshot), true);
 });
 
+void test("rejects the previous owner snapshot schema", () => {
+  const previousSchemaSnapshot: unknown = { ...completeSnapshot, schemaVersion: 5 };
+
+  assert.equal(isCompleteClientOwnerSnapshot(previousSchemaSnapshot), false);
+});
+
 void test("merges modified slices and retains unchanged cached data", () => {
   const response = {
-    schemaVersion: 5,
+    schemaVersion: 6,
     owner: completeSnapshot.owner,
     assets: {
       eTag: completeSnapshot.assets.eTag,
