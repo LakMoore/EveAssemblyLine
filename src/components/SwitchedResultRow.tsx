@@ -22,6 +22,7 @@ export type SwitchedResultRowProps = Omit<
   switchDisabled?: boolean;
   showSwitch?: boolean;
   checkboxChecked?: boolean;
+  checkboxIndeterminate?: boolean;
   onCheckboxChange?: (checked: boolean) => void;
   checkboxTooltip?: string;
   checkboxPending?: boolean;
@@ -50,6 +51,7 @@ export default function SwitchedResultRow({
   switchDisabled = false,
   showSwitch = true,
   checkboxChecked,
+  checkboxIndeterminate = false,
   onCheckboxChange,
   checkboxTooltip = "Complete result",
   checkboxPending = false,
@@ -76,7 +78,7 @@ export default function SwitchedResultRow({
       tabIndex={onClick ? 0 : undefined}
       aria-label={onClick ? `Select ${name}` : undefined}
       className={cn(
-        "group/result-row grid min-h-14 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-[13px] gap-y-2 border-b border-border px-2 py-2.5 transition-colors hover:bg-muted/50 data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[installed=true]:hover:bg-transparent data-[installed=true]:**:data-result-row-content:opacity-50 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:hover:bg-accent sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)_auto] sm:items-center",
+        "group/result-row grid min-h-14 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-[13px] gap-y-2 border-b border-border px-2 py-2.5 transition-colors hover:bg-muted/50 data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[installed=true]:opacity-50 data-[installed=true]:hover:bg-transparent data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:hover:bg-accent sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)_auto] sm:items-center",
         className,
       )}
       onClick={onClick}
@@ -102,7 +104,7 @@ export default function SwitchedResultRow({
                   <Switch
                     aria-label={switchTooltip}
                     checked={switchChecked}
-                    disabled={disabled || installed || switchDisabled}
+                    disabled={disabled || switchDisabled}
                     onClick={(event) => event.stopPropagation()}
                     onCheckedChange={onSwitchChange}
                   />
@@ -145,8 +147,13 @@ export default function SwitchedResultRow({
                   <Checkbox
                     aria-label={checkboxTooltip}
                     checked={checkboxChecked}
+                    indeterminate={checkboxIndeterminate}
                     disabled={disabled || checkboxDisabled}
-                    className={cn(selected && "border-secondary")}
+                    className={cn(
+                      selected && "border-secondary",
+                      checkboxIndeterminate
+                        && "before:absolute before:h-px before:w-2 before:bg-current before:content-[''] data-indeterminate:[&>span>svg]:hidden",
+                    )}
                     onClick={(event) => event.stopPropagation()}
                     onCheckedChange={onCheckboxChange}
                   />

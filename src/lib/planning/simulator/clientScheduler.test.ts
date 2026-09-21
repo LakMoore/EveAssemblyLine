@@ -9,6 +9,7 @@ function job(
   requiredRuns: number,
   readyNowRuns: number,
   durationPerRunSeconds: number,
+  inputQuantitiesPerRun: number[] = [],
 ): SimulationIndustryJob {
   return {
     jobId,
@@ -34,7 +35,16 @@ function job(
     materialMultiplier: 1,
     timeMultiplier: 1,
     durationPerRunSeconds,
-    inputs: [],
+    inputs: inputQuantitiesPerRun.map((quantityPerRun, index) => ({
+      typeId: 1000 + index,
+      typeName: `Input ${index}`,
+      quantityPerRun,
+      requiredQuantity: quantityPerRun * requiredRuns,
+      availableNow: quantityPerRun * requiredRuns,
+      availableFromHauling: 0,
+      availableAfterUpstream: quantityPerRun * requiredRuns,
+      unsatisfiedQuantity: 0,
+    })),
     installs: [],
     demandSources: [],
   };
@@ -94,5 +104,129 @@ void test("retains character slot details for the install plan", () => {
       { characterId: 7, slotIndex: 0, runs: 3 },
       { characterId: 8, slotIndex: 0, runs: 2 },
     ],
+  );
+});
+
+void test("protects the ME bonus by keeping reaction installs above the minimum run count", () => {
+  const schedules = solveSimulationActivity(
+    [job("A", 10, 10, 60, [10, 40])],
+    3,
+    "available-slots",
+    24,
+    new Set(["A"]),
+    [],
+    {
+      protectReactionMaterialBonus: true,
+      reactionMaterialBonusesByLocation: new Map([[20, -2.2]]),
+    },
+  );
+
+  assert.deepEqual(
+    schedules.get("A")?.installs.map((install) => install.runs),
+    [5, 5],
+  );
+});
+
+void test("allows one under-minimum install when total reaction runs are too small", () => {
+  const schedules = solveSimulationActivity(
+    [job("A", 3, 3, 60, [10])],
+    3,
+    "available-slots",
+    24,
+    new Set(["A"]),
+    [],
+    {
+      protectReactionMaterialBonus: true,
+      reactionMaterialBonusesByLocation: new Map([[20, -2.2]]),
+    },
+  );
+
+  assert.deepEqual(
+    schedules.get("A")?.installs.map((install) => install.runs),
+    [3],
+  );
+});
+
+void test("derives the ME minimum from persisted jobs without per-run input quantities", () => {
+  const persistedJob = job("A", 20, 20, 60);
+  persistedJob.inputs = [
+    {
+      typeId: 1000,
+      typeName: "Input",
+      requiredQuantity: 100,
+      availableNow: 100,
+      availableFromHauling: 0,
+      availableAfterUpstream: 100,
+      unsatisfiedQuantity: 0,
+    },
+  ];
+  const schedules = solveSimulationActivity(
+    [persistedJob],
+    2,
+    "available-slots",
+    24,
+    new Set(["A"]),
+    [],
+    {
+      protectReactionMaterialBonus: true,
+      reactionMaterialBonusesByLocation: new Map([[20, -2.2]]),
+    },
+  );
+
+  assert.deepEqual(
+    schedules.get("A")?.installs.map((install) => install.runs),
+    [10, 10],
+  );
+});
+
+void test("keeps all but one persisted-result install at the ten-run minimum", () => {
+  const persistedJob = job("A", 35, 35, 60);
+  persistedJob.inputs = [
+    {
+      typeId: 1000,
+      typeName: "Input",
+      requiredQuantity: 175,
+      availableNow: 175,
+      availableFromHauling: 0,
+      availableAfterUpstream: 175,
+      unsatisfiedQuantity: 0,
+    },
+  ];
+  const schedules = solveSimulationActivity(
+    [persistedJob],
+    4,
+    "available-slots",
+    24,
+    new Set(["A"]),
+    [],
+    {
+      protectReactionMaterialBonus: true,
+      reactionMaterialBonusesByLocation: new Map([[20, -2.2]]),
+    },
+  );
+
+  assert.deepEqual(
+    schedules.get("A")?.installs.map((install) => install.runs),
+    [10, 10, 10, 5],
+  );
+});
+
+void test("allows only one under-minimum install when a remainder cannot meet the minimum", () => {
+  const schedules = solveSimulationActivity(
+    [job("A", 9, 9, 60, [10])],
+    2,
+    "available-slots",
+    24,
+    new Set(["A"]),
+    [],
+    {
+      protectReactionMaterialBonus: true,
+      reactionMaterialBonusesByLocation: new Map([[20, -2.2]]),
+    },
+  );
+
+  assert.deepEqual(
+    schedules.get("A")?.installs.map((install) => install.runs),
+    [5, 4],
   );
 });

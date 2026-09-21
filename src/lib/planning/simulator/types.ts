@@ -122,6 +122,7 @@ export interface SimulationUpstreamReservation {
 export interface SimulationJobInput {
   typeId: number;
   typeName: string;
+  quantityPerRun?: number;
   requiredQuantity: number;
   availableNow: number;
   availableFromHauling: number;

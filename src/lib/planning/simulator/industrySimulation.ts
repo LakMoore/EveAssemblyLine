@@ -528,6 +528,7 @@ class IndustryDemandSimulation {
       inputs.push({
         typeId: material.typeId,
         typeName: typeName(this.context, material.typeId, this.request.language),
+        quantityPerRun: material.quantityPerRun,
         requiredQuantity: material.requiredQuantity,
         availableNow: claimedNow,
         availableFromHauling: physicalClaimed - claimedNow,

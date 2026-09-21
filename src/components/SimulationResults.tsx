@@ -158,10 +158,45 @@ type SimulationRowControls = {
   onSelectRow: (rowKey: string) => void;
   isIncluded: (rowKey: string) => boolean;
   onIncludedChange: (rowKey: string, included: boolean) => void;
-  isCompleted: (rowKey: string) => boolean;
+  isCompleted: (
+    rowKey: string,
+    scheduleIdentity?: string,
+    matchScheduleRevision?: boolean,
+  ) => boolean;
   onCompletedChange: (rowKey: string, completed: boolean) => void;
+  getInstalledRuns: (
+    rowKey: string,
+    scheduleIdentity?: string,
+    matchScheduleRevision?: boolean,
+  ) => number;
+  getCompletedInstallIds: (
+    rowKey: string,
+    scheduleIdentity?: string,
+    matchScheduleRevision?: boolean,
+  ) => Readonly<Record<string, boolean>>;
+  getCompletedSchedule: (
+    rowKey: string,
+    scheduleIdentity?: string,
+    matchScheduleRevision?: boolean,
+  ) => ClientSimulationSchedule | undefined;
+  onInstalledRunsChange: (
+    rowKey: string,
+    installedRuns: number,
+    installableRuns: number,
+    scheduleIdentity?: string,
+    completedInstallIds?: Readonly<Record<string, boolean>>,
+    schedule?: ClientSimulationSchedule,
+  ) => void;
   onOpenPlan: () => void;
   onOpenBuy: () => void;
+};
+
+type SimulationCompletionState = {
+  installedRuns: number;
+  installableRuns?: number;
+  scheduleIdentity?: string;
+  completedInstallIds: Record<string, boolean>;
+  schedule?: ClientSimulationSchedule;
 };
 
 type SimulationGroupAvatar = {
@@ -335,6 +370,31 @@ type CompactInstallGroup = {
   installs: ClientSimulationInstall[];
 };
 
+/** Identifies one generated install plan for completion-state reconciliation. */
+function simulationInstallScheduleIdentity(
+  scheduleRevision: string,
+  installs: readonly ClientSimulationInstall[],
+): string {
+  return `${scheduleRevision}|${installs
+    .map(
+      (install) =>
+        `${install.installId}:${install.characterId ?? ""}:${install.slotIndex ?? ""}:${install.runs}`,
+    )
+    .join("|")}`;
+}
+
+/** Matches a full install identity against its solver-revision prefix. */
+function simulationCompletionMatchesSchedule(
+  completionIdentity: string | undefined,
+  scheduleIdentity: string,
+  matchScheduleRevision: boolean,
+): boolean {
+  return (
+    completionIdentity === scheduleIdentity
+    || (matchScheduleRevision && completionIdentity?.startsWith(`${scheduleIdentity}|`) === true)
+  );
+}
+
 /** Groups scheduled installs that contain the same number of runs. */
 function compactInstallGroups(installs: readonly ClientSimulationInstall[]): CompactInstallGroup[] {
   const groups = new Map<number, ClientSimulationInstall[]>();
@@ -352,6 +412,9 @@ function compactInstallGroups(installs: readonly ClientSimulationInstall[]): Com
 function SimulationInstallPlanDialog({
   job,
   schedule,
+  installedRuns,
+  completedInstallIds: parentCompletedInstallIds = {},
+  onInstalledRunsChange,
   activityLabel,
   blueprintCounts,
   characterNamesById,
@@ -360,6 +423,13 @@ function SimulationInstallPlanDialog({
 }: {
   job: SimulationIndustryJob;
   schedule: ClientSimulationSchedule | undefined;
+  installedRuns: number;
+  completedInstallIds: Readonly<Record<string, boolean>>;
+  onInstalledRunsChange: (
+    installedRuns: number,
+    scheduleIdentity: string,
+    completedInstallIds: Readonly<Record<string, boolean>>,
+  ) => void;
   activityLabel: string;
   blueprintCounts: SimulationBlueprintCounts;
   characterNamesById: ReadonlyMap<number, string>;
@@ -368,34 +438,32 @@ function SimulationInstallPlanDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<SimulationInstallPlanView>("compact");
-  const [completedInstallState, setCompletedInstallState] = useState<{
-    scheduleIdentity: string;
-    completedInstallIds: Record<string, boolean>;
-  }>({ scheduleIdentity: "", completedInstallIds: {} });
   const installs = schedule?.installs ?? [];
   const hasInsufficientInputs =
     job.inputs.length > 0 && Math.min(...job.inputs.map((input) => input.availableNow)) === 0;
   const compactGroups = compactInstallGroups(installs);
-  const scheduleIdentity = `${scheduleRevision}|${installs
-    .map(
-      (install) =>
-        `${install.installId}:${install.characterId ?? ""}:${install.slotIndex ?? ""}:${install.runs}`,
-    )
-    .join("|")}`;
-  const completedInstallIds =
-    completedInstallState.scheduleIdentity === scheduleIdentity
-      ? completedInstallState.completedInstallIds
-      : {};
-  const completed = (installId: string) => completedInstallIds[installId] ?? false;
+  const scheduleIdentity = simulationInstallScheduleIdentity(scheduleRevision, installs);
+  const totalInstallRuns = installs.reduce((total, install) => total + install.runs, 0);
+  const allRunsInstalled = totalInstallRuns > 0 && installedRuns >= totalInstallRuns;
+  const completedInstallIds = allRunsInstalled
+    ? Object.fromEntries(installs.map((install) => [install.installId, true]))
+    : parentCompletedInstallIds;
+  const completed = (installId: string) =>
+    allRunsInstalled || completedInstallIds[installId] === true;
   const setInstallCompleted = (installIds: readonly string[], checked: boolean) => {
-    setCompletedInstallState((current) => {
-      const next = {
-        ...(current.scheduleIdentity === scheduleIdentity ? current.completedInstallIds : {}),
-      };
-      for (const installId of installIds) next[installId] = checked;
-      return { scheduleIdentity, completedInstallIds: next };
-    });
+    const next = { ...completedInstallIds };
+    let installedRunsDelta = 0;
+    for (const installId of installIds) {
+      const wasCompleted = next[installId] ?? false;
+      const install = installs.find((entry) => entry.installId === installId);
+      if (!install || wasCompleted === checked) continue;
+      installedRunsDelta += checked ? install.runs : -install.runs;
+      next[installId] = checked;
+    }
+    onInstalledRunsChange(Math.max(0, installedRuns + installedRunsDelta), scheduleIdentity, next);
   };
+  const someCompleted = (installIds: readonly string[]) =>
+    installIds.some((installId) => completed(installId));
   const allCompleted = (installIds: readonly string[]) =>
     installIds.length > 0 && installIds.every((installId) => completed(installId));
   const navigateToPlan = () => {
@@ -489,6 +557,7 @@ function SimulationInstallPlanDialog({
                   variation="icon"
                   showSwitch={false}
                   checkboxChecked={completed(install.installId)}
+                  installed={completed(install.installId)}
                   checkboxTooltip="Mark install complete"
                   onCheckboxChange={(checked) => setInstallCompleted([install.installId], checked)}
                   contentClassName="w-full justify-between gap-3 self-end text-right font-mono text-xs sm:grid sm:min-w-[11rem] sm:grid-cols-[minmax(0,1fr)_max-content] sm:gap-x-4 sm:justify-normal sm:self-auto"
@@ -523,15 +592,13 @@ function SimulationInstallPlanDialog({
                   variation="icon"
                   showSwitch={false}
                   checkboxChecked={allCompleted(installIds)}
+                  checkboxIndeterminate={!allCompleted(installIds) && someCompleted(installIds)}
+                  installed={allCompleted(installIds)}
                   checkboxTooltip="Mark grouped installs complete"
                   onCheckboxChange={(checked) => setInstallCompleted(installIds, checked)}
                   contentClassName="w-full justify-between gap-3 self-end text-right font-mono text-xs sm:grid sm:min-w-[11rem] sm:grid-cols-[minmax(0,1fr)_max-content] sm:gap-x-4 sm:justify-normal sm:self-auto"
                 >
-                  <CopyableNumber
-                    value={group.installs.length}
-                    suffix=" installs"
-                    copyLabel="Install count"
-                  />
+                  <span>{quantity(group.installs.length)} installs</span>
                   <CopyableNumber
                     value={group.runs}
                     suffix=" runs each"
@@ -1064,6 +1131,7 @@ function multibuyText(entries: readonly SimulationBuyEntry[]): string {
 function SimulationActivityTab({
   tab,
   jobs,
+  simulationInputRevision,
   stock,
   locationNamesById,
   reactionMaterialBonusesByLocation,
@@ -1076,6 +1144,7 @@ function SimulationActivityTab({
 }: {
   tab: "react" | "manufacture";
   jobs: SimulationIndustryJob[];
+  simulationInputRevision: string;
   stock: readonly PlanStockItem[];
   locationNamesById: ReadonlyMap<number, string>;
   reactionMaterialBonusesByLocation: ReadonlyMap<number, number>;
@@ -1089,6 +1158,7 @@ function SimulationActivityTab({
   const activityLabel = tab === "react" ? "reaction" : "manufacturing";
   const [solveMode, setSolveMode] = useState<ClientSimulationSolveMode>("available-slots");
   const [targetTime, setTargetTime] = useState("24");
+  const [protectReactionMaterialBonus, setProtectReactionMaterialBonus] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
   const [groupCopyStatus, setGroupCopyStatus] = useState<SimulationGroupCopyStatus>(null);
   const slotCharacters = simulationSlotCharacters(
@@ -1101,12 +1171,35 @@ function SimulationActivityTab({
     (total, character) => total + character.availableSlots,
     0,
   );
-  const activeJobs = jobs.filter((job) => !controls.isCompleted(`${tab}:${job.jobId}`));
+  const baseScheduleRevision = [
+    simulationInputRevision,
+    solveMode,
+    targetTime,
+    protectReactionMaterialBonus,
+    availableSlots,
+    ...slotCharacters.map(
+      ({ characterId, availableSlots: characterSlots }) => `${characterId}:${characterSlots}`,
+    ),
+    ...jobs
+      .filter((job) => controls.isIncluded(`${tab}:${job.jobId}`))
+      .map((job) => job.jobId)
+      .sort(),
+    ...[...reactionMaterialBonusesByLocation.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([locationId, bonus]) => `${locationId}:${bonus}`),
+  ].join("|");
+  const activeJobs = jobs.filter(
+    (job) => !controls.isCompleted(`${tab}:${job.jobId}`, baseScheduleRevision, true),
+  );
+  const scheduleRevision = [
+    baseScheduleRevision,
+    ...activeJobs.map((job) => job.jobId).sort(),
+  ].join("|");
   const enabledJobIds = new Set(
     activeJobs.filter((job) => controls.isIncluded(`${tab}:${job.jobId}`)).map((job) => job.jobId),
   );
   const schedules = solveSimulationActivity(
-    activeJobs,
+    jobs,
     availableSlots,
     solveMode,
     Number(targetTime),
@@ -1117,16 +1210,11 @@ function SimulationActivityTab({
         availableSlots,
       }),
     ),
+    {
+      protectReactionMaterialBonus: tab === "react" && protectReactionMaterialBonus,
+      reactionMaterialBonusesByLocation,
+    },
   );
-  const scheduleRevision = [
-    solveMode,
-    targetTime,
-    availableSlots,
-    ...slotCharacters.map(
-      ({ characterId, availableSlots: characterSlots }) => `${characterId}:${characterSlots}`,
-    ),
-    ...[...enabledJobIds].sort(),
-  ].join("|");
   const scheduledRuns = activeJobs.reduce(
     (total, job) => total + (schedules.get(job.jobId)?.runs ?? 0),
     0,
@@ -1230,6 +1318,19 @@ function SimulationActivityTab({
                 aria-label={`Target ${activityLabel} run time`}
                 className="w-28"
               />
+            )}
+            {tab === "react" && (
+              <Label
+                className="flex shrink-0 items-center gap-2 whitespace-nowrap"
+                htmlFor="react-protect-me-bonus"
+              >
+                <Switch
+                  id="react-protect-me-bonus"
+                  checked={protectReactionMaterialBonus}
+                  onCheckedChange={setProtectReactionMaterialBonus}
+                />
+                Protect ME Bonus
+              </Label>
             )}
             <Button
               type="button"
@@ -1342,8 +1443,39 @@ function SimulationActivityTab({
         })}
         renderRow={(job) => {
           const rowKey = `${tab}:${job.jobId}`;
+          const generatedSchedule = schedules.get(job.jobId);
+          const scheduleIdentity = simulationInstallScheduleIdentity(
+            scheduleRevision,
+            generatedSchedule?.installs ?? [],
+          );
+          const active = activeJobs.some((activeJob) => activeJob.jobId === job.jobId);
+          const completedSchedule = controls.getCompletedSchedule(
+            rowKey,
+            active ? scheduleIdentity : baseScheduleRevision,
+            !active,
+          );
+          const schedule =
+            generatedSchedule && generatedSchedule.installs.length > 0
+              ? generatedSchedule
+              : completedSchedule;
           const included = controls.isIncluded(rowKey);
-          const completed = controls.isCompleted(rowKey);
+          const installableRuns = schedule?.runs ?? 0;
+          const installedRuns = controls.getInstalledRuns(
+            rowKey,
+            active ? scheduleIdentity : baseScheduleRevision,
+            !active,
+          );
+          const completed = controls.isCompleted(
+            rowKey,
+            active ? scheduleIdentity : baseScheduleRevision,
+            !active,
+          );
+          const completedInstallIds = controls.getCompletedInstallIds(
+            rowKey,
+            active ? scheduleIdentity : baseScheduleRevision,
+            !active,
+          );
+          const partiallyInstalled = installedRuns > 0 && installedRuns < installableRuns;
           return (
             <SwitchedResultRow
               name={job.productName}
@@ -1363,21 +1495,47 @@ function SimulationActivityTab({
               switchTooltip={`Include in ${activityLabel} schedule`}
               onSwitchChange={(checked) => controls.onIncludedChange(rowKey, checked)}
               checkboxChecked={completed}
-              checkboxDisabled={!included}
+              checkboxIndeterminate={partiallyInstalled}
+              checkboxDisabled={!included && !completed}
               checkboxTooltip={
                 tab === "react" ? "Mark reaction installed" : "Mark manufacturing job installed"
               }
-              onCheckboxChange={(checked) => controls.onCompletedChange(rowKey, checked)}
+              onCheckboxChange={(checked) =>
+                controls.onInstalledRunsChange(
+                  rowKey,
+                  checked || partiallyInstalled ? installableRuns : 0,
+                  installableRuns,
+                  scheduleIdentity,
+                  checked || partiallyInstalled
+                    ? Object.fromEntries(
+                        (schedule?.installs ?? []).map((install) => [install.installId, true]),
+                      )
+                    : {},
+                  schedule,
+                )
+              }
               contentClassName="grid w-full grid-cols-[max-content_minmax(0,max-content)_minmax(0,max-content)] items-center justify-around gap-3 self-end text-right font-mono text-xs sm:w-auto sm:grid-cols-[3rem_9rem_minmax(11rem,max-content)] sm:justify-end sm:gap-x-5 sm:self-auto"
             >
               <span className="flex items-center justify-center">
                 <SimulationInstallPlanDialog
                   job={job}
-                  schedule={schedules.get(job.jobId)}
+                  schedule={schedule}
                   activityLabel={activityLabel}
                   blueprintCounts={simulationBlueprintCounts(job, stock)}
                   characterNamesById={characterNamesById}
                   scheduleRevision={scheduleRevision}
+                  installedRuns={installedRuns}
+                  completedInstallIds={completedInstallIds}
+                  onInstalledRunsChange={(runs, dialogScheduleIdentity, installIds) =>
+                    controls.onInstalledRunsChange(
+                      rowKey,
+                      runs,
+                      installableRuns,
+                      dialogScheduleIdentity,
+                      installIds,
+                      schedule,
+                    )
+                  }
                   onOpenPlan={controls.onOpenPlan}
                 />
               </span>
@@ -1868,7 +2026,9 @@ export default function SimulationResults({
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [includedRows, setIncludedRows] = useState<Record<string, boolean>>({});
-  const [completedRows, setCompletedRows] = useState<Record<string, boolean>>({});
+  const [completionByRow, setCompletionByRow] = useState<
+    Partial<Record<string, SimulationCompletionState>>
+  >({});
   const statusIsError = status.startsWith("Error:");
   const controls: SimulationRowControls = {
     selectedRowKey,
@@ -1876,9 +2036,85 @@ export default function SimulationResults({
     isIncluded: (rowKey) => includedRows[rowKey] ?? true,
     onIncludedChange: (rowKey, included) =>
       setIncludedRows((current) => ({ ...current, [rowKey]: included })),
-    isCompleted: (rowKey) => completedRows[rowKey] ?? false,
+    isCompleted: (rowKey, scheduleIdentity, matchScheduleRevision = false) => {
+      const completion = completionByRow[rowKey];
+      if (!completion) return false;
+      if (
+        scheduleIdentity !== undefined
+        && completion.scheduleIdentity !== undefined
+        && !simulationCompletionMatchesSchedule(
+          completion.scheduleIdentity,
+          scheduleIdentity,
+          matchScheduleRevision,
+        )
+      ) {
+        return false;
+      }
+      return completion.installableRuns === undefined
+        ? completion.installedRuns > 0
+        : completion.installableRuns > 0 && completion.installedRuns >= completion.installableRuns;
+    },
     onCompletedChange: (rowKey, completed) =>
-      setCompletedRows((current) => ({ ...current, [rowKey]: completed })),
+      setCompletionByRow((current) => ({
+        ...current,
+        [rowKey]: { installedRuns: completed ? 1 : 0, completedInstallIds: {} },
+      })),
+    getInstalledRuns: (rowKey, scheduleIdentity, matchScheduleRevision = false) => {
+      const completion = completionByRow[rowKey];
+      return scheduleIdentity !== undefined
+        && completion?.scheduleIdentity !== undefined
+        && !simulationCompletionMatchesSchedule(
+          completion.scheduleIdentity,
+          scheduleIdentity,
+          matchScheduleRevision,
+        )
+        ? 0
+        : (completion?.installedRuns ?? 0);
+    },
+    getCompletedInstallIds: (rowKey, scheduleIdentity, matchScheduleRevision = false) => {
+      const completion = completionByRow[rowKey];
+      return scheduleIdentity !== undefined
+        && completion?.scheduleIdentity !== undefined
+        && !simulationCompletionMatchesSchedule(
+          completion.scheduleIdentity,
+          scheduleIdentity,
+          matchScheduleRevision,
+        )
+        ? {}
+        : (completion?.completedInstallIds ?? {});
+    },
+    getCompletedSchedule: (rowKey, scheduleIdentity, matchScheduleRevision = false) => {
+      const completion = completionByRow[rowKey];
+      return scheduleIdentity !== undefined
+        && completion?.scheduleIdentity !== undefined
+        && !simulationCompletionMatchesSchedule(
+          completion.scheduleIdentity,
+          scheduleIdentity,
+          matchScheduleRevision,
+        )
+        ? undefined
+        : completion?.schedule;
+    },
+    onInstalledRunsChange: (
+      rowKey,
+      installedRuns,
+      installableRuns,
+      scheduleIdentity,
+      completedInstallIds = {},
+      schedule,
+    ) => {
+      const normalizedRuns = Math.min(Math.max(0, installedRuns), installableRuns);
+      setCompletionByRow((current) => ({
+        ...current,
+        [rowKey]: {
+          installedRuns: normalizedRuns,
+          installableRuns,
+          scheduleIdentity,
+          completedInstallIds: { ...completedInstallIds },
+          schedule,
+        },
+      }));
+    },
     onOpenPlan: () => setActiveTab("plan"),
     onOpenBuy: () => setActiveTab("buy"),
   };
@@ -2046,6 +2282,7 @@ function SimulationTabContent({
       <SimulationActivityTab
         tab={activeTab}
         jobs={activeTab === "react" ? result.lists.reactionJobs : result.lists.manufacturingJobs}
+        simulationInputRevision={`${result.metadata.normalizedInputHash}|${result.metadata.sdeRevision}`}
         stock={stock}
         locationNamesById={locationNamesById}
         reactionMaterialBonusesByLocation={reactionMaterialBonusesByLocation}
