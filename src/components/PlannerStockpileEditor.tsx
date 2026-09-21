@@ -55,7 +55,6 @@ type ActivityLocationOption = {
   disabled?: boolean;
   baseYield: number;
   baseManufacturingMe: number;
-  baseReactionMe: number;
 };
 
 type StockLocationOption = ActivityLocationOption;
@@ -73,18 +72,16 @@ export type ProductionGroupOption = {
   facilities: GroupFacilityOption[];
 };
 
-type LocationBonus = "manufacturing" | "reaction" | "reprocessing" | "none";
+type LocationBonus = "manufacturing" | "reprocessing" | "none";
 
 function locationBonus(option: ActivityLocationOption, bonus: LocationBonus) {
   if (bonus === "reprocessing") return option.baseYield;
-  if (bonus === "reaction") return option.baseReactionMe;
   if (bonus === "manufacturing") return option.baseManufacturingMe;
   return 0;
 }
 
 function formatLocationBonus(option: ActivityLocationOption, bonus: LocationBonus) {
   if (bonus === "reprocessing") return `Yield ${option.baseYield.toFixed(1)}%`;
-  if (bonus === "reaction") return `ME ${option.baseReactionMe.toFixed(1)}%`;
   if (bonus === "manufacturing") return `ME ${option.baseManufacturingMe.toFixed(1)}%`;
   return undefined;
 }
@@ -223,7 +220,7 @@ const activityLocationFields: Array<{
   bonus: LocationBonus;
 }> = [
   { key: "manufacturing", label: "Manufacturing location", bonus: "manufacturing" },
-  { key: "reactions", label: "Reaction location", bonus: "reaction" },
+  { key: "reactions", label: "Reaction location", bonus: "none" },
   { key: "reprocessing", label: "Reprocessing location", bonus: "reprocessing" },
   { key: "copying", label: "Copying location", bonus: "manufacturing" },
   { key: "invention", label: "Invention location", bonus: "manufacturing" },
@@ -388,9 +385,9 @@ function StockpileDetailsContent({
               );
               const materialPercentage =
                 selected?.materialPercentage
-                ?? (group.activity === "manufacturing"
-                  ? defaultFacility?.baseManufacturingMe
-                  : defaultFacility?.baseReactionMe)
+                ?? group.facilities.find(
+                  (facility) => facility.locationId === defaultFacility?.locationId,
+                )?.materialPercentage
                 ?? 0;
               const sortedFacilities = [...group.facilities].sort(
                 (left, right) =>

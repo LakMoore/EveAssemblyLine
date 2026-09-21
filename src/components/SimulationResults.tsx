@@ -565,6 +565,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
   tab,
   items,
   locationNamesById,
+  reactionMaterialBonusesByLocation,
   openGroups,
   onOpenGroupChange,
   getRowKey,
@@ -576,6 +577,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
   tab: SimulationTab;
   items: readonly T[];
   locationNamesById: ReadonlyMap<number, string>;
+  reactionMaterialBonusesByLocation?: ReadonlyMap<number, number>;
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
   getRowKey: (item: T) => string;
@@ -603,11 +605,30 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
         const groupKey = `${tab}:${locationId}`;
         const avatars = createGroupAvatars(groupItems, getAvatar);
         const groupAction = getGroupAction?.(locationId, groupItems);
+        const hasReactionMaterialBonus =
+          reactionMaterialBonusesByLocation?.has(locationId) ?? false;
+        const reactionMaterialBonus = -(reactionMaterialBonusesByLocation?.get(locationId) ?? 0);
+        const groupLabel = locationName(locationNamesById, locationId);
+        const reactionMaterialLabel = hasReactionMaterialBonus
+          ? reactionMaterialBonus > 0
+            ? `+${reactionMaterialBonus.toFixed(1)}% reaction ME`
+            : "No bonus to ME"
+          : undefined;
         return (
           <SimulationResultGroup
             groupKey={groupKey}
             key={groupKey}
-            label={locationName(locationNamesById, locationId)}
+            ariaLabel={[groupLabel, reactionMaterialLabel].filter(Boolean).join(" ")}
+            label={
+              <span className="flex min-w-0 items-baseline gap-2">
+                <span className="truncate">{groupLabel}</span>
+                {hasReactionMaterialBonus && (
+                  <small className="shrink-0 text-xs font-normal text-muted-foreground normal-case">
+                    {reactionMaterialLabel}
+                  </small>
+                )}
+              </span>
+            }
             isOpen={openGroups[groupKey] ?? true}
             onOpenChange={(open) => onOpenGroupChange(groupKey, open)}
             avatarRows={avatars}
@@ -1045,6 +1066,7 @@ function SimulationActivityTab({
   jobs,
   stock,
   locationNamesById,
+  reactionMaterialBonusesByLocation,
   characterNamesById,
   characterStatuses,
   slotUsage,
@@ -1056,6 +1078,7 @@ function SimulationActivityTab({
   jobs: SimulationIndustryJob[];
   stock: readonly PlanStockItem[];
   locationNamesById: ReadonlyMap<number, string>;
+  reactionMaterialBonusesByLocation: ReadonlyMap<number, number>;
   characterNamesById: ReadonlyMap<number, string>;
   characterStatuses: readonly ClientCharacterStatus[];
   slotUsage: ClientJobsResponse["slotUsage"];
@@ -1299,6 +1322,9 @@ function SimulationActivityTab({
         tab={tab}
         items={jobs}
         locationNamesById={locationNamesById}
+        reactionMaterialBonusesByLocation={
+          tab === "react" ? reactionMaterialBonusesByLocation : undefined
+        }
         openGroups={openGroups}
         onOpenGroupChange={onOpenGroupChange}
         getRowKey={(job) => job.jobId}
@@ -1820,6 +1846,7 @@ export default function SimulationResults({
   status,
   stock,
   locationNamesById,
+  reactionMaterialBonusesByLocation,
   characterNamesById,
   characterStatuses,
   slotUsage,
@@ -1830,6 +1857,7 @@ export default function SimulationResults({
   status: string;
   stock: readonly PlanStockItem[];
   locationNamesById: ReadonlyMap<number, string>;
+  reactionMaterialBonusesByLocation: ReadonlyMap<number, number>;
   characterNamesById: ReadonlyMap<number, string>;
   characterStatuses: readonly ClientCharacterStatus[];
   slotUsage: ClientJobsResponse["slotUsage"];
@@ -1911,6 +1939,7 @@ export default function SimulationResults({
             result={result}
             stock={stock}
             locationNamesById={locationNamesById}
+            reactionMaterialBonusesByLocation={reactionMaterialBonusesByLocation}
             characterNamesById={characterNamesById}
             characterStatuses={characterStatuses}
             slotUsage={slotUsage}
@@ -1932,6 +1961,7 @@ function SimulationTabContent({
   result,
   stock,
   locationNamesById,
+  reactionMaterialBonusesByLocation,
   characterNamesById,
   characterStatuses,
   slotUsage,
@@ -1945,6 +1975,7 @@ function SimulationTabContent({
   result: SimulationResultV1;
   stock: readonly PlanStockItem[];
   locationNamesById: ReadonlyMap<number, string>;
+  reactionMaterialBonusesByLocation: ReadonlyMap<number, number>;
   characterNamesById: ReadonlyMap<number, string>;
   characterStatuses: readonly ClientCharacterStatus[];
   slotUsage: ClientJobsResponse["slotUsage"];
@@ -2017,6 +2048,7 @@ function SimulationTabContent({
         jobs={activeTab === "react" ? result.lists.reactionJobs : result.lists.manufacturingJobs}
         stock={stock}
         locationNamesById={locationNamesById}
+        reactionMaterialBonusesByLocation={reactionMaterialBonusesByLocation}
         characterNamesById={characterNamesById}
         characterStatuses={characterStatuses}
         slotUsage={slotUsage}

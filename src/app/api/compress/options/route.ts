@@ -271,21 +271,6 @@ async function getOptions(
                   ? location.reprocessingRig
                   : 0,
               ).normalOre,
-      baseReactionMe:
-        "canReprocess" in location && location.canReprocess === false
-          ? 0
-          : structureTypeId === 0
-            ? 0
-            : calculateReprocessingEfficiency(
-                baseYieldMaps,
-                structureTypeId,
-                {},
-                0,
-                location.securityStatus,
-                "reprocessingRig" in location && typeof location.reprocessingRig === "number"
-                  ? location.reprocessingRig
-                  : 0,
-              ).normalOre,
     };
   });
   markPhase("derived");

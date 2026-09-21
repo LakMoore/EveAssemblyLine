@@ -153,7 +153,6 @@ type PlanLocationOption = {
   locationType: "station" | "structure";
   baseYield: number;
   baseManufacturingMe: number;
-  baseReactionMe: number;
   manufacturingTimeMultiplier: number;
   reactionTimeMultiplier: number;
   sizeId: number;
@@ -163,6 +162,27 @@ type PlanLocationOption = {
   };
   buildTypeGroups: Partial<Record<ProductionGroupKey, FacilityGroupBonus>>;
 };
+
+/** Returns the strongest reaction material saving configured for a facility's reaction groups. */
+function reactionMaterialPercentage(location: Pick<PlanLocationOption, "buildTypeGroups">): number {
+  const reactionBonuses = Object
+    .entries(location.buildTypeGroups)
+    .flatMap(([key, bonus]) =>
+      key.endsWith("Reactions") ? [bonus.reactionMaterialPercentage] : [],
+    );
+  return reactionBonuses.length > 0 ? Math.min(...reactionBonuses) : 0;
+}
+
+/** Returns reaction material savings configured for each facility location. */
+function simulationReactionMaterialBonuses(
+  locations: readonly PlanLocationOption[],
+): ReadonlyMap<number, number> {
+  const bonuses = new Map<number, number>();
+  for (const location of locations) {
+    bonuses.set(location.locationId, reactionMaterialPercentage(location));
+  }
+  return bonuses;
+}
 
 const industrySkillIds = {
   industry: 3380,
@@ -685,7 +705,6 @@ function Planner() {
               kind: location.locationType,
               baseYield: 0,
               baseManufacturingMe: 0,
-              baseReactionMe: 0,
             })),
         );
       }
@@ -701,7 +720,6 @@ function Planner() {
           locationType: facility.locationType,
           baseYield: (facility.activities.reprocessing.baseYield ?? 0) * 100,
           baseManufacturingMe: facility.activities.manufacturing.materialConsumption ?? 0,
-          baseReactionMe: facility.activities.reactions.materialConsumption ?? 0,
           manufacturingTimeMultiplier:
             facility.activities.manufacturing.rawJobDurationMultiplier ?? 1,
           reactionTimeMultiplier: facility.activities.reactions.rawJobDurationMultiplier ?? 1,
@@ -723,7 +741,8 @@ function Planner() {
         .slice()
         .sort(
           (left, right) =>
-            left.baseReactionMe - right.baseReactionMe || left.name.localeCompare(right.name),
+            reactionMaterialPercentage(left) - reactionMaterialPercentage(right)
+            || left.name.localeCompare(right.name),
         );
       const nextLocations = {
         ...defaultLocations,
@@ -1257,7 +1276,6 @@ function Planner() {
       kind: location.locationType,
       baseYield: location.baseYield,
       baseManufacturingMe: location.baseManufacturingMe,
-      baseReactionMe: location.baseReactionMe,
     })),
     ...cachedAssetLocations,
     ...knownStructures.flatMap((structure) =>
@@ -1270,7 +1288,6 @@ function Planner() {
               kind: "structure" as const,
               baseYield: 0,
               baseManufacturingMe: 0,
-              baseReactionMe: 0,
             },
           ],
     ),
@@ -1312,7 +1329,6 @@ function Planner() {
             kind: location.locationType,
             baseYield: location.baseYield,
             baseManufacturingMe: location.baseManufacturingMe,
-            baseReactionMe: location.baseReactionMe,
             sizeId: location.sizeId,
             materialPercentage:
               group.activity === "manufacturing"
@@ -1811,12 +1827,6 @@ function Planner() {
                   <Label>
                     <div className={`${styles.planOptionHeader} text-xs`}>
                       <span>REACTION LOCATION</span>
-                      <span className={styles.planOptionBonus}>
-                        REACTION ME{" "}
-                        {selectedReactionLocation
-                          ? `${selectedReactionLocation.baseReactionMe.toFixed(1)}%`
-                          : "0.0%"}
-                      </span>
                     </div>
                     <Select
                       value={String(locations.reactions)}
@@ -1825,7 +1835,7 @@ function Planner() {
                       }
                       items={sharedLocationOptions.map((location) => ({
                         value: String(location.locationId),
-                        label: `${location.name} (${location.baseReactionMe.toFixed(1)}%)`,
+                        label: location.name,
                       }))}
                     >
                       <SelectTrigger
@@ -1836,22 +1846,13 @@ function Planner() {
                           <span className={styles.locationSelectName}>
                             {selectedReactionLocation?.name ?? "Select reaction location"}
                           </span>
-                          <span className={styles.locationSelectYield}>
-                            {selectedReactionLocation
-                              ? `${selectedReactionLocation.baseReactionMe.toFixed(1)}%`
-                              : "0.0%"}
-                          </span>
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
                           {sharedLocationOptions
                             .slice()
-                            .sort(
-                              (left, right) =>
-                                left.baseReactionMe - right.baseReactionMe
-                                || left.name.localeCompare(right.name),
-                            )
+                            .sort((left, right) => left.name.localeCompare(right.name))
                             .map((location) => (
                               <SelectItem
                                 value={String(location.locationId)}
@@ -1859,9 +1860,6 @@ function Planner() {
                                 className={styles.locationSelectItem}
                               >
                                 <span className={styles.locationOptionName}>{location.name}</span>
-                                <span className={styles.locationOptionYield}>
-                                  {location.baseReactionMe.toFixed(1)}%
-                                </span>
                               </SelectItem>
                             ))}
                         </SelectGroup>
@@ -2127,6 +2125,7 @@ function Planner() {
           status={planStatus}
           stock={stock}
           locationNamesById={plannerLocationNames}
+          reactionMaterialBonusesByLocation={simulationReactionMaterialBonuses(locationOptions)}
           characterNamesById={characterNamesById}
           characterStatuses={characterStatuses}
           slotUsage={jobs?.slotUsage}
