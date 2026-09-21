@@ -9,6 +9,7 @@ import {
   Brain,
   Factory,
   FlaskConical,
+  ListChecks,
   ShoppingCart,
   TriangleAlert,
   Truck,
@@ -41,6 +42,7 @@ import {
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -56,10 +58,15 @@ import { getAvailableSlotCount } from "@/lib/client/slotUsage";
 import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageServer";
 import { AssemblyLineGroups } from "@/lib/reference/assemblyLineGroups";
 import {
+  convertSimulationTargetTime,
   getSimulationInstallableRuns,
   solveSimulationActivity,
+  type ClientSimulationInstall,
   type ClientSimulationSolveMode,
+  type ClientSimulationSlotGroup,
+  type ClientSimulationSchedule,
 } from "@/lib/planning/simulator/clientScheduler";
+import type { PlanStockItem } from "@/lib/planning/types";
 import type {
   SimulationCopyJob,
   SimulationHaulTask,
@@ -289,6 +296,263 @@ function simulationSlotCharacters(
         : [];
     })
     .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+type SimulationBlueprintCounts = {
+  owned: number;
+  available: number;
+};
+
+/** Counts owned and currently available blueprint assets for one simulator job. */
+function simulationBlueprintCounts(
+  job: SimulationIndustryJob,
+  stock: readonly PlanStockItem[],
+): SimulationBlueprintCounts {
+  const matchingBlueprints = stock.filter(
+    (item) =>
+      item.typeId === job.blueprint.blueprintTypeId
+      && (item.category === "blueprint" || item.category === "reactionformula"),
+  );
+  const countPrints = (item: PlanStockItem) =>
+    item.blueprintPrints && item.blueprintPrints.length > 0
+      ? item.blueprintPrints.length
+      : Math.max(0, item.quantity);
+  return matchingBlueprints.reduce(
+    (counts, item) => {
+      const quantity = countPrints(item);
+      counts.owned += quantity;
+      if (!item.inUse && !item.inBuild) counts.available += quantity;
+      return counts;
+    },
+    { owned: 0, available: 0 },
+  );
+}
+
+type SimulationInstallPlanView = "compact" | "full";
+
+type CompactInstallGroup = {
+  runs: number;
+  installs: ClientSimulationInstall[];
+};
+
+/** Groups scheduled installs that contain the same number of runs. */
+function compactInstallGroups(installs: readonly ClientSimulationInstall[]): CompactInstallGroup[] {
+  const groups = new Map<number, ClientSimulationInstall[]>();
+  for (const install of installs) {
+    const group = groups.get(install.runs) ?? [];
+    group.push(install);
+    groups.set(install.runs, group);
+  }
+  return [...groups.entries()]
+    .sort(([leftRuns], [rightRuns]) => rightRuns - leftRuns)
+    .map(([runs, groupedInstalls]) => ({ runs, installs: groupedInstalls }));
+}
+
+/** Renders the install plan for one simulator activity row. */
+function SimulationInstallPlanDialog({
+  job,
+  schedule,
+  activityLabel,
+  blueprintCounts,
+  characterNamesById,
+  scheduleRevision,
+  onOpenPlan,
+}: {
+  job: SimulationIndustryJob;
+  schedule: ClientSimulationSchedule | undefined;
+  activityLabel: string;
+  blueprintCounts: SimulationBlueprintCounts;
+  characterNamesById: ReadonlyMap<number, string>;
+  scheduleRevision: string;
+  onOpenPlan: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState<SimulationInstallPlanView>("compact");
+  const [completedInstallState, setCompletedInstallState] = useState<{
+    scheduleIdentity: string;
+    completedInstallIds: Record<string, boolean>;
+  }>({ scheduleIdentity: "", completedInstallIds: {} });
+  const installs = schedule?.installs ?? [];
+  const hasInsufficientInputs =
+    job.inputs.length > 0 && Math.min(...job.inputs.map((input) => input.availableNow)) === 0;
+  const compactGroups = compactInstallGroups(installs);
+  const scheduleIdentity = `${scheduleRevision}|${installs
+    .map(
+      (install) =>
+        `${install.installId}:${install.characterId ?? ""}:${install.slotIndex ?? ""}:${install.runs}`,
+    )
+    .join("|")}`;
+  const completedInstallIds =
+    completedInstallState.scheduleIdentity === scheduleIdentity
+      ? completedInstallState.completedInstallIds
+      : {};
+  const completed = (installId: string) => completedInstallIds[installId] ?? false;
+  const setInstallCompleted = (installIds: readonly string[], checked: boolean) => {
+    setCompletedInstallState((current) => {
+      const next = {
+        ...(current.scheduleIdentity === scheduleIdentity ? current.completedInstallIds : {}),
+      };
+      for (const installId of installIds) next[installId] = checked;
+      return { scheduleIdentity, completedInstallIds: next };
+    });
+  };
+  const allCompleted = (installIds: readonly string[]) =>
+    installIds.length > 0 && installIds.every((installId) => completed(installId));
+  const navigateToPlan = () => {
+    setOpen(false);
+    onOpenPlan();
+  };
+
+  return (
+    <ResponsiveDialogDrawer
+      open={open}
+      onOpenChange={setOpen}
+      trigger={
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-xs"
+          aria-label={`View ${job.productName} install plan`}
+          className="size-6 text-muted-foreground transition-colors hover:text-foreground"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <ListChecks aria-hidden="true" />
+        </Button>
+      }
+      triggerTooltip={`View ${job.productName} install plan`}
+      title={`${job.productName} install plan`}
+      description={`Planned ${activityLabel} installs for this item.`}
+      headerContent={
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-3 font-mono text-xs sm:grid-cols-4">
+            <div className="flex flex-col">
+              <strong>{job.readyNowRuns.toLocaleString()}</strong>
+              <small className="text-[10px] text-muted-foreground uppercase">
+                Installable runs
+              </small>
+            </div>
+            <div className="flex flex-col">
+              <strong>{job.requiredRuns.toLocaleString()}</strong>
+              <small className="text-[10px] text-muted-foreground uppercase">Total runs</small>
+            </div>
+            <div className="flex flex-col">
+              <strong>{installs.length.toLocaleString()}</strong>
+              <small className="text-[10px] text-muted-foreground uppercase">Slots allocated</small>
+            </div>
+            <div className="flex flex-col">
+              <strong>
+                {blueprintCounts.owned.toLocaleString()} /{" "}
+                {blueprintCounts.available.toLocaleString()}
+              </strong>
+              <small className="text-[10px] text-muted-foreground uppercase">
+                BPs owned / available
+              </small>
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+            <Label className="flex items-center gap-2 text-xs">
+              <span>View: Compact</span>
+              <Switch
+                aria-label="Show full install plan"
+                checked={view === "full"}
+                onCheckedChange={(checked) => setView(checked ? "full" : "compact")}
+              />
+              <span>Detailed</span>
+            </Label>
+          </div>
+        </div>
+      }
+    >
+      <div className="flex flex-col">
+        {view === "full"
+          ? installs.map((install, index) => {
+              const characterName =
+                install.characterId === undefined
+                  ? undefined
+                  : characterNamesById.get(install.characterId);
+              return (
+                <SwitchedResultRow
+                  key={install.installId}
+                  name={job.productName}
+                  typeId={job.productTypeId}
+                  linkPath="planner"
+                  linkIcon={ClipboardList}
+                  linkSearchParams={{ tab: "Plan" }}
+                  linkHash="plan-breakdown"
+                  navigateInPlace
+                  onNavigate={navigateToPlan}
+                  subline={
+                    install.characterId === undefined
+                      ? `Install ${index + 1} · Character not assigned`
+                      : `Install ${index + 1} · ${characterName ?? `Character ${install.characterId}`}`
+                  }
+                  variation="icon"
+                  showSwitch={false}
+                  checkboxChecked={completed(install.installId)}
+                  checkboxTooltip="Mark install complete"
+                  onCheckboxChange={(checked) => setInstallCompleted([install.installId], checked)}
+                  contentClassName="w-full justify-between gap-3 self-end text-right font-mono text-xs sm:grid sm:min-w-[11rem] sm:grid-cols-[minmax(0,1fr)_max-content] sm:gap-x-4 sm:justify-normal sm:self-auto"
+                >
+                  {install.characterId !== undefined && (
+                    <Image
+                      src={eveCharacterPortraitUrl(install.characterId, 32)}
+                      alt={`${characterName ?? `Character ${install.characterId}`} portrait`}
+                      width={24}
+                      height={24}
+                      className="size-6 rounded-none"
+                    />
+                  )}
+                  <CopyableNumber value={install.runs} suffix=" runs" copyLabel="Install runs" />
+                </SwitchedResultRow>
+              );
+            })
+          : compactGroups.map((group) => {
+              const installIds = group.installs.map((install) => install.installId);
+              return (
+                <SwitchedResultRow
+                  key={group.runs}
+                  name={job.productName}
+                  typeId={job.productTypeId}
+                  linkPath="planner"
+                  linkIcon={ClipboardList}
+                  linkSearchParams={{ tab: "Plan" }}
+                  linkHash="plan-breakdown"
+                  navigateInPlace
+                  onNavigate={navigateToPlan}
+                  subline={`${group.installs.length} install${group.installs.length === 1 ? "" : "s"} grouped by runs per install`}
+                  variation="icon"
+                  showSwitch={false}
+                  checkboxChecked={allCompleted(installIds)}
+                  checkboxTooltip="Mark grouped installs complete"
+                  onCheckboxChange={(checked) => setInstallCompleted(installIds, checked)}
+                  contentClassName="w-full justify-between gap-3 self-end text-right font-mono text-xs sm:grid sm:min-w-[11rem] sm:grid-cols-[minmax(0,1fr)_max-content] sm:gap-x-4 sm:justify-normal sm:self-auto"
+                >
+                  <CopyableNumber
+                    value={group.installs.length}
+                    suffix=" installs"
+                    copyLabel="Install count"
+                  />
+                  <CopyableNumber
+                    value={group.runs}
+                    suffix=" runs each"
+                    copyLabel="Runs per install"
+                  />
+                </SwitchedResultRow>
+              );
+            })}
+        {installs.length === 0 && (
+          <p className="py-4 text-muted-foreground">
+            No slots are allocated for this item.
+            {blueprintCounts.available === 0
+              ? " No available blueprints."
+              : hasInsufficientInputs
+                ? " Insufficient inputs."
+                : null}
+          </p>
+        )}
+      </div>
+    </ResponsiveDialogDrawer>
+  );
 }
 
 /** Selects blueprint artwork for blueprint-named balances in the plan ledger. */
@@ -779,6 +1043,7 @@ function multibuyText(entries: readonly SimulationBuyEntry[]): string {
 function SimulationActivityTab({
   tab,
   jobs,
+  stock,
   locationNamesById,
   characterNamesById,
   characterStatuses,
@@ -789,6 +1054,7 @@ function SimulationActivityTab({
 }: {
   tab: "react" | "manufacture";
   jobs: SimulationIndustryJob[];
+  stock: readonly PlanStockItem[];
   locationNamesById: ReadonlyMap<number, string>;
   characterNamesById: ReadonlyMap<number, string>;
   characterStatuses: readonly ClientCharacterStatus[];
@@ -822,7 +1088,22 @@ function SimulationActivityTab({
     solveMode,
     Number(targetTime),
     enabledJobIds,
+    slotCharacters.map(
+      ({ characterId, availableSlots }): ClientSimulationSlotGroup => ({
+        characterId,
+        availableSlots,
+      }),
+    ),
   );
+  const scheduleRevision = [
+    solveMode,
+    targetTime,
+    availableSlots,
+    ...slotCharacters.map(
+      ({ characterId, availableSlots: characterSlots }) => `${characterId}:${characterSlots}`,
+    ),
+    ...[...enabledJobIds].sort(),
+  ].join("|");
   const scheduledRuns = activeJobs.reduce(
     (total, job) => total + (schedules.get(job.jobId)?.runs ?? 0),
     0,
@@ -874,6 +1155,19 @@ function SimulationActivityTab({
     }
   }
 
+  function handleSolveModeChange(value: ClientSimulationSolveMode | null) {
+    if (value === null) return;
+    const nextMode = value;
+    if (
+      solveMode !== "available-slots"
+      && nextMode !== "available-slots"
+      && solveMode !== nextMode
+    ) {
+      setTargetTime(String(convertSimulationTargetTime(Number(targetTime), solveMode, nextMode)));
+    }
+    setSolveMode(nextMode);
+  }
+
   return (
     <SimulationResultsTab
       hasResults={jobs.length > 0}
@@ -883,10 +1177,7 @@ function SimulationActivityTab({
             <Label className="shrink-0 whitespace-nowrap" htmlFor={`${tab}-solve-mode`}>
               Solve for
             </Label>
-            <Select
-              value={solveMode}
-              onValueChange={(value) => setSolveMode(value as ClientSimulationSolveMode)}
-            >
+            <Select value={solveMode} onValueChange={handleSolveModeChange}>
               <SelectTrigger
                 id={`${tab}-solve-mode`}
                 aria-label={`${activityLabel} solve mode`}
@@ -1051,15 +1342,30 @@ function SimulationActivityTab({
                 tab === "react" ? "Mark reaction installed" : "Mark manufacturing job installed"
               }
               onCheckboxChange={(checked) => controls.onCompletedChange(rowKey, checked)}
-              contentClassName="self-end text-right font-mono text-xs sm:self-auto"
+              contentClassName="grid w-full grid-cols-[max-content_minmax(0,max-content)_minmax(0,max-content)] items-center justify-around gap-3 self-end text-right font-mono text-xs sm:w-auto sm:grid-cols-[3rem_9rem_minmax(11rem,max-content)] sm:justify-end sm:gap-x-5 sm:self-auto"
             >
-              <SimulationJobInputsResponsive
-                job={job}
-                onOpenPlan={controls.onOpenPlan}
-                onOpenBuy={controls.onOpenBuy}
-              />
-              <CopyableNumber value={job.readyNowRuns} suffix=" / " copyLabel="Ready runs" />
-              <CopyableNumber value={job.requiredRuns} suffix=" runs" copyLabel="Required runs" />
+              <span className="flex items-center justify-center">
+                <SimulationInstallPlanDialog
+                  job={job}
+                  schedule={schedules.get(job.jobId)}
+                  activityLabel={activityLabel}
+                  blueprintCounts={simulationBlueprintCounts(job, stock)}
+                  characterNamesById={characterNamesById}
+                  scheduleRevision={scheduleRevision}
+                  onOpenPlan={controls.onOpenPlan}
+                />
+              </span>
+              <span className="flex items-center justify-center">
+                <SimulationJobInputsResponsive
+                  job={job}
+                  onOpenPlan={controls.onOpenPlan}
+                  onOpenBuy={controls.onOpenBuy}
+                />
+              </span>
+              <span className="flex min-w-0 items-center justify-end gap-1 whitespace-normal sm:whitespace-nowrap">
+                <CopyableNumber value={job.readyNowRuns} suffix=" / " copyLabel="Ready runs" />
+                <CopyableNumber value={job.requiredRuns} suffix=" runs" copyLabel="Required runs" />
+              </span>
             </SwitchedResultRow>
           );
         }}
@@ -1512,6 +1818,7 @@ function SimulationWarningsTab({
 export default function SimulationResults({
   result,
   status,
+  stock,
   locationNamesById,
   characterNamesById,
   characterStatuses,
@@ -1521,6 +1828,7 @@ export default function SimulationResults({
 }: {
   result: SimulationResultV1 | null;
   status: string;
+  stock: readonly PlanStockItem[];
   locationNamesById: ReadonlyMap<number, string>;
   characterNamesById: ReadonlyMap<number, string>;
   characterStatuses: readonly ClientCharacterStatus[];
@@ -1601,6 +1909,7 @@ export default function SimulationResults({
           <SimulationTabContent
             activeTab={activeTab}
             result={result}
+            stock={stock}
             locationNamesById={locationNamesById}
             characterNamesById={characterNamesById}
             characterStatuses={characterStatuses}
@@ -1621,6 +1930,7 @@ export default function SimulationResults({
 function SimulationTabContent({
   activeTab,
   result,
+  stock,
   locationNamesById,
   characterNamesById,
   characterStatuses,
@@ -1633,6 +1943,7 @@ function SimulationTabContent({
 }: {
   activeTab: SimulationTab;
   result: SimulationResultV1;
+  stock: readonly PlanStockItem[];
   locationNamesById: ReadonlyMap<number, string>;
   characterNamesById: ReadonlyMap<number, string>;
   characterStatuses: readonly ClientCharacterStatus[];
@@ -1704,6 +2015,7 @@ function SimulationTabContent({
       <SimulationActivityTab
         tab={activeTab}
         jobs={activeTab === "react" ? result.lists.reactionJobs : result.lists.manufacturingJobs}
+        stock={stock}
         locationNamesById={locationNamesById}
         characterNamesById={characterNamesById}
         characterStatuses={characterStatuses}

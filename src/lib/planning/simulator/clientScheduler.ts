@@ -3,10 +3,35 @@ import type { SimulationIndustryJob } from "./types";
 /** Scheduling modes exposed by the simulator activity controls. */
 export type ClientSimulationSolveMode = "available-slots" | "run-time-hours" | "run-time-days";
 
+/** Describes the currently available slots for one character. */
+export type ClientSimulationSlotGroup = {
+  characterId: number;
+  availableSlots: number;
+};
+
+/** Converts a runtime target between the hour and day solve modes. */
+export function convertSimulationTargetTime(
+  targetTime: number,
+  fromMode: ClientSimulationSolveMode,
+  toMode: ClientSimulationSolveMode,
+): number {
+  const normalizedTarget = Number.isFinite(targetTime) ? Math.max(0, targetTime) : 0;
+  if (fromMode === "run-time-days" && toMode === "run-time-hours") {
+    return Math.max(1, Math.ceil(normalizedTarget * 24));
+  }
+  if (fromMode === "run-time-hours" && toMode === "run-time-days") {
+    return Math.max(1, Math.ceil(normalizedTarget / 24));
+  }
+  return Math.max(1, Math.ceil(normalizedTarget));
+}
+
 /** One client-side install suggestion for a simulator job. */
 export type ClientSimulationInstall = {
+  installId: string;
   runs: number;
   durationSeconds: number;
+  characterId?: number;
+  slotIndex?: number;
 };
 
 /** The client-side install suggestions and summary for one simulator job. */
@@ -28,12 +53,14 @@ export function solveSimulationActivity(
   mode: ClientSimulationSolveMode,
   targetTime: number,
   enabledJobIds: ReadonlySet<string> = new Set(jobs.map((job) => job.jobId)),
+  slotGroups: readonly ClientSimulationSlotGroup[] = [],
 ): ReadonlyMap<string, ClientSimulationSchedule> {
   const rows = jobs.map((job) => ({
     job,
     runs: getSimulationInstallableRuns(job),
     installs: 0,
     scheduledRuns: 0,
+    assignedSlots: [] as ClientSimulationSlot[],
   }));
   const enabledRows = rows.filter(
     ({ job, runs }) => enabledJobIds.has(job.jobId) && runs > 0 && job.durationPerRunSeconds > 0,
@@ -59,12 +86,17 @@ export function solveSimulationActivity(
     }
   }
 
+  assignSlotDetails(enabledRows, slotGroups);
+
   return new Map(
-    rows.map(({ job, installs, scheduledRuns }) => {
+    rows.map(({ job, installs, scheduledRuns, assignedSlots }) => {
       const allocations = splitRuns(scheduledRuns, installs);
-      const scheduleInstalls = allocations.map((installRuns) => ({
+      const scheduleInstalls = allocations.map((installRuns, index) => ({
+        installId: `client-install:${job.jobId}:${index}`,
         runs: installRuns,
         durationSeconds: Math.ceil(installRuns * job.durationPerRunSeconds),
+        characterId: assignedSlots[index]?.characterId,
+        slotIndex: assignedSlots[index]?.slotIndex,
       }));
       return [
         job.jobId,
@@ -83,7 +115,34 @@ type SimulationScheduleRow = {
   runs: number;
   installs: number;
   scheduledRuns: number;
+  assignedSlots: ClientSimulationSlot[];
 };
+
+type ClientSimulationSlot = {
+  characterId: number;
+  slotIndex: number;
+};
+
+/** Assigns available character slots to each scheduled install for presentation. */
+function assignSlotDetails(
+  rows: SimulationScheduleRow[],
+  slotGroups: readonly ClientSimulationSlotGroup[],
+): void {
+  const slots = slotGroups.flatMap((group) =>
+    Array.from(
+      { length: Math.max(0, Math.floor(group.availableSlots)) },
+      (_, slotIndex) => ({
+        characterId: group.characterId,
+        slotIndex,
+      }),
+    ),
+  );
+  let slotOffset = 0;
+  for (const row of rows) {
+    row.assignedSlots = slots.slice(slotOffset, slotOffset + row.installs);
+    slotOffset += row.installs;
+  }
+}
 
 /** Distributes available slots toward the largest remaining installable chunks. */
 function allocateAvailableSlots(rows: SimulationScheduleRow[], availableSlots: number): void {

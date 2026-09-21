@@ -2125,6 +2125,7 @@ function Planner() {
         <SimulationResults
           result={simulationResult}
           status={planStatus}
+          stock={stock}
           locationNamesById={plannerLocationNames}
           characterNamesById={characterNamesById}
           characterStatuses={characterStatuses}

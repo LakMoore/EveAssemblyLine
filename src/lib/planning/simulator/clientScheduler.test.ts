@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { solveSimulationActivity } from "./clientScheduler";
+import { convertSimulationTargetTime, solveSimulationActivity } from "./clientScheduler";
 import type { SimulationIndustryJob } from "./types";
 
 /** Creates a minimal simulator job for client scheduler tests. */
@@ -60,4 +60,39 @@ void test("limits each suggested install to the requested run time", () => {
   assert.equal(schedules.get("A")?.installs.length, 1);
   assert.equal(schedules.get("A")?.installs[0]?.runs, 3);
   assert.equal(schedules.get("A")?.timeSeconds, 10800);
+});
+
+void test("converts runtime targets between hours and days with a minimum of one", () => {
+  assert.equal(convertSimulationTargetTime(2, "run-time-days", "run-time-hours"), 48);
+  assert.equal(convertSimulationTargetTime(24, "run-time-hours", "run-time-days"), 1);
+  assert.equal(convertSimulationTargetTime(12, "run-time-hours", "run-time-days"), 1);
+  assert.equal(convertSimulationTargetTime(0, "run-time-days", "run-time-hours"), 1);
+});
+
+void test("retains character slot details for the install plan", () => {
+  const schedules = solveSimulationActivity(
+    [job("A", 5, 5, 3600)],
+    2,
+    "available-slots",
+    24,
+    new Set(["A"]),
+    [
+      { characterId: 7, availableSlots: 1 },
+      { characterId: 8, availableSlots: 1 },
+    ],
+  );
+
+  assert.deepEqual(
+    schedules
+      .get("A")
+      ?.installs.map(({ characterId, slotIndex, runs }) => ({
+        characterId,
+        slotIndex,
+        runs,
+      })),
+    [
+      { characterId: 7, slotIndex: 0, runs: 3 },
+      { characterId: 8, slotIndex: 0, runs: 2 },
+    ],
+  );
 });

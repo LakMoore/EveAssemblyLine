@@ -21,10 +21,12 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@/components/ui/drawer";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 export type ResponsiveDialogDrawerProps = {
   trigger?: ReactElement;
+  triggerTooltip?: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   title: ReactNode;
@@ -55,6 +57,7 @@ function useIsMobile() {
 /** Renders the same content as a desktop Dialog and a mobile bottom Drawer. */
 export default function ResponsiveDialogDrawer({
   trigger,
+  triggerTooltip,
   open,
   onOpenChange,
   title,
@@ -71,7 +74,14 @@ export default function ResponsiveDialogDrawer({
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={onOpenChange}>
-        {trigger && <DrawerTrigger render={trigger} />}
+        {trigger && triggerTooltip ? (
+          <Tooltip>
+            <TooltipTrigger render={<DrawerTrigger render={trigger} />} />
+            <TooltipContent>{triggerTooltip}</TooltipContent>
+          </Tooltip>
+        ) : (
+          trigger && <DrawerTrigger render={trigger} />
+        )}
         {/* Constrain height (h-full) makes the ScrollArea work */}
         <DrawerContent
           className={cn(
@@ -93,7 +103,14 @@ export default function ResponsiveDialogDrawer({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {trigger && <DialogTrigger render={trigger} />}
+      {trigger && triggerTooltip ? (
+        <Tooltip>
+          <TooltipTrigger render={<DialogTrigger render={trigger} />} />
+          <TooltipContent>{triggerTooltip}</TooltipContent>
+        </Tooltip>
+      ) : (
+        trigger && <DialogTrigger render={trigger} />
+      )}
       <DialogContent className={cn("max-h-[85vh]", dialogClassName)}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
