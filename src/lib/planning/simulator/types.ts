@@ -251,7 +251,7 @@ export interface SimulationHaulDemand {
   quantity: number;
 }
 
-/** Physical haul requirement aggregated by source, type, and owner. */
+/** Physical haul requirement aggregated by source, type, destination, and owner. */
 export interface SimulationHaulTask {
   transferId: string;
   lotId: string;

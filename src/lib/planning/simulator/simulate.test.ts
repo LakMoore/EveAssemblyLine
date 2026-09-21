@@ -3,7 +3,7 @@ import test from "node:test";
 import { parseSimulatorRequest } from "./schema";
 import { aggregateHaulingTasks, simulateIndustry } from "./simulate";
 
-void test("aggregates hauling tasks by source, type, and owner with demand provenance", () => {
+void test("aggregates hauling tasks by route and owner with demand provenance", () => {
   const tasks = aggregateHaulingTasks([
     {
       transferId: "haul:one",
@@ -48,15 +48,9 @@ void test("aggregates hauling tasks by source, type, and owner with demand prove
       demands: [{ jobId: "job-c", quantity: 7 }],
     },
   ]);
-  assert.equal(tasks.length, 2);
-  assert.equal(tasks[0].quantity, 15);
-  assert.deepEqual(
-    tasks[0].demands,
-    [
-      { jobId: "job-a", quantity: 10 },
-      { jobId: "job-b", quantity: 5 },
-    ],
-  );
+  assert.equal(tasks.length, 3);
+  assert.equal(tasks[0].quantity, 10);
+  assert.deepEqual(tasks[0].demands, [{ jobId: "job-a", quantity: 10 }]);
 });
 
 void test("assembles a versioned invariant-safe result from the cached SDE", async () => {

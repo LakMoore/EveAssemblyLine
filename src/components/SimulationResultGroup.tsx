@@ -16,6 +16,10 @@ type SimulationResultGroupProps = {
   isOpen: boolean;
   avatarRows: SimulationGroupAvatar[];
   remainingCount: number;
+  switchChecked?: boolean;
+  switchLabel?: string;
+  switchDisabled?: boolean;
+  onSwitchChange?: (checked: boolean) => void;
   onOpenChange: (open: boolean) => void;
   onCopyGroup?: () => void;
   copyLabel?: string;
@@ -32,6 +36,10 @@ export default function SimulationResultGroup({
   isOpen,
   avatarRows,
   remainingCount,
+  switchChecked,
+  switchLabel,
+  switchDisabled,
+  onSwitchChange,
   onOpenChange,
   onCopyGroup,
   copyLabel,
@@ -55,6 +63,10 @@ export default function SimulationResultGroup({
         isOpen={isOpen}
         avatarRows={avatarRows}
         remainingCount={remainingCount}
+        switchChecked={switchChecked}
+        switchLabel={switchLabel}
+        switchDisabled={switchDisabled}
+        onSwitchChange={onSwitchChange}
         onCopyGroup={onCopyGroup}
         copyLabel={copyLabel}
       />

@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Switch } from "@/components/ui/switch";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import { ChevronsDownUp, ChevronsUpDown, Copy as CopyIcon } from "lucide-react";
 
@@ -24,6 +25,10 @@ type SimulationResultGroupHeaderProps = {
   isOpen: boolean;
   avatarRows: SimulationGroupAvatar[];
   remainingCount: number;
+  switchChecked?: boolean;
+  switchLabel?: string;
+  switchDisabled?: boolean;
+  onSwitchChange?: (checked: boolean) => void;
   onCopyGroup?: () => void;
   copyLabel?: string;
 };
@@ -36,12 +41,24 @@ export default function SimulationResultGroupHeader({
   isOpen,
   avatarRows,
   remainingCount,
+  switchChecked,
+  switchLabel = "Include group",
+  switchDisabled = false,
+  onSwitchChange,
   onCopyGroup,
   copyLabel,
 }: SimulationResultGroupHeaderProps) {
   return (
     <div className="py-4 text-foreground uppercase">
       <div className="flex flex-1 flex-row items-center justify-between gap-4 px-2">
+        {onSwitchChange && (
+          <Switch
+            aria-label={switchLabel}
+            checked={switchChecked}
+            disabled={switchDisabled}
+            onCheckedChange={onSwitchChange}
+          />
+        )}
         <h3 className="flex min-w-0 shrink grow truncate pl-2 text-lg">{label}</h3>
         {trailingContent}
         <AvatarGroup className="ml-auto hidden group-data-closed/simulation-group:flex">

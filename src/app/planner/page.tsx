@@ -6,6 +6,7 @@ import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import type {
   ClientBuildItem,
   ClientPlanStockpile,
+  PlanHaulExclusion,
   PlanStockpileLocations,
   PlanResponse,
   PlanStockItem,
@@ -279,6 +280,20 @@ function retainCurrentHaulItemExclusions(
   );
 }
 
+/** Combines route exclusions while removing duplicate item, route, and owner entries. */
+function mergePlanHaulExclusions(
+  ...exclusionLists: readonly (readonly PlanHaulExclusion[])[]
+): PlanHaulExclusion[] {
+  const exclusions = new Map<string, PlanHaulExclusion>();
+  for (const exclusionList of exclusionLists) {
+    for (const exclusion of exclusionList) {
+      const key = `${exclusion.typeId}:${exclusion.fromLocationId}:${exclusion.toLocationId}:${exclusion.ownerType ?? ""}:${exclusion.ownerId ?? ""}`;
+      exclusions.set(key, exclusion);
+    }
+  }
+  return [...exclusions.values()];
+}
+
 function selectSavedLocation(
   options: PlanLocationOption[],
   savedLocationId: number | undefined,
@@ -465,6 +480,7 @@ function Planner() {
   const [includeStock, setIncludeStock] = useState(true);
   const [includeSurplusForAllLocations, setIncludeSurplusForAllLocations] = useState(false);
   const [haulItemExclusion, setHaulItemExclusion] = useState<HaulItemExclusion>(() => new Map());
+  const [simulationHaulExclusions, setSimulationHaulExclusions] = useState<PlanHaulExclusion[]>([]);
   const [haulPatches, setHaulPatches] = useState<Map<string, HaulPatch>>(() => new Map());
   const [haulPatchesLoaded, setHaulPatchesLoaded] = useState(false);
   const [corporationSources, setCorporationSources] = useState<ClientCorporationSource[]>([]);
@@ -788,6 +804,7 @@ function Planner() {
     itemExclusions: HaulItemExclusion = haulItemExclusion,
     patches: ReadonlyMap<string, HaulPatch> = activeHaulPatches,
     mode: PlanRunMode = "calculate",
+    simulationExclusions: readonly PlanHaulExclusion[] = simulationHaulExclusions,
   ): Promise<boolean> {
     const activeStockpiles = stockpiles.filter((stockpile) => stockpile.isActive !== false);
     const plannerItems = activeStockpiles.flatMap((stockpile) => stockpile.items);
@@ -853,7 +870,10 @@ function Planner() {
               sizeId: location.sizeId,
               buildTypeGroups: location.buildTypeGroups,
             })),
-            haulExclusions: toPlanHaulExclusions(itemExclusions),
+            haulExclusions: mergePlanHaulExclusions(
+              toPlanHaulExclusions(itemExclusions),
+              mode === "simulate" ? simulationExclusions : [],
+            ),
             assets: requestStock.map(
               ({ sourceLocationName: _sourceLocationName, ...item }) => item,
             ),
@@ -940,6 +960,33 @@ function Planner() {
       setIsPlanLoading(false);
       setActivePlanRun(null);
     }
+  }
+
+  /** Re-runs the simulator with the current haul-row exclusions. */
+  async function updateSimulationHaulExclusions(
+    exclusions: readonly PlanHaulExclusion[],
+  ): Promise<void> {
+    const succeeded = await submitPlan(
+      new Set(excludedLocationIds),
+      haulItemExclusion,
+      activeHaulPatches,
+      "simulate",
+      exclusions,
+    );
+    if (succeeded) setSimulationHaulExclusions([...exclusions]);
+  }
+
+  /** Clears haul-tab exclusions and refreshes the simulator with every route enabled. */
+  async function clearSimulationHaulExclusions(): Promise<boolean> {
+    const succeeded = await submitPlan(
+      new Set(excludedLocationIds),
+      haulItemExclusion,
+      activeHaulPatches,
+      "simulate",
+      [],
+    );
+    if (succeeded) setSimulationHaulExclusions([]);
+    return succeeded;
   }
 
   async function excludeHaulStockpile(fromLocationId: number) {
@@ -2133,6 +2180,12 @@ function Planner() {
           stockpileNamesById={
             new Map(stockpiles.map((stockpile) => [stockpile.id, stockpile.name]))
           }
+          haulExclusions={simulationHaulExclusions}
+          isLoading={isPlanLoading}
+          onClearHaulExclusions={clearSimulationHaulExclusions}
+          onHaulExclusionsChange={(exclusions) => {
+            void updateSimulationHaulExclusions(exclusions);
+          }}
         />
       )}
     </>

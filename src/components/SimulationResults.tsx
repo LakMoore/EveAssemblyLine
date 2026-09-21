@@ -66,7 +66,7 @@ import {
   type ClientSimulationSlotGroup,
   type ClientSimulationSchedule,
 } from "@/lib/planning/simulator/clientScheduler";
-import type { PlanStockItem } from "@/lib/planning/types";
+import type { PlanHaulExclusion, PlanStockItem } from "@/lib/planning/types";
 import type {
   SimulationCopyJob,
   SimulationHaulTask,
@@ -179,6 +179,7 @@ type SimulationRowControls = {
   onSelectRow: (rowKey: string) => void;
   isIncluded: (rowKey: string) => boolean;
   onIncludedChange: (rowKey: string, included: boolean) => void;
+  onHaulIncludedChange: (rowKeys: readonly string[], included: boolean) => void;
   isCompleted: (
     rowKey: string,
     scheduleIdentity?: string,
@@ -234,6 +235,46 @@ function quantity(value: number): string {
 /** Returns the rounded total volume represented by a group of simulation haul tasks. */
 function simulationHaulVolume(tasks: readonly SimulationHaulTask[]): number {
   return Math.ceil(tasks.reduce((total, task) => total + task.quantity * task.unitVolume, 0));
+}
+
+/** Identifies one simulator haul route, including its optional owner scope. */
+function simulationHaulExclusionKey(
+  value: Pick<
+    PlanHaulExclusion,
+    "typeId" | "fromLocationId" | "toLocationId" | "ownerType" | "ownerId"
+  >,
+): string {
+  return `${value.typeId}:${value.fromLocationId}:${value.toLocationId}:${value.ownerType ?? ""}:${value.ownerId ?? ""}`;
+}
+
+/** Builds route-scoped simulator exclusions from the haul rows currently switched off. */
+function simulationHaulExclusions(
+  result: SimulationResultV1 | null,
+  includedRows: Readonly<Record<string, boolean>>,
+  currentExclusions: readonly PlanHaulExclusion[],
+  visibleHaulTasks: readonly SimulationHaulTask[] = result?.lists.haulingTasks ?? [],
+): PlanHaulExclusion[] {
+  const exclusions = new Map<string, PlanHaulExclusion>(
+    currentExclusions.map((exclusion) => [
+      `${exclusion.typeId}:${exclusion.fromLocationId}:${exclusion.toLocationId}:${exclusion.ownerType ?? ""}:${exclusion.ownerId ?? ""}`,
+      exclusion,
+    ]),
+  );
+  if (!result) return [...exclusions.values()];
+  for (const task of visibleHaulTasks) {
+    const exclusion: PlanHaulExclusion = {
+      typeId: task.typeId,
+      fromLocationId: task.fromLocationId,
+      toLocationId: task.toLocationId,
+      ...(task.ownerType !== undefined && task.ownerId !== undefined
+        ? { ownerType: task.ownerType, ownerId: task.ownerId }
+        : {}),
+    };
+    const key = simulationHaulExclusionKey(exclusion);
+    if (includedRows[`haul:${task.transferId}`] ?? true) exclusions.delete(key);
+    else exclusions.set(key, exclusion);
+  }
+  return [...exclusions.values()];
 }
 
 /** Renders a simulator number with its raw value available for copying. */
@@ -1735,14 +1776,20 @@ function SimulationHaulTab({
   characterNamesById,
   corporationNamesById,
   controls,
+  isLoading,
+  haulExclusions,
+  onClearHaulExclusions,
   openGroups,
   onOpenGroupChange,
 }: {
-  tasks: SimulationHaulTask[];
+  tasks: readonly SimulationHaulTask[];
   locationNamesById: ReadonlyMap<number, string>;
   characterNamesById: ReadonlyMap<number, string>;
   corporationNamesById: ReadonlyMap<number, string>;
   controls: SimulationRowControls;
+  isLoading: boolean;
+  haulExclusions: readonly PlanHaulExclusion[];
+  onClearHaulExclusions: () => Promise<boolean>;
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
@@ -1760,96 +1807,125 @@ function SimulationHaulTab({
   );
 
   return (
-    <SimulationResultsTab hasResults={tasks.length > 0}>
-      <div className="flex min-w-0 flex-col gap-4">
-        {sourceGroups.map(([fromLocationId, destinations]) => {
-          const sourceTasks = [...destinations.values()].flat();
-          const sourceKey = `haul:from:${fromLocationId}`;
-          const sourceAvatars = createGroupAvatars(
-            sourceTasks,
-            (task) => ({
-              typeId: task.typeId,
-              name: task.typeName,
-              imageVariation: haulImageVariation(task.blueprintKind),
-            }),
-          );
-          return (
-            <SimulationResultGroup
-              groupKey={sourceKey}
-              key={sourceKey}
-              label={
-                <>
-                  <span className="text-(--theme-info)">From:&nbsp;</span>
-                  {locationName(locationNamesById, fromLocationId)}
-                </>
-              }
-              ariaLabel={`From: ${locationName(locationNamesById, fromLocationId)}`}
-              isOpen={openGroups[sourceKey] ?? true}
-              onOpenChange={(open) => onOpenGroupChange(sourceKey, open)}
-              avatarRows={sourceAvatars}
-              remainingCount={sourceTasks.length - sourceAvatars.length}
-            >
-              <div className="flex min-w-0 flex-col gap-3 pb-3">
-                {[...destinations.entries()]
-                  .sort(([leftId], [rightId]) =>
-                    locationName(locationNamesById, leftId).localeCompare(
-                      locationName(locationNamesById, rightId),
-                    ),
-                  )
-                  .map(([toLocationId, destinationTasks]) => {
-                    const destinationKey = `${sourceKey}:to:${toLocationId}`;
-                    const destinationVolume = simulationHaulVolume(destinationTasks);
-                    const destinationVolumeLabel = `${quantity(destinationVolume)} cubic meters`;
-                    const destinationAvatars = createGroupAvatars(
-                      destinationTasks,
-                      (task) => ({
-                        typeId: task.typeId,
-                        name: task.typeName,
-                        imageVariation: haulImageVariation(task.blueprintKind),
-                      }),
-                    );
-                    return (
-                      <SimulationResultGroup
-                        groupKey={destinationKey}
-                        key={destinationKey}
-                        label={
-                          <>
-                            <span className="text-(--theme-info)">To:&nbsp;</span>
-                            {locationName(locationNamesById, toLocationId)}
-                          </>
-                        }
-                        trailingContent={
-                          <strong className="shrink-0 text-lg whitespace-nowrap text-(--theme-info) lowercase">
-                            {quantity(destinationVolume)} m<sup>3</sup>
-                          </strong>
-                        }
-                        ariaLabel={`To: ${locationName(locationNamesById, toLocationId)}, ${destinationVolumeLabel}`}
-                        variant="nested"
-                        isOpen={openGroups[destinationKey] ?? true}
-                        onOpenChange={(open) => onOpenGroupChange(destinationKey, open)}
-                        avatarRows={destinationAvatars}
-                        remainingCount={destinationTasks.length - destinationAvatars.length}
-                      >
-                        <div className="flex min-w-0 flex-col">
-                          {destinationTasks.map((task) => (
-                            <SimulationHaulRow
-                              key={task.transferId}
-                              task={task}
-                              characterNamesById={characterNamesById}
-                              corporationNamesById={corporationNamesById}
-                              controls={controls}
-                            />
-                          ))}
-                        </div>
-                      </SimulationResultGroup>
-                    );
-                  })}
-              </div>
-            </SimulationResultGroup>
-          );
-        })}
-      </div>
-    </SimulationResultsTab>
+    <div className="flex min-w-0 flex-col gap-4">
+      {haulExclusions.length > 0 && (
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={isLoading}
+            onClick={onClearHaulExclusions}
+          >
+            Clear haul exclusions
+          </Button>
+        </div>
+      )}
+      <SimulationResultsTab hasResults={tasks.length > 0}>
+        <div className="flex min-w-0 flex-col gap-4">
+          {sourceGroups.map(([fromLocationId, destinations]) => {
+            const sourceTasks = [...destinations.values()].flat();
+            const sourceKey = `haul:from:${fromLocationId}`;
+            const sourceAvatars = createGroupAvatars(
+              sourceTasks,
+              (task) => ({
+                typeId: task.typeId,
+                name: task.typeName,
+                imageVariation: haulImageVariation(task.blueprintKind),
+              }),
+            );
+            return (
+              <SimulationResultGroup
+                groupKey={sourceKey}
+                key={sourceKey}
+                label={
+                  <>
+                    <span className="text-(--theme-info)">From:&nbsp;</span>
+                    {locationName(locationNamesById, fromLocationId)}
+                  </>
+                }
+                ariaLabel={`From: ${locationName(locationNamesById, fromLocationId)}`}
+                isOpen={openGroups[sourceKey] ?? true}
+                onOpenChange={(open) => onOpenGroupChange(sourceKey, open)}
+                avatarRows={sourceAvatars}
+                remainingCount={sourceTasks.length - sourceAvatars.length}
+              >
+                <div className="flex min-w-0 flex-col gap-3 pb-3">
+                  {[...destinations.entries()]
+                    .sort(([leftId], [rightId]) =>
+                      locationName(locationNamesById, leftId).localeCompare(
+                        locationName(locationNamesById, rightId),
+                      ),
+                    )
+                    .map(([toLocationId, destinationTasks]) => {
+                      const destinationKey = `${sourceKey}:to:${toLocationId}`;
+                      const destinationVolume = simulationHaulVolume(destinationTasks);
+                      const destinationVolumeLabel = `${quantity(destinationVolume)} cubic meters`;
+                      const includedTaskCount = destinationTasks.filter((task) =>
+                        controls.isIncluded(`haul:${task.transferId}`),
+                      ).length;
+                      const destinationIncluded = includedTaskCount > destinationTasks.length / 2;
+                      const destinationRowKeys = destinationTasks.map(
+                        (task) => `haul:${task.transferId}`,
+                      );
+                      const destinationAvatars = createGroupAvatars(
+                        destinationTasks,
+                        (task) => ({
+                          typeId: task.typeId,
+                          name: task.typeName,
+                          imageVariation: haulImageVariation(task.blueprintKind),
+                        }),
+                      );
+                      return (
+                        <SimulationResultGroup
+                          groupKey={destinationKey}
+                          key={destinationKey}
+                          label={
+                            <>
+                              <span className="text-(--theme-info)">To:&nbsp;</span>
+                              {locationName(locationNamesById, toLocationId)}
+                            </>
+                          }
+                          trailingContent={
+                            <strong className="shrink-0 text-lg whitespace-nowrap text-(--theme-info) lowercase">
+                              {quantity(destinationVolume)} m<sup>3</sup>
+                            </strong>
+                          }
+                          ariaLabel={`To: ${locationName(locationNamesById, toLocationId)}, ${destinationVolumeLabel}`}
+                          switchChecked={destinationIncluded}
+                          switchLabel={`Include haul group from ${locationName(locationNamesById, fromLocationId)} to ${locationName(locationNamesById, toLocationId)}`}
+                          switchDisabled={isLoading}
+                          onSwitchChange={(checked) =>
+                            controls.onHaulIncludedChange(destinationRowKeys, checked)
+                          }
+                          variant="nested"
+                          isOpen={openGroups[destinationKey] ?? true}
+                          onOpenChange={(open) => onOpenGroupChange(destinationKey, open)}
+                          avatarRows={destinationAvatars}
+                          remainingCount={destinationTasks.length - destinationAvatars.length}
+                        >
+                          <div className="flex min-w-0 flex-col">
+                            {destinationTasks.map((task) => (
+                              <SimulationHaulRow
+                                key={task.transferId}
+                                task={task}
+                                characterNamesById={characterNamesById}
+                                corporationNamesById={corporationNamesById}
+                                switchLabel={`Include ${task.typeName} from ${locationName(locationNamesById, task.fromLocationId)} to ${locationName(locationNamesById, task.toLocationId)} in haul plan, transfer ${task.transferId}`}
+                                isLoading={isLoading}
+                                controls={controls}
+                              />
+                            ))}
+                          </div>
+                        </SimulationResultGroup>
+                      );
+                    })}
+                </div>
+              </SimulationResultGroup>
+            );
+          })}
+        </div>
+      </SimulationResultsTab>
+    </div>
   );
 }
 
@@ -1858,11 +1934,15 @@ function SimulationHaulRow({
   task,
   characterNamesById,
   corporationNamesById,
+  switchLabel,
+  isLoading,
   controls,
 }: {
   task: SimulationHaulTask;
   characterNamesById: ReadonlyMap<number, string>;
   corporationNamesById: ReadonlyMap<number, string>;
+  switchLabel: string;
+  isLoading: boolean;
   controls: SimulationRowControls;
 }) {
   const rowKey = `haul:${task.transferId}`;
@@ -1892,12 +1972,13 @@ function SimulationHaulRow({
       onNavigate={controls.onOpenPlan}
       selected={!completed && controls.selectedRowKey === rowKey}
       installed={completed}
-      onClick={completed ? undefined : () => controls.onSelectRow(rowKey)}
+      onClick={completed || isLoading ? undefined : () => controls.onSelectRow(rowKey)}
       switchChecked={included}
-      switchTooltip="Include in haul plan"
-      onSwitchChange={(checked) => controls.onIncludedChange(rowKey, checked)}
+      switchTooltip={switchLabel}
+      switchDisabled={isLoading}
+      onSwitchChange={(checked) => controls.onHaulIncludedChange([rowKey], checked)}
       checkboxChecked={completed}
-      checkboxDisabled={!included}
+      checkboxDisabled={!included || isLoading}
       checkboxTooltip="Mark as moved"
       onCheckboxChange={(checked) => controls.onCompletedChange(rowKey, checked)}
       contentClassName="self-end text-right font-mono text-xs sm:self-auto"
@@ -2180,6 +2261,10 @@ export default function SimulationResults({
   slotUsage,
   corporationNamesById,
   stockpileNamesById,
+  haulExclusions,
+  isLoading,
+  onClearHaulExclusions,
+  onHaulExclusionsChange,
 }: {
   result: SimulationResultV1 | null;
   status: string;
@@ -2191,21 +2276,74 @@ export default function SimulationResults({
   slotUsage: ClientJobsResponse["slotUsage"];
   corporationNamesById: ReadonlyMap<number, string>;
   stockpileNamesById: ReadonlyMap<string, string>;
+  haulExclusions: readonly PlanHaulExclusion[];
+  isLoading: boolean;
+  onClearHaulExclusions: () => Promise<boolean>;
+  onHaulExclusionsChange: (exclusions: readonly PlanHaulExclusion[]) => void;
 }) {
   const [activeTab, setActiveTab] = useState<SimulationTab>("warnings");
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [includedRows, setIncludedRows] = useState<Record<string, boolean>>({});
+  const [preservedHaulTasks, setPreservedHaulTasks] = useState<Record<string, SimulationHaulTask>>(
+    {},
+  );
   const [completionByRow, setCompletionByRow] = useState<
     Partial<Record<string, SimulationCompletionState>>
   >({});
   const statusIsError = status.startsWith("Error:");
+  async function clearHaulExclusions(): Promise<boolean> {
+    const succeeded = await onClearHaulExclusions();
+    if (succeeded) {
+      setIncludedRows({});
+      setPreservedHaulTasks({});
+    }
+    return succeeded;
+  }
+  const currentHaulTasks = result?.lists.haulingTasks ?? [];
+  const currentHaulExclusionKeys = new Set(
+    currentHaulTasks.map((task) => simulationHaulExclusionKey(task)),
+  );
+  const visibleHaulTasks = [
+    ...currentHaulTasks,
+    ...Object
+      .entries(preservedHaulTasks)
+      .filter(
+        ([key]) =>
+          !currentHaulExclusionKeys.has(key)
+          && haulExclusions.some((exclusion) => simulationHaulExclusionKey(exclusion) === key),
+      )
+      .map(([, task]) => task),
+  ].filter(
+    (task, index, tasks) =>
+      tasks.findIndex((candidate) => candidate.transferId === task.transferId) === index,
+  );
   const controls: SimulationRowControls = {
     selectedRowKey,
     onSelectRow: (rowKey) => setSelectedRowKey((current) => (current === rowKey ? null : rowKey)),
     isIncluded: (rowKey) => includedRows[rowKey] ?? true,
     onIncludedChange: (rowKey, included) =>
       setIncludedRows((current) => ({ ...current, [rowKey]: included })),
+    onHaulIncludedChange: (rowKeys, included) => {
+      const nextIncludedRows = { ...includedRows };
+      const nextPreservedHaulTasks = { ...preservedHaulTasks };
+      const tasksByRowKey = new Map(
+        visibleHaulTasks.map((task) => [`haul:${task.transferId}`, task]),
+      );
+      for (const rowKey of rowKeys) nextIncludedRows[rowKey] = included;
+      for (const rowKey of rowKeys) {
+        const task = tasksByRowKey.get(rowKey);
+        if (!task) continue;
+        const key = simulationHaulExclusionKey(task);
+        if (included) delete nextPreservedHaulTasks[key];
+        else nextPreservedHaulTasks[key] = task;
+      }
+      setIncludedRows(nextIncludedRows);
+      setPreservedHaulTasks(nextPreservedHaulTasks);
+      onHaulExclusionsChange(
+        simulationHaulExclusions(result, nextIncludedRows, haulExclusions, visibleHaulTasks),
+      );
+    },
     isCompleted: (rowKey, scheduleIdentity, matchScheduleRevision = false) => {
       const completion = completionByRow[rowKey];
       if (!completion) return false;
@@ -2362,6 +2500,7 @@ export default function SimulationResults({
           <SimulationTabContent
             activeTab={activeTab}
             result={result}
+            haulTasks={visibleHaulTasks}
             stock={stock}
             locationNamesById={locationNamesById}
             reactionMaterialBonusesByLocation={reactionMaterialBonusesByLocation}
@@ -2370,6 +2509,9 @@ export default function SimulationResults({
             slotUsage={slotUsage}
             corporationNamesById={corporationNamesById}
             stockpileNamesById={stockpileNamesById}
+            haulExclusions={haulExclusions}
+            isLoading={isLoading}
+            onClearHaulExclusions={clearHaulExclusions}
             controls={controls}
             openGroups={openGroups}
             onOpenGroupChange={onOpenGroupChange}
@@ -2384,6 +2526,7 @@ export default function SimulationResults({
 function SimulationTabContent({
   activeTab,
   result,
+  haulTasks,
   stock,
   locationNamesById,
   reactionMaterialBonusesByLocation,
@@ -2393,11 +2536,15 @@ function SimulationTabContent({
   corporationNamesById,
   stockpileNamesById,
   controls,
+  haulExclusions,
+  isLoading,
+  onClearHaulExclusions,
   openGroups,
   onOpenGroupChange,
 }: {
   activeTab: SimulationTab;
   result: SimulationResultV1;
+  haulTasks: readonly SimulationHaulTask[];
   stock: readonly PlanStockItem[];
   locationNamesById: ReadonlyMap<number, string>;
   reactionMaterialBonusesByLocation: ReadonlyMap<number, number>;
@@ -2407,6 +2554,9 @@ function SimulationTabContent({
   corporationNamesById: ReadonlyMap<number, string>;
   stockpileNamesById: ReadonlyMap<string, string>;
   controls: SimulationRowControls;
+  haulExclusions: readonly PlanHaulExclusion[];
+  isLoading: boolean;
+  onClearHaulExclusions: () => Promise<boolean>;
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
@@ -2487,10 +2637,13 @@ function SimulationTabContent({
   if (activeTab === "haul") {
     return (
       <SimulationHaulTab
-        tasks={result.lists.haulingTasks}
+        tasks={haulTasks}
         locationNamesById={locationNamesById}
         characterNamesById={characterNamesById}
         corporationNamesById={corporationNamesById}
+        isLoading={isLoading}
+        haulExclusions={haulExclusions}
+        onClearHaulExclusions={onClearHaulExclusions}
         controls={controls}
         openGroups={openGroups}
         onOpenGroupChange={onOpenGroupChange}

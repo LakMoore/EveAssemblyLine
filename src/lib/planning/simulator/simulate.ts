@@ -58,7 +58,7 @@ function typeName(
 }
 
 /**
- * Combines allocator lot transfers into one source/type/owner haul requirement.
+ * Combines allocator lot transfers into one source/type/destination/owner haul requirement.
  *
  * @param tasks - Exact lot-level transfers produced during allocation.
  * @returns Stable presentation tasks with the job demands that compose each total.
@@ -66,9 +66,13 @@ function typeName(
 export function aggregateHaulingTasks(tasks: readonly SimulationHaulTask[]): SimulationHaulTask[] {
   const groupedTasks = new Map<string, SimulationHaulTask>();
   for (const task of tasks) {
-    const key = [task.fromLocationId, task.typeId, task.ownerType ?? "", task.ownerId ?? ""].join(
-      ":",
-    );
+    const key = [
+      task.fromLocationId,
+      task.typeId,
+      task.toLocationId,
+      task.ownerType ?? "",
+      task.ownerId ?? "",
+    ].join(":");
     const existingTask = groupedTasks.get(key);
     if (!existingTask) {
       groupedTasks.set(key, { ...task, demands: [...task.demands] });
@@ -89,6 +93,7 @@ export function aggregateHaulingTasks(tasks: readonly SimulationHaulTask[]): Sim
       (left, right) =>
         left.fromLocationId - right.fromLocationId
         || left.typeId - right.typeId
+        || left.toLocationId - right.toLocationId
         || (left.ownerType ?? "").localeCompare(right.ownerType ?? "")
         || (left.ownerId ?? 0) - (right.ownerId ?? 0),
     );
