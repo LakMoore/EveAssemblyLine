@@ -41,7 +41,7 @@ export type ClientSimulationSchedule = {
   timeSeconds: number;
 };
 
-type ClientSimulationScheduleOptions = {
+export type ClientSimulationScheduleOptions = {
   protectReactionMaterialBonus?: boolean;
   reactionMaterialBonusesByLocation?: ReadonlyMap<number, number>;
 };
@@ -64,31 +64,49 @@ export function solveSimulationActivity(
   const rows = jobs.map((job) => ({
     job,
     runs: getSimulationInstallableRuns(job),
-    minimumRunsPerInstall: minimumRunsPerInstall(job, options),
+    minimumRunsPerInstall: getSimulationMinimumRunsPerInstall(job, options),
     installs: 0,
     scheduledRuns: 0,
     assignedSlots: [] as ClientSimulationSlot[],
   }));
   const enabledRows = rows.filter(
-    ({ job, runs }) => enabledJobIds.has(job.jobId) && runs > 0 && job.durationPerRunSeconds > 0,
+    ({ job, runs, minimumRunsPerInstall }) =>
+      enabledJobIds.has(job.jobId) && runs > 0 && job.durationPerRunSeconds > 0,
   );
 
   if (mode === "available-slots") {
-    allocateAvailableSlots(enabledRows, availableSlots);
+    const shouldBalanceProtectedReactions =
+      options.protectReactionMaterialBonus
+      && enabledRows.every(({ job }) => job.activity === "reaction");
+    if (shouldBalanceProtectedReactions) {
+      allocateReactionAvailableSlots(enabledRows, availableSlots);
+    }
+    else {
+      allocateAvailableSlots(enabledRows, availableSlots);
+    }
   }
   else {
-    const targetSeconds = mode === "run-time-days" ? targetTime * 86400 : targetTime * 3600;
-    if (targetSeconds > 0) {
-      let remainingSlots = Math.max(0, Math.floor(availableSlots));
-      for (const row of enabledRows.slice().sort((left, right) => right.runs - left.runs)) {
-        if (remainingSlots <= 0) break;
-        const runsPerInstall = Math.max(
-          row.minimumRunsPerInstall,
-          Math.floor(targetSeconds / row.job.durationPerRunSeconds),
-        );
-        row.installs = Math.min(remainingSlots, Math.ceil(row.runs / runsPerInstall));
-        row.scheduledRuns = Math.min(row.runs, row.installs * runsPerInstall);
-        remainingSlots -= row.installs;
+    if (enabledRows.every(({ job }) => job.activity === "reaction")) {
+      allocateReactionRuntimeSlots(enabledRows, availableSlots, mode, targetTime);
+    }
+    else {
+      const targetSeconds = mode === "run-time-days" ? targetTime * 86400 : targetTime * 3600;
+      if (targetSeconds > 0) {
+        let remainingSlots = Math.max(0, Math.floor(availableSlots));
+        for (const row of enabledRows.slice().sort((left, right) => right.runs - left.runs)) {
+          if (remainingSlots <= 0) break;
+          const runsPerInstall = Math.max(
+            row.minimumRunsPerInstall,
+            Math.floor(targetSeconds / row.job.durationPerRunSeconds),
+          );
+          row.installs = Math.min(
+            remainingSlots,
+            Math.ceil(row.runs / runsPerInstall),
+            maximumInstallCount(row),
+          );
+          row.scheduledRuns = Math.min(row.runs, row.installs * runsPerInstall);
+          remainingSlots -= row.installs;
+        }
       }
     }
   }
@@ -97,7 +115,7 @@ export function solveSimulationActivity(
 
   return new Map(
     rows.map(({ job, minimumRunsPerInstall, installs, scheduledRuns, assignedSlots }) => {
-      const allocations = splitRuns(scheduledRuns, installs, minimumRunsPerInstall);
+      const allocations = splitSimulationRuns(scheduledRuns, installs, minimumRunsPerInstall);
       const scheduleInstalls = allocations.map((installRuns, index) => ({
         installId: `client-install:${job.jobId}:${index}`,
         runs: installRuns,
@@ -177,14 +195,98 @@ function allocateAvailableSlots(rows: SimulationScheduleRow[], availableSlots: n
   }
 }
 
+/** Allocates reaction slots by removing below-average jobs before balancing the remainder. */
+function allocateReactionAvailableSlots(
+  rows: SimulationScheduleRow[],
+  availableSlots: number,
+): void {
+  let remainingSlots = Math.max(0, Math.floor(availableSlots));
+  let remainingRows = rows.slice();
+
+  while (remainingSlots > 0 && remainingRows.length > 0) {
+    const totalRuns = remainingRows.reduce((total, row) => total + row.runs, 0);
+    const floorAverage = Math.floor(totalRuns / remainingSlots);
+    const lowRunRows = remainingRows
+      .filter((row) => row.runs < floorAverage)
+      .sort((left, right) => left.runs - right.runs);
+    if (lowRunRows.length === 0) break;
+
+    for (const row of lowRunRows) {
+      if (remainingSlots <= 0) break;
+      row.installs = 1;
+      row.scheduledRuns = row.runs;
+      remainingSlots -= 1;
+      remainingRows = remainingRows.filter((candidate) => candidate !== row);
+    }
+  }
+
+  allocateBalancedSlots(remainingRows, remainingSlots);
+}
+
+/** Balances the remaining reaction runs across the remaining slots. */
+function allocateBalancedSlots(rows: SimulationScheduleRow[], availableSlots: number): void {
+  let remainingSlots = Math.max(0, Math.floor(availableSlots));
+  const selectedRows = rows.slice().sort((left, right) => right.runs - left.runs);
+  const selectedRuns = selectedRows.reduce((total, row) => total + row.runs, 0);
+  const averageRunsPerSlot = remainingSlots > 0 ? selectedRuns / remainingSlots : 0;
+
+  for (const row of selectedRows) {
+    if (remainingSlots <= 0) break;
+    row.installs = 1;
+    row.scheduledRuns = row.runs;
+    remainingSlots -= 1;
+  }
+
+  while (remainingSlots > 0) {
+    const candidates = selectedRows
+      .filter((row) => row.installs < maximumInstallCount(row))
+      .sort((left, right) => {
+        const leftIdealInstalls = averageRunsPerSlot > 0 ? left.runs / averageRunsPerSlot : 0;
+        const rightIdealInstalls = averageRunsPerSlot > 0 ? right.runs / averageRunsPerSlot : 0;
+        return (
+          rightIdealInstalls - right.installs - (leftIdealInstalls - left.installs)
+          || right.runs - left.runs
+        );
+      });
+    if (candidates.length === 0) return;
+    candidates[0].installs += 1;
+    candidates[0].scheduledRuns = candidates[0].runs;
+    remainingSlots -= 1;
+  }
+}
+
+/** Allocates reaction installs to complete each type within the requested runtime. */
+function allocateReactionRuntimeSlots(
+  rows: SimulationScheduleRow[],
+  availableSlots: number,
+  mode: ClientSimulationSolveMode,
+  targetTime: number,
+): void {
+  const targetHours = mode === "run-time-days" ? targetTime * 24 : targetTime;
+  if (targetHours <= 0) return;
+
+  let remainingSlots = Math.max(0, Math.floor(availableSlots));
+  for (const row of rows.slice().sort((left, right) => right.runs - left.runs)) {
+    if (remainingSlots <= 0) return;
+    const runsPerInstall = Math.max(
+      row.minimumRunsPerInstall,
+      Math.floor((targetHours * 3600) / row.job.durationPerRunSeconds),
+    );
+    const requiredInstalls = Math.ceil(row.runs / runsPerInstall);
+    const safeInstallCount = maximumInstallCount(row);
+    row.installs = Math.min(remainingSlots, requiredInstalls, safeInstallCount);
+    row.scheduledRuns = Math.min(row.runs, row.installs * runsPerInstall);
+    remainingSlots -= row.installs;
+  }
+}
+
 /** Returns the maximum install count that preserves the ME protection minimum. */
 function maximumInstallCount(row: SimulationScheduleRow): number {
-  if (row.runs < row.minimumRunsPerInstall) return 1;
   return Math.max(1, Math.ceil(row.runs / row.minimumRunsPerInstall));
 }
 
 /** Calculates the minimum runs needed for a reaction rig saving to remove one unit. */
-function minimumRunsPerInstall(
+export function getSimulationMinimumRunsPerInstall(
   job: SimulationIndustryJob,
   options: ClientSimulationScheduleOptions,
 ): number {
@@ -205,13 +307,17 @@ function minimumRunsPerInstall(
   return Math.max(1, Math.ceil(1 / (smallestInputQuantity * materialBonus)));
 }
 
-/** Splits a run count into balanced positive install quantities. */
-function splitRuns(runs: number, installCount: number, minimumRunsPerInstall: number): number[] {
+/** Splits runs evenly while keeping at most one protected under-minimum remainder. */
+export function splitSimulationRuns(
+  runs: number,
+  installCount: number,
+  minimumRunsPerInstall: number,
+): number[] {
   if (runs <= 0 || installCount <= 0) return [];
   const count = Math.min(runs, installCount);
-  if (minimumRunsPerInstall > 1 && count > 1 && count > Math.floor(runs / minimumRunsPerInstall)) {
+  if (minimumRunsPerInstall > 1 && count > Math.floor(runs / minimumRunsPerInstall)) {
     const underMinimumRuns = runs % minimumRunsPerInstall;
-    if (underMinimumRuns > 0) {
+    if (underMinimumRuns > 0 && count > 1) {
       const fullInstallRuns = Math.floor((runs - underMinimumRuns) / (count - 1));
       return [...Array.from({ length: count - 1 }, () => fullInstallRuns), underMinimumRuns];
     }

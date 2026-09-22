@@ -44,6 +44,11 @@ export function withSimulationId(body: unknown, simulationId: string): unknown {
   };
 }
 
+/** Indicates whether a simulator response contains a replayable retained body. */
+export function shouldRetainSimulationLog(responseStatus: number): boolean {
+  return responseStatus !== 304;
+}
+
 /** Runs the version-one industry simulator without authentication or ESI side effects. */
 export async function POST(request: Request) {
   const simulationId = randomUUID();
@@ -53,6 +58,7 @@ export async function POST(request: Request) {
   let rawRequestBody = "";
 
   function logResponse(rawResponseBody: string, responseStatus: number) {
+    if (!shouldRetainSimulationLog(responseStatus)) return;
     logSimulationRequest({
       id: simulationId,
       requestedAt,

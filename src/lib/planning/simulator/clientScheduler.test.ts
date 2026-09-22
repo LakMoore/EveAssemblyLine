@@ -64,6 +64,130 @@ void test("allocates available slots across the largest installable jobs", () =>
   assert.equal(schedules.get("B")?.runs, 3);
 });
 
+void test("keeps unprotected reactions on largest-job allocation", () => {
+  const schedules = solveSimulationActivity(
+    [job("A", 100, 100, 60), job("B", 40, 40, 60), job("C", 10, 10, 60)],
+    2,
+    "available-slots",
+    24,
+  );
+
+  assert.equal(schedules.get("A")?.runs, 100);
+  assert.equal(schedules.get("B")?.runs, 40);
+  assert.equal(schedules.get("C")?.runs, 0);
+});
+
+void test("recalculates the reaction average after allocating low-run jobs", () => {
+  const schedules = solveSimulationActivity(
+    [job("A", 100, 100, 60), job("B", 40, 40, 60), job("C", 10, 10, 60)],
+    4,
+    "available-slots",
+    24,
+  );
+
+  assert.deepEqual(
+    schedules.get("A")?.installs.map((install) => install.runs),
+    [50, 50],
+  );
+  assert.deepEqual(
+    schedules.get("B")?.installs.map((install) => install.runs),
+    [40],
+  );
+  assert.deepEqual(
+    schedules.get("C")?.installs.map((install) => install.runs),
+    [10],
+  );
+});
+
+void test("prioritizes every low-run reaction job when enough slots remain", () => {
+  const schedules = solveSimulationActivity(
+    [job("A", 100, 100, 60), job("B", 20, 20, 60), job("C", 10, 10, 60), job("D", 5, 5, 60)],
+    4,
+    "available-slots",
+    24,
+  );
+
+  assert.deepEqual(
+    schedules.get("A")?.installs.map((install) => install.runs),
+    [100],
+  );
+  assert.deepEqual(
+    schedules.get("B")?.installs.map((install) => install.runs),
+    [20],
+  );
+  assert.deepEqual(
+    schedules.get("C")?.installs.map((install) => install.runs),
+    [10],
+  );
+  assert.deepEqual(
+    schedules.get("D")?.installs.map((install) => install.runs),
+    [5],
+  );
+});
+
+void test("respects the protected reaction minimum during average allocation", () => {
+  const schedules = solveSimulationActivity(
+    [job("A", 25, 25, 60, [10]), job("B", 25, 25, 60, [10]), job("C", 25, 25, 60, [10])],
+    4,
+    "available-slots",
+    24,
+    new Set(["A", "B", "C"]),
+    [],
+    {
+      protectReactionMaterialBonus: true,
+      reactionMaterialBonusesByLocation: new Map([[20, -2.2]]),
+    },
+  );
+
+  const installRuns = [...schedules.values()].flatMap((schedule) =>
+    schedule.installs.map((install) => install.runs),
+  );
+  assert.deepEqual(
+    installRuns.sort((left, right) => right - left),
+    [25, 25, 13, 12],
+  );
+  assert.ok(installRuns.every((runs) => runs >= 10));
+});
+
+void test("splits reaction runtime installs across floor and ceiling averages", () => {
+  const schedules = solveSimulationActivity([job("A", 10, 10, 3600)], 4, "run-time-hours", 3);
+
+  assert.deepEqual(
+    schedules.get("A")?.installs.map((install) => install.runs),
+    [3, 3, 2, 2],
+  );
+  assert.equal(schedules.get("A")?.runs, 10);
+});
+
+void test("converts reaction runtime days to hours before calculating runs", () => {
+  const schedules = solveSimulationActivity([job("A", 25, 25, 3600)], 2, "run-time-days", 1);
+
+  assert.deepEqual(
+    schedules.get("A")?.installs.map((install) => install.runs),
+    [13, 12],
+  );
+});
+
+void test("keeps reaction runtime splits above the protected minimum", () => {
+  const schedules = solveSimulationActivity(
+    [job("A", 10, 10, 3600, [10])],
+    4,
+    "run-time-hours",
+    3,
+    new Set(["A"]),
+    [],
+    {
+      protectReactionMaterialBonus: true,
+      reactionMaterialBonusesByLocation: new Map([[20, -2.2]]),
+    },
+  );
+
+  assert.deepEqual(
+    schedules.get("A")?.installs.map((install) => install.runs),
+    [5, 5],
+  );
+});
+
 void test("limits each suggested install to the requested run time", () => {
   const schedules = solveSimulationActivity([job("A", 10, 10, 3600)], 1, "run-time-hours", 3);
 
@@ -211,9 +335,9 @@ void test("keeps all but one persisted-result install at the ten-run minimum", (
   );
 });
 
-void test("allows only one under-minimum install when a remainder cannot meet the minimum", () => {
+void test("uses one install when another protected install would be under minimum", () => {
   const schedules = solveSimulationActivity(
-    [job("A", 9, 9, 60, [10])],
+    [job("A", 9, 9, 60, [5])],
     2,
     "available-slots",
     24,
@@ -227,6 +351,48 @@ void test("allows only one under-minimum install when a remainder cannot meet th
 
   assert.deepEqual(
     schedules.get("A")?.installs.map((install) => install.runs),
-    [5, 4],
+    [9],
+  );
+});
+
+void test("keeps the protected minimum when runtime activities are mixed", () => {
+  const manufacturingJob = job("M", 2, 2, 60);
+  manufacturingJob.activity = "manufacturing";
+  const schedules = solveSimulationActivity(
+    [job("A", 19, 19, 3600, [5]), manufacturingJob],
+    3,
+    "run-time-hours",
+    1,
+    new Set(["A", "M"]),
+    [],
+    {
+      protectReactionMaterialBonus: true,
+      reactionMaterialBonusesByLocation: new Map([[20, -2.2]]),
+    },
+  );
+
+  assert.deepEqual(
+    schedules.get("A")?.installs.map((install) => install.runs),
+    [10, 9],
+  );
+});
+
+void test("uses a protected full install and one remainder install", () => {
+  const schedules = solveSimulationActivity(
+    [job("A", 11, 11, 60, [5])],
+    2,
+    "available-slots",
+    24,
+    new Set(["A"]),
+    [],
+    {
+      protectReactionMaterialBonus: true,
+      reactionMaterialBonusesByLocation: new Map([[20, -2.2]]),
+    },
+  );
+
+  assert.deepEqual(
+    schedules.get("A")?.installs.map((install) => install.runs),
+    [10, 1],
   );
 });

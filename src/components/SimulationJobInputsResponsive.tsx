@@ -233,7 +233,7 @@ function SimulationInputRow({
         typeId={input.typeId}
         linkPath="planner"
         linkIcon={ClipboardList}
-        linkSearchParams={{ tab: "Plan" }}
+        linkSearchParams={{ simulationTab: "plan" }}
         linkHash="plan-breakdown"
         navigateInPlace
         onNavigate={onNavigate}
@@ -394,7 +394,7 @@ export default function SimulationJobInputsResponsive({
               imageSize={40}
               linkPath="planner"
               linkIcon={ClipboardList}
-              linkSearchParams={{ tab: "Plan" }}
+              linkSearchParams={{ simulationTab: "plan" }}
               linkHash="plan-breakdown"
               navigateInPlace
               onNavigate={navigateToPlan}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { presentationResult, withSimulationId } from "./route";
+import { presentationResult, shouldRetainSimulationLog, withSimulationId } from "./route";
 import type { SimulationResultWithDiagnostics } from "@/lib/planning/simulator/types";
 
 const testEnvironment = process.env as unknown as Record<string, string | undefined>;
@@ -78,4 +78,10 @@ void test("returns the simulator ID in success metadata and errors", () => {
   };
   assert.equal(success.metadata.simulationId, simulationId);
   assert.equal(error.simulationId, simulationId);
+});
+
+void test("does not retain bodyless conditional responses as simulation logs", () => {
+  assert.equal(shouldRetainSimulationLog(200), true);
+  assert.equal(shouldRetainSimulationLog(400), true);
+  assert.equal(shouldRetainSimulationLog(304), false);
 });

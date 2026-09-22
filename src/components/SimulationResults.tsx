@@ -68,9 +68,12 @@ import {
 import { AssemblyLineGroups } from "@/lib/reference/assemblyLineGroups";
 import {
   convertSimulationTargetTime,
+  getSimulationMinimumRunsPerInstall,
   getSimulationInstallableRuns,
   solveSimulationActivity,
+  splitSimulationRuns,
   type ClientSimulationInstall,
+  type ClientSimulationScheduleOptions,
   type ClientSimulationSolveMode,
   type ClientSimulationSlotGroup,
   type ClientSimulationSchedule,
@@ -461,6 +464,13 @@ type SimulationInstallDetail = {
 type CompactInstallGroup = {
   runs: number;
   installs: SimulationInstallDetail[];
+  displayInstallCount: number;
+  completionDetails: SimulationInstallDetail[];
+};
+
+type DetailedInstallDisplay = {
+  detail: SimulationInstallDetail;
+  completionDetails: SimulationInstallDetail[];
 };
 
 /** Identifies one generated install plan for completion-state reconciliation. */
@@ -489,7 +499,14 @@ function simulationCompletionMatchesSchedule(
 }
 
 /** Groups installs by product type and runs per install for compact display. */
-function compactInstallGroups(installs: readonly SimulationInstallDetail[]): CompactInstallGroup[] {
+function compactInstallGroups(
+  installs: readonly SimulationInstallDetail[],
+  aggregateReactionRuntime: boolean,
+  scheduleOptions: ClientSimulationScheduleOptions,
+): CompactInstallGroup[] {
+  if (aggregateReactionRuntime) {
+    return compactReactionRuntimeGroups(installs, scheduleOptions);
+  }
   const groups = new Map<string, SimulationInstallDetail[]>();
   for (const detail of installs) {
     const key = `${detail.entry.job.productTypeId}:${detail.install.runs}`;
@@ -505,7 +522,101 @@ function compactInstallGroups(installs: readonly SimulationInstallDetail[]): Com
     .map(([, groupedInstalls]) => ({
       runs: groupedInstalls[0].install.runs,
       installs: groupedInstalls,
+      displayInstallCount: groupedInstalls.length,
+      completionDetails: groupedInstalls,
     }));
+}
+
+/** Groups runtime reaction installs by product type and exact floor/ceiling run count. */
+function compactReactionRuntimeGroups(
+  installs: readonly SimulationInstallDetail[],
+  scheduleOptions: ClientSimulationScheduleOptions,
+): CompactInstallGroup[] {
+  const byProductType = new Map<number, SimulationInstallDetail[]>();
+  for (const detail of installs) {
+    const group = byProductType.get(detail.entry.job.productTypeId) ?? [];
+    group.push(detail);
+    byProductType.set(detail.entry.job.productTypeId, group);
+  }
+
+  return [...byProductType.values()].flatMap((productInstalls) => {
+    const totalRuns = productInstalls.reduce((total, detail) => total + detail.install.runs, 0);
+    const maximumRunsPerInstall = Math.max(
+      ...productInstalls.map((detail) => detail.install.runs),
+      0,
+    );
+    if (totalRuns <= 0 || maximumRunsPerInstall <= 0) return [];
+    const minimumRuns = scheduleOptions.protectReactionMaterialBonus
+      ? Math.max(
+          ...productInstalls.map((detail) =>
+            getSimulationMinimumRunsPerInstall(detail.entry.job, scheduleOptions),
+          ),
+          1,
+        )
+      : 1;
+    const installCount =
+      minimumRuns > 1
+        ? Math.min(productInstalls.length, Math.max(1, Math.ceil(totalRuns / minimumRuns)))
+        : Math.ceil(totalRuns / maximumRunsPerInstall);
+    const allocations = splitSimulationRuns(totalRuns, installCount, minimumRuns);
+    const groups: CompactInstallGroup[] = [];
+    let detailOffset = 0;
+    let completionOffset = 0;
+    for (const runs of [...new Set(allocations)]) {
+      const displayInstallCount = allocations.filter((allocation) => allocation === runs).length;
+      const details = installDetailsWithRuns(
+        productInstalls.slice(detailOffset, detailOffset + displayInstallCount),
+        runs,
+      );
+      detailOffset += displayInstallCount;
+      const remainingGroups = [...new Set(allocations)].length - groups.length;
+      const remainingDetails = productInstalls.length - completionOffset;
+      const completionCount =
+        remainingGroups === 1
+          ? remainingDetails
+          : Math.max(1, Math.ceil(remainingDetails / remainingGroups));
+      const completionDetails = productInstalls.slice(
+        completionOffset,
+        completionOffset + completionCount,
+      );
+      completionOffset += completionDetails.length;
+      groups.push({
+        runs,
+        installs: details,
+        displayInstallCount,
+        completionDetails,
+      });
+    }
+    return groups;
+  });
+}
+
+/** Copies install details with the normalized run count shown by a compact group. */
+function installDetailsWithRuns(
+  details: readonly SimulationInstallDetail[],
+  runs: number,
+): SimulationInstallDetail[] {
+  return details.map((detail) => ({
+    ...detail,
+    install: {
+      ...detail.install,
+      runs,
+    },
+  }));
+}
+
+/** Expands compact groups into one normalized detail per displayed install. */
+function detailedInstallDetailsFromGroups(
+  groups: readonly CompactInstallGroup[],
+): DetailedInstallDisplay[] {
+  return groups.flatMap((group) =>
+    group.installs
+      .slice(0, group.displayInstallCount)
+      .map((detail) => ({
+        detail,
+        completionDetails: group.completionDetails,
+      })),
+  );
 }
 
 /** Converts one server-planned install to the client dialog's display shape. */
@@ -524,11 +635,13 @@ function serverInstallDetail(
 /** Returns all install rows that should be visible for one grouped simulator job. */
 function displayInstallsForEntry(
   entry: SimulationInstallPlanEntry,
+  activityLabel: "reaction" | "manufacturing",
 ): Array<{ install: ClientSimulationInstall; trackCompletion: boolean }> {
   const clientInstalls = entry.schedule?.installs ?? [];
   if (clientInstalls.length > 0) {
     return clientInstalls.map((install) => ({ install, trackCompletion: true }));
   }
+  if (activityLabel === "reaction") return [];
   if (entry.job.installs.length > 0) {
     return entry.job.installs.map((install) => ({
       install: serverInstallDetail(install),
@@ -551,12 +664,16 @@ function displayInstallsForEntry(
 function SimulationInstallPlanDialog({
   entries,
   activityLabel,
+  solveMode,
+  scheduleOptions,
   characterNamesById,
   onOpenPlan,
   readOnly,
 }: {
   entries: readonly SimulationInstallPlanEntry[];
-  activityLabel: string;
+  activityLabel: "reaction" | "manufacturing";
+  solveMode: ClientSimulationSolveMode;
+  scheduleOptions: ClientSimulationScheduleOptions;
   characterNamesById: ReadonlyMap<number, string>;
   onOpenPlan: () => void;
   readOnly: boolean;
@@ -564,7 +681,7 @@ function SimulationInstallPlanDialog({
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<SimulationInstallPlanView>("compact");
   const installDetails = entries.flatMap((entry) => {
-    const displayInstalls = displayInstallsForEntry(entry);
+    const displayInstalls = displayInstallsForEntry(entry, activityLabel);
     const scheduleInstalls = entry.schedule?.installs ?? [];
     const scheduleIdentity = simulationInstallScheduleIdentity(
       entry.scheduleRevision,
@@ -577,7 +694,12 @@ function SimulationInstallPlanDialog({
       trackCompletion,
     }));
   });
-  const compactGroups = compactInstallGroups(installDetails);
+  const compactGroups = compactInstallGroups(
+    installDetails,
+    activityLabel === "reaction" && solveMode !== "available-slots",
+    scheduleOptions,
+  );
+  const detailedInstallDetails = detailedInstallDetailsFromGroups(compactGroups);
   const installableRuns = entries.reduce((total, entry) => total + entry.job.readyNowRuns, 0);
   const totalRuns = entries.reduce((total, entry) => total + entry.job.requiredRuns, 0);
   const allocatedSlots = installDetails.filter(
@@ -707,7 +829,7 @@ function SimulationInstallPlanDialog({
     >
       <div className="flex flex-col">
         {view === "full"
-          ? installDetails.map((detail, index) => {
+          ? detailedInstallDetails.map(({ detail, completionDetails }, index) => {
               const install = detail.install;
               const characterName =
                 install.characterId === undefined
@@ -731,11 +853,19 @@ function SimulationInstallPlanDialog({
                   }
                   variation="icon"
                   showSwitch={false}
-                  checkboxChecked={completed(detail)}
-                  checkboxDisabled={readOnly || !detail.trackCompletion}
-                  installed={completed(detail)}
+                  checkboxChecked={allCompleted(completionDetails)}
+                  checkboxDisabled={
+                    readOnly
+                    || completionDetails.some(
+                      (completionDetail) => !completionDetail.trackCompletion,
+                    )
+                  }
+                  checkboxIndeterminate={
+                    !allCompleted(completionDetails) && someCompleted(completionDetails)
+                  }
+                  installed={allCompleted(completionDetails)}
                   checkboxTooltip="Mark install complete"
-                  onCheckboxChange={(checked) => setInstallCompleted([detail], checked)}
+                  onCheckboxChange={(checked) => setInstallCompleted(completionDetails, checked)}
                   contentClassName="w-full justify-between gap-3 self-end text-right font-mono text-xs sm:grid sm:min-w-[11rem] sm:grid-cols-[minmax(0,1fr)_max-content] sm:gap-x-4 sm:justify-normal sm:self-auto"
                 >
                   {install.characterId !== undefined ? (
@@ -768,7 +898,7 @@ function SimulationInstallPlanDialog({
                       <TooltipContent>Not Assigned</TooltipContent>
                     </Tooltip>
                   )}
-                  <CopyableNumber value={install.runs} suffix=" runs" copyLabel="Install runs" />
+                  <CopyableNumber value={install.runs} suffix={` run${install.runs === 1 ? "" : "s"}`} copyLabel={`Install run${install.runs === 1 ? "" : "s"}`} />
                 </SwitchedResultRow>
               );
             })
@@ -792,30 +922,32 @@ function SimulationInstallPlanDialog({
                   linkHash="plan-breakdown"
                   navigateInPlace
                   onNavigate={navigateToPlan}
-                  subline={`${blueprintLabel} · ${group.installs.length} install${group.installs.length === 1 ? "" : "s"} grouped by runs per install`}
+                  subline={`${blueprintLabel} · ${group.displayInstallCount} install${group.displayInstallCount === 1 ? "" : "s"} grouped by runs per install`}
                   variation="icon"
                   showSwitch={false}
-                  checkboxChecked={allCompleted(group.installs)}
+                  checkboxChecked={allCompleted(group.completionDetails)}
                   checkboxDisabled={
-                    readOnly || group.installs.some((detail) => !detail.trackCompletion)
+                    readOnly || group.completionDetails.some((detail) => !detail.trackCompletion)
                   }
                   checkboxIndeterminate={
-                    !allCompleted(group.installs) && someCompleted(group.installs)
+                    !allCompleted(group.completionDetails) && someCompleted(group.completionDetails)
                   }
-                  installed={allCompleted(group.installs)}
+                  installed={allCompleted(group.completionDetails)}
                   checkboxTooltip="Mark grouped installs complete"
-                  onCheckboxChange={(checked) => setInstallCompleted(group.installs, checked)}
+                  onCheckboxChange={(checked) =>
+                    setInstallCompleted(group.completionDetails, checked)
+                  }
                   contentClassName="w-full justify-between gap-3 self-end text-right font-mono text-xs sm:grid sm:min-w-[11rem] sm:grid-cols-[minmax(0,1fr)_max-content] sm:gap-x-4 sm:justify-normal sm:self-auto"
                 >
-                  <span>
-                    {quantity(group.installs.length)} install
-                    {group.installs.length === 1 ? "" : "s"}
-                  </span>
                   <CopyableNumber
                     value={group.runs}
                     suffix={` run${group.runs === 1 ? "" : "s"} each`}
                     copyLabel="Runs per install"
                   />
+                  <span>
+                    {quantity(group.displayInstallCount)} install
+                    {group.displayInstallCount === 1 ? "" : "s"}
+                  </span>
                 </SwitchedResultRow>
               );
             })}
@@ -1838,6 +1970,11 @@ function SimulationActivityTab({
                 <SimulationInstallPlanDialog
                   entries={installPlanEntries}
                   activityLabel={activityLabel}
+                  solveMode={solveMode}
+                  scheduleOptions={{
+                    protectReactionMaterialBonus: tab === "react" && protectReactionMaterialBonus,
+                    reactionMaterialBonusesByLocation,
+                  }}
                   characterNamesById={characterNamesById}
                   onOpenPlan={controls.onOpenPlan}
                   readOnly={readOnly}
