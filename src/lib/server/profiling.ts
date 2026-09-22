@@ -3,7 +3,14 @@ export type ProfileValue =
   | {
       totalMS: number;
       sections: Record<string, ProfileValue>;
+      count?: number;
     };
+
+type ProfileGroup = Exclude<ProfileValue, number>;
+
+function profileCount(group: ProfileGroup): number {
+  return group.count === undefined ? 1 : group.count;
+}
 
 export type RequestProfiler = {
   start(section: string): void;
@@ -35,6 +42,47 @@ export function createRequestProfiler(
     };
   }
 
+  function mergeProfileValues(left: ProfileValue, right: ProfileValue): ProfileValue {
+    const leftGroup =
+      typeof left === "number"
+        ? { totalMS: left, sections: {}, count: 1 }
+        : { ...left, count: profileCount(left) };
+    const rightGroup =
+      typeof right === "number"
+        ? { totalMS: right, sections: {}, count: 1 }
+        : { ...right, count: profileCount(right) };
+    const sectionNames = new Set([
+      ...Object.keys(leftGroup.sections),
+      ...Object.keys(rightGroup.sections),
+    ]);
+    const sections = Object.fromEntries(
+      [...sectionNames].map((name) => {
+        const hasLeftSection = Object.prototype.hasOwnProperty.call(leftGroup.sections, name);
+        const hasRightSection = Object.prototype.hasOwnProperty.call(rightGroup.sections, name);
+        const mergedSection = !hasLeftSection
+          ? rightGroup.sections[name]
+          : !hasRightSection
+            ? leftGroup.sections[name]
+            : mergeProfileValues(leftGroup.sections[name], rightGroup.sections[name]);
+        return [name, mergedSection];
+      }),
+    );
+    return {
+      totalMS: Math.round((leftGroup.totalMS + rightGroup.totalMS) * 100) / 100,
+      sections,
+      count: leftGroup.count + rightGroup.count,
+    };
+  }
+
+  function recordSection(
+    parentSections: Map<string, ProfileValue>,
+    name: string,
+    value: ProfileValue,
+  ) {
+    const existing = parentSections.get(name);
+    parentSections.set(name, existing === undefined ? value : mergeProfileValues(existing, value));
+  }
+
   return {
     start(section: string) {
       if (enabled) {
@@ -47,7 +95,7 @@ export function createRequestProfiler(
       if (!activeSection || activeSection.name !== section) return;
       const totalMS = Math.round((performance.now() - activeSection.startedAt) * 100) / 100;
       const parentSections = activeSections.at(-1)?.sections ?? rootSections;
-      parentSections.set(section, finishSection(activeSection, totalMS));
+      recordSection(parentSections, section, finishSection(activeSection, totalMS));
     },
     async measure<T>(section: string, operation: () => Promise<T>) {
       if (!enabled) return operation();
@@ -60,7 +108,7 @@ export function createRequestProfiler(
         if (activeSection && activeSection.name === section) {
           const totalMS = Math.round((performance.now() - activeSection.startedAt) * 100) / 100;
           const parentSections = activeSections.at(-1)?.sections ?? rootSections;
-          parentSections.set(section, finishSection(activeSection, totalMS));
+          recordSection(parentSections, section, finishSection(activeSection, totalMS));
         }
       }
     },

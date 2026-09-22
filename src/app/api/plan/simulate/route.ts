@@ -93,7 +93,10 @@ export async function POST(request: Request) {
       logResponse(JSON.stringify(responseBody), 400);
       return NextResponse.json(responseBody, { status: 400, ...noStoreResponseInit });
     }
-    const result = await profiler.measure("simulate", () => simulateIndustry(parsed.data));
+    const result = await profiler.measure(
+      "simulate",
+      () => simulateIndustry(parsed.data, profiler),
+    );
     const responseBody = withSimulationId(presentationResult(result), simulationId);
     logResponse(JSON.stringify(responseBody), 200);
     return NextResponse.json(responseBody, noStoreResponseInit);

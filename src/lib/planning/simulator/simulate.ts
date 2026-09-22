@@ -11,6 +11,7 @@ import {
 import { settleReprocessing } from "./reprocessing";
 import { scheduleSimulationJobs, type SimulationScheduleResult } from "./scheduler";
 import { normalizeSimulatorInventory, type SimulatorInventory } from "./sourceLots";
+import type { RequestProfiler } from "@/lib/server/profiling";
 import type {
   SimulationHaulTask,
   SimulationMaterialBalance,
@@ -237,6 +238,31 @@ function presentationItems(
 
 type SimulationInputJob = SimulationIndustryJob | SimulationInventionJob | SimulationCopyJob;
 
+/** Measures a synchronous simulator phase when development profiling is enabled. */
+function measureSyncProfiled<T>(
+  profiler: RequestProfiler | undefined,
+  section: string,
+  operation: () => T,
+): T {
+  profiler?.start(section);
+  try {
+    return operation();
+  }
+  finally {
+    profiler?.end(section);
+  }
+}
+
+/** Measures an asynchronous simulator phase when development profiling is enabled. */
+function measureAsyncProfiled<T>(
+  profiler: RequestProfiler | undefined,
+  section: string,
+  operation: () => T | PromiseLike<T>,
+): Promise<T> {
+  if (!profiler) return Promise.resolve(operation());
+  return profiler.measure(section, async () => operation());
+}
+
 /** Adds simulated completion offsets to reservations for scheduled upstream jobs. */
 function annotateUpstreamReservations(
   jobs: readonly SimulationIndustryJob[],
@@ -336,61 +362,116 @@ function assembleLists(
 /** Executes one deterministic, cached-SDE-only industry simulation. */
 export async function simulateIndustry(
   request: SimulationRequestV1,
+  profiler?: RequestProfiler,
 ): Promise<SimulationResultWithDiagnostics> {
   const startedAt = performance.now();
   const generatedAt = new Date().toISOString();
-  const context = await loadSimulationContext();
-  const graph = buildDependencyGraph(
-    request.stockpiles.flatMap((stockpile) => stockpile.items.map((item) => item.typeId)),
-    context,
-    {
-      buildBlacklist: new Set(request.settings.buildBlacklist),
-      buyBlacklist: new Set(request.settings.buyBlacklist),
-      maxNodes: request.simulation.policy.maxGraphNodes,
-      maxDepth: request.simulation.policy.maxGraphDepth,
-    },
+  const context = await measureAsyncProfiled(profiler, "load-context", loadSimulationContext);
+  const graph = measureSyncProfiled(
+    profiler,
+    "build-dependency-graph",
+    () =>
+      buildDependencyGraph(
+        request.stockpiles.flatMap((stockpile) => stockpile.items.map((item) => item.typeId)),
+        context,
+        {
+          buildBlacklist: new Set(request.settings.buildBlacklist),
+          buyBlacklist: new Set(request.settings.buyBlacklist),
+          maxNodes: request.simulation.policy.maxGraphNodes,
+          maxDepth: request.simulation.policy.maxGraphDepth,
+        },
+      ),
   );
-  const inventory = await normalizeSimulatorInventory(request, context);
-  const industry = simulateIndustryDemand(request, context, inventory, graph);
-  const schedules = scheduleSimulationJobs(
-    industry.manufacturingJobs,
-    industry.reactionJobs,
-    industry.inventionJobs,
-    industry.copyJobs,
-    request.simulation.characters,
+  const inventory = await measureAsyncProfiled(
+    profiler,
+    "normalize-inventory",
+    () => normalizeSimulatorInventory(request, context),
+  );
+  const industry = measureSyncProfiled(
+    profiler,
+    "simulate-industry-demand",
+    () => simulateIndustryDemand(request, context, inventory, graph, profiler),
+  );
+  const schedules = measureSyncProfiled(
+    profiler,
+    "schedule-industry-jobs",
+    () =>
+      scheduleSimulationJobs(
+        industry.manufacturingJobs,
+        industry.reactionJobs,
+        industry.inventionJobs,
+        industry.copyJobs,
+        request.simulation.characters,
+      ),
   );
   const producingJobs = [...schedules.manufacturingJobs, ...schedules.reactionJobs];
-  const reprocessing = settleReprocessing(request, context, inventory, industry);
-  const buying = settleBuying(request, context, industry, reprocessing.remainingDemands);
-  const annotatedSchedules: SimulationScheduleResult = {
-    ...schedules,
-    manufacturingJobs: annotatePurchaseQuantities(
-      annotateUpstreamReservations(schedules.manufacturingJobs, producingJobs, generatedAt),
-      buying.materials,
-    ),
-    reactionJobs: annotatePurchaseQuantities(
-      annotateUpstreamReservations(schedules.reactionJobs, producingJobs, generatedAt),
-      buying.materials,
-    ),
-    inventionJobs: annotatePurchaseQuantities(schedules.inventionJobs, buying.materials),
-    copyJobs: annotatePurchaseQuantities(schedules.copyJobs, buying.materials),
-  };
-  const transactions = uniqueTransactions([
-    ...industry.transactions,
-    ...industry.allocator.transactions,
-    ...reprocessing.transactions,
-    ...buying.transactions,
-    ...sourceAvailabilityTransactions(inventory),
-  ]);
-  const names = new Map(
-    [...context.types].map(([typeId]) => [typeId, typeName(context, request, typeId)]),
+  const reprocessing = measureSyncProfiled(
+    profiler,
+    "settle-reprocessing",
+    () => settleReprocessing(request, context, inventory, industry),
   );
-  const volumes = new Map(
-    [...context.types].map(([typeId, type]) => [typeId, type.packagedVolume ?? type.volume ?? 0]),
+  const buying = measureSyncProfiled(
+    profiler,
+    "settle-buying",
+    () => settleBuying(request, context, industry, reprocessing.remainingDemands),
   );
-  const projection = projectSimulationLedger(inventory.itemLots, transactions, names, volumes);
-  const ledgers = ledgerViews(projection.balances);
-  const connectedKeys = connectedAccountKeys(transactions);
+  const annotatedSchedules = measureSyncProfiled(
+    profiler,
+    "annotate-schedules",
+    (): SimulationScheduleResult => ({
+      ...schedules,
+      manufacturingJobs: annotatePurchaseQuantities(
+        annotateUpstreamReservations(schedules.manufacturingJobs, producingJobs, generatedAt),
+        buying.materials,
+      ),
+      reactionJobs: annotatePurchaseQuantities(
+        annotateUpstreamReservations(schedules.reactionJobs, producingJobs, generatedAt),
+        buying.materials,
+      ),
+      inventionJobs: annotatePurchaseQuantities(schedules.inventionJobs, buying.materials),
+      copyJobs: annotatePurchaseQuantities(schedules.copyJobs, buying.materials),
+    }),
+  );
+  const transactions = measureSyncProfiled(
+    profiler,
+    "collect-transactions",
+    () =>
+      uniqueTransactions([
+        ...industry.transactions,
+        ...industry.allocator.transactions,
+        ...reprocessing.transactions,
+        ...buying.transactions,
+        ...sourceAvailabilityTransactions(inventory),
+      ]),
+  );
+  const { names, volumes } = measureSyncProfiled(
+    profiler,
+    "build-type-indexes",
+    () => ({
+      names: new Map(
+        [...context.types].map(([typeId]) => [typeId, typeName(context, request, typeId)]),
+      ),
+      volumes: new Map(
+        [...context.types].map(([typeId, type]) => [
+          typeId,
+          type.packagedVolume ?? type.volume ?? 0,
+        ]),
+      ),
+    }),
+  );
+  const projection = measureSyncProfiled(
+    profiler,
+    "project-ledger",
+    () => projectSimulationLedger(inventory.itemLots, transactions, names, volumes),
+  );
+  const { connectedKeys, ledgers } = measureSyncProfiled(
+    profiler,
+    "prepare-ledgers",
+    () => ({
+      connectedKeys: connectedAccountKeys(transactions),
+      ledgers: ledgerViews(projection.balances),
+    }),
+  );
   const invariantWarnings: SimulationWarning[] = projection.invariantViolations.map((message) => ({
     code: "invariant-violation",
     message,
@@ -402,23 +483,29 @@ export async function simulateIndustry(
     ...buying.warnings,
     ...invariantWarnings,
   ];
-  const lists = assembleLists(
-    request,
-    industry,
-    annotatedSchedules,
-    reprocessing,
-    buying,
-    ledgers,
-    connectedKeys,
-    warnings,
+  const lists = measureSyncProfiled(
+    profiler,
+    "assemble-lists",
+    () =>
+      assembleLists(
+        request,
+        industry,
+        annotatedSchedules,
+        reprocessing,
+        buying,
+        ledgers,
+        connectedKeys,
+        warnings,
+      ),
   );
+  const normalizedInputHash = measureSyncProfiled(profiler, "hash-input", () => inputHash(request));
   return {
     metadata: {
       simulatorVersion: 1,
       policyVersion: 1,
       generatedAt,
       sdeRevision: context.sdeRevision,
-      normalizedInputHash: inputHash(request),
+      normalizedInputHash,
       elapsedMilliseconds: performance.now() - startedAt,
       warningCount: warnings.length,
       invariantViolationCount: projection.invariantViolations.length,

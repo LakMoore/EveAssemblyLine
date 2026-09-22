@@ -9,6 +9,7 @@ import type { SimulationContext } from "./context";
 import type { DependencyGraph } from "./dependencyGraph";
 import type { SimulationLedgerAccount, SimulationTransaction } from "./ledger";
 import { isSimulatorReprocessingType, type SimulatorInventory } from "./sourceLots";
+import type { RequestProfiler } from "@/lib/server/profiling";
 import type {
   SimulationBlueprintAllocation,
   SimulationCopyJob,
@@ -117,14 +118,36 @@ function horizonRunLimit(claim: BlueprintClaim, requiredRuns: number) {
   };
 }
 
+/** Measures a synchronous demand-simulation phase when development profiling is enabled. */
+function measureSyncProfiled<T>(
+  profiler: RequestProfiler | undefined,
+  section: string,
+  operation: () => T,
+): T {
+  profiler?.start(section);
+  try {
+    return operation();
+  }
+  finally {
+    profiler?.end(section);
+  }
+}
+
 /** Declares industry work and reserves only complete physical run kits. */
 export function simulateIndustryDemand(
   request: SimulationRequestV1,
   context: SimulationContext,
   inventory: SimulatorInventory,
   dependencyGraph: DependencyGraph,
+  profiler?: RequestProfiler,
 ): IndustrySimulationResult {
-  const simulation = new IndustryDemandSimulation(request, context, inventory, dependencyGraph);
+  const simulation = new IndustryDemandSimulation(
+    request,
+    context,
+    inventory,
+    dependencyGraph,
+    profiler,
+  );
   return simulation.run();
 }
 
@@ -151,6 +174,7 @@ class IndustryDemandSimulation {
     private readonly context: SimulationContext,
     inventory: SimulatorInventory,
     dependencyGraph: DependencyGraph,
+    private readonly profiler?: RequestProfiler,
   ) {
     this.allocator = new SimulationAllocator(inventory, request.haulExclusions ?? []);
     this.warnings = [...dependencyGraph.warnings];
@@ -164,59 +188,84 @@ class IndustryDemandSimulation {
 
   /** Runs demand expansion followed by invention/copying derivation. */
   run(): IndustrySimulationResult {
-    const stockpiles = [...this.request.stockpiles].sort((left, right) =>
-      left.id.localeCompare(right.id),
-    );
-    for (const stockpile of stockpiles) {
-      const items = [...stockpile.items].sort(
-        (left, right) =>
-          left.typeId - right.typeId
-          || left.quantity - right.quantity
-          || left.me - right.me
-          || left.te - right.te,
-      );
-      for (const item of items) {
-        const isReprocessingInput = isSimulatorReprocessingType(this.context, item.typeId);
-        const account: SimulationLedgerAccount = {
-          locationId: isReprocessingInput
-            ? stockpile.locations.reprocessing
-            : stockpile.locations.stock,
-          typeId: item.typeId,
-        };
-        const source = this.demandSource(
-          stockpile,
-          item.typeId,
-          item.quantity,
-          item.typeId,
-          item.quantity,
-          account.locationId,
-          isReprocessingInput ? "reprocessing" : "stock",
+    measureSyncProfiled(
+      this.profiler,
+      "expand-stockpile-demand",
+      () => {
+        const stockpiles = [...this.request.stockpiles].sort((left, right) =>
+          left.id.localeCompare(right.id),
         );
-        this.declareDemand(account, item.quantity, source);
-        const existing = this.allocator.claimOrdinarySupply(
-          item.typeId,
-          item.quantity,
-          account.locationId,
-          account,
-          undefined,
-          stockpile.id,
-          isReprocessingInput ? "reprocessing" : "stock",
-        );
-        this.setDemandReadiness(source, existing.local);
-        const remaining = item.quantity - existing.local - existing.remote - existing.future;
-        if (remaining > 0) {
-          if (isReprocessingInput) {
-            this.recordUnmet(account, remaining, source, "reprocessing-input");
+        for (const stockpile of stockpiles) {
+          const items = [...stockpile.items].sort(
+            (left, right) =>
+              left.typeId - right.typeId
+              || left.quantity - right.quantity
+              || left.me - right.me
+              || left.te - right.te,
+          );
+          for (const item of items) {
+            const isReprocessingInput = isSimulatorReprocessingType(this.context, item.typeId);
+            const account: SimulationLedgerAccount = {
+              locationId: isReprocessingInput
+                ? stockpile.locations.reprocessing
+                : stockpile.locations.stock,
+              typeId: item.typeId,
+            };
+            const source = this.demandSource(
+              stockpile,
+              item.typeId,
+              item.quantity,
+              item.typeId,
+              item.quantity,
+              account.locationId,
+              isReprocessingInput ? "reprocessing" : "stock",
+            );
+            this.declareDemand(account, item.quantity, source);
+            const existing = measureSyncProfiled(
+              this.profiler,
+              "claim-stockpile-supply",
+              () =>
+                this.allocator.claimOrdinarySupply(
+                  item.typeId,
+                  item.quantity,
+                  account.locationId,
+                  account,
+                  undefined,
+                  stockpile.id,
+                  isReprocessingInput ? "reprocessing" : "stock",
+                ),
+            );
+            this.setDemandReadiness(source, existing.local);
+            const remaining = item.quantity - existing.local - existing.remote - existing.future;
+            if (remaining > 0) {
+              if (isReprocessingInput) {
+                this.recordUnmet(account, remaining, source, "reprocessing-input");
+              }
+              else {
+                this.planProduction(item.typeId, remaining, stockpile, account, source, new Set());
+              }
+            }
           }
-          else this.planProduction(item.typeId, remaining, stockpile, account, source, new Set());
         }
-      }
-    }
+      },
+    );
 
-    for (let index = 0; index < this.blueprintShortages.length; index += 1) {
-      this.planInventionAndCopying(this.blueprintShortages[index]);
-    }
-    this.expandSkillPrerequisites();
+    measureSyncProfiled(
+      this.profiler,
+      "plan-invention-and-copying",
+      () => {
+        for (let index = 0; index < this.blueprintShortages.length; index += 1) {
+          this.planInventionAndCopying(this.blueprintShortages[index]);
+        }
+      },
+    );
+    measureSyncProfiled(
+      this.profiler,
+      "expand-skill-prerequisites",
+      () => {
+        this.expandSkillPrerequisites();
+      },
+    );
     return {
       transactions: [...this.transactions, ...this.allocator.transactions],
       manufacturingJobs: this.manufacturingJobs,
@@ -239,6 +288,29 @@ class IndustryDemandSimulation {
   }
 
   private planProduction(
+    productTypeId: number,
+    quantity: number,
+    stockpile: PlanStockpile,
+    destinationAccount: SimulationLedgerAccount,
+    demandSource: SimulationDemandSource,
+    stack: ReadonlySet<number>,
+  ): ProductionSupply {
+    return measureSyncProfiled(
+      this.profiler,
+      "plan-production",
+      () =>
+        this.planProductionCore(
+          productTypeId,
+          quantity,
+          stockpile,
+          destinationAccount,
+          demandSource,
+          stack,
+        ),
+    );
+  }
+
+  private planProductionCore(
     productTypeId: number,
     quantity: number,
     stockpile: PlanStockpile,
@@ -332,16 +404,21 @@ class IndustryDemandSimulation {
     const reservations: SimulationUpstreamReservation[] = [];
     for (const [allocationIndex, allocation] of allocations.entries()) {
       const jobId = `${baseJobId}:${allocationIndex}`;
-      const job = this.planIndustryJob(
-        jobId,
-        production,
-        productTypeId,
-        details.product.quantity,
-        allocation,
-        profile,
-        stockpile,
-        demandSource,
-        nextStack,
+      const job = measureSyncProfiled(
+        this.profiler,
+        "plan-industry-job",
+        () =>
+          this.planIndustryJob(
+            jobId,
+            production,
+            productTypeId,
+            details.product.quantity,
+            allocation,
+            profile,
+            stockpile,
+            demandSource,
+            nextStack,
+          ),
       );
       const outputQuantity = allocation.runs * details.product.quantity;
       const reservedQuantity = Math.min(outputQuantity, Math.max(0, quantity - plannedOutput));
@@ -433,11 +510,16 @@ class IndustryDemandSimulation {
       },
     );
 
-    const availabilityByTypeId = new Map(
-      materialSpecifications.map((material) => [
-        material.typeId,
-        this.allocator.availability(material.typeId, profile.locationId),
-      ]),
+    const availabilityByTypeId = measureSyncProfiled(
+      this.profiler,
+      "lookup-material-availability",
+      () =>
+        new Map(
+          materialSpecifications.map((material) => [
+            material.typeId,
+            this.allocator.availability(material.typeId, profile.locationId),
+          ]),
+        ),
     );
     const blueprintLimits = horizonRunLimit(blueprint, blueprint.runs);
     const readyNowRuns = Math.min(

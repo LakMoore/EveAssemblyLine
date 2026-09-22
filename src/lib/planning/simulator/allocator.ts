@@ -55,6 +55,7 @@ function excluded(
 
 /** Deterministically allocates ordinary lots and blueprint runs without duplicating stock. */
 export class SimulationAllocator {
+  private readonly itemLotsByTypeId: Map<number, SimulationItemLot[]>;
   private readonly remainingItemQuantityByLotId: Map<string, number>;
   private readonly remainingBlueprintRunsByLotId: Map<string, number>;
   private readonly transferredBlueprintLotIds = new Set<string>();
@@ -67,6 +68,15 @@ export class SimulationAllocator {
     private readonly inventory: SimulatorInventory,
     private readonly haulExclusions: readonly PlanHaulExclusion[],
   ) {
+    this.itemLotsByTypeId = new Map();
+    for (const lot of inventory.itemLots) {
+      const lots = this.itemLotsByTypeId.get(lot.typeId) ?? [];
+      lots.push(lot);
+      this.itemLotsByTypeId.set(lot.typeId, lots);
+    }
+    for (const lots of this.itemLotsByTypeId.values()) {
+      lots.sort((left, right) => left.lotId.localeCompare(right.lotId));
+    }
     this.remainingItemQuantityByLotId = new Map(
       inventory.itemLots.map((lot) => [lot.lotId, lot.quantity]),
     );
@@ -80,8 +90,7 @@ export class SimulationAllocator {
     let local = 0;
     let remote = 0;
     let future = 0;
-    for (const lot of this.inventory.itemLots) {
-      if (lot.typeId !== typeId) continue;
+    for (const lot of this.itemLotsByTypeId.get(typeId) ?? []) {
       const quantity = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
       if (quantity <= 0) continue;
       if (lot.horizon === "after-upstream") {
@@ -106,7 +115,7 @@ export class SimulationAllocator {
     demandActivity?: Exclude<SimulationActivity, "surplus">,
   ): number {
     return this.claimItemLots(
-      this.inventory.itemLots.filter(
+      (this.itemLotsByTypeId.get(typeId) ?? []).filter(
         (lot) =>
           lot.typeId === typeId
           && lot.horizon === "now"
@@ -133,7 +142,7 @@ export class SimulationAllocator {
     demandActivity?: Exclude<SimulationActivity, "surplus">,
   ): number {
     return this.claimItemLots(
-      this.inventory.itemLots.filter(
+      (this.itemLotsByTypeId.get(typeId) ?? []).filter(
         (lot) =>
           lot.typeId === typeId
           && lot.horizon === "now"
@@ -160,13 +169,9 @@ export class SimulationAllocator {
     let remaining = quantity;
     let claimed = 0;
     const reservations: SimulationUpstreamReservation[] = [];
-    for (const lot of this.sortedItemLots(
-      this.inventory.itemLots.filter(
-        (candidate) =>
-          candidate.typeId === typeId
-          && candidate.horizon === "after-upstream"
-          && candidate.locationId === account.locationId,
-      ),
+    for (const lot of (this.itemLotsByTypeId.get(typeId) ?? []).filter(
+      (candidate) =>
+        candidate.horizon === "after-upstream" && candidate.locationId === account.locationId,
     )) {
       if (remaining <= 0) break;
       const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
@@ -528,7 +533,7 @@ export class SimulationAllocator {
   ): number {
     let remaining = quantity;
     let claimed = 0;
-    for (const lot of this.sortedItemLots(lots)) {
+    for (const lot of lots) {
       if (remaining <= 0) break;
       const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
       const next = Math.min(remaining, available);
@@ -574,10 +579,6 @@ export class SimulationAllocator {
       claimed += next;
     }
     return claimed;
-  }
-
-  private sortedItemLots(lots: readonly SimulationItemLot[]): SimulationItemLot[] {
-    return lots.slice().sort((left, right) => left.lotId.localeCompare(right.lotId));
   }
 
   private blueprintHorizon(
