@@ -874,6 +874,8 @@ function SimulationMaterialsTab({
   controls,
   openGroups,
   onOpenGroupChange,
+  usePlannerUrlState,
+  instanceId,
 }: {
   tab: "plan" | "surplus";
   buckets: SimulationMaterialLocationBucket[];
@@ -882,27 +884,33 @@ function SimulationMaterialsTab({
   controls: SimulationRowControls;
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
+  usePlannerUrlState: boolean;
+  instanceId: string;
 }) {
   const items = buckets.flatMap((bucket) => bucket.items);
-  const selectedTypeId = useSyncExternalStore(
+  const urlSelectedTypeId = useSyncExternalStore(
     subscribeToTypeId,
     readTypeIdFromUrl,
     getServerTypeIdSnapshot,
   );
+  const [localSelectedTypeId, setLocalSelectedTypeId] = useState<number | null>(null);
+  const selectedTypeId = usePlannerUrlState ? urlSelectedTypeId : localSelectedTypeId;
   const [copyStatus, setCopyStatus] = useState("");
   useEffect(() => {
+    if (!usePlannerUrlState) return;
     const rawTypeId = new URLSearchParams(window.location.search).get("typeId");
     if (rawTypeId !== null && selectedTypeId === null) updateTypeIdInUrl(null);
-  }, [selectedTypeId]);
+  }, [selectedTypeId, usePlannerUrlState]);
   const typeOptions = [...new Map(items.map((item) => [item.typeId, item.typeName])).entries()]
     .map(([id, name]) => ({ id, name }))
     .sort((left, right) => left.name.localeCompare(right.name) || left.id - right.id);
   useEffect(() => {
+    if (!usePlannerUrlState) return;
     if (selectedTypeId === null || typeOptions.some((option) => option.id === selectedTypeId)) {
       return;
     }
     if (readTypeIdFromUrl() === selectedTypeId) updateTypeIdInUrl(null);
-  }, [selectedTypeId, typeOptions]);
+  }, [selectedTypeId, typeOptions, usePlannerUrlState]);
   const effectiveSelectedTypeId = typeOptions.some((option) => option.id === selectedTypeId)
     ? selectedTypeId
     : null;
@@ -946,7 +954,10 @@ function SimulationMaterialsTab({
         items.length > 0 ? (
           <div className="flex flex-wrap justify-end gap-2.5 py-3.5 pb-2.5 max-[640px]:flex-col max-[640px]:items-stretch">
             <div className="flex w-auto items-center gap-2.5 max-[640px]:w-full max-[640px]:flex-col max-[640px]:items-stretch">
-              <Label className="max-[640px]:self-start" htmlFor={`simulation-${tab}-type`}>
+              <Label
+                className="max-[640px]:self-start"
+                htmlFor={`${instanceId}-simulation-${tab}-type`}
+              >
                 TYPE
               </Label>
               <div className="w-full min-w-0 max-[640px]:overflow-hidden sm:w-72 lg:w-96">
@@ -956,11 +967,12 @@ function SimulationMaterialsTab({
                   value={selectedType}
                   onValueChange={(value) => {
                     const nextTypeId = value?.id ?? null;
-                    updateTypeIdInUrl(nextTypeId);
+                    if (usePlannerUrlState) updateTypeIdInUrl(nextTypeId);
+                    else setLocalSelectedTypeId(nextTypeId);
                   }}
                 >
                   <ComboboxInput
-                    id={`simulation-${tab}-type`}
+                    id={`${instanceId}-simulation-${tab}-type`}
                     placeholder="Filter by type"
                     aria-label="Filter simulation by material type"
                     showClear
@@ -1290,6 +1302,7 @@ function SimulationActivityTab({
   controls,
   openGroups,
   onOpenGroupChange,
+  instanceId,
 }: {
   tab: "react" | "manufacture";
   jobs: SimulationIndustryJob[];
@@ -1303,6 +1316,7 @@ function SimulationActivityTab({
   controls: SimulationRowControls;
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
+  instanceId: string;
 }) {
   const activityLabel = tab === "react" ? "reaction" : "manufacturing";
   const [solveMode, setSolveMode] = useState<ClientSimulationSolveMode>("available-slots");
@@ -1439,12 +1453,15 @@ function SimulationActivityTab({
           <div className="flex flex-wrap items-center gap-2.5 max-[640px]:items-stretch">
             {tab === "react" && (
               <>
-                <Label className="shrink-0 whitespace-nowrap" htmlFor={`${tab}-solve-mode`}>
+                <Label
+                  className="shrink-0 whitespace-nowrap"
+                  htmlFor={`${instanceId}-${tab}-solve-mode`}
+                >
                   Solve for
                 </Label>
                 <Select value={solveMode} onValueChange={handleSolveModeChange}>
                   <SelectTrigger
-                    id={`${tab}-solve-mode`}
+                    id={`${instanceId}-${tab}-solve-mode`}
                     aria-label={`${activityLabel} solve mode`}
                     className="min-w-44"
                   >
@@ -1478,10 +1495,10 @@ function SimulationActivityTab({
             {tab === "react" && (
               <Label
                 className="flex shrink-0 items-center gap-2 whitespace-nowrap"
-                htmlFor="react-protect-me-bonus"
+                htmlFor={`${instanceId}-react-protect-me-bonus`}
               >
                 <Switch
-                  id="react-protect-me-bonus"
+                  id={`${instanceId}-react-protect-me-bonus`}
                   checked={protectReactionMaterialBonus}
                   onCheckedChange={setProtectReactionMaterialBonus}
                 />
@@ -2265,6 +2282,8 @@ export default function SimulationResults({
   isLoading,
   onClearHaulExclusions,
   onHaulExclusionsChange,
+  usePlannerUrlState = true,
+  instanceId = "planner",
 }: {
   result: SimulationResultV1 | null;
   status: string;
@@ -2280,8 +2299,12 @@ export default function SimulationResults({
   isLoading: boolean;
   onClearHaulExclusions: () => Promise<boolean>;
   onHaulExclusionsChange: (exclusions: readonly PlanHaulExclusion[]) => void;
+  usePlannerUrlState?: boolean;
+  instanceId?: string;
 }) {
-  const [activeTab, setActiveTab] = useState<SimulationTab>("warnings");
+  const [activeTab, setActiveTab] = useState<SimulationTab>(() =>
+    usePlannerUrlState ? readSimulationTabFromUrl() : "warnings",
+  );
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [includedRows, setIncludedRows] = useState<Record<string, boolean>>({});
@@ -2432,10 +2455,11 @@ export default function SimulationResults({
   function selectTab(value: string) {
     if (!isSimulationTab(value)) return;
     setActiveTab(value);
-    updateSimulationTabInUrl(value);
+    if (usePlannerUrlState) updateSimulationTabInUrl(value);
   }
 
   useEffect(() => {
+    if (!usePlannerUrlState) return;
     const applyUrlState = () => {
       const nextTab = readSimulationTabFromUrl();
       setActiveTab(nextTab);
@@ -2446,7 +2470,7 @@ export default function SimulationResults({
     applyUrlState();
     window.addEventListener("popstate", applyUrlState);
     return () => window.removeEventListener("popstate", applyUrlState);
-  }, []);
+  }, [usePlannerUrlState]);
 
   if (!result) {
     return (
@@ -2515,6 +2539,8 @@ export default function SimulationResults({
             controls={controls}
             openGroups={openGroups}
             onOpenGroupChange={onOpenGroupChange}
+            usePlannerUrlState={usePlannerUrlState}
+            instanceId={instanceId}
           />
         </TabsContent>
       </Tabs>
@@ -2541,6 +2567,8 @@ function SimulationTabContent({
   onClearHaulExclusions,
   openGroups,
   onOpenGroupChange,
+  usePlannerUrlState,
+  instanceId,
 }: {
   activeTab: SimulationTab;
   result: SimulationResultV1;
@@ -2559,6 +2587,8 @@ function SimulationTabContent({
   onClearHaulExclusions: () => Promise<boolean>;
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
+  usePlannerUrlState: boolean;
+  instanceId: string;
 }) {
   if (activeTab === "warnings") {
     return (
@@ -2580,6 +2610,8 @@ function SimulationTabContent({
         controls={controls}
         openGroups={openGroups}
         onOpenGroupChange={onOpenGroupChange}
+        usePlannerUrlState={usePlannerUrlState}
+        instanceId={instanceId}
       />
     );
   }
@@ -2631,6 +2663,7 @@ function SimulationTabContent({
         controls={controls}
         openGroups={openGroups}
         onOpenGroupChange={onOpenGroupChange}
+        instanceId={instanceId}
       />
     );
   }

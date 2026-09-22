@@ -10,8 +10,14 @@ import { Spinner } from "@/components/ui/spinner";
 import type { PlanRequestLog } from "@/lib/planning/planRequestLogger";
 
 type PlanRequestLogSummary = Omit<PlanRequestLog, "rawRequestBody" | "rawResponseBody">;
+type PlanLogCollectionDetails = {
+  collectionId: string;
+  kind: "corporation" | "character";
+  id: number;
+  name: string;
+};
 type PlanLogPage = {
-  logs: PlanRequestLogSummary[];
+  logs: Array<PlanRequestLogSummary & { collectionDetails?: PlanLogCollectionDetails }>;
   page: number;
   pageSize: number;
   total: number;
@@ -54,10 +60,10 @@ export default function PlanLogReview() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 id="plan-log-heading" className="text-lg font-semibold">
-            Plan request log
+            Planning request log
           </h2>
           <p className="text-sm text-muted-foreground">
-            Retained request and response bodies for reproducing reported plans.
+            Retained request and response bodies for reproducing planner and simulator runs.
           </p>
         </div>
         <Button
@@ -78,12 +84,24 @@ export default function PlanLogReview() {
       {page?.logs.length ? (
         <div className="overflow-x-auto border">
           <table className="w-full min-w-190 text-left text-sm">
+            <caption className="sr-only">Retained planning and simulation requests</caption>
             <thead className="border-b text-muted-foreground">
               <tr>
-                <th className="px-4 py-3 font-medium">Time</th>
-                <th className="px-4 py-3 font-medium">Plan ID</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">Review</th>
+                <th scope="col" className="px-4 py-3 font-medium">
+                  Time
+                </th>
+                <th scope="col" className="px-4 py-3 font-medium">
+                  Endpoint
+                </th>
+                <th scope="col" className="px-4 py-3 font-medium">
+                  Request ID
+                </th>
+                <th scope="col" className="px-4 py-3 font-medium">
+                  Collection
+                </th>
+                <th scope="col" className="px-4 py-3 font-medium">
+                  Status
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -92,24 +110,40 @@ export default function PlanLogReview() {
                   <td className="px-4 py-3 whitespace-nowrap">
                     {new Date(log.requestedAt).toLocaleString()}
                   </td>
+                  <td className="px-4 py-3">
+                    /{log.endpoint === "simulate" ? "simulate" : "plan"}
+                  </td>
                   <td className="px-4 py-3 font-mono text-xs">
                     <NoPrefetchLink
                       className="underline decoration-muted-foreground/50 underline-offset-2 hover:decoration-foreground"
-                      href={`/admin/plans/${log.id}`}
+                      href={
+                        log.endpoint === "simulate"
+                          ? `/admin/simulations/${log.id}`
+                          : `/admin/plans/${log.id}`
+                      }
                     >
                       {log.id}
                     </NoPrefetchLink>
                   </td>
-                  <td className="px-4 py-3">{log.responseStatus}</td>
                   <td className="px-4 py-3">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => window.location.assign(`/admin/plans/${log.id}`)}
-                    >
-                      Open
-                    </Button>
+                    {log.collectionDetails ? (
+                      <div className="flex flex-col gap-0.5">
+                        <span>{log.collectionDetails.name}</span>
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {log.collectionDetails.kind === "corporation"
+                            ? "Corporation"
+                            : "Character"}{" "}
+                          {log.collectionDetails.id}
+                        </span>
+                        <span className="font-mono text-xs text-muted-foreground">
+                          Collection {log.collectionDetails.collectionId}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">No collection</span>
+                    )}
                   </td>
+                  <td className="px-4 py-3">{log.responseStatus}</td>
                 </tr>
               ))}
             </tbody>

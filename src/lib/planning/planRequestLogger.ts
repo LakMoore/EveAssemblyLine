@@ -10,9 +10,12 @@ const planRequestsCollection = "planRequests";
 const planLogStoragePrefix = "plan-logs";
 const maximumMemoryEntries = 100;
 
+export type PlanRequestLogEndpoint = "plan" | "simulate";
+
 /** The raw request and response retained for one plan calculation. */
 export type PlanRequestLog = {
   id: string;
+  endpoint: PlanRequestLogEndpoint;
   requestedAt: string;
   storagePath: string;
   sizeBytes: number;
@@ -102,6 +105,7 @@ function parseStoredBlob(value: Buffer, id: string): PlanRequestLog | undefined 
     }
     return {
       id,
+      endpoint: "plan",
       requestedAt: "",
       storagePath: storagePath(id),
       sizeBytes: value.byteLength,
@@ -150,6 +154,7 @@ export async function writePlanRequestLog(entry: PlanRequestLog): Promise<void> 
         sizeBytes: blob.byteLength,
         createdAt: Timestamp.fromDate(new Date(entry.requestedAt)),
         summary: {
+          endpoint: entry.endpoint,
           responseStatus: entry.responseStatus,
           ...(entry.sessionCollectionId ? { sessionCollectionId: entry.sessionCollectionId } : {}),
         },
@@ -183,8 +188,8 @@ async function persistPlanRequestLog(entry: PlanRequestLog): Promise<void> {
   }
 }
 
-/** Assigns an ID and schedules durable persistence without delaying the plan response. */
-export function logPlanRequest(entry: PlanRequestLogInput): string {
+/** Assigns an ID and schedules durable persistence without delaying the request response. */
+function logRequest(entry: PlanRequestLogInput): string {
   const id = entry.id ?? randomUUID();
   const completeEntry: PlanRequestLog = {
     ...entry,
@@ -195,6 +200,16 @@ export function logPlanRequest(entry: PlanRequestLogInput): string {
   remember(completeEntry);
   after(() => persistPlanRequestLog(completeEntry));
   return id;
+}
+
+/** Retains one legacy planner request and response. */
+export function logPlanRequest(entry: Omit<PlanRequestLogInput, "endpoint">): string {
+  return logRequest({ ...entry, endpoint: "plan" });
+}
+
+/** Retains one simulator request and response in the shared administrator log. */
+export function logSimulationRequest(entry: Omit<PlanRequestLogInput, "endpoint">): string {
+  return logRequest({ ...entry, endpoint: "simulate" });
 }
 
 /** Loads one plan request log, preferring the current process memory. */
@@ -209,7 +224,11 @@ export async function getPlanRequestLog(id: string): Promise<PlanRequestLog | un
       storagePath?: string;
       sizeBytes?: number;
       createdAt?: Timestamp;
-      summary?: { responseStatus?: number; sessionCollectionId?: string };
+      summary?: {
+        endpoint?: unknown;
+        responseStatus?: number;
+        sessionCollectionId?: string;
+      };
     };
     if (metadata.requestId === id && metadata.storagePath) {
       const [contents] = await getStorageBucket().file(metadata.storagePath).download();
@@ -222,6 +241,7 @@ export async function getPlanRequestLog(id: string): Promise<PlanRequestLog | un
           sizeBytes: metadata.sizeBytes ?? contents.byteLength,
           responseStatus: metadata.summary?.responseStatus ?? 0,
           sessionCollectionId: metadata.summary?.sessionCollectionId,
+          endpoint: metadata.summary?.endpoint === "simulate" ? "simulate" : "plan",
         };
       }
     }
@@ -253,13 +273,18 @@ export async function getPlanRequestLogPage(
       storagePath?: string;
       sizeBytes?: number;
       createdAt?: Timestamp;
-      summary?: { responseStatus?: number; sessionCollectionId?: string };
+      summary?: {
+        endpoint?: unknown;
+        responseStatus?: number;
+        sessionCollectionId?: string;
+      };
     };
     if (!value.requestId || !value.storagePath) continue;
     entries.set(
       value.requestId,
       {
         id: value.requestId,
+        endpoint: value.summary?.endpoint === "simulate" ? "simulate" : "plan",
         requestedAt: value.createdAt?.toDate().toISOString() ?? "",
         storagePath: value.storagePath,
         sizeBytes: value.sizeBytes ?? 0,
