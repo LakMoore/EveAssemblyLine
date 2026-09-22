@@ -29,6 +29,8 @@ type OptionsRequest = {
   stationIds?: number[];
 };
 
+const compressOptionsVersion = 2;
+
 let relevantSkillIdsPromise: Promise<number[]> | undefined;
 
 function getEsiStructureId(locationId: string) {
@@ -183,14 +185,16 @@ async function getOptions(
   const characterImplants = await Promise.all(
     records.map(async (record) => {
       const clones = await fetchCharacterClones(record).catch(() => ({ data: null }));
+      const cloneRecords = clones.data?.jump_clones ?? clones.data?.clones ?? [];
+      const activeClone = cloneRecords.find(
+        (clone) =>
+          (clone.jump_clone_id ?? clone.clone_id) === clones.data?.active_clone_id,
+      );
+      const implants = activeClone?.implants ?? cloneRecords.flatMap((clone) => clone.implants ?? []);
       return {
         characterId: record.characterId,
         implants: [
-          ...new Set(
-            (clones.data?.clones ?? []).find(
-              (clone) => clone.clone_id === clones.data?.active_clone_id,
-            )?.implants ?? [],
-          ),
+          ...new Set(implants),
         ],
       };
     }),
@@ -291,6 +295,7 @@ async function getOptions(
     );
   }
   const response = NextResponse.json({
+    optionsVersion: compressOptionsVersion,
     characterImplants: Object.fromEntries(
       characterImplants.map((character) => [String(character.characterId), character.implants]),
     ),

@@ -17,6 +17,7 @@ type ImplantOption = {
 };
 
 type CompressOptions = {
+  optionsVersion: number;
   characterImplants: Partial<Record<string, number[]>>;
   implants: ImplantOption[];
   relevantSkillIds: number[];
@@ -29,7 +30,7 @@ export function loadCompressOptions(language: SdeLanguage, reload = false) {
   if (compressOptionsRequest) return compressOptionsRequest;
   compressOptionsRequest = (async () => {
     const cached = reload ? null : await loadEndpointRecord<CompressOptions>("compress/options");
-    if (cached && Object.hasOwn(cached.data, "characterImplants")) return cached.data;
+    if (cached && cached.data.optionsVersion === 2) return cached.data;
     const response = await fetch(
       "/api/compress/options",
       {

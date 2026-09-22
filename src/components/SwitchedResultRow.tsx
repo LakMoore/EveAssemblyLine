@@ -32,6 +32,7 @@ export type SwitchedResultRowProps = Omit<
   disabled?: boolean;
   selected?: boolean;
   onClick?: () => void;
+  wideBreakpoint?: "sm" | "md";
   className?: string;
   identityClassName?: string;
   contentClassName?: string;
@@ -61,6 +62,7 @@ export default function SwitchedResultRow({
   disabled = false,
   selected = false,
   onClick,
+  wideBreakpoint = "sm",
   className,
   identityClassName,
   contentClassName,
@@ -68,6 +70,23 @@ export default function SwitchedResultRow({
   checkboxClassName,
   ...typeIdentityProps
 }: SwitchedResultRowProps) {
+  const wideLayoutClasses =
+    wideBreakpoint === "md"
+      ? {
+          grid: "md:grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)_auto] md:items-center",
+          switch: "md:row-auto",
+          identity: "md:row-auto",
+          content: "md:col-span-1 md:col-start-3 md:row-auto",
+          checkbox: "md:col-start-4 md:row-auto",
+        }
+      : {
+          grid: "sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)_auto] sm:items-center",
+          switch: "sm:row-auto",
+          identity: "sm:row-auto",
+          content: "sm:col-span-1 sm:col-start-3 sm:row-auto",
+          checkbox: "sm:col-start-4 sm:row-auto",
+        };
+
   return (
     <div
       aria-disabled={disabled}
@@ -78,7 +97,8 @@ export default function SwitchedResultRow({
       tabIndex={onClick ? 0 : undefined}
       aria-label={onClick ? `Select ${name}` : undefined}
       className={cn(
-        "group/result-row grid min-h-14 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-[13px] gap-y-2 border-b border-border px-2 py-2.5 transition-colors hover:bg-muted/50 data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[installed=true]:opacity-50 data-[installed=true]:hover:bg-transparent data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:hover:bg-accent sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)_auto] sm:items-center",
+        "group/result-row grid min-h-14 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-[13px] gap-y-2 border-b border-border px-2 py-2.5 transition-colors hover:bg-muted/50 data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[installed=true]:opacity-50 data-[installed=true]:hover:bg-transparent data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:hover:bg-accent",
+        wideLayoutClasses.grid,
         className,
       )}
       onClick={onClick}
@@ -94,7 +114,9 @@ export default function SwitchedResultRow({
       }}
     >
       {showSwitch && (
-        <ResultRowControl className={cn("col-start-1 row-start-1 sm:row-auto", switchClassName)}>
+        <ResultRowControl
+          className={cn("col-start-1 row-start-1", wideLayoutClasses.switch, switchClassName)}
+        >
           {switchPending ? (
             <Spinner aria-hidden="true" />
           ) : (
@@ -120,14 +142,16 @@ export default function SwitchedResultRow({
         name={name}
         typeId={typeId}
         className={cn(
-          "col-start-2 row-start-1 min-w-0 sm:row-auto",
+          "col-start-2 row-start-1 min-w-0",
+          wideLayoutClasses.identity,
           !showSwitch && "col-start-1",
           identityClassName,
         )}
       />
       <div
         className={cn(
-          "col-span-2 col-start-2 row-start-2 flex min-w-0 items-center justify-end gap-1 sm:col-span-1 sm:col-start-3 sm:row-auto",
+          "col-span-2 col-start-2 row-start-2 flex min-w-0 items-center justify-end gap-1",
+          wideLayoutClasses.content,
           !showSwitch && "col-start-1",
           contentClassName,
         )}
@@ -136,7 +160,7 @@ export default function SwitchedResultRow({
       </div>
       {showCheckbox && (
         <ResultRowControl
-          className={cn("col-start-3 row-start-1 sm:col-start-4 sm:row-auto", checkboxClassName)}
+          className={cn("col-start-3 row-start-1", wideLayoutClasses.checkbox, checkboxClassName)}
         >
           {checkboxPending ? (
             <Spinner aria-hidden="true" />

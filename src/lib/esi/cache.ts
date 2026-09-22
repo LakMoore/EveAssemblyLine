@@ -3550,6 +3550,12 @@ export function getOwnerSnapshotEndpointStatuses(
     industryJobs: jobStatus,
     jobs: jobStatus,
     marketOrders: endpointStatusOrUnavailable(cache.marketOrders),
+    ...(owner.kind === "character"
+      ? {
+          clones: endpointStatusOrUnavailable(cache.clones),
+          location: endpointStatusOrUnavailable(cache.currentLocation),
+        }
+      : {}),
     rootLocations: assetStatus,
     ships: endpointStatusOrUnavailable(cache.currentShip),
     skills: endpointStatusOrUnavailable(cache.skills),

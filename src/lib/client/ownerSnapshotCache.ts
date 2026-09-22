@@ -131,6 +131,8 @@ export type ClientOwnerSnapshot = {
   >;
   jobs: ClientOwnerSnapshotSlice<ClientOwnerSnapshotJob[]>;
   marketOrders: ClientOwnerSnapshotSlice<ClientOwnerSnapshotMarketOrder[]>;
+  clones?: ClientOwnerSnapshotEndpointStatus;
+  location?: ClientOwnerSnapshotEndpointStatus;
   ships: ClientOwnerSnapshotSlice<ClientOwnerSnapshotShip[]>;
   skills: ClientOwnerSnapshotSlice<CharacterSkillRecord[]>;
 };
@@ -150,6 +152,8 @@ export type ClientOwnerSnapshotResponse = {
   >;
   jobs: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["jobs"]["data"]>;
   marketOrders: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["marketOrders"]["data"]>;
+  clones?: ClientOwnerSnapshotEndpointStatus;
+  location?: ClientOwnerSnapshotEndpointStatus;
   ships: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["ships"]["data"]>;
   skills: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["skills"]["data"]>;
 };
@@ -508,6 +512,8 @@ export function isCompleteClientOwnerSnapshot(value: unknown): value is ClientOw
       (data): data is ClientOwnerSnapshotMarketOrder[] =>
         Array.isArray(data) && data.every((order) => isSnapshotMarketOrder(order)),
     )
+    && isOptional(value.clones, isSnapshotEndpointStatus)
+    && isOptional(value.location, isSnapshotEndpointStatus)
     && isSnapshotSlice(
       ships,
       (data): data is ClientOwnerSnapshotShip[] =>
@@ -588,6 +594,8 @@ export function isCompleteClientOwnerSnapshotResponse(
       (data): data is ClientOwnerSnapshot["marketOrders"]["data"] =>
         Array.isArray(data) && data.every((order) => isSnapshotMarketOrder(order)),
     )
+    && isOptional(value.clones, isSnapshotEndpointStatus)
+    && isOptional(value.location, isSnapshotEndpointStatus)
     && isSnapshotResponseSlice(
       value.ships,
       (data): data is ClientOwnerSnapshot["ships"]["data"] =>
@@ -654,6 +662,12 @@ export function mergeOwnerSnapshot(
     ),
     jobs: mergeSnapshotSlice(previous?.jobs ?? null, response.jobs),
     marketOrders: mergeSnapshotSlice(previous?.marketOrders ?? null, response.marketOrders),
+    ...((response.clones ?? previous?.clones)
+      ? { clones: response.clones ?? previous?.clones }
+      : {}),
+    ...((response.location ?? previous?.location)
+      ? { location: response.location ?? previous?.location }
+      : {}),
     ships: mergeSnapshotSlice(previous?.ships ?? null, response.ships),
     skills: mergeSnapshotSlice(previous?.skills ?? null, response.skills),
   };

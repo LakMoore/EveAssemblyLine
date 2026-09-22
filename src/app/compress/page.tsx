@@ -126,6 +126,7 @@ type CharacterOption = {
 };
 type ImplantOption = { id: string; name: string; level: number; typeId?: number };
 type CompressOptionsData = {
+  optionsVersion: number;
   characterImplants: Partial<Record<string, number[]>>;
   implants: ImplantOption[];
   relevantSkillIds: number[];
@@ -206,6 +207,7 @@ function CompressContent() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [options, setOptions] = useState<CompressOptions>({
+    optionsVersion: 2,
     locations: [],
     characters: [],
     characterImplants: {},
@@ -255,7 +257,8 @@ function CompressContent() {
             ? loadedOptions.characterImplants
             : undefined;
         const hasCachedCharacterImplants =
-          cachedCharacterImplants !== undefined
+          loadedOptions?.optionsVersion === 2
+          && cachedCharacterImplants !== undefined
           && (session.characters ?? []).every((character) =>
             Object.hasOwn(cachedCharacterImplants, String(character.characterId)),
           );
@@ -349,6 +352,7 @@ function CompressContent() {
         }));
         setOptions({
           ...loadedOptions,
+          optionsVersion: loadedOptions.optionsVersion ?? 2,
           characterImplants,
           implants: loadedOptions.implants ?? [],
           relevantSkillIds: loadedOptions.relevantSkillIds ?? [],
@@ -415,14 +419,17 @@ function CompressContent() {
   const selectedCharacter = options.characters.find(
     (character) => character.id === settings.characterId,
   );
-  const selectedImplant = options.implants.find((implant) => implant.id === settings.implantId);
-  const implantOptions = selectedCharacter
+  const availableImplants = selectedCharacter
     ? options.implants.filter(
         (implant) =>
           implant.id === "none"
           || (implant.typeId !== undefined && selectedCharacter.implants.includes(implant.typeId)),
       )
     : options.implants;
+  const implantOptions = availableImplants.filter(
+    (implant) => implant.id === "none" || implant.name.includes("RX-"),
+  );
+  const selectedImplant = implantOptions.find((implant) => implant.id === settings.implantId);
   const skillLevels =
     settings.characterId === "all-zero"
       ? Object.fromEntries(options.relevantSkillIds.map((id) => [String(id), 0]))

@@ -56,6 +56,8 @@ void test("merges modified slices and retains unchanged cached data", () => {
   const response = {
     schemaVersion: 6,
     owner: completeSnapshot.owner,
+    clones: { status: "fresh" as const, hasBody: true },
+    location: { status: "fresh" as const, hasBody: true },
     assets: {
       eTag: completeSnapshot.assets.eTag,
       isEmpty: false,
@@ -115,6 +117,8 @@ void test("merges modified slices and retains unchanged cached data", () => {
   const merged = mergeOwnerSnapshot(completeSnapshot, response);
 
   assert.equal(merged.assets.data, completeSnapshot.assets.data);
+  assert.deepEqual(merged.clones, { status: "fresh", hasBody: true });
+  assert.deepEqual(merged.location, { status: "fresh", hasBody: true });
   assert.deepEqual(
     merged.industryJobs,
     {

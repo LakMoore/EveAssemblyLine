@@ -4,6 +4,7 @@ import type { CharacterTokenRecord, TokenSet } from "@/lib/auth/model";
 import { clearEsiRequestLogTimer } from "./logger";
 import {
   fetchCharacterCorporationAuthorization,
+  fetchCharacterClones,
   fetchCharacterIndustryJobs,
   fetchCharacterLocation,
   fetchCharacterRoles,
@@ -518,6 +519,31 @@ void test("maps current ship and location responses", async (t) => {
       "https://esi.evetech.net/latest/characters/42/ship/",
     ],
   );
+});
+
+void test("preserves ESI jump clone implant records", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const scopedCharacter: CharacterTokenRecord = {
+    ...character,
+    personalAuth: {
+      ...token,
+      scopes: ["esi-clones.read_clones.v1", "esi-clones.read_implants.v1"],
+    },
+  };
+  globalThis.fetch = async () =>
+    Response.json({
+      jump_clones: [{ jump_clone_id: 77, implants: [27175] }],
+    });
+
+  const result = await fetchCharacterClones(scopedCharacter);
+
+  assert.deepEqual(result.data, {
+    jump_clones: [{ jump_clone_id: 77, implants: [27175] }],
+  });
 });
 
 void test("treats a 420 error-limit response as rate limited", async (t) => {

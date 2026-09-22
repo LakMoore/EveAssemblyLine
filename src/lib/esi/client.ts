@@ -91,13 +91,15 @@ type EsiCharacterShip = {
 };
 
 export type EsiCharacterClone = {
-  clone_id: number;
+  jump_clone_id?: number;
+  clone_id?: number;
   implants?: number[];
 };
 
 export type EsiCharacterClones = {
   active_clone_id?: number;
   clones?: EsiCharacterClone[];
+  jump_clones?: EsiCharacterClone[];
 };
 
 /** The complete public character body returned by ESI. */

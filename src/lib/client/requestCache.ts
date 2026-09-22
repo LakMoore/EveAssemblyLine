@@ -907,7 +907,9 @@ export function loadClientCharacterState(): Promise<ClientCharacterState> {
           industrySlots: personalSnapshot?.industrySlots,
           assets: personalSnapshot?.assets.status,
           blueprints: personalSnapshot?.blueprintInstances.status,
+          clones: personalSnapshot?.clones,
           jobs: personalSnapshot?.industryJobs.status,
+          location: personalSnapshot?.location,
           orders: personalSnapshot?.marketOrders.status,
           ship: personalSnapshot?.ships.status,
           skills: personalSnapshot

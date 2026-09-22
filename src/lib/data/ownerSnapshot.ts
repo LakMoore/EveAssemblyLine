@@ -133,6 +133,8 @@ export type OwnerSnapshot = {
   industryJobs: OwnerSnapshotSlice<OwnerSnapshotData["industryJobs"]>;
   jobs: OwnerSnapshotSlice<OwnerSnapshotData["jobs"]>;
   marketOrders: OwnerSnapshotSlice<OwnerSnapshotData["marketOrders"]>;
+  clones?: OwnerSnapshotEndpointStatus;
+  location?: OwnerSnapshotEndpointStatus;
   rootLocations: OwnerSnapshotSlice<OwnerSnapshotData["rootLocations"]>;
   ships: OwnerSnapshotSlice<OwnerSnapshotData["ships"]>;
   skills: OwnerSnapshotSlice<OwnerSnapshotData["skills"]>;
@@ -322,6 +324,8 @@ function snapshotResponse(
       data.marketOrders.length === 0,
       endpointStatuses.marketOrders,
     ),
+    ...(endpointStatuses.clones ? { clones: endpointStatuses.clones } : {}),
+    ...(endpointStatuses.location ? { location: endpointStatuses.location } : {}),
     rootLocations: createSnapshotSlice(
       data.rootLocations,
       previousETags.rootLocations,

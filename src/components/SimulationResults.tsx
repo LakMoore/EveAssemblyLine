@@ -61,6 +61,7 @@ import { toast } from "@/components/ui/toast";
 import type { ClientCharacterStatus, ClientJobsResponse } from "@/lib/client/requestCache";
 import { getAvailableSlotCount } from "@/lib/client/slotUsage";
 import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageServer";
+import { cn } from "@/lib/utils";
 import {
   groupSimulationActivityJobs,
   type SimulationIndustryJobGroup,
@@ -898,7 +899,11 @@ function SimulationInstallPlanDialog({
                       <TooltipContent>Not Assigned</TooltipContent>
                     </Tooltip>
                   )}
-                  <CopyableNumber value={install.runs} suffix={` run${install.runs === 1 ? "" : "s"}`} copyLabel={`Install run${install.runs === 1 ? "" : "s"}`} />
+                  <CopyableNumber
+                    value={install.runs}
+                    suffix={` run${install.runs === 1 ? "" : "s"}`}
+                    copyLabel={`Install run${install.runs === 1 ? "" : "s"}`}
+                  />
                 </SwitchedResultRow>
               );
             })
@@ -1948,6 +1953,7 @@ function SimulationActivityTab({
               linkHash="plan-breakdown"
               navigateInPlace
               onNavigate={controls.onOpenPlan}
+              wideBreakpoint={tab === "manufacture" ? "md" : undefined}
               selected={!groupCompleted && controls.selectedRowKey === group.groupKey}
               installed={groupCompleted}
               onClick={groupCompleted ? undefined : () => controls.onSelectRow(group.groupKey)}
@@ -1964,7 +1970,12 @@ function SimulationActivityTab({
                 tab === "react" ? "Mark reaction installed" : "Mark manufacturing job installed"
               }
               onCheckboxChange={updateGroupCompletion}
-              contentClassName="grid w-full grid-cols-[max-content_minmax(0,max-content)_minmax(0,max-content)] items-center justify-around gap-3 self-end text-right font-mono text-xs sm:w-auto sm:grid-cols-[3rem_9rem_minmax(11rem,max-content)] sm:justify-end sm:gap-x-5 sm:self-auto"
+              contentClassName={cn(
+                "grid w-full grid-cols-[max-content_minmax(0,max-content)_minmax(0,max-content)] items-center justify-around gap-3 self-end text-right font-mono text-xs",
+                tab === "manufacture"
+                  ? "md:w-auto md:grid-cols-[3rem_9rem_minmax(11rem,max-content)] md:justify-end md:gap-x-5 md:self-auto"
+                  : "sm:w-auto sm:grid-cols-[3rem_9rem_minmax(11rem,max-content)] sm:justify-end sm:gap-x-5 sm:self-auto",
+              )}
             >
               <span className="flex items-center justify-center">
                 <SimulationInstallPlanDialog
@@ -1988,7 +1999,12 @@ function SimulationActivityTab({
                   onOpenBuy={controls.onOpenBuy}
                 />
               </span>
-              <span className="flex min-w-0 items-center justify-end gap-1 whitespace-normal sm:whitespace-nowrap">
+              <span
+                className={cn(
+                  "flex min-w-0 items-center justify-end gap-1 whitespace-normal",
+                  tab === "manufacture" ? "md:whitespace-nowrap" : "sm:whitespace-nowrap",
+                )}
+              >
                 <CopyableNumber
                   value={group.quantities.availableNow}
                   suffix=" / "
