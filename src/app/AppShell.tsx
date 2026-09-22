@@ -229,18 +229,24 @@ function allEndpointsFreshOrCached(
         : [],
     ),
   );
-  return statuses.length > 0 && statuses.every((character) => {
-    const endpoints = getFreshnessEndpoints(character, refreshedCorporationIds);
-    return endpoints.length > 0 && endpoints.every(
-      (endpoint) => {
-        const expiresAt = Date.parse(endpoint?.expires ?? "");
-        return Boolean(endpoint?.hasBody)
-          && Number.isFinite(expiresAt)
-          && expiresAt > Date.now()
-          && (endpoint?.status === "fresh" || endpoint?.status === "cached");
-      },
-    );
-  });
+  return (
+    statuses.length > 0
+    && statuses.every((character) => {
+      const endpoints = getFreshnessEndpoints(character, refreshedCorporationIds);
+      return (
+        endpoints.length > 0
+        && endpoints.every((endpoint) => {
+          const expiresAt = Date.parse(endpoint?.expires ?? "");
+          return (
+            Boolean(endpoint?.hasBody)
+            && Number.isFinite(expiresAt)
+            && expiresAt > Date.now()
+            && (endpoint?.status === "fresh" || endpoint?.status === "cached")
+          );
+        })
+      );
+    })
+  );
 }
 
 function hasEndpointErrors(statuses: ClientCharacterStatus[]) {

@@ -2000,7 +2000,7 @@ function SimulationActivityTab({
               linkHash="plan-breakdown"
               navigateInPlace
               onNavigate={controls.onOpenPlan}
-              wideBreakpoint={tab === "manufacture" ? "md" : undefined}
+              wideBreakpoint="lg"
               selected={!groupCompleted && controls.selectedRowKey === group.groupKey}
               installed={groupCompleted}
               onClick={groupCompleted ? undefined : () => controls.onSelectRow(group.groupKey)}
@@ -2018,13 +2018,11 @@ function SimulationActivityTab({
               }
               onCheckboxChange={updateGroupCompletion}
               contentClassName={cn(
-                "grid w-full grid-cols-[max-content_minmax(0,max-content)_minmax(0,max-content)] items-center justify-around gap-3 self-end text-right font-mono text-xs",
-                tab === "manufacture"
-                  ? "md:w-auto md:grid-cols-[3rem_9rem_minmax(11rem,max-content)] md:justify-end md:gap-x-5 md:self-auto"
-                  : "sm:w-auto sm:grid-cols-[3rem_9rem_minmax(11rem,max-content)] sm:justify-end sm:gap-x-5 sm:self-auto",
+                "grid w-full grid-cols-[1fr_auto_1fr] items-center gap-3 self-end text-right font-mono text-xs",
+                "lg:w-auto lg:grid-cols-[3rem_9rem_minmax(11rem,max-content)] lg:justify-end lg:gap-x-5 lg:self-auto",
               )}
             >
-              <span className="flex items-center justify-center">
+              <span className="flex items-center justify-self-start">
                 <SimulationInstallPlanDialog
                   entries={installPlanEntries}
                   activityLabel={activityLabel}
@@ -2038,7 +2036,7 @@ function SimulationActivityTab({
                   readOnly={readOnly}
                 />
               </span>
-              <span className="flex items-center justify-center">
+              <span className="flex items-center justify-self-center">
                 <SimulationJobInputsResponsive
                   job={group.jobs[0]}
                   jobs={group.jobs}
@@ -2048,8 +2046,8 @@ function SimulationActivityTab({
               </span>
               <span
                 className={cn(
-                  "flex min-w-0 items-center justify-end gap-1 whitespace-normal",
-                  tab === "manufacture" ? "md:whitespace-nowrap" : "sm:whitespace-nowrap",
+                  "flex min-w-0 items-center gap-1 justify-self-end whitespace-normal",
+                  "lg:whitespace-nowrap",
                 )}
               >
                 <CopyableNumber

@@ -541,9 +541,12 @@ void test("preserves ESI jump clone implant records", async (t) => {
 
   const result = await fetchCharacterClones(scopedCharacter);
 
-  assert.deepEqual(result.data, {
-    jump_clones: [{ jump_clone_id: 77, implants: [27175] }],
-  });
+  assert.deepEqual(
+    result.data,
+    {
+      jump_clones: [{ jump_clone_id: 77, implants: [27175] }],
+    },
+  );
 });
 
 void test("treats a 420 error-limit response as rate limited", async (t) => {

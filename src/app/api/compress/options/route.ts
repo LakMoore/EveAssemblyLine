@@ -187,15 +187,13 @@ async function getOptions(
       const clones = await fetchCharacterClones(record).catch(() => ({ data: null }));
       const cloneRecords = clones.data?.jump_clones ?? clones.data?.clones ?? [];
       const activeClone = cloneRecords.find(
-        (clone) =>
-          (clone.jump_clone_id ?? clone.clone_id) === clones.data?.active_clone_id,
+        (clone) => (clone.jump_clone_id ?? clone.clone_id) === clones.data?.active_clone_id,
       );
-      const implants = activeClone?.implants ?? cloneRecords.flatMap((clone) => clone.implants ?? []);
+      const implants =
+        activeClone?.implants ?? cloneRecords.flatMap((clone) => clone.implants ?? []);
       return {
         characterId: record.characterId,
-        implants: [
-          ...new Set(implants),
-        ],
+        implants: [...new Set(implants)],
       };
     }),
   );

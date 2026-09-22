@@ -32,7 +32,7 @@ export type SwitchedResultRowProps = Omit<
   disabled?: boolean;
   selected?: boolean;
   onClick?: () => void;
-  wideBreakpoint?: "sm" | "md";
+  wideBreakpoint?: "sm" | "md" | "lg";
   className?: string;
   identityClassName?: string;
   contentClassName?: string;
@@ -71,21 +71,29 @@ export default function SwitchedResultRow({
   ...typeIdentityProps
 }: SwitchedResultRowProps) {
   const wideLayoutClasses =
-    wideBreakpoint === "md"
+    wideBreakpoint === "lg"
       ? {
-          grid: "md:grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)_auto] md:items-center",
-          switch: "md:row-auto",
-          identity: "md:row-auto",
-          content: "md:col-span-1 md:col-start-3 md:row-auto",
-          checkbox: "md:col-start-4 md:row-auto",
+          grid: "lg:grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)_auto] lg:items-center",
+          switch: "lg:row-auto",
+          identity: "lg:row-auto",
+          content: "lg:col-span-1 lg:col-start-3 lg:row-auto",
+          checkbox: "lg:col-start-4 lg:row-auto",
         }
-      : {
-          grid: "sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)_auto] sm:items-center",
-          switch: "sm:row-auto",
-          identity: "sm:row-auto",
-          content: "sm:col-span-1 sm:col-start-3 sm:row-auto",
-          checkbox: "sm:col-start-4 sm:row-auto",
-        };
+      : wideBreakpoint === "md"
+        ? {
+            grid: "md:grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)_auto] md:items-center",
+            switch: "md:row-auto",
+            identity: "md:row-auto",
+            content: "md:col-span-1 md:col-start-3 md:row-auto",
+            checkbox: "md:col-start-4 md:row-auto",
+          }
+        : {
+            grid: "sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)_auto] sm:items-center",
+            switch: "sm:row-auto",
+            identity: "sm:row-auto",
+            content: "sm:col-span-1 sm:col-start-3 sm:row-auto",
+            checkbox: "sm:col-start-4 sm:row-auto",
+          };
 
   return (
     <div
