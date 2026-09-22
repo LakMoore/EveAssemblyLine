@@ -2,12 +2,15 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { getSessionFromRequest } from "@/lib/auth/session";
 import { logSimulationRequest } from "@/lib/planning/planRequestLogger";
+import { createSimulationEtag } from "@/lib/planning/simulator/etag";
 import { simulatorRequestSchema } from "@/lib/planning/simulator/schema";
-import { simulateIndustry } from "@/lib/planning/simulator/simulate";
+import { simulateIndustry, simulationInputHash } from "@/lib/planning/simulator/simulate";
 import type {
   SimulationResultV1,
   SimulationResultWithDiagnostics,
 } from "@/lib/planning/simulator/types";
+import { getSdeBuildNumber } from "@/lib/sde/loader";
+import { matchesIfNoneMatch } from "@/lib/server/etag";
 import { createRequestProfiler } from "@/lib/server/profiling";
 
 export const dynamic = "force-dynamic";
@@ -93,13 +96,41 @@ export async function POST(request: Request) {
       logResponse(JSON.stringify(responseBody), 400);
       return NextResponse.json(responseBody, { status: 400, ...noStoreResponseInit });
     }
+    const normalizedInputHash = profiler.measureSync(
+      "hash-input",
+      () => simulationInputHash(parsed.data),
+    );
+    const sdeRevision = await profiler.measure("read-sde-revision", getSdeBuildNumber);
+    const etag = createSimulationEtag(normalizedInputHash, sdeRevision);
+    if (matchesIfNoneMatch(request.headers.get("if-none-match"), etag)) {
+      logResponse("", 304);
+      return new Response(
+        null,
+        {
+          status: 304,
+          headers: {
+            ...noStoreResponseInit.headers,
+            ETag: etag,
+          },
+        },
+      );
+    }
     const result = await profiler.measure(
       "simulate",
-      () => simulateIndustry(parsed.data, profiler),
+      () => simulateIndustry(parsed.data, profiler, normalizedInputHash),
     );
     const responseBody = withSimulationId(presentationResult(result), simulationId);
     logResponse(JSON.stringify(responseBody), 200);
-    return NextResponse.json(responseBody, noStoreResponseInit);
+    return NextResponse.json(
+      responseBody,
+      {
+        ...noStoreResponseInit,
+        headers: {
+          ...noStoreResponseInit.headers,
+          ETag: etag,
+        },
+      },
+    );
   }
   catch (error) {
     console.error("Industry simulation failed.", error);

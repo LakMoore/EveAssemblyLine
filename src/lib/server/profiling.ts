@@ -15,6 +15,7 @@ function profileCount(group: ProfileGroup): number {
 export type RequestProfiler = {
   start(section: string): void;
   end(section: string): void;
+  measureSync<T>(section: string, operation: () => T): T;
   measure<T>(section: string, operation: () => Promise<T>): Promise<T>;
   finish(): void;
 };
@@ -96,6 +97,21 @@ export function createRequestProfiler(
       const totalMS = Math.round((performance.now() - activeSection.startedAt) * 100) / 100;
       const parentSections = activeSections.at(-1)?.sections ?? rootSections;
       recordSection(parentSections, section, finishSection(activeSection, totalMS));
+    },
+    measureSync<T>(section: string, operation: () => T) {
+      if (!enabled) return operation();
+      activeSections.push({ name: section, startedAt: performance.now(), sections: new Map() });
+      try {
+        return operation();
+      }
+      finally {
+        const activeSection = activeSections.pop();
+        if (activeSection && activeSection.name === section) {
+          const totalMS = Math.round((performance.now() - activeSection.startedAt) * 100) / 100;
+          const parentSections = activeSections.at(-1)?.sections ?? rootSections;
+          recordSection(parentSections, section, finishSection(activeSection, totalMS));
+        }
+      }
     },
     async measure<T>(section: string, operation: () => Promise<T>) {
       if (!enabled) return operation();

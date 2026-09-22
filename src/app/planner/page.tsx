@@ -47,6 +47,7 @@ import {
   savePlanResponse,
   saveSimulationResult,
 } from "@/lib/planning/planResultStore";
+import { createSimulationEtag } from "@/lib/planning/simulator/etag";
 import {
   applyHaulItemExclusionsToPlan,
   createHaulItemExclusionKey,
@@ -849,7 +850,17 @@ function Planner() {
         mode === "simulate" ? "/api/plan/simulate" : "/api/plan",
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(mode === "simulate" && simulationResult
+              ? {
+                  "If-None-Match": createSimulationEtag(
+                    simulationResult.metadata.normalizedInputHash,
+                    simulationResult.metadata.sdeRevision,
+                  ),
+                }
+              : {}),
+          },
           body: JSON.stringify({
             language,
             stockpiles:
@@ -912,14 +923,23 @@ function Planner() {
           }),
         },
       );
-      const data = (await response.json()) as
-        | PlanResponse
-        | SimulationResultV1
-        | { error?: string };
-      if (!response.ok) {
+      if (mode === "simulate" && response.status === 304) {
+        if (!simulationResult) {
+          setPlanStatus("Error: The unchanged simulation result is no longer available");
+          return false;
+        }
+        flushSync(() => {
+          setDisplayedResult("simulate");
+        });
+      }
+      const data =
+        response.status === 304
+          ? null
+          : ((await response.json()) as PlanResponse | SimulationResultV1 | { error?: string });
+      if (!response.ok && response.status !== 304) {
         setPlanStatus(
           `Error: ${
-            "error" in data && data.error
+            data && typeof data === "object" && "error" in data && data.error
               ? data.error
               : mode === "simulate"
                 ? "Could not simulate plan"
@@ -929,8 +949,12 @@ function Planner() {
         return false;
       }
       if (mode === "simulate") {
-        const nextSimulationResult = data as SimulationResultV1;
-        await saveSimulationResult(nextSimulationResult);
+        const nextSimulationResult = (data as SimulationResultV1 | null) ?? simulationResult;
+        if (!nextSimulationResult) {
+          setPlanStatus("Error: The simulator returned no result");
+          return false;
+        }
+        if (response.status !== 304) await saveSimulationResult(nextSimulationResult);
         flushSync(() => {
           setSimulationResult(nextSimulationResult);
           setDisplayedResult("simulate");

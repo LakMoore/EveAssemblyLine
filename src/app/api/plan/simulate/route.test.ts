@@ -14,7 +14,6 @@ function diagnosticResult(): SimulationResultWithDiagnostics {
       generatedAt: "2026-09-20T00:00:00.000Z",
       sdeRevision: "test",
       normalizedInputHash: "test",
-      elapsedMilliseconds: 0,
       warningCount: 0,
       invariantViolationCount: 0,
       unresolvedAssetCount: 0,

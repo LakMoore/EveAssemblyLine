@@ -331,7 +331,6 @@ export interface SimulationResultV1 {
     generatedAt: string;
     sdeRevision: string;
     normalizedInputHash: string;
-    elapsedMilliseconds: number;
     warningCount: number;
     invariantViolationCount: number;
     unresolvedAssetCount: number;

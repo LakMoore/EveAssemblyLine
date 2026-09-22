@@ -807,10 +807,13 @@ function SimulationInstallPlanDialog({
                   onCheckboxChange={(checked) => setInstallCompleted(group.installs, checked)}
                   contentClassName="w-full justify-between gap-3 self-end text-right font-mono text-xs sm:grid sm:min-w-[11rem] sm:grid-cols-[minmax(0,1fr)_max-content] sm:gap-x-4 sm:justify-normal sm:self-auto"
                 >
-                  <span>{quantity(group.installs.length)} install{group.installs.length === 1 ? "" : "s"}</span>
+                  <span>
+                    {quantity(group.installs.length)} install
+                    {group.installs.length === 1 ? "" : "s"}
+                  </span>
                   <CopyableNumber
                     value={group.runs}
-                    suffix={` run${group.runs === 1 ? '' : 's'} each`}
+                    suffix={` run${group.runs === 1 ? "" : "s"} each`}
                     copyLabel="Runs per install"
                   />
                 </SwitchedResultRow>

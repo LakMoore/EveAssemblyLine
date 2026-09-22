@@ -42,7 +42,7 @@ function canonicalize(value: unknown): unknown {
 }
 
 /** Creates a stable content hash without retaining request data in the response. */
-function inputHash(request: SimulationRequestV1): string {
+export function simulationInputHash(request: SimulationRequestV1): string {
   return createHash("sha256")
     .update(JSON.stringify(canonicalize(request)))
     .digest("hex");
@@ -363,8 +363,8 @@ function assembleLists(
 export async function simulateIndustry(
   request: SimulationRequestV1,
   profiler?: RequestProfiler,
+  normalizedInputHash?: string,
 ): Promise<SimulationResultWithDiagnostics> {
-  const startedAt = performance.now();
   const generatedAt = new Date().toISOString();
   const context = await measureAsyncProfiled(profiler, "load-context", loadSimulationContext);
   const graph = measureSyncProfiled(
@@ -498,15 +498,16 @@ export async function simulateIndustry(
         warnings,
       ),
   );
-  const normalizedInputHash = measureSyncProfiled(profiler, "hash-input", () => inputHash(request));
+  const resultInputHash =
+    normalizedInputHash
+    ?? measureSyncProfiled(profiler, "hash-input", () => simulationInputHash(request));
   return {
     metadata: {
       simulatorVersion: 1,
       policyVersion: 1,
       generatedAt,
       sdeRevision: context.sdeRevision,
-      normalizedInputHash,
-      elapsedMilliseconds: performance.now() - startedAt,
+      normalizedInputHash: resultInputHash,
       warningCount: warnings.length,
       invariantViolationCount: projection.invariantViolations.length,
       unresolvedAssetCount: inventory.unresolvedLotCount,
