@@ -140,6 +140,12 @@ const stateEndpoints: StateEndpoint[] = [
   "orders",
 ];
 const corporationStateEndpoints: Array<"assets" | "jobs" | "orders"> = ["assets", "jobs", "orders"];
+const freshnessEndpoints: Array<"assets" | "blueprints" | "jobs" | "orders"> = [
+  "assets",
+  "blueprints",
+  "jobs",
+  "orders",
+];
 
 function showRefreshError(details: string) {
   toast.add({
@@ -189,41 +195,57 @@ function getStateStatusErrors(statuses: ClientCharacterStatus[], characters: Cha
   return [...new Set(errors)];
 }
 
-function hasExpiredEndpoint(statuses: ClientCharacterStatus[]) {
-  return statuses.some((character) => {
-    const endpoints = [
-      ...stateEndpoints.map((endpoint) => character[endpoint]),
-      ...(character.corporations ?? []).flatMap((corporation) =>
-        corporationStateEndpoints.map((endpoint) => corporation[endpoint]),
-      ),
-    ];
-    return endpoints.some((endpoint) => {
-      if (!endpoint || !endpoint.hasBody) return true;
-      if (endpoint.status === "error") return true;
-      const now = Date.now();
-      if (
-        endpoint.status === "rate_limited"
-        && endpoint.rateLimitedUntil
-        && Date.parse(endpoint.rateLimitedUntil) > now
-      ) return false;
-      const lastUpdated = Date.parse(endpoint.lastUpdated ?? "");
-      const recentlyUpdated =
-        Number.isFinite(lastUpdated) && lastUpdated <= now && now - lastUpdated <= 2 * 60 * 1000;
-      const expiresAt = Date.parse(endpoint.expires ?? "");
-      const isExpired = Number.isFinite(expiresAt) && expiresAt <= now;
-      return endpoint.status === "stale" || (isExpired && !recentlyUpdated);
-    });
+function getTrackedEndpoints(character: ClientCharacterStatus) {
+  return [
+    ...stateEndpoints.map((endpoint) => character[endpoint]),
+    ...(character.corporations ?? []).flatMap((corporation) =>
+      corporationStateEndpoints.map((endpoint) => corporation[endpoint]),
+    ),
+  ];
+}
+
+function getFreshnessEndpoints(
+  character: ClientCharacterStatus,
+  refreshedCorporationIds: ReadonlySet<number>,
+) {
+  return [
+    ...freshnessEndpoints.map((endpoint) => character[endpoint]),
+    ...(character.corporations ?? []).flatMap((corporation) =>
+      refreshedCorporationIds.has(corporation.corporationId)
+        ? freshnessEndpoints.map((endpoint) => corporation[endpoint])
+        : [],
+    ),
+  ];
+}
+
+function allEndpointsFreshOrCached(
+  statuses: ClientCharacterStatus[],
+  characters: CharacterSummary[],
+) {
+  const refreshedCorporationIds = new Set(
+    characters.flatMap((character) =>
+      character.corporationSupportEnabled && character.corporationId !== undefined
+        ? [character.corporationId]
+        : [],
+    ),
+  );
+  return statuses.length > 0 && statuses.every((character) => {
+    const endpoints = getFreshnessEndpoints(character, refreshedCorporationIds);
+    return endpoints.length > 0 && endpoints.every(
+      (endpoint) => {
+        const expiresAt = Date.parse(endpoint?.expires ?? "");
+        return Boolean(endpoint?.hasBody)
+          && Number.isFinite(expiresAt)
+          && expiresAt > Date.now()
+          && (endpoint?.status === "fresh" || endpoint?.status === "cached");
+      },
+    );
   });
 }
 
 function hasEndpointErrors(statuses: ClientCharacterStatus[]) {
   return statuses.some((character) =>
-    [
-      ...stateEndpoints.map((endpoint) => character[endpoint]),
-      ...(character.corporations ?? []).flatMap((corporation) =>
-        corporationStateEndpoints.map((endpoint) => corporation[endpoint]),
-      ),
-    ].some((endpoint) => endpoint?.status === "error"),
+    getTrackedEndpoints(character).some((endpoint) => endpoint?.status === "error"),
   );
 }
 
@@ -307,12 +329,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
                                     ].includes(pathname)
                                   ? "public"
                                   : "planner";
-  const hasExpiredState =
+  const isRefreshCurrent =
     authenticated
     && characters.length > 0
     && hasLoadedStateStatuses
     && statusCheckAt > 0
-    && hasExpiredEndpoint(stateStatuses);
+    && allEndpointsFreshOrCached(stateStatuses, characters);
   const hasStateErrors =
     authenticated
     && characters.length > 0
@@ -834,23 +856,23 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 {authenticated && (
                   <button
                     type="button"
-                    className={`${styles.refresh} ${!hasExpiredState ? styles.refreshCurrent : ""}`}
+                    className={`${styles.refresh} ${isRefreshCurrent ? styles.refreshCurrent : ""}`}
                     onClick={() => void handleMobileMetaAction()}
                     disabled={isRefreshingData}
-                    aria-label={hasExpiredState ? "Refresh data" : "Up to date"}
+                    aria-label={isRefreshCurrent ? "Up to date" : "Refresh data"}
                     title={
                       hasStateErrors
                         ? "Refresh data; one or more endpoints failed"
-                        : hasExpiredState
-                          ? "Refresh data"
-                          : "Up to date"
+                        : isRefreshCurrent
+                          ? "Up to date"
+                          : "Refresh data"
                     }
                   >
                     {hasStateErrors ? (
                       <span className={styles.refreshIconError} aria-hidden="true">
                         !
                       </span>
-                    ) : hasExpiredState ? (
+                    ) : !isRefreshCurrent ? (
                       <span className={styles.refreshIconWarning} aria-hidden="true">
                         ↻
                       </span>
@@ -860,9 +882,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
                     <span>
                       {isRefreshingData
                         ? "Refreshing..."
-                        : hasExpiredState
-                          ? "Refresh Data"
-                          : "Up To Date"}
+                        : isRefreshCurrent
+                          ? "Up to Date"
+                          : "Refresh Data"}
                     </span>
                   </button>
                 )}

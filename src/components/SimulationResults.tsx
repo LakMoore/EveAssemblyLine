@@ -62,6 +62,8 @@ import type { ClientCharacterStatus, ClientJobsResponse } from "@/lib/client/req
 import { getAvailableSlotCount } from "@/lib/client/slotUsage";
 import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageServer";
 import { cn } from "@/lib/utils";
+import { useAppLanguage } from "@/app/AppShell";
+import { fetchTypeMetadata } from "@/lib/reference/types";
 import {
   groupSimulationActivityJobs,
   type SimulationIndustryJobGroup,
@@ -976,6 +978,42 @@ function materialImageVariation(typeName: string): "icon" | "bp" {
   return /\bblueprint$/i.test(typeName) ? "bp" : "icon";
 }
 
+/** Loads localized names for simulator type IDs while retaining a stable ID fallback. */
+function useSimulationTypeNames(typeIds: readonly number[]) {
+  const { language } = useAppLanguage();
+  const typeIdKey = [...new Set(typeIds)].sort((left, right) => left - right).join(",");
+  const requestKey = `${language}:${typeIdKey}`;
+  const [loadedNames, setLoadedNames] = useState<{
+    requestKey: string;
+    namesByTypeId: ReadonlyMap<number, string>;
+  }>({ requestKey: "", namesByTypeId: new Map() });
+
+  useEffect(() => {
+    const requestedTypeIds = typeIdKey
+      .split(",")
+      .filter(Boolean)
+      .map(Number);
+    if (requestedTypeIds.length === 0) return;
+    let cancelled = false;
+    void fetchTypeMetadata(requestedTypeIds, language)
+      .then((metadata) => {
+        if (cancelled) return;
+        setLoadedNames({
+          requestKey,
+          namesByTypeId: new Map(metadata.map((item) => [item.typeId, item.name])),
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setLoadedNames({ requestKey, namesByTypeId: new Map() });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [language, requestKey, typeIdKey]);
+
+  return loadedNames.requestKey === requestKey ? loadedNames.namesByTypeId : new Map();
+}
+
 /** Renders location-scoped rows inside collapsible result groups. */
 function SimulationLocationResultGroups<T extends { locationId: number }>({
   tab,
@@ -1348,6 +1386,7 @@ function SimulationCopyTab({
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
+  const blueprintNamesById = useSimulationTypeNames(jobs.map((job) => job.blueprintTypeId));
   return (
     <SimulationResultsTab hasResults={jobs.length > 0}>
       <SimulationLocationResultGroups
@@ -1359,14 +1398,14 @@ function SimulationCopyTab({
         getRowKey={(job) => job.jobId}
         getAvatar={(job) => ({
           typeId: job.blueprintTypeId,
-          name: `Blueprint ${job.blueprintTypeId}`,
+          name: blueprintNamesById.get(job.blueprintTypeId) ?? `Blueprint ${job.blueprintTypeId}`,
           imageVariation: "bp",
         })}
         renderRow={(job) => (
           <SimulationSimpleJobRow
             rowKey={`copy:${job.jobId}`}
             typeId={job.blueprintTypeId}
-            name={`Blueprint ${job.blueprintTypeId}`}
+            name={blueprintNamesById.get(job.blueprintTypeId) ?? `Blueprint ${job.blueprintTypeId}`}
             subline={
               <CopyableNumber
                 value={job.totalLicensedRuns}
@@ -1398,6 +1437,9 @@ function SimulationInventionTab({
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
+  const blueprintNamesById = useSimulationTypeNames(
+    jobs.map((job) => job.outputBlueprintTypeId),
+  );
   return (
     <SimulationResultsTab hasResults={jobs.length > 0}>
       <SimulationLocationResultGroups
@@ -1409,14 +1451,19 @@ function SimulationInventionTab({
         getRowKey={(job) => job.jobId}
         getAvatar={(job) => ({
           typeId: job.outputBlueprintTypeId,
-          name: `Blueprint ${job.outputBlueprintTypeId}`,
+          name:
+            blueprintNamesById.get(job.outputBlueprintTypeId)
+            ?? `Blueprint ${job.outputBlueprintTypeId}`,
           imageVariation: "bpc",
         })}
         renderRow={(job) => (
           <SimulationSimpleJobRow
             rowKey={`invent:${job.jobId}`}
             typeId={job.outputBlueprintTypeId}
-            name={`Blueprint ${job.outputBlueprintTypeId}`}
+            name={
+              blueprintNamesById.get(job.outputBlueprintTypeId)
+              ?? `Blueprint ${job.outputBlueprintTypeId}`
+            }
             subline={
               <CopyableNumber
                 value={Math.round(job.successProbability * 100)}

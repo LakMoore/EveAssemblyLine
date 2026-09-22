@@ -53,6 +53,19 @@ export function GoogleAnalytics() {
   }, []);
 
   useEffect(() => {
+    if (consent !== "granted" || !scriptLoaded || !window.gtag) return;
+
+    window.gtag(
+      "consent",
+      "update",
+      {
+        analytics_storage: consent,
+        ad_storage: "denied",
+      },
+    );
+  }, [consent, scriptLoaded]);
+
+  useEffect(() => {
     if (consent !== "granted" || !measurementId || !scriptLoaded || !window.gtag) return;
 
     window.gtag(
