@@ -2680,12 +2680,18 @@
   transform: translateY(0);
 }
 
-.availableSourceIcon[data-source="market"] {
+.availableSourceIcon[data-source="market"],
+.simulationSourceIcon[data-source="market"] {
   color: #e4b36f;
 }
 
-.availableSourceIcon[data-source="industry"] {
+.availableSourceIcon[data-source="industry"],
+.simulationSourceIcon[data-source="industry"] {
   color: #72d3b1;
+}
+
+.simulationSourceIcon[data-source="reaction"] {
+  color: #78c7d2;
 }
 
 .availableSourceIcon[data-source="invention"] {

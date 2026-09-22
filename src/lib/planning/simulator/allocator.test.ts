@@ -156,6 +156,37 @@ void test("retains the full output when an active job only supplies part of dema
   );
 });
 
+void test("does not claim future output delivered to another location", () => {
+  const allocator = new SimulationAllocator(
+    {
+      ...inventory,
+      itemLots: [
+        {
+          ...inventory.itemLots[0],
+          lotId: "remote-future-output",
+          quantity: 4,
+          locationId: 30,
+          horizon: "after-upstream",
+          source: "industry-output",
+          activity: "manufacturing",
+          industryJobId: 789,
+          industryJobStatus: "active",
+        },
+      ],
+    },
+    [],
+  );
+
+  assert.deepEqual(allocator.availability(34, 20), { local: 0, remote: 0, future: 0 });
+  assert.deepEqual(
+    allocator.claimFuture(34, 4, account, "demanding-job"),
+    {
+      quantity: 0,
+      reservations: [],
+    },
+  );
+});
+
 void test("conserves finite BPC runs across allocations", () => {
   const allocator = new SimulationAllocator(inventory, []);
   const first = allocator.claimManufacturingBlueprints(100, 4, 20, account, "job-1", 10);

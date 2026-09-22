@@ -551,7 +551,7 @@ void test("projects job output and remaining blueprint runs without an asset rec
         blueprintLocationId: 600,
         blueprintTypeId: 21018,
         endDate: "2026-01-02T00:00:00.000Z",
-        facilityId: 600,
+        facilityId: 601,
         installerId: 1,
         installedRuns: 30,
         licensedRuns: 40,
@@ -601,6 +601,15 @@ void test("projects job output and remaining blueprint runs without an asset rec
   assert.ok(blueprint);
   assert.equal(output.quantity, 30);
   assert.equal(output.inBuildQuantity, 30);
+  assert.equal(output.rootLocationId, 600);
+  assert.deepEqual(
+    output.corporationSource,
+    {
+      rootLocationId: 600,
+      locationFlag: "CorpSAG1",
+      containerItemIds: [44],
+    },
+  );
   assert.equal(output.industryJobEndDate, "2026-01-02T00:00:00.000Z");
   assert.equal(blueprint.blueprintType, "bpc");
   assert.equal(blueprint.blueprintPrints?.[0]?.runs, 10);
@@ -610,6 +619,49 @@ void test("projects job output and remaining blueprint runs without an asset rec
     filterClientAssetsForPlanning(result).assets?.filter((item) => item.jobId === 700),
     [],
   );
+});
+
+void test("uses a direct structure delivery location for future job output", () => {
+  const jobSnapshot: ClientOwnerSnapshot = {
+    ...snapshot,
+    assets: slice([]),
+    rootLocations: slice([
+      {
+        itemId: 700,
+        location: {
+          locationId: 700,
+          kind: "structure",
+          name: "Delivery Structure",
+          systemId: 30000142,
+          resolved: true,
+        },
+      },
+    ]),
+    jobs: slice([
+      {
+        jobId: 701,
+        characterId: 1,
+        ownerId: 900,
+        ownerType: "corporation",
+        activityId: 1,
+        status: "active",
+        runs: 1,
+        outputQuantity: 1,
+        startDate: "2026-01-01T00:00:00.000Z",
+        endDate: "2026-01-02T00:00:00.000Z",
+        facilityId: 600,
+        outputLocationId: 700,
+        blueprintTypeId: 21018,
+        productTypeId: 21017,
+      },
+    ]),
+  };
+  const result = projectOwnerSnapshotsToClientAssets(
+    [jobSnapshot],
+    { metadata: [{ typeId: 21017, name: "Capital Armor Plates", category: "item" }] },
+  );
+
+  assert.equal(result.assets?.find((item) => item.jobId === 701)?.rootLocationId, 700);
 });
 
 void test("keeps a running reaction job formula classified as a reaction formula", () => {

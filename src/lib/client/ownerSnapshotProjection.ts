@@ -294,8 +294,8 @@ function corporationSourceForJob(
   const source = snapshot.corporationSources.data.find(
     (candidate) =>
       candidate.corporationId === job.ownerId
-      && candidate.containerItemIds.includes(job.outputLocationId)
-      && candidate.canQuery,
+      && candidate.canTake
+      && candidate.containerItemIds.includes(job.outputLocationId),
   );
   if (!source) return undefined;
   const outputIsContainer = source.containerItemIds.includes(job.outputLocationId);
@@ -306,32 +306,57 @@ function corporationSourceForJob(
   };
 }
 
-function jobLocation(
+function jobOutputLocation(
+  snapshot: ClientOwnerSnapshot,
   job: ClientOwnerSnapshot["jobs"]["data"][number],
-  options: OwnerSnapshotProjectionOptions,
+  corporationSource: ReturnType<typeof corporationSourceForJob>,
 ) {
-  const facility = options.facilities?.find((candidate) => Number(candidate.id) === job.facilityId);
+  const corporationOutput =
+    job.ownerType === "corporation"
+    && snapshot.corporationSources.data.some(
+      (candidate) =>
+        candidate.corporationId === job.ownerId
+        && candidate.containerItemIds.includes(job.outputLocationId),
+    );
+  const outputRootLocation = snapshot.rootLocations.data.find(
+    (entry) => entry.itemId === job.outputLocationId,
+  )?.location;
+  const corporationRootLocation = corporationSource
+    ? snapshot.corporationSources.data.find(
+        (candidate) =>
+          candidate.corporationId === job.ownerId
+          && candidate.rootLocationId === corporationSource.rootLocationId
+          && candidate.locationFlag === corporationSource.locationFlag,
+      )?.rootLocation
+    : undefined;
+  const rootLocation = corporationOutput
+    ? corporationRootLocation
+    : (outputRootLocation ?? corporationRootLocation);
+  const sourceKind = sourceLocationKind(rootLocation);
+  const sourceSystemId =
+    rootLocation?.systemId
+    ?? (rootLocation?.kind === "solar_system" ? rootLocation.locationId : undefined);
   return {
-    rootLocationId: job.facilityId,
-    sourceLocationName: facility?.name,
-    sourceLocationKind: facility?.locationType,
-    sourceSystemId: facility?.systemId,
-    sourceSystemName: facility?.systemName,
+    rootLocationId:
+      rootLocation?.locationId ?? corporationSource?.rootLocationId ?? job.outputLocationId,
+    sourceLocationName: rootLocation?.name ?? job.outputLocationName,
+    sourceLocationKind: sourceKind,
+    sourceSystemId,
+    sourceSystemName: sourceSystemId === undefined ? undefined : `System ${sourceSystemId}`,
   };
 }
 
 function projectIndustryJobAssets(
   snapshot: ClientOwnerSnapshot,
   metadataByTypeId: Map<number, TypeMetadata>,
-  options: OwnerSnapshotProjectionOptions,
 ): StockItem[] {
   const assets: StockItem[] = [];
   for (const job of snapshot.jobs.data) {
     const status = job.status.toLowerCase();
     if (status === "cancelled" || status === "reverted" || status === "delivered") continue;
     const jobRecord = snapshot.industryJobs.data.find((candidate) => candidate.jobId === job.jobId);
-    const location = jobLocation(job, options);
     const corporationSource = corporationSourceForJob(snapshot, job);
+    const location = jobOutputLocation(snapshot, job, corporationSource);
     const metadata =
       job.productTypeId === undefined ? undefined : metadataByTypeId.get(job.productTypeId);
     if (job.productTypeId !== undefined && job.outputQuantity > 0) {
@@ -492,7 +517,7 @@ export function projectOwnerSnapshotsToClientAssets(
     return [
       ...snapshot.assets.data.map((asset) => projectAsset(snapshot, asset, metadataByTypeId)),
       ...projectMissingBlueprintAssets(snapshot, metadataByTypeId),
-      ...projectIndustryJobAssets(snapshot, metadataByTypeId, options),
+      ...projectIndustryJobAssets(snapshot, metadataByTypeId),
       ...projectMarketOrderStock(snapshot, metadataByTypeId),
     ];
   });

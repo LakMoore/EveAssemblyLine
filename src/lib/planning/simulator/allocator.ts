@@ -84,7 +84,10 @@ export class SimulationAllocator {
       if (lot.typeId !== typeId) continue;
       const quantity = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
       if (quantity <= 0) continue;
-      if (lot.horizon === "after-upstream") future += quantity;
+      if (lot.horizon === "after-upstream") {
+        if (lot.locationId === destinationLocationId) future += quantity;
+        continue;
+      }
       else if (lot.locationId === destinationLocationId) local += quantity;
       else if (!excluded(this.haulExclusions, lot, destinationLocationId)) remote += quantity;
     }
@@ -159,7 +162,10 @@ export class SimulationAllocator {
     const reservations: SimulationUpstreamReservation[] = [];
     for (const lot of this.sortedItemLots(
       this.inventory.itemLots.filter(
-        (candidate) => candidate.typeId === typeId && candidate.horizon === "after-upstream",
+        (candidate) =>
+          candidate.typeId === typeId
+          && candidate.horizon === "after-upstream"
+          && candidate.locationId === account.locationId,
       ),
     )) {
       if (remaining <= 0) break;
@@ -174,7 +180,10 @@ export class SimulationAllocator {
         destinationAccount: account,
         quantity: next,
         source: "production",
-        producingJobId: demandingJobId ?? `existing:${lot.lotId}`,
+        producingJobId:
+          lot.industryJobId === undefined
+            ? (demandingJobId ?? `existing:${lot.lotId}`)
+            : String(lot.industryJobId),
       });
       remaining -= next;
       claimed += next;

@@ -6,6 +6,8 @@ import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import styles from "@/app/page.module.css";
+import { aggregateSimulationInputs } from "@/lib/planning/simulator/presentation";
 import { cn } from "@/lib/utils";
 import type {
   SimulationIndustryJob,
@@ -87,45 +89,14 @@ function completionDetail(minutes: number | undefined): string {
 type InputSupplySource = {
   key: string;
   label: string;
+  source: "industry" | "reaction" | "market" | "haul";
+  inBuild: boolean;
   quantity: number;
   claimedQuantity: number;
   showJobOutput: boolean;
   completion?: string;
   Icon: LucideIcon;
 };
-
-/** Merges repeated material inputs for grouped presentation rows by material type. */
-function aggregateSimulationInputs(inputs: readonly SimulationJobInput[]): SimulationJobInput[] {
-  const inputsByType = new Map<number, SimulationJobInput>();
-  for (const input of inputs) {
-    const existing = inputsByType.get(input.typeId);
-    if (!existing) {
-      inputsByType.set(
-        input.typeId,
-        {
-          ...input,
-          upstreamReservations: [...(input.upstreamReservations ?? [])],
-        },
-      );
-      continue;
-    }
-    existing.requiredQuantity += input.requiredQuantity;
-    existing.availableNow += input.availableNow;
-    existing.availableFromHauling += input.availableFromHauling;
-    existing.availableAfterUpstream += input.availableAfterUpstream;
-    existing.unsatisfiedQuantity += input.unsatisfiedQuantity;
-    existing.upstreamReservations = [
-      ...(existing.upstreamReservations ?? []),
-      ...(input.upstreamReservations ?? []),
-    ];
-    const purchaseQuantity = (existing.purchaseQuantity ?? 0) + (input.purchaseQuantity ?? 0);
-    if (purchaseQuantity > 0) existing.purchaseQuantity = purchaseQuantity;
-    if (existing.quantityPerRun !== input.quantityPerRun) existing.quantityPerRun = undefined;
-  }
-  return [...inputsByType.values()].sort(
-    (left, right) => left.typeName.localeCompare(right.typeName) || left.typeId - right.typeId,
-  );
-}
 
 /** Combines reservations from the same upstream activity and execution state for source tooltips. */
 function reservationSources(
@@ -194,6 +165,8 @@ function reservationSources(
           quantity: showJobOutput ? source.quantity : source.claimedQuantity,
           claimedQuantity: source.claimedQuantity,
           showJobOutput,
+          source: activity === "manufacturing" ? ("industry" as const) : ("reaction" as const),
+          inBuild: state !== "planned",
           completion: completionDetail(source.completionMinutes),
           Icon: activity === "manufacturing" ? Factory : Atom,
         },
@@ -210,7 +183,9 @@ function inputSupplySources(input: SimulationJobInput, now: number): InputSupply
       ? [
           {
             key: "hauling",
-            label: "Hauling",
+            label: "To Haul",
+            source: "haul" as const,
+            inBuild: false,
             quantity: input.availableFromHauling,
             claimedQuantity: input.availableFromHauling,
             showJobOutput: false,
@@ -224,6 +199,8 @@ function inputSupplySources(input: SimulationJobInput, now: number): InputSupply
           {
             key: "buy",
             label: "Buy",
+            source: "market" as const,
+            inBuild: false,
             quantity: input.purchaseQuantity,
             claimedQuantity: input.purchaseQuantity,
             showJobOutput: false,
@@ -265,42 +242,63 @@ function SimulationInputRow({
       <div className="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 font-mono text-xs sm:w-auto sm:grid-cols-[5rem_5rem_12rem] sm:gap-2">
         <span className="order-2 flex items-center justify-start gap-1 sm:order-1 sm:w-20 sm:justify-end">
           {supplySources.map(
-            ({ key, label, quantity, claimedQuantity, showJobOutput, completion = "", Icon }) => (
-              <Tooltip key={key}>
-                <TooltipTrigger
-                  render={
-                    label === "Buy" ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        aria-label={`${label}: ${sourceQuantityLabel(quantity, claimedQuantity, showJobOutput)}${completion}. View buy list`}
-                        className="size-5 p-0 text-muted-foreground"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onOpenBuy();
-                        }}
-                      >
-                        <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
-                      </Button>
-                    ) : (
-                      <span
-                        aria-label={`${label}: ${sourceQuantityLabel(quantity, claimedQuantity, showJobOutput)}${completion}`}
-                        className="inline-flex size-5 items-center justify-center text-muted-foreground"
-                        role="img"
-                        tabIndex={0}
-                      >
-                        <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
-                      </span>
-                    )
-                  }
-                />
-                <TooltipContent>
-                  {label}: {sourceQuantityLabel(quantity, claimedQuantity, showJobOutput)}
-                  {completion}
-                </TooltipContent>
-              </Tooltip>
-            ),
+            ({
+              key,
+              label,
+              source,
+              inBuild,
+              quantity,
+              claimedQuantity,
+              showJobOutput,
+              completion = "",
+              Icon,
+            }) => {
+              const isColored = source === "market" || inBuild;
+              const iconClassName = isColored
+                ? styles.simulationSourceIcon
+                : "text-muted-foreground";
+              return (
+                <Tooltip key={key}>
+                  <TooltipTrigger
+                    render={
+                      label === "Buy" ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label={`${label}: ${sourceQuantityLabel(quantity, claimedQuantity, showJobOutput)}${completion}. View buy list`}
+                          className={cn("size-5 p-0", iconClassName)}
+                          data-source={source}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onOpenBuy();
+                          }}
+                        >
+                          <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
+                        </Button>
+                      ) : (
+                        <span
+                          aria-label={`${label}: ${sourceQuantityLabel(quantity, claimedQuantity, showJobOutput)}${completion}`}
+                          className={cn(
+                            "inline-flex size-5 items-center justify-center",
+                            iconClassName,
+                          )}
+                          data-source={source}
+                          role="img"
+                          tabIndex={0}
+                        >
+                          <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
+                        </span>
+                      )
+                    }
+                  />
+                  <TooltipContent>
+                    {label}: {sourceQuantityLabel(quantity, claimedQuantity, showJobOutput)}
+                    {completion}
+                  </TooltipContent>
+                </Tooltip>
+              );
+            },
           )}
         </span>
         <Badge
