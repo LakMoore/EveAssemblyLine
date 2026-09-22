@@ -1,5 +1,17 @@
 # AssemblyLine
 
+## Google Analytics
+
+To enable optional Google Analytics 4, set the public measurement ID in the deployment environment:
+
+```env
+NEXT_PUBLIC_GA_MEASUREMENT_ID=G-XXXXXXXXXX
+```
+
+The application loads GA4 only after the visitor allows analytics in the consent banner. The
+choice is stored in browser local storage and can be changed from the [cookie policy](/cookies).
+If the variable is omitted or invalid, analytics and the consent banner remain disabled.
+
 ## SDE preparation
 
 SDE files are build/runtime inputs and are intentionally ignored by git. To prepare them locally:

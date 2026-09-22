@@ -1,4 +1,5 @@
 import InfoPage from "@/components/InfoPage";
+import { AnalyticsConsentSettings } from "@/components/AnalyticsConsent";
 
 export const metadata = {
   title: "Cookies | Eve AssemblyLine",
@@ -10,7 +11,7 @@ export default function CookiesPage() {
     <InfoPage
       eyebrow="COOKIES & STORAGE"
       title="A small amount of state, for a useful workspace."
-      intro="AssemblyLine uses a secure session cookie plus browser storage to keep your planning workspace useful between visits. It does not use advertising or cross-site tracking cookies."
+      intro="AssemblyLine uses a secure session cookie plus browser storage to keep your planning workspace useful between visits. Optional Google Analytics runs only after you allow it."
       sections={[
         {
           eyebrow: "REQUIRED",
@@ -62,6 +63,22 @@ export default function CookiesPage() {
           ),
         },
         {
+          eyebrow: "OPTIONAL ANALYTICS",
+          title: "Google Analytics is consent-gated",
+          content: (
+            <>
+              <p>
+                When configured, AssemblyLine uses Google Analytics 4 to understand aggregate page
+                usage and improve the product. It is loaded only after you choose &quot;Allow
+                analytics&quot;. AssemblyLine does not send EVE credentials, character data, assets,
+                jobs, orders, or planning data to Google Analytics, and it does not use analytics
+                for advertising or cross-site profiling.
+              </p>
+              <AnalyticsConsentSettings />
+            </>
+          ),
+        },
+        {
           eyebrow: "CLEARING DATA",
           title: "You can remove browser state",
           content: (
@@ -74,8 +91,8 @@ export default function CookiesPage() {
                 contact the maintainers if you need those records removed as well.
               </p>
               <p>
-                AssemblyLine does not use third-party advertising cookies, cross-site profiling, or
-                analytics scripts to follow you around the web.
+                AssemblyLine does not use third-party advertising cookies or cross-site profiling.
+                Optional analytics is described above and can be disabled at any time.
               </p>
             </>
           ),

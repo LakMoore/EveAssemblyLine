@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import AppShell from "./AppShell";
+import { AnalyticsConsent } from "@/components/AnalyticsConsent";
+import { GoogleAnalytics } from "@/components/GoogleAnalytics";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toast";
 import "./globals.css";
@@ -21,6 +23,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <TooltipProvider>
           <AppShell>{children}</AppShell>
           <Toaster />
+          <AnalyticsConsent />
+          <GoogleAnalytics />
         </TooltipProvider>
       </body>
     </html>

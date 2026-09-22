@@ -27,6 +27,9 @@ export default function PrivacyPage() {
                 Cached ESI responses used to make refreshed assets, jobs, and orders available to
                 the app.
               </li>
+              <li>
+                Aggregate page usage through Google Analytics only when you explicitly allow it.
+              </li>
             </ul>
           ),
         },
@@ -72,9 +75,11 @@ export default function PrivacyPage() {
                 <NoPrefetchLink href="/characters">Characters</NoPrefetchLink> page your data will
                 be removed immediately.
               </p>
-              <p>The app does not gather personal information.</p>
               <p>
-                The app does not sell character information or use planning data for advertising.
+                The app does not sell character information, use planning data for advertising, or
+                send EVE credentials, character data, assets, jobs, orders, or planning data to
+                Google Analytics. When you allow analytics, Google may process aggregate usage and
+                browser or device information under its own privacy terms.
               </p>
             </>
           ),
