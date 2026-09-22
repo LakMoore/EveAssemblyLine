@@ -999,6 +999,17 @@ function Planner() {
     await savePromise;
   }
 
+  /** Excludes a simulator haul source location and recalculates the simulator result. */
+  async function excludeSimulationLocation(fromLocationId: number): Promise<void> {
+    const nextExcludedLocationIds = new Set(excludedLocationIds);
+    nextExcludedLocationIds.add(fromLocationId);
+    const nextIds = [...nextExcludedLocationIds];
+    setExcludedLocationIds(nextIds);
+    const savePromise = saveExcludedLocationIds(nextIds);
+    await submitPlan(nextExcludedLocationIds, haulItemExclusion, activeHaulPatches, "simulate");
+    await savePromise;
+  }
+
   async function removeExcludedLocation(locationId: number) {
     const nextExcludedLocationIds = excludedLocationIds.filter((id) => id !== locationId);
     setExcludedLocationIds(nextExcludedLocationIds);
@@ -2052,6 +2063,9 @@ function Planner() {
           locationNamesById={
             new Map([
               ...locationOptions.map((option) => [option.locationId, option.name] as const),
+              ...cachedAssetLocations.map(
+                (location) => [location.locationId, location.name] as const,
+              ),
               ...stock.flatMap((item) => {
                 const locationId = getStockLocationId(item);
                 return locationId !== undefined && item.sourceLocationName
@@ -2180,9 +2194,11 @@ function Planner() {
           stockpileNamesById={
             new Map(stockpiles.map((stockpile) => [stockpile.id, stockpile.name]))
           }
+          stockpileLocations={stockpileLocations}
           haulExclusions={simulationHaulExclusions}
           isLoading={isPlanLoading}
           onClearHaulExclusions={clearSimulationHaulExclusions}
+          onExcludeLocation={excludeSimulationLocation}
           onHaulExclusionsChange={(exclusions) => {
             void updateSimulationHaulExclusions(exclusions);
           }}

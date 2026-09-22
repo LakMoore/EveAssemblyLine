@@ -12,6 +12,7 @@ import {
   FlaskConical,
   ListChecks,
   ShoppingCart,
+  SquareX,
   TriangleAlert,
   Truck,
   ClipboardList,
@@ -44,6 +45,7 @@ import {
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import {
   Select,
@@ -544,11 +546,13 @@ function SimulationInstallPlanDialog({
   activityLabel,
   characterNamesById,
   onOpenPlan,
+  readOnly,
 }: {
   entries: readonly SimulationInstallPlanEntry[];
   activityLabel: string;
   characterNamesById: ReadonlyMap<number, string>;
   onOpenPlan: () => void;
+  readOnly: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<SimulationInstallPlanView>("compact");
@@ -706,6 +710,7 @@ function SimulationInstallPlanDialog({
                   variation="icon"
                   showSwitch={false}
                   checkboxChecked={completed(detail)}
+                  checkboxDisabled={readOnly}
                   installed={completed(detail)}
                   checkboxTooltip="Mark install complete"
                   onCheckboxChange={(checked) => setInstallCompleted([detail], checked)}
@@ -741,6 +746,7 @@ function SimulationInstallPlanDialog({
                   variation="icon"
                   showSwitch={false}
                   checkboxChecked={allCompleted(group.installs)}
+                  checkboxDisabled={readOnly}
                   checkboxIndeterminate={
                     !allCompleted(group.installs) && someCompleted(group.installs)
                   }
@@ -1305,6 +1311,7 @@ function SimulationActivityTab({
   openGroups,
   onOpenGroupChange,
   instanceId,
+  readOnly,
 }: {
   tab: "react" | "manufacture";
   jobs: SimulationIndustryJob[];
@@ -1319,6 +1326,7 @@ function SimulationActivityTab({
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
   instanceId: string;
+  readOnly: boolean;
 }) {
   const activityLabel = tab === "react" ? "reaction" : "manufacturing";
   const [solveMode, setSolveMode] = useState<ClientSimulationSolveMode>("available-slots");
@@ -1743,13 +1751,14 @@ function SimulationActivityTab({
               installed={groupCompleted}
               onClick={groupCompleted ? undefined : () => controls.onSelectRow(group.groupKey)}
               switchChecked={groupIncluded}
+              switchDisabled={readOnly}
               switchTooltip={`Include in ${activityLabel} schedule`}
               onSwitchChange={(checked) =>
                 groupEntries.forEach((entry) => controls.onIncludedChange(entry.rowKey, checked))
               }
               checkboxChecked={groupCompleted}
               checkboxIndeterminate={groupPartiallyInstalled}
-              checkboxDisabled={!groupIncluded && !groupCompleted}
+              checkboxDisabled={readOnly || (!groupIncluded && !groupCompleted)}
               checkboxTooltip={
                 tab === "react" ? "Mark reaction installed" : "Mark manufacturing job installed"
               }
@@ -1762,6 +1771,7 @@ function SimulationActivityTab({
                   activityLabel={activityLabel}
                   characterNamesById={characterNamesById}
                   onOpenPlan={controls.onOpenPlan}
+                  readOnly={readOnly}
                 />
               </span>
               <span className="flex items-center justify-center">
@@ -1792,26 +1802,33 @@ function SimulationActivityTab({
 function SimulationHaulTab({
   tasks,
   locationNamesById,
+  stockpileLocations,
   characterNamesById,
   corporationNamesById,
   controls,
   isLoading,
   haulExclusions,
   onClearHaulExclusions,
+  onExcludeLocation,
+  readOnly,
   openGroups,
   onOpenGroupChange,
 }: {
   tasks: readonly SimulationHaulTask[];
   locationNamesById: ReadonlyMap<number, string>;
+  stockpileLocations: ReadonlySet<number>;
   characterNamesById: ReadonlyMap<number, string>;
   corporationNamesById: ReadonlyMap<number, string>;
   controls: SimulationRowControls;
   isLoading: boolean;
   haulExclusions: readonly PlanHaulExclusion[];
   onClearHaulExclusions: () => Promise<boolean>;
+  onExcludeLocation?: (locationId: number) => Promise<void>;
+  readOnly: boolean;
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
+  const [excludingLocationId, setExcludingLocationId] = useState<number | null>(null);
   const tasksBySource = new Map<number, Map<number, SimulationHaulTask[]>>();
   for (const task of tasks) {
     const destinations =
@@ -1832,7 +1849,7 @@ function SimulationHaulTab({
           <Button
             type="button"
             variant="outline"
-            disabled={isLoading}
+            disabled={readOnly || isLoading}
             onClick={onClearHaulExclusions}
           >
             Clear haul exclusions
@@ -1863,6 +1880,35 @@ function SimulationHaulTab({
                   </>
                 }
                 ariaLabel={`From: ${locationName(locationNamesById, fromLocationId)}`}
+                trailingContent={
+                  !stockpileLocations.has(fromLocationId) && (onExcludeLocation || readOnly) ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0 normal-case"
+                      disabled={
+                        readOnly || isLoading || excludingLocationId !== null || !onExcludeLocation
+                      }
+                      onClick={() => {
+                        if (!onExcludeLocation) return;
+                        setExcludingLocationId(fromLocationId);
+                        void onExcludeLocation(fromLocationId).finally(() => {
+                          setExcludingLocationId(null);
+                        });
+                      }}
+                    >
+                      {excludingLocationId === fromLocationId ? (
+                        <Spinner data-icon="inline-start" aria-hidden="true" />
+                      ) : (
+                        <SquareX data-icon="inline-start" aria-hidden="true" />
+                      )}
+                      {excludingLocationId === fromLocationId
+                        ? "Recalculating..."
+                        : "Exclude Location"}
+                    </Button>
+                  ) : undefined
+                }
                 isOpen={openGroups[sourceKey] ?? true}
                 onOpenChange={(open) => onOpenGroupChange(sourceKey, open)}
                 avatarRows={sourceAvatars}
@@ -1912,7 +1958,7 @@ function SimulationHaulTab({
                           ariaLabel={`To: ${locationName(locationNamesById, toLocationId)}, ${destinationVolumeLabel}`}
                           switchChecked={destinationIncluded}
                           switchLabel={`Include haul group from ${locationName(locationNamesById, fromLocationId)} to ${locationName(locationNamesById, toLocationId)}`}
-                          switchDisabled={isLoading}
+                          switchDisabled={readOnly || isLoading}
                           onSwitchChange={(checked) =>
                             controls.onHaulIncludedChange(destinationRowKeys, checked)
                           }
@@ -1931,6 +1977,7 @@ function SimulationHaulTab({
                                 corporationNamesById={corporationNamesById}
                                 switchLabel={`Include ${task.typeName} from ${locationName(locationNamesById, task.fromLocationId)} to ${locationName(locationNamesById, task.toLocationId)} in haul plan, transfer ${task.transferId}`}
                                 isLoading={isLoading}
+                                readOnly={readOnly}
                                 controls={controls}
                               />
                             ))}
@@ -1955,6 +2002,7 @@ function SimulationHaulRow({
   corporationNamesById,
   switchLabel,
   isLoading,
+  readOnly,
   controls,
 }: {
   task: SimulationHaulTask;
@@ -1962,6 +2010,7 @@ function SimulationHaulRow({
   corporationNamesById: ReadonlyMap<number, string>;
   switchLabel: string;
   isLoading: boolean;
+  readOnly: boolean;
   controls: SimulationRowControls;
 }) {
   const rowKey = `haul:${task.transferId}`;
@@ -1991,13 +2040,13 @@ function SimulationHaulRow({
       onNavigate={controls.onOpenPlan}
       selected={!completed && controls.selectedRowKey === rowKey}
       installed={completed}
-      onClick={completed || isLoading ? undefined : () => controls.onSelectRow(rowKey)}
+      onClick={completed || isLoading || readOnly ? undefined : () => controls.onSelectRow(rowKey)}
       switchChecked={included}
       switchTooltip={switchLabel}
-      switchDisabled={isLoading}
+      switchDisabled={readOnly || isLoading}
       onSwitchChange={(checked) => controls.onHaulIncludedChange([rowKey], checked)}
       checkboxChecked={completed}
-      checkboxDisabled={!included || isLoading}
+      checkboxDisabled={!included || readOnly || isLoading}
       checkboxTooltip="Mark as moved"
       onCheckboxChange={(checked) => controls.onCompletedChange(rowKey, checked)}
       contentClassName="self-end text-right font-mono text-xs sm:self-auto"
@@ -2274,6 +2323,7 @@ export default function SimulationResults({
   status,
   stock,
   locationNamesById,
+  stockpileLocations,
   reactionMaterialBonusesByLocation,
   characterNamesById,
   characterStatuses,
@@ -2283,14 +2333,17 @@ export default function SimulationResults({
   haulExclusions,
   isLoading,
   onClearHaulExclusions,
+  onExcludeLocation,
   onHaulExclusionsChange,
   usePlannerUrlState = true,
   instanceId = "planner",
+  readOnly = false,
 }: {
   result: SimulationResultV1 | null;
   status: string;
   stock: readonly PlanStockItem[];
   locationNamesById: ReadonlyMap<number, string>;
+  stockpileLocations: ReadonlySet<number>;
   reactionMaterialBonusesByLocation: ReadonlyMap<number, number>;
   characterNamesById: ReadonlyMap<number, string>;
   characterStatuses: readonly ClientCharacterStatus[];
@@ -2300,9 +2353,11 @@ export default function SimulationResults({
   haulExclusions: readonly PlanHaulExclusion[];
   isLoading: boolean;
   onClearHaulExclusions: () => Promise<boolean>;
+  onExcludeLocation?: (locationId: number) => Promise<void>;
   onHaulExclusionsChange: (exclusions: readonly PlanHaulExclusion[]) => void;
   usePlannerUrlState?: boolean;
   instanceId?: string;
+  readOnly?: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<SimulationTab>(() =>
     usePlannerUrlState ? readSimulationTabFromUrl() : "warnings",
@@ -2582,6 +2637,7 @@ export default function SimulationResults({
             haulTasks={visibleHaulTasks}
             stock={stock}
             locationNamesById={locationNamesById}
+            stockpileLocations={stockpileLocations}
             reactionMaterialBonusesByLocation={reactionMaterialBonusesByLocation}
             characterNamesById={characterNamesById}
             characterStatuses={characterStatuses}
@@ -2591,6 +2647,8 @@ export default function SimulationResults({
             haulExclusions={haulExclusions}
             isLoading={isLoading}
             onClearHaulExclusions={clearHaulExclusions}
+            onExcludeLocation={onExcludeLocation}
+            readOnly={readOnly}
             controls={controls}
             openGroups={openGroups}
             onOpenGroupChange={onOpenGroupChange}
@@ -2610,6 +2668,7 @@ function SimulationTabContent({
   haulTasks,
   stock,
   locationNamesById,
+  stockpileLocations,
   reactionMaterialBonusesByLocation,
   characterNamesById,
   characterStatuses,
@@ -2620,16 +2679,19 @@ function SimulationTabContent({
   haulExclusions,
   isLoading,
   onClearHaulExclusions,
+  onExcludeLocation,
   openGroups,
   onOpenGroupChange,
   usePlannerUrlState,
   instanceId,
+  readOnly,
 }: {
   activeTab: SimulationTab;
   result: SimulationResultV1;
   haulTasks: readonly SimulationHaulTask[];
   stock: readonly PlanStockItem[];
   locationNamesById: ReadonlyMap<number, string>;
+  stockpileLocations: ReadonlySet<number>;
   reactionMaterialBonusesByLocation: ReadonlyMap<number, number>;
   characterNamesById: ReadonlyMap<number, string>;
   characterStatuses: readonly ClientCharacterStatus[];
@@ -2640,6 +2702,8 @@ function SimulationTabContent({
   haulExclusions: readonly PlanHaulExclusion[];
   isLoading: boolean;
   onClearHaulExclusions: () => Promise<boolean>;
+  onExcludeLocation?: (locationId: number) => Promise<void>;
+  readOnly: boolean;
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
   usePlannerUrlState: boolean;
@@ -2719,6 +2783,7 @@ function SimulationTabContent({
         openGroups={openGroups}
         onOpenGroupChange={onOpenGroupChange}
         instanceId={instanceId}
+        readOnly={readOnly}
       />
     );
   }
@@ -2727,11 +2792,14 @@ function SimulationTabContent({
       <SimulationHaulTab
         tasks={haulTasks}
         locationNamesById={locationNamesById}
+        stockpileLocations={stockpileLocations}
         characterNamesById={characterNamesById}
         corporationNamesById={corporationNamesById}
         isLoading={isLoading}
         haulExclusions={haulExclusions}
         onClearHaulExclusions={onClearHaulExclusions}
+        onExcludeLocation={onExcludeLocation}
+        readOnly={readOnly}
         controls={controls}
         openGroups={openGroups}
         onOpenGroupChange={onOpenGroupChange}

@@ -80,6 +80,7 @@ type PlannerHaulTabProps = {
   onToggleHaulItemExclusion: (key: string, excluded: boolean) => Promise<void>;
   onToggleHaulItemExclusions: (tasks: ResponseHaulTask[], excluded: boolean) => Promise<void>;
   onToggleHaulPatches: (tasks: ResponseHaulTask[], patched: boolean) => Promise<void>;
+  readOnly: boolean;
 };
 
 /** Renders grouped hauling tasks and owns haul-specific progress state. */
@@ -106,6 +107,7 @@ export default function PlannerHaulTab({
   onToggleHaulItemExclusion,
   onToggleHaulItemExclusions,
   onToggleHaulPatches,
+  readOnly,
 }: PlannerHaulTabProps) {
   return (
     <div className={styles.haulGroups}>
@@ -140,7 +142,8 @@ export default function PlannerHaulTab({
                         checked={groupChecked}
                         className="shrink-0"
                         disabled={
-                          group.tasks.length === 0
+                          readOnly
+                          || group.tasks.length === 0
                           || togglingHaulItemKey !== null
                           || togglingHaulPatchGroupKey !== null
                           || togglingHaulPatchKey !== null
@@ -180,7 +183,7 @@ export default function PlannerHaulTab({
                   <Button
                     className="w-full md:w-auto"
                     variant="outline"
-                    disabled={excludingHaulFromLocationId !== null}
+                    disabled={readOnly || excludingHaulFromLocationId !== null}
                     onClick={() => {
                       onExcludingHaulFromLocationIdChange(group.fromLocationId);
                       void onExcludeHaulStockpile(group.fromLocationId).finally(() => {
@@ -257,7 +260,8 @@ export default function PlannerHaulTab({
                           checked={groupPatchChecked}
                           indeterminate={groupPatchIndeterminate}
                           disabled={
-                            eligibleTasks.length === 0
+                            readOnly
+                            || eligibleTasks.length === 0
                             || togglingHaulPatchGroupKey !== null
                             || togglingHaulPatchKey !== null
                           }
@@ -299,7 +303,10 @@ export default function PlannerHaulTab({
                   switchChecked={!isExcluded}
                   switchPending={togglingHaulItemKey === key}
                   switchDisabled={
-                    isPatched || togglingHaulItemKey !== null || togglingHaulPatchGroupKey !== null
+                    readOnly
+                    || isPatched
+                    || togglingHaulItemKey !== null
+                    || togglingHaulPatchGroupKey !== null
                   }
                   switchTooltip="Include in haul plan?"
                   onSwitchChange={(checked) => {
@@ -312,7 +319,8 @@ export default function PlannerHaulTab({
                   checkboxChecked={isPatched}
                   checkboxPending={togglingHaulPatchKey === key}
                   checkboxDisabled={
-                    isExcluded
+                    readOnly
+                    || isExcluded
                     || togglingHaulPatchGroupKey !== null
                     || togglingHaulPatchKey !== null
                   }

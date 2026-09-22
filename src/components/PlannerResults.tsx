@@ -614,6 +614,7 @@ function PlannerResultsContent({
   onToggleHaulItemExclusions,
   haulPatches,
   onToggleHaulPatches,
+  readOnly = false,
 }: {
   language: SdeLanguage;
   plan: PlanResponse | null;
@@ -636,6 +637,7 @@ function PlannerResultsContent({
   onToggleHaulItemExclusions: (tasks: ResponseHaulTask[], excluded: boolean) => Promise<void>;
   haulPatches: ReadonlyMap<string, HaulPatch>;
   onToggleHaulPatches: (tasks: ResponseHaulTask[], patched: boolean) => Promise<void>;
+  readOnly?: boolean;
 }) {
   const [activeTab, setActiveTab] = useState<PlannerTab>("Plan");
   const [selectedTypeId, setSelectedTypeId] = useState<number | null>(null);
@@ -877,6 +879,7 @@ function PlannerResultsContent({
               onToggleHaulItemExclusions={onToggleHaulItemExclusions}
               haulPatches={haulPatches}
               onToggleHaulPatches={onToggleHaulPatches}
+              readOnly={readOnly}
               selectedTypeId={selectedTypeId}
               onSelectedTypeIdChange={selectTypeId}
               resultsHeaderRef={resultsHeaderRef}
@@ -1016,6 +1019,7 @@ function PlanList({
   onToggleHaulItemExclusions,
   haulPatches,
   onToggleHaulPatches,
+  readOnly,
   selectedTypeId,
   onSelectedTypeIdChange,
   resultsHeaderRef,
@@ -1043,6 +1047,7 @@ function PlanList({
   onToggleHaulItemExclusions: (tasks: ResponseHaulTask[], excluded: boolean) => Promise<void>;
   haulPatches: ReadonlyMap<string, HaulPatch>;
   onToggleHaulPatches: (tasks: ResponseHaulTask[], patched: boolean) => Promise<void>;
+  readOnly: boolean;
   selectedTypeId: number | null;
   onSelectedTypeIdChange: (typeId: number | null) => void;
   resultsHeaderRef: RefObject<HTMLElement | null>;
@@ -1755,6 +1760,7 @@ function PlanList({
           onToggleHaulItemExclusion={onToggleHaulItemExclusion}
           onToggleHaulItemExclusions={onToggleHaulItemExclusions}
           onToggleHaulPatches={onToggleHaulPatches}
+          readOnly={readOnly}
         />
       ) : (
         <div className={activeTab === "Plan" ? styles.planTable : styles.planList}>
@@ -2023,7 +2029,7 @@ function PlanList({
                           selected={!isInstalled && selectedResultRowKey === rowKey}
                           onClick={isInstalled ? undefined : () => toggleSelectedResultRow(rowKey)}
                           showSwitch={reactionJob !== null}
-                          switchDisabled={isInstalled}
+                          switchDisabled={readOnly || isInstalled}
                           switchChecked={
                             reactionJob
                               ? !disabledReactionJobKeys.has(reactionJobKey(reactionJob))
@@ -2035,6 +2041,7 @@ function PlanList({
                           }}
                           showCheckbox={activeTab === "React" || activeTab === "Manufacture"}
                           checkboxChecked={isInstalled}
+                          checkboxDisabled={readOnly}
                           checkboxTooltip="Installed?"
                           onCheckboxChange={(checked) => setResultRowInstalled(rowKey, checked)}
                           identityClassName={`${styles.planTypeIdentity} ${activeTab === "Copy" ? "max-[640px]:col-span-full max-[640px]:w-full" : ""}`}
@@ -2229,6 +2236,7 @@ function PlanList({
                                           variant="ghost"
                                           size="xs"
                                           className={styles.buyReactionButton}
+                                          disabled={readOnly}
                                           onClick={() => {
                                             onAddBuildItem({
                                               name,

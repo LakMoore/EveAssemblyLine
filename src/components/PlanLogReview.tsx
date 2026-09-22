@@ -1,7 +1,7 @@
 "use client";
 
 import { NoPrefetchLink } from "@/components/NoPrefetchLink";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,7 @@ export default function PlanLogReview() {
   const [page, setPage] = useState<PlanLogPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const hasLoadedInitially = useRef(false);
 
   async function loadLogs(nextPage = 1) {
     setIsLoading(true);
@@ -52,7 +53,9 @@ export default function PlanLogReview() {
   }
 
   useEffect(() => {
-    void Promise.resolve().then(() => loadLogs());
+    if (hasLoadedInitially.current) return;
+    hasLoadedInitially.current = true;
+    void loadLogs();
   }, []);
 
   return (
