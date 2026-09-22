@@ -24,6 +24,23 @@ export function presentationResult(result: SimulationResultWithDiagnostics): Sim
   return publicResult;
 }
 
+/** Adds the retained simulator request ID to a response without changing its result lists. */
+export function withSimulationId(body: unknown, simulationId: string): unknown {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return { simulationId, error: "The simulator request was not valid JSON." };
+  }
+  const record = body as Record<string, unknown>;
+  if (record.error) return { ...record, simulationId };
+  const metadata = record.metadata;
+  return {
+    ...record,
+    metadata: {
+      ...(metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {}),
+      simulationId,
+    },
+  };
+}
+
 /** Runs the version-one industry simulator without authentication or ESI side effects. */
 export async function POST(request: Request) {
   const simulationId = randomUUID();
@@ -50,37 +67,46 @@ export async function POST(request: Request) {
       body = await profiler.measure("parse-json", () => JSON.parse(rawRequestBody));
     }
     catch {
-      const responseBody = {
-        code: "invalid-json",
-        error: "The simulator request was not valid JSON.",
-      };
+      const responseBody = withSimulationId(
+        {
+          code: "invalid-json",
+          error: "The simulator request was not valid JSON.",
+        },
+        simulationId,
+      );
       logResponse(JSON.stringify(responseBody), 400);
       return NextResponse.json(responseBody, { status: 400, ...noStoreResponseInit });
     }
     const parsed = simulatorRequestSchema.safeParse(body);
     if (!parsed.success) {
-      const responseBody = {
-        code: "invalid-request",
-        error: "The simulator request failed validation.",
-        issues: parsed.error.issues.map((issue) => ({
-          path: issue.path.join("."),
-          message: issue.message,
-        })),
-      };
+      const responseBody = withSimulationId(
+        {
+          code: "invalid-request",
+          error: "The simulator request failed validation.",
+          issues: parsed.error.issues.map((issue) => ({
+            path: issue.path.join("."),
+            message: issue.message,
+          })),
+        },
+        simulationId,
+      );
       logResponse(JSON.stringify(responseBody), 400);
       return NextResponse.json(responseBody, { status: 400, ...noStoreResponseInit });
     }
     const result = await profiler.measure("simulate", () => simulateIndustry(parsed.data));
-    const responseBody = presentationResult(result);
+    const responseBody = withSimulationId(presentationResult(result), simulationId);
     logResponse(JSON.stringify(responseBody), 200);
     return NextResponse.json(responseBody, noStoreResponseInit);
   }
   catch (error) {
     console.error("Industry simulation failed.", error);
-    const responseBody = {
-      code: "simulation-failed",
-      error: "Could not run the industry simulation.",
-    };
+    const responseBody = withSimulationId(
+      {
+        code: "simulation-failed",
+        error: "Could not run the industry simulation.",
+      },
+      simulationId,
+    );
     logResponse(JSON.stringify(responseBody), 500);
     return NextResponse.json(responseBody, { status: 500, ...noStoreResponseInit });
   }

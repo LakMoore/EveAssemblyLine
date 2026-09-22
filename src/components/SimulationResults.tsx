@@ -7,6 +7,7 @@ import {
   Atom,
   Boxes,
   Brain,
+  Bug,
   Factory,
   FlaskConical,
   ListChecks,
@@ -30,6 +31,7 @@ import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import {
   Combobox,
   ComboboxCollection,
@@ -2314,7 +2316,19 @@ export default function SimulationResults({
   const [completionByRow, setCompletionByRow] = useState<
     Partial<Record<string, SimulationCompletionState>>
   >({});
+  const [isBugReportOpen, setIsBugReportOpen] = useState(false);
   const statusIsError = status.startsWith("Error:");
+  async function copySimulationId() {
+    const simulationId = result?.metadata.simulationId;
+    if (!simulationId) return;
+    try {
+      await navigator.clipboard.writeText(simulationId);
+      toast.add({ description: "Simulation ID copied" });
+    }
+    catch {
+      toast.add({ description: "Could not copy the simulation ID", type: "error" });
+    }
+  }
   async function clearHaulExclusions(): Promise<boolean> {
     const succeeded = await onClearHaulExclusions();
     if (succeeded) {
@@ -2504,13 +2518,54 @@ export default function SimulationResults({
           <p className="text-xs text-muted-foreground">SIMULATOR OUTPUT</p>
           <h2 className="text-lg font-medium">Plan breakdown</h2>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 max-[640px]:w-full max-[640px]:flex-col max-[640px]:items-stretch">
           <Badge variant="outline">v{result.metadata.simulatorVersion}</Badge>
+          {result.metadata.simulationId && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="max-[640px]:w-full"
+              onClick={() => setIsBugReportOpen(true)}
+            >
+              <Bug aria-hidden="true" />
+              Found a bug in this simulation?
+            </Button>
+          )}
           <span aria-live="polite" className="text-xs text-muted-foreground" role="status">
             {status}
           </span>
         </div>
       </div>
+      <Dialog open={isBugReportOpen} onOpenChange={setIsBugReportOpen}>
+        <DialogContent>
+          <DialogTitle>Report a simulation problem</DialogTitle>
+          <div className="flex flex-col gap-4 text-sm">
+            <DialogDescription>
+              Go to our Discord and post details of the problem along with this simulation ID so we
+              can reproduce the calculation.
+            </DialogDescription>
+            <div className="flex items-center gap-2 border p-3 font-mono text-xs">
+              <span className="min-w-0 flex-1 break-all">{result.metadata.simulationId}</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => void copySimulationId()}
+              >
+                <CopyIcon aria-hidden="true" />
+                Copy ID
+              </Button>
+            </div>
+            <Button
+              type="button"
+              onClick={() => window.open("https://discord.gg/VdGZWzXahh", "_blank", "noopener")}
+            >
+              Open Discord
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Tabs value={activeTab} onValueChange={selectTab}>
         <TabsList className="w-full max-w-full justify-start overflow-x-auto" variant="line">
           {tabs.map(({ value, label, icon: Icon }) => (

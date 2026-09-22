@@ -202,7 +202,8 @@ export function isSimulationResultV1(value: unknown): value is SimulationResultV
   const hasJobs = (jobs: unknown, validator: (job: Record<string, unknown>) => boolean) =>
     hasSimulationRows(jobs, (job) => isRecord(job) && validator(job));
   return (
-    metadata.simulatorVersion === 1
+    (metadata.simulationId === undefined || typeof metadata.simulationId === "string")
+    && metadata.simulatorVersion === 1
     && typeof metadata.generatedAt === "string"
     && typeof metadata.normalizedInputHash === "string"
     && hasSimulationRows(

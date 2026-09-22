@@ -325,6 +325,7 @@ export interface SimulationLedgerView {
 /** Versioned native simulator result; all rows are ready for direct presentation. */
 export interface SimulationResultV1 {
   metadata: {
+    simulationId?: string;
     simulatorVersion: 1;
     policyVersion: 1;
     generatedAt: string;
