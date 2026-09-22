@@ -698,7 +698,7 @@ function SimulationInstallPlanDialog({
                   typeId={detail.entry.job.productTypeId}
                   linkPath="planner"
                   linkIcon={ClipboardList}
-                  linkSearchParams={{ tab: "Plan" }}
+                  linkSearchParams={{ simulationTab: "plan" }}
                   linkHash="plan-breakdown"
                   navigateInPlace
                   onNavigate={navigateToPlan}
@@ -738,7 +738,7 @@ function SimulationInstallPlanDialog({
                   typeId={firstDetail.entry.job.productTypeId}
                   linkPath="planner"
                   linkIcon={ClipboardList}
-                  linkSearchParams={{ tab: "Plan" }}
+                  linkSearchParams={{ simulationTab: "plan" }}
                   linkHash="plan-breakdown"
                   navigateInPlace
                   onNavigate={navigateToPlan}
@@ -1270,7 +1270,7 @@ function SimulationSimpleJobRow({
       variation={variation}
       linkPath="planner"
       linkIcon={ClipboardList}
-      linkSearchParams={{ tab: "Plan" }}
+      linkSearchParams={{ simulationTab: "plan" }}
       linkHash="plan-breakdown"
       navigateInPlace
       onNavigate={controls.onOpenPlan}
@@ -1743,7 +1743,7 @@ function SimulationActivityTab({
               variation="icon"
               linkPath="planner"
               linkIcon={ClipboardList}
-              linkSearchParams={{ tab: "Plan" }}
+              linkSearchParams={{ simulationTab: "plan" }}
               linkHash="plan-breakdown"
               navigateInPlace
               onNavigate={controls.onOpenPlan}
@@ -2034,7 +2034,7 @@ function SimulationHaulRow({
       }
       linkPath="planner"
       linkIcon={ClipboardList}
-      linkSearchParams={{ tab: "Plan" }}
+      linkSearchParams={{ simulationTab: "plan" }}
       linkHash="plan-breakdown"
       navigateInPlace
       onNavigate={controls.onOpenPlan}
