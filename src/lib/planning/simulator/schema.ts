@@ -15,6 +15,7 @@ const defaultSimulationPolicy = {
 const defaultSimulationOptions = {
   version: 1 as const,
   includeSurplusForAllLocations: false,
+  blockInterStockpileHauling: false,
   characters: [],
   scienceProfiles: [],
   policy: defaultSimulationPolicy,
@@ -162,6 +163,7 @@ const simulationSchema = z
   .object({
     version: z.literal(1).default(1),
     includeSurplusForAllLocations: z.boolean().default(false),
+    blockInterStockpileHauling: z.boolean().default(false),
     characters: z
       .array(
         z.object({

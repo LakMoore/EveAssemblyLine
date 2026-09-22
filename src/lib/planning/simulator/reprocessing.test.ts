@@ -61,6 +61,7 @@ const request: SimulationRequestV1 = {
   simulation: {
     version: 1,
     includeSurplusForAllLocations: false,
+    blockInterStockpileHauling: false,
     characters: [],
     scienceProfiles: [],
     policy: {

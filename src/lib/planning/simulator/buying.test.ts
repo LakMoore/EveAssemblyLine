@@ -22,6 +22,7 @@ const request = {
   simulation: {
     version: 1,
     includeSurplusForAllLocations: false,
+    blockInterStockpileHauling: false,
     characters: [],
     scienceProfiles: [],
     policy: {

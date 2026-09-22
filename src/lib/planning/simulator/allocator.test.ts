@@ -60,6 +60,73 @@ void test("claims local stock before remote stock and creates an exact haul", ()
   assert.equal(allocator.remainingItemQuantity("remote"), 2);
 });
 
+void test("blocks only hauls between stockpile locations with no shared stockpile", () => {
+  const stockpiles = [
+    {
+      locations: {
+        stock: 10,
+        manufacturing: 11,
+        reactions: 12,
+        reprocessing: 13,
+        copying: 14,
+        invention: 15,
+      },
+    },
+    {
+      locations: {
+        stock: 20,
+        manufacturing: 21,
+        reactions: 22,
+        reprocessing: 23,
+        copying: 24,
+        invention: 25,
+      },
+    },
+  ] as const;
+  const remoteInventory = {
+    ...inventory,
+    itemLots: [{ ...inventory.itemLots[1], lotId: "cross-stockpile", locationId: 20 }],
+  };
+  const blocked = new SimulationAllocator(remoteInventory, [], stockpiles, true);
+  assert.deepEqual(
+    blocked.claimOrdinarySupply(34, 2, 10, account, "job"),
+    {
+      local: 0,
+      remote: 0,
+      future: 0,
+      futureReservations: [],
+    },
+  );
+  assert.equal(blocked.haulingTasks.length, 0);
+  const blockedBlueprint = new SimulationAllocator(
+    {
+      ...inventory,
+      blueprintLots: [{ ...inventory.blueprintLots[0], locationId: 20 }],
+    },
+    [],
+    stockpiles,
+    true,
+  );
+  assert.deepEqual(
+    blockedBlueprint.claimManufacturingBlueprints(100, 1, 10, account, "job", 10),
+    [],
+  );
+
+  const sharedLocationInventory = {
+    ...inventory,
+    itemLots: [{ ...inventory.itemLots[1], lotId: "same-stockpile", locationId: 11 }],
+  };
+  const sameStockpile = new SimulationAllocator(sharedLocationInventory, [], stockpiles, true);
+  assert.equal(sameStockpile.claimOrdinarySupply(34, 2, 10, account, "job").remote, 2);
+
+  const unlistedLocationInventory = {
+    ...inventory,
+    itemLots: [{ ...inventory.itemLots[1], lotId: "unlisted", locationId: 99 }],
+  };
+  const unlisted = new SimulationAllocator(unlistedLocationInventory, [], stockpiles, true);
+  assert.equal(unlisted.claimOrdinarySupply(34, 2, 10, account, "job").remote, 2);
+});
+
 void test("distinguishes active production from planned future output", () => {
   const allocator = new SimulationAllocator(
     {

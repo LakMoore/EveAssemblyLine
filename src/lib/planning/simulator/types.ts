@@ -52,6 +52,7 @@ export interface SimulationPolicyV1 {
 export interface SimulationOptionsV1 {
   version: 1;
   includeSurplusForAllLocations: boolean;
+  blockInterStockpileHauling: boolean;
   characters: SimulationCharacterProfile[];
   scienceProfiles: SimulationScienceProfile[];
   policy: SimulationPolicyV1;

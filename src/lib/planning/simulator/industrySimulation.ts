@@ -176,7 +176,12 @@ class IndustryDemandSimulation {
     dependencyGraph: DependencyGraph,
     private readonly profiler?: RequestProfiler,
   ) {
-    this.allocator = new SimulationAllocator(inventory, request.haulExclusions ?? []);
+    this.allocator = new SimulationAllocator(
+      inventory,
+      request.haulExclusions ?? [],
+      request.stockpiles,
+      request.simulation.blockInterStockpileHauling,
+    );
     this.warnings = [...dependencyGraph.warnings];
     if (inventory.unresolvedLotCount > 0) {
       this.warnings.push({

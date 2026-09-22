@@ -480,6 +480,7 @@ function Planner() {
   >([]);
   const [includeStock, setIncludeStock] = useState(true);
   const [includeSurplusForAllLocations, setIncludeSurplusForAllLocations] = useState(false);
+  const [allowInterStockpileHauling, setAllowInterStockpileHauling] = useState(false);
   const [haulItemExclusion, setHaulItemExclusion] = useState<HaulItemExclusion>(() => new Map());
   const [simulationHaulExclusions, setSimulationHaulExclusions] = useState<PlanHaulExclusion[]>([]);
   const [haulPatches, setHaulPatches] = useState<Map<string, HaulPatch>>(() => new Map());
@@ -918,7 +919,13 @@ function Planner() {
               fallbackT2OrT3Te: settings.fallbackT2OrT3Te,
             },
             ...(mode === "simulate"
-              ? { simulation: { version: 1, includeSurplusForAllLocations } }
+              ? {
+                  simulation: {
+                    version: 1,
+                    includeSurplusForAllLocations,
+                    blockInterStockpileHauling: !allowInterStockpileHauling,
+                  },
+                }
               : {}),
           }),
         },
@@ -1573,6 +1580,14 @@ function Planner() {
                 onCheckedChange={setIncludeSurplusForAllLocations}
               />
               Simulate surplus for all locations
+            </Label>
+            <Label className="flex items-center gap-2 text-sm">
+              <Switch
+                aria-label="Allow inter-stockpile hauling"
+                checked={allowInterStockpileHauling}
+                onCheckedChange={setAllowInterStockpileHauling}
+              />
+              Allow inter-stockpile hauling
             </Label>
             <span className="text-sm text-muted-foreground">{selectedSourceLabel}</span>
             <Button

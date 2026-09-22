@@ -1,4 +1,4 @@
-import type { PlanHaulExclusion } from "@/lib/planning/types";
+import type { PlanHaulExclusion, PlanStockpile } from "@/lib/planning/types";
 import type { SimulationLedgerAccount, SimulationTransaction } from "./ledger";
 import type { SimulatorBlueprintLot, SimulatorInventory, SimulationItemLot } from "./sourceLots";
 import type {
@@ -35,22 +35,27 @@ export interface BlueprintClaim extends SimulationBlueprintAllocation {
   lotId?: string;
 }
 
-function excluded(
-  exclusions: readonly PlanHaulExclusion[],
-  lot: Pick<SimulationItemLot, "typeId" | "locationId" | "ownerType" | "ownerId">,
-  destinationLocationId: number,
-): boolean {
-  if (lot.locationId === undefined) return true;
-  return exclusions.some(
-    (exclusion) =>
-      exclusion.typeId === lot.typeId
-      && exclusion.fromLocationId === lot.locationId
-      && exclusion.toLocationId === destinationLocationId
-      && (
-        exclusion.ownerType === undefined
-        || (exclusion.ownerType === lot.ownerType && exclusion.ownerId === lot.ownerId)
-      ),
-  );
+function locationPairKey(firstLocationId: number, secondLocationId: number): string {
+  return firstLocationId < secondLocationId
+    ? `${firstLocationId}:${secondLocationId}`
+    : `${secondLocationId}:${firstLocationId}`;
+}
+
+function stockpileRoutePolicy(stockpiles: readonly Pick<PlanStockpile, "locations">[]) {
+  const stockpileLocationIds = new Set<number>();
+  const sameStockpileLocationPairs = new Set<string>();
+  for (const stockpile of stockpiles) {
+    const locationIds = [...new Set(Object.values(stockpile.locations))];
+    for (const locationId of locationIds) stockpileLocationIds.add(locationId);
+    for (let firstIndex = 0; firstIndex < locationIds.length; firstIndex += 1) {
+      for (let secondIndex = firstIndex + 1; secondIndex < locationIds.length; secondIndex += 1) {
+        sameStockpileLocationPairs.add(
+          locationPairKey(locationIds[firstIndex], locationIds[secondIndex]),
+        );
+      }
+    }
+  }
+  return { stockpileLocationIds, sameStockpileLocationPairs };
 }
 
 /** Deterministically allocates ordinary lots and blueprint runs without duplicating stock. */
@@ -58,6 +63,9 @@ export class SimulationAllocator {
   private readonly itemLotsByTypeId: Map<number, SimulationItemLot[]>;
   private readonly remainingItemQuantityByLotId: Map<string, number>;
   private readonly remainingBlueprintRunsByLotId: Map<string, number>;
+  private readonly stockpileLocationIds: ReadonlySet<number>;
+  private readonly sameStockpileLocationPairs: ReadonlySet<string>;
+  private readonly blockInterStockpileHauling: boolean;
   private readonly transferredBlueprintLotIds = new Set<string>();
   private transactionSequence = 0;
   readonly transactions: SimulationTransaction[] = [];
@@ -67,7 +75,13 @@ export class SimulationAllocator {
   constructor(
     private readonly inventory: SimulatorInventory,
     private readonly haulExclusions: readonly PlanHaulExclusion[],
+    stockpiles: readonly Pick<PlanStockpile, "locations">[] = [],
+    blockInterStockpileHauling = false,
   ) {
+    const routePolicy = stockpileRoutePolicy(stockpiles);
+    this.stockpileLocationIds = routePolicy.stockpileLocationIds;
+    this.sameStockpileLocationPairs = routePolicy.sameStockpileLocationPairs;
+    this.blockInterStockpileHauling = blockInterStockpileHauling;
     this.itemLotsByTypeId = new Map();
     for (const lot of inventory.itemLots) {
       const lots = this.itemLotsByTypeId.get(lot.typeId) ?? [];
@@ -98,7 +112,7 @@ export class SimulationAllocator {
         continue;
       }
       else if (lot.locationId === destinationLocationId) local += quantity;
-      else if (!excluded(this.haulExclusions, lot, destinationLocationId)) remote += quantity;
+      else if (!this.isExcluded(lot, destinationLocationId)) remote += quantity;
     }
     return { local, remote, future };
   }
@@ -147,7 +161,7 @@ export class SimulationAllocator {
           lot.typeId === typeId
           && lot.horizon === "now"
           && lot.locationId !== destinationLocationId
-          && !excluded(this.haulExclusions, lot, destinationLocationId),
+          && !this.isExcluded(lot, destinationLocationId),
       ),
       quantity,
       destinationLocationId,
@@ -273,7 +287,16 @@ export class SimulationAllocator {
     let remainingRuns = runs;
     const allocations: BlueprintClaim[] = [];
     const candidates = this.inventory.blueprintLots
-      .filter((lot) => lot.typeId === blueprintTypeId && lot.kind !== "formula" && !lot.inUse)
+      .filter(
+        (lot) =>
+          lot.typeId === blueprintTypeId
+          && lot.kind !== "formula"
+          && !lot.inUse
+          && (
+            lot.locationId === destinationLocationId
+            || !this.isExcluded(lot, destinationLocationId)
+          ),
+      )
       .slice()
       .sort((left, right) => {
         const leftLocationRank = left.locationId === destinationLocationId ? 0 : 1;
@@ -335,7 +358,16 @@ export class SimulationAllocator {
     demandingJobId: string,
   ): BlueprintClaim | undefined {
     const formula = this.inventory.blueprintLots
-      .filter((lot) => lot.typeId === formulaTypeId && lot.kind === "formula" && !lot.inUse)
+      .filter(
+        (lot) =>
+          lot.typeId === formulaTypeId
+          && lot.kind === "formula"
+          && !lot.inUse
+          && (
+            lot.locationId === destinationLocationId
+            || !this.isExcluded(lot, destinationLocationId)
+          ),
+      )
       .slice()
       .sort((left, right) => {
         const leftRank = left.locationId === destinationLocationId ? 0 : 1;
@@ -377,7 +409,16 @@ export class SimulationAllocator {
     let remainingRuns = runs;
     const claims: BlueprintClaim[] = [];
     const copies = this.inventory.blueprintLots
-      .filter((lot) => lot.typeId === blueprintTypeId && lot.kind === "bpc" && !lot.inUse)
+      .filter(
+        (lot) =>
+          lot.typeId === blueprintTypeId
+          && lot.kind === "bpc"
+          && !lot.inUse
+          && (
+            lot.locationId === destinationLocationId
+            || !this.isExcluded(lot, destinationLocationId)
+          ),
+      )
       .slice()
       .sort((left, right) => {
         const leftRank = left.locationId === destinationLocationId ? 0 : 1;
@@ -423,7 +464,16 @@ export class SimulationAllocator {
     demandingJobId: string,
   ): BlueprintClaim | undefined {
     const original = this.inventory.blueprintLots
-      .filter((lot) => lot.typeId === blueprintTypeId && lot.kind === "bpo" && !lot.inUse)
+      .filter(
+        (lot) =>
+          lot.typeId === blueprintTypeId
+          && lot.kind === "bpo"
+          && !lot.inUse
+          && (
+            lot.locationId === destinationLocationId
+            || !this.isExcluded(lot, destinationLocationId)
+          ),
+      )
       .slice()
       .sort((left, right) => {
         const leftRank = left.locationId === destinationLocationId ? 0 : 1;
@@ -474,10 +524,9 @@ export class SimulationAllocator {
   ): number {
     const lot = this.inventory.itemLots.find((candidate) => candidate.lotId === lotId);
     if (!lot || !lot.eligibleForReprocessing || quantity <= 0) return 0;
-    if (
-      lot.locationId !== destinationLocationId
-      && excluded(this.haulExclusions, lot, destinationLocationId)
-    ) return 0;
+    if (lot.locationId !== destinationLocationId && this.isExcluded(lot, destinationLocationId)) {
+      return 0;
+    }
     const available = this.remainingItemQuantityByLotId.get(lotId) ?? 0;
     const claimed = Math.min(quantity, available);
     if (claimed <= 0) return 0;
@@ -581,6 +630,35 @@ export class SimulationAllocator {
     return claimed;
   }
 
+  private isExcluded(
+    lot: Pick<SimulationItemLot, "typeId" | "locationId" | "ownerType" | "ownerId">,
+    destinationLocationId: number,
+  ): boolean {
+    if (lot.locationId === undefined) return true;
+    if (
+      this.haulExclusions.some(
+        (exclusion) =>
+          exclusion.typeId === lot.typeId
+          && exclusion.fromLocationId === lot.locationId
+          && exclusion.toLocationId === destinationLocationId
+          && (
+            exclusion.ownerType === undefined
+            || (exclusion.ownerType === lot.ownerType && exclusion.ownerId === lot.ownerId)
+          ),
+      )
+    ) {
+      return true;
+    }
+    return (
+      this.blockInterStockpileHauling
+      && this.stockpileLocationIds.has(lot.locationId)
+      && this.stockpileLocationIds.has(destinationLocationId)
+      && !this.sameStockpileLocationPairs.has(
+        locationPairKey(lot.locationId, destinationLocationId),
+      )
+    );
+  }
+
   private blueprintHorizon(
     lot: SimulatorBlueprintLot,
     destinationLocationId: number,
@@ -608,7 +686,7 @@ export class SimulationAllocator {
       source: "asset",
       eligibleForReprocessing: false,
     };
-    if (excluded(this.haulExclusions, pseudoItem, destinationLocationId)) return;
+    if (this.isExcluded(pseudoItem, destinationLocationId)) return;
     this.transferredBlueprintLotIds.add(lot.lotId);
     this.haulingTasks.push({
       transferId: `haul:${lot.lotId}:${destinationLocationId}:${demandingJobId}`,
