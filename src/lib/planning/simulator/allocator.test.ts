@@ -68,7 +68,7 @@ void test("greedy hauling claims remote stock before preserving local stock", ()
   assert.equal(allocator.remainingItemQuantity("local"), 2);
 });
 
-void test("blocks only hauls between stockpile locations with no shared stockpile", () => {
+void test("blocks cross-stockpile activity hauls but allows end-destination hauls", () => {
   const stockpiles = [
     {
       locations: {
@@ -93,11 +93,11 @@ void test("blocks only hauls between stockpile locations with no shared stockpil
   ] as const;
   const remoteInventory = {
     ...inventory,
-    itemLots: [{ ...inventory.itemLots[1], lotId: "cross-stockpile", locationId: 20 }],
+    itemLots: [{ ...inventory.itemLots[1], lotId: "cross-stockpile", locationId: 21 }],
   };
   const blocked = new SimulationAllocator(remoteInventory, [], stockpiles, true);
   assert.deepEqual(
-    blocked.claimOrdinarySupply(34, 2, 10, account, "job"),
+    blocked.claimOrdinarySupply(34, 2, 11, { ...account, locationId: 11 }, "job"),
     {
       local: 0,
       remote: 0,
@@ -109,14 +109,21 @@ void test("blocks only hauls between stockpile locations with no shared stockpil
   const blockedBlueprint = new SimulationAllocator(
     {
       ...inventory,
-      blueprintLots: [{ ...inventory.blueprintLots[0], locationId: 20 }],
+      blueprintLots: [{ ...inventory.blueprintLots[0], locationId: 21 }],
     },
     [],
     stockpiles,
     true,
   );
   assert.deepEqual(
-    blockedBlueprint.claimManufacturingBlueprints(100, 1, 10, account, "job", 10),
+    blockedBlueprint.claimManufacturingBlueprints(
+      100,
+      1,
+      11,
+      { ...account, locationId: 11 },
+      "job",
+      10,
+    ),
     [],
   );
 
@@ -125,7 +132,10 @@ void test("blocks only hauls between stockpile locations with no shared stockpil
     itemLots: [{ ...inventory.itemLots[1], lotId: "same-stockpile", locationId: 11 }],
   };
   const sameStockpile = new SimulationAllocator(sharedLocationInventory, [], stockpiles, true);
-  assert.equal(sameStockpile.claimOrdinarySupply(34, 2, 10, account, "job").remote, 2);
+  assert.equal(
+    sameStockpile.claimOrdinarySupply(34, 2, 14, { ...account, locationId: 14 }, "job").remote,
+    2,
+  );
 
   const unlistedLocationInventory = {
     ...inventory,
@@ -133,6 +143,32 @@ void test("blocks only hauls between stockpile locations with no shared stockpil
   };
   const unlisted = new SimulationAllocator(unlistedLocationInventory, [], stockpiles, true);
   assert.equal(unlisted.claimOrdinarySupply(34, 2, 10, account, "job").remote, 2);
+
+  const endDestinationSource = new SimulationAllocator(
+    {
+      ...inventory,
+      itemLots: [{ ...inventory.itemLots[1], lotId: "end-destination-source", locationId: 20 }],
+    },
+    [],
+    stockpiles,
+    true,
+  );
+  assert.equal(
+    endDestinationSource.claimOrdinarySupply(34, 2, 10, { ...account, locationId: 10 }, "job")
+      .remote,
+    2,
+  );
+
+  const endDestinationTarget = new SimulationAllocator(
+    {
+      ...inventory,
+      itemLots: [{ ...inventory.itemLots[1], lotId: "end-destination-target", locationId: 11 }],
+    },
+    [],
+    stockpiles,
+    true,
+  );
+  assert.equal(endDestinationTarget.claimOrdinarySupply(34, 2, 20, account, "job").remote, 2);
 });
 
 void test("distinguishes active production from planned future output", () => {

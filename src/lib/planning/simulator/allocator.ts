@@ -46,7 +46,14 @@ function stockpileRoutePolicy(stockpiles: readonly Pick<PlanStockpile, "location
   const stockpileLocationIds = new Set<number>();
   const sameStockpileLocationPairs = new Set<string>();
   for (const stockpile of stockpiles) {
-    const locationIds = [...new Set(Object.values(stockpile.locations))];
+    const locationIds = [
+      ...new Set(
+        Object
+          .entries(stockpile.locations)
+          .filter(([locationKind]) => locationKind !== "stock")
+          .map(([, locationId]) => locationId),
+      ),
+    ];
     for (const locationId of locationIds) stockpileLocationIds.add(locationId);
     for (let firstIndex = 0; firstIndex < locationIds.length; firstIndex += 1) {
       for (let secondIndex = firstIndex + 1; secondIndex < locationIds.length; secondIndex += 1) {
