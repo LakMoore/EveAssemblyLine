@@ -181,6 +181,7 @@ class IndustryDemandSimulation {
       request.haulExclusions ?? [],
       request.stockpiles,
       request.simulation.blockInterStockpileHauling,
+      request.simulation.haulingAllocationMode,
     );
     this.warnings = [...dependencyGraph.warnings];
     if (inventory.unresolvedLotCount > 0) {
@@ -193,6 +194,13 @@ class IndustryDemandSimulation {
 
   /** Runs demand expansion followed by invention/copying derivation. */
   run(): IndustrySimulationResult {
+    if (this.request.simulation.haulingAllocationMode === "local-first") {
+      measureSyncProfiled(
+        this.profiler,
+        "reserve-recursive-local-demand",
+        () => this.reserveRecursiveLocalDemand(),
+      );
+    }
     measureSyncProfiled(
       this.profiler,
       "expand-stockpile-demand",
@@ -313,6 +321,60 @@ class IndustryDemandSimulation {
           stack,
         ),
     );
+  }
+
+  private reserveRecursiveLocalDemand(): void {
+    const stockpiles = [...this.request.stockpiles].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    );
+    for (const stockpile of stockpiles) {
+      const items = [...stockpile.items].sort(
+        (left, right) => left.typeId - right.typeId || left.quantity - right.quantity,
+      );
+      for (const item of items) {
+        if (isSimulatorReprocessingType(this.context, item.typeId)) continue;
+        const availability = this.allocator.availability(item.typeId, stockpile.locations.stock);
+        const quantityToBuild = Math.max(
+          0,
+          item.quantity - availability.local - availability.remote - availability.future,
+        );
+        this.reserveProductionInputs(item.typeId, quantityToBuild, stockpile, new Set());
+      }
+    }
+  }
+
+  private reserveProductionInputs(
+    productTypeId: number,
+    quantity: number,
+    stockpile: PlanStockpile,
+    stack: ReadonlySet<number>,
+  ): void {
+    if (quantity <= 0 || stack.has(productTypeId)) return;
+    if (this.request.settings.buildBlacklist.includes(productTypeId)) return;
+    const production = this.context.blueprints.byBuildProductTypeId.get(productTypeId);
+    const details = production ? productionDetails(production, productTypeId) : undefined;
+    if (!production || !details) return;
+
+    const profile = this.activityProfile(stockpile, productTypeId, production.activity);
+    const requiredRuns = Math.ceil(quantity / details.product.quantity);
+    const nextStack = new Set(stack);
+    nextStack.add(productTypeId);
+    for (const material of details.activity.materials ?? []) {
+      const requiredQuantity = requiredMaterialQuantity(
+        production.activity,
+        material.quantity,
+        requiredRuns,
+        { me: 0 },
+        profile.materialMultiplier,
+      );
+      const availability = this.allocator.availability(material.typeID, profile.locationId);
+      const quantityToBuild = Math.max(
+        0,
+        requiredQuantity - availability.local - availability.remote - availability.future,
+      );
+      this.allocator.reserveLocalDemand(material.typeID, requiredQuantity, profile.locationId);
+      this.reserveProductionInputs(material.typeID, quantityToBuild, stockpile, nextStack);
+    }
   }
 
   private planProductionCore(
@@ -573,33 +635,17 @@ class IndustryDemandSimulation {
         blueprint,
         profile.materialMultiplier,
       );
-      const claimedNow = this.allocator.claimLocal(
+      const physicalClaim = this.allocator.claimOrdinarySupply(
         material.typeId,
         material.requiredQuantity,
         profile.locationId,
         material.account,
         jobId,
-        "now",
         undefined,
         activity,
       );
-      const claimedRemote = this.allocator.claimRemote(
-        material.typeId,
-        material.requiredQuantity - claimedNow,
-        profile.locationId,
-        material.account,
-        jobId,
-        undefined,
-        activity,
-      );
-      const physicalClaimed = claimedNow + claimedRemote;
-      const futureClaim = this.allocator.claimFuture(
-        material.typeId,
-        material.requiredQuantity - physicalClaimed,
-        material.account,
-        jobId,
-      );
-      const claimedFuture = futureClaim.quantity;
+      const physicalClaimed = physicalClaim.local + physicalClaim.remote;
+      const claimedFuture = physicalClaim.future;
       const remaining = Math.max(0, material.requiredQuantity - physicalClaimed - claimedFuture);
       const productionSupply = this.planProduction(
         material.typeId,
@@ -617,8 +663,8 @@ class IndustryDemandSimulation {
         typeName: typeName(this.context, material.typeId, this.request.language),
         quantityPerRun: material.quantityPerRun,
         requiredQuantity: material.requiredQuantity,
-        availableNow: claimedNow,
-        availableFromHauling: physicalClaimed - claimedNow,
+        availableNow: physicalClaim.local,
+        availableFromHauling: physicalClaim.remote,
         availableAfterUpstream,
         unsatisfiedQuantity: Math.max(
           0,
@@ -627,7 +673,10 @@ class IndustryDemandSimulation {
             - claimedFuture
             - productionSupply.plannedQuantity,
         ),
-        upstreamReservations: [...futureClaim.reservations, ...productionSupply.reservations],
+        upstreamReservations: [
+          ...physicalClaim.futureReservations,
+          ...productionSupply.reservations,
+        ],
       });
     }
 

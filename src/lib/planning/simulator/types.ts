@@ -58,6 +58,9 @@ export interface SimulationScienceProfile {
   inventionMaterialMultiplier: number;
 }
 
+/** Controls whether ordinary supply claims prioritize remote or local stock. */
+export type HaulingAllocationMode = "greedy" | "local-first";
+
 /** Versioned policy controls for deterministic simulation. */
 export interface SimulationPolicyV1 {
   inventionExpectedOutputFactor: number;
@@ -72,6 +75,7 @@ export interface SimulationOptionsV1 {
   version: 1;
   includeSurplusForAllLocations: boolean;
   blockInterStockpileHauling: boolean;
+  haulingAllocationMode: HaulingAllocationMode;
   characters: SimulationCharacterProfile[];
   scienceProfiles: SimulationScienceProfile[];
   policy: SimulationPolicyV1;

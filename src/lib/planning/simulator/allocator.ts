@@ -2,6 +2,7 @@ import type { PlanHaulExclusion, PlanStockpile } from "@/lib/planning/types";
 import type { SimulationLedgerAccount, SimulationTransaction } from "./ledger";
 import type { SimulatorBlueprintLot, SimulatorInventory, SimulationItemLot } from "./sourceLots";
 import type {
+  HaulingAllocationMode,
   SimulationBlueprintAllocation,
   SimulationHaulTask,
   SimulationActivity,
@@ -66,6 +67,8 @@ export class SimulationAllocator {
   private readonly stockpileLocationIds: ReadonlySet<number>;
   private readonly sameStockpileLocationPairs: ReadonlySet<string>;
   private readonly blockInterStockpileHauling: boolean;
+  private readonly haulingAllocationMode: HaulingAllocationMode;
+  private readonly localDemandReservations = new Map<string, number>();
   private readonly transferredBlueprintLotIds = new Set<string>();
   private transactionSequence = 0;
   readonly transactions: SimulationTransaction[] = [];
@@ -77,11 +80,13 @@ export class SimulationAllocator {
     private readonly haulExclusions: readonly PlanHaulExclusion[],
     stockpiles: readonly Pick<PlanStockpile, "locations">[] = [],
     blockInterStockpileHauling = false,
+    haulingAllocationMode: HaulingAllocationMode = "local-first",
   ) {
     const routePolicy = stockpileRoutePolicy(stockpiles);
     this.stockpileLocationIds = routePolicy.stockpileLocationIds;
     this.sameStockpileLocationPairs = routePolicy.sameStockpileLocationPairs;
     this.blockInterStockpileHauling = blockInterStockpileHauling;
+    this.haulingAllocationMode = haulingAllocationMode;
     this.itemLotsByTypeId = new Map();
     for (const lot of inventory.itemLots) {
       const lots = this.itemLotsByTypeId.get(lot.typeId) ?? [];
@@ -112,7 +117,11 @@ export class SimulationAllocator {
         continue;
       }
       else if (lot.locationId === destinationLocationId) local += quantity;
-      else if (!this.isExcluded(lot, destinationLocationId)) remote += quantity;
+      else if (lot.locationId !== undefined && !this.isExcluded(lot, destinationLocationId)) {
+        const protectedQuantity =
+          this.localDemandReservations.get(this.localDemandKey(lot.typeId, lot.locationId)) ?? 0;
+        remote += Math.max(0, quantity - protectedQuantity);
+      }
     }
     return { local, remote, future };
   }
@@ -170,7 +179,15 @@ export class SimulationAllocator {
       "after-hauling",
       stockpileId,
       demandActivity,
+      true,
     );
+  }
+
+  /** Reserves local source quantity for demand discovered during recursive expansion. */
+  reserveLocalDemand(typeId: number, quantity: number, locationId: number): void {
+    if (this.haulingAllocationMode !== "local-first" || quantity <= 0) return;
+    const key = this.localDemandKey(typeId, locationId);
+    this.localDemandReservations.set(key, (this.localDemandReservations.get(key) ?? 0) + quantity);
   }
 
   /** Claims existing active-job output without treating it as physical stock. */
@@ -242,25 +259,50 @@ export class SimulationAllocator {
     stockpileId?: string,
     demandActivity?: Exclude<SimulationActivity, "surplus">,
   ): ItemClaim {
-    const local = this.claimLocal(
-      typeId,
-      quantity,
-      destinationLocationId,
-      account,
-      demandingJobId,
-      "now",
-      stockpileId,
-      demandActivity,
-    );
-    const remote = this.claimRemote(
-      typeId,
-      quantity - local,
-      destinationLocationId,
-      account,
-      demandingJobId,
-      stockpileId,
-      demandActivity,
-    );
+    let local: number;
+    let remote: number;
+    if (this.haulingAllocationMode === "greedy") {
+      remote = this.claimRemote(
+        typeId,
+        quantity,
+        destinationLocationId,
+        account,
+        demandingJobId,
+        stockpileId,
+        demandActivity,
+      );
+      local = this.claimLocal(
+        typeId,
+        quantity - remote,
+        destinationLocationId,
+        account,
+        demandingJobId,
+        "now",
+        stockpileId,
+        demandActivity,
+      );
+    }
+    else {
+      local = this.claimLocal(
+        typeId,
+        quantity,
+        destinationLocationId,
+        account,
+        demandingJobId,
+        "now",
+        stockpileId,
+        demandActivity,
+      );
+      remote = this.claimRemote(
+        typeId,
+        quantity - local,
+        destinationLocationId,
+        account,
+        demandingJobId,
+        stockpileId,
+        demandActivity,
+      );
+    }
     const futureClaim = this.claimFuture(
       typeId,
       quantity - local - remote,
@@ -579,15 +621,24 @@ export class SimulationAllocator {
     reservationHorizon: "now" | "after-hauling",
     stockpileId?: string,
     demandActivity?: Exclude<SimulationActivity, "surplus">,
+    protectLocalDemand = false,
   ): number {
     let remaining = quantity;
     let claimed = 0;
     for (const lot of lots) {
       if (remaining <= 0) break;
       const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
-      const next = Math.min(remaining, available);
+      const protectedQuantity =
+        protectLocalDemand && lot.locationId !== undefined
+          ? (this.localDemandReservations.get(this.localDemandKey(lot.typeId, lot.locationId)) ?? 0)
+          : 0;
+      const usable = Math.max(0, available - protectedQuantity);
+      const next = Math.min(remaining, usable);
       if (next <= 0) continue;
       this.remainingItemQuantityByLotId.set(lot.lotId, available - next);
+      if (!protectLocalDemand && lot.locationId !== undefined) {
+        this.consumeLocalDemandReservation(lot.typeId, lot.locationId, next);
+      }
       this.transactions.push({
         id: this.nextTransactionId("reserve"),
         kind: "source-reservation",
@@ -657,6 +708,22 @@ export class SimulationAllocator {
         locationPairKey(lot.locationId, destinationLocationId),
       )
     );
+  }
+
+  private localDemandKey(typeId: number, locationId: number): string {
+    return `${typeId}:${locationId}`;
+  }
+
+  private consumeLocalDemandReservation(
+    typeId: number,
+    locationId: number,
+    quantity: number,
+  ): void {
+    if (this.haulingAllocationMode !== "local-first") return;
+    const key = this.localDemandKey(typeId, locationId);
+    const remaining = this.localDemandReservations.get(key) ?? 0;
+    if (remaining <= quantity) this.localDemandReservations.delete(key);
+    else this.localDemandReservations.set(key, remaining - quantity);
   }
 
   private blueprintHorizon(

@@ -172,6 +172,7 @@ export function projectSimulationLedger(
       continue;
     }
     const key = simulationAccountKey(transaction.account);
+    const hadBalance = mutableBalances.has(key);
     const balance =
       mutableBalances.get(key)
       ?? emptyBalance(
@@ -235,40 +236,44 @@ export function projectSimulationLedger(
             ?? `Type ${transaction.destinationAccount.typeId}`,
           volumes.get(transaction.destinationAccount.typeId) ?? 0,
         );
+      const isRemoteOutput = destinationKey !== key;
+      const persistSourceBalance = !isRemoteOutput || hadBalance;
       switch (transaction.source) {
       case "production":
-        balance.availableFromProduction += transaction.quantity;
-        if (destinationKey !== key) destination.availableFromProduction += transaction.quantity;
+        if (isRemoteOutput) destination.availableFromProduction += transaction.quantity;
+        else balance.availableFromProduction += transaction.quantity;
         break;
       case "copying":
-        balance.availableFromCopying += transaction.quantity;
-        if (destinationKey !== key) destination.availableFromCopying += transaction.quantity;
+        if (isRemoteOutput) destination.availableFromCopying += transaction.quantity;
+        else balance.availableFromCopying += transaction.quantity;
         break;
       case "invention":
-        balance.availableFromInvention += transaction.quantity;
-        if (destinationKey !== key) destination.availableFromInvention += transaction.quantity;
+        if (isRemoteOutput) destination.availableFromInvention += transaction.quantity;
+        else balance.availableFromInvention += transaction.quantity;
         break;
       }
-      if (destinationKey !== key) balance.transferredOut += transaction.quantity;
       mutableBalances.set(destinationKey, destination);
+      if (!persistSourceBalance) continue;
     }
     else if (transaction.kind === "reprocessing-output") {
-      balance.availableFromReprocessing += transaction.quantity;
-      if (transaction.destinationAccount) {
-        const destinationKey = simulationAccountKey(transaction.destinationAccount);
-        if (destinationKey !== key) {
-          const destination =
-            mutableBalances.get(destinationKey)
-            ?? emptyBalance(
-              transaction.destinationAccount,
-              names.get(transaction.destinationAccount.typeId)
-                ?? `Type ${transaction.destinationAccount.typeId}`,
-              volumes.get(transaction.destinationAccount.typeId) ?? 0,
-            );
-          destination.availableFromReprocessing += transaction.quantity;
-          balance.transferredOut += transaction.quantity;
-          mutableBalances.set(destinationKey, destination);
-        }
+      const destinationKey = transaction.destinationAccount
+        ? simulationAccountKey(transaction.destinationAccount)
+        : key;
+      if (destinationKey === key) {
+        balance.availableFromReprocessing += transaction.quantity;
+      }
+      else if (transaction.destinationAccount) {
+        const destination =
+          mutableBalances.get(destinationKey)
+          ?? emptyBalance(
+            transaction.destinationAccount,
+            names.get(transaction.destinationAccount.typeId)
+              ?? `Type ${transaction.destinationAccount.typeId}`,
+            volumes.get(transaction.destinationAccount.typeId) ?? 0,
+          );
+        destination.availableFromReprocessing += transaction.quantity;
+        mutableBalances.set(destinationKey, destination);
+        if (!hadBalance) continue;
       }
     }
     else if (transaction.kind === "purchase-requirement") {

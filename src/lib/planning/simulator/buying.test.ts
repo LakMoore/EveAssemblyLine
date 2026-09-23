@@ -23,6 +23,7 @@ const request = {
     version: 1,
     includeSurplusForAllLocations: false,
     blockInterStockpileHauling: false,
+    haulingAllocationMode: "local-first",
     characters: [],
     scienceProfiles: [],
     policy: {

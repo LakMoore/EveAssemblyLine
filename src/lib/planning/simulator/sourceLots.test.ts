@@ -50,6 +50,7 @@ function request(): SimulationRequestV1 {
       version: 1,
       includeSurplusForAllLocations: false,
       blockInterStockpileHauling: false,
+      haulingAllocationMode: "local-first",
       characters: [],
       scienceProfiles: [],
       policy: {

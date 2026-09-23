@@ -369,3 +369,75 @@ void test("keeps connected material surplus on the plan tab", async () => {
     !result.lists.surplusItems.some((bucket) => bucket.items.some((item) => item.typeId === 34)),
   );
 });
+
+void test("preserves local recursive demand before hauling in local-first mode", async () => {
+  const input = {
+    stockpiles: [
+      {
+        id: "a-jita",
+        name: "Jita",
+        locations: {
+          stock: 10,
+          manufacturing: 10,
+          reactions: 10,
+          reprocessing: 10,
+          copying: 10,
+          invention: 10,
+        },
+        items: [{ typeId: 11370, quantity: 150, me: 0, te: 0, fromCompression: false }],
+      },
+      {
+        id: "b-auner",
+        name: "Auner",
+        locations: {
+          stock: 20,
+          manufacturing: 20,
+          reactions: 20,
+          reprocessing: 20,
+          copying: 20,
+          invention: 20,
+        },
+        items: [{ typeId: 11577, quantity: 299, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [{ typeId: 11370, name: "Prototype Cloaking Device I", quantity: 96, locationId: 20 }],
+    settings: {
+      includeCorporationAssets: true,
+      personalSellOrdersAsStock: false,
+      allCorporationSellOrdersAsStock: false,
+      myCorporationSellOrdersAsStock: false,
+      buildBlacklist: [],
+      buyBlacklist: [],
+    },
+    simulation: { version: 1, haulingAllocationMode: "local-first" as const },
+  };
+  const localFirst = await simulateIndustry(parseSimulatorRequest(input));
+  const greedy = await simulateIndustry(
+    parseSimulatorRequest({
+      ...input,
+      simulation: { version: 1, haulingAllocationMode: "greedy" },
+    }),
+  );
+
+  assert.deepEqual(
+    localFirst.lists.haulingTasks.filter((task) => task.typeId === 11370),
+    [],
+  );
+  assert.deepEqual(
+    greedy.lists.haulingTasks
+      .filter((task) => task.typeId === 11370)
+      .map((task) => ({
+        from: task.fromLocationId,
+        to: task.toLocationId,
+        quantity: task.quantity,
+      })),
+    [{ from: 20, to: 10, quantity: 96 }],
+  );
+  const localAunerBalance = localFirst.ledgers
+    .find((ledger) => ledger.locationId === 20)
+    ?.balances.find((balance) => balance.typeId === 11370);
+  assert.ok(localAunerBalance);
+  assert.equal(localAunerBalance.availableNow, 96);
+  assert.equal(localAunerBalance.availableFromProduction, 203);
+  assert.equal(localAunerBalance.transferredOut, 0);
+});

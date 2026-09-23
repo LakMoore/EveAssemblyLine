@@ -16,6 +16,7 @@ const defaultSimulationOptions = {
   version: 1 as const,
   includeSurplusForAllLocations: false,
   blockInterStockpileHauling: false,
+  haulingAllocationMode: "local-first" as const,
   characters: [],
   scienceProfiles: [],
   policy: defaultSimulationPolicy,
@@ -156,6 +157,7 @@ const simulationSchema = z
     version: z.literal(1).default(1),
     includeSurplusForAllLocations: z.boolean().default(false),
     blockInterStockpileHauling: z.boolean().default(false),
+    haulingAllocationMode: z.enum(["greedy", "local-first"]).default("local-first"),
     characters: z
       .array(
         z.object({

@@ -37,6 +37,7 @@ void test("defaults the simulator policy", () => {
   const parsed = parseSimulatorRequest(request());
   assert.equal(parsed.simulation.includeSurplusForAllLocations, false);
   assert.equal(parsed.simulation.blockInterStockpileHauling, false);
+  assert.equal(parsed.simulation.haulingAllocationMode, "local-first");
   assert.equal(parsed.simulation.policy.inventionExpectedOutputFactor, 1.2);
   assert.equal(parsed.simulation.policy.fallbackInventionSkillLevel, 3);
   assert.deepEqual(parsed.simulation.characters, []);
@@ -48,6 +49,14 @@ void test("accepts the inter-stockpile hauling policy", () => {
     simulation: { version: 1, blockInterStockpileHauling: true },
   });
   assert.equal(parsed.simulation.blockInterStockpileHauling, true);
+});
+
+void test("accepts the greedy hauling allocation policy", () => {
+  const parsed = parseSimulatorRequest({
+    ...request(),
+    simulation: { version: 1, haulingAllocationMode: "greedy" },
+  });
+  assert.equal(parsed.simulation.haulingAllocationMode, "greedy");
 });
 
 void test("rejects fractional build quantities", () => {

@@ -146,7 +146,7 @@ import {
 import type { FacilityGroupBonus } from "@/lib/planning/facilityBonuses";
 import type { ProductionGroupKey, ProductionGroupReference } from "@/lib/planning/productionGroups";
 import { fetchProductionGroups } from "@/lib/reference/productionGroups";
-import type { SimulationResultV1 } from "@/lib/planning/simulator/types";
+import type { HaulingAllocationMode, SimulationResultV1 } from "@/lib/planning/simulator/types";
 
 type StockpileEditorMode = "details" | "items";
 type PlanRunMode = "calculate" | "simulate";
@@ -511,6 +511,8 @@ function Planner() {
   const [includeStock, setIncludeStock] = useState(true);
   const [includeSurplusForAllLocations, setIncludeSurplusForAllLocations] = useState(false);
   const [allowInterStockpileHauling, setAllowInterStockpileHauling] = useState(false);
+  const [haulingAllocationMode, setHaulingAllocationMode] =
+    useState<HaulingAllocationMode>("local-first");
   const [haulItemExclusion, setHaulItemExclusion] = useState<HaulItemExclusion>(() => new Map());
   const [simulationHaulExclusions, setSimulationHaulExclusions] = useState<PlanHaulExclusion[]>([]);
   const [haulPatches, setHaulPatches] = useState<Map<string, HaulPatch>>(() => new Map());
@@ -957,6 +959,7 @@ function Planner() {
                     version: 1,
                     includeSurplusForAllLocations,
                     blockInterStockpileHauling: !allowInterStockpileHauling,
+                    haulingAllocationMode,
                   },
                 }
               : {}),
@@ -1628,6 +1631,27 @@ function Planner() {
                 onCheckedChange={setAllowInterStockpileHauling}
               />
               Allow inter-stockpile hauling
+            </Label>
+            <Label className="flex items-center gap-2 text-sm">
+              <span>Hauling allocation</span>
+              <Select
+                value={haulingAllocationMode}
+                onValueChange={(value) =>
+                  value && setHaulingAllocationMode(value as HaulingAllocationMode)
+                }
+              >
+                <SelectTrigger aria-label="Hauling allocation mode" className="w-44">
+                  <SelectValue>
+                    {haulingAllocationMode === "greedy" ? "Greedy" : "Local-first"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="local-first">Local-first (protect local)</SelectItem>
+                    <SelectItem value="greedy">Greedy (remote first)</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
             </Label>
             <span className="text-sm text-muted-foreground">{selectedSourceLabel}</span>
             <Button

@@ -60,6 +60,14 @@ void test("claims local stock before remote stock and creates an exact haul", ()
   assert.equal(allocator.remainingItemQuantity("remote"), 2);
 });
 
+void test("greedy hauling claims remote stock before preserving local stock", () => {
+  const allocator = new SimulationAllocator(inventory, [], [], false, "greedy");
+  const claim = allocator.claimOrdinarySupply(34, 10, 20, account, "job");
+  assert.deepEqual(claim, { local: 2, remote: 8, future: 0, futureReservations: [] });
+  assert.equal(allocator.haulingTasks[0].quantity, 8);
+  assert.equal(allocator.remainingItemQuantity("local"), 2);
+});
+
 void test("blocks only hauls between stockpile locations with no shared stockpile", () => {
   const stockpiles = [
     {
