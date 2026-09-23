@@ -13,6 +13,7 @@ type SimulationResultGroupProps = {
   ariaLabel?: string;
   trailingContent?: ReactNode;
   variant?: "card" | "nested";
+  allowOverflow?: boolean;
   isOpen: boolean;
   avatarRows: SimulationGroupAvatar[];
   remainingCount: number;
@@ -33,6 +34,7 @@ export default function SimulationResultGroup({
   ariaLabel,
   trailingContent,
   variant = "card",
+  allowOverflow = false,
   isOpen,
   avatarRows,
   remainingCount,
@@ -74,5 +76,9 @@ export default function SimulationResultGroup({
     </Collapsible>
   );
 
-  return variant === "nested" ? group : <Card className="pt-0">{group}</Card>;
+  return variant === "nested" ? (
+    group
+  ) : (
+    <Card className={`${allowOverflow ? "overflow-visible " : ""}pt-0`}>{group}</Card>
+  );
 }

@@ -2694,6 +2694,22 @@
   color: #78c7d2;
 }
 
+.simulationSourceIcon[data-source="invention"] {
+  color: #c5a6e8;
+}
+
+.simulationSourceIcon[data-source="haul"] {
+  color: #e18e76;
+}
+
+.simulationSourceIcon[data-source="copying"] {
+  color: #f28c8c;
+}
+
+.simulationSourceIcon[data-source="reprocessing"] {
+  color: var(--lime);
+}
+
 .availableSourceIcon[data-source="invention"] {
   color: #c5a6e8;
 }

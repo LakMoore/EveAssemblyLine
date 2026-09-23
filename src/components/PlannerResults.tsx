@@ -55,6 +55,7 @@ import PlannerListToolbar, { PlannerCopyHeader } from "@/components/PlannerListT
 import SimulationResultGroupHeader from "@/components/SimulationResultGroupHeader";
 import ResultRow from "@/components/ResultRow";
 import PlannerSkillsTab, { type PlannerSkillCharacter } from "@/components/PlannerSkillsTab";
+import MarketBuyOrderIndicator from "@/components/MarketBuyOrderIndicator";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
@@ -70,7 +71,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import styles from "@/app/page.module.css";
 import {
   Atom,
@@ -2211,13 +2211,16 @@ function PlanList({
                               <span
                                 className={`${styles.planRowAmount} max-[640px]:col-span-1 max-[640px]:w-full`}
                               >
-                                <strong>
-                                  <CopyableText
-                                    textToRender={`${materialAmount?.toLocaleString() ?? "0"} units`}
-                                    textToCopy={amountToCopy ?? "0"}
-                                    copyLabel={amountCopyLabel}
-                                  />
-                                </strong>
+                                <span className={styles.planRowMarketAmount}>
+                                  <MarketBuyOrderIndicator quantity={marketBuyOrderQuantity} />
+                                  <strong>
+                                    <CopyableText
+                                      textToRender={`${materialAmount?.toLocaleString() ?? "0"} units`}
+                                      textToCopy={amountToCopy ?? "0"}
+                                      copyLabel={amountCopyLabel}
+                                    />
+                                  </strong>
+                                </span>
                               </span>
                             </>
                           ) : (
@@ -2553,21 +2556,4 @@ function sumSourceCounts(countsByLocation?: PlanSourceCountsByLocation): PlanSou
     }
   }
   return counts;
-}
-
-function MarketBuyOrderIndicator({ quantity }: { quantity: number }) {
-  if (quantity <= 0) return null;
-  const label = `${quantity.toLocaleString()} currently in market buy orders`;
-  return (
-    <span
-      className={styles.availableSourceIcon}
-      data-source="market"
-      data-tooltip={label}
-      aria-label={label}
-      role="img"
-      tabIndex={0}
-    >
-      <ChartLine size={14} strokeWidth={1.8} aria-hidden="true" />
-    </span>
-  );
 }

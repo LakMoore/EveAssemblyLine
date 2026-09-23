@@ -30,8 +30,10 @@ import SimulationResultGroup from "@/components/SimulationResultGroup";
 import SimulationResultsTab from "@/components/SimulatorResultsTab";
 import SwitchedResultRow from "@/components/SwitchedResultRow";
 import CopyableText from "@/components/CopyableText";
+import MarketBuyOrderIndicator from "@/components/MarketBuyOrderIndicator";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
+import styles from "@/app/page.module.css";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -328,7 +330,7 @@ function demandStockpiles(
 ): string {
   const stockpiles = [...new Set(balance.demandSources.map((source) => source.stockpileId))];
   return stockpiles.length > 0
-    ? `Stockpiles: ${stockpiles
+    ? `From: ${stockpiles
         .map((stockpileId) => stockpileNamesById.get(stockpileId) ?? stockpileId)
         .join(", ")}`
     : "Ledger balance";
@@ -354,6 +356,63 @@ function futureSupply(item: SimulationMaterialBalance): number {
     + item.availableFromReprocessing
     + item.availableFromMarket
   );
+}
+
+type FutureSupplySource = {
+  key: string;
+  label: string;
+  quantity: number;
+  source: "haul" | "industry" | "copying" | "invention" | "reprocessing" | "market";
+  Icon: LucideIcon;
+};
+
+/** Returns the non-empty source contributions shown beside a future supply total. */
+function futureSupplySources(item: SimulationMaterialBalance): FutureSupplySource[] {
+  const sources: FutureSupplySource[] = [
+    {
+      key: "hauling",
+      label: "Haul",
+      quantity: item.availableFromHauling,
+      source: "haul",
+      Icon: Truck,
+    },
+    {
+      key: "production",
+      label: "Produce",
+      quantity: item.availableFromProduction,
+      source: "industry",
+      Icon: Factory,
+    },
+    {
+      key: "copying",
+      label: "Copy",
+      quantity: item.availableFromCopying,
+      source: "copying",
+      Icon: TestTubes,
+    },
+    {
+      key: "invention",
+      label: "Invent",
+      quantity: item.availableFromInvention,
+      source: "invention",
+      Icon: FlaskConical,
+    },
+    {
+      key: "reprocessing",
+      label: "Reprocess",
+      quantity: item.availableFromReprocessing,
+      source: "reprocessing",
+      Icon: Minimize2,
+    },
+    {
+      key: "market",
+      label: "Buy",
+      quantity: item.availableFromMarket,
+      source: "market",
+      Icon: ShoppingCart,
+    },
+  ];
+  return sources.filter((source) => source.quantity > 0);
 }
 
 /** Maps simulator blueprint kinds to the corresponding EVE image variation. */
@@ -1138,6 +1197,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
             remainingCount={groupItems.length - avatars.length}
             onCopyGroup={groupAction?.onCopyGroup}
             copyLabel={groupAction?.copyLabel}
+            allowOverflow={groupHeader !== undefined}
           >
             <div className="flex min-w-0 flex-col">
               {groupHeader}
@@ -1158,7 +1218,9 @@ function SimulationMaterialsTab({
   buckets,
   locationNamesById,
   stockpileNamesById,
+  marketBuyOrderQuantities,
   controls,
+  onSelectSimulationTab,
   openGroups,
   onOpenGroupChange,
   usePlannerUrlState,
@@ -1168,7 +1230,9 @@ function SimulationMaterialsTab({
   buckets: SimulationMaterialLocationBucket[];
   locationNamesById: ReadonlyMap<number, string>;
   stockpileNamesById: ReadonlyMap<string, string>;
+  marketBuyOrderQuantities?: Readonly<Record<string, number>>;
   controls: SimulationRowControls;
+  onSelectSimulationTab: (tab: SimulationTab) => void;
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
   usePlannerUrlState: boolean;
@@ -1334,12 +1398,16 @@ function SimulationMaterialsTab({
                       item={item}
                       demandTypeNamesById={demandTypeNamesById}
                       locationLabel={locationName(locationNamesById, item.locationId)}
+                      onSelectSimulationTab={onSelectSimulationTab}
                     />
                   ) : tab === "plan" ? (
                     <span aria-hidden="true" className="size-6 shrink-0" />
                   ) : null}
                   <div className="min-w-0 flex-1">
-                    <MaterialBalanceSummary item={item} />
+                    <MaterialBalanceSummary
+                      item={item}
+                      marketBuyOrderQuantities={marketBuyOrderQuantities}
+                    />
                   </div>
                 </div>
               </SimpleResultRow>
@@ -1357,7 +1425,50 @@ type SimulationDemandSummary = {
   productQuantity: number;
   immediateInputQuantity: number;
   futureInputQuantity: number;
+  activities: SimulationDemandSource["activity"][];
 };
+
+type DemandActivityDetails = {
+  label: string;
+  source: "industry" | "reaction" | "invention" | "copying" | "reprocessing" | "stock";
+  Icon: LucideIcon;
+  tab: SimulationTab;
+};
+
+/** Returns the display icon and label for a simulator demand activity. */
+function demandActivityDetails(
+  activity: SimulationDemandSource["activity"],
+): DemandActivityDetails {
+  switch (activity) {
+  case "manufacturing":
+    return { label: "Manufacture", source: "industry", Icon: Factory, tab: "manufacture" };
+  case "reaction":
+    return { label: "React", source: "reaction", Icon: Atom, tab: "react" };
+  case "invention":
+    return { label: "Invention", source: "invention", Icon: FlaskConical, tab: "invent" };
+  case "copying":
+    return { label: "Copying", source: "copying", Icon: TestTubes, tab: "copy" };
+  case "reprocessing":
+    return { label: "Reprocessing", source: "reprocessing", Icon: Minimize2, tab: "reprocess" };
+  case "stock":
+    return { label: "Stock", source: "stock", Icon: Boxes, tab: "plan" };
+  }
+}
+
+/** Sorts demand activities into the simulator's workflow order. */
+function sortDemandActivities(
+  activities: readonly SimulationDemandSource["activity"][],
+): SimulationDemandSource["activity"][] {
+  const order: SimulationDemandSource["activity"][] = [
+    "manufacturing",
+    "reaction",
+    "invention",
+    "copying",
+    "reprocessing",
+    "stock",
+  ];
+  return [...new Set(activities)].sort((left, right) => order.indexOf(left) - order.indexOf(right));
+}
 
 /** Combines repeated demand sources for the same demanding type. */
 function summarizeSimulationDemandSources(
@@ -1371,6 +1482,7 @@ function summarizeSimulationDemandSources(
       existing.productQuantity += source.productQuantity;
       existing.immediateInputQuantity += source.requiredNow;
       existing.futureInputQuantity += source.reserved;
+      existing.activities = sortDemandActivities([...existing.activities, source.activity]);
       continue;
     }
     summaries.set(
@@ -1381,6 +1493,7 @@ function summarizeSimulationDemandSources(
         productQuantity: source.productQuantity,
         immediateInputQuantity: source.requiredNow,
         futureInputQuantity: source.reserved,
+        activities: [source.activity],
       },
     );
   }
@@ -1395,18 +1508,24 @@ function SimulationDemandSourcesDrawer({
   item,
   demandTypeNamesById,
   locationLabel,
+  onSelectSimulationTab,
 }: {
   item: SimulationMaterialBalance;
   demandTypeNamesById: ReadonlyMap<number, string>;
   locationLabel: string;
+  onSelectSimulationTab: (tab: SimulationTab) => void;
 }) {
+  const [open, setOpen] = useState(false);
   const summaries = summarizeSimulationDemandSources(item.demandSources, demandTypeNamesById);
   const totalInputQuantity = item.requiredNow + item.reserved;
   const triggerLabel = `View demand sources for ${item.typeName}`;
-  const demandNumberGridClass = "grid min-w-[14rem] grid-cols-[repeat(3,minmax(4rem,1fr))] gap-x-3";
+  const demandNumberGridClass =
+    "grid min-w-[15.5rem] grid-cols-[minmax(6rem,1fr)_repeat(2,minmax(4rem,1fr))] gap-x-3";
 
   return (
     <ResponsiveDialogDrawer
+      open={open}
+      onOpenChange={setOpen}
       trigger={
         <Button
           type="button"
@@ -1438,7 +1557,7 @@ function SimulationDemandSourcesDrawer({
               {quantity(totalInputQuantity)} required
             </strong>
           </div>
-          <div className="hidden grid-cols-[minmax(0,1fr)_minmax(14rem,auto)] items-center gap-[13px] border-t border-border pt-3 text-right text-xs text-muted-foreground md:grid">
+          <div className="hidden grid-cols-[minmax(0,1fr)_minmax(14rem,auto)] items-center gap-[13px] border-t border-border px-2 pt-3 pr-5 text-right text-xs text-muted-foreground md:grid">
             <span className="text-left">Type</span>
             <div className={`${demandNumberGridClass} leading-tight whitespace-normal`}>
               <span>Create</span>
@@ -1465,7 +1584,37 @@ function SimulationDemandSourcesDrawer({
             contentClassName="self-end text-right font-mono text-xs md:w-full md:self-auto"
           >
             <div className={`${demandNumberGridClass} items-center text-foreground`}>
-              <span aria-label={`Create quantity: ${quantity(summary.productQuantity)}`}>
+              <span
+                className="flex items-center justify-end gap-1 whitespace-nowrap"
+                aria-label={`Create quantity: ${quantity(summary.productQuantity)} from ${summary.activities.map((activity) => demandActivityDetails(activity).label).join(", ")}`}
+              >
+                {summary.activities.map((activity) => {
+                  const { label, source, Icon, tab } = demandActivityDetails(activity);
+                  return (
+                    <Tooltip key={activity}>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label={`${label} demand`}
+                            className={cn(styles.simulationSourceIcon, "size-5 shrink-0 p-0")}
+                            data-source={source}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setOpen(false);
+                              onSelectSimulationTab(tab);
+                            }}
+                          >
+                            <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
+                          </Button>
+                        }
+                      />
+                      <TooltipContent>{label} demand</TooltipContent>
+                    </Tooltip>
+                  );
+                })}
                 x {quantity(summary.productQuantity)} =
               </span>
               <span
@@ -1485,11 +1634,20 @@ function SimulationDemandSourcesDrawer({
 }
 
 /** Renders the detail columns for a simulator material balance. */
-function MaterialBalanceSummary({ item }: { item: SimulationMaterialBalance }) {
+function MaterialBalanceSummary({
+  item,
+  marketBuyOrderQuantities,
+}: {
+  item: SimulationMaterialBalance;
+  marketBuyOrderQuantities?: Readonly<Record<string, number>>;
+}) {
+  const supplySources = futureSupplySources(item);
+  const marketBuyOrderQuantity = marketBuyOrderQuantities?.[String(item.typeId)] ?? 0;
   return (
-    <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-right md:grid-cols-6 md:gap-x-3">
+    <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_minmax(5rem,auto)] gap-x-3 gap-y-1 text-right md:grid-cols-6 md:gap-x-3">
       <span className="text-muted-foreground md:hidden">Available</span>
-      <span>
+      <span className="flex items-center justify-end gap-2">
+        <MarketBuyOrderIndicator quantity={marketBuyOrderQuantity} />
         <CopyableNumber value={item.availableNow} copyLabel="Available quantity" />
       </span>
       <span className="text-muted-foreground md:hidden">Immediate Demand</span>
@@ -1497,8 +1655,38 @@ function MaterialBalanceSummary({ item }: { item: SimulationMaterialBalance }) {
         <CopyableNumber value={item.requiredNow} copyLabel="Immediate demand" />
       </span>
       <span className="text-muted-foreground md:hidden">Future Supply</span>
-      <span>
-        <CopyableNumber value={futureSupply(item)} copyLabel="Future supply" />
+      <span className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+        <span
+          className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1"
+          aria-label="Future supply sources"
+        >
+          {supplySources.map(({ key, label, quantity, source, Icon }) => (
+            <Tooltip key={key}>
+              <TooltipTrigger
+                render={
+                  <span
+                    aria-label={`${label}: ${quantity.toLocaleString()}`}
+                    className={cn(
+                      styles.simulationSourceIcon,
+                      "inline-flex size-5 items-center justify-center",
+                    )}
+                    data-source={source}
+                    role="img"
+                    tabIndex={0}
+                  >
+                    <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
+                  </span>
+                }
+              />
+              <TooltipContent>
+                {label}: {quantity.toLocaleString()}
+              </TooltipContent>
+            </Tooltip>
+          ))}
+        </span>
+        <span className="shrink-0">
+          <CopyableNumber value={futureSupply(item)} copyLabel="Future supply" />
+        </span>
       </span>
       <span className="text-muted-foreground md:hidden">Future Demand</span>
       <span>
@@ -1519,7 +1707,7 @@ function MaterialBalanceSummary({ item }: { item: SimulationMaterialBalance }) {
 /** Renders the desktop labels for the Plan and Surplus material columns. */
 function MaterialBalanceHeader() {
   return (
-    <div className="hidden min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-[13px] p-2 md:grid">
+    <div className="sticky top-0 z-10 hidden min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-[13px] bg-card p-2 shadow-[0_1px_0_var(--border)] md:grid">
       <span aria-hidden="true" />
       <div className="grid grid-cols-6 gap-x-3 text-right font-mono text-[10px] text-muted-foreground uppercase">
         {materialBalanceColumns.map((column) => (
@@ -2566,11 +2754,13 @@ function SimulationHaulRow({
 /** Renders simulator purchases grouped by AssemblyLineGroup with multibuy actions. */
 function SimulationBuyTab({
   result,
+  marketBuyOrderQuantities,
   controls,
   openGroups,
   onOpenGroupChange,
 }: {
   result: SimulationResultV1;
+  marketBuyOrderQuantities?: Readonly<Record<string, number>>;
   controls: SimulationRowControls;
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
@@ -2689,7 +2879,15 @@ function SimulationBuyTab({
                           />
                         }
                         summary={
-                          <CopyableNumber value={purchase.quantity} copyLabel="Purchase quantity" />
+                          <span className="flex items-center justify-end gap-2">
+                            <MarketBuyOrderIndicator
+                              quantity={marketBuyOrderQuantities?.[String(purchase.typeId)] ?? 0}
+                            />
+                            <CopyableNumber
+                              value={purchase.quantity}
+                              copyLabel="Purchase quantity"
+                            />
+                          </span>
                         }
                         variation={isMaterial ? "icon" : "bp"}
                         controls={controls}
@@ -2806,6 +3004,7 @@ export default function SimulationResults({
   result,
   status,
   stock,
+  marketBuyOrderQuantities,
   locationNamesById,
   stockpileLocations,
   reactionMaterialBonusesByLocation,
@@ -2826,6 +3025,7 @@ export default function SimulationResults({
   result: SimulationResultV1 | null;
   status: string;
   stock: readonly PlanStockItem[];
+  marketBuyOrderQuantities?: Readonly<Record<string, number>>;
   locationNamesById: ReadonlyMap<number, string>;
   stockpileLocations: ReadonlySet<number>;
   reactionMaterialBonusesByLocation: ReadonlyMap<number, number>;
@@ -3128,6 +3328,7 @@ export default function SimulationResults({
             result={result}
             haulTasks={visibleHaulTasks}
             stock={stock}
+            marketBuyOrderQuantities={marketBuyOrderQuantities}
             locationNamesById={locationNamesById}
             stockpileLocations={stockpileLocations}
             reactionMaterialBonusesByLocation={reactionMaterialBonusesByLocation}
@@ -3142,6 +3343,7 @@ export default function SimulationResults({
             onExcludeLocation={onExcludeLocation}
             readOnly={readOnly}
             controls={controls}
+            onSelectSimulationTab={selectTab}
             openGroups={openGroups}
             onOpenGroupChange={onOpenGroupChange}
             usePlannerUrlState={usePlannerUrlState}
@@ -3159,6 +3361,7 @@ function SimulationTabContent({
   result,
   haulTasks,
   stock,
+  marketBuyOrderQuantities,
   locationNamesById,
   stockpileLocations,
   reactionMaterialBonusesByLocation,
@@ -3173,6 +3376,7 @@ function SimulationTabContent({
   onClearHaulExclusions,
   onExcludeLocation,
   openGroups,
+  onSelectSimulationTab,
   onOpenGroupChange,
   usePlannerUrlState,
   instanceId,
@@ -3182,6 +3386,7 @@ function SimulationTabContent({
   result: SimulationResultV1;
   haulTasks: readonly SimulationHaulTask[];
   stock: readonly PlanStockItem[];
+  marketBuyOrderQuantities?: Readonly<Record<string, number>>;
   locationNamesById: ReadonlyMap<number, string>;
   stockpileLocations: ReadonlySet<number>;
   reactionMaterialBonusesByLocation: ReadonlyMap<number, number>;
@@ -3197,6 +3402,7 @@ function SimulationTabContent({
   onExcludeLocation?: (locationId: number) => Promise<void>;
   readOnly: boolean;
   openGroups: Record<string, boolean>;
+  onSelectSimulationTab: (tab: SimulationTab) => void;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
   usePlannerUrlState: boolean;
   instanceId: string;
@@ -3218,7 +3424,9 @@ function SimulationTabContent({
         buckets={activeTab === "plan" ? result.lists.planItems : result.lists.surplusItems}
         locationNamesById={locationNamesById}
         stockpileNamesById={stockpileNamesById}
+        marketBuyOrderQuantities={marketBuyOrderQuantities}
         controls={controls}
+        onSelectSimulationTab={onSelectSimulationTab}
         openGroups={openGroups}
         onOpenGroupChange={onOpenGroupChange}
         usePlannerUrlState={usePlannerUrlState}
@@ -3302,6 +3510,7 @@ function SimulationTabContent({
     return (
       <SimulationBuyTab
         result={result}
+        marketBuyOrderQuantities={marketBuyOrderQuantities}
         controls={controls}
         openGroups={openGroups}
         onOpenGroupChange={onOpenGroupChange}

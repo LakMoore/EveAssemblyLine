@@ -2288,6 +2288,7 @@ function Planner() {
           result={simulationResult}
           status={planStatus}
           stock={stock}
+          marketBuyOrderQuantities={clientAssets?.marketBuyOrderQuantities}
           locationNamesById={plannerLocationNames}
           reactionMaterialBonusesByLocation={simulationReactionMaterialBonuses(locationOptions)}
           characterNamesById={characterNamesById}
