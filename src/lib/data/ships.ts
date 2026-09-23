@@ -104,7 +104,8 @@ async function buildShipsResponse(
         ?? station?.solarSystemID
         ?? (asset.locationType === "solar_system" ? asset.locationId : undefined);
       const systemName = systemId === undefined ? undefined : systems.get(systemId)?.name.en;
-      const isInSpace = asset.locationFlag === "Pilot" && asset.locationType === "solar_system";
+      const isInSpace = asset.locationType === "solar_system";
+      const isPiloted = isInSpace && asset.locationFlag === "Pilot";
       return {
         itemId: asset.itemId,
         typeId: asset.typeId,
@@ -122,6 +123,14 @@ async function buildShipsResponse(
         ownerType: asset.ownerType,
         ownerId: asset.ownerId,
         ...(root ? { rootLocation: root } : {}),
+        ...(isInSpace ? { isInSpace: true } : {}),
+        ...(isPiloted
+          ? {
+              pilotId: asset.ownerId,
+              pilotName: characterNamesById.get(asset.ownerId) ?? `Character ${asset.ownerId}`,
+              locationName: systemName ?? `System ${systemId}`,
+            }
+          : {}),
         items: getAssetsContainedByShip(asset.itemId, annotatedAssets).map(
           ({ ownerType: _ownerType, ownerId: _ownerId, rootLocation: _rootLocation, ...item }) =>
             item,

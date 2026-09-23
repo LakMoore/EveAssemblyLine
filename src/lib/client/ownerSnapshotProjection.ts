@@ -12,6 +12,7 @@ import type { ClientOwnerSnapshot } from "./ownerSnapshotCache";
 
 type SnapshotAsset = ClientOwnerSnapshot["assets"]["data"][number];
 type SnapshotLocation = ClientOwnerSnapshot["rootLocations"]["data"][number]["location"];
+type SnapshotShip = ClientOwnerSnapshot["ships"]["data"][number];
 
 export type OwnerSnapshotProjectionOptions = {
   metadata: readonly TypeMetadata[];
@@ -35,6 +36,43 @@ function findRootLocation(snapshot: ClientOwnerSnapshot, asset: SnapshotAsset) {
   return snapshot.rootLocations.data.find((entry) => entry.itemId === asset.itemId)?.location;
 }
 
+function findContainingShip(
+  asset: SnapshotAsset,
+  shipsByItemId: ReadonlyMap<number, SnapshotShip>,
+  assetsByItemId: ReadonlyMap<number, SnapshotAsset>,
+) {
+  const visited = new Set<number>();
+  let locationId = asset.locationId;
+  while (!visited.has(locationId)) {
+    const ship = shipsByItemId.get(locationId);
+    if (ship) return ship;
+    visited.add(locationId);
+    const parent = assetsByItemId.get(locationId);
+    if (!parent) return undefined;
+    locationId = parent.locationId;
+  }
+  return undefined;
+}
+
+function effectiveAssetLocation(
+  asset: SnapshotAsset,
+  rootLocation: SnapshotLocation | undefined,
+  shipsByItemId: ReadonlyMap<number, SnapshotShip>,
+  assetsByItemId: ReadonlyMap<number, SnapshotAsset>,
+) {
+  const containingShip = findContainingShip(asset, shipsByItemId, assetsByItemId);
+  const systemId = containingShip?.systemId;
+  if (systemId !== undefined && containingShip?.isInSpace === true) {
+    return {
+      locationId: systemId,
+      kind: "solar_system" as const,
+      systemId,
+      resolved: true,
+    };
+  }
+  return rootLocation;
+}
+
 function sourceLocationKind(location: SnapshotLocation | undefined) {
   if (!location) return undefined;
   return location.kind === "solar_system" ? ("anchored" as const) : location.kind;
@@ -43,11 +81,13 @@ function sourceLocationKind(location: SnapshotLocation | undefined) {
 function sourceLocationName(
   location: SnapshotLocation | undefined,
   systemNames: ReadonlyMap<number, string> = new Map(),
+  undocked = false,
 ) {
   if (!location) return undefined;
   if (location.kind === "solar_system") {
     const systemId = location.systemId ?? location.locationId;
-    return systemNames.get(systemId) ?? `System ${systemId}`;
+    const name = systemNames.get(systemId) ?? `System ${systemId}`;
+    return undocked ? `${name} \u00abUndocked\u00bb` : name;
   }
   if (location.name) return location.name;
   return location.kind === "structure"
@@ -126,10 +166,20 @@ function projectAsset(
   asset: SnapshotAsset,
   metadataByTypeId: Map<number, TypeMetadata>,
   systemNames: ReadonlyMap<number, string>,
+  shipsByItemId: ReadonlyMap<number, SnapshotShip>,
+  assetsByItemId: ReadonlyMap<number, SnapshotAsset>,
 ): StockItem {
   const metadata = metadataByTypeId.get(asset.typeId);
-  const rootLocation = findRootLocation(snapshot, asset);
-  const rootLocationId = asset.rootLocationId ?? rootLocation?.locationId ?? undefined;
+  const originalRootLocation = findRootLocation(snapshot, asset);
+  const rootLocation = effectiveAssetLocation(
+    asset,
+    originalRootLocation,
+    shipsByItemId,
+    assetsByItemId,
+  );
+  const containingShip = findContainingShip(asset, shipsByItemId, assetsByItemId);
+  const undocked = containingShip?.isInSpace === true;
+  const rootLocationId = asset.rootLocationId ?? originalRootLocation?.locationId ?? undefined;
   const systemId =
     rootLocation?.systemId
     ?? (rootLocation?.kind === "solar_system" ? rootLocation.locationId : undefined);
@@ -162,7 +212,7 @@ function projectAsset(
     quantity,
     locationId: asset.locationId,
     rootLocationId,
-    sourceLocationName: sourceLocationName(rootLocation, systemNames),
+    sourceLocationName: sourceLocationName(rootLocation, systemNames, undocked),
     sourceLocationKind: sourceLocationKind(rootLocation),
     sourceSystemId: systemId,
     sourceSystemName:
@@ -546,6 +596,8 @@ export function projectOwnerSnapshotsToClientAssets(
   const systemNames = options.systemNames ?? new Map<number, string>();
   const marketBuyOrderQuantities: Record<string, number> = {};
   const assets = snapshots.flatMap((snapshot) => {
+    const shipsByItemId = new Map(snapshot.ships.data.map((ship) => [ship.itemId, ship]));
+    const assetsByItemId = new Map(snapshot.assets.data.map((asset) => [asset.itemId, asset]));
     for (const order of snapshot.marketOrders.data) {
       const typeId = String(order.typeId);
       marketBuyOrderQuantities[typeId] =
@@ -553,7 +605,7 @@ export function projectOwnerSnapshotsToClientAssets(
     }
     return [
       ...snapshot.assets.data.map((asset) =>
-        projectAsset(snapshot, asset, metadataByTypeId, systemNames),
+        projectAsset(snapshot, asset, metadataByTypeId, systemNames, shipsByItemId, assetsByItemId),
       ),
       ...projectMissingBlueprintAssets(snapshot, metadataByTypeId, systemNames),
       ...projectIndustryJobAssets(snapshot, metadataByTypeId, systemNames),

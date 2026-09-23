@@ -1433,6 +1433,13 @@ function Planner() {
         : [],
     ),
     ...sharedLocationOptions.map((location) => [location.locationId, location.name] as const),
+    ...stock.flatMap((item) => {
+      if (item.sourceLocationKind !== "anchored" || item.sourceSystemName === undefined) return [];
+      const locationId = getStockLocationId(item);
+      return locationId === undefined
+        ? []
+        : [[locationId, `${item.sourceSystemName} \u00abUndocked\u00bb`] as const];
+    }),
   ]);
   const productionGroupOptions: ProductionGroupOption[] = productionGroupReferences.map((group) => {
     const facilities = locationOptions
