@@ -13,10 +13,7 @@ export type ClientOwner = {
 };
 
 type ClientOwnerSnapshotLocation = AssetLocation;
-type ClientOwnerSnapshotSourceLocation = ClientOwnerSnapshotLocation & {
-  name?: string;
-  systemName?: string;
-};
+type ClientOwnerSnapshotSourceLocation = ClientOwnerSnapshotLocation;
 type ClientOwnerSnapshotAsset = Omit<
   AssetRecord,
   "name" | "rootLocation" | "containerId" | "rootLocationId" | "hangarId"
@@ -219,12 +216,7 @@ function isSnapshotLocation(value: unknown): value is ClientOwnerSnapshotLocatio
 }
 
 function isSnapshotSourceLocation(value: unknown): value is ClientOwnerSnapshotSourceLocation {
-  const location = value as ClientOwnerSnapshotSourceLocation;
-  return (
-    isSnapshotLocation(value)
-    && isOptional(location.name, (name) => typeof name === "string")
-    && isOptional(location.systemName, (name) => typeof name === "string")
-  );
+  return isSnapshotLocation(value);
 }
 
 function isSnapshotAsset(value: unknown, depth = 0): value is ClientOwnerSnapshotAsset {

@@ -684,12 +684,17 @@ export async function loadClientOwnerSnapshotAssets(
       ]),
     ),
   ].filter((typeId) => typeId > 0);
-  const metadata = await fetchTypeMetadata(typeIds, language);
+  const systemIds = collectSnapshotSystemIds(snapshots);
+  const [metadata, systemNames] = await Promise.all([
+    fetchTypeMetadata(typeIds, language),
+    loadClientSystemNames([...systemIds], language),
+  ]);
   return projectOwnerSnapshotsToClientAssets(
     snapshots,
     {
       metadata,
       facilities: resolvedFacilities,
+      systemNames,
     },
   );
 }
@@ -716,23 +721,59 @@ function loadClientFacilities(language: SdeLanguage, reload = false) {
   return request;
 }
 
-async function loadClientSystemNames(systemIds: readonly number[]) {
-  const entries = await Promise.all(
-    systemIds.map(async (systemId) => {
-      const response = await fetch(
-        `/api/reference/systems?systemId=${systemId}&language=en`,
-        { cache: "no-store" },
-      );
-      if (!response.ok) return undefined;
-      const data = (await response.json()) as {
-        item?: { systemId?: number; name?: string } | null;
-      };
-      if (data.item?.systemId !== systemId || !data.item.name) return undefined;
-      return [systemId, data.item.name] as const;
-    }),
-  );
+function collectSnapshotSystemIds(snapshots: readonly ClientOwnerSnapshot[]) {
+  const systemIds = new Set<number>();
+  const addLocation = (location: { locationId: number; kind: string; systemId?: number }) => {
+    const systemId =
+      location.systemId ?? (location.kind === "solar_system" ? location.locationId : undefined);
+    if (systemId !== undefined) systemIds.add(systemId);
+  };
+  for (const snapshot of snapshots) {
+    snapshot.rootLocations.data.forEach(({ location }) => addLocation(location));
+    snapshot.corporationSources.data.forEach((source) => {
+      if (source.rootLocation) addLocation(source.rootLocation);
+    });
+    for (const asset of snapshot.assets.data) {
+      let location = asset.rootLocation;
+      let depth = 0;
+      while (location && depth < 20) {
+        if ("kind" in location) {
+          addLocation(location);
+          break;
+        }
+        location = location.rootLocation;
+        depth += 1;
+      }
+    }
+  }
+  return systemIds;
+}
+
+async function loadClientSystemNames(systemIds: readonly number[], language: SdeLanguage) {
+  if (systemIds.length === 0) return new Map<number, string>();
+  let data: {
+    items?: Array<{ systemId?: number; name?: string }>;
+  };
+  try {
+    const response = await fetch(
+      "/api/reference/systems",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ systemIds, language }),
+        cache: "no-store",
+      },
+    );
+    if (!response.ok) return new Map<number, string>();
+    data = (await response.json()) as { items?: Array<{ systemId?: number; name?: string }> };
+  }
+  catch {
+    return new Map<number, string>();
+  }
   return new Map(
-    entries.filter((entry): entry is readonly [number, string] => entry !== undefined),
+    (data.items ?? []).flatMap((item) =>
+      item.systemId !== undefined && item.name ? [[item.systemId, item.name] as const] : [],
+    ),
   );
 }
 
@@ -766,7 +807,7 @@ export function loadClientShips(reload = false) {
       ];
       const [metadata, systemNames] = await Promise.all([
         fetchTypeMetadata(typeIds, "en"),
-        loadClientSystemNames(systemIds),
+        loadClientSystemNames(systemIds, "en"),
       ]);
       const characterNames = new Map(
         (session.characters ?? []).map((character) => [
@@ -806,14 +847,18 @@ export function loadClientJobs(reload = false) {
         ),
       ),
     ].filter((typeId) => typeId > 0);
-    const metadata = await fetchTypeMetadata(typeIds, "en");
+    const snapshotSystemIds = collectSnapshotSystemIds(snapshots);
+    const [metadata, systemNames] = await Promise.all([
+      fetchTypeMetadata(typeIds, "en"),
+      loadClientSystemNames([...snapshotSystemIds], "en"),
+    ]);
     const industrySlots = new Map(
       (state.characters ?? []).flatMap((character) =>
         character.industrySlots ? [[character.characterId, character.industrySlots] as const] : [],
       ),
     );
     const data = snapshots.length
-      ? projectOwnerSnapshotsToClientJobs(snapshots, metadata, industrySlots)
+      ? projectOwnerSnapshotsToClientJobs(snapshots, metadata, industrySlots, systemNames)
       : emptyJobsResponse;
     jobsResponse = data;
     return data;

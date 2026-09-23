@@ -1321,8 +1321,7 @@ function SimulationMaterialsTab({
                 name={item.typeName}
                 typeId={item.typeId}
                 subline={demandStockpiles(item, stockpileNamesById)}
-                linkPath="planner"
-                navigateInPlace
+                linkPath="assets"
                 selected={controls.selectedRowKey === rowKey}
                 onClick={() => controls.onSelectRow(rowKey)}
                 variation={materialImageVariation(item.typeName)}

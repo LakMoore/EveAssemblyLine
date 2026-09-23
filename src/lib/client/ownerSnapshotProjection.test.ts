@@ -51,7 +51,6 @@ const snapshot: ClientOwnerSnapshot = {
         locationId: 600,
         kind: "structure",
         name: "Production Fortizar",
-        systemName: "Jita",
         systemId: 30000142,
         resolved: true,
       },
@@ -194,6 +193,7 @@ void test("projects stable owner assets into enriched client assets", () => {
           assemblyLineGroup: "standard",
         },
       ],
+      systemNames: new Map([[30000142, "Jita"]]),
     },
   );
 
@@ -209,7 +209,7 @@ void test("projects stable owner assets into enriched client assets", () => {
         sourceLocationName: "Jita - Production Fortizar",
         sourceLocationKind: "structure",
         sourceSystemId: 30000142,
-        sourceSystemName: "System 30000142",
+        sourceSystemName: "Jita",
         ownerType: "corporation",
         ownerId: 900,
         inUse: undefined,

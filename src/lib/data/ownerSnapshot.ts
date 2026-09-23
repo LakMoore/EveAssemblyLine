@@ -145,6 +145,13 @@ function snapshotLocation(location: AssetLocation): OwnerSnapshotLocation {
   return stableLocation;
 }
 
+function snapshotCorporationSourceLocation(
+  location: OwnerSnapshotCorporationSourceLocation,
+): OwnerSnapshotLocation {
+  const { systemName: _systemName, ...stableLocation } = location;
+  return snapshotLocation(stableLocation);
+}
+
 function snapshotAsset(asset: AssetRecord): OwnerSnapshotAsset {
   const { name: _name, rootLocation, ...stableAsset } = asset;
   return {
@@ -179,7 +186,9 @@ function snapshotAssets(data: OwnerAssetData) {
       rootLocationId: source.rootLocationId,
       locationFlag: source.locationFlag,
       label: source.label,
-      ...(source.rootLocation ? { rootLocation: { ...source.rootLocation } } : {}),
+      ...(source.rootLocation
+        ? { rootLocation: snapshotCorporationSourceLocation(source.rootLocation) }
+        : {}),
       canTake: source.canTake,
       canQuery: source.canQuery,
       selected: source.selected,

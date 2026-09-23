@@ -17,6 +17,7 @@ export type OwnerSnapshotProjectionOptions = {
   metadata: readonly TypeMetadata[];
   facilities?: readonly Facility[];
   characterNames?: ReadonlyMap<number, string>;
+  systemNames?: ReadonlyMap<number, string>;
 };
 
 function isSnapshotLocation(value: SnapshotAsset["rootLocation"]): value is SnapshotLocation {
@@ -39,9 +40,15 @@ function sourceLocationKind(location: SnapshotLocation | undefined) {
   return location.kind === "solar_system" ? ("anchored" as const) : location.kind;
 }
 
-function sourceLocationName(location: SnapshotLocation | undefined) {
+function sourceLocationName(
+  location: SnapshotLocation | undefined,
+  systemNames: ReadonlyMap<number, string> = new Map(),
+) {
   if (!location) return undefined;
-  if (location.kind === "solar_system") return `System ${location.systemId ?? location.locationId}`;
+  if (location.kind === "solar_system") {
+    const systemId = location.systemId ?? location.locationId;
+    return systemNames.get(systemId) ?? `System ${systemId}`;
+  }
   if (location.name) return location.name;
   return location.kind === "structure"
     ? "Structure details unavailable"
@@ -74,11 +81,15 @@ function slotCategory(activityId: number) {
   return undefined;
 }
 
-function locationName(snapshot: ClientOwnerSnapshot, locationId: number) {
+function locationName(
+  snapshot: ClientOwnerSnapshot,
+  locationId: number,
+  systemNames: ReadonlyMap<number, string> = new Map(),
+) {
   const location = snapshot.rootLocations.data.find(
     (entry) => entry.location.locationId === locationId,
   )?.location;
-  return sourceLocationName(location) ?? `Location ${locationId}`;
+  return sourceLocationName(location, systemNames) ?? `Location ${locationId}`;
 }
 
 function corporationSourceForAsset(
@@ -114,6 +125,7 @@ function projectAsset(
   snapshot: ClientOwnerSnapshot,
   asset: SnapshotAsset,
   metadataByTypeId: Map<number, TypeMetadata>,
+  systemNames: ReadonlyMap<number, string>,
 ): StockItem {
   const metadata = metadataByTypeId.get(asset.typeId);
   const rootLocation = findRootLocation(snapshot, asset);
@@ -150,10 +162,11 @@ function projectAsset(
     quantity,
     locationId: asset.locationId,
     rootLocationId,
-    sourceLocationName: sourceLocationName(rootLocation),
+    sourceLocationName: sourceLocationName(rootLocation, systemNames),
     sourceLocationKind: sourceLocationKind(rootLocation),
     sourceSystemId: systemId,
-    sourceSystemName: systemId === undefined ? undefined : `System ${systemId}`,
+    sourceSystemName:
+      systemId === undefined ? undefined : (systemNames.get(systemId) ?? `System ${systemId}`),
     ownerType: asset.ownerType,
     ownerId: asset.ownerId,
     inUse: asset.inUse,
@@ -214,6 +227,7 @@ function projectMarketOrderStock(
 function projectMissingBlueprintAssets(
   snapshot: ClientOwnerSnapshot,
   metadataByTypeId: Map<number, TypeMetadata>,
+  systemNames: ReadonlyMap<number, string>,
 ): StockItem[] {
   const assetItemIds = new Set(snapshot.assets.data.map((asset) => asset.itemId));
   return snapshot.blueprintInstances.data
@@ -262,7 +276,7 @@ function projectMissingBlueprintAssets(
           ],
           ...(rootLocation
             ? {
-                sourceLocationName: sourceLocationName(rootLocation),
+                sourceLocationName: sourceLocationName(rootLocation, systemNames),
                 sourceLocationKind: sourceLocationKind(rootLocation),
                 sourceSystemId:
                   rootLocation.kind === "solar_system"
@@ -310,6 +324,7 @@ function jobOutputLocation(
   snapshot: ClientOwnerSnapshot,
   job: ClientOwnerSnapshot["jobs"]["data"][number],
   corporationSource: ReturnType<typeof corporationSourceForJob>,
+  systemNames: ReadonlyMap<number, string>,
 ) {
   const corporationOutput =
     job.ownerType === "corporation"
@@ -339,16 +354,20 @@ function jobOutputLocation(
   return {
     rootLocationId:
       rootLocation?.locationId ?? corporationSource?.rootLocationId ?? job.outputLocationId,
-    sourceLocationName: rootLocation?.name ?? job.outputLocationName,
+    sourceLocationName: sourceLocationName(rootLocation, systemNames) ?? job.outputLocationName,
     sourceLocationKind: sourceKind,
     sourceSystemId,
-    sourceSystemName: sourceSystemId === undefined ? undefined : `System ${sourceSystemId}`,
+    sourceSystemName:
+      sourceSystemId === undefined
+        ? undefined
+        : (systemNames.get(sourceSystemId) ?? `System ${sourceSystemId}`),
   };
 }
 
 function projectIndustryJobAssets(
   snapshot: ClientOwnerSnapshot,
   metadataByTypeId: Map<number, TypeMetadata>,
+  systemNames: ReadonlyMap<number, string>,
 ): StockItem[] {
   const assets: StockItem[] = [];
   for (const job of snapshot.jobs.data) {
@@ -356,7 +375,7 @@ function projectIndustryJobAssets(
     if (status === "cancelled" || status === "reverted" || status === "delivered") continue;
     const jobRecord = snapshot.industryJobs.data.find((candidate) => candidate.jobId === job.jobId);
     const corporationSource = corporationSourceForJob(snapshot, job);
-    const location = jobOutputLocation(snapshot, job, corporationSource);
+    const location = jobOutputLocation(snapshot, job, corporationSource, systemNames);
     const metadata =
       job.productTypeId === undefined ? undefined : metadataByTypeId.get(job.productTypeId);
     if (job.productTypeId !== undefined && job.outputQuantity > 0) {
@@ -468,6 +487,7 @@ function projectIndustryJobAssets(
 
 function projectCorporationSources(
   snapshots: readonly ClientOwnerSnapshot[],
+  systemNames: ReadonlyMap<number, string>,
 ): ClientCorporationSource[] {
   const sources = new Map<string, ClientCorporationSource>();
   for (const snapshot of snapshots) {
@@ -489,7 +509,23 @@ function projectCorporationSources(
           rootLocationId: source.rootLocationId,
           locationFlag: source.locationFlag,
           label: source.label ?? (source.locationFlag || "Hangar"),
-          ...(source.rootLocation ? { rootLocation: { ...source.rootLocation } } : {}),
+          ...(source.rootLocation
+            ? {
+                rootLocation: {
+                  ...source.rootLocation,
+                  ...(source.rootLocation.kind === "solar_system"
+                    ? { name: sourceLocationName(source.rootLocation, systemNames) }
+                    : {}),
+                  ...(source.rootLocation.systemId !== undefined
+                    ? {
+                        systemName:
+                          systemNames.get(source.rootLocation.systemId)
+                          ?? `System ${source.rootLocation.systemId}`,
+                      }
+                    : {}),
+                },
+              }
+            : {}),
           canTake: source.canTake,
           canQuery: source.canQuery,
           selected: source.selected,
@@ -507,6 +543,7 @@ export function projectOwnerSnapshotsToClientAssets(
   options: OwnerSnapshotProjectionOptions,
 ): ClientAssetsResponse {
   const metadataByTypeId = metadataMap(options.metadata);
+  const systemNames = options.systemNames ?? new Map<number, string>();
   const marketBuyOrderQuantities: Record<string, number> = {};
   const assets = snapshots.flatMap((snapshot) => {
     for (const order of snapshot.marketOrders.data) {
@@ -515,16 +552,18 @@ export function projectOwnerSnapshotsToClientAssets(
         (marketBuyOrderQuantities[typeId] ?? 0) + order.buyOrderQuantity;
     }
     return [
-      ...snapshot.assets.data.map((asset) => projectAsset(snapshot, asset, metadataByTypeId)),
-      ...projectMissingBlueprintAssets(snapshot, metadataByTypeId),
-      ...projectIndustryJobAssets(snapshot, metadataByTypeId),
+      ...snapshot.assets.data.map((asset) =>
+        projectAsset(snapshot, asset, metadataByTypeId, systemNames),
+      ),
+      ...projectMissingBlueprintAssets(snapshot, metadataByTypeId, systemNames),
+      ...projectIndustryJobAssets(snapshot, metadataByTypeId, systemNames),
       ...projectMarketOrderStock(snapshot, metadataByTypeId),
     ];
   });
   return {
     assets,
     facilities: [...(options.facilities ?? [])],
-    corporationSources: projectCorporationSources(snapshots),
+    corporationSources: projectCorporationSources(snapshots, systemNames),
     marketBuyOrderQuantities,
   };
 }
@@ -534,6 +573,7 @@ export function projectOwnerSnapshotsToClientJobs(
   snapshots: readonly ClientOwnerSnapshot[],
   metadata: readonly TypeMetadata[],
   industrySlots: ReadonlyMap<number, ClientIndustrySlots> = new Map(),
+  systemNames: ReadonlyMap<number, string> = new Map(),
 ): ClientJobsResponse {
   const metadataByTypeId = metadataMap(metadata);
   const slotUsage: NonNullable<ClientJobsResponse["slotUsage"]> = {};
@@ -563,7 +603,8 @@ export function projectOwnerSnapshotsToClientJobs(
     snapshot.jobs.data.map((job) => ({
       ...job,
       activity: activityName(job.activityId),
-      outputLocationName: job.outputLocationName ?? locationName(snapshot, job.outputLocationId),
+      outputLocationName:
+        job.outputLocationName ?? locationName(snapshot, job.outputLocationId, systemNames),
       blueprintTypeName: metadataByTypeId.get(job.blueprintTypeId)?.name,
       productTypeName:
         job.productTypeId === undefined ? undefined : metadataByTypeId.get(job.productTypeId)?.name,
