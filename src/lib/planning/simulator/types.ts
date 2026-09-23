@@ -12,6 +12,9 @@ export type SimulationAsset = Omit<
   | "blueprintType"
   | "sourceLocationKind"
   | "techLevel"
+  | "isCargoContainer"
+  | "isPackaged"
+  | "isShip"
 >;
 
 type CategorizedPlanAssets = Exclude<NonNullable<PlanRequest["assets"]>, PlanStockItem[]>;

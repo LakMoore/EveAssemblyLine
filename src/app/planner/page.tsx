@@ -13,6 +13,7 @@ import type {
   ResponseHaulTask,
 } from "@/lib/planning/types";
 import type { SimulationAsset } from "@/lib/planning/simulator/types";
+import { prepareSimulationAssets } from "@/lib/planning/simulator/requestAssets";
 import { loadBuildList } from "@/lib/planning/buildListStore";
 import EveAuthorizationWarning from "@/components/EveAuthorizationWarning";
 import {
@@ -229,6 +230,9 @@ function toSimulationAsset(item: PlanStockItem): SimulationAsset {
     sourceLocationKind: _sourceLocationKind,
     sourceSystemName: _sourceSystemName,
     techLevel: _techLevel,
+    isCargoContainer: _isCargoContainer,
+    isPackaged: _isPackaged,
+    isShip: _isShip,
     ...simulationAsset
   } = item as PlannerAssetWithPresentation;
   return simulationAsset;
@@ -868,7 +872,9 @@ function Planner() {
       const selectedReactionFacility = locationOptions.find(
         (location) => location.locationId === primaryStockpileLocations.reactions,
       );
-      const requestStock = applyHaulPatches(workingAssets, [...patches.values()]);
+      const requestStock = prepareSimulationAssets(
+        applyHaulPatches(workingAssets, [...patches.values()]),
+      );
       const planningCharacter = characterStatuses.find(
         (character) => character.characterId === planningCharacterId,
       );

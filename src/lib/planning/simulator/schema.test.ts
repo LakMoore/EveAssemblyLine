@@ -92,6 +92,9 @@ void test("strips asset presentation metadata at the simulator boundary", () => 
         blueprintType: "bpo",
         sourceLocationKind: "station",
         techLevel: 1,
+        isCargoContainer: true,
+        isPackaged: true,
+        isShip: true,
       },
     ],
   });
@@ -108,6 +111,9 @@ void test("strips asset presentation metadata at the simulator boundary", () => 
     "blueprintType",
     "sourceLocationKind",
     "techLevel",
+    "isCargoContainer",
+    "isPackaged",
+    "isShip",
   ]) {
     assert.equal(property in asset, false, property);
   }
