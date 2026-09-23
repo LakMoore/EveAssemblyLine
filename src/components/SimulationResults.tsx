@@ -11,6 +11,7 @@ import {
   Factory,
   FlaskConical,
   ListChecks,
+  ListTree,
   ShoppingCart,
   SquareX,
   TriangleAlert,
@@ -30,6 +31,7 @@ import SimulationResultsTab from "@/components/SimulatorResultsTab";
 import SwitchedResultRow from "@/components/SwitchedResultRow";
 import CopyableText from "@/components/CopyableText";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
+import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -84,6 +86,7 @@ import {
 import type { PlanHaulExclusion, PlanStockItem } from "@/lib/planning/types";
 import type {
   SimulationCopyJob,
+  SimulationDemandSource,
   SimulationHaulTask,
   SimulationIndustryJob,
   SimulationInventionJob,
@@ -989,10 +992,7 @@ function useSimulationTypeNames(typeIds: readonly number[]) {
   }>({ requestKey: "", namesByTypeId: new Map() });
 
   useEffect(() => {
-    const requestedTypeIds = typeIdKey
-      .split(",")
-      .filter(Boolean)
-      .map(Number);
+    const requestedTypeIds = typeIdKey.split(",").filter(Boolean).map(Number);
     if (requestedTypeIds.length === 0) return;
     let cancelled = false;
     void fetchTypeMetadata(requestedTypeIds, language)
@@ -1142,6 +1142,9 @@ function SimulationMaterialsTab({
   const typeOptions = [...new Map(items.map((item) => [item.typeId, item.typeName])).entries()]
     .map(([id, name]) => ({ id, name }))
     .sort((left, right) => left.name.localeCompare(right.name) || left.id - right.id);
+  const demandTypeNamesById = useSimulationTypeNames(
+    items.flatMap((item) => item.demandSources.map((source) => source.productTypeId)),
+  );
   useEffect(() => {
     if (!usePlannerUrlState) return;
     if (selectedTypeId === null || typeOptions.some((option) => option.id === selectedTypeId)) {
@@ -1277,13 +1280,159 @@ function SimulationMaterialsTab({
                 wideBreakpoint="md"
                 contentClassName="self-end text-right font-mono text-xs md:w-full md:self-auto"
               >
-                <MaterialBalanceSummary item={item} />
+                <div className="flex w-full min-w-0 items-center justify-end gap-1">
+                  {tab === "plan" && item.demandSources.length > 0 ? (
+                    <SimulationDemandSourcesDrawer
+                      item={item}
+                      demandTypeNamesById={demandTypeNamesById}
+                      locationLabel={locationName(locationNamesById, item.locationId)}
+                    />
+                  ) : tab === "plan" ? (
+                    <span aria-hidden="true" className="size-6 shrink-0" />
+                  ) : null}
+                  <div className="min-w-0 flex-1">
+                    <MaterialBalanceSummary item={item} />
+                  </div>
+                </div>
               </SimpleResultRow>
             );
           }}
         />
       )}
     </SimulationResultsTab>
+  );
+}
+
+type SimulationDemandSummary = {
+  productTypeId: number;
+  productName: string;
+  productQuantity: number;
+  immediateInputQuantity: number;
+  futureInputQuantity: number;
+};
+
+/** Combines repeated demand sources for the same demanding type. */
+function summarizeSimulationDemandSources(
+  sources: readonly SimulationDemandSource[],
+  namesByTypeId: ReadonlyMap<number, string>,
+): SimulationDemandSummary[] {
+  const summaries = new Map<number, SimulationDemandSummary>();
+  for (const source of sources) {
+    const existing = summaries.get(source.productTypeId);
+    if (existing) {
+      existing.productQuantity += source.productQuantity;
+      existing.immediateInputQuantity += source.requiredNow;
+      existing.futureInputQuantity += source.reserved;
+      continue;
+    }
+    summaries.set(
+      source.productTypeId,
+      {
+        productTypeId: source.productTypeId,
+        productName: namesByTypeId.get(source.productTypeId) ?? `Type ${source.productTypeId}`,
+        productQuantity: source.productQuantity,
+        immediateInputQuantity: source.requiredNow,
+        futureInputQuantity: source.reserved,
+      },
+    );
+  }
+  return [...summaries.values()].sort(
+    (left, right) =>
+      left.productName.localeCompare(right.productName) || left.productTypeId - right.productTypeId,
+  );
+}
+
+/** Shows the demand contributors for one material balance at its physical location. */
+function SimulationDemandSourcesDrawer({
+  item,
+  demandTypeNamesById,
+  locationLabel,
+}: {
+  item: SimulationMaterialBalance;
+  demandTypeNamesById: ReadonlyMap<number, string>;
+  locationLabel: string;
+}) {
+  const summaries = summarizeSimulationDemandSources(item.demandSources, demandTypeNamesById);
+  const totalInputQuantity = item.requiredNow + item.reserved;
+  const triggerLabel = `View demand sources for ${item.typeName}`;
+  const demandNumberGridClass = "grid min-w-[14rem] grid-cols-[repeat(3,minmax(4rem,1fr))] gap-x-3";
+
+  return (
+    <ResponsiveDialogDrawer
+      trigger={
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-xs"
+          className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+          aria-label={triggerLabel}
+          title={triggerLabel}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <ListTree aria-hidden="true" />
+        </Button>
+      }
+      triggerTooltip={triggerLabel}
+      title="Demand sources"
+      description={`Items creating demand for ${item.typeName} at ${locationLabel}.`}
+      headerContent={
+        <div className="flex flex-col gap-3">
+          <div className="flex min-w-0 items-center justify-between gap-4">
+            <TypeIdentity
+              name={item.typeName}
+              typeId={item.typeId}
+              imageSize={40}
+              linkPath="planner"
+              linkSearchParams={{ simulationTab: "plan" }}
+              linkHash="plan-breakdown"
+            />
+            <strong className="shrink-0 text-right font-mono text-xs text-foreground">
+              {quantity(totalInputQuantity)} required
+            </strong>
+          </div>
+          <div className="hidden grid-cols-[minmax(0,1fr)_minmax(14rem,auto)] items-center gap-[13px] border-t border-border pt-3 text-right text-xs text-muted-foreground md:grid">
+            <span className="text-left">Type</span>
+            <div className={`${demandNumberGridClass} leading-tight whitespace-normal`}>
+              <span>Create</span>
+              <span>Immediate input</span>
+              <span>Future input</span>
+            </div>
+          </div>
+        </div>
+      }
+    >
+      <div className="w-full">
+        {summaries.map((summary) => (
+          <SimpleResultRow
+            key={summary.productTypeId}
+            name={summary.productName}
+            typeId={summary.productTypeId}
+            linkPath="planner"
+            linkIcon={ClipboardList}
+            linkSearchParams={{ simulationTab: "plan" }}
+            linkHash="plan-breakdown"
+            imageSize={32}
+            wideBreakpoint="md"
+            className="md:grid-cols-[minmax(0,1fr)_minmax(14rem,auto)]"
+            contentClassName="self-end text-right font-mono text-xs md:w-full md:self-auto"
+          >
+            <div className={`${demandNumberGridClass} items-center text-foreground`}>
+              <span aria-label={`Create quantity: ${quantity(summary.productQuantity)}`}>
+                x {quantity(summary.productQuantity)} =
+              </span>
+              <span
+                aria-label={`Immediate input quantity: ${quantity(summary.immediateInputQuantity)}`}
+              >
+                {quantity(summary.immediateInputQuantity)}
+              </span>
+              <span aria-label={`Future input quantity: ${quantity(summary.futureInputQuantity)}`}>
+                {quantity(summary.futureInputQuantity)}
+              </span>
+            </div>
+          </SimpleResultRow>
+        ))}
+      </div>
+    </ResponsiveDialogDrawer>
   );
 }
 
@@ -1437,9 +1586,7 @@ function SimulationInventionTab({
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
-  const blueprintNamesById = useSimulationTypeNames(
-    jobs.map((job) => job.outputBlueprintTypeId),
-  );
+  const blueprintNamesById = useSimulationTypeNames(jobs.map((job) => job.outputBlueprintTypeId));
   return (
     <SimulationResultsTab hasResults={jobs.length > 0}>
       <SimulationLocationResultGroups
