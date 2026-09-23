@@ -6,8 +6,6 @@ import type {
 } from "./industrySimulation";
 import type { SimulationTransaction } from "./ledger";
 import type { SimulationPurchase, SimulationWarning, SimulationRequestV1 } from "./types";
-import { categorizeType } from "@/lib/reference/category";
-import type { SdeLanguage } from "@/lib/reference/languages";
 
 /** Final purchase aggregation and blocked-policy diagnostics. */
 export interface BuyingSettlementResult {
@@ -27,27 +25,6 @@ function unitVolume(context: SimulationContext, typeId: number): number {
   return type?.packagedVolume ?? type?.volume ?? 0;
 }
 
-function assemblyLineGroup(
-  context: SimulationContext,
-  typeId: number,
-  language: SdeLanguage = "en",
-): string {
-  const type = context.types.get(typeId);
-  const category = categorizeType(
-    type ?? { name: { en: `Type ${typeId}` } },
-    language,
-    context.marketGroups,
-    context.groups,
-  );
-  if (category.assemblyLineGroup) return category.assemblyLineGroup;
-  const group = context.groups.get(type?.groupID ?? -1);
-  return (
-    group?.name[language as keyof typeof group.name]
-    ?? group?.name.en
-    ?? `Group ${type?.groupID ?? "unknown"}`
-  );
-}
-
 function aggregateMaterialPurchases(
   request: SimulationRequestV1,
   context: SimulationContext,
@@ -58,7 +35,6 @@ function aggregateMaterialPurchases(
     const existing = purchases.get(demand.account.typeId) ?? {
       typeId: demand.account.typeId,
       typeName: typeName(context, demand.account.typeId, request.language),
-      assemblyLineGroup: assemblyLineGroup(context, demand.account.typeId, request.language),
       unitVolume: unitVolume(context, demand.account.typeId),
       quantity: 0,
       destinations: [],
@@ -88,7 +64,6 @@ function aggregateBlueprintPurchases(
     const existing = purchases.get(purchase.typeId) ?? {
       typeId: purchase.typeId,
       typeName: typeName(context, purchase.typeId, request.language),
-      assemblyLineGroup: assemblyLineGroup(context, purchase.typeId, request.language),
       unitVolume: unitVolume(context, purchase.typeId),
       quantity: 0,
       destinations: [],

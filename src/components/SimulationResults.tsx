@@ -1014,6 +1014,55 @@ function useSimulationTypeNames(typeIds: readonly number[]) {
   return loadedNames.requestKey === requestKey ? loadedNames.namesByTypeId : new Map();
 }
 
+/** Loads localized SDE assembly groups for purchase rows without response metadata. */
+function useSimulationAssemblyLineGroups(typeIds: readonly number[]) {
+  const { language } = useAppLanguage();
+  const typeIdKey = [...new Set(typeIds)].sort((left, right) => left - right).join(",");
+  const requestKey = `${language}:${typeIdKey}`;
+  const [loadedGroups, setLoadedGroups] = useState<{
+    requestKey: string;
+    groupsByTypeId: ReadonlyMap<number, string>;
+    error: string | null;
+  }>({ requestKey: "", groupsByTypeId: new Map(), error: null });
+  const [retryCount, setRetryCount] = useState(0);
+
+  useEffect(() => {
+    const requestedTypeIds = typeIdKey.split(",").filter(Boolean).map(Number);
+    if (requestedTypeIds.length === 0) return;
+    let cancelled = false;
+    void fetchTypeMetadata(requestedTypeIds, language)
+      .then((metadata) => {
+        if (cancelled) return;
+        setLoadedGroups({
+          requestKey,
+          groupsByTypeId: new Map(
+            metadata.map((item) => [item.typeId, item.assemblyLineGroup ?? "Unknown"]),
+          ),
+          error: null,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLoadedGroups({
+            requestKey,
+            groupsByTypeId: new Map(),
+            error: "Type metadata could not be loaded.",
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [language, requestKey, retryCount, typeIdKey]);
+
+  return {
+    groupsByTypeId:
+      loadedGroups.requestKey === requestKey ? loadedGroups.groupsByTypeId : new Map(),
+    error: loadedGroups.requestKey === requestKey ? loadedGroups.error : null,
+    retry: () => setRetryCount((current) => current + 1),
+  };
+}
+
 /** Renders location-scoped rows inside collapsible result groups. */
 function SimulationLocationResultGroups<T extends { locationId: number }>({
   tab,
@@ -2531,8 +2580,13 @@ function SimulationBuyTab({
     ...result.lists.materialsToBuy.map((purchase) => ({ purchase, isMaterial: true })),
     ...result.lists.bpoToBuy.map((purchase) => ({ purchase, isMaterial: false })),
   ];
+  const {
+    groupsByTypeId,
+    error: assemblyLineGroupError,
+    retry: retryAssemblyLineGroups,
+  } = useSimulationAssemblyLineGroups(entries.map((entry) => entry.purchase.typeId));
   const groups = AssemblyLineGroups
-    .groupBy(entries, (entry) => entry.purchase.assemblyLineGroup)
+    .groupBy(entries, (entry) => groupsByTypeId.get(entry.purchase.typeId) ?? "Unknown")
     .sort((left, right) => left.assemblyLineGroup.localeCompare(right.assemblyLineGroup));
   const materialEntries = entries.filter((entry) => entry.isMaterial);
   const [copyStatus, setCopyStatus] = useState<{ scope: string; label: string } | null>(null);
@@ -2556,87 +2610,100 @@ function SimulationBuyTab({
   }
 
   return (
-    <SimulationResultsTab
-      hasResults={entries.length > 0}
-      settings={
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            disabled={materialEntries.length === 0}
-            onClick={() => void copyGroupMultibuy("all materials", materialEntries)}
-          >
-            <CopyIcon aria-hidden="true" />
-            {copyStatus?.scope === "all materials" ? copyStatus.label : "Multibuy Materials"}
-          </Button>
-        </div>
-      }
-    >
-      <div className="flex min-w-0 flex-col gap-4">
-        {groups.map((group) => {
-          const groupKey = `buy:${group.assemblyLineGroup}`;
-          const materialGroupEntries = group.items.filter((entry) => entry.isMaterial);
-          const groupAvatars = createGroupAvatars(
-            group.items,
-            (entry) => ({
-              typeId: entry.purchase.typeId,
-              name: entry.purchase.typeName,
-              imageVariation: entry.isMaterial ? "icon" : "bp",
-            }),
-          );
-          return (
-            <SimulationResultGroup
-              key={groupKey}
-              groupKey={groupKey}
-              label={group.assemblyLineGroup}
-              ariaLabel={group.assemblyLineGroup}
-              isOpen={openGroups[groupKey] ?? true}
-              onOpenChange={(open) => onOpenGroupChange(groupKey, open)}
-              avatarRows={groupAvatars}
-              remainingCount={group.items.length - groupAvatars.length}
-              onCopyGroup={
-                materialGroupEntries.length > 0
-                  ? () => void copyGroupMultibuy(group.assemblyLineGroup, materialGroupEntries)
-                  : undefined
-              }
-              copyLabel={
-                copyStatus?.scope === group.assemblyLineGroup
-                  ? copyStatus.label
-                  : "Copy Group Multibuy"
-              }
+    <div className="flex flex-col gap-4">
+      {assemblyLineGroupError && (
+        <Alert variant="destructive">
+          <AlertTitle>Purchase groups unavailable</AlertTitle>
+          <AlertDescription className="flex flex-wrap items-center gap-3">
+            <span>{assemblyLineGroupError} Purchases are temporarily grouped as Unknown.</span>
+            <Button type="button" variant="outline" size="sm" onClick={retryAssemblyLineGroups}>
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+      <SimulationResultsTab
+        hasResults={entries.length > 0}
+        settings={
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={materialEntries.length === 0}
+              onClick={() => void copyGroupMultibuy("all materials", materialEntries)}
             >
-              <div className="flex min-w-0 flex-col">
-                {group.items.map(({ purchase, isMaterial }) => {
-                  const rowKey = `buy:${isMaterial ? "material" : "blueprint"}:${purchase.typeId}:${purchase.destinations
-                    .map((destination) => destination.locationId)
-                    .join(":")}`;
-                  return (
-                    <SimulationSimpleJobRow
-                      key={rowKey}
-                      rowKey={rowKey}
-                      typeId={purchase.typeId}
-                      name={purchase.typeName}
-                      subline={
-                        <CopyableNumber
-                          value={purchase.destinations.length}
-                          suffix={` destination${purchase.destinations.length === 1 ? "" : "s"}`}
-                          copyLabel="Destinations"
-                        />
-                      }
-                      summary={
-                        <CopyableNumber value={purchase.quantity} copyLabel="Purchase quantity" />
-                      }
-                      variation={isMaterial ? "icon" : "bp"}
-                      controls={controls}
-                    />
-                  );
-                })}
-              </div>
-            </SimulationResultGroup>
-          );
-        })}
-      </div>
-    </SimulationResultsTab>
+              <CopyIcon aria-hidden="true" />
+              {copyStatus?.scope === "all materials" ? copyStatus.label : "Multibuy Materials"}
+            </Button>
+          </div>
+        }
+      >
+        <div className="flex min-w-0 flex-col gap-4">
+          {groups.map((group) => {
+            const groupKey = `buy:${group.assemblyLineGroup}`;
+            const materialGroupEntries = group.items.filter((entry) => entry.isMaterial);
+            const groupAvatars = createGroupAvatars(
+              group.items,
+              (entry) => ({
+                typeId: entry.purchase.typeId,
+                name: entry.purchase.typeName,
+                imageVariation: entry.isMaterial ? "icon" : "bp",
+              }),
+            );
+            return (
+              <SimulationResultGroup
+                key={groupKey}
+                groupKey={groupKey}
+                label={group.assemblyLineGroup}
+                ariaLabel={group.assemblyLineGroup}
+                isOpen={openGroups[groupKey] ?? true}
+                onOpenChange={(open) => onOpenGroupChange(groupKey, open)}
+                avatarRows={groupAvatars}
+                remainingCount={group.items.length - groupAvatars.length}
+                onCopyGroup={
+                  materialGroupEntries.length > 0
+                    ? () => void copyGroupMultibuy(group.assemblyLineGroup, materialGroupEntries)
+                    : undefined
+                }
+                copyLabel={
+                  copyStatus?.scope === group.assemblyLineGroup
+                    ? copyStatus.label
+                    : "Copy Group Multibuy"
+                }
+              >
+                <div className="flex min-w-0 flex-col">
+                  {group.items.map(({ purchase, isMaterial }) => {
+                    const rowKey = `buy:${isMaterial ? "material" : "blueprint"}:${purchase.typeId}:${purchase.destinations
+                      .map((destination) => destination.locationId)
+                      .join(":")}`;
+                    return (
+                      <SimulationSimpleJobRow
+                        key={rowKey}
+                        rowKey={rowKey}
+                        typeId={purchase.typeId}
+                        name={purchase.typeName}
+                        subline={
+                          <CopyableNumber
+                            value={purchase.destinations.length}
+                            suffix={` destination${purchase.destinations.length === 1 ? "" : "s"}`}
+                            copyLabel="Destinations"
+                          />
+                        }
+                        summary={
+                          <CopyableNumber value={purchase.quantity} copyLabel="Purchase quantity" />
+                        }
+                        variation={isMaterial ? "icon" : "bp"}
+                        controls={controls}
+                      />
+                    );
+                  })}
+                </div>
+              </SimulationResultGroup>
+            );
+          })}
+        </div>
+      </SimulationResultsTab>
+    </div>
   );
 }
 
@@ -2970,6 +3037,14 @@ export default function SimulationResults({
             <AlertTitle>Simulation failed</AlertTitle>
             <AlertDescription>{status.slice("Error: ".length)}</AlertDescription>
           </Alert>
+        ) : isLoading ? (
+          <Empty>
+            <EmptyHeader>
+              <Spinner />
+              <EmptyTitle>Simulation in progress</EmptyTitle>
+              <EmptyDescription>{status}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         ) : (
           <Empty>
             <EmptyHeader>

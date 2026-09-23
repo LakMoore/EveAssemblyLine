@@ -12,6 +12,7 @@ import type {
   PlanStockItem,
   ResponseHaulTask,
 } from "@/lib/planning/types";
+import type { SimulationAsset } from "@/lib/planning/simulator/types";
 import { loadBuildList } from "@/lib/planning/buildListStore";
 import EveAuthorizationWarning from "@/components/EveAuthorizationWarning";
 import {
@@ -206,6 +207,31 @@ function skillTimeMultiplier(
 
 function getStockLocationId(item: PlanStockItem) {
   return item.rootLocationId ?? item.sourceLocationId ?? item.locationId;
+}
+
+type PlannerAssetWithPresentation = PlanStockItem & {
+  assembledVolume?: number;
+  assemblyLineGroup?: string;
+  packagedVolume?: number;
+  techLevel?: number;
+};
+
+/** Removes SDE and display metadata before sending assets to the simulator. */
+function toSimulationAsset(item: PlanStockItem): SimulationAsset {
+  const {
+    assembledVolume: _assembledVolume,
+    assemblyLineGroup: _assemblyLineGroup,
+    category: _category,
+    name: _name,
+    packagedVolume: _packagedVolume,
+    blueprintType: _blueprintType,
+    sourceLocationName: _sourceLocationName,
+    sourceLocationKind: _sourceLocationKind,
+    sourceSystemName: _sourceSystemName,
+    techLevel: _techLevel,
+    ...simulationAsset
+  } = item as PlannerAssetWithPresentation;
+  return simulationAsset;
 }
 
 function getPlannerStock(
@@ -886,9 +912,10 @@ function Planner() {
               toPlanHaulExclusions(itemExclusions),
               mode === "simulate" ? simulationExclusions : [],
             ),
-            assets: requestStock.map(
-              ({ sourceLocationName: _sourceLocationName, ...item }) => item,
-            ),
+            assets:
+              mode === "simulate"
+                ? requestStock.map(toSimulationAsset)
+                : requestStock.map(({ sourceLocationName: _sourceLocationName, ...item }) => item),
             facilityTimeMultipliers: {
               manufacturing: selectedManufacturingFacility?.manufacturingTimeMultiplier ?? 1,
               reactions: selectedReactionFacility?.reactionTimeMultiplier ?? 1,

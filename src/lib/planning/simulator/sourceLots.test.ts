@@ -23,20 +23,19 @@ function request(): SimulationRequestV1 {
     assets: [
       {
         typeId: 34,
-        name: "Tritanium",
         quantity: 10,
-        category: "item",
         rootLocationId: 20,
         ownerType: "character",
         ownerId: 7,
       },
       {
         typeId: 100,
-        name: "Blueprint",
         quantity: 1,
-        category: "blueprint",
         rootLocationId: 20,
-        blueprintPrints: [{ itemId: 99, runs: 5, type: "bpc", me: 10, te: 20 }],
+        blueprintPrints: [
+          { itemId: 98, runs: -1, type: "bpo" },
+          { itemId: 99, runs: 5, type: "bpc", me: 10, te: 20 },
+        ],
       },
     ],
     settings: {
@@ -68,8 +67,15 @@ void test("normalizes ordinary assets and finite blueprint runs", () => {
   const inventory = normalizeSimulatorInventory(request(), context);
   assert.equal(inventory.itemLots[0].quantity, 10);
   assert.equal(inventory.itemLots[0].ownerId, 7);
-  assert.equal(inventory.blueprintLots[0].runs, 5);
-  assert.equal(inventory.blueprintLots[0].materialEfficiency, 10);
+  const bpoLot = inventory.blueprintLots.find((lot) => lot.itemId === 98);
+  const bpcLot = inventory.blueprintLots.find((lot) => lot.itemId === 99);
+  assert.ok(bpoLot);
+  assert.ok(bpcLot);
+  assert.equal(bpoLot.kind, "bpo");
+  assert.equal(bpoLot.runs, Number.MAX_SAFE_INTEGER);
+  assert.equal(bpcLot.kind, "bpc");
+  assert.equal(bpcLot.runs, 5);
+  assert.equal(bpcLot.materialEfficiency, 10);
 });
 
 void test("preserves industry job status on future output lots", () => {
@@ -81,9 +87,7 @@ void test("preserves industry job status on future output lots", () => {
     ...simulationRequest.assets,
     {
       typeId: 34,
-      name: "Tritanium",
       quantity: 4,
-      category: "item",
       rootLocationId: 20,
       inBuild: true,
       jobId: 123,
@@ -93,9 +97,7 @@ void test("preserves industry job status on future output lots", () => {
     },
     {
       typeId: 34,
-      name: "Tritanium",
       quantity: 2,
-      category: "item",
       rootLocationId: 20,
       inBuild: true,
       jobId: 124,

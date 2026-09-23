@@ -76,15 +76,50 @@ void test("accepts stockpiles that share a physical activity location", () => {
   assert.equal(simulatorRequestSchema.safeParse(input).success, true);
 });
 
+void test("strips asset presentation metadata at the simulator boundary", () => {
+  const parsed = parseSimulatorRequest({
+    ...request(),
+    assets: [
+      {
+        typeId: 34,
+        quantity: 10,
+        assembledVolume: 1,
+        assemblyLineGroup: "Materials",
+        category: "item",
+        name: "Tritanium",
+        packagedVolume: 0.01,
+        sourceSystemName: "Jita",
+        blueprintType: "bpo",
+        sourceLocationKind: "station",
+        techLevel: 1,
+      },
+    ],
+  });
+  assert.ok(Array.isArray(parsed.assets));
+  const asset = parsed.assets[0];
+  assert.ok(asset);
+  for (const property of [
+    "assembledVolume",
+    "assemblyLineGroup",
+    "category",
+    "name",
+    "packagedVolume",
+    "sourceSystemName",
+    "blueprintType",
+    "sourceLocationKind",
+    "techLevel",
+  ]) {
+    assert.equal(property in asset, false, property);
+  }
+});
+
 void test("accepts unlimited BPO runs and rejects negative BPC runs", () => {
   const bpoInput = request();
   bpoInput.assets = [
     {
       typeId: 691,
-      name: "Rifter Blueprint",
       quantity: 1,
       locationId: 2,
-      category: "blueprint",
       blueprintPrints: [{ itemId: 1, runs: -1, type: "bpo" }],
     },
   ];
@@ -94,10 +129,8 @@ void test("accepts unlimited BPO runs and rejects negative BPC runs", () => {
   bpcInput.assets = [
     {
       typeId: 691,
-      name: "Rifter Blueprint",
       quantity: 1,
       locationId: 2,
-      category: "blueprint",
       blueprintPrints: [{ itemId: 2, runs: -1, type: "bpc" }],
     },
   ];

@@ -14,7 +14,7 @@ import type {
 } from "@/lib/planning/types";
 import type { SimulationContext } from "./context";
 import type { SimulationSourceLot } from "./ledger";
-import type { SimulationRequestV1 } from "./types";
+import type { SimulationAsset, SimulationRequestV1 } from "./types";
 
 /** Physical or committed ordinary stock available to the simulator. */
 export interface SimulationItemLot extends SimulationSourceLot {
@@ -53,7 +53,7 @@ export interface SimulatorInventory {
   unresolvedLotCount: number;
 }
 
-type CategorizedAssets = Exclude<SimulationRequestV1["assets"], PlanStockItem[] | undefined>;
+type CategorizedAssets = Exclude<SimulationRequestV1["assets"], SimulationAsset[] | undefined>;
 
 function localizedTypeName(context: SimulationContext, typeId: number, language = "en"): string {
   const name = context.types.get(typeId)?.name;
@@ -63,6 +63,17 @@ function localizedTypeName(context: SimulationContext, typeId: number, language 
 function unitVolume(context: SimulationContext, typeId: number): number {
   const type = context.types.get(typeId);
   return type?.packagedVolume ?? type?.volume ?? 0;
+}
+
+function assetCategory(
+  item: SimulationAsset,
+  context: SimulationContext,
+): "blueprint" | "reactionformula" | "item" {
+  if (item.blueprintPrints?.length) return "blueprint";
+  if (context.blueprints.byBlueprintId.get(item.typeId)?.activities.reaction) {
+    return "reactionformula";
+  }
+  return "item";
 }
 
 /** Narrows an external industry activity name to a production activity. */
@@ -220,7 +231,15 @@ export function normalizeSimulatorInventory(
   context: SimulationContext,
 ): SimulatorInventory {
   const assets = request.assets ?? [];
-  const stock = (Array.isArray(assets) ? assets : normalizeCategorizedAssets(assets, context))
+  const stock: PlanStockItem[] = (
+    Array.isArray(assets)
+      ? assets.map((item) => ({
+          ...item,
+          name: localizedTypeName(context, item.typeId, request.language),
+          category: assetCategory(item, context),
+        }))
+      : normalizeCategorizedAssets(assets, context)
+  )
     .slice()
     .sort(
       (left, right) =>
@@ -238,7 +257,8 @@ export function normalizeSimulatorInventory(
 
   for (const [stockIndex, item] of stock.entries()) {
     const locationId = getStockRootLocationId(item);
-    if (item.category === "blueprint" || item.category === "reactionformula") {
+    const category = assetCategory(item, context);
+    if (category === "blueprint" || category === "reactionformula") {
       const prints = [...(item.blueprintPrints ?? [])].sort(
         (left, right) =>
           left.itemId - right.itemId
@@ -251,8 +271,8 @@ export function normalizeSimulatorInventory(
             lotId: `blueprint:${stockIndex}:${print.itemId}:${printIndex}`,
             itemId: print.itemId,
             typeId: item.typeId,
-            name: item.name || localizedTypeName(context, item.typeId, request.language),
-            kind: item.category === "reactionformula" ? "formula" : print.type,
+            name: localizedTypeName(context, item.typeId, request.language),
+            kind: category === "reactionformula" ? "formula" : print.type,
             runs: print.type === "bpo" ? Number.MAX_SAFE_INTEGER : Math.max(0, print.runs),
             materialEfficiency: print.me ?? item.me ?? 0,
             timeEfficiency: print.te ?? item.te ?? 0,
@@ -264,17 +284,14 @@ export function normalizeSimulatorInventory(
           });
         }
       }
-      else {
+      else if (category === "reactionformula") {
         for (let index = 0; index < Math.max(0, item.quantity); index += 1) {
           blueprintLots.push({
             lotId: `blueprint:${stockIndex}:${index}`,
             typeId: item.typeId,
-            name: item.name || localizedTypeName(context, item.typeId, request.language),
-            kind: item.category === "reactionformula" ? "formula" : (item.blueprintType ?? "bpc"),
-            runs:
-              item.category === "reactionformula" || item.blueprintType === "bpo"
-                ? Number.MAX_SAFE_INTEGER
-                : Math.max(0, item.licensedRuns ?? item.quantity),
+            name: localizedTypeName(context, item.typeId, request.language),
+            kind: "formula",
+            runs: Number.MAX_SAFE_INTEGER,
             materialEfficiency: item.me ?? 0,
             timeEfficiency: item.te ?? 0,
             locationId,
@@ -291,7 +308,7 @@ export function normalizeSimulatorInventory(
     itemLots.push({
       lotId: `item:${stockIndex}`,
       typeId: item.typeId,
-      name: item.name || localizedTypeName(context, item.typeId, request.language),
+      name: localizedTypeName(context, item.typeId, request.language),
       quantity: item.quantity,
       locationId,
       ownerType: item.ownerType,

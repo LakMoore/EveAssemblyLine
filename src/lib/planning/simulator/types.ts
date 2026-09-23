@@ -1,4 +1,20 @@
-import type { PlanRequest, StockOwnerType } from "@/lib/planning/types";
+import type { PlanRequest, PlanStockItem, StockItem, StockOwnerType } from "@/lib/planning/types";
+
+/** Asset fields required by simulation; display metadata is resolved from SDE context. */
+export type SimulationAsset = Omit<
+  StockItem,
+  | "assembledVolume"
+  | "assemblyLineGroup"
+  | "category"
+  | "name"
+  | "packagedVolume"
+  | "sourceSystemName"
+  | "blueprintType"
+  | "sourceLocationKind"
+  | "techLevel"
+>;
+
+type CategorizedPlanAssets = Exclude<NonNullable<PlanRequest["assets"]>, PlanStockItem[]>;
 
 /** Activity kinds represented by simulator ledgers and schedules. */
 export type SimulationActivity =
@@ -59,7 +75,8 @@ export interface SimulationOptionsV1 {
 }
 
 /** Public request accepted by the versioned simulator endpoint. */
-export interface SimulationRequestV1 extends PlanRequest {
+export interface SimulationRequestV1 extends Omit<PlanRequest, "assets"> {
+  assets?: SimulationAsset[] | CategorizedPlanAssets;
   simulation: SimulationOptionsV1;
 }
 
@@ -282,7 +299,6 @@ export interface SimulationPurchaseDestination {
 export interface SimulationPurchase {
   typeId: number;
   typeName: string;
-  assemblyLineGroup: string;
   unitVolume: number;
   quantity: number;
   destinations: SimulationPurchaseDestination[];
