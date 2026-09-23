@@ -177,10 +177,12 @@ export default function JobsPage() {
     }
     return [...types];
   }, [slotUsage]);
-  const characterIds = characters.map((character) => character.characterId);
+  const slotCharacterIds = characters
+    .filter((character) => !character.onDeployment)
+    .map((character) => character.characterId);
   const availableSlotTotals = slotOrder.map((type) => ({
     type,
-    ...getSlotUsageTotals(slotUsage, type, characterIds),
+    ...getSlotUsageTotals(slotUsage, type, slotCharacterIds),
   }));
 
   return (
@@ -204,7 +206,7 @@ export default function JobsPage() {
                           "manufacturing",
                           data,
                           undefined,
-                          new Set(characterIds),
+                          new Set(slotCharacterIds),
                         ),
                       )
                     : undefined;
