@@ -52,6 +52,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -155,6 +156,21 @@ function updateSimulationTabInUrl(tab: SimulationTab): void {
   const url = new URL(window.location.href);
   url.searchParams.set(simulationTabParam, tab);
   window.history.replaceState(null, "", url);
+}
+
+/** Tracks whether simulator output controls should use the compact mobile select. */
+function useIsMobileSimulationView(): boolean {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 640px)");
+    const updateIsMobile = () => setIsMobile(mediaQuery.matches);
+    updateIsMobile();
+    mediaQuery.addEventListener("change", updateIsMobile);
+    return () => mediaQuery.removeEventListener("change", updateIsMobile);
+  }, []);
+
+  return isMobile;
 }
 
 /** Parses a positive type ID from the planner URL query string. */
@@ -1894,6 +1910,7 @@ function SimulationSimpleJobRow({
   subline,
   summary,
   variation = "icon",
+  showCheckbox = false,
   controls,
 }: {
   rowKey: string;
@@ -1902,26 +1919,39 @@ function SimulationSimpleJobRow({
   subline: ReactNode;
   summary: ReactNode;
   variation?: "icon" | "bp" | "bpc";
+  showCheckbox?: boolean;
   controls: SimulationRowControls;
 }) {
-  return (
-    <SimpleResultRow
-      name={name}
-      typeId={typeId}
-      subline={subline}
-      variation={variation}
-      linkPath="planner"
-      linkIcon={ClipboardList}
-      linkSearchParams={{ simulationTab: "plan" }}
-      linkHash="plan-breakdown"
-      navigateInPlace
-      onNavigate={controls.onOpenPlan}
-      selected={controls.selectedRowKey === rowKey}
-      onClick={() => controls.onSelectRow(rowKey)}
-      contentClassName="self-end text-right font-mono text-xs sm:self-auto"
+  const rowProps = {
+    name,
+    typeId,
+    subline,
+    variation,
+    linkPath: "planner" as const,
+    linkIcon: ClipboardList,
+    linkSearchParams: { simulationTab: "plan" },
+    linkHash: "plan-breakdown",
+    navigateInPlace: true,
+    onNavigate: controls.onOpenPlan,
+    selected: controls.selectedRowKey === rowKey,
+    onClick: () => controls.onSelectRow(rowKey),
+    contentClassName: "self-end text-right font-mono text-xs sm:self-auto",
+  };
+  const checkboxChecked = showCheckbox && controls.isCompleted(rowKey);
+
+  return showCheckbox ? (
+    <SwitchedResultRow
+      {...rowProps}
+      showSwitch={false}
+      checkboxChecked={checkboxChecked}
+      installed={checkboxChecked}
+      checkboxTooltip="Mark purchase complete"
+      onCheckboxChange={(checked) => controls.onCompletedChange(rowKey, checked)}
     >
       {summary}
-    </SimpleResultRow>
+    </SwitchedResultRow>
+  ) : (
+    <SimpleResultRow {...rowProps}>{summary}</SimpleResultRow>
   );
 }
 
@@ -2665,6 +2695,7 @@ function SimulationHaulTab({
                           ariaLabel={`To: ${locationName(locationNamesById, toLocationId)}, ${destinationVolumeLabel}`}
                           switchChecked={destinationIncluded}
                           switchLabel={`Include haul group from ${locationName(locationNamesById, fromLocationId)} to ${locationName(locationNamesById, toLocationId)}`}
+                          switchPending={isLoading}
                           switchDisabled={readOnly || isLoading}
                           onSwitchChange={(checked) =>
                             controls.onHaulIncludedChange(destinationRowKeys, checked)
@@ -2744,6 +2775,7 @@ function SimulationHaulRow({
       onClick={completed || isLoading || readOnly ? undefined : () => controls.onSelectRow(rowKey)}
       switchChecked={included}
       switchTooltip={switchLabel}
+      switchPending={isLoading}
       switchDisabled={readOnly || isLoading}
       onSwitchChange={(checked) => controls.onHaulIncludedChange([rowKey], checked)}
       checkboxChecked={completed}
@@ -2948,6 +2980,7 @@ function SimulationBuyTab({
                           </span>
                         }
                         variation={isMaterial ? "icon" : "bp"}
+                        showCheckbox
                         controls={controls}
                       />
                     );
@@ -3119,6 +3152,7 @@ export default function SimulationResults({
     Partial<Record<string, SimulationCompletionState>>
   >({});
   const [isBugReportOpen, setIsBugReportOpen] = useState(false);
+  const isMobile = useIsMobileSimulationView();
   const statusIsError = status.startsWith("Error:");
   const hasSurplusTab = result?.lists.surplusItems !== undefined;
   const selectedTab = !hasSurplusTab && activeTab === "surplus" ? "warnings" : activeTab;
@@ -3357,6 +3391,37 @@ export default function SimulationResults({
     );
   }
 
+  const availableTabs = tabs.filter(({ value }) => value !== "surplus" || hasSurplusTab);
+  const simulationTabContent = (
+    <SimulationTabContent
+      activeTab={selectedTab}
+      result={result}
+      haulTasks={visibleHaulTasks}
+      stock={stock}
+      marketBuyOrderQuantities={marketBuyOrderQuantities}
+      locationNamesById={locationNamesById}
+      stockpileLocations={stockpileLocations}
+      reactionMaterialBonusesByLocation={reactionMaterialBonusesByLocation}
+      characterNamesById={characterNamesById}
+      characterStatuses={characterStatuses}
+      slotUsage={slotUsage}
+      corporationNamesById={corporationNamesById}
+      stockpileNamesById={stockpileNamesById}
+      haulExclusions={haulExclusions}
+      preservedHaulTasks={preservedHaulTasks}
+      isLoading={isLoading}
+      onClearHaulExclusions={clearHaulExclusions}
+      onExcludeLocation={onExcludeLocation}
+      readOnly={readOnly}
+      controls={controls}
+      onSelectSimulationTab={selectTab}
+      openGroups={openGroups}
+      onOpenGroupChange={onOpenGroupChange}
+      usePlannerUrlState={usePlannerUrlState}
+      instanceId={instanceId}
+    />
+  );
+
   return (
     <section className="flex min-w-0 flex-col gap-4">
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
@@ -3412,47 +3477,45 @@ export default function SimulationResults({
           </div>
         </DialogContent>
       </Dialog>
-      <Tabs value={selectedTab} onValueChange={selectTab}>
-        <TabsList className="w-full max-w-full justify-start overflow-x-auto" variant="line">
-          {tabs
-            .filter(({ value }) => value !== "surplus" || hasSurplusTab)
-            .map(({ value, label, icon: Icon }) => (
-              <TabsTrigger key={value} value={value}>
-                <Icon data-icon="inline-start" aria-hidden="true" />
-                {label}
-              </TabsTrigger>
-            ))}
-        </TabsList>
-        <TabsContent value={selectedTab} className="pt-3">
-          <SimulationTabContent
-            activeTab={selectedTab}
-            result={result}
-            haulTasks={visibleHaulTasks}
-            stock={stock}
-            marketBuyOrderQuantities={marketBuyOrderQuantities}
-            locationNamesById={locationNamesById}
-            stockpileLocations={stockpileLocations}
-            reactionMaterialBonusesByLocation={reactionMaterialBonusesByLocation}
-            characterNamesById={characterNamesById}
-            characterStatuses={characterStatuses}
-            slotUsage={slotUsage}
-            corporationNamesById={corporationNamesById}
-            stockpileNamesById={stockpileNamesById}
-            haulExclusions={haulExclusions}
-            preservedHaulTasks={preservedHaulTasks}
-            isLoading={isLoading}
-            onClearHaulExclusions={clearHaulExclusions}
-            onExcludeLocation={onExcludeLocation}
-            readOnly={readOnly}
-            controls={controls}
-            onSelectSimulationTab={selectTab}
-            openGroups={openGroups}
-            onOpenGroupChange={onOpenGroupChange}
-            usePlannerUrlState={usePlannerUrlState}
-            instanceId={instanceId}
-          />
-        </TabsContent>
-      </Tabs>
+      {isMobile ? (
+        <>
+          <Select
+            value={selectedTab}
+            onValueChange={(value) => {
+              if (value !== null) selectTab(value);
+            }}
+          >
+            <SelectTrigger aria-label="Simulation output view" className="w-full">
+              <SelectValue>{tabs.find(({ value }) => value === selectedTab)?.label}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {availableTabs.map(({ value, label }) => (
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {simulationTabContent}
+        </>
+      ) : (
+        <Tabs value={selectedTab} onValueChange={selectTab}>
+          <ScrollArea className="h-11 w-full max-w-full **:data-[slot=scroll-area-viewport]:overflow-y-hidden!">
+            <TabsList className="w-full min-w-max justify-start" variant="line">
+              {availableTabs.map(({ value, label, icon: Icon }) => (
+                <TabsTrigger key={value} value={value}>
+                  <Icon data-icon="inline-start" aria-hidden="true" />
+                  {label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            <ScrollBar orientation="horizontal" />
+          </ScrollArea>
+          <TabsContent value={selectedTab} className="pt-0">
+            {simulationTabContent}
+          </TabsContent>
+        </Tabs>
+      )}
     </section>
   );
 }

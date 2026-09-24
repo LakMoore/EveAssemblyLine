@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import { ChevronsDownUp, ChevronsUpDown, Copy as CopyIcon } from "lucide-react";
@@ -27,6 +28,7 @@ type SimulationResultGroupHeaderProps = {
   remainingCount: number;
   switchChecked?: boolean;
   switchLabel?: string;
+  switchPending?: boolean;
   switchDisabled?: boolean;
   onSwitchChange?: (checked: boolean) => void;
   onCopyGroup?: () => void;
@@ -43,6 +45,7 @@ export default function SimulationResultGroupHeader({
   remainingCount,
   switchChecked,
   switchLabel = "Include group",
+  switchPending = false,
   switchDisabled = false,
   onSwitchChange,
   onCopyGroup,
@@ -51,14 +54,19 @@ export default function SimulationResultGroupHeader({
   return (
     <div className="py-4 text-foreground uppercase">
       <div className="flex flex-1 flex-row items-center justify-between gap-4 px-2">
-        {onSwitchChange && (
-          <Switch
-            aria-label={switchLabel}
-            checked={switchChecked}
-            disabled={switchDisabled}
-            onCheckedChange={onSwitchChange}
-          />
-        )}
+        {onSwitchChange
+          && (switchPending ? (
+            <span className="flex w-8 items-center justify-center">
+              <Spinner aria-hidden="true" />
+            </span>
+          ) : (
+            <Switch
+              aria-label={switchLabel}
+              checked={switchChecked}
+              disabled={switchDisabled}
+              onCheckedChange={onSwitchChange}
+            />
+          ))}
         <h3 className="flex min-w-0 shrink grow truncate pl-2 text-lg">{label}</h3>
         {trailingContent}
         <AvatarGroup className="ml-auto hidden group-data-closed/simulation-group:flex">

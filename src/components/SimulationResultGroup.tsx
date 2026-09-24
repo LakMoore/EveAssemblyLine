@@ -19,6 +19,7 @@ type SimulationResultGroupProps = {
   remainingCount: number;
   switchChecked?: boolean;
   switchLabel?: string;
+  switchPending?: boolean;
   switchDisabled?: boolean;
   onSwitchChange?: (checked: boolean) => void;
   onOpenChange: (open: boolean) => void;
@@ -40,6 +41,7 @@ export default function SimulationResultGroup({
   remainingCount,
   switchChecked,
   switchLabel,
+  switchPending,
   switchDisabled,
   onSwitchChange,
   onOpenChange,
@@ -67,6 +69,7 @@ export default function SimulationResultGroup({
         remainingCount={remainingCount}
         switchChecked={switchChecked}
         switchLabel={switchLabel}
+        switchPending={switchPending}
         switchDisabled={switchDisabled}
         onSwitchChange={onSwitchChange}
         onCopyGroup={onCopyGroup}

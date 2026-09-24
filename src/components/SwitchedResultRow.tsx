@@ -94,19 +94,30 @@ export default function SwitchedResultRow({
             content: "sm:col-span-1 sm:col-start-3 sm:row-auto",
             checkbox: "sm:col-start-4 sm:row-auto",
           };
+  const noSwitchLayoutClasses = {
+    grid: "sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center",
+    identity: "sm:row-auto",
+    content: "sm:col-span-1 sm:col-start-2 sm:row-auto",
+    checkbox: "col-start-2 sm:col-start-3 sm:row-auto",
+  };
+  const rowIsChecked = installed || checkboxChecked === true;
+  const effectiveSwitchDisabled = disabled || switchDisabled || rowIsChecked;
+  const effectiveCheckboxDisabled =
+    disabled || checkboxDisabled || (showSwitch && switchChecked !== true);
 
   return (
     <div
       aria-disabled={disabled}
       data-disabled={disabled || undefined}
-      data-installed={installed || undefined}
+      data-installed={rowIsChecked || undefined}
       data-selected={selected || undefined}
       role={onClick ? "group" : undefined}
       tabIndex={onClick ? 0 : undefined}
       aria-label={onClick ? `Select ${name}` : undefined}
       className={cn(
-        "group/result-row grid min-h-14 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-[13px] gap-y-2 border-b border-border px-2 py-2.5 transition-colors hover:bg-muted/50 data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[installed=true]:opacity-50 data-[installed=true]:hover:bg-transparent data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:hover:bg-accent",
-        wideLayoutClasses.grid,
+        "group/result-row grid min-h-14 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-[13px] gap-y-2 border-b border-border px-2 py-2.5 transition-colors hover:bg-muted/50 data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[installed=true]:hover:bg-transparent data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:hover:bg-accent",
+        showSwitch ? wideLayoutClasses.grid : "grid-cols-[minmax(0,1fr)_auto]",
+        showSwitch ? undefined : noSwitchLayoutClasses.grid,
         className,
       )}
       onClick={onClick}
@@ -123,10 +134,17 @@ export default function SwitchedResultRow({
     >
       {showSwitch && (
         <ResultRowControl
-          className={cn("col-start-1 row-start-1", wideLayoutClasses.switch, switchClassName)}
+          className={cn(
+            "col-start-1 row-start-1",
+            wideLayoutClasses.switch,
+            switchPending && "w-8",
+            switchClassName,
+          )}
         >
           {switchPending ? (
-            <Spinner aria-hidden="true" />
+            <span className="flex w-8 items-center justify-center">
+              <Spinner aria-hidden="true" />
+            </span>
           ) : (
             <Tooltip>
               <TooltipTrigger
@@ -134,7 +152,7 @@ export default function SwitchedResultRow({
                   <Switch
                     aria-label={switchTooltip}
                     checked={switchChecked}
-                    disabled={disabled || switchDisabled}
+                    disabled={effectiveSwitchDisabled}
                     onClick={(event) => event.stopPropagation()}
                     onCheckedChange={onSwitchChange}
                   />
@@ -151,16 +169,18 @@ export default function SwitchedResultRow({
         typeId={typeId}
         className={cn(
           "col-start-2 row-start-1 min-w-0",
-          wideLayoutClasses.identity,
+          showSwitch ? wideLayoutClasses.identity : noSwitchLayoutClasses.identity,
           !showSwitch && "col-start-1",
+          "group-data-[installed=true]/result-row:opacity-50",
           identityClassName,
         )}
       />
       <div
         className={cn(
           "col-span-2 col-start-2 row-start-2 flex min-w-0 items-center justify-end gap-1",
-          wideLayoutClasses.content,
-          !showSwitch && "col-start-1",
+          showSwitch ? wideLayoutClasses.content : noSwitchLayoutClasses.content,
+          !showSwitch && "col-span-1 col-start-1",
+          "group-data-[installed=true]/result-row:opacity-50",
           contentClassName,
         )}
       >
@@ -168,7 +188,11 @@ export default function SwitchedResultRow({
       </div>
       {showCheckbox && (
         <ResultRowControl
-          className={cn("col-start-3 row-start-1", wideLayoutClasses.checkbox, checkboxClassName)}
+          className={cn(
+            "col-start-3 row-start-1",
+            showSwitch ? wideLayoutClasses.checkbox : noSwitchLayoutClasses.checkbox,
+            checkboxClassName,
+          )}
         >
           {checkboxPending ? (
             <Spinner aria-hidden="true" />
@@ -180,7 +204,7 @@ export default function SwitchedResultRow({
                     aria-label={checkboxTooltip}
                     checked={checkboxChecked}
                     indeterminate={checkboxIndeterminate}
-                    disabled={disabled || checkboxDisabled}
+                    disabled={effectiveCheckboxDisabled}
                     className={cn(
                       selected && "border-secondary",
                       checkboxIndeterminate
