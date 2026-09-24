@@ -335,6 +335,28 @@ function mergePlanHaulExclusions(
   return [...exclusions.values()];
 }
 
+/** Converts local owner-aware exclusions into the simulator's route-only contract. */
+function toSimulationHaulExclusions(
+  exclusions: readonly PlanHaulExclusion[],
+): Array<Pick<PlanHaulExclusion, "typeId" | "fromLocationId" | "toLocationId">> {
+  const routeExclusions = new Map<
+    string,
+    Pick<PlanHaulExclusion, "typeId" | "fromLocationId" | "toLocationId">
+  >();
+  for (const exclusion of exclusions) {
+    const routeOnly = {
+      typeId: exclusion.typeId,
+      fromLocationId: exclusion.fromLocationId,
+      toLocationId: exclusion.toLocationId,
+    };
+    routeExclusions.set(
+      `${routeOnly.typeId}:${routeOnly.fromLocationId}:${routeOnly.toLocationId}`,
+      routeOnly,
+    );
+  }
+  return [...routeExclusions.values()];
+}
+
 function selectSavedLocation(
   options: PlanLocationOption[],
   savedLocationId: number | undefined,
@@ -967,10 +989,15 @@ function Planner() {
               sizeId: location.sizeId,
               buildTypeGroups: location.buildTypeGroups,
             })),
-            haulExclusions: mergePlanHaulExclusions(
-              toPlanHaulExclusions(itemExclusions),
-              mode === "simulate" ? simulationExclusions : [],
-            ),
+            haulExclusions:
+              mode === "simulate"
+                ? toSimulationHaulExclusions(
+                    mergePlanHaulExclusions(
+                      toPlanHaulExclusions(itemExclusions),
+                      simulationExclusions,
+                    ),
+                  )
+                : mergePlanHaulExclusions(toPlanHaulExclusions(itemExclusions)),
             assets:
               mode === "simulate"
                 ? requestStock.map(toSimulationAsset)

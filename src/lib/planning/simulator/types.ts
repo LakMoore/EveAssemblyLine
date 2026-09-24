@@ -82,8 +82,16 @@ export interface SimulationOptionsV1 {
 }
 
 /** Public request accepted by the versioned simulator endpoint. */
-export interface SimulationRequestV1 extends Omit<PlanRequest, "assets"> {
+export interface SimulationHaulExclusion {
+  typeId: number;
+  fromLocationId: number;
+  toLocationId: number;
+}
+
+/** Public request accepted by the versioned simulator endpoint. */
+export interface SimulationRequestV1 extends Omit<PlanRequest, "assets" | "haulExclusions"> {
   assets?: SimulationAsset[] | CategorizedPlanAssets;
+  haulExclusions?: SimulationHaulExclusion[];
   simulation: SimulationOptionsV1;
 }
 

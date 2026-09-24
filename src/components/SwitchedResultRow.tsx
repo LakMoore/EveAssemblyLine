@@ -101,6 +101,8 @@ export default function SwitchedResultRow({
     checkbox: "col-start-2 sm:col-start-3 sm:row-auto",
   };
   const rowIsChecked = installed || checkboxChecked === true;
+  const rowHasUncheckedSwitch = showSwitch && switchChecked !== true;
+  const rowHasMutedContent = rowIsChecked || rowHasUncheckedSwitch;
   const effectiveSwitchDisabled = disabled || switchDisabled || rowIsChecked;
   const effectiveCheckboxDisabled =
     disabled || checkboxDisabled || (showSwitch && switchChecked !== true);
@@ -171,7 +173,7 @@ export default function SwitchedResultRow({
           "col-start-2 row-start-1 min-w-0",
           showSwitch ? wideLayoutClasses.identity : noSwitchLayoutClasses.identity,
           !showSwitch && "col-start-1",
-          "group-data-[installed=true]/result-row:opacity-50",
+          rowHasMutedContent && "opacity-50",
           identityClassName,
         )}
       />
@@ -180,7 +182,7 @@ export default function SwitchedResultRow({
           "col-span-2 col-start-2 row-start-2 flex min-w-0 items-center justify-end gap-1",
           showSwitch ? wideLayoutClasses.content : noSwitchLayoutClasses.content,
           !showSwitch && "col-span-1 col-start-1",
-          "group-data-[installed=true]/result-row:opacity-50",
+          rowHasMutedContent && "opacity-50",
           contentClassName,
         )}
       >

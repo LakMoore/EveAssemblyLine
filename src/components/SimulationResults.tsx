@@ -291,14 +291,11 @@ function sortSimulationHaulTasks(
   });
 }
 
-/** Identifies one simulator haul route, including its optional owner scope. */
+/** Identifies one simulator haul route. */
 function simulationHaulExclusionKey(
-  value: Pick<
-    PlanHaulExclusion,
-    "typeId" | "fromLocationId" | "toLocationId" | "ownerType" | "ownerId"
-  >,
+  value: Pick<PlanHaulExclusion, "typeId" | "fromLocationId" | "toLocationId">,
 ): string {
-  return `${value.typeId}:${value.fromLocationId}:${value.toLocationId}:${value.ownerType ?? ""}:${value.ownerId ?? ""}`;
+  return `${value.typeId}:${value.fromLocationId}:${value.toLocationId}`;
 }
 
 /** Builds route-scoped simulator exclusions from the haul rows currently switched off. */
@@ -309,10 +306,14 @@ function simulationHaulExclusions(
   visibleHaulTasks: readonly SimulationHaulTask[] = result?.lists.haulingTasks ?? [],
 ): PlanHaulExclusion[] {
   const exclusions = new Map<string, PlanHaulExclusion>(
-    currentExclusions.map((exclusion) => [
-      `${exclusion.typeId}:${exclusion.fromLocationId}:${exclusion.toLocationId}:${exclusion.ownerType ?? ""}:${exclusion.ownerId ?? ""}`,
-      exclusion,
-    ]),
+    currentExclusions.map((exclusion) => {
+      const routeOnly = {
+        typeId: exclusion.typeId,
+        fromLocationId: exclusion.fromLocationId,
+        toLocationId: exclusion.toLocationId,
+      };
+      return [simulationHaulExclusionKey(routeOnly), routeOnly];
+    }),
   );
   if (!result) return [...exclusions.values()];
   for (const task of visibleHaulTasks) {
@@ -320,9 +321,6 @@ function simulationHaulExclusions(
       typeId: task.typeId,
       fromLocationId: task.fromLocationId,
       toLocationId: task.toLocationId,
-      ...(task.ownerType !== undefined && task.ownerId !== undefined
-        ? { ownerType: task.ownerType, ownerId: task.ownerId }
-        : {}),
     };
     const key = simulationHaulExclusionKey(exclusion);
     const isIncluded = includedRows[`haul:${task.transferId}`] ?? !exclusions.has(key);

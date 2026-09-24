@@ -59,6 +59,22 @@ void test("accepts the greedy hauling allocation policy", () => {
   assert.equal(parsed.simulation.haulingAllocationMode, "greedy");
 });
 
+void test("removes owner identity from simulator haul exclusions", () => {
+  const parsed = parseSimulatorRequest({
+    ...request(),
+    haulExclusions: [
+      {
+        typeId: 34,
+        fromLocationId: 20,
+        toLocationId: 10,
+        ownerType: "character",
+        ownerId: 7,
+      },
+    ],
+  });
+  assert.deepEqual(parsed.haulExclusions, [{ typeId: 34, fromLocationId: 20, toLocationId: 10 }]);
+});
+
 void test("rejects fractional build quantities", () => {
   const input = request();
   input.stockpiles[0].items[0].quantity = 1.5;

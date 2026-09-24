@@ -68,6 +68,29 @@ void test("greedy hauling claims remote stock before preserving local stock", ()
   assert.equal(allocator.remainingItemQuantity("local"), 2);
 });
 
+void test("blocks a haul route for every owner", () => {
+  const allocator = new SimulationAllocator(
+    {
+      ...inventory,
+      itemLots: [
+        { ...inventory.itemLots[1], ownerType: "character", ownerId: 7 },
+        {
+          ...inventory.itemLots[1],
+          lotId: "remote-corporation",
+          ownerType: "corporation",
+          ownerId: 8,
+        },
+      ],
+    },
+    [{ typeId: 34, fromLocationId: 30, toLocationId: 20 }],
+  );
+  assert.deepEqual(
+    allocator.claimOrdinarySupply(34, 10, 20, account, "job"),
+    { local: 0, remote: 0, future: 0, futureReservations: [] },
+  );
+  assert.equal(allocator.haulingTasks.length, 0);
+});
+
 void test("blocks cross-stockpile activity hauls but allows end-destination hauls", () => {
   const stockpiles = [
     {

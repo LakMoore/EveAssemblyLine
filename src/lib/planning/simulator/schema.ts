@@ -237,13 +237,11 @@ export const simulatorRequestSchema = z
     skillTimeMultipliers: z.object({ manufacturing: multiplier, reactions: multiplier }).optional(),
     haulExclusions: z
       .array(
-        z
-          .object({
-            typeId: positiveSafeInteger,
-            fromLocationId: positiveSafeInteger,
-            toLocationId: positiveSafeInteger,
-          })
-          .and(ownerSchema),
+        z.object({
+          typeId: positiveSafeInteger,
+          fromLocationId: positiveSafeInteger,
+          toLocationId: positiveSafeInteger,
+        }),
       )
       .max(5000)
       .optional(),

@@ -1,10 +1,11 @@
-import type { PlanHaulExclusion, PlanStockpile } from "@/lib/planning/types";
+import type { PlanStockpile } from "@/lib/planning/types";
 import type { SimulationLedgerAccount, SimulationTransaction } from "./ledger";
 import type { SimulatorBlueprintLot, SimulatorInventory, SimulationItemLot } from "./sourceLots";
 import type {
   HaulingAllocationMode,
   SimulationBlueprintAllocation,
   SimulationHaulTask,
+  SimulationHaulExclusion,
   SimulationActivity,
   SimulationUpstreamReservation,
 } from "./types";
@@ -84,7 +85,7 @@ export class SimulationAllocator {
   /** Creates an allocator over one immutable inventory snapshot. */
   constructor(
     private readonly inventory: SimulatorInventory,
-    private readonly haulExclusions: readonly PlanHaulExclusion[],
+    private readonly haulExclusions: readonly SimulationHaulExclusion[],
     stockpiles: readonly Pick<PlanStockpile, "locations">[] = [],
     blockInterStockpileHauling = false,
     haulingAllocationMode: HaulingAllocationMode = "local-first",
@@ -698,11 +699,7 @@ export class SimulationAllocator {
         (exclusion) =>
           exclusion.typeId === lot.typeId
           && exclusion.fromLocationId === lot.locationId
-          && exclusion.toLocationId === destinationLocationId
-          && (
-            exclusion.ownerType === undefined
-            || (exclusion.ownerType === lot.ownerType && exclusion.ownerId === lot.ownerId)
-          ),
+          && exclusion.toLocationId === destinationLocationId,
       )
     ) {
       return true;
