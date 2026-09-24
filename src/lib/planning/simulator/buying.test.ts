@@ -21,7 +21,7 @@ const request = {
   },
   simulation: {
     version: 1,
-    includeSurplusForAllLocations: false,
+    simulateSurplus: false,
     blockInterStockpileHauling: false,
     haulingAllocationMode: "local-first",
     characters: [],

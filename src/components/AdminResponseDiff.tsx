@@ -19,11 +19,24 @@ type LineReader = {
 /** Formats retained JSON for readable administrator comparison. */
 function prettyJson(value: string): string {
   try {
-    return JSON.stringify(JSON.parse(value), null, 2);
+    return JSON.stringify(sortJsonKeys(JSON.parse(value)), null, 2);
   }
   catch {
     return value;
   }
+}
+
+/** Sorts object keys without changing array order so property relocation is not reported as a change. */
+function sortJsonKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJsonKeys);
+  if (value === null || typeof value !== "object") return value;
+
+  return Object.fromEntries(
+    Object
+      .entries(value)
+      .sort(([leftKey], [rightKey]) => (leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0))
+      .map(([key, nestedValue]) => [key, sortJsonKeys(nestedValue)]),
+  );
 }
 
 /** Creates random-access line views without retaining a second copy of every line. */

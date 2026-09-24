@@ -73,7 +73,7 @@ export interface SimulationPolicyV1 {
 /** Additive simulator controls carried beside the current planning request. */
 export interface SimulationOptionsV1 {
   version: 1;
-  includeSurplusForAllLocations: boolean;
+  simulateSurplus: boolean;
   blockInterStockpileHauling: boolean;
   haulingAllocationMode: HaulingAllocationMode;
   characters: SimulationCharacterProfile[];
@@ -362,7 +362,7 @@ export interface SimulationResultV1 {
   lists: {
     warnings: SimulationWarning[];
     planItems: SimulationMaterialLocationBucket[];
-    surplusItems: SimulationMaterialLocationBucket[];
+    surplusItems?: SimulationMaterialLocationBucket[];
     haulingTasks: SimulationHaulTask[];
     materialsToBuy: SimulationPurchase[];
     bpoToBuy: SimulationPurchase[];

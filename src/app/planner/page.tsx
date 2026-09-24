@@ -1,7 +1,15 @@
 "use client";
 
-import { type ChangeEvent, type RefObject, useEffect, useRef, useState } from "react";
+import {
+  startTransition,
+  type ChangeEvent,
+  type RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { flushSync } from "react-dom";
+import { usePathname } from "next/navigation";
 import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import type {
   ClientBuildItem,
@@ -511,7 +519,7 @@ function Planner() {
     ProductionGroupReference[]
   >([]);
   const [includeStock, setIncludeStock] = useState(true);
-  const [includeSurplusForAllLocations, setIncludeSurplusForAllLocations] = useState(false);
+  const [simulateSurplus, setSimulateSurplus] = useState(false);
   const [allowInterStockpileHauling, setAllowInterStockpileHauling] = useState(false);
   const [haulingAllocationMode, setHaulingAllocationMode] =
     useState<HaulingAllocationMode>("local-first");
@@ -536,6 +544,14 @@ function Planner() {
       return defaultSettings;
     }
   });
+  const pathname = usePathname();
+  const previousPathnameRef = useRef(pathname);
+
+  useEffect(() => {
+    if (previousPathnameRef.current === pathname) return;
+    previousPathnameRef.current = pathname;
+    startTransition(() => setSimulateSurplus(false));
+  }, [pathname]);
 
   useEffect(() => {
     void Promise
@@ -992,7 +1008,7 @@ function Planner() {
               ? {
                   simulation: {
                     version: 1,
-                    includeSurplusForAllLocations,
+                    simulateSurplus,
                     blockInterStockpileHauling: !allowInterStockpileHauling,
                     haulingAllocationMode,
                   },
@@ -1664,11 +1680,11 @@ function Planner() {
             </Label>
             <Label className="flex items-center gap-2 text-sm">
               <Switch
-                aria-label="Simulate surplus for all locations"
-                checked={includeSurplusForAllLocations}
-                onCheckedChange={setIncludeSurplusForAllLocations}
+                aria-label="Simulate surplus items"
+                checked={simulateSurplus}
+                onCheckedChange={setSimulateSurplus}
               />
-              Simulate surplus for all locations
+              Simulate surplus items
             </Label>
             <Label className="flex items-center gap-2 text-sm">
               <Switch

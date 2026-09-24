@@ -35,7 +35,7 @@ function request() {
 
 void test("defaults the simulator policy", () => {
   const parsed = parseSimulatorRequest(request());
-  assert.equal(parsed.simulation.includeSurplusForAllLocations, false);
+  assert.equal(parsed.simulation.simulateSurplus, false);
   assert.equal(parsed.simulation.blockInterStockpileHauling, false);
   assert.equal(parsed.simulation.haulingAllocationMode, "local-first");
   assert.equal(parsed.simulation.policy.inventionExpectedOutputFactor, 1.2);

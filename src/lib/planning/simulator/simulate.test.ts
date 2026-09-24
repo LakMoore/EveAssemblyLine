@@ -79,7 +79,7 @@ void test("assembles a versioned invariant-safe result from the cached SDE", asy
       buildBlacklist: [],
       buyBlacklist: [],
     },
-    simulation: { version: 1 },
+    simulation: { version: 1, simulateSurplus: true },
   });
   const first = await simulateIndustry(request);
   const second = await simulateIndustry(request);
@@ -192,7 +192,7 @@ void test("combines stockpile demand in one canonical location ledger", async ()
   );
 });
 
-void test("shows unrelated stock only on the surplus tab", async () => {
+void test("shows configured-location stock only on the surplus tab when requested", async () => {
   const request = parseSimulatorRequest({
     stockpiles: [
       {
@@ -225,7 +225,7 @@ void test("shows unrelated stock only on the surplus tab", async () => {
       buildBlacklist: [],
       buyBlacklist: [],
     },
-    simulation: { version: 1 },
+    simulation: { version: 1, simulateSurplus: true },
   });
   const result = await simulateIndustry(request);
   const ledger = result.ledgers.find((candidate) => candidate.locationId === 50);
@@ -235,14 +235,14 @@ void test("shows unrelated stock only on the surplus tab", async () => {
   assert.equal(amplifier.availableNow, 252);
   assert.equal(amplifier.reserved, 0);
   assert.ok(
-    result.lists.surplusItems.some((bucket) => bucket.items.some((item) => item.typeId === 4393)),
+    result.lists.surplusItems?.some((bucket) => bucket.items.some((item) => item.typeId === 4393)),
   );
   assert.ok(
     !result.lists.planItems.some((bucket) => bucket.items.some((item) => item.typeId === 4393)),
   );
 });
 
-void test("includes surplus at an unconfigured location only when requested", async () => {
+void test("omits surplus and ledgers for unconfigured locations", async () => {
   const input = {
     stockpiles: [
       {
@@ -271,19 +271,20 @@ void test("includes surplus at an unconfigured location only when requested", as
     simulation: { version: 1 },
   };
   const limited = await simulateIndustry(parseSimulatorRequest(input));
-  const expanded = await simulateIndustry(
+  const simulated = await simulateIndustry(
     parseSimulatorRequest({
       ...input,
-      simulation: { version: 1, includeSurplusForAllLocations: true },
+      simulation: { version: 1, simulateSurplus: true },
     }),
   );
+  assert.equal("surplusItems" in limited.lists, false);
   assert.equal(
-    limited.lists.surplusItems.some((bucket) => bucket.locationId === 70),
+    simulated.lists.surplusItems?.some((bucket) => bucket.locationId === 70),
     false,
   );
   assert.equal(
-    expanded.lists.surplusItems.some((bucket) => bucket.locationId === 70),
-    true,
+    simulated.ledgers.some((ledger) => ledger.locationId === 70),
+    false,
   );
 });
 
@@ -366,7 +367,7 @@ void test("keeps connected material surplus on the plan tab", async () => {
   assert.equal(tritanium.reserved, 0);
   assert.equal(tritanium.surplus, 25);
   assert.ok(
-    !result.lists.surplusItems.some((bucket) => bucket.items.some((item) => item.typeId === 34)),
+    !result.lists.surplusItems?.some((bucket) => bucket.items.some((item) => item.typeId === 34)),
   );
 });
 

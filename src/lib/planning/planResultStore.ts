@@ -171,7 +171,8 @@ export function isSimulationResultV1(value: unknown): value is SimulationResultV
         && Array.isArray(bucket.items)
         && bucket.items.every((item) => hasBalance(item) && item.locationId === bucket.locationId),
     );
-  const hasSurplusBalances = hasPresentationBuckets(lists.surplusItems);
+  const hasSurplusBalances =
+    lists.surplusItems === undefined || hasPresentationBuckets(lists.surplusItems);
   const hasPlanPresentationBalances = hasPresentationBuckets(lists.planItems);
   const hasLedgers =
     value.ledgers === undefined

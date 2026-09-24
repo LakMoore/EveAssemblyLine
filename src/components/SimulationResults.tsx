@@ -3120,6 +3120,8 @@ export default function SimulationResults({
   >({});
   const [isBugReportOpen, setIsBugReportOpen] = useState(false);
   const statusIsError = status.startsWith("Error:");
+  const hasSurplusTab = result?.lists.surplusItems !== undefined;
+  const selectedTab = !hasSurplusTab && activeTab === "surplus" ? "warnings" : activeTab;
   async function copySimulationId() {
     const simulationId = result?.metadata.simulationId;
     if (!simulationId) return;
@@ -3302,7 +3304,7 @@ export default function SimulationResults({
     setOpenGroups((current) => ({ ...current, [groupKey]: open }));
 
   function selectTab(value: string) {
-    if (!isSimulationTab(value)) return;
+    if (!isSimulationTab(value) || (value === "surplus" && !hasSurplusTab)) return;
     setActiveTab(value);
     if (usePlannerUrlState) updateSimulationTabInUrl(value);
   }
@@ -3310,7 +3312,8 @@ export default function SimulationResults({
   useEffect(() => {
     if (!usePlannerUrlState) return;
     const applyUrlState = () => {
-      const nextTab = readSimulationTabFromUrl();
+      const requestedTab = readSimulationTabFromUrl();
+      const nextTab = requestedTab === "surplus" && !hasSurplusTab ? "warnings" : requestedTab;
       setActiveTab(nextTab);
       if (new URLSearchParams(window.location.search).get(simulationTabParam) !== nextTab) {
         updateSimulationTabInUrl(nextTab);
@@ -3319,7 +3322,7 @@ export default function SimulationResults({
     applyUrlState();
     window.addEventListener("popstate", applyUrlState);
     return () => window.removeEventListener("popstate", applyUrlState);
-  }, [usePlannerUrlState]);
+  }, [hasSurplusTab, usePlannerUrlState]);
 
   if (!result) {
     return (
@@ -3409,18 +3412,20 @@ export default function SimulationResults({
           </div>
         </DialogContent>
       </Dialog>
-      <Tabs value={activeTab} onValueChange={selectTab}>
+      <Tabs value={selectedTab} onValueChange={selectTab}>
         <TabsList className="w-full max-w-full justify-start overflow-x-auto" variant="line">
-          {tabs.map(({ value, label, icon: Icon }) => (
-            <TabsTrigger key={value} value={value}>
-              <Icon data-icon="inline-start" aria-hidden="true" />
-              {label}
-            </TabsTrigger>
-          ))}
+          {tabs
+            .filter(({ value }) => value !== "surplus" || hasSurplusTab)
+            .map(({ value, label, icon: Icon }) => (
+              <TabsTrigger key={value} value={value}>
+                <Icon data-icon="inline-start" aria-hidden="true" />
+                {label}
+              </TabsTrigger>
+            ))}
         </TabsList>
-        <TabsContent value={activeTab} className="pt-3">
+        <TabsContent value={selectedTab} className="pt-3">
           <SimulationTabContent
-            activeTab={activeTab}
+            activeTab={selectedTab}
             result={result}
             haulTasks={visibleHaulTasks}
             stock={stock}
@@ -3520,7 +3525,7 @@ function SimulationTabContent({
     return (
       <SimulationMaterialsTab
         tab={activeTab}
-        buckets={activeTab === "plan" ? result.lists.planItems : result.lists.surplusItems}
+        buckets={activeTab === "plan" ? result.lists.planItems : (result.lists.surplusItems ?? [])}
         locationNamesById={locationNamesById}
         stockpileNamesById={stockpileNamesById}
         marketBuyOrderQuantities={marketBuyOrderQuantities}

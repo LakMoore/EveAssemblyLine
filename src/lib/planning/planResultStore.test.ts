@@ -116,3 +116,9 @@ void test("accepts a cached simulator result without diagnostic ledgers", () => 
   delete (result as { ledgers?: unknown }).ledgers;
   assert.equal(isSimulationResultV1(result), true);
 });
+
+void test("accepts a simulator result without optional surplus items", () => {
+  const result = simulationResult();
+  delete (result.lists as Record<string, unknown>).surplusItems;
+  assert.equal(isSimulationResultV1(result), true);
+});

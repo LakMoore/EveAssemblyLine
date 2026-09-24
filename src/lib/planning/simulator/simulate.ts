@@ -100,10 +100,18 @@ export function aggregateHaulingTasks(tasks: readonly SimulationHaulTask[]): Sim
     );
 }
 
-/** Posts every physical item lot to its canonical location/type ledger before allocation. */
-function sourceAvailabilityTransactions(inventory: SimulatorInventory): SimulationTransaction[] {
+/** Posts visible or plan-used physical item lots to their canonical ledgers. */
+function sourceAvailabilityTransactions(
+  inventory: SimulatorInventory,
+  visibleLocationIds: ReadonlySet<number>,
+  usedLotIds: ReadonlySet<string>,
+): SimulationTransaction[] {
   return inventory.itemLots.flatMap((lot) => {
-    if (lot.horizon !== "now" || lot.locationId === undefined) {
+    if (
+      lot.horizon !== "now"
+      || lot.locationId === undefined
+      || (!visibleLocationIds.has(lot.locationId) && !usedLotIds.has(lot.lotId))
+    ) {
       return [];
     }
     return [
@@ -117,6 +125,17 @@ function sourceAvailabilityTransactions(inventory: SimulatorInventory): Simulati
       },
     ];
   });
+}
+
+/** Returns source lots that contributed to a plan demand or physical transfer. */
+function usedSourceLotIds(transactions: readonly SimulationTransaction[]): ReadonlySet<string> {
+  const lotIds = new Set<string>();
+  for (const transaction of transactions) {
+    if (transaction.kind === "source-reservation" || transaction.kind === "transfer-commitment") {
+      lotIds.add(transaction.lotId);
+    }
+  }
+  return lotIds;
 }
 
 /** Returns accounts participating in the requested plan, excluding unrelated source availability. */
@@ -189,8 +208,6 @@ function presentationItems(
   ledgers: readonly SimulationLedgerView[],
   connectedKeys: ReadonlySet<string>,
   kind: "plan" | "surplus",
-  visibleSurplusLocations: ReadonlySet<number>,
-  includeSurplusForAllLocations: boolean,
 ): SimulationResultV1["lists"]["planItems"] {
   const itemsByLocation = new Map<
     number,
@@ -217,11 +234,7 @@ function presentationItems(
           )
         );
       }
-      return (
-        !connected
-        && balance.surplus > 0
-        && (includeSurplusForAllLocations || visibleSurplusLocations.has(balance.locationId))
-      );
+      return !connected && balance.surplus > 0;
     });
     if (items.length === 0) continue;
     const locationItems = itemsByLocation.get(ledger.locationId) ?? [];
@@ -331,22 +344,9 @@ function assembleLists(
   connectedKeys: ReadonlySet<string>,
   warnings: SimulationWarning[],
 ): SimulationResultV1["lists"] {
-  return {
+  const lists: SimulationResultV1["lists"] = {
     warnings,
-    planItems: presentationItems(
-      ledgers,
-      connectedKeys,
-      "plan",
-      configuredLocationIds(request),
-      request.simulation.includeSurplusForAllLocations,
-    ),
-    surplusItems: presentationItems(
-      ledgers,
-      connectedKeys,
-      "surplus",
-      configuredLocationIds(request),
-      request.simulation.includeSurplusForAllLocations,
-    ),
+    planItems: presentationItems(ledgers, connectedKeys, "plan"),
     materialsToBuy: buying.materials,
     bpoToBuy: buying.blueprints,
     reprocessingJobs: reprocessing.jobs,
@@ -357,6 +357,10 @@ function assembleLists(
     haulingTasks: aggregateHaulingTasks(industry.allocator.haulingTasks),
     skillsRequired: industry.skillsRequired,
   };
+  if (request.simulation.simulateSurplus) {
+    lists.surplusItems = presentationItems(ledgers, connectedKeys, "surplus");
+  }
+  return lists;
 }
 
 /** Executes one deterministic, cached-SDE-only industry simulation. */
@@ -432,7 +436,7 @@ export async function simulateIndustry(
       copyJobs: annotatePurchaseQuantities(schedules.copyJobs, buying.materials),
     }),
   );
-  const transactions = measureSyncProfiled(
+  const baseTransactions = measureSyncProfiled(
     profiler,
     "collect-transactions",
     () =>
@@ -441,8 +445,18 @@ export async function simulateIndustry(
         ...industry.allocator.transactions,
         ...reprocessing.transactions,
         ...buying.transactions,
-        ...sourceAvailabilityTransactions(inventory),
       ]),
+  );
+  const visibleLocationIds = configuredLocationIds(request);
+  const usedLotIds = usedSourceLotIds(baseTransactions);
+  const transactions = uniqueTransactions([
+    ...baseTransactions,
+    ...sourceAvailabilityTransactions(inventory, visibleLocationIds, usedLotIds),
+  ]);
+  const ledgerSourceLots = inventory.itemLots.filter(
+    (lot) =>
+      lot.locationId !== undefined
+      && (visibleLocationIds.has(lot.locationId) || usedLotIds.has(lot.lotId)),
   );
   const { names, volumes } = measureSyncProfiled(
     profiler,
@@ -462,7 +476,7 @@ export async function simulateIndustry(
   const projection = measureSyncProfiled(
     profiler,
     "project-ledger",
-    () => projectSimulationLedger(inventory.itemLots, transactions, names, volumes),
+    () => projectSimulationLedger(ledgerSourceLots, transactions, names, volumes),
   );
   const { connectedKeys, ledgers } = measureSyncProfiled(
     profiler,
