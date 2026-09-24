@@ -160,6 +160,7 @@ class IndustryDemandSimulation {
   private readonly copyJobs: SimulationCopyJob[] = [];
   private readonly unmetDemands: SimulationUnmetDemand[] = [];
   private readonly blueprintPurchases: SimulationBlueprintPurchase[] = [];
+  private readonly reactionFormulaShortages = new Set<string>();
   private readonly warnings: SimulationWarning[];
   private readonly blueprintShortages: BlueprintShortage[] = [];
   private readonly skillRequirements = new Map<
@@ -510,14 +511,25 @@ class IndustryDemandSimulation {
         sourceOutputQuantity: outputQuantity,
       });
       this.addActivitySkills(details.activity.skills, jobId);
-      if (allocation.blueprintKind === "fallback") {
-        this.recordBlueprintShortage(
-          stockpile,
-          production,
-          allocation.runs,
-          profile.locationId,
-          jobId,
-        );
+      if (
+        allocation.blueprintKind === "fallback"
+        || (allocation.blueprintKind === "formula" && allocation.lotId === undefined)
+      ) {
+        const formulaIsAvailable =
+          production.activity === "reaction"
+          && this.allocator.hasAvailableReactionFormula(
+            production.blueprint._key,
+            profile.locationId,
+          );
+        if (!formulaIsAvailable) {
+          this.recordBlueprintShortage(
+            stockpile,
+            production,
+            allocation.runs,
+            profile.locationId,
+            jobId,
+          );
+        }
       }
     }
     return {
@@ -1128,6 +1140,9 @@ class IndustryDemandSimulation {
     jobId: string,
   ): void {
     if (production.activity === "reaction") {
+      const shortageKey = `${production.blueprint._key}:${manufacturingLocationId}`;
+      if (this.reactionFormulaShortages.has(shortageKey)) return;
+      this.reactionFormulaShortages.add(shortageKey);
       this.blueprintPurchases.push({
         typeId: production.blueprint._key,
         quantity: 1,

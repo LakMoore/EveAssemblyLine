@@ -171,9 +171,39 @@ export function isSimulationResultV1(value: unknown): value is SimulationResultV
         && Array.isArray(bucket.items)
         && bucket.items.every((item) => hasBalance(item) && item.locationId === bucket.locationId),
     );
+  const hasReactionFormulaBalances = (items: unknown) =>
+    items === undefined
+    || (
+      Array.isArray(items)
+      && items.every(
+        (bucket) =>
+          isRecord(bucket)
+          && isPositiveInteger(bucket.locationId)
+          && Array.isArray(bucket.items)
+          && bucket.items.every(
+            (item) =>
+              hasTypeIdentity(item)
+              && item.locationId === bucket.locationId
+              && ["ownedQuantity", "availableQuantity", "inUseQuantity", "requiredRuns"].every(
+                (key) => isQuantity(item[key]),
+              )
+              && Array.isArray(item.demandSources)
+              && item.demandSources.every(
+                (source) =>
+                  isRecord(source)
+                  && typeof source.jobId === "string"
+                  && typeof source.stockpileId === "string"
+                  && isPositiveInteger(source.productTypeId)
+                  && typeof source.productName === "string"
+                  && isQuantity(source.runs),
+              ),
+          ),
+      )
+    );
   const hasSurplusBalances =
     lists.surplusItems === undefined || hasPresentationBuckets(lists.surplusItems);
   const hasPlanPresentationBalances = hasPresentationBuckets(lists.planItems);
+  const hasReactionFormulaPresentation = hasReactionFormulaBalances(lists.reactionFormulas);
   const hasLedgers =
     value.ledgers === undefined
     || (
@@ -235,6 +265,7 @@ export function isSimulationResultV1(value: unknown): value is SimulationResultV
         && typeof warning.message === "string",
     )
     && hasPlanPresentationBalances
+    && hasReactionFormulaPresentation
     && hasSurplusBalances
     && hasLedgers
     && hasSimulationRows(

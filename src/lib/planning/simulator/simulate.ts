@@ -19,6 +19,8 @@ import type {
   SimulationCopyJob,
   SimulationIndustryJob,
   SimulationInventionJob,
+  SimulationReactionFormulaBalance,
+  SimulationReactionFormulaLocationBucket,
   SimulationResultV1,
   SimulationResultWithDiagnostics,
   SimulationWarning,
@@ -249,6 +251,92 @@ function presentationItems(
     .sort((left, right) => left.locationId - right.locationId);
 }
 
+/** Builds location-scoped reaction-formula counts and run demand for the Plan tab. */
+function reactionFormulaBalances(
+  inventory: SimulatorInventory,
+  reactionJobs: readonly SimulationIndustryJob[],
+): SimulationReactionFormulaLocationBucket[] {
+  const formulaKey = (locationId: number, typeId: number) => `${locationId}:${typeId}`;
+  const formulasByLocationAndType = new Map<
+    string,
+    {
+      typeId: number;
+      typeName: string;
+      ownedQuantity: number;
+      availableQuantity: number;
+      inUseQuantity: number;
+    }
+  >();
+  const formulaNamesByType = new Map<number, string>();
+  for (const formula of inventory.blueprintLots) {
+    if (formula.kind !== "formula") continue;
+    formulaNamesByType.set(formula.typeId, formula.name);
+    if (formula.locationId === undefined) continue;
+    const key = formulaKey(formula.locationId, formula.typeId);
+    const existing = formulasByLocationAndType.get(key) ?? {
+      typeId: formula.typeId,
+      typeName: formula.name,
+      ownedQuantity: 0,
+      availableQuantity: 0,
+      inUseQuantity: 0,
+    };
+    existing.ownedQuantity += 1;
+    if (formula.inUse) existing.inUseQuantity += 1;
+    else existing.availableQuantity += 1;
+    formulasByLocationAndType.set(key, existing);
+  }
+
+  const demandByLocationAndType = new Map<string, SimulationReactionFormulaBalance>();
+  for (const job of reactionJobs) {
+    const key = formulaKey(job.locationId, job.blueprint.blueprintTypeId);
+    const existing = demandByLocationAndType.get(key);
+    const demandSource = {
+      jobId: job.jobId,
+      stockpileId: job.stockpileId,
+      productTypeId: job.productTypeId,
+      productName: job.productName,
+      runs: job.requiredRuns,
+    };
+    if (existing) {
+      existing.requiredRuns += job.requiredRuns;
+      existing.demandSources.push(demandSource);
+      continue;
+    }
+    const formula = formulasByLocationAndType.get(
+      formulaKey(job.locationId, job.blueprint.blueprintTypeId),
+    );
+    demandByLocationAndType.set(
+      key,
+      {
+        typeId: job.blueprint.blueprintTypeId,
+        typeName:
+          formula?.typeName
+          ?? formulaNamesByType.get(job.blueprint.blueprintTypeId)
+          ?? `Type ${job.blueprint.blueprintTypeId}`,
+        locationId: job.locationId,
+        ownedQuantity: formula?.ownedQuantity ?? 0,
+        availableQuantity: formula?.availableQuantity ?? 0,
+        inUseQuantity: formula?.inUseQuantity ?? 0,
+        requiredRuns: job.requiredRuns,
+        demandSources: [demandSource],
+      },
+    );
+  }
+
+  const buckets = new Map<number, SimulationReactionFormulaBalance[]>();
+  for (const item of demandByLocationAndType.values()) {
+    const items = buckets.get(item.locationId) ?? [];
+    items.push(item);
+    buckets.set(item.locationId, items);
+  }
+  return [...buckets.entries()]
+    .map(([locationId, items]) => ({
+      locationId,
+      items: items.sort((left, right) => left.typeId - right.typeId),
+    }))
+    .sort((left, right) => left.locationId - right.locationId);
+}
+
 type SimulationInputJob = SimulationIndustryJob | SimulationInventionJob | SimulationCopyJob;
 
 /** Measures a synchronous simulator phase when development profiling is enabled. */
@@ -336,6 +424,7 @@ function annotatePurchaseQuantities<T extends SimulationInputJob>(
 /** Builds the presentation lists from settled domain facts. */
 function assembleLists(
   request: SimulationRequestV1,
+  inventory: SimulatorInventory,
   industry: IndustrySimulationResult,
   schedules: SimulationScheduleResult,
   reprocessing: ReturnType<typeof settleReprocessing>,
@@ -347,6 +436,7 @@ function assembleLists(
   const lists: SimulationResultV1["lists"] = {
     warnings,
     planItems: presentationItems(ledgers, connectedKeys, "plan"),
+    reactionFormulas: reactionFormulaBalances(inventory, schedules.reactionJobs),
     materialsToBuy: buying.materials,
     bpoToBuy: buying.blueprints,
     reprocessingJobs: reprocessing.groups,
@@ -503,6 +593,7 @@ export async function simulateIndustry(
     () =>
       assembleLists(
         request,
+        inventory,
         industry,
         annotatedSchedules,
         reprocessing,

@@ -96,6 +96,8 @@ import type {
   SimulationMaterialBalance,
   SimulationMaterialLocationBucket,
   SimulationPurchase,
+  SimulationReactionFormulaBalance,
+  SimulationReactionFormulaLocationBucket,
   SimulationReprocessingJobGroup,
   SimulationResultV1,
 } from "@/lib/planning/simulator/types";
@@ -135,6 +137,7 @@ const materialBalanceColumns = [
   "Transferred Out",
   "Surplus",
 ] as const;
+const reactionFormulaBalanceColumns = ["Available", "Owned", "In Use", "Runs to Install"] as const;
 const typeIdChangedEvent = "assembly-line-planner-type-id-changed";
 const simulationTabParam = "simulationTab";
 
@@ -1159,6 +1162,7 @@ function useSimulationAssemblyLineGroups(typeIds: readonly number[]) {
 function SimulationLocationResultGroups<T extends { locationId: number }>({
   tab,
   items,
+  groupKeyPrefix,
   locationNamesById,
   reactionMaterialBonusesByLocation,
   openGroups,
@@ -1171,6 +1175,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
 }: {
   tab: SimulationTab;
   items: readonly T[];
+  groupKeyPrefix?: string;
   locationNamesById: ReadonlyMap<number, string>;
   reactionMaterialBonusesByLocation?: ReadonlyMap<number, number>;
   openGroups: Record<string, boolean>;
@@ -1197,7 +1202,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {sortedGroups.map(([locationId, groupItems]) => {
-        const groupKey = `${tab}:${locationId}`;
+        const groupKey = `${groupKeyPrefix ?? tab}:${locationId}`;
         const avatars = createGroupAvatars(groupItems, getAvatar);
         const groupAction = getGroupAction?.(locationId, groupItems);
         const hasReactionMaterialBonus =
@@ -1249,6 +1254,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
 function SimulationMaterialsTab({
   tab,
   buckets,
+  reactionFormulaBuckets,
   locationNamesById,
   stockpileNamesById,
   marketBuyOrderQuantities,
@@ -1261,6 +1267,7 @@ function SimulationMaterialsTab({
 }: {
   tab: "plan" | "surplus";
   buckets: SimulationMaterialLocationBucket[];
+  reactionFormulaBuckets?: SimulationReactionFormulaLocationBucket[];
   locationNamesById: ReadonlyMap<number, string>;
   stockpileNamesById: ReadonlyMap<string, string>;
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
@@ -1272,6 +1279,7 @@ function SimulationMaterialsTab({
   instanceId: string;
 }) {
   const items = buckets.flatMap((bucket) => bucket.items);
+  const reactionFormulaItems = reactionFormulaBuckets?.flatMap((bucket) => bucket.items) ?? [];
   const urlSelectedTypeId = useSyncExternalStore(
     subscribeToTypeId,
     readTypeIdFromUrl,
@@ -1285,7 +1293,11 @@ function SimulationMaterialsTab({
     const rawTypeId = new URLSearchParams(window.location.search).get("typeId");
     if (rawTypeId !== null && selectedTypeId === null) updateTypeIdInUrl(null);
   }, [selectedTypeId, usePlannerUrlState]);
-  const typeOptions = [...new Map(items.map((item) => [item.typeId, item.typeName])).entries()]
+  const typeOptions = [
+    ...new Map(
+      [...items, ...reactionFormulaItems].map((item) => [item.typeId, item.typeName]),
+    ).entries(),
+  ]
     .map(([id, name]) => ({ id, name }))
     .sort((left, right) => left.name.localeCompare(right.name) || left.id - right.id);
   const demandTypeNamesById = useSimulationTypeNames(
@@ -1305,6 +1317,10 @@ function SimulationMaterialsTab({
     effectiveSelectedTypeId === null
       ? items
       : items.filter((item) => item.typeId === effectiveSelectedTypeId);
+  const filteredReactionFormulaItems =
+    effectiveSelectedTypeId === null
+      ? reactionFormulaItems
+      : reactionFormulaItems.filter((item) => item.typeId === effectiveSelectedTypeId);
   const selectedType = typeOptions.find((option) => option.id === effectiveSelectedTypeId) ?? null;
 
   async function copyTable() {
@@ -1336,9 +1352,9 @@ function SimulationMaterialsTab({
 
   return (
     <SimulationResultsTab
-      hasResults={items.length > 0}
+      hasResults={items.length > 0 || reactionFormulaItems.length > 0}
       settings={
-        items.length > 0 ? (
+        items.length > 0 || reactionFormulaItems.length > 0 ? (
           <div className="flex flex-wrap justify-end gap-2.5 py-3.5 pb-2.5 max-[640px]:flex-col max-[640px]:items-stretch">
             <div className="flex w-auto items-center gap-2.5 max-[640px]:w-full max-[640px]:flex-col max-[640px]:items-stretch">
               <Label
@@ -1361,12 +1377,12 @@ function SimulationMaterialsTab({
                   <ComboboxInput
                     id={`${instanceId}-simulation-${tab}-type`}
                     placeholder="Filter by type"
-                    aria-label="Filter simulation by material type"
+                    aria-label="Filter simulation by type"
                     showClear
                     className="w-full [&>input]:text-xs!"
                   />
                   <ComboboxContent>
-                    <ComboboxEmpty>No matching material types.</ComboboxEmpty>
+                    <ComboboxEmpty>No matching types.</ComboboxEmpty>
                     <ComboboxList>
                       <ComboboxCollection>
                         {(option) => (
@@ -1380,25 +1396,35 @@ function SimulationMaterialsTab({
                 </Combobox>
               </div>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              className="max-[640px]:w-full"
-              onClick={() => void copyTable()}
-              disabled={filteredItems.length === 0}
-            >
-              <CopyIcon aria-hidden="true" />
-              {copyStatus || "Copy table"}
-            </Button>
+            {filteredItems.length > 0 && (
+              <Button
+                type="button"
+                variant="outline"
+                className="max-[640px]:w-full"
+                onClick={() => void copyTable()}
+                disabled={filteredItems.length === 0}
+              >
+                <CopyIcon aria-hidden="true" />
+                {copyStatus || "Copy table"}
+              </Button>
+            )}
           </div>
         ) : undefined
       }
     >
-      {filteredItems.length === 0 ? (
+      {filteredItems.length === 0 && filteredReactionFormulaItems.length === 0 ? (
         <Empty>
           <EmptyHeader>
-            <EmptyTitle>No matching materials</EmptyTitle>
-            <EmptyDescription>Clear the type filter to show all materials.</EmptyDescription>
+            <EmptyTitle>
+              {items.length > 0 || reactionFormulaItems.length > 0
+                ? "No matching materials or reaction formulas"
+                : "No materials or reaction formulas"}
+            </EmptyTitle>
+            <EmptyDescription>
+              {items.length > 0 || reactionFormulaItems.length > 0
+                ? "Clear the type filter to show all matching results."
+                : "No result rows are available for this simulation."}
+            </EmptyDescription>
           </EmptyHeader>
         </Empty>
       ) : (
@@ -1448,7 +1474,87 @@ function SimulationMaterialsTab({
           }}
         />
       )}
+      {filteredReactionFormulaItems.length > 0 && (
+        <section className="mb-4 flex min-w-0 flex-col gap-2">
+          <h2 className="px-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            Reaction formulas
+          </h2>
+          <SimulationLocationResultGroups
+            tab={tab}
+            items={filteredReactionFormulaItems}
+            groupKeyPrefix="reaction-formula"
+            locationNamesById={locationNamesById}
+            openGroups={openGroups}
+            onOpenGroupChange={onOpenGroupChange}
+            getRowKey={(item) => `reaction-formula:${item.locationId}:${item.typeId}`}
+            getAvatar={(item) => ({
+              typeId: item.typeId,
+              name: item.typeName,
+              imageVariation: "bpc",
+            })}
+            groupHeader={<ReactionFormulaBalanceHeader />}
+            renderRow={(item) => <SimulationReactionFormulaRow item={item} controls={controls} />}
+          />
+        </section>
+      )}
     </SimulationResultsTab>
+  );
+}
+
+/** Renders formula availability and reaction-run demand for one location. */
+function SimulationReactionFormulaRow({
+  item,
+  controls,
+}: {
+  item: SimulationReactionFormulaBalance;
+  controls: SimulationRowControls;
+}) {
+  return (
+    <SimulationSimpleJobRow
+      rowKey={`reaction-formula:${item.locationId}:${item.typeId}`}
+      typeId={item.typeId}
+      name={item.typeName}
+      variation="bpc"
+      wideBreakpoint="md"
+      summary={
+        <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_minmax(5rem,auto)] gap-x-3 gap-y-1 text-right md:grid-cols-4 md:gap-x-3">
+          <span className="text-muted-foreground md:hidden">Available</span>
+          <span>
+            <CopyableNumber value={item.availableQuantity} copyLabel="Available formula count" />
+          </span>
+          <span className="text-muted-foreground md:hidden">Owned</span>
+          <span>
+            <CopyableNumber value={item.ownedQuantity} copyLabel="Owned formula count" />
+          </span>
+          <span className="text-muted-foreground md:hidden">In Use</span>
+          <span>
+            <CopyableNumber value={item.inUseQuantity} copyLabel="In-use formula count" />
+          </span>
+          <span className="text-muted-foreground md:hidden">Runs to Install</span>
+          <span>
+            <CopyableNumber
+              value={item.requiredRuns}
+              copyLabel="Reaction formula runs to install"
+            />
+          </span>
+        </div>
+      }
+      controls={controls}
+    />
+  );
+}
+
+/** Renders the desktop labels for reaction formula balance columns. */
+function ReactionFormulaBalanceHeader() {
+  return (
+    <div className="sticky top-0 z-10 hidden min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-[13px] bg-card p-2 shadow-[0_1px_0_var(--border)] md:grid">
+      <span aria-hidden="true" />
+      <div className="grid min-w-0 grid-cols-4 gap-x-3 text-right font-mono text-[10px] text-muted-foreground uppercase">
+        {reactionFormulaBalanceColumns.map((column) => (
+          <span key={column}>{column}</span>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1971,15 +2077,17 @@ function SimulationSimpleJobRow({
   subline,
   summary,
   variation = "icon",
+  wideBreakpoint = "sm",
   showCheckbox = false,
   controls,
 }: {
   rowKey: string;
   typeId: number;
   name: string;
-  subline: ReactNode;
+  subline?: ReactNode;
   summary: ReactNode;
   variation?: "icon" | "bp" | "bpc";
+  wideBreakpoint?: "sm" | "md";
   showCheckbox?: boolean;
   controls: SimulationRowControls;
 }) {
@@ -1994,6 +2102,7 @@ function SimulationSimpleJobRow({
     linkHash: "plan-breakdown",
     navigateInPlace: true,
     onNavigate: controls.onOpenPlan,
+    wideBreakpoint,
     selected: controls.selectedRowKey === rowKey,
     onClick: () => controls.onSelectRow(rowKey),
     contentClassName: "self-end text-right font-mono text-xs sm:self-auto",
@@ -3653,6 +3762,7 @@ function SimulationTabContent({
       <SimulationMaterialsTab
         tab={activeTab}
         buckets={activeTab === "plan" ? result.lists.planItems : (result.lists.surplusItems ?? [])}
+        reactionFormulaBuckets={activeTab === "plan" ? result.lists.reactionFormulas : undefined}
         locationNamesById={locationNamesById}
         stockpileNamesById={stockpileNamesById}
         marketBuyOrderQuantities={marketBuyOrderQuantities}

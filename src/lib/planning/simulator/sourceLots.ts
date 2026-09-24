@@ -69,10 +69,10 @@ function assetCategory(
   item: SimulationAsset,
   context: SimulationContext,
 ): "blueprint" | "reactionformula" | "item" {
-  if (item.blueprintPrints?.length) return "blueprint";
   if (context.blueprints.byBlueprintId.get(item.typeId)?.activities.reaction) {
     return "reactionformula";
   }
+  if (item.blueprintPrints?.length) return "blueprint";
   return "item";
 }
 
@@ -267,21 +267,30 @@ export function normalizeSimulatorInventory(
       );
       if (prints.length > 0) {
         for (const [printIndex, print] of prints.entries()) {
-          blueprintLots.push({
-            lotId: `blueprint:${stockIndex}:${print.itemId}:${printIndex}`,
-            itemId: print.itemId,
-            typeId: item.typeId,
-            name: localizedTypeName(context, item.typeId, request.language),
-            kind: category === "reactionformula" ? "formula" : print.type,
-            runs: print.type === "bpo" ? Number.MAX_SAFE_INTEGER : Math.max(0, print.runs),
-            materialEfficiency: print.me ?? item.me ?? 0,
-            timeEfficiency: print.te ?? item.te ?? 0,
-            locationId,
-            ownerType: item.ownerType,
-            ownerId: item.ownerId,
-            inUse: item.inUse === true,
-            horizon: isUsableIndustryProductionOutput(item) ? "now" : "after-upstream",
-          });
+          const formulaCopies = category === "reactionformula" ? Math.max(0, item.quantity) : 1;
+          for (let copyIndex = 0; copyIndex < formulaCopies; copyIndex += 1) {
+            blueprintLots.push({
+              lotId:
+                category === "reactionformula"
+                  ? `blueprint:${stockIndex}:${print.itemId}:${printIndex}:${copyIndex}`
+                  : `blueprint:${stockIndex}:${print.itemId}:${printIndex}`,
+              itemId: category === "reactionformula" ? undefined : print.itemId,
+              typeId: item.typeId,
+              name: localizedTypeName(context, item.typeId, request.language),
+              kind: category === "reactionformula" ? "formula" : print.type,
+              runs:
+                category === "reactionformula" || print.type === "bpo"
+                  ? Number.MAX_SAFE_INTEGER
+                  : Math.max(0, print.runs),
+              materialEfficiency: print.me ?? item.me ?? 0,
+              timeEfficiency: print.te ?? item.te ?? 0,
+              locationId,
+              ownerType: item.ownerType,
+              ownerId: item.ownerId,
+              inUse: item.inUse === true,
+              horizon: isUsableIndustryProductionOutput(item) ? "now" : "after-upstream",
+            });
+          }
         }
       }
       else if (category === "reactionformula") {

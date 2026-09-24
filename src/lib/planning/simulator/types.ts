@@ -137,6 +137,33 @@ export interface SimulationMaterialLocationBucket {
   items: SimulationMaterialBalance[];
 }
 
+/** Demand and physical formula counts for one reaction location. */
+export interface SimulationReactionFormulaBalance {
+  typeId: number;
+  typeName: string;
+  locationId: number;
+  ownedQuantity: number;
+  availableQuantity: number;
+  inUseQuantity: number;
+  requiredRuns: number;
+  demandSources: SimulationReactionFormulaDemandSource[];
+}
+
+/** Reaction runs that contribute to a location's formula demand. */
+export interface SimulationReactionFormulaDemandSource {
+  jobId: string;
+  stockpileId: string;
+  productTypeId: number;
+  productName: string;
+  runs: number;
+}
+
+/** Location bucket containing reaction-formula demand and counts. */
+export interface SimulationReactionFormulaLocationBucket {
+  locationId: number;
+  items: SimulationReactionFormulaBalance[];
+}
+
 /** Identifies the upstream activity and quantity reserved for an input. */
 export type SimulationUpstreamSupplyState = "in-production" | "paused" | "planned";
 
@@ -384,6 +411,7 @@ export interface SimulationResultV1 {
   lists: {
     warnings: SimulationWarning[];
     planItems: SimulationMaterialLocationBucket[];
+    reactionFormulas?: SimulationReactionFormulaLocationBucket[];
     surplusItems?: SimulationMaterialLocationBucket[];
     haulingTasks: SimulationHaulTask[];
     materialsToBuy: SimulationPurchase[];

@@ -8,9 +8,10 @@ const context = {
   types: new Map([
     [34, { _key: 34, name: { en: "Tritanium" }, groupID: 1, volume: 0.01 }],
     [100, { _key: 100, name: { en: "Blueprint" }, groupID: 2, volume: 0.01 }],
+    [46207, { _key: 46207, name: { en: "Reaction Formula" }, groupID: 3, volume: 0.01 }],
   ]),
   blueprints: {
-    byBlueprintId: new Map(),
+    byBlueprintId: new Map([[46207, { _key: 46207, activities: { reaction: {} } }]]),
   },
   compressibleTypes: new Map(),
   typeMaterials: new Map(),
@@ -77,6 +78,29 @@ void test("normalizes ordinary assets and finite blueprint runs", () => {
   assert.equal(bpcLot.kind, "bpc");
   assert.equal(bpcLot.runs, 5);
   assert.equal(bpcLot.materialEfficiency, 10);
+});
+
+void test("normalizes reaction formulas with print metadata as reusable formulas", () => {
+  const simulationRequest = request();
+  if (!Array.isArray(simulationRequest.assets)) {
+    throw new Error("Expected the test request to contain an asset array.");
+  }
+  simulationRequest.assets = [
+    {
+      typeId: 46207,
+      quantity: 1,
+      rootLocationId: 30,
+      blueprintPrints: [{ itemId: 987, runs: 5, type: "bpc", me: 10, te: 20 }],
+    },
+  ];
+
+  const inventory = normalizeSimulatorInventory(simulationRequest, context);
+  const formulaLot = inventory.blueprintLots[0];
+
+  assert.ok(formulaLot);
+  assert.equal(formulaLot.kind, "formula");
+  assert.equal(formulaLot.itemId, undefined);
+  assert.equal(formulaLot.runs, Number.MAX_SAFE_INTEGER);
 });
 
 void test("preserves industry job status on future output lots", () => {

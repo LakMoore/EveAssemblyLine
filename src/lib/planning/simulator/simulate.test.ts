@@ -99,6 +99,195 @@ void test("assembles a versioned invariant-safe result from the cached SDE", asy
   );
 });
 
+void test("tracks reaction formula counts and required runs at the reaction location", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "reaction-stockpile",
+        name: "Reaction stockpile",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 16672, quantity: 20, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [
+      {
+        typeId: 46207,
+        name: "Reaction Formula",
+        quantity: 2,
+        category: "reactionformula",
+        locationId: 30,
+      },
+      {
+        typeId: 46207,
+        name: "Reaction Formula",
+        quantity: 1,
+        category: "reactionformula",
+        locationId: 30,
+        inUse: true,
+      },
+    ],
+    settings: {
+      includeCorporationAssets: true,
+      personalSellOrdersAsStock: false,
+      allCorporationSellOrdersAsStock: false,
+      myCorporationSellOrdersAsStock: false,
+      buildBlacklist: [],
+      buyBlacklist: [],
+    },
+    simulation: { version: 1 },
+  });
+
+  const result = await simulateIndustry(request);
+  const reactionJob = result.lists.reactionJobs.find((job) => job.productTypeId === 16672);
+  const formula = result.lists.reactionFormulas
+    ?.find((bucket) => bucket.locationId === 30)
+    ?.items.find((item) => item.typeId === 46207);
+
+  assert.ok(reactionJob);
+  assert.ok(formula);
+  assert.equal(formula.ownedQuantity, 3);
+  assert.equal(formula.availableQuantity, 2);
+  assert.equal(formula.inUseQuantity, 1);
+  assert.equal(formula.requiredRuns, reactionJob.requiredRuns);
+  assert.equal(formula.demandSources[0]?.jobId, reactionJob.jobId);
+  assert.equal(
+    result.lists.bpoToBuy.some((purchase) => purchase.typeId === 46207),
+    false,
+  );
+});
+
+void test("adds missing reaction formulas to blueprint purchases", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "reaction-stockpile",
+        name: "Reaction stockpile",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 16672, quantity: 20, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [],
+    settings: {
+      includeCorporationAssets: true,
+      personalSellOrdersAsStock: false,
+      allCorporationSellOrdersAsStock: false,
+      myCorporationSellOrdersAsStock: false,
+      buildBlacklist: [],
+      buyBlacklist: [],
+    },
+    simulation: { version: 1 },
+  });
+
+  const result = await simulateIndustry(request);
+  const formulaPurchase = result.lists.bpoToBuy.find((purchase) => purchase.typeId === 46207);
+
+  assert.ok(result.lists.reactionFormulas?.some((bucket) => bucket.items.length > 0));
+  assert.ok(formulaPurchase);
+  assert.equal(formulaPurchase.quantity, 1);
+  assert.equal(formulaPurchase.destinations[0]?.locationId, 30);
+});
+
+void test("buys one missing reaction formula per type and reaction location", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "reaction-stockpile",
+        name: "Reaction stockpile",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [
+          { typeId: 16672, quantity: 20, me: 0, te: 0, fromCompression: false },
+          { typeId: 16673, quantity: 20, me: 0, te: 0, fromCompression: false },
+        ],
+      },
+    ],
+    assets: [],
+    settings: {
+      includeCorporationAssets: true,
+      personalSellOrdersAsStock: false,
+      allCorporationSellOrdersAsStock: false,
+      myCorporationSellOrdersAsStock: false,
+      buildBlacklist: [],
+      buyBlacklist: [],
+    },
+    simulation: { version: 1 },
+  });
+
+  const result = await simulateIndustry(request);
+  const formulaPurchases = result.lists.bpoToBuy.filter((purchase) => purchase.typeId === 46207);
+
+  assert.equal(formulaPurchases.length, 1);
+  assert.equal(formulaPurchases[0]?.quantity, 1);
+  assert.equal(formulaPurchases[0]?.destinations.length, 1);
+  assert.equal(formulaPurchases[0]?.destinations[0]?.locationId, 30);
+});
+
+void test("buys a reaction formula when the only available copy is haul-excluded", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "reaction-stockpile",
+        name: "Reaction stockpile",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 16672, quantity: 20, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [
+      {
+        typeId: 46207,
+        name: "Reaction Formula",
+        quantity: 1,
+        category: "reactionformula",
+        locationId: 31,
+      },
+    ],
+    haulExclusions: [{ typeId: 46207, fromLocationId: 31, toLocationId: 30 }],
+    settings: {
+      includeCorporationAssets: true,
+      personalSellOrdersAsStock: false,
+      allCorporationSellOrdersAsStock: false,
+      myCorporationSellOrdersAsStock: false,
+      buildBlacklist: [],
+      buyBlacklist: [],
+    },
+    simulation: { version: 1 },
+  });
+
+  const result = await simulateIndustry(request);
+
+  const formulaPurchase = result.lists.bpoToBuy.find((purchase) => purchase.typeId === 46207);
+  assert.ok(formulaPurchase);
+  assert.equal(formulaPurchase.quantity, 1);
+  assert.equal(formulaPurchase.destinations[0]?.locationId, 30);
+});
+
 void test("produces identical facts for equivalent input permutations", async () => {
   const stockpile = (id: string, offset: number) => ({
     id,

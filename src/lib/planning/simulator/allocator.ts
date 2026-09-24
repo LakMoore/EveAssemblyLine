@@ -448,6 +448,20 @@ export class SimulationAllocator {
     };
   }
 
+  /** Returns whether an unused formula can be claimed for the destination location. */
+  hasAvailableReactionFormula(formulaTypeId: number, destinationLocationId: number): boolean {
+    return this.inventory.blueprintLots.some(
+      (lot) =>
+        lot.typeId === formulaTypeId
+        && lot.kind === "formula"
+        && !lot.inUse
+        && (
+          lot.locationId === destinationLocationId
+          || !this.isExcluded(lot, destinationLocationId)
+        ),
+    );
+  }
+
   /** Claims finite BPC runs for invention or another consuming science activity. */
   claimBlueprintCopyRuns(
     blueprintTypeId: number,
