@@ -464,7 +464,7 @@ export async function calculateFacilities(
   });
   markPhase("calculateFacilities");
   timingScope.complete();
-  return { facilities, productionGroups };
+  return { facilities };
 }
 
 async function loadFacilityCalculationContext(

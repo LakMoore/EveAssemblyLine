@@ -496,6 +496,8 @@ const assetsResponses = new Map<string, { scope: string; data: ClientAssetsRespo
 let assetsCacheGeneration = 0;
 const facilitiesRequests = new Map<string, Promise<Facility[]>>();
 const facilitiesResponses = new Map<string, Facility[]>();
+const systemNameRequests = new Map<string, Promise<Map<number, string>>>();
+const systemNameResponses = new Map<string, Map<number, string>>();
 let shipsRequest: Promise<ClientShipsResponse> | undefined;
 let shipsResponse: ClientShipsResponse | undefined;
 let jobsRequest: Promise<ClientJobsResponse> | undefined;
@@ -569,11 +571,11 @@ function invalidateClientAssetRequests() {
 
 export function loadClientAssets(language: SdeLanguage, reload = false) {
   const key = language;
+  const pending = assetsRequests.get(key);
+  if (pending) return pending;
   if (reload) {
     invalidateClientAssetRequests();
   }
-  const pending = assetsRequests.get(key);
-  if (!reload && pending) return pending;
   const generation = assetsCacheGeneration;
   let request: Promise<ClientAssetsResponse>;
   request = loadClientSession()
@@ -701,7 +703,7 @@ export async function loadClientOwnerSnapshotAssets(
 
 function loadClientFacilities(language: SdeLanguage, reload = false) {
   const pending = facilitiesRequests.get(language);
-  if (!reload && pending) return pending;
+  if (pending) return pending;
   if (!reload) {
     const cached = facilitiesResponses.get(language);
     if (cached) return Promise.resolve(cached);
@@ -749,32 +751,77 @@ function collectSnapshotSystemIds(snapshots: readonly ClientOwnerSnapshot[]) {
   return systemIds;
 }
 
-async function loadClientSystemNames(systemIds: readonly number[], language: SdeLanguage) {
-  if (systemIds.length === 0) return new Map<number, string>();
-  let data: {
-    items?: Array<{ systemId?: number; name?: string }>;
-  };
-  try {
-    const response = await fetch(
+/** Loads system names while sharing overlapping in-flight ID requests. */
+export async function loadClientSystemNames(
+  systemIds: readonly number[],
+  language: SdeLanguage,
+): Promise<Map<number, string>> {
+  const uniqueSystemIds = [...new Set(systemIds)];
+  if (uniqueSystemIds.length === 0) return new Map<number, string>();
+
+  const requestsBySystemId = new Map<number, Promise<Map<number, string>>>();
+  const unrequestedSystemIds: number[] = [];
+  const names = new Map<number, string>();
+  const cachedNames = systemNameResponses.get(language);
+  for (const systemId of uniqueSystemIds) {
+    const cachedName = cachedNames?.get(systemId);
+    if (cachedName !== undefined) {
+      names.set(systemId, cachedName);
+      continue;
+    }
+    const requestKey = `${language}:${systemId}`;
+    const pending = systemNameRequests.get(requestKey);
+    if (pending) requestsBySystemId.set(systemId, pending);
+    else unrequestedSystemIds.push(systemId);
+  }
+
+  if (unrequestedSystemIds.length > 0) {
+    const requestKeys = unrequestedSystemIds.map((systemId) => `${language}:${systemId}`);
+    let request: Promise<Map<number, string>>;
+    request = fetch(
       "/api/reference/systems",
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ systemIds, language }),
+        body: JSON.stringify({ systemIds: unrequestedSystemIds, language }),
         cache: "no-store",
       },
-    );
-    if (!response.ok) return new Map<number, string>();
-    data = (await response.json()) as { items?: Array<{ systemId?: number; name?: string }> };
+    )
+      .then(async (response) => {
+        if (!response.ok) return new Map<number, string>();
+        const data = (await response.json()) as {
+          items?: Array<{ systemId?: number; name?: string }>;
+        };
+        return new Map(
+          (data.items ?? []).flatMap((item) =>
+            item.systemId !== undefined && unrequestedSystemIds.includes(item.systemId) && item.name
+              ? [[item.systemId, item.name] as const]
+              : [],
+          ),
+        );
+      })
+      .catch(() => new Map<number, string>())
+      .finally(() => {
+        requestKeys.forEach((requestKey) => {
+          if (systemNameRequests.get(requestKey) === request) {
+            systemNameRequests.delete(requestKey);
+          }
+        });
+      });
+    requestKeys.forEach((requestKey) => systemNameRequests.set(requestKey, request));
+    unrequestedSystemIds.forEach((systemId) => requestsBySystemId.set(systemId, request));
   }
-  catch {
-    return new Map<number, string>();
+
+  const responses = await Promise.all(requestsBySystemId.values());
+  for (const response of responses) {
+    for (const [systemId, name] of response) {
+      if (uniqueSystemIds.includes(systemId)) names.set(systemId, name);
+    }
   }
-  return new Map(
-    (data.items ?? []).flatMap((item) =>
-      item.systemId !== undefined && item.name ? [[item.systemId, item.name] as const] : [],
-    ),
-  );
+  const cachedResponse = systemNameResponses.get(language) ?? new Map<number, string>();
+  for (const [systemId, name] of names) cachedResponse.set(systemId, name);
+  systemNameResponses.set(language, cachedResponse);
+  return names;
 }
 
 export function loadClientShips(reload = false) {

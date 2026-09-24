@@ -12,7 +12,7 @@ import type {
   PlanStockItem,
   ResponseHaulTask,
 } from "@/lib/planning/types";
-import type { SimulationAsset } from "@/lib/planning/simulator/types";
+import type { SimulationAsset, SimulationHaulTask } from "@/lib/planning/simulator/types";
 import { prepareSimulationAssets } from "@/lib/planning/simulator/requestAssets";
 import { loadBuildList } from "@/lib/planning/buildListStore";
 import EveAuthorizationWarning from "@/components/EveAuthorizationWarning";
@@ -47,7 +47,9 @@ import {
   loadPlanResponse,
   loadSimulationResult,
   savePlanResponse,
-  saveSimulationResult,
+  loadSimulationHaulExclusions,
+  loadSimulationPreservedHaulTasks,
+  saveSimulationState,
 } from "@/lib/planning/planResultStore";
 import { createSimulationEtag } from "@/lib/planning/simulator/etag";
 import {
@@ -515,6 +517,11 @@ function Planner() {
     useState<HaulingAllocationMode>("local-first");
   const [haulItemExclusion, setHaulItemExclusion] = useState<HaulItemExclusion>(() => new Map());
   const [simulationHaulExclusions, setSimulationHaulExclusions] = useState<PlanHaulExclusion[]>([]);
+  const [simulationPreservedHaulTasks, setSimulationPreservedHaulTasks] = useState<
+    SimulationHaulTask[]
+  >([]);
+  const [simulationStateLoaded, setSimulationStateLoaded] = useState(false);
+  const planRunStartedRef = useRef(false);
   const [haulPatches, setHaulPatches] = useState<Map<string, HaulPatch>>(() => new Map());
   const [haulPatchesLoaded, setHaulPatchesLoaded] = useState(false);
   const [corporationSources, setCorporationSources] = useState<ClientCorporationSource[]>([]);
@@ -532,26 +539,48 @@ function Planner() {
 
   useEffect(() => {
     void Promise
-      .all([loadPlanResponse(), loadSimulationResult(), loadHaulItemExclusions()])
-      .then(([savedPlan, savedSimulation, savedExclusions]) => {
-        setHaulItemExclusion(savedExclusions);
-        if (savedPlan) setPlan(applyHaulItemExclusionsToPlan(savedPlan, savedExclusions));
-        if (savedSimulation) setSimulationResult(savedSimulation);
-        if (
-          savedPlan
-          && (
-            !savedSimulation
-            || savedPlan.metadata.generatedAt >= savedSimulation.metadata.generatedAt
-          )
-        ) {
-          setDisplayedResult("calculate");
-          setPlanStatus("Plan loaded from this browser");
-        }
-        else if (savedSimulation) {
-          setDisplayedResult("simulate");
-          setPlanStatus("Simulation loaded from this browser");
-        }
-      });
+      .all([
+        loadPlanResponse(),
+        loadSimulationResult(),
+        loadHaulItemExclusions(),
+        loadSimulationHaulExclusions(),
+        loadSimulationPreservedHaulTasks(),
+      ])
+      .then(
+        ([
+          savedPlan,
+          savedSimulation,
+          savedExclusions,
+          savedSimulationExclusions,
+          savedPreservedHaulTasks,
+        ]) => {
+          if (planRunStartedRef.current) {
+            setSimulationStateLoaded(true);
+            return;
+          }
+          setHaulItemExclusion(savedExclusions);
+          setSimulationHaulExclusions(savedSimulationExclusions);
+          setSimulationPreservedHaulTasks(savedPreservedHaulTasks);
+          if (savedPlan) setPlan(applyHaulItemExclusionsToPlan(savedPlan, savedExclusions));
+          if (savedSimulation) setSimulationResult(savedSimulation);
+          if (
+            savedPlan
+            && (
+              !savedSimulation
+              || savedPlan.metadata.generatedAt >= savedSimulation.metadata.generatedAt
+            )
+          ) {
+            setDisplayedResult("calculate");
+            setPlanStatus("Plan loaded from this browser");
+          }
+          else if (savedSimulation) {
+            setDisplayedResult("simulate");
+            setPlanStatus("Simulation loaded from this browser");
+          }
+          setSimulationStateLoaded(true);
+        },
+      )
+      .catch(() => setSimulationStateLoaded(true));
   }, []);
 
   useEffect(() => {
@@ -839,10 +868,16 @@ function Planner() {
     patches: ReadonlyMap<string, HaulPatch> = activeHaulPatches,
     mode: PlanRunMode = "calculate",
     simulationExclusions: readonly PlanHaulExclusion[] = simulationHaulExclusions,
+    preservedHaulTasks: readonly SimulationHaulTask[] = simulationPreservedHaulTasks,
   ): Promise<boolean> {
     const activeStockpiles = stockpiles.filter((stockpile) => stockpile.isActive !== false);
     const plannerItems = activeStockpiles.flatMap((stockpile) => stockpile.items);
-    if (plannerItems.length === 0 || isPlanLoading) return false;
+    if (
+      plannerItems.length === 0
+      || isPlanLoading
+      || (mode === "simulate" && !simulationStateLoaded)
+    ) return false;
+    planRunStartedRef.current = true;
     flushSync(() => {
       setIsPlanLoading(true);
       setActivePlanRun(mode);
@@ -997,10 +1032,22 @@ function Planner() {
           setPlanStatus("Error: The simulator returned no result");
           return false;
         }
-        if (response.status !== 304) await saveSimulationResult(nextSimulationResult);
+        const simulationStateSaved = await saveSimulationState(
+          nextSimulationResult,
+          simulationExclusions,
+          preservedHaulTasks,
+        );
+        if (!simulationStateSaved) {
+          setPlanStatus("Simulation updated, but could not save it in this browser");
+          return false;
+        }
         flushSync(() => {
           setSimulationResult(nextSimulationResult);
           setDisplayedResult("simulate");
+          setSimulationHaulExclusions([...simulationExclusions]);
+          setSimulationPreservedHaulTasks([...preservedHaulTasks]);
+          setHaulItemExclusion(new Map(itemExclusions));
+          setHaulPatches(new Map(patches));
         });
       }
       else {
@@ -1009,12 +1056,10 @@ function Planner() {
         flushSync(() => {
           setPlan(calculatedPlan);
           setDisplayedResult("calculate");
+          setHaulItemExclusion(new Map(itemExclusions));
+          setHaulPatches(new Map(patches));
         });
       }
-      flushSync(() => {
-        setHaulItemExclusion(new Map(itemExclusions));
-        setHaulPatches(new Map(patches));
-      });
       await savePlannerLocations(locations);
       setPlanStatus(mode === "simulate" ? "Simulation updated just now" : "Plan updated just now");
       return true;
@@ -1032,15 +1077,16 @@ function Planner() {
   /** Re-runs the simulator with the current haul-row exclusions. */
   async function updateSimulationHaulExclusions(
     exclusions: readonly PlanHaulExclusion[],
-  ): Promise<void> {
-    const succeeded = await submitPlan(
+    preservedHaulTasks: readonly SimulationHaulTask[] = simulationPreservedHaulTasks,
+  ): Promise<boolean> {
+    return submitPlan(
       new Set(excludedLocationIds),
       haulItemExclusion,
       activeHaulPatches,
       "simulate",
       exclusions,
+      preservedHaulTasks,
     );
-    if (succeeded) setSimulationHaulExclusions([...exclusions]);
   }
 
   /** Clears haul-tab exclusions and refreshes the simulator with every route enabled. */
@@ -1051,8 +1097,8 @@ function Planner() {
       activeHaulPatches,
       "simulate",
       [],
+      [],
     );
-    if (succeeded) setSimulationHaulExclusions([]);
     return succeeded;
   }
 
@@ -1692,6 +1738,7 @@ function Planner() {
                 type="button"
                 disabled={
                   isPlanLoading
+                  || !simulationStateLoaded
                   || stockpiles.every(
                     (stockpile) => stockpile.isActive === false || stockpile.items.length === 0,
                   )
@@ -2300,12 +2347,11 @@ function Planner() {
           }
           stockpileLocations={stockpileLocations}
           haulExclusions={simulationHaulExclusions}
+          preservedHaulTasks={simulationPreservedHaulTasks}
           isLoading={isPlanLoading}
           onClearHaulExclusions={clearSimulationHaulExclusions}
           onExcludeLocation={excludeSimulationLocation}
-          onHaulExclusionsChange={(exclusions) => {
-            void updateSimulationHaulExclusions(exclusions);
-          }}
+          onHaulExclusionsChange={updateSimulationHaulExclusions}
         />
       )}
     </>

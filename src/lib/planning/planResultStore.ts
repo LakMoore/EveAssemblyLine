@@ -1,9 +1,11 @@
-import type { SimulationResultV1 } from "./simulator/types";
-import type { PlanResponse } from "./types";
+import type { SimulationHaulTask, SimulationResultV1 } from "./simulator/types";
+import type { PlanHaulExclusion, PlanResponse } from "./types";
 import { getPlanningDatabase, plannerPreferencesStoreName } from "./planningDatabase";
 
 const planResponseKey = "latest-plan-response";
 const simulationResultKey = "latest-simulation-result-v1";
+const simulationHaulExclusionsKey = "simulation-haul-exclusions";
+const simulationPreservedHaulTasksKey = "simulation-preserved-haul-tasks";
 
 /** Narrows unknown persisted JSON-like values to plain record values. */
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -307,17 +309,124 @@ export async function loadSimulationResult(): Promise<SimulationResultV1 | null>
   }
 }
 
-/** Saves a native simulation result for browser-local restoration. */
-export async function saveSimulationResult(result: SimulationResultV1): Promise<void> {
+function isStoredSimulationHaulExclusion(value: unknown): value is PlanHaulExclusion {
+  if (!isRecord(value)) return false;
+  const ownerType = value.ownerType;
+  const ownerId = value.ownerId;
+  return (
+    isPositiveInteger(value.typeId)
+    && isPositiveInteger(value.fromLocationId)
+    && isPositiveInteger(value.toLocationId)
+    && (ownerType === undefined || ownerType === "character" || ownerType === "corporation")
+    && (ownerId === undefined || isPositiveInteger(ownerId))
+    && (ownerType === undefined) === (ownerId === undefined)
+  );
+}
+
+function isStoredSimulationHaulTask(value: unknown): value is SimulationHaulTask {
+  if (!isRecord(value)) return false;
+  const ownerType = value.ownerType;
+  const ownerId = value.ownerId;
+  return (
+    typeof value.transferId === "string"
+    && typeof value.lotId === "string"
+    && isPositiveInteger(value.typeId)
+    && typeof value.typeName === "string"
+    && (
+      value.blueprintKind === undefined
+      || value.blueprintKind === "bpo"
+      || value.blueprintKind === "bpc"
+      || value.blueprintKind === "formula"
+    )
+    && isQuantity(value.quantity)
+    && isQuantity(value.unitVolume)
+    && isPositiveInteger(value.fromLocationId)
+    && isPositiveInteger(value.toLocationId)
+    && (ownerType === undefined || ownerType === "character" || ownerType === "corporation")
+    && (ownerId === undefined || isPositiveInteger(ownerId))
+    && (ownerType === undefined) === (ownerId === undefined)
+    && (
+      value.purpose === "industry-input"
+      || value.purpose === "completion"
+      || value.purpose === "reprocessing-input"
+    )
+    && Array.isArray(value.demands)
+    && value.demands.every(
+      (demand) =>
+        isRecord(demand)
+        && (demand.jobId === undefined || typeof demand.jobId === "string")
+        && isQuantity(demand.quantity),
+    )
+  );
+}
+
+/** Loads persisted simulator-only haul route exclusions from IndexedDB. */
+export async function loadSimulationHaulExclusions(): Promise<PlanHaulExclusion[]> {
+  try {
+    const database = await getPlanningDatabase();
+    return await new Promise<PlanHaulExclusion[]>((resolve, reject) => {
+      const request = database
+        .transaction(plannerPreferencesStoreName, "readonly")
+        .objectStore(plannerPreferencesStoreName)
+        .get(simulationHaulExclusionsKey);
+      request.onsuccess = () => {
+        const stored = Array.isArray(request.result) ? request.result : [];
+        resolve(stored.filter(isStoredSimulationHaulExclusion));
+      };
+      request.onerror = () =>
+        reject(request.error ?? new Error("Could not load simulator haul exclusions."));
+    });
+  }
+  catch {
+    return [];
+  }
+}
+
+/** Loads persisted simulator haul rows needed to display excluded transfers. */
+export async function loadSimulationPreservedHaulTasks(): Promise<SimulationHaulTask[]> {
+  try {
+    const database = await getPlanningDatabase();
+    return await new Promise<SimulationHaulTask[]>((resolve, reject) => {
+      const request = database
+        .transaction(plannerPreferencesStoreName, "readonly")
+        .objectStore(plannerPreferencesStoreName)
+        .get(simulationPreservedHaulTasksKey);
+      request.onsuccess = () => {
+        const stored = Array.isArray(request.result) ? request.result : [];
+        resolve(stored.filter(isStoredSimulationHaulTask));
+      };
+      request.onerror = () =>
+        reject(request.error ?? new Error("Could not load preserved simulator haul tasks."));
+    });
+  }
+  catch {
+    return [];
+  }
+}
+
+/** Saves the simulator result and its haul exclusions in one browser transaction. */
+export async function saveSimulationState(
+  result: SimulationResultV1,
+  haulExclusions: readonly PlanHaulExclusion[],
+  preservedHaulTasks: readonly SimulationHaulTask[],
+): Promise<boolean> {
   try {
     const database = await getPlanningDatabase();
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(plannerPreferencesStoreName, "readwrite");
-      transaction.objectStore(plannerPreferencesStoreName).put(result, simulationResultKey);
+      const store = transaction.objectStore(plannerPreferencesStoreName);
+      store.put(result, simulationResultKey);
+      store.put([...haulExclusions], simulationHaulExclusionsKey);
+      store.put([...preservedHaulTasks], simulationPreservedHaulTasksKey);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () =>
-        reject(transaction.error ?? new Error("Could not save the simulation result."));
+        reject(transaction.error ?? new Error("Could not save simulator state."));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("Could not save simulator state."));
     });
+    return true;
   }
-  catch {}
+  catch {
+    return false;
+  }
 }

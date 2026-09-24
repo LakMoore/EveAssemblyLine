@@ -112,6 +112,10 @@ export interface ActivitiesResponse extends ActivitiesRequest {
 
 export type FacilityResponse = {
   facilities: Facility[];
+};
+
+export type FacilityMaterialContext = {
+  facilities: Facility[];
   productionGroups: ProductionGroupReference[];
 };
 

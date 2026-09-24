@@ -19,7 +19,7 @@ import type {
   EsiCorporationStructure,
 } from "./client";
 import type { PlanStockItem } from "@/lib/planning/types";
-import type { FacilityResponse } from "@/lib/planning/facilities";
+import type { FacilityMaterialContext } from "@/lib/planning/facilities";
 import { productionGroupForType } from "@/lib/planning/productionGroups";
 import { requiredMaterialQuantity } from "@/lib/planning/materialQuantities";
 import {
@@ -1176,7 +1176,7 @@ function getJobMaterials(
   }
 }
 
-type JobMaterialCalculationContext = Pick<FacilityResponse, "facilities" | "productionGroups">;
+type JobMaterialCalculationContext = FacilityMaterialContext;
 
 function getJobOutputQuantity(
   job: IndustryJobRecord,

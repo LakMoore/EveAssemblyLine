@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server";
-import { getGroups, getIndustryTargetFilters } from "@/cache/services/sdeCache";
-import { getProductionGroupReferences } from "@/lib/planning/productionGroups";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
+import { loadProductionGroupReferences } from "@/lib/reference/productionGroupsServer";
 
 export async function GET(request: Request) {
   const requestedLanguage = new URL(request.url).searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
   try {
-    const [groups, targetFilters] = await Promise.all([getGroups(), getIndustryTargetFilters()]);
     return NextResponse.json({
-      items: getProductionGroupReferences(targetFilters, groups, language),
+      items: await loadProductionGroupReferences(language),
     });
   }
   catch (error) {

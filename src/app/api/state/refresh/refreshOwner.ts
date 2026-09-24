@@ -19,7 +19,10 @@ import {
 } from "@/lib/esi/cache";
 import { getEsiRateLimitUntil } from "@/lib/esi/client";
 import { getOwnerSnapshot, type OwnerSnapshot } from "@/lib/data/ownerSnapshot";
+import type { FacilityMaterialContext } from "@/lib/planning/facilities";
 import { calculateFacilities } from "@/lib/planning/facilitiesServer";
+import { isSdeLanguage } from "@/lib/reference/languages";
+import { loadProductionGroupReferences } from "@/lib/reference/productionGroupsServer";
 
 const refreshIdSchema = z.coerce.number().int().positive();
 const refreshRequestSchema = z
@@ -62,7 +65,7 @@ async function refreshUnit(
   sessionId: string,
   authorizationCharacter: NonNullable<Awaited<ReturnType<typeof getCharacter>>>,
   profiler: RefreshProfiler,
-  materialContext?: Awaited<ReturnType<typeof calculateFacilities>>,
+  materialContext?: FacilityMaterialContext,
 ) {
   const source = await refreshCoordinator.run(
     unit.key,
@@ -223,14 +226,17 @@ async function handleRefreshRequestInternal(
     });
   }
 
-  let materialContext: Awaited<ReturnType<typeof calculateFacilities>> | undefined;
+  let materialContext: FacilityMaterialContext | undefined;
   if (session.collectionId) {
     profiler.start("facilities");
     try {
-      materialContext = await calculateFacilities(
-        request,
-        await getCollectionFacilities(session.collectionId),
-      );
+      const requestedLanguage = new URL(request.url).searchParams.get("language");
+      const language = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
+      const [facilitiesResponse, productionGroups] = await Promise.all([
+        calculateFacilities(request, await getCollectionFacilities(session.collectionId)),
+        loadProductionGroupReferences(language),
+      ]);
+      materialContext = { facilities: facilitiesResponse.facilities, productionGroups };
     }
     catch {
       // Facility bonuses are optional for reconciliation; the raw material quantity remains safe.

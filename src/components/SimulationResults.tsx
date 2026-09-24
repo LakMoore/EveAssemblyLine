@@ -257,6 +257,24 @@ function simulationHaulVolume(tasks: readonly SimulationHaulTask[]): number {
   return Math.ceil(tasks.reduce((total, task) => total + task.quantity * task.unitVolume, 0));
 }
 
+/** Sorts haul rows by AssemblyLine group, item name, and stable identity. */
+function sortSimulationHaulTasks(
+  tasks: readonly SimulationHaulTask[],
+  groupsByTypeId: ReadonlyMap<number, string>,
+): SimulationHaulTask[] {
+  return [...tasks].sort((left, right) => {
+    const groupOrder = (groupsByTypeId.get(left.typeId) ?? "Unknown").localeCompare(
+      groupsByTypeId.get(right.typeId) ?? "Unknown",
+    );
+    if (groupOrder !== 0) return groupOrder;
+
+    const nameOrder = left.typeName.localeCompare(right.typeName);
+    if (nameOrder !== 0) return nameOrder;
+
+    return left.typeId - right.typeId || left.transferId.localeCompare(right.transferId);
+  });
+}
+
 /** Identifies one simulator haul route, including its optional owner scope. */
 function simulationHaulExclusionKey(
   value: Pick<
@@ -291,7 +309,8 @@ function simulationHaulExclusions(
         : {}),
     };
     const key = simulationHaulExclusionKey(exclusion);
-    if (includedRows[`haul:${task.transferId}`] ?? true) exclusions.delete(key);
+    const isIncluded = includedRows[`haul:${task.transferId}`] ?? !exclusions.has(key);
+    if (isIncluded) exclusions.delete(key);
     else exclusions.set(key, exclusion);
   }
   return [...exclusions.values()];
@@ -1118,6 +1137,7 @@ function useSimulationAssemblyLineGroups(typeIds: readonly number[]) {
     groupsByTypeId:
       loadedGroups.requestKey === requestKey ? loadedGroups.groupsByTypeId : new Map(),
     error: loadedGroups.requestKey === requestKey ? loadedGroups.error : null,
+    isLoading: typeIdKey.length > 0 && loadedGroups.requestKey !== requestKey,
     retry: () => setRetryCount((current) => current + 1),
   };
 }
@@ -2483,6 +2503,12 @@ function SimulationHaulTab({
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
   const [excludingLocationId, setExcludingLocationId] = useState<number | null>(null);
+  const {
+    groupsByTypeId: haulGroupsByTypeId,
+    error: haulGroupError,
+    isLoading: haulGroupsLoading,
+    retry: retryHaulGroups,
+  } = useSimulationAssemblyLineGroups(tasks.map((task) => task.typeId));
   const tasksBySource = new Map<number, Map<number, SimulationHaulTask[]>>();
   for (const task of tasks) {
     const destinations =
@@ -2498,17 +2524,38 @@ function SimulationHaulTab({
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      {haulExclusions.length > 0 && (
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            disabled={readOnly || isLoading}
-            onClick={onClearHaulExclusions}
-          >
-            Clear haul exclusions
-          </Button>
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="outline"
+          disabled={readOnly || isLoading || haulExclusions.length === 0}
+          onClick={onClearHaulExclusions}
+        >
+          {haulExclusions.length > 0
+            ? `Clear ${haulExclusions.length} haul ${haulExclusions.length === 1 ? "exclusion" : "exclusions"}`
+            : "Clear haul exclusions"}
+        </Button>
+      </div>
+      {haulGroupsLoading && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-center gap-2 px-2 text-muted-foreground"
+        >
+          <Spinner aria-hidden="true" />
+          Loading haul item groups...
         </div>
+      )}
+      {haulGroupError && (
+        <Alert variant="destructive">
+          <AlertTitle>Haul item groups unavailable</AlertTitle>
+          <AlertDescription className="flex flex-wrap items-center gap-3">
+            <span>{haulGroupError} Haul items are temporarily sorted alphabetically.</span>
+            <Button type="button" variant="outline" size="sm" onClick={retryHaulGroups}>
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
       )}
       <SimulationResultsTab hasResults={tasks.length > 0}>
         <div className="flex min-w-0 flex-col gap-4">
@@ -2577,17 +2624,23 @@ function SimulationHaulTab({
                     )
                     .map(([toLocationId, destinationTasks]) => {
                       const destinationKey = `${sourceKey}:to:${toLocationId}`;
-                      const destinationVolume = simulationHaulVolume(destinationTasks);
-                      const destinationVolumeLabel = `${quantity(destinationVolume)} cubic meters`;
-                      const includedTaskCount = destinationTasks.filter((task) =>
+                      const sortedDestinationTasks = sortSimulationHaulTasks(
+                        destinationTasks,
+                        haulGroupsByTypeId,
+                      );
+                      const includedDestinationTasks = sortedDestinationTasks.filter((task) =>
                         controls.isIncluded(`haul:${task.transferId}`),
-                      ).length;
-                      const destinationIncluded = includedTaskCount > destinationTasks.length / 2;
-                      const destinationRowKeys = destinationTasks.map(
+                      );
+                      const destinationVolume = simulationHaulVolume(includedDestinationTasks);
+                      const destinationVolumeLabel = `${quantity(destinationVolume)} cubic meters`;
+                      const includedTaskCount = includedDestinationTasks.length;
+                      const destinationIncluded =
+                        includedTaskCount > sortedDestinationTasks.length / 2;
+                      const destinationRowKeys = sortedDestinationTasks.map(
                         (task) => `haul:${task.transferId}`,
                       );
                       const destinationAvatars = createGroupAvatars(
-                        destinationTasks,
+                        sortedDestinationTasks,
                         (task) => ({
                           typeId: task.typeId,
                           name: task.typeName,
@@ -2620,10 +2673,10 @@ function SimulationHaulTab({
                           isOpen={openGroups[destinationKey] ?? true}
                           onOpenChange={(open) => onOpenGroupChange(destinationKey, open)}
                           avatarRows={destinationAvatars}
-                          remainingCount={destinationTasks.length - destinationAvatars.length}
+                          remainingCount={sortedDestinationTasks.length - destinationAvatars.length}
                         >
                           <div className="flex min-w-0 flex-col">
-                            {destinationTasks.map((task) => (
+                            {sortedDestinationTasks.map((task) => (
                               <SimulationHaulRow
                                 key={task.transferId}
                                 task={task}
@@ -2679,13 +2732,7 @@ function SimulationHaulRow({
       name={task.typeName}
       typeId={task.typeId}
       variation={haulImageVariation(task.blueprintKind)}
-      subline={
-        <CopyableNumber
-          value={Math.ceil(task.quantity * task.unitVolume)}
-          suffix={` m3 | ${task.purpose}`}
-          copyLabel="Haul volume"
-        />
-      }
+      subline={task.purpose}
       linkPath="planner"
       linkIcon={ClipboardList}
       linkSearchParams={{ simulationTab: "plan" }}
@@ -2743,8 +2790,19 @@ function SimulationHaulRow({
             </TooltipContent>
           </Tooltip>
         )}
-        <span className={owner !== null ? "justify-self-end" : undefined}>
+        <span
+          className={
+            owner !== null ? "flex flex-col items-end justify-self-end" : "flex flex-col items-end"
+          }
+        >
           <CopyableNumber value={task.quantity} suffix=" units" copyLabel="Haul quantity" />
+          <span className="text-muted-foreground">
+            <CopyableNumber
+              value={Math.ceil(task.quantity * task.unitVolume)}
+              suffix=" m3"
+              copyLabel="Haul volume"
+            />
+          </span>
         </span>
       </span>
     </SwitchedResultRow>
@@ -3014,6 +3072,7 @@ export default function SimulationResults({
   corporationNamesById,
   stockpileNamesById,
   haulExclusions,
+  preservedHaulTasks,
   isLoading,
   onClearHaulExclusions,
   onExcludeLocation,
@@ -3035,10 +3094,14 @@ export default function SimulationResults({
   corporationNamesById: ReadonlyMap<number, string>;
   stockpileNamesById: ReadonlyMap<string, string>;
   haulExclusions: readonly PlanHaulExclusion[];
+  preservedHaulTasks: readonly SimulationHaulTask[];
   isLoading: boolean;
   onClearHaulExclusions: () => Promise<boolean>;
   onExcludeLocation?: (locationId: number) => Promise<void>;
-  onHaulExclusionsChange: (exclusions: readonly PlanHaulExclusion[]) => void;
+  onHaulExclusionsChange: (
+    exclusions: readonly PlanHaulExclusion[],
+    preservedHaulTasks: readonly SimulationHaulTask[],
+  ) => Promise<boolean>;
   usePlannerUrlState?: boolean;
   instanceId?: string;
   readOnly?: boolean;
@@ -3049,9 +3112,9 @@ export default function SimulationResults({
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [includedRows, setIncludedRows] = useState<Record<string, boolean>>({});
-  const [preservedHaulTasks, setPreservedHaulTasks] = useState<Record<string, SimulationHaulTask>>(
-    {},
-  );
+  const [localPreservedHaulTasks, setLocalPreservedHaulTasks] = useState<
+    Record<string, SimulationHaulTask>
+  >({});
   const [completionByRow, setCompletionByRow] = useState<
     Partial<Record<string, SimulationCompletionState>>
   >({});
@@ -3072,7 +3135,7 @@ export default function SimulationResults({
     const succeeded = await onClearHaulExclusions();
     if (succeeded) {
       setIncludedRows({});
-      setPreservedHaulTasks({});
+      setLocalPreservedHaulTasks({});
     }
     return succeeded;
   }
@@ -3080,10 +3143,16 @@ export default function SimulationResults({
   const currentHaulExclusionKeys = new Set(
     currentHaulTasks.map((task) => simulationHaulExclusionKey(task)),
   );
+  const allPreservedHaulTasks = new Map(
+    preservedHaulTasks.map((task) => [simulationHaulExclusionKey(task), task]),
+  );
+  for (const [key, task] of Object.entries(localPreservedHaulTasks)) {
+    allPreservedHaulTasks.set(key, task);
+  }
   const visibleHaulTasks = [
     ...currentHaulTasks,
     ...Object
-      .entries(preservedHaulTasks)
+      .entries(Object.fromEntries(allPreservedHaulTasks))
       .filter(
         ([key]) =>
           !currentHaulExclusionKeys.has(key)
@@ -3094,15 +3163,26 @@ export default function SimulationResults({
     (task, index, tasks) =>
       tasks.findIndex((candidate) => candidate.transferId === task.transferId) === index,
   );
+  const excludedHaulRowKeys = new Set(
+    visibleHaulTasks
+      .filter((task) =>
+        haulExclusions.some(
+          (exclusion) => simulationHaulExclusionKey(exclusion) === simulationHaulExclusionKey(task),
+        ),
+      )
+      .map((task) => `haul:${task.transferId}`),
+  );
   const controls: SimulationRowControls = {
     selectedRowKey,
     onSelectRow: (rowKey) => setSelectedRowKey((current) => (current === rowKey ? null : rowKey)),
-    isIncluded: (rowKey) => includedRows[rowKey] ?? true,
+    isIncluded: (rowKey) => includedRows[rowKey] ?? !excludedHaulRowKeys.has(rowKey),
     onIncludedChange: (rowKey, included) =>
       setIncludedRows((current) => ({ ...current, [rowKey]: included })),
     onHaulIncludedChange: (rowKeys, included) => {
+      const previousIncludedRows = includedRows;
+      const previousLocalPreservedHaulTasks = localPreservedHaulTasks;
       const nextIncludedRows = { ...includedRows };
-      const nextPreservedHaulTasks = { ...preservedHaulTasks };
+      const nextPreservedHaulTasks = Object.fromEntries(allPreservedHaulTasks);
       const tasksByRowKey = new Map(
         visibleHaulTasks.map((task) => [`haul:${task.transferId}`, task]),
       );
@@ -3111,14 +3191,30 @@ export default function SimulationResults({
         const task = tasksByRowKey.get(rowKey);
         if (!task) continue;
         const key = simulationHaulExclusionKey(task);
-        if (included) delete nextPreservedHaulTasks[key];
-        else nextPreservedHaulTasks[key] = task;
+        if (!included) nextPreservedHaulTasks[key] = task;
+        else delete nextPreservedHaulTasks[key];
       }
-      setIncludedRows(nextIncludedRows);
-      setPreservedHaulTasks(nextPreservedHaulTasks);
-      onHaulExclusionsChange(
-        simulationHaulExclusions(result, nextIncludedRows, haulExclusions, visibleHaulTasks),
+      const nextExclusions = simulationHaulExclusions(
+        result,
+        nextIncludedRows,
+        haulExclusions,
+        visibleHaulTasks,
       );
+      const nextPreservedTasks = Object
+        .values(nextPreservedHaulTasks)
+        .filter((task) =>
+          nextExclusions.some(
+            (exclusion) =>
+              simulationHaulExclusionKey(exclusion) === simulationHaulExclusionKey(task),
+          ),
+        );
+      setIncludedRows(nextIncludedRows);
+      setLocalPreservedHaulTasks(nextPreservedHaulTasks);
+      void onHaulExclusionsChange(nextExclusions, nextPreservedTasks).then((succeeded) => {
+        if (succeeded) return;
+        setIncludedRows(previousIncludedRows);
+        setLocalPreservedHaulTasks(previousLocalPreservedHaulTasks);
+      });
     },
     isCompleted: (rowKey, scheduleIdentity, matchScheduleRevision = false) => {
       const completion = completionByRow[rowKey];
@@ -3338,6 +3434,7 @@ export default function SimulationResults({
             corporationNamesById={corporationNamesById}
             stockpileNamesById={stockpileNamesById}
             haulExclusions={haulExclusions}
+            preservedHaulTasks={preservedHaulTasks}
             isLoading={isLoading}
             onClearHaulExclusions={clearHaulExclusions}
             onExcludeLocation={onExcludeLocation}
@@ -3372,6 +3469,7 @@ function SimulationTabContent({
   stockpileNamesById,
   controls,
   haulExclusions,
+  preservedHaulTasks,
   isLoading,
   onClearHaulExclusions,
   onExcludeLocation,
@@ -3397,6 +3495,7 @@ function SimulationTabContent({
   stockpileNamesById: ReadonlyMap<string, string>;
   controls: SimulationRowControls;
   haulExclusions: readonly PlanHaulExclusion[];
+  preservedHaulTasks: readonly SimulationHaulTask[];
   isLoading: boolean;
   onClearHaulExclusions: () => Promise<boolean>;
   onExcludeLocation?: (locationId: number) => Promise<void>;

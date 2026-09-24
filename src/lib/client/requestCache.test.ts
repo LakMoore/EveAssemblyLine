@@ -7,7 +7,61 @@ import {
   isCompleteClientAssetsResponse,
   normalizeClientAssetsResponse,
   applyCorporationSettings,
+  loadClientSystemNames,
 } from "./requestCache";
+
+void test("shares overlapping in-flight system name requests", async () => {
+  const originalFetch = globalThis.fetch;
+  const fetchBodies: number[][] = [];
+  let releaseFirstRequest!: () => void;
+  const firstRequestReleased = new Promise<void>((resolve) => {
+    releaseFirstRequest = resolve;
+  });
+  globalThis.fetch = async (_input, init) => {
+    const body = JSON.parse(String(init?.body)) as { systemIds: number[] };
+    fetchBodies.push(body.systemIds);
+    if (fetchBodies.length === 1) await firstRequestReleased;
+    return {
+      ok: true,
+      json: async () => ({
+        items: body.systemIds.map((systemId) => ({ systemId, name: `System ${systemId}` })),
+      }),
+    } as Response;
+  };
+
+  try {
+    const first = loadClientSystemNames([1, 2], "en");
+    const second = loadClientSystemNames([2, 3], "en");
+    await Promise.resolve();
+    assert.deepEqual(fetchBodies, [[1, 2], [3]]);
+    releaseFirstRequest();
+    assert.deepEqual(
+      [...(await first).entries()],
+      [
+        [1, "System 1"],
+        [2, "System 2"],
+      ],
+    );
+    assert.deepEqual(
+      [...(await second).entries()],
+      [
+        [2, "System 2"],
+        [3, "System 3"],
+      ],
+    );
+    assert.deepEqual(
+      [...(await loadClientSystemNames([1, 3], "en")).entries()],
+      [
+        [1, "System 1"],
+        [3, "System 3"],
+      ],
+    );
+    assert.deepEqual(fetchBodies, [[1, 2], [3]]);
+  }
+  finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 void test("deduplicates supported corporation snapshot owners", () => {
   const owners = getClientOwnerSnapshotOwners({
