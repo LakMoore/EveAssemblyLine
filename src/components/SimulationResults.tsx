@@ -96,7 +96,7 @@ import type {
   SimulationMaterialBalance,
   SimulationMaterialLocationBucket,
   SimulationPurchase,
-  SimulationReprocessingJob,
+  SimulationReprocessingJobGroup,
   SimulationResultV1,
 } from "@/lib/planning/simulator/types";
 
@@ -194,7 +194,6 @@ function subscribeToTypeId(onStoreChange: () => void): () => void {
     window.removeEventListener(typeIdChangedEvent, onStoreChange);
   };
 }
-
 /** Provides the server snapshot for the browser-only planner type filter. */
 function getServerTypeIdSnapshot(): number | null {
   return null;
@@ -1763,7 +1762,7 @@ function SimulationReprocessingTab({
   openGroups,
   onOpenGroupChange,
 }: {
-  jobs: SimulationReprocessingJob[];
+  jobs: SimulationReprocessingJobGroup[];
   locationNamesById: ReadonlyMap<number, string>;
   controls: SimulationRowControls;
   openGroups: Record<string, boolean>;
@@ -1777,20 +1776,81 @@ function SimulationReprocessingTab({
         locationNamesById={locationNamesById}
         openGroups={openGroups}
         onOpenGroupChange={onOpenGroupChange}
-        getRowKey={(job) => job.jobId}
-        getAvatar={(job) => ({ typeId: job.sourceTypeId, name: job.sourceTypeName })}
-        renderRow={(job) => (
+        getRowKey={(group) => group.groupKey}
+        getAvatar={(group) => ({ typeId: group.sourceTypeId, name: group.sourceTypeName })}
+        renderRow={(group) => (
           <SimulationSimpleJobRow
-            rowKey={`reprocess:${job.jobId}`}
-            typeId={job.sourceTypeId}
-            name={job.sourceTypeName}
-            subline={job.state}
-            summary={<CopyableNumber value={job.sourceQuantity} copyLabel="Source quantity" />}
+            rowKey={group.groupKey}
+            typeId={group.sourceTypeId}
+            name={group.sourceTypeName}
+            subline={<span>Immediate {quantity(group.quantities.immediateSourceQuantity)}</span>}
+            summary={
+              <span className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+                <SimulationReprocessingHorizons quantities={group.quantities} />
+                <CopyableNumber
+                  value={group.quantities.totalSourceQuantity}
+                  copyLabel="Total source quantity"
+                />
+              </span>
+            }
             controls={controls}
           />
         )}
       />
     </SimulationResultsTab>
+  );
+}
+
+/** Shows non-immediate reprocessing source quantities with horizon icons. */
+function SimulationReprocessingHorizons({
+  quantities,
+}: {
+  quantities: SimulationReprocessingJobGroup["quantities"];
+}) {
+  const horizons = [
+    {
+      key: "after-hauling",
+      label: "After hauling",
+      quantity: quantities.afterHaulingSourceQuantity,
+      source: "haul" as const,
+      Icon: Truck,
+    },
+    {
+      key: "after-purchase",
+      label: "After purchase",
+      quantity: quantities.afterPurchaseSourceQuantity,
+      source: "market" as const,
+      Icon: ShoppingCart,
+    },
+  ];
+  return (
+    <span className="flex max-w-full flex-wrap items-center justify-end gap-2">
+      {horizons
+        .filter((horizon) => horizon.quantity > 0)
+        .map(({ key, label, quantity: horizonQuantity, source, Icon }) => (
+          <Tooltip key={key}>
+            <TooltipTrigger
+              render={
+                <span
+                  aria-label={`${label}: ${horizonQuantity.toLocaleString()}`}
+                  className={cn(
+                    styles.simulationSourceIcon,
+                    "inline-flex size-5 items-center justify-center",
+                  )}
+                  data-source={source}
+                  role="img"
+                  tabIndex={0}
+                >
+                  <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
+                </span>
+              }
+            />
+            <TooltipContent>
+              {label}: {horizonQuantity.toLocaleString()}
+            </TooltipContent>
+          </Tooltip>
+        ))}
+    </span>
   );
 }
 

@@ -204,6 +204,24 @@ export function isSimulationResultV1(value: unknown): value is SimulationResultV
     );
   const hasJobs = (jobs: unknown, validator: (job: Record<string, unknown>) => boolean) =>
     hasSimulationRows(jobs, (job) => isRecord(job) && validator(job));
+  const hasReprocessingQuantities = (quantities: unknown) =>
+    isRecord(quantities)
+    && [
+      "totalSourceQuantity",
+      "immediateSourceQuantity",
+      "afterHaulingSourceQuantity",
+      "afterPurchaseSourceQuantity",
+    ].every((key) => isQuantity(quantities[key]));
+  const hasReprocessingGroups = hasSimulationRows(
+    lists.reprocessingJobs,
+    (group) =>
+      isRecord(group)
+      && typeof group.groupKey === "string"
+      && isPositiveInteger(group.locationId)
+      && isPositiveInteger(group.sourceTypeId)
+      && typeof group.sourceTypeName === "string"
+      && hasReprocessingQuantities(group.quantities),
+  );
   return (
     (metadata.simulationId === undefined || typeof metadata.simulationId === "string")
     && metadata.simulatorVersion === 1
@@ -230,15 +248,7 @@ export function isSimulationResultV1(value: unknown): value is SimulationResultV
     )
     && hasPurchases(lists.materialsToBuy)
     && hasPurchases(lists.bpoToBuy)
-    && hasJobs(
-      lists.reprocessingJobs,
-      (job) =>
-        typeof job.jobId === "string"
-        && isPositiveInteger(job.sourceTypeId)
-        && typeof job.sourceTypeName === "string"
-        && isQuantity(job.sourceQuantity)
-        && isPositiveInteger(job.locationId),
-    )
+    && hasReprocessingGroups
     && hasJobs(
       lists.bpcToCopy,
       (job) =>

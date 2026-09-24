@@ -5,9 +5,9 @@ import { settleBuying } from "./buying";
 import type { SimulationContext } from "./context";
 import type { IndustrySimulationResult } from "./industrySimulation";
 import type { SimulationLedgerAccount } from "./ledger";
-import { settleReprocessing } from "./reprocessing";
+import { groupReprocessingJobs, settleReprocessing } from "./reprocessing";
 import type { SimulatorInventory } from "./sourceLots";
-import type { SimulationRequestV1 } from "./types";
+import type { SimulationReprocessingJob, SimulationRequestV1 } from "./types";
 
 const materialAccount: SimulationLedgerAccount = {
   locationId: 20,
@@ -88,6 +88,28 @@ const context = {
   ]),
 } as unknown as SimulationContext;
 
+/** Creates a minimal reprocessing job for simulator aggregation tests. */
+function reprocessingJob(
+  jobId: string,
+  state: SimulationReprocessingJob["state"],
+  overrides: Partial<SimulationReprocessingJob> = {},
+): SimulationReprocessingJob {
+  return {
+    jobId,
+    stockpileId: "main",
+    locationId: 40,
+    sourceLotId: jobId,
+    sourceTypeId: 100,
+    sourceTypeName: "Compressed Ore",
+    sourceQuantity: 100,
+    portionCount: 1,
+    efficiency: 50,
+    state,
+    yields: [],
+    ...overrides,
+  };
+}
+
 void test("allocates complete reprocessing portions and keeps surplus out of Buy", () => {
   const allocator = new SimulationAllocator(inventory, []);
   const industry: IndustrySimulationResult = {
@@ -145,7 +167,42 @@ void test("allocates complete reprocessing portions and keeps surplus out of Buy
   assert.equal(reprocessing.jobs[0].portionCount, 1);
   assert.equal(reprocessing.jobs[0].yields[0].quantity, 200);
   assert.equal(reprocessing.jobs[0].yields[0].allocatedQuantity, 150);
+  assert.deepEqual(
+    reprocessing.groups[0]?.quantities,
+    {
+      totalSourceQuantity: 100,
+      immediateSourceQuantity: 100,
+      afterHaulingSourceQuantity: 0,
+      afterPurchaseSourceQuantity: 0,
+    },
+  );
   assert.deepEqual(reprocessing.remainingDemands, []);
   const buying = settleBuying(request, context, industry, reprocessing.remainingDemands);
   assert.deepEqual(buying.materials, []);
+});
+
+void test("groups reprocessing jobs by location and source type and sums horizons", () => {
+  const groups = groupReprocessingJobs([
+    reprocessingJob("local", "local"),
+    reprocessingJob("local-two", "local", { sourceQuantity: 25 }),
+    reprocessingJob("hauled", "after-hauling", { sourceQuantity: 50 }),
+    reprocessingJob("purchased", "after-purchase", { sourceQuantity: 25 }),
+    reprocessingJob("other-type", "local", { sourceTypeId: 101, sourceTypeName: "Other Ore" }),
+    reprocessingJob("other-location", "local", { locationId: 50 }),
+  ]);
+
+  assert.equal(groups.length, 3);
+  const compressedOre = groups.find(
+    (group) => group.locationId === 40 && group.sourceTypeId === 100,
+  );
+  assert.ok(compressedOre);
+  assert.deepEqual(
+    compressedOre.quantities,
+    {
+      totalSourceQuantity: 200,
+      immediateSourceQuantity: 125,
+      afterHaulingSourceQuantity: 50,
+      afterPurchaseSourceQuantity: 25,
+    },
+  );
 });

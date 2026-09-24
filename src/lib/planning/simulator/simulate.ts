@@ -349,7 +349,7 @@ function assembleLists(
     planItems: presentationItems(ledgers, connectedKeys, "plan"),
     materialsToBuy: buying.materials,
     bpoToBuy: buying.blueprints,
-    reprocessingJobs: reprocessing.jobs,
+    reprocessingJobs: reprocessing.groups,
     bpcToCopy: schedules.copyJobs,
     inventionJobs: schedules.inventionJobs,
     reactionJobs: schedules.reactionJobs,

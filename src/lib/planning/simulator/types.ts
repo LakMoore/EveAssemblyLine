@@ -278,6 +278,20 @@ export interface SimulationReprocessingJob {
   yields: Array<{ typeId: number; typeName: string; quantity: number; allocatedQuantity: number }>;
 }
 
+/** Aggregated reprocessing source quantities for one location and source type. */
+export interface SimulationReprocessingJobGroup {
+  groupKey: string;
+  locationId: number;
+  sourceTypeId: number;
+  sourceTypeName: string;
+  quantities: {
+    totalSourceQuantity: number;
+    immediateSourceQuantity: number;
+    afterHaulingSourceQuantity: number;
+    afterPurchaseSourceQuantity: number;
+  };
+}
+
 /** One job's contribution to an aggregated haul task. */
 export interface SimulationHaulDemand {
   jobId?: string;
@@ -374,7 +388,7 @@ export interface SimulationResultV1 {
     haulingTasks: SimulationHaulTask[];
     materialsToBuy: SimulationPurchase[];
     bpoToBuy: SimulationPurchase[];
-    reprocessingJobs: SimulationReprocessingJob[];
+    reprocessingJobs: SimulationReprocessingJobGroup[];
     bpcToCopy: SimulationCopyJob[];
     inventionJobs: SimulationInventionJob[];
     reactionJobs: SimulationIndustryJob[];

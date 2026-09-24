@@ -33,6 +33,37 @@ void test("accepts a complete cached native simulation result", () => {
   assert.equal(isSimulationResultV1(simulationResult()), true);
 });
 
+void test("accepts grouped reprocessing rows and rejects legacy raw jobs", () => {
+  const current = simulationResult();
+  (current.lists as Record<string, unknown>).reprocessingJobs = [
+    {
+      groupKey: "reprocessing:10:34",
+      locationId: 10,
+      sourceTypeId: 34,
+      sourceTypeName: "Tritanium",
+      quantities: {
+        totalSourceQuantity: 100,
+        immediateSourceQuantity: 50,
+        afterHaulingSourceQuantity: 25,
+        afterPurchaseSourceQuantity: 25,
+      },
+    },
+  ];
+  assert.equal(isSimulationResultV1(current), true);
+
+  const legacy = simulationResult();
+  (legacy.lists as Record<string, unknown>).reprocessingJobs = [
+    {
+      jobId: "reprocessing:main:34:0",
+      locationId: 10,
+      sourceTypeId: 34,
+      sourceTypeName: "Tritanium",
+      sourceQuantity: 100,
+    },
+  ];
+  assert.equal(isSimulationResultV1(legacy), false);
+});
+
 void test("accepts canonical location ledgers and rejects ledgers without a location", () => {
   const current = {
     ...simulationResult(),

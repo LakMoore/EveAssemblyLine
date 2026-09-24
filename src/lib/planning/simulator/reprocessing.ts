@@ -3,11 +3,17 @@ import type { SimulationContext } from "./context";
 import type { IndustrySimulationResult, SimulationUnmetDemand } from "./industrySimulation";
 import type { SimulationLedgerAccount, SimulationTransaction } from "./ledger";
 import type { SimulatorInventory, SimulationItemLot } from "./sourceLots";
-import type { SimulationReprocessingJob, SimulationWarning, SimulationRequestV1 } from "./types";
+import type {
+  SimulationReprocessingJob,
+  SimulationReprocessingJobGroup,
+  SimulationWarning,
+  SimulationRequestV1,
+} from "./types";
 
 /** Result of applying selected reprocessing yields to residual material demand. */
 export interface ReprocessingSettlementResult {
   jobs: SimulationReprocessingJob[];
+  groups: SimulationReprocessingJobGroup[];
   transactions: SimulationTransaction[];
   remainingDemands: SimulationUnmetDemand[];
   warnings: SimulationWarning[];
@@ -30,6 +36,43 @@ interface AllocatedYield {
   quantity: number;
   allocatedQuantity: number;
   allocations: Array<{ account: SimulationLedgerAccount; quantity: number }>;
+}
+
+/** Groups settled reprocessing jobs by location and source type across horizons. */
+export function groupReprocessingJobs(
+  jobs: readonly SimulationReprocessingJob[],
+): SimulationReprocessingJobGroup[] {
+  const groups = new Map<string, SimulationReprocessingJobGroup>();
+  for (const job of jobs) {
+    const groupKey = `reprocessing:${job.locationId}:${job.sourceTypeId}`;
+    const group = groups.get(groupKey);
+    if (group) {
+      group.quantities.totalSourceQuantity += job.sourceQuantity;
+      if (job.state === "local") group.quantities.immediateSourceQuantity += job.sourceQuantity;
+      else if (job.state === "after-hauling") {
+        group.quantities.afterHaulingSourceQuantity += job.sourceQuantity;
+      }
+      else group.quantities.afterPurchaseSourceQuantity += job.sourceQuantity;
+      continue;
+    }
+
+    groups.set(
+      groupKey,
+      {
+        groupKey,
+        locationId: job.locationId,
+        sourceTypeId: job.sourceTypeId,
+        sourceTypeName: job.sourceTypeName,
+        quantities: {
+          totalSourceQuantity: job.sourceQuantity,
+          immediateSourceQuantity: job.state === "local" ? job.sourceQuantity : 0,
+          afterHaulingSourceQuantity: job.state === "after-hauling" ? job.sourceQuantity : 0,
+          afterPurchaseSourceQuantity: job.state === "after-purchase" ? job.sourceQuantity : 0,
+        },
+      },
+    );
+  }
+  return [...groups.values()];
 }
 
 function typeName(context: SimulationContext, typeId: number, language = "en"): string {
@@ -355,6 +398,7 @@ export function settleReprocessing(
 
   return {
     jobs,
+    groups: groupReprocessingJobs(jobs),
     transactions,
     remainingDemands: demands.filter((demand) => demand.quantity > 0),
     warnings,
