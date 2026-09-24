@@ -1745,10 +1745,13 @@ function MaterialBalanceHeader() {
   return (
     <div className="sticky top-0 z-10 hidden min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-[13px] bg-card p-2 shadow-[0_1px_0_var(--border)] md:grid">
       <span aria-hidden="true" />
-      <div className="grid grid-cols-6 gap-x-3 text-right font-mono text-[10px] text-muted-foreground uppercase">
-        {materialBalanceColumns.map((column) => (
-          <span key={column}>{column}</span>
-        ))}
+      <div className="flex min-w-0 items-center justify-end gap-1">
+        <span className="size-6 shrink-0" aria-hidden="true" />
+        <div className="grid min-w-0 flex-1 grid-cols-6 gap-x-3 text-right font-mono text-[10px] text-muted-foreground uppercase">
+          {materialBalanceColumns.map((column) => (
+            <span key={column}>{column}</span>
+          ))}
+        </div>
       </div>
     </div>
   );
