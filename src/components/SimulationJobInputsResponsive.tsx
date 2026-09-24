@@ -90,6 +90,7 @@ type InputSupplySource = {
   key: string;
   label: string;
   source: "industry" | "reaction" | "market" | "haul";
+  sourceJobIds: readonly string[];
   inBuild: boolean;
   quantity: number;
   claimedQuantity: number;
@@ -166,6 +167,7 @@ function reservationSources(
           claimedQuantity: source.claimedQuantity,
           showJobOutput,
           source: activity === "manufacturing" ? ("industry" as const) : ("reaction" as const),
+          sourceJobIds: [...source.sourceJobIds],
           inBuild: state !== "planned",
           completion: completionDetail(source.completionMinutes),
           Icon: activity === "manufacturing" ? Factory : Atom,
@@ -189,6 +191,7 @@ function inputSupplySources(input: SimulationJobInput, now: number): InputSupply
             quantity: input.availableFromHauling,
             claimedQuantity: input.availableFromHauling,
             showJobOutput: false,
+            sourceJobIds: [],
             Icon: Truck,
           },
         ]
@@ -204,6 +207,7 @@ function inputSupplySources(input: SimulationJobInput, now: number): InputSupply
             quantity: input.purchaseQuantity,
             claimedQuantity: input.purchaseQuantity,
             showJobOutput: false,
+            sourceJobIds: [],
             Icon: ShoppingCart,
           },
         ]
@@ -217,11 +221,15 @@ function SimulationInputRow({
   now,
   onNavigate,
   onOpenBuy,
+  onOpenJobInputs,
+  jobsById,
 }: {
   input: SimulationJobInput;
   now: number;
   onNavigate: () => void;
   onOpenBuy: () => void;
+  onOpenJobInputs: (jobs: readonly SimulationIndustryJob[]) => void;
+  jobsById: ReadonlyMap<string, SimulationIndustryJob>;
 }) {
   const percent = inputCompletionPercent(input);
   const status = inputStatus(input);
@@ -246,6 +254,7 @@ function SimulationInputRow({
               key,
               label,
               source,
+              sourceJobIds,
               inBuild,
               quantity,
               claimedQuantity,
@@ -257,21 +266,29 @@ function SimulationInputRow({
               const iconClassName = isColored
                 ? styles.simulationSourceIcon
                 : "text-muted-foreground";
+              const sourceJobs = sourceJobIds.flatMap((sourceJobId) => {
+                const sourceJob = jobsById.get(sourceJobId);
+                return sourceJob ? [sourceJob] : [];
+              });
+              const opensJobInputs = label === "To Be Manufactured";
+              const sourceDescription = `${label}: ${sourceQuantityLabel(quantity, claimedQuantity, showJobOutput)}${completion}`;
               return (
                 <Tooltip key={key}>
                   <TooltipTrigger
                     render={
-                      label === "Buy" ? (
+                      label === "Buy" || opensJobInputs ? (
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon-xs"
-                          aria-label={`${label}: ${sourceQuantityLabel(quantity, claimedQuantity, showJobOutput)}${completion}. View buy list`}
+                          aria-label={`${sourceDescription}. ${opensJobInputs ? "View job inputs" : "View buy list"}`}
                           className={cn("size-5 p-0", iconClassName)}
                           data-source={source}
+                          disabled={opensJobInputs && sourceJobs.length === 0}
                           onClick={(event) => {
                             event.stopPropagation();
-                            onOpenBuy();
+                            if (opensJobInputs) onOpenJobInputs(sourceJobs);
+                            else onOpenBuy();
                           }}
                         >
                           <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
@@ -293,8 +310,8 @@ function SimulationInputRow({
                     }
                   />
                   <TooltipContent>
-                    {label}: {sourceQuantityLabel(quantity, claimedQuantity, showJobOutput)}
-                    {completion}
+                    {sourceDescription}
+                    {opensJobInputs && " View job inputs"}
                   </TooltipContent>
                 </Tooltip>
               );
@@ -319,17 +336,20 @@ function SimulationInputRow({
 export default function SimulationJobInputsResponsive({
   job,
   jobs,
+  allJobs,
   onOpenPlan,
   onOpenBuy,
   variation = "icon",
 }: {
   job: SimulationIndustryJob;
   jobs?: readonly SimulationIndustryJob[];
+  allJobs?: readonly SimulationIndustryJob[];
   onOpenPlan: () => void;
   onOpenBuy: () => void;
   variation?: "icon" | "render" | "bp" | "bpc";
 }) {
   const [open, setOpen] = useState(false);
+  const [selectedJobs, setSelectedJobs] = useState<readonly SimulationIndustryJob[] | null>(null);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!open) return;
@@ -347,23 +367,35 @@ export default function SimulationJobInputsResponsive({
     onOpenBuy();
   };
   const inputJobs = jobs && jobs.length > 0 ? jobs : [job];
-  const installableRuns = inputJobs.reduce(
+  const jobsById = new Map((allJobs ?? inputJobs).map((inputJob) => [inputJob.jobId, inputJob]));
+  const displayedJobs = selectedJobs ?? inputJobs;
+  const installableRuns = displayedJobs.reduce(
     (total, inputJob) =>
       total + Math.min(inputJob.requiredRuns, Math.max(0, inputJob.readyNowRuns)),
     0,
   );
-  const totalRuns = inputJobs.reduce((total, inputJob) => total + inputJob.requiredRuns, 0);
-  const inputs = aggregateSimulationInputs(inputJobs.flatMap((inputJob) => inputJob.inputs));
+  const totalRuns = displayedJobs.reduce((total, inputJob) => total + inputJob.requiredRuns, 0);
+  const inputs = aggregateSimulationInputs(displayedJobs.flatMap((inputJob) => inputJob.inputs));
   const completionPercent =
     totalRuns > 0 ? Math.min(100, Math.round((installableRuns / totalRuns) * 100)) : 100;
   const status: InputStatus =
     completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked";
   const description: ReactNode = "Material availability for this simulation job.";
+  const displayedJob = displayedJobs[0] ?? job;
+  const openJobInputs = (sourceJobs: readonly SimulationIndustryJob[]) => {
+    if (sourceJobs.length === 0) return;
+    setSelectedJobs(sourceJobs);
+    setOpen(true);
+  };
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (!nextOpen) setSelectedJobs(null);
+  };
 
   return (
     <ResponsiveDialogDrawer
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={handleOpenChange}
       trigger={
         <Button
           type="button"
@@ -372,15 +404,18 @@ export default function SimulationJobInputsResponsive({
             "inline-flex h-6 items-center justify-center gap-1 border px-2 text-[10px] font-semibold tracking-[0.08em] uppercase transition-colors hover:brightness-125",
             statusClassName(status),
           )}
-          onClick={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            setSelectedJobs(null);
+          }}
         >
           <span>{completionPercent}%</span>
           Inputs
         </Button>
       }
-      title={inputJobs.length > 1 ? "Grouped job inputs" : "Job inputs"}
+      title={displayedJobs.length > 1 ? "Grouped job inputs" : "Job inputs"}
       description={
-        inputJobs.length > 1
+        displayedJobs.length > 1
           ? "Material availability for the grouped simulation jobs."
           : description
       }
@@ -388,8 +423,8 @@ export default function SimulationJobInputsResponsive({
         <div className="flex flex-col gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <TypeIdentity
-              name={job.productName}
-              typeId={job.productTypeId}
+              name={displayedJob.productName}
+              typeId={displayedJob.productTypeId}
               variation={variation}
               imageSize={40}
               linkPath="planner"
@@ -432,6 +467,8 @@ export default function SimulationJobInputsResponsive({
               now={now}
               onNavigate={navigateToPlan}
               onOpenBuy={navigateToBuy}
+              onOpenJobInputs={openJobInputs}
+              jobsById={jobsById}
             />
           ))
         ) : (

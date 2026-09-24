@@ -2,8 +2,8 @@ import type { SimulationIndustryJob, SimulationJobInput } from "./types";
 
 /** Aggregated quantities and material inputs for one presentation job group. */
 export interface SimulationIndustryJobQuantities {
-  availableNow: number;
-  required: number;
+  installableRuns: number;
+  totalRuns: number;
   inputs: SimulationJobInput[];
 }
 
@@ -52,7 +52,7 @@ export function aggregateSimulationInputs(
   );
 }
 
-/** Groups activity jobs and sums final-item and input quantities for presentation. */
+/** Groups activity jobs and sums installable runs and input quantities for presentation. */
 export function groupSimulationActivityJobs(
   jobs: readonly SimulationIndustryJob[],
 ): SimulationIndustryJobGroup[] {
@@ -62,8 +62,8 @@ export function groupSimulationActivityJobs(
     const group = groups.get(groupKey);
     if (group) {
       group.jobs.push(job);
-      group.quantities.availableNow += job.readyNowRuns * job.outputPerRun;
-      group.quantities.required += job.requiredRuns * job.outputPerRun;
+      group.quantities.installableRuns += job.readyNowRuns;
+      group.quantities.totalRuns += job.requiredRuns;
       group.quantities.inputs = aggregateSimulationInputs(
         group.jobs.flatMap((groupJob) => groupJob.inputs),
       );
@@ -78,8 +78,8 @@ export function groupSimulationActivityJobs(
         productName: job.productName,
         jobs: [job],
         quantities: {
-          availableNow: job.readyNowRuns * job.outputPerRun,
-          required: job.requiredRuns * job.outputPerRun,
+          installableRuns: job.readyNowRuns,
+          totalRuns: job.requiredRuns,
           inputs: aggregateSimulationInputs(job.inputs),
         },
       },

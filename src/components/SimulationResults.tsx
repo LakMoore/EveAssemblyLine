@@ -1989,6 +1989,7 @@ function installableRunsText(entries: readonly SimulationIndustryJob[]): string 
 function SimulationActivityTab({
   tab,
   jobs,
+  allJobs,
   simulationInputRevision,
   stock,
   locationNamesById,
@@ -2004,6 +2005,7 @@ function SimulationActivityTab({
 }: {
   tab: "react" | "manufacture";
   jobs: SimulationIndustryJob[];
+  allJobs: readonly SimulationIndustryJob[];
   simulationInputRevision: string;
   stock: readonly PlanStockItem[];
   locationNamesById: ReadonlyMap<number, string>;
@@ -2473,6 +2475,7 @@ function SimulationActivityTab({
                 <SimulationJobInputsResponsive
                   job={group.jobs[0]}
                   jobs={group.jobs}
+                  allJobs={allJobs}
                   onOpenPlan={controls.onOpenPlan}
                   onOpenBuy={controls.onOpenBuy}
                 />
@@ -2484,14 +2487,14 @@ function SimulationActivityTab({
                 )}
               >
                 <CopyableNumber
-                  value={group.quantities.availableNow}
+                  value={group.quantities.installableRuns}
                   suffix=" / "
-                  copyLabel="Available quantity"
+                  copyLabel="Installable runs"
                 />
                 <CopyableNumber
-                  value={group.quantities.required}
-                  suffix=" units"
-                  copyLabel="Required quantity"
+                  value={group.quantities.totalRuns}
+                  suffix=" runs"
+                  copyLabel="Total runs"
                 />
               </span>
             </SwitchedResultRow>
@@ -3639,6 +3642,7 @@ function SimulationTabContent({
       <SimulationActivityTab
         tab={activeTab}
         jobs={activeTab === "react" ? result.lists.reactionJobs : result.lists.manufacturingJobs}
+        allJobs={[...result.lists.manufacturingJobs, ...result.lists.reactionJobs]}
         simulationInputRevision={`${result.metadata.normalizedInputHash}|${result.metadata.sdeRevision}`}
         stock={stock}
         locationNamesById={locationNamesById}

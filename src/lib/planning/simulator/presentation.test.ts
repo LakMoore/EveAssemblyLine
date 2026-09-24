@@ -66,8 +66,8 @@ void test("groups same-activity jobs by location and product and sums quantities
   const charon = groups.find((group) => group.locationId === 20);
   assert.ok(charon);
   assert.equal(charon.jobs.length, 2);
-  assert.equal(charon.quantities.availableNow, 3);
-  assert.equal(charon.quantities.required, 5);
+  assert.equal(charon.quantities.installableRuns, 3);
+  assert.equal(charon.quantities.totalRuns, 5);
   assert.deepEqual(
     charon.quantities.inputs.map(({ typeId, availableNow, requiredQuantity }) => ({
       typeId,
