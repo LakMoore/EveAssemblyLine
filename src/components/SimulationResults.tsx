@@ -5,6 +5,7 @@ import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react
 import {
   AlertTriangle,
   Atom,
+  ChartLine,
   Boxes,
   Brain,
   Bug,
@@ -402,7 +403,7 @@ function immediateSupplySources(item: SimulationMaterialBalance) {
           label: "Sell orders",
           quantity: item.availableFromSellOrders,
           source: "market" as const,
-          Icon: ShoppingCart,
+          Icon: ChartLine,
         },
       ]
     : [];
@@ -1825,7 +1826,6 @@ function MaterialBalanceSummary({
             </TooltipContent>
           </Tooltip>
         ))}
-        <MarketBuyOrderIndicator quantity={marketBuyOrderQuantity} />
         <CopyableNumber
           value={item.availableNow + item.availableFromSellOrders}
           copyLabel="Available quantity"
@@ -1841,6 +1841,7 @@ function MaterialBalanceSummary({
           className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1"
           aria-label="Future supply sources"
         >
+          <MarketBuyOrderIndicator quantity={marketBuyOrderQuantity} />
           {supplySources.map(({ key, label, quantity, source, Icon }) => (
             <Tooltip key={key}>
               <TooltipTrigger
