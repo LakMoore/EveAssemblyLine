@@ -11,6 +11,7 @@ export type SimulationAsset = Omit<
   | "sourceSystemName"
   | "blueprintType"
   | "sourceLocationKind"
+  | "marketOrderIssuerId"
   | "techLevel"
   | "isCargoContainer"
   | "isPackaged"
@@ -89,11 +90,25 @@ export interface SimulationHaulExclusion {
 }
 
 /** Public request accepted by the versioned simulator endpoint. */
-export interface SimulationRequestV1 extends Omit<PlanRequest, "assets" | "haulExclusions"> {
+export type SimulationRequestV1 = Omit<PlanRequest, "assets" | "haulExclusions" | "settings"> & {
   assets?: SimulationAsset[] | CategorizedPlanAssets;
   haulExclusions?: SimulationHaulExclusion[];
+  settings: Omit<
+    PlanRequest["settings"],
+    | "personalSellOrdersAsStock"
+    | "allCorporationSellOrdersAsStock"
+    | "myCorporationSellOrdersAsStock"
+  >
+    & Partial<
+      Pick<
+        PlanRequest["settings"],
+        | "personalSellOrdersAsStock"
+        | "allCorporationSellOrdersAsStock"
+        | "myCorporationSellOrdersAsStock"
+      >
+    >;
   simulation: SimulationOptionsV1;
-}
+};
 
 /** Stable, readiness-aware provenance for one planned material requirement. */
 export interface SimulationDemandSource {
@@ -119,6 +134,7 @@ export interface SimulationMaterialBalance {
   requiredNow: number;
   reserved: number;
   availableNow: number;
+  availableFromSellOrders: number;
   availableFromHauling: number;
   availableFromProduction: number;
   availableFromCopying: number;

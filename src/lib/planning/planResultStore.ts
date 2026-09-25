@@ -137,6 +137,7 @@ export function isSimulationResultV1(value: unknown): value is SimulationResultV
       "requiredNow",
       "reserved",
       "availableNow",
+      "availableFromSellOrders",
       "availableFromHauling",
       "availableFromProduction",
       "availableFromCopying",

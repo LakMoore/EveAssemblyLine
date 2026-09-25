@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   filterClientAssetsForPlanning,
+  filterClientSellOrdersForPlanning,
   getClientOwnerSnapshotOwners,
   groupClientAssetsByLocation,
   isCompleteClientAssetsResponse,
@@ -9,6 +10,68 @@ import {
   applyCorporationSettings,
   loadClientSystemNames,
 } from "./requestCache";
+
+void test("filters sell orders using personal and corporation settings", () => {
+  const data = {
+    facilities: [],
+    assets: [
+      {
+        typeId: 1,
+        name: "Personal",
+        quantity: 1,
+        source: "marketOrder" as const,
+        ownerType: "character" as const,
+        ownerId: 7,
+      },
+      {
+        typeId: 2,
+        name: "My corporation",
+        quantity: 2,
+        source: "marketOrder" as const,
+        ownerType: "corporation" as const,
+        ownerId: 90,
+        marketOrderIssuerId: 7,
+      },
+      {
+        typeId: 3,
+        name: "Other corporation",
+        quantity: 3,
+        source: "marketOrder" as const,
+        ownerType: "corporation" as const,
+        ownerId: 90,
+        marketOrderIssuerId: 8,
+      },
+      { typeId: 4, name: "Regular", quantity: 4, ownerType: "character" as const, ownerId: 7 },
+    ],
+  };
+  const selectedCharacterOnly = filterClientSellOrdersForPlanning(
+    data,
+    {
+      personalSellOrdersAsStock: false,
+      allCorporationSellOrdersAsStock: false,
+      myCorporationSellOrdersAsStock: true,
+    },
+    [7],
+  );
+  assert.deepEqual(
+    selectedCharacterOnly.assets?.map((item) => item.typeId),
+    [2, 4],
+  );
+
+  const allOrders = filterClientSellOrdersForPlanning(
+    data,
+    {
+      personalSellOrdersAsStock: true,
+      allCorporationSellOrdersAsStock: true,
+      myCorporationSellOrdersAsStock: false,
+    },
+    [7],
+  );
+  assert.deepEqual(
+    allOrders.assets?.map((item) => item.typeId),
+    [1, 2, 3, 4],
+  );
+});
 
 void test("shares overlapping in-flight system name requests", async () => {
   const originalFetch = globalThis.fetch;

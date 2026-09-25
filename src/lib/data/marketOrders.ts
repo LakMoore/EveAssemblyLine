@@ -18,6 +18,9 @@ export type OwnerMarketOrder = {
   locationId: number;
   buyOrderQuantity: number;
   sellOrderQuantity: number;
+  ownerType: "character" | "corporation";
+  ownerId: number;
+  marketOrderIssuerId?: number;
 };
 
 export type OwnerMarketOrdersResponse = OwnerMarketOrder[];
@@ -25,20 +28,29 @@ export type OwnerMarketOrdersResponse = OwnerMarketOrder[];
 function combineMarketOrders(
   sellOrders: PlanStockItem[] | null,
   buyOrders: Awaited<ReturnType<typeof getMarketOrderBuyQuantities>>,
+  owner: { ownerType: OwnerMarketOrder["ownerType"]; ownerId: number },
 ): OwnerMarketOrdersResponse {
   const orders = new Map<string, OwnerMarketOrder>();
-  const getOrder = (typeId: number, locationId: number) => {
-    const key = `${typeId}:${locationId}`;
+  const getOrder = (typeId: number, locationId: number, marketOrderIssuerId?: number) => {
+    const key = `${typeId}:${locationId}:${marketOrderIssuerId ?? ""}`;
     const existing = orders.get(key);
     if (existing) return existing;
-    const order = { typeId, locationId, buyOrderQuantity: 0, sellOrderQuantity: 0 };
+    const order = {
+      typeId,
+      locationId,
+      buyOrderQuantity: 0,
+      sellOrderQuantity: 0,
+      ...owner,
+      ...(marketOrderIssuerId === undefined ? {} : { marketOrderIssuerId }),
+    };
     orders.set(key, order);
     return order;
   };
 
   for (const item of sellOrders ?? []) {
     if (item.sourceLocationId === undefined) continue;
-    getOrder(item.typeId, item.sourceLocationId).sellOrderQuantity += item.quantity;
+    getOrder(item.typeId, item.sourceLocationId, item.marketOrderIssuerId).sellOrderQuantity
+      += item.quantity;
   }
   for (const item of buyOrders ?? []) {
     getOrder(item.typeId, item.locationId).buyOrderQuantity += item.quantity;
@@ -71,7 +83,14 @@ export async function getMarketOrdersForCharacter(
       { includeCorporationOrders: false },
     ),
   ]);
-  return combineMarketOrders(marketOrderStock, marketBuyOrderQuantities);
+  return combineMarketOrders(
+    marketOrderStock,
+    marketBuyOrderQuantities,
+    {
+      ownerType: "character",
+      ownerId: characterId,
+    },
+  );
 }
 
 /** Builds source-filtered market-order stock for one authorized corporation. */
@@ -100,5 +119,12 @@ export async function getMarketOrdersForCorporation(
       { includePersonalOrders: false },
     ),
   ]);
-  return combineMarketOrders(marketOrderStock, marketBuyOrderQuantities);
+  return combineMarketOrders(
+    marketOrderStock,
+    marketBuyOrderQuantities,
+    {
+      ownerType: "corporation",
+      ownerId: corporationId,
+    },
+  );
 }

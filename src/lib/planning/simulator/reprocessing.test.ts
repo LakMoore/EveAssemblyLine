@@ -206,3 +206,47 @@ void test("groups reprocessing jobs by location and source type and sums horizon
     },
   );
 });
+
+void test("does not use market-order lots for reprocessing", () => {
+  const marketOrderInventory: SimulatorInventory = {
+    ...inventory,
+    itemLots: [{ ...inventory.itemLots[0], source: "market-order" }],
+  };
+  const allocator = new SimulationAllocator(marketOrderInventory, []);
+  const industry: IndustrySimulationResult = {
+    transactions: [],
+    manufacturingJobs: [],
+    reactionJobs: [],
+    inventionJobs: [],
+    copyJobs: [],
+    unmetDemands: [
+      {
+        account: materialAccount,
+        quantity: 150,
+        source: {
+          demandId: "source",
+          stockpileId: "main",
+          materialTypeId: 34,
+          productTypeId: 34,
+          productQuantity: 150,
+          plannedQuantity: 150,
+          requiredNow: 150,
+          reserved: 0,
+          destinationLocationId: 20,
+          activity: "manufacturing",
+        },
+        blockedByBuyBlacklist: false,
+        purpose: "material",
+      },
+    ],
+    blueprintPurchases: [],
+    skillsRequired: [],
+    warnings: [],
+    allocator,
+  };
+
+  const reprocessing = settleReprocessing(request, context, marketOrderInventory, industry);
+
+  assert.deepEqual(reprocessing.jobs, []);
+  assert.equal(reprocessing.remainingDemands[0]?.quantity, 150);
+});

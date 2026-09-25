@@ -118,6 +118,7 @@ export class SimulationAllocator {
     let remote = 0;
     let future = 0;
     for (const lot of this.itemLotsByTypeId.get(typeId) ?? []) {
+      if (lot.source === "market-order") continue;
       const quantity = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
       if (quantity <= 0) continue;
       if (lot.horizon === "after-upstream") {
@@ -149,6 +150,7 @@ export class SimulationAllocator {
       (this.itemLotsByTypeId.get(typeId) ?? []).filter(
         (lot) =>
           lot.typeId === typeId
+          && lot.source !== "market-order"
           && lot.horizon === "now"
           && lot.locationId === destinationLocationId,
       ),
@@ -176,6 +178,7 @@ export class SimulationAllocator {
       (this.itemLotsByTypeId.get(typeId) ?? []).filter(
         (lot) =>
           lot.typeId === typeId
+          && lot.source !== "market-order"
           && lot.horizon === "now"
           && lot.locationId !== destinationLocationId
           && !this.isExcluded(lot, destinationLocationId),
@@ -210,7 +213,9 @@ export class SimulationAllocator {
     const reservations: SimulationUpstreamReservation[] = [];
     for (const lot of (this.itemLotsByTypeId.get(typeId) ?? []).filter(
       (candidate) =>
-        candidate.horizon === "after-upstream" && candidate.locationId === account.locationId,
+        candidate.source !== "market-order"
+        && candidate.horizon === "after-upstream"
+        && candidate.locationId === account.locationId,
     )) {
       if (remaining <= 0) break;
       const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
@@ -323,6 +328,33 @@ export class SimulationAllocator {
       future: futureClaim.quantity,
       futureReservations: futureClaim.reservations,
     };
+  }
+
+  /** Claims sell-order lots only when direct final demand is at the order location. */
+  claimSellOrderSupply(
+    typeId: number,
+    quantity: number,
+    destinationLocationId: number,
+    account: SimulationLedgerAccount,
+    demandingJobId?: string,
+    stockpileId?: string,
+  ): number {
+    return this.claimItemLots(
+      (this.itemLotsByTypeId.get(typeId) ?? []).filter(
+        (lot) =>
+          lot.typeId === typeId
+          && lot.source === "market-order"
+          && lot.horizon === "now"
+          && lot.locationId === destinationLocationId,
+      ),
+      quantity,
+      destinationLocationId,
+      account,
+      demandingJobId,
+      "now",
+      stockpileId,
+      "stock",
+    );
   }
 
   /** Allocates manufacturing blueprint runs in stable locality/ME/TE order. */
@@ -587,7 +619,9 @@ export class SimulationAllocator {
     reprocessingJobId: string,
   ): number {
     const lot = this.inventory.itemLots.find((candidate) => candidate.lotId === lotId);
-    if (!lot || !lot.eligibleForReprocessing || quantity <= 0) return 0;
+    if (!lot || lot.source === "market-order" || !lot.eligibleForReprocessing || quantity <= 0) {
+      return 0;
+    }
     if (lot.locationId !== destinationLocationId && this.isExcluded(lot, destinationLocationId)) {
       return 0;
     }

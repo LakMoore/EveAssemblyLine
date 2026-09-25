@@ -393,6 +393,21 @@ function futureSupply(item: SimulationMaterialBalance): number {
   );
 }
 
+/** Returns immediate supply sources that need a provenance icon beside availability. */
+function immediateSupplySources(item: SimulationMaterialBalance) {
+  return item.availableFromSellOrders > 0
+    ? [
+        {
+          key: "sell-orders",
+          label: "Sell orders",
+          quantity: item.availableFromSellOrders,
+          source: "market" as const,
+          Icon: ShoppingCart,
+        },
+      ]
+    : [];
+}
+
 type FutureSupplySource = {
   key: string;
   label: string;
@@ -1329,7 +1344,7 @@ function SimulationMaterialsTab({
       ...filteredItems.map((item) =>
         [
           item.typeName,
-          item.availableNow.toLocaleString(),
+          (item.availableNow + item.availableFromSellOrders).toLocaleString(),
           item.requiredNow.toLocaleString(),
           futureSupply(item).toLocaleString(),
           item.reserved.toLocaleString(),
@@ -1781,13 +1796,40 @@ function MaterialBalanceSummary({
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
 }) {
   const supplySources = futureSupplySources(item);
+  const immediateSources = immediateSupplySources(item);
   const marketBuyOrderQuantity = marketBuyOrderQuantities?.[String(item.typeId)] ?? 0;
   return (
     <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_minmax(5rem,auto)] gap-x-3 gap-y-1 text-right md:grid-cols-6 md:gap-x-3">
       <span className="text-muted-foreground md:hidden">Available</span>
       <span className="flex items-center justify-end gap-2">
+        {immediateSources.map(({ key, label, quantity: sourceQuantity, source, Icon }) => (
+          <Tooltip key={key}>
+            <TooltipTrigger
+              render={
+                <span
+                  aria-label={`${label}: ${sourceQuantity.toLocaleString()}`}
+                  className={cn(
+                    styles.simulationSourceIcon,
+                    "inline-flex size-5 items-center justify-center",
+                  )}
+                  data-source={source}
+                  role="img"
+                  tabIndex={0}
+                >
+                  <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
+                </span>
+              }
+            />
+            <TooltipContent>
+              {label}: {sourceQuantity.toLocaleString()}
+            </TooltipContent>
+          </Tooltip>
+        ))}
         <MarketBuyOrderIndicator quantity={marketBuyOrderQuantity} />
-        <CopyableNumber value={item.availableNow} copyLabel="Available quantity" />
+        <CopyableNumber
+          value={item.availableNow + item.availableFromSellOrders}
+          copyLabel="Available quantity"
+        />
       </span>
       <span className="text-muted-foreground md:hidden">Immediate Demand</span>
       <span>

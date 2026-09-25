@@ -333,7 +333,10 @@ export function settleReprocessing(
       const available = industry.allocator.remainingItemQuantity(lot.lotId);
       const materials = context.typeMaterials.get(lot.typeId)?.materials ?? [];
       const portionSize = Math.max(1, context.types.get(lot.typeId)?.portionSize ?? 1);
-      return lot.eligibleForReprocessing && available >= portionSize && materials.length > 0
+      return lot.source !== "market-order"
+        && lot.eligibleForReprocessing
+        && available >= portionSize
+        && materials.length > 0
         ? [
             {
               lot,

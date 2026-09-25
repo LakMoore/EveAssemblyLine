@@ -172,6 +172,7 @@ export function filterClientAssetsForPlanning(data: ClientAssetsResponse): Clien
   return {
     ...data,
     assets: (data.assets ?? []).filter((item) => {
+      if (item.source === "marketOrder") return true;
       if (item.ownerType !== "corporation") return true;
       const source = item.corporationSource;
       const sourceDetails =
@@ -223,6 +224,38 @@ export function filterClientAssetsForPlanning(data: ClientAssetsResponse): Clien
         || (
           (source.locationFlag === "" ? directSourceLocationSelected : directSourceSelected)
           && source.containerItemIds.length === 0
+        )
+      );
+    }),
+  };
+}
+
+/** Settings used to select which projected sell orders can enter a planning request. */
+export type ClientSellOrderPlanningSettings = {
+  personalSellOrdersAsStock: boolean;
+  allCorporationSellOrdersAsStock: boolean;
+  myCorporationSellOrdersAsStock: boolean;
+};
+
+/** Filters sell orders after authorization and before they are sent to a planning endpoint. */
+export function filterClientSellOrdersForPlanning(
+  data: ClientAssetsResponse,
+  settings: ClientSellOrderPlanningSettings,
+  characterIds: readonly number[],
+): ClientAssetsResponse {
+  const attachedCharacterIds = new Set(characterIds);
+  return {
+    ...data,
+    assets: (data.assets ?? []).filter((item) => {
+      if (item.source !== "marketOrder") return true;
+      if (item.ownerType === "character") return settings.personalSellOrdersAsStock;
+      if (item.ownerType !== "corporation") return settings.personalSellOrdersAsStock;
+      return (
+        settings.allCorporationSellOrdersAsStock
+        || (
+          settings.myCorporationSellOrdersAsStock
+          && item.marketOrderIssuerId !== undefined
+          && attachedCharacterIds.has(item.marketOrderIssuerId)
         )
       );
     }),

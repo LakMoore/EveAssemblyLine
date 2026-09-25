@@ -3250,6 +3250,7 @@ export async function getMarketOrderStock(
           sourceLocationId: order.locationId,
           ownerType: order.ownerType,
           ownerId: order.ownerId,
+          marketOrderIssuerId: order.issuedBy,
           category: "item",
           source: "marketOrder",
         });
@@ -3305,6 +3306,7 @@ export async function getMarketOrderStock(
         sourceLocationId: order.locationId,
         ownerType: order.ownerType,
         ownerId: order.ownerId,
+        marketOrderIssuerId: order.issuedBy,
         category: "item",
         source: "marketOrder",
         ...(corporationSource ? { corporationSource } : {}),

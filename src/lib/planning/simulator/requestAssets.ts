@@ -3,7 +3,8 @@ import type { StockItem } from "@/lib/planning/types";
 /** Returns whether an inventory item can contribute to a simulation request. */
 function isSimulationAssetEligible(item: StockItem): boolean {
   return (
-    item.isPackaged === true
+    item.source === "marketOrder"
+    || item.isPackaged === true
     || item.blueprintPrints !== undefined
     || item.category === "blueprint"
     || item.category === "reactionformula"

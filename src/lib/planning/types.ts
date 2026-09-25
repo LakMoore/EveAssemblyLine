@@ -130,6 +130,7 @@ export interface StockItemBase {
   blueprintType?: BlueprintType;
   activityName?: string;
   jobRuns?: number;
+  marketOrderIssuerId?: number;
   me?: number;
   te?: number;
   corporationSource?: {

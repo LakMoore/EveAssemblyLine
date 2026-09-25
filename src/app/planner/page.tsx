@@ -46,6 +46,7 @@ import {
   groupClientAssetsByLocation,
   type ClientRefreshEventDetail,
   filterClientAssetsForPlanning,
+  filterClientSellOrdersForPlanning,
   type ClientAssetsResponse,
   type ClientCharacterStatus,
   type ClientCorporationSource,
@@ -240,6 +241,7 @@ function toSimulationAsset(item: PlanStockItem): SimulationAsset {
     sourceLocationKind: _sourceLocationKind,
     sourceSystemName: _sourceSystemName,
     techLevel: _techLevel,
+    marketOrderIssuerId: _marketOrderIssuerId,
     isCargoContainer: _isCargoContainer,
     isPackaged: _isPackaged,
     isShip: _isShip,
@@ -252,9 +254,21 @@ function getPlannerStock(
   assets: ClientAssetsResponse | null,
   includeStock: boolean,
   excludedLocationIds: ReadonlySet<number>,
+  settings: Pick<
+    PlannerSettings,
+    | "personalSellOrdersAsStock"
+    | "allCorporationSellOrdersAsStock"
+    | "myCorporationSellOrdersAsStock"
+  >,
+  characterIds: readonly number[],
 ): PlanStockItem[] {
   if (!includeStock || !assets) return [];
-  return (filterClientAssetsForPlanning(assets).assets ?? []).filter((item) => {
+  const planningAssets = filterClientSellOrdersForPlanning(
+    filterClientAssetsForPlanning(assets),
+    settings,
+    characterIds,
+  );
+  return (planningAssets.assets ?? []).filter((item) => {
     const locationId = getStockLocationId(item);
     return locationId === undefined || !excludedLocationIds.has(locationId);
   });
@@ -714,7 +728,13 @@ function Planner() {
     };
   }, [language]);
 
-  const stock = getPlannerStock(clientAssets, includeStock, new Set(excludedLocationIds));
+  const stock = getPlannerStock(
+    clientAssets,
+    includeStock,
+    new Set(excludedLocationIds),
+    settings,
+    characterStatuses.map((character) => character.characterId),
+  );
   const activeHaulPatches =
     haulPatchesLoaded && characterStatuses.length > 0
       ? new Map(
@@ -939,7 +959,13 @@ function Planner() {
         setPlanStatus("Account assets are still loading");
         return false;
       }
-      workingAssets = getPlannerStock(clientAssets, includeStock, exclusions);
+      workingAssets = getPlannerStock(
+        clientAssets,
+        includeStock,
+        exclusions,
+        settings,
+        characterStatuses.map((character) => character.characterId),
+      );
       const primaryStockpileLocations = populatedStockpiles[0].locations;
       const selectedManufacturingFacility = locationOptions.find(
         (location) => location.locationId === primaryStockpileLocations.manufacturing,
@@ -1020,10 +1046,14 @@ function Planner() {
               ),
             },
             settings: {
-              includeCorporationAssets: settings.includeCorporationAssets,
-              personalSellOrdersAsStock: settings.personalSellOrdersAsStock,
-              allCorporationSellOrdersAsStock: settings.allCorporationSellOrdersAsStock,
-              myCorporationSellOrdersAsStock: settings.myCorporationSellOrdersAsStock,
+              ...(mode === "calculate"
+                ? {
+                    includeCorporationAssets: settings.includeCorporationAssets,
+                    personalSellOrdersAsStock: settings.personalSellOrdersAsStock,
+                    allCorporationSellOrdersAsStock: settings.allCorporationSellOrdersAsStock,
+                    myCorporationSellOrdersAsStock: settings.myCorporationSellOrdersAsStock,
+                  }
+                : { includeCorporationAssets: settings.includeCorporationAssets }),
               buildBlacklist: settings.buildBlacklist.map((item) => item.typeId),
               buyBlacklist: [],
               fallbackT1Me: settings.fallbackT1Me,
@@ -1252,7 +1282,13 @@ function Planner() {
 
   async function toggleHaulPatches(tasks: ResponseHaulTask[], patched: boolean) {
     const nextPatches = new Map(activeHaulPatches);
-    const currentStock = getPlannerStock(clientAssets, includeStock, new Set(excludedLocationIds));
+    const currentStock = getPlannerStock(
+      clientAssets,
+      includeStock,
+      new Set(excludedLocationIds),
+      settings,
+      characterStatuses.map((character) => character.characterId),
+    );
     for (const task of tasks) {
       if (
         haulItemExclusion.has(

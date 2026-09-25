@@ -68,6 +68,7 @@ const planStockItemSchema = z
     inBuildQuantity: nonNegativeInteger.optional(),
     futureReprocessingOutput: z.boolean().optional(),
     source: z.literal("marketOrder").optional(),
+    marketOrderIssuerId: positiveSafeInteger.optional(),
     inBuild: z.boolean().optional(),
     inUse: z.boolean().optional(),
     jobId: positiveSafeInteger.optional(),
@@ -247,9 +248,6 @@ export const simulatorRequestSchema = z
       .optional(),
     settings: z.object({
       includeCorporationAssets: z.boolean(),
-      personalSellOrdersAsStock: z.boolean(),
-      allCorporationSellOrdersAsStock: z.boolean(),
-      myCorporationSellOrdersAsStock: z.boolean(),
       buildBlacklist: z.array(positiveSafeInteger).max(100000),
       buyBlacklist: z.array(positiveSafeInteger).max(100000),
       fallbackT1Me: percentage.max(10).optional(),

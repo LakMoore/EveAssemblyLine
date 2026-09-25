@@ -5,6 +5,7 @@ import { buildDependencyGraph } from "./dependencyGraph";
 import { simulateIndustryDemand } from "./industrySimulation";
 import { projectSimulationLedger } from "./ledger";
 import { parseSimulatorRequest } from "./schema";
+import { simulateIndustry } from "./simulate";
 import { normalizeSimulatorInventory } from "./sourceLots";
 
 void test("declares an exact SDE-backed manufacturing job without inventing available stock", async () => {
@@ -175,4 +176,86 @@ void test("defers available Tritanium when another job prerequisite blocks insta
     result.unmetDemands.some((demand) => demand.account.typeId === 34),
     false,
   );
+});
+
+void test("uses sell orders for direct demand and keeps their ledger source separate", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "market-stockpile",
+        name: "Market stockpile",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 34, quantity: 150, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [
+      { typeId: 34, name: "Tritanium", quantity: 71, locationId: 10 },
+      {
+        typeId: 34,
+        name: "Tritanium",
+        quantity: 81,
+        locationId: 10,
+        source: "marketOrder",
+      },
+    ],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1 },
+  });
+  const result = await simulateIndustry(request);
+  const balance = result.ledgers
+    .find((ledger) => ledger.locationId === 10)
+    ?.balances.find((candidate) => candidate.typeId === 34);
+
+  assert.ok(balance);
+  assert.equal(balance.availableNow, 71);
+  assert.equal(balance.availableFromSellOrders, 81);
+  assert.equal(balance.unsatisfied, 0);
+  assert.equal(result.lists.haulingTasks.length, 0);
+});
+
+void test("does not use sell orders for manufacturing inputs or hauling", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "manufacturing-stockpile",
+        name: "Manufacturing stockpile",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 587, quantity: 1, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [
+      {
+        typeId: 34,
+        name: "Tritanium",
+        quantity: 1_000_000,
+        locationId: 20,
+        source: "marketOrder",
+      },
+    ],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1 },
+  });
+  const result = await simulateIndustry(request);
+  const job = result.lists.manufacturingJobs.find((candidate) => candidate.productTypeId === 587);
+  const input = job?.inputs.find((candidate) => candidate.typeId === 34);
+
+  assert.ok(input);
+  assert.equal(input.availableNow, 0);
+  assert.equal(input.availableFromHauling, 0);
+  assert.ok((input.purchaseQuantity ?? 0) > 0);
+  assert.equal(result.lists.haulingTasks.length, 0);
 });

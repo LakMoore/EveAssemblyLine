@@ -28,6 +28,9 @@ type ClientOwnerSnapshotMarketOrder = {
   locationId: number;
   buyOrderQuantity: number;
   sellOrderQuantity: number;
+  ownerType?: "character" | "corporation";
+  ownerId?: number;
+  marketOrderIssuerId?: number;
 };
 type ClientOwnerSnapshotJob = {
   jobId: number;
@@ -410,6 +413,13 @@ function isSnapshotMarketOrder(value: unknown): value is ClientOwnerSnapshotMark
     && isPositiveInteger(value.locationId)
     && isNonNegativeNumber(value.buyOrderQuantity)
     && isNonNegativeNumber(value.sellOrderQuantity)
+    && (
+      value.ownerType === undefined
+      || value.ownerType === "character"
+      || value.ownerType === "corporation"
+    )
+    && (value.ownerId === undefined || isPositiveInteger(value.ownerId))
+    && (value.marketOrderIssuerId === undefined || isPositiveInteger(value.marketOrderIssuerId))
   );
 }
 

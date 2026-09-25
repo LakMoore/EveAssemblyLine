@@ -13,6 +13,23 @@ void test("filters non-packaged ordinary assets and preserves packaged assets", 
   );
 });
 
+void test("preserves market sell orders even without packaged metadata", () => {
+  const prepared = prepareSimulationAssets([
+    {
+      typeId: 34,
+      name: "Tritanium",
+      quantity: 81,
+      locationId: 10,
+      source: "marketOrder",
+    },
+  ]);
+
+  assert.deepEqual(
+    prepared.map((item) => item.typeId),
+    [34],
+  );
+});
+
 void test("merges blueprint prints by type, location, and owner", () => {
   const prepared = prepareSimulationAssets([
     {

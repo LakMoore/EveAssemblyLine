@@ -269,6 +269,11 @@ function projectMarketOrderStock(
       packagedVolume: metadata?.packagedVolume,
       techLevel: metadata?.techLevel,
       assemblyLineGroup: metadata?.assemblyLineGroup,
+      ownerType: snapshot.owner.kind,
+      ownerId: snapshot.owner.id,
+      ...(order.marketOrderIssuerId === undefined
+        ? {}
+        : { marketOrderIssuerId: order.marketOrderIssuerId }),
       source: "marketOrder" as const,
     };
   });

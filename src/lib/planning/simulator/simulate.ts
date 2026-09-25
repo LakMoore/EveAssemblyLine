@@ -124,6 +124,7 @@ function sourceAvailabilityTransactions(
         lotId: lot.lotId,
         quantity: lot.quantity,
         horizon: "now" as const,
+        source: lot.source === "market-order" ? "market-order" : "asset",
       },
     ];
   });
@@ -227,6 +228,7 @@ function presentationItems(
             balance.requiredNow > 0
             || balance.reserved > 0
             || balance.availableNow > 0
+            || balance.availableFromSellOrders > 0
             || balance.availableFromHauling > 0
             || balance.availableFromProduction > 0
             || balance.availableFromCopying > 0

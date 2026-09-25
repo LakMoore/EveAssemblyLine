@@ -249,8 +249,23 @@ class IndustryDemandSimulation {
                   isReprocessingInput ? "reprocessing" : "stock",
                 ),
             );
-            this.setDemandReadiness(source, existing.local);
-            const remaining = item.quantity - existing.local - existing.remote - existing.future;
+            const sellOrderQuantity = isReprocessingInput
+              ? 0
+              : this.allocator.claimSellOrderSupply(
+                  item.typeId,
+                  item.quantity - existing.local - existing.remote - existing.future,
+                  account.locationId,
+                  account,
+                  undefined,
+                  stockpile.id,
+                );
+            this.setDemandReadiness(source, existing.local + sellOrderQuantity);
+            const remaining =
+              item.quantity
+              - existing.local
+              - existing.remote
+              - existing.future
+              - sellOrderQuantity;
             if (remaining > 0) {
               if (isReprocessingInput) {
                 this.recordUnmet(account, remaining, source, "reprocessing-input");

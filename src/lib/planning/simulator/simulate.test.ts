@@ -87,6 +87,11 @@ void test("assembles a versioned invariant-safe result from the cached SDE", asy
   assert.equal(first.metadata.normalizedInputHash, second.metadata.normalizedInputHash);
   assert.equal(first.metadata.invariantViolationCount, 0);
   assert.ok(first.lists.manufacturingJobs.some((job) => job.productTypeId === 587));
+  const manufacturedPlanItem = first.lists.planItems
+    .flatMap((bucket) => bucket.items)
+    .find((item) => item.typeId === 587);
+  assert.ok(manufacturedPlanItem);
+  assert.ok(manufacturedPlanItem.availableFromProduction > 0);
   assert.ok(
     first.lists.planItems.some((bucket) =>
       bucket.items.some((item) => item.requiredNow + item.reserved > 0),
@@ -97,6 +102,46 @@ void test("assembles a versioned invariant-safe result from the cached SDE", asy
       ledger.balances.some((balance) => balance.requiredNow + balance.reserved > 0),
     ),
   );
+});
+
+void test("keeps sell-order availability in the Plan presentation", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "market-stockpile",
+        name: "Market stockpile",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 34, quantity: 81, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [
+      {
+        typeId: 34,
+        name: "Tritanium",
+        quantity: 81,
+        locationId: 10,
+        source: "marketOrder",
+      },
+    ],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1 },
+  });
+
+  const result = await simulateIndustry(request);
+  const item = result.lists.planItems
+    .flatMap((bucket) => bucket.items)
+    .find((candidate) => candidate.typeId === 34);
+
+  assert.ok(item);
+  assert.equal(item.availableNow, 0);
+  assert.equal(item.availableFromSellOrders, 81);
 });
 
 void test("tracks reaction formula counts and required runs at the reaction location", async () => {

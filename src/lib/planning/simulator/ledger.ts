@@ -30,6 +30,7 @@ export type SimulationTransaction =
       lotId: string;
       quantity: number;
       horizon: Extract<SupplyHorizon, "now" | "after-hauling">;
+      source?: "asset" | "market-order";
     }
   | {
       id: string;
@@ -116,6 +117,7 @@ function emptyBalance(
     requiredNow: 0,
     reserved: 0,
     availableNow: 0,
+    availableFromSellOrders: 0,
     availableFromHauling: 0,
     availableFromProduction: 0,
     availableFromCopying: 0,
@@ -192,7 +194,10 @@ export function projectSimulationLedger(
         transaction.lotId,
         (exposedByLotId.get(transaction.lotId) ?? 0) + transaction.quantity,
       );
-      if (transaction.horizon === "now") balance.availableNow += transaction.quantity;
+      if (transaction.horizon === "now" && transaction.source === "market-order") {
+        balance.availableFromSellOrders += transaction.quantity;
+      }
+      else if (transaction.horizon === "now") balance.availableNow += transaction.quantity;
       else balance.availableFromHauling += transaction.quantity;
     }
     else if (transaction.kind === "demand") {
@@ -311,6 +316,7 @@ export function projectSimulationLedger(
       const physicalAvailable = balance.availableNow + balance.availableFromHauling;
       const plannedSupply =
         physicalAvailable
+        + balance.availableFromSellOrders
         + balance.availableFromProduction
         + balance.availableFromCopying
         + balance.availableFromInvention
