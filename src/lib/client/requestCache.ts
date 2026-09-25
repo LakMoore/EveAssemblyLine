@@ -248,6 +248,7 @@ export function filterClientSellOrdersForPlanning(
     ...data,
     assets: (data.assets ?? []).filter((item) => {
       if (item.source !== "marketOrder") return true;
+      if (item.marketOrderSide === "buy") return false;
       if (item.ownerType === "character") return settings.personalSellOrdersAsStock;
       if (item.ownerType !== "corporation") return settings.personalSellOrdersAsStock;
       return (

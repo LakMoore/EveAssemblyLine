@@ -131,6 +131,7 @@ export interface StockItemBase {
   activityName?: string;
   jobRuns?: number;
   marketOrderIssuerId?: number;
+  marketOrderSide?: "buy" | "sell";
   me?: number;
   te?: number;
   corporationSource?: {

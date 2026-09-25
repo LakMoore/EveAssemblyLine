@@ -6,7 +6,7 @@ import {
   projectOwnerSnapshotsToClientShips,
 } from "./ownerSnapshotProjection";
 import type { ClientOwnerSnapshot } from "./ownerSnapshotCache";
-import { filterClientAssetsForPlanning } from "./requestCache";
+import { filterClientAssetsForPlanning, filterClientSellOrdersForPlanning } from "./requestCache";
 
 function slice<T>(data: T) {
   return { eTag: "test", data, status: { status: "cached" as const, hasBody: true } };
@@ -1004,15 +1004,50 @@ void test("projects normalized market order quantities", () => {
             buyOrderQuantity: 0,
             sellOrderQuantity: 25,
           },
+          {
+            typeId: 35,
+            locationId: 600,
+            buyOrderQuantity: 12,
+            sellOrderQuantity: 0,
+          },
         ]),
       },
     ],
     { metadata: [] },
   );
 
-  const projectedMarketOrder = result.assets?.[1];
-  assert.ok(projectedMarketOrder);
-  assert.equal(projectedMarketOrder.sourceLocationId, 600);
-  assert.equal(projectedMarketOrder.quantity, 25);
-  assert.equal(projectedMarketOrder.isPackaged, true);
+  assert.ok(result.assets);
+  assert.ok(result.marketBuyOrderQuantities);
+  const projectedMarketOrders = result.assets.filter((item) => item.source === "marketOrder");
+  assert.equal(projectedMarketOrders.length, 2);
+  assert.deepEqual(
+    projectedMarketOrders.map((item) => ({
+      typeId: item.typeId,
+      quantity: item.quantity,
+      marketOrderSide: item.marketOrderSide,
+    })),
+    [
+      { typeId: 34, quantity: 25, marketOrderSide: "sell" },
+      { typeId: 35, quantity: 12, marketOrderSide: "buy" },
+    ],
+  );
+  assert.equal(projectedMarketOrders[0]?.sourceLocationId, 600);
+  assert.equal(projectedMarketOrders[0]?.isPackaged, true);
+  assert.equal(result.marketBuyOrderQuantities["35"], 12);
+  const planningAssets = filterClientSellOrdersForPlanning(
+    result,
+    {
+      personalSellOrdersAsStock: true,
+      allCorporationSellOrdersAsStock: true,
+      myCorporationSellOrdersAsStock: true,
+    },
+    [],
+  );
+  assert.ok(planningAssets.assets);
+  assert.deepEqual(
+    planningAssets.assets
+      .filter((item) => item.source === "marketOrder")
+      .map((item) => item.typeId),
+    [34],
+  );
 });

@@ -3360,23 +3360,11 @@ export async function getMarketOrderBuyQuantities(
         continue;
       }
       hasUsableSource = true;
-      const policy = projection.policiesByCorporationId.get(corporationId);
-      const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
-      const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
-      const structureIds = knownStructureIds(cache);
+      // Market orders are authorized by the corporation orders endpoint; they are not
+      // physical corporation assets and should not depend on a selected hangar source.
       addMarketBuyOrderQuantitiesByLocation(
         quantities,
-        (cache.marketOrders?.lastBody ?? []).filter(
-          (order) =>
-            !policy
-            || isCorporationLocationAccessible(
-              order.locationId,
-              policy,
-              projection.characters,
-              rawAssetsByItemId,
-              structureIds,
-            ),
-        ),
+        cache.marketOrders?.lastBody ?? [],
         seenOrderIds,
       );
     }

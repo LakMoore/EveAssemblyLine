@@ -248,35 +248,38 @@ function projectMarketOrderStock(
   metadataByTypeId: Map<number, TypeMetadata>,
 ): StockItem[] {
   return snapshot.marketOrders.data.flatMap((order) => {
-    if (order.sellOrderQuantity <= 0) return [];
-    const item = {
-      typeId: order.typeId,
-      quantity: order.sellOrderQuantity,
-      sourceLocationId: order.locationId,
+    const metadata = metadataByTypeId.get(order.typeId);
+    const projectOrder = (quantity: number, marketOrderSide: "buy" | "sell"): StockItem | null => {
+      if (quantity <= 0) return null;
+      return {
+        typeId: order.typeId,
+        quantity,
+        sourceLocationId: order.locationId,
+        name: metadata?.name ?? `Type ${order.typeId}`,
+        rootLocationId: order.locationId,
+        category: metadata?.category ?? "item",
+        isPackaged: true,
+        ...(metadata?.isShip !== undefined ? { isShip: metadata.isShip } : {}),
+        ...(metadata?.isCargoContainer !== undefined
+          ? { isCargoContainer: metadata.isCargoContainer }
+          : {}),
+        assembledVolume: metadata?.assembledVolume,
+        packagedVolume: metadata?.packagedVolume,
+        techLevel: metadata?.techLevel,
+        assemblyLineGroup: metadata?.assemblyLineGroup,
+        ownerType: snapshot.owner.kind,
+        ownerId: snapshot.owner.id,
+        ...(order.marketOrderIssuerId === undefined
+          ? {}
+          : { marketOrderIssuerId: order.marketOrderIssuerId }),
+        marketOrderSide,
+        source: "marketOrder" as const,
+      } satisfies StockItem;
     };
-    const metadata = metadataByTypeId.get(item.typeId);
-    const rootLocationId = item.sourceLocationId;
-    return {
-      ...item,
-      name: metadata?.name ?? `Type ${item.typeId}`,
-      rootLocationId,
-      category: metadata?.category ?? "item",
-      isPackaged: true,
-      ...(metadata?.isShip !== undefined ? { isShip: metadata.isShip } : {}),
-      ...(metadata?.isCargoContainer !== undefined
-        ? { isCargoContainer: metadata.isCargoContainer }
-        : {}),
-      assembledVolume: metadata?.assembledVolume,
-      packagedVolume: metadata?.packagedVolume,
-      techLevel: metadata?.techLevel,
-      assemblyLineGroup: metadata?.assemblyLineGroup,
-      ownerType: snapshot.owner.kind,
-      ownerId: snapshot.owner.id,
-      ...(order.marketOrderIssuerId === undefined
-        ? {}
-        : { marketOrderIssuerId: order.marketOrderIssuerId }),
-      source: "marketOrder" as const,
-    };
+    return [
+      projectOrder(order.sellOrderQuantity, "sell"),
+      projectOrder(order.buyOrderQuantity, "buy"),
+    ].filter((item): item is StockItem => item !== null);
   });
 }
 

@@ -101,7 +101,7 @@ type PasteResult = {
 };
 type StockFilter =
   | { kind: "all" }
-  | { kind: "sales" }
+  | { kind: "orders" }
   | { kind: "jobs" }
   | { kind: "category" | "market"; value: string };
 type AssetTypeFilter = { id: number; name: string };
@@ -854,7 +854,7 @@ function StockLocationCard({
           : item.assemblyLineGroup,
     )
     .map((group) => group.assemblyLineGroup);
-  const sellOrderCount = items.filter((item) => item.source === "marketOrder").length;
+  const marketOrderCount = items.filter((item) => item.source === "marketOrder").length;
   const installedJobCount = new Set(
     items.map((item) => item.jobId).filter((jobId): jobId is number => jobId !== undefined),
   ).size;
@@ -875,12 +875,12 @@ function StockLocationCard({
       };
     }),
     {
-      id: "sales",
-      label: "Sales",
+      id: "market",
+      label: "Market",
       icon: ChartLine,
-      count: sellOrderCount,
-      detail: "Sell orders",
-      filter: { kind: "sales" as const },
+      count: marketOrderCount,
+      detail: "Orders",
+      filter: { kind: "orders" as const },
     },
     {
       id: "jobs",
@@ -993,7 +993,8 @@ type StockTypeBucket = {
   item: StockItem;
   stockQuantity: number;
   productionQuantity: number;
-  marketQuantity: number;
+  sellingQuantity: number;
+  buyingQuantity: number;
   bpoCount: number;
   bpoInUseCount: number;
   bpcProductionCount: number;
@@ -1031,7 +1032,7 @@ function ViewItemsModal({
   const filteredItems = location.items.filter((item) => {
     if (assetTypeFilter !== null && item.typeId !== assetTypeFilter.id) return false;
     if (filter.kind === "all") return true;
-    if (filter.kind === "sales") return item.source === "marketOrder";
+    if (filter.kind === "orders") return item.source === "marketOrder";
     if (filter.kind === "jobs") return jobTypeIds.has(item.typeId);
     if (filter.kind === "market") return item.assemblyLineGroup === filter.value;
     return filter.value === "bpc"
@@ -1045,7 +1046,8 @@ function ViewItemsModal({
     const isProduction = isActiveProductionItem(item);
     const stockQuantity = !isMarketOrder && !isProduction ? item.quantity : 0;
     const productionQuantity = isProduction ? (item.inBuildQuantity ?? item.quantity) : 0;
-    const marketQuantity = isMarketOrder ? item.quantity : 0;
+    const sellingQuantity = isMarketOrder && item.marketOrderSide !== "buy" ? item.quantity : 0;
+    const buyingQuantity = isMarketOrder && item.marketOrderSide === "buy" ? item.quantity : 0;
     const isBlueprint = isBlueprintStockItem(item);
     const isBpo = isBlueprint && item.blueprintType === "bpo";
     const isBpc = isBlueprint && item.blueprintType !== "bpo";
@@ -1071,7 +1073,8 @@ function ViewItemsModal({
           item,
           stockQuantity,
           productionQuantity,
-          marketQuantity,
+          sellingQuantity,
+          buyingQuantity,
           ...blueprintSummary,
           category: item.category,
           assemblyLineGroup: item.assemblyLineGroup,
@@ -1081,7 +1084,8 @@ function ViewItemsModal({
     }
     existing.stockQuantity += stockQuantity;
     existing.productionQuantity += productionQuantity;
-    existing.marketQuantity += marketQuantity;
+    existing.sellingQuantity += sellingQuantity;
+    existing.buyingQuantity += buyingQuantity;
     existing.bpoCount += blueprintSummary.bpoCount;
     existing.bpoInUseCount += blueprintSummary.bpoInUseCount;
     existing.bpcProductionCount += blueprintSummary.bpcProductionCount;
@@ -1096,8 +1100,8 @@ function ViewItemsModal({
   const title =
     filter.kind === "all"
       ? "All items"
-      : filter.kind === "sales"
-        ? "Sales"
+      : filter.kind === "orders"
+        ? "Orders"
         : filter.kind === "jobs"
           ? "Jobs"
           : filter.kind === "market"
@@ -1128,10 +1132,10 @@ function ViewItemsModal({
         </button>
         <button
           type="button"
-          className={filter.kind === "sales" ? styles.stockFilterActive : ""}
-          onClick={() => onFilterChange({ kind: "sales" })}
+          className={filter.kind === "orders" ? styles.stockFilterActive : ""}
+          onClick={() => onFilterChange({ kind: "orders" })}
         >
-          Sales
+          Orders
         </button>
         <button
           type="button"
@@ -1167,7 +1171,8 @@ function ViewItemsModal({
                 item,
                 stockQuantity,
                 productionQuantity,
-                marketQuantity,
+                sellingQuantity,
+                buyingQuantity,
                 bpoCount,
                 bpoInUseCount,
                 bpcProductionCount,
@@ -1272,13 +1277,16 @@ function ViewItemsModal({
                         <b>{stockQuantity.toLocaleString()}</b>
                         <small>Available</small>
                       </span>
-                      {marketQuantity > 0 && (
-                        <span>
-                          <ShoppingCart aria-hidden="true" />
-                          <b>{marketQuantity.toLocaleString()}</b>
-                          <small>On market</small>
-                        </span>
-                      )}
+                      <span>
+                        <ShoppingCart aria-hidden="true" />
+                        <b>{sellingQuantity.toLocaleString()}</b>
+                        <small>Selling</small>
+                      </span>
+                      <span>
+                        <ShoppingCart aria-hidden="true" />
+                        <b>{buyingQuantity.toLocaleString()}</b>
+                        <small>Buying</small>
+                      </span>
                     </div>
                   )}
                 </div>
