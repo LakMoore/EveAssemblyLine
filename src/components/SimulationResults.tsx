@@ -2599,7 +2599,8 @@ function SimulationActivityTab({
                 ? generatedSchedule
                 : completedSchedule;
             const included = controls.isIncluded(rowKey);
-            const installableRuns = schedule?.runs ?? 0;
+            const installableRuns =
+              schedule && schedule.runs > 0 ? schedule.runs : getSimulationInstallableRuns(job);
             const installedRuns = controls.getInstalledRuns(
               rowKey,
               active ? generatedScheduleIdentity : baseScheduleRevision,
@@ -2629,16 +2630,17 @@ function SimulationActivityTab({
               blueprintCounts: simulationBlueprintCounts(job, stock),
             };
           });
-          const groupInstallableRuns = groupEntries.reduce(
+          const installableGroupEntries = groupEntries.filter((entry) => entry.installableRuns > 0);
+          const groupInstallableRuns = installableGroupEntries.reduce(
             (total, entry) => total + entry.installableRuns,
             0,
           );
-          const groupInstalledRuns = groupEntries.reduce(
+          const groupInstalledRuns = installableGroupEntries.reduce(
             (total, entry) => total + entry.installedRuns,
             0,
           );
           const groupCompleted =
-            groupEntries.length > 0 && groupEntries.every((entry) => entry.completed);
+            groupInstallableRuns > 0 && groupInstalledRuns >= groupInstallableRuns;
           const groupPartiallyInstalled = groupInstalledRuns > 0 && !groupCompleted;
           const groupIncluded = groupEntries.every((entry) => entry.included);
           const updateGroupCompletion = (checked: boolean) => {
