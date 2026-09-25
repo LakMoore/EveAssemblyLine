@@ -1,5 +1,11 @@
 import type { PlanRequest, PlanStockItem, StockItem, StockOwnerType } from "@/lib/planning/types";
 
+/** Sanitized provenance needed to model an already-installed industry output. */
+export interface SimulationIndustryOutputMarker {
+  activity: "manufacturing" | "reaction";
+  state: "active" | "paused" | "available" | "excluded";
+}
+
 /** Asset fields required by simulation; display metadata is resolved from SDE context. */
 export type SimulationAsset = Omit<
   StockItem,
@@ -12,11 +18,18 @@ export type SimulationAsset = Omit<
   | "blueprintType"
   | "sourceLocationKind"
   | "marketOrderIssuerId"
+  | "inBuild"
+  | "jobId"
+  | "industryJobStatus"
+  | "industryJobEndDate"
+  | "activityName"
   | "techLevel"
   | "isCargoContainer"
   | "isPackaged"
   | "isShip"
->;
+> & {
+  industryOutput?: SimulationIndustryOutputMarker;
+};
 
 type CategorizedPlanAssets = Exclude<NonNullable<PlanRequest["assets"]>, PlanStockItem[]>;
 
@@ -133,10 +146,14 @@ export interface SimulationMaterialBalance {
   locationId: number;
   requiredNow: number;
   reserved: number;
+  futureDemand: number;
+  futureSupply: number;
   availableNow: number;
   availableFromSellOrders: number;
   availableFromHauling: number;
+  inFlightQuantity: number;
   availableFromProduction: number;
+  activityType?: "manufacturing" | "reaction";
   availableFromCopying: number;
   availableFromInvention: number;
   availableFromReprocessing: number;
@@ -412,10 +429,10 @@ export interface SimulationLedgerView {
 }
 
 /** Versioned native simulator result; all rows are ready for direct presentation. */
-export interface SimulationResultV1 {
+export interface SimulationResultV2 {
   metadata: {
     simulationId?: string;
-    simulatorVersion: 1;
+    simulatorVersion: 2;
     policyVersion: 1;
     generatedAt: string;
     sdeRevision: string;
@@ -444,6 +461,6 @@ export interface SimulationResultV1 {
 }
 
 /** Internal simulator result with the diagnostic ledger projection available. */
-export type SimulationResultWithDiagnostics = SimulationResultV1 & {
+export type SimulationResultWithDiagnostics = SimulationResultV2 & {
   ledgers: SimulationLedgerView[];
 };

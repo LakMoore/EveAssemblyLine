@@ -83,7 +83,7 @@ void test("assembles a versioned invariant-safe result from the cached SDE", asy
   });
   const first = await simulateIndustry(request);
   const second = await simulateIndustry(request);
-  assert.equal(first.metadata.simulatorVersion, 1);
+  assert.equal(first.metadata.simulatorVersion, 2);
   assert.equal(first.metadata.normalizedInputHash, second.metadata.normalizedInputHash);
   assert.equal(first.metadata.invariantViolationCount, 0);
   assert.ok(first.lists.manufacturingJobs.some((job) => job.productTypeId === 587));

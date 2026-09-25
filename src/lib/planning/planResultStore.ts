@@ -1,9 +1,9 @@
-import type { SimulationHaulTask, SimulationResultV1 } from "./simulator/types";
+import type { SimulationHaulTask, SimulationResultV2 } from "./simulator/types";
 import type { PlanHaulExclusion, PlanResponse } from "./types";
 import { getPlanningDatabase, plannerPreferencesStoreName } from "./planningDatabase";
 
 const planResponseKey = "latest-plan-response";
-const simulationResultKey = "latest-simulation-result-v1";
+const simulationResultKey = "latest-simulation-result-v2";
 const simulationHaulExclusionsKey = "simulation-haul-exclusions";
 const simulationPreservedHaulTasksKey = "simulation-preserved-haul-tasks";
 
@@ -116,7 +116,7 @@ export async function savePlanResponse(plan: PlanResponse): Promise<void> {
 }
 
 /** Validates the durable browser representation of a native simulator result. */
-export function isSimulationResultV1(value: unknown): value is SimulationResultV1 {
+export function isSimulationResultV2(value: unknown): value is SimulationResultV2 {
   if (!isRecord(value) || !isRecord(value.metadata) || !isRecord(value.lists)) return false;
   const metadata = value.metadata;
   const lists = value.lists;
@@ -136,9 +136,12 @@ export function isSimulationResultV1(value: unknown): value is SimulationResultV
     && [
       "requiredNow",
       "reserved",
+      "futureDemand",
+      "futureSupply",
       "availableNow",
       "availableFromSellOrders",
       "availableFromHauling",
+      "inFlightQuantity",
       "availableFromProduction",
       "availableFromCopying",
       "availableFromInvention",
@@ -148,6 +151,11 @@ export function isSimulationResultV1(value: unknown): value is SimulationResultV
       "unsatisfied",
       "surplus",
     ].every((key) => isQuantity(balance[key]))
+    && (
+      balance.activityType === undefined
+      || balance.activityType === "manufacturing"
+      || balance.activityType === "reaction"
+    )
     && Array.isArray(balance.demandSources)
     && balance.demandSources.every(
       (source) =>
@@ -255,9 +263,14 @@ export function isSimulationResultV1(value: unknown): value is SimulationResultV
   );
   return (
     (metadata.simulationId === undefined || typeof metadata.simulationId === "string")
-    && metadata.simulatorVersion === 1
+    && metadata.simulatorVersion === 2
+    && metadata.policyVersion === 1
     && typeof metadata.generatedAt === "string"
+    && typeof metadata.sdeRevision === "string"
     && typeof metadata.normalizedInputHash === "string"
+    && isQuantity(metadata.warningCount)
+    && isQuantity(metadata.invariantViolationCount)
+    && isQuantity(metadata.unresolvedAssetCount)
     && hasSimulationRows(
       lists.warnings,
       (warning) =>
@@ -333,16 +346,17 @@ export function isSimulationResultV1(value: unknown): value is SimulationResultV
 }
 
 /** Loads the most recent native simulation result from IndexedDB. */
-export async function loadSimulationResult(): Promise<SimulationResultV1 | null> {
+export async function loadSimulationResult(): Promise<SimulationResultV2 | null> {
   try {
     const database = await getPlanningDatabase();
-    return await new Promise<SimulationResultV1 | null>((resolve, reject) => {
+    return await new Promise<SimulationResultV2 | null>((resolve, reject) => {
       const request = database
         .transaction(plannerPreferencesStoreName, "readonly")
         .objectStore(plannerPreferencesStoreName)
         .get(simulationResultKey);
-      request.onsuccess = () =>
-        resolve(isSimulationResultV1(request.result) ? request.result : null);
+      request.onsuccess = () => {
+        resolve(isSimulationResultV2(request.result) ? request.result : null);
+      };
       request.onerror = () =>
         reject(request.error ?? new Error("Could not load the latest simulation result."));
     });
@@ -449,7 +463,7 @@ export async function loadSimulationPreservedHaulTasks(): Promise<SimulationHaul
 
 /** Saves the simulator result and its haul exclusions in one browser transaction. */
 export async function saveSimulationState(
-  result: SimulationResultV1,
+  result: SimulationResultV2,
   haulExclusions: readonly PlanHaulExclusion[],
   preservedHaulTasks: readonly SimulationHaulTask[],
 ): Promise<boolean> {

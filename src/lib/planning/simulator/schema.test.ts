@@ -144,6 +144,37 @@ void test("strips asset presentation metadata at the simulator boundary", () => 
   }
 });
 
+void test("accepts only sanitized industry output provenance", () => {
+  const parsed = parseSimulatorRequest({
+    ...request(),
+    assets: [
+      {
+        typeId: 34,
+        quantity: 10,
+        inBuild: true,
+        jobId: 123,
+        industryJobStatus: "active",
+        industryJobEndDate: "2026-01-01T01:00:00.000Z",
+        activityName: "manufacturing",
+        industryOutput: { activity: "manufacturing", state: "active" },
+      },
+    ],
+  });
+  assert.ok(Array.isArray(parsed.assets));
+  const asset = parsed.assets[0];
+  assert.ok(asset);
+  assert.deepEqual(asset.industryOutput, { activity: "manufacturing", state: "active" });
+  for (const property of [
+    "inBuild",
+    "jobId",
+    "industryJobStatus",
+    "industryJobEndDate",
+    "activityName",
+  ]) {
+    assert.equal(property in asset, false, property);
+  }
+});
+
 void test("accepts unlimited BPO runs and rejects negative BPC runs", () => {
   const bpoInput = request();
   bpoInput.assets = [

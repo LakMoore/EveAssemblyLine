@@ -36,6 +36,11 @@ const ownerSchema = z
     }
   });
 
+const industryOutputMarkerSchema = z.object({
+  activity: z.enum(["manufacturing", "reaction"]),
+  state: z.enum(["active", "paused", "available", "excluded"]),
+});
+
 const blueprintPrintSchema = z
   .object({
     itemId: positiveSafeInteger,
@@ -69,19 +74,13 @@ const planStockItemSchema = z
     futureReprocessingOutput: z.boolean().optional(),
     source: z.literal("marketOrder").optional(),
     marketOrderIssuerId: positiveSafeInteger.optional(),
-    inBuild: z.boolean().optional(),
     inUse: z.boolean().optional(),
-    jobId: positiveSafeInteger.optional(),
-    industryJobStatus: z
-      .enum(["active", "cancelled", "delivered", "paused", "ready", "reverted"])
-      .optional(),
-    industryJobEndDate: z.string().max(100).optional(),
     blueprintRunsAtInstall: z.number().int().min(-1).max(Number.MAX_SAFE_INTEGER).optional(),
     licensedRuns: nonNegativeInteger.optional(),
-    activityName: z.string().max(100).optional(),
     jobRuns: nonNegativeInteger.optional(),
     me: percentage.optional(),
     te: percentage.optional(),
+    industryOutput: industryOutputMarkerSchema.optional(),
   })
   .and(ownerSchema);
 

@@ -221,6 +221,7 @@ export class SimulationAllocator {
       const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
       const next = Math.min(remaining, available);
       if (next <= 0) continue;
+      if (lot.activity === undefined) continue;
       this.remainingItemQuantityByLotId.set(lot.lotId, available - next);
       this.transactions.push({
         id: this.nextTransactionId("existing-output"),
@@ -229,6 +230,8 @@ export class SimulationAllocator {
         destinationAccount: account,
         quantity: next,
         source: "production",
+        activity: lot.activity,
+        sourceLotId: lot.lotId,
         producingJobId:
           lot.industryJobId === undefined
             ? (demandingJobId ?? `existing:${lot.lotId}`)
@@ -236,25 +239,23 @@ export class SimulationAllocator {
       });
       remaining -= next;
       claimed += next;
-      if (lot.activity) {
-        reservations.push({
-          activity: lot.activity,
-          quantity: next,
-          state:
-            lot.industryJobStatus === "active"
-              ? "in-production"
-              : lot.industryJobStatus === "paused"
-                ? "paused"
-                : "planned",
-          ...(lot.industryJobId !== undefined ? { sourceJobId: lot.industryJobId } : {}),
-          ...(lot.industryJobId !== undefined && lot.quantity > 0
-            ? { sourceOutputQuantity: lot.quantity }
-            : {}),
-          ...(lot.industryJobStatus === "active" && lot.industryJobEndDate
-            ? { sourceCompletionAt: lot.industryJobEndDate }
-            : {}),
-        });
-      }
+      reservations.push({
+        activity: lot.activity,
+        quantity: next,
+        state:
+          lot.industryJobStatus === "active"
+            ? "in-production"
+            : lot.industryJobStatus === "paused"
+              ? "paused"
+              : "planned",
+        ...(lot.industryJobId !== undefined ? { sourceJobId: lot.industryJobId } : {}),
+        ...(lot.industryJobId !== undefined && lot.quantity > 0
+          ? { sourceOutputQuantity: lot.quantity }
+          : {}),
+        ...(lot.industryJobStatus === "active" && lot.industryJobEndDate
+          ? { sourceCompletionAt: lot.industryJobEndDate }
+          : {}),
+      });
     }
     return {
       quantity: claimed,

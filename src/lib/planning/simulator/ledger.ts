@@ -13,6 +13,7 @@ export interface SimulationSourceLot {
   locationId?: number;
   ownerType?: "character" | "corporation";
   ownerId?: number;
+  activity?: "manufacturing" | "reaction";
 }
 
 /** Exact identity of one physical material ledger account. */
@@ -50,15 +51,28 @@ export type SimulationTransaction =
       stockpileId?: string;
       demandActivity?: Exclude<SimulationActivity, "surplus">;
     }
-  | {
-      id: string;
-      kind: "production-commitment";
-      account: SimulationLedgerAccount;
-      destinationAccount: SimulationLedgerAccount;
-      quantity: number;
-      source: "production" | "copying" | "invention";
-      producingJobId: string;
-    }
+  | (
+      | {
+          id: string;
+          kind: "production-commitment";
+          account: SimulationLedgerAccount;
+          destinationAccount: SimulationLedgerAccount;
+          quantity: number;
+          source: "production";
+          activity: "manufacturing" | "reaction";
+          sourceLotId?: string;
+          producingJobId: string;
+        }
+      | {
+          id: string;
+          kind: "production-commitment";
+          account: SimulationLedgerAccount;
+          destinationAccount: SimulationLedgerAccount;
+          quantity: number;
+          source: "copying" | "invention";
+          producingJobId: string;
+        }
+    )
   | {
       id: string;
       kind: "reprocessing-output";
@@ -116,9 +130,12 @@ function emptyBalance(
     locationId: account.locationId,
     requiredNow: 0,
     reserved: 0,
+    futureDemand: 0,
+    futureSupply: 0,
     availableNow: 0,
     availableFromSellOrders: 0,
     availableFromHauling: 0,
+    inFlightQuantity: 0,
     availableFromProduction: 0,
     availableFromCopying: 0,
     availableFromInvention: 0,
@@ -131,6 +148,23 @@ function emptyBalance(
   };
 }
 
+function setProductionActivity(
+  balance: SimulationMaterialBalance,
+  activity: "manufacturing" | "reaction",
+  invariantViolations: string[],
+  sourceDescription: string,
+): void {
+  if (balance.activityType === undefined) {
+    balance.activityType = activity;
+    return;
+  }
+  if (balance.activityType !== activity) {
+    invariantViolations.push(
+      `Production row ${balance.locationId}:${balance.typeId} has mixed activity types at ${sourceDescription}.`,
+    );
+  }
+}
+
 /** Reduces transactions into balances and verifies source-lot conservation. */
 export function projectSimulationLedger(
   sourceLots: readonly SimulationSourceLot[],
@@ -140,9 +174,26 @@ export function projectSimulationLedger(
 ): SimulationLedgerProjection {
   const sourceLotsById = new Map(sourceLots.map((lot) => [lot.lotId, lot]));
   const reservedByLotId = new Map<string, number>();
+  const claimedProductionByLotId = new Map<string, number>();
   const exposedByLotId = new Map<string, number>();
   const mutableBalances = new Map<string, SimulationMaterialBalance>();
   const invariantViolations: string[] = [];
+
+  for (const lot of sourceLots) {
+    if (lot.locationId === undefined || lot.activity === undefined) continue;
+    const account = { locationId: lot.locationId, typeId: lot.typeId };
+    const key = simulationAccountKey(account);
+    const balance =
+      mutableBalances.get(key)
+      ?? emptyBalance(
+        account,
+        names.get(account.typeId) ?? `Type ${account.typeId}`,
+        volumes.get(account.typeId) ?? 0,
+      );
+    balance.inFlightQuantity += lot.quantity;
+    setProductionActivity(balance, lot.activity, invariantViolations, `source lot ${lot.lotId}`);
+    mutableBalances.set(key, balance);
+  }
 
   for (const transaction of transactions) {
     if (!Number.isSafeInteger(transaction.quantity) || transaction.quantity < 0) {
@@ -232,6 +283,24 @@ export function projectSimulationLedger(
       }
     }
     else if (transaction.kind === "production-commitment") {
+      if (transaction.source === "production" && transaction.sourceLotId !== undefined) {
+        const sourceLot = sourceLotsById.get(transaction.sourceLotId);
+        if (
+          !sourceLot
+          || sourceLot.typeId !== transaction.account.typeId
+          || sourceLot.locationId !== transaction.account.locationId
+          || sourceLot.activity !== transaction.activity
+        ) {
+          invariantViolations.push(
+            `Production claim ${transaction.id} references an invalid source lot.`,
+          );
+          continue;
+        }
+        claimedProductionByLotId.set(
+          transaction.sourceLotId,
+          (claimedProductionByLotId.get(transaction.sourceLotId) ?? 0) + transaction.quantity,
+        );
+      }
       const destinationKey = simulationAccountKey(transaction.destinationAccount);
       const destination =
         mutableBalances.get(destinationKey)
@@ -243,19 +312,23 @@ export function projectSimulationLedger(
         );
       const isRemoteOutput = destinationKey !== key;
       const persistSourceBalance = !isRemoteOutput || hadBalance;
-      switch (transaction.source) {
-      case "production":
-        if (isRemoteOutput) destination.availableFromProduction += transaction.quantity;
-        else balance.availableFromProduction += transaction.quantity;
-        break;
-      case "copying":
+      if (transaction.source === "production" && transaction.sourceLotId === undefined) {
+        const productionBalance = isRemoteOutput ? destination : balance;
+        productionBalance.availableFromProduction += transaction.quantity;
+        setProductionActivity(
+          productionBalance,
+          transaction.activity,
+          invariantViolations,
+          `production commitment ${transaction.id}`,
+        );
+      }
+      else if (transaction.source === "copying") {
         if (isRemoteOutput) destination.availableFromCopying += transaction.quantity;
         else balance.availableFromCopying += transaction.quantity;
-        break;
-      case "invention":
+      }
+      else if (transaction.source === "invention") {
         if (isRemoteOutput) destination.availableFromInvention += transaction.quantity;
         else balance.availableFromInvention += transaction.quantity;
-        break;
       }
       mutableBalances.set(destinationKey, destination);
       if (!persistSourceBalance) continue;
@@ -301,6 +374,14 @@ export function projectSimulationLedger(
       );
     }
   }
+  for (const [lotId, claimedQuantity] of claimedProductionByLotId) {
+    const lot = sourceLotsById.get(lotId);
+    if (lot && claimedQuantity > lot.quantity) {
+      invariantViolations.push(
+        `Source lot ${lotId} was claimed ${claimedQuantity - lot.quantity} excess units.`,
+      );
+    }
+  }
   for (const lot of sourceLots) {
     const exposedQuantity = exposedByLotId.get(lot.lotId) ?? 0;
     if (exposedQuantity > lot.quantity) {
@@ -314,9 +395,22 @@ export function projectSimulationLedger(
     [...mutableBalances].map(([key, balance]) => {
       const plannedRequirement = balance.requiredNow + balance.reserved;
       const physicalAvailable = balance.availableNow + balance.availableFromHauling;
+      const immediateSurplus = Math.max(
+        0,
+        balance.availableNow + balance.availableFromSellOrders - balance.requiredNow,
+      );
+      const futureSupply =
+        balance.availableFromHauling
+        + balance.inFlightQuantity
+        + balance.availableFromProduction
+        + balance.availableFromCopying
+        + balance.availableFromInvention
+        + balance.availableFromReprocessing
+        + balance.availableFromMarket;
       const plannedSupply =
         physicalAvailable
         + balance.availableFromSellOrders
+        + balance.inFlightQuantity
         + balance.availableFromProduction
         + balance.availableFromCopying
         + balance.availableFromInvention
@@ -324,6 +418,8 @@ export function projectSimulationLedger(
         + balance.availableFromMarket;
       const finalized = Object.freeze({
         ...balance,
+        futureDemand: Math.max(0, balance.reserved - immediateSurplus),
+        futureSupply,
         demandSources: [...balance.demandSources],
         unsatisfied: Math.max(0, plannedRequirement - plannedSupply),
         surplus: Math.max(0, plannedSupply - plannedRequirement - balance.transferredOut),

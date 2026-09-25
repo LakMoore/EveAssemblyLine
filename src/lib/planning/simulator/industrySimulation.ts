@@ -512,6 +512,7 @@ class IndustryDemandSimulation {
         destinationAccount,
         quantity: outputQuantity,
         source: "production",
+        activity: production.activity,
         producingJobId: jobId,
       });
       if (production.activity === "manufacturing") this.manufacturingJobs.push(job);

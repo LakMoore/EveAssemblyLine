@@ -21,7 +21,7 @@ import type {
   SimulationInventionJob,
   SimulationReactionFormulaBalance,
   SimulationReactionFormulaLocationBucket,
-  SimulationResultV1,
+  SimulationResultV2,
   SimulationResultWithDiagnostics,
   SimulationWarning,
   SimulationRequestV1,
@@ -211,10 +211,10 @@ function presentationItems(
   ledgers: readonly SimulationLedgerView[],
   connectedKeys: ReadonlySet<string>,
   kind: "plan" | "surplus",
-): SimulationResultV1["lists"]["planItems"] {
+): SimulationResultV2["lists"]["planItems"] {
   const itemsByLocation = new Map<
     number,
-    SimulationResultV1["lists"]["planItems"][number]["items"]
+    SimulationResultV2["lists"]["planItems"][number]["items"]
   >();
   for (const ledger of ledgers) {
     const items = ledger.balances.filter((balance) => {
@@ -230,6 +230,7 @@ function presentationItems(
             || balance.availableNow > 0
             || balance.availableFromSellOrders > 0
             || balance.availableFromHauling > 0
+            || balance.inFlightQuantity > 0
             || balance.availableFromProduction > 0
             || balance.availableFromCopying > 0
             || balance.availableFromInvention > 0
@@ -401,7 +402,7 @@ function annotateUpstreamReservations(
 /** Adds settled Buy-tab quantities to the job inputs that require them. */
 function annotatePurchaseQuantities<T extends SimulationInputJob>(
   jobs: readonly T[],
-  purchases: SimulationResultV1["lists"]["materialsToBuy"],
+  purchases: SimulationResultV2["lists"]["materialsToBuy"],
 ): T[] {
   const quantitiesByJobAndType = new Map<string, number>();
   for (const purchase of purchases) {
@@ -434,8 +435,8 @@ function assembleLists(
   ledgers: readonly SimulationLedgerView[],
   connectedKeys: ReadonlySet<string>,
   warnings: SimulationWarning[],
-): SimulationResultV1["lists"] {
-  const lists: SimulationResultV1["lists"] = {
+): SimulationResultV2["lists"] {
+  const lists: SimulationResultV2["lists"] = {
     warnings,
     planItems: presentationItems(ledgers, connectedKeys, "plan"),
     reactionFormulas: reactionFormulaBalances(inventory, schedules.reactionJobs),
@@ -610,7 +611,7 @@ export async function simulateIndustry(
     ?? measureSyncProfiled(profiler, "hash-input", () => simulationInputHash(request));
   return {
     metadata: {
-      simulatorVersion: 1,
+      simulatorVersion: 2,
       policyVersion: 1,
       generatedAt,
       sdeRevision: context.sdeRevision,

@@ -11,7 +11,16 @@ const context = {
     [46207, { _key: 46207, name: { en: "Reaction Formula" }, groupID: 3, volume: 0.01 }],
   ]),
   blueprints: {
-    byBlueprintId: new Map([[46207, { _key: 46207, activities: { reaction: {} } }]]),
+    byBlueprintId: new Map([
+      [
+        100,
+        { _key: 100, activities: { manufacturing: { products: [{ typeID: 34, quantity: 1 }] } } },
+      ],
+      [
+        46207,
+        { _key: 46207, activities: { reaction: { products: [{ typeID: 34, quantity: 1 }] } } },
+      ],
+    ]),
   },
   compressibleTypes: new Map(),
   typeMaterials: new Map(),
@@ -114,20 +123,13 @@ void test("preserves industry job status on future output lots", () => {
       typeId: 34,
       quantity: 4,
       rootLocationId: 20,
-      inBuild: true,
-      jobId: 123,
-      activityName: "manufacturing",
-      industryJobStatus: "active",
-      industryJobEndDate: "2026-01-01T01:00:00.000Z",
+      industryOutput: { activity: "manufacturing", state: "active" },
     },
     {
       typeId: 34,
       quantity: 2,
       rootLocationId: 20,
-      inBuild: true,
-      jobId: 124,
-      activityName: "Reactions",
-      industryJobStatus: "paused",
+      industryOutput: { activity: "reaction", state: "paused" },
     },
   ];
 
@@ -140,9 +142,52 @@ void test("preserves industry job status on future output lots", () => {
   assert.equal(futureOutput.horizon, "after-upstream");
   assert.equal(futureOutput.industryJobStatus, "active");
   assert.equal(futureOutput.activity, "manufacturing");
-  assert.equal(futureOutput.industryJobId, 123);
-  assert.equal(futureOutput.industryJobEndDate, "2026-01-01T01:00:00.000Z");
+  assert.equal(futureOutput.industryJobId, undefined);
+  assert.equal(futureOutput.industryJobEndDate, undefined);
   const pausedOutput = inventory.itemLots.find((lot) => lot.industryJobStatus === "paused");
   assert.ok(pausedOutput);
   assert.equal(pausedOutput.activity, "reaction");
+});
+
+void test("preserves categorized industry output provenance", () => {
+  const simulationRequest = request();
+  simulationRequest.assets = {
+    items: [],
+    market: [],
+    blueprints: [],
+    industry: [
+      {
+        jobId: 1,
+        typeId: 34,
+        blueprintTypeId: 100,
+        quantity: 4,
+        runs: 4,
+        activity: "manufacturing",
+        status: "active",
+        locationId: 20,
+        rootLocationId: 20,
+      },
+      {
+        jobId: 2,
+        typeId: 34,
+        blueprintTypeId: 46207,
+        quantity: 2,
+        runs: 2,
+        activity: "reaction",
+        status: "paused",
+        locationId: 20,
+        rootLocationId: 20,
+      },
+    ],
+  };
+
+  const inventory = normalizeSimulatorInventory(simulationRequest, context);
+  const manufacturingOutput = inventory.itemLots.find((lot) => lot.activity === "manufacturing");
+  const reactionOutput = inventory.itemLots.find((lot) => lot.activity === "reaction");
+  assert.ok(manufacturingOutput);
+  assert.ok(reactionOutput);
+  assert.equal(manufacturingOutput.activity, "manufacturing");
+  assert.equal(manufacturingOutput.industryJobStatus, "active");
+  assert.equal(reactionOutput.activity, "reaction");
+  assert.equal(reactionOutput.industryJobStatus, "paused");
 });

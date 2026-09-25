@@ -1,8 +1,4 @@
-import {
-  getStockRootLocationId,
-  isAvailableIndustryProductionOutput,
-  isUsableIndustryProductionOutput,
-} from "@/lib/planning/stockPolicies";
+import { getStockRootLocationId } from "@/lib/planning/stockPolicies";
 import type {
   PlanBlueprintInput,
   PlanIndustryInput,
@@ -14,7 +10,7 @@ import type {
 } from "@/lib/planning/types";
 import type { SimulationContext } from "./context";
 import type { SimulationSourceLot } from "./ledger";
-import type { SimulationAsset, SimulationRequestV1 } from "./types";
+import type { SimulationAsset, SimulationIndustryOutputMarker, SimulationRequestV1 } from "./types";
 
 /** Physical or committed ordinary stock available to the simulator. */
 export interface SimulationItemLot extends SimulationSourceLot {
@@ -54,6 +50,9 @@ export interface SimulatorInventory {
 }
 
 type CategorizedAssets = Exclude<SimulationRequestV1["assets"], SimulationAsset[] | undefined>;
+type NormalizedSimulationAsset = PlanStockItem & {
+  industryOutput?: SimulationIndustryOutputMarker;
+};
 
 function localizedTypeName(context: SimulationContext, typeId: number, language = "en"): string {
   const name = context.types.get(typeId)?.name;
@@ -66,7 +65,7 @@ function unitVolume(context: SimulationContext, typeId: number): number {
 }
 
 function assetCategory(
-  item: SimulationAsset,
+  item: SimulationAsset | NormalizedSimulationAsset,
   context: SimulationContext,
 ): "blueprint" | "reactionformula" | "item" {
   if (context.blueprints.byBlueprintId.get(item.typeId)?.activities.reaction) {
@@ -76,14 +75,12 @@ function assetCategory(
   return "item";
 }
 
-/** Narrows an external industry activity name to a production activity. */
-function productionActivity(activityName?: string): SimulationItemLot["activity"] {
-  const normalizedActivity = activityName?.toLowerCase();
-  if (normalizedActivity === "manufacturing") return "manufacturing";
-  if (normalizedActivity === "reaction" || normalizedActivity === "reactions") {
-    return "reaction";
-  }
-  return undefined;
+function isUsableIndustryOutput(item: NormalizedSimulationAsset): boolean {
+  return item.industryOutput?.state === undefined || item.industryOutput.state === "available";
+}
+
+function isAvailableIndustryOutput(item: NormalizedSimulationAsset): boolean {
+  return item.industryOutput?.state !== "excluded";
 }
 
 /** Returns the only type IDs the simulator may ever select for reprocessing. */
@@ -151,7 +148,7 @@ function categorizedBlueprintItem(
 function industryOutputItem(
   job: PlanIndustryInput,
   context: SimulationContext,
-): PlanStockItem | undefined {
+): NormalizedSimulationAsset | undefined {
   const blueprint =
     (job.blueprintTypeId === undefined
       ? undefined
@@ -196,6 +193,15 @@ function industryOutputItem(
     activity?.products?.find((candidate) => candidate.typeID === job.typeId)
     ?? activity?.products?.[0];
   if (!product) return undefined;
+  const outputActivity = normalizedActivity.startsWith("reaction") ? "reaction" : "manufacturing";
+  const outputState: SimulationIndustryOutputMarker["state"] =
+    job.status === "active"
+      ? "active"
+      : job.status === "paused"
+        ? "paused"
+        : job.status === "cancelled" || job.status === "reverted"
+          ? "excluded"
+          : "available";
   return {
     typeId: product.typeID,
     name: localizedTypeName(context, product.typeID),
@@ -207,6 +213,7 @@ function industryOutputItem(
     jobId: job.jobId,
     industryJobStatus: job.status,
     activityName: job.activity,
+    industryOutput: { activity: outputActivity, state: outputState },
   };
 }
 
@@ -231,7 +238,7 @@ export function normalizeSimulatorInventory(
   context: SimulationContext,
 ): SimulatorInventory {
   const assets = request.assets ?? [];
-  const stock: PlanStockItem[] = (
+  const stock: NormalizedSimulationAsset[] = (
     Array.isArray(assets)
       ? assets.map((item) => ({
           ...item,
@@ -288,7 +295,7 @@ export function normalizeSimulatorInventory(
               ownerType: item.ownerType,
               ownerId: item.ownerId,
               inUse: item.inUse === true,
-              horizon: isUsableIndustryProductionOutput(item) ? "now" : "after-upstream",
+              horizon: isUsableIndustryOutput(item) ? "now" : "after-upstream",
             });
           }
         }
@@ -307,13 +314,13 @@ export function normalizeSimulatorInventory(
             ownerType: item.ownerType,
             ownerId: item.ownerId,
             inUse: item.inUse === true,
-            horizon: isUsableIndustryProductionOutput(item) ? "now" : "after-upstream",
+            horizon: isUsableIndustryOutput(item) ? "now" : "after-upstream",
           });
         }
       }
       continue;
     }
-    if (!isAvailableIndustryProductionOutput(item) || item.quantity <= 0) continue;
+    if (!isAvailableIndustryOutput(item) || item.quantity <= 0) continue;
     itemLots.push({
       lotId: `item:${stockIndex}`,
       typeId: item.typeId,
@@ -323,13 +330,20 @@ export function normalizeSimulatorInventory(
       ownerType: item.ownerType,
       ownerId: item.ownerId,
       unitVolume: unitVolume(context, item.typeId),
-      horizon: isUsableIndustryProductionOutput(item) ? "now" : "after-upstream",
+      horizon: isUsableIndustryOutput(item) ? "now" : "after-upstream",
       source:
-        item.source === "marketOrder" ? "market-order" : item.inBuild ? "industry-output" : "asset",
-      activity: productionActivity(item.activityName),
-      industryJobId: item.jobId,
-      industryJobStatus: item.industryJobStatus,
-      industryJobEndDate: item.industryJobEndDate,
+        item.source === "marketOrder"
+          ? "market-order"
+          : item.industryOutput
+            ? "industry-output"
+            : "asset",
+      ...(item.industryOutput?.state === "active" || item.industryOutput?.state === "paused"
+        ? { activity: item.industryOutput.activity }
+        : {}),
+      industryJobStatus:
+        item.industryOutput?.state === "active" || item.industryOutput?.state === "paused"
+          ? item.industryOutput.state
+          : undefined,
       eligibleForReprocessing: eligibleTypeIds.has(item.typeId),
     });
   }

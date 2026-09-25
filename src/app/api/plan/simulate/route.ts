@@ -6,7 +6,7 @@ import { createSimulationEtag } from "@/lib/planning/simulator/etag";
 import { simulatorRequestSchema } from "@/lib/planning/simulator/schema";
 import { simulateIndustry, simulationInputHash } from "@/lib/planning/simulator/simulate";
 import type {
-  SimulationResultV1,
+  SimulationResultV2,
   SimulationResultWithDiagnostics,
 } from "@/lib/planning/simulator/types";
 import { getSdeBuildNumber } from "@/lib/sde/loader";
@@ -21,7 +21,7 @@ const noStoreResponseInit: ResponseInit = {
 };
 
 /** Removes diagnostic ledger projections from non-development responses. */
-export function presentationResult(result: SimulationResultWithDiagnostics): SimulationResultV1 {
+export function presentationResult(result: SimulationResultWithDiagnostics): SimulationResultV2 {
   if (process.env.NODE_ENV === "development") return result;
   const { ledgers: _ledgers, ...publicResult } = result;
   return publicResult;

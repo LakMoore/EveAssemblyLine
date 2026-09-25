@@ -74,7 +74,12 @@ void test("projects source availability before demand reservations and hauling",
   ];
   const projection = projectSimulationLedger(
     [
-      { lotId: "local", typeId: 34, quantity: 4, locationId: 20 },
+      {
+        lotId: "local",
+        typeId: 34,
+        quantity: 4,
+        locationId: 20,
+      },
       { lotId: "remote", typeId: 34, quantity: 3, locationId: 30 },
     ],
     transactions,
@@ -176,7 +181,15 @@ void test("posts remote production directly at its destination ledger", () => {
     typeId: 34,
   };
   const projection = projectSimulationLedger(
-    [],
+    [
+      {
+        lotId: "in-flight-output",
+        typeId: 34,
+        quantity: 8,
+        locationId: 10,
+        activity: "manufacturing",
+      },
+    ],
     [
       {
         id: "target-demand",
@@ -203,6 +216,8 @@ void test("posts remote production directly at its destination ledger", () => {
         destinationAccount,
         quantity: 8,
         source: "production",
+        activity: "manufacturing",
+        sourceLotId: "in-flight-output",
         producingJobId: "job-1",
       },
     ],
@@ -211,8 +226,212 @@ void test("posts remote production directly at its destination ledger", () => {
   const destinationBalance = projection.balances.get("10:34");
   assert.equal(sourceBalance, undefined);
   assert.ok(destinationBalance);
-  assert.equal(destinationBalance.availableFromProduction, 8);
+  assert.equal(destinationBalance.inFlightQuantity, 8);
+  assert.equal(destinationBalance.availableFromProduction, 0);
+  assert.equal(destinationBalance.activityType, "manufacturing");
+  assert.equal(destinationBalance.futureDemand, 0);
   assert.equal(destinationBalance.unsatisfied, 0);
+  assert.equal(projection.balances.get("20:34"), undefined);
+});
+
+void test("retains total in-flight output after claiming only the required quantity", () => {
+  const projection = projectSimulationLedger(
+    [
+      {
+        lotId: "carbon-fiber-output",
+        typeId: 34,
+        quantity: 154_200,
+        locationId: 10,
+        activity: "reaction",
+      },
+      {
+        lotId: "current-stock",
+        typeId: 34,
+        quantity: 3_533,
+        locationId: 10,
+      },
+    ],
+    [
+      {
+        id: "current-stock-availability",
+        kind: "source-availability",
+        account: { locationId: 10, typeId: 34 },
+        lotId: "current-stock",
+        quantity: 3_533,
+        horizon: "now",
+        source: "asset",
+      },
+      {
+        id: "future-demand",
+        kind: "demand",
+        account: { locationId: 10, typeId: 34 },
+        quantity: 48_528,
+        source: {
+          demandId: "future-demand",
+          stockpileId: "main",
+          materialTypeId: 34,
+          productTypeId: 34,
+          productQuantity: 48_528,
+          plannedQuantity: 48_528,
+          requiredNow: 3_523,
+          reserved: 45_005,
+          destinationLocationId: 10,
+          activity: "stock",
+        },
+      },
+      {
+        id: "claimed-in-flight-output",
+        kind: "production-commitment",
+        account: { locationId: 10, typeId: 34 },
+        destinationAccount: { locationId: 10, typeId: 34 },
+        quantity: 44_995,
+        source: "production",
+        activity: "manufacturing",
+        sourceLotId: "carbon-fiber-output",
+        producingJobId: "job-1",
+      },
+    ],
+  );
+  const balance = projection.balances.get("10:34");
+  assert.ok(balance);
+  assert.equal(balance.inFlightQuantity, 154_200);
+  assert.equal(balance.availableFromProduction, 0);
+  assert.equal(balance.activityType, "reaction");
+  assert.equal(balance.futureSupply, 154_200);
+  assert.equal(balance.futureDemand, 44_995);
+  assert.equal(balance.surplus, 109_205);
+  assert.equal(balance.unsatisfied, 0);
+});
+
+void test("adds planned production to gross in-flight output", () => {
+  const projection = projectSimulationLedger(
+    [
+      {
+        lotId: "in-flight-output",
+        typeId: 34,
+        quantity: 100,
+        locationId: 10,
+        activity: "manufacturing",
+      },
+    ],
+    [
+      {
+        id: "planned-production",
+        kind: "production-commitment",
+        account: { locationId: 10, typeId: 34 },
+        destinationAccount: { locationId: 10, typeId: 34 },
+        quantity: 50,
+        source: "production",
+        activity: "manufacturing",
+        producingJobId: "planned-job",
+      },
+    ],
+  );
+  const balance = projection.balances.get("10:34");
+  assert.ok(balance);
+  assert.equal(balance.inFlightQuantity, 100);
+  assert.equal(balance.availableFromProduction, 50);
+  assert.equal(balance.activityType, "manufacturing");
+  assert.equal(balance.futureSupply, 150);
+});
+
+void test("separates existing reaction output from newly planned reaction output", () => {
+  const projection = projectSimulationLedger(
+    [
+      {
+        lotId: "existing-reaction-output",
+        typeId: 34,
+        quantity: 154_200,
+        locationId: 10,
+        activity: "reaction",
+      },
+    ],
+    [
+      {
+        id: "planned-reaction",
+        kind: "production-commitment",
+        account: { locationId: 10, typeId: 34 },
+        destinationAccount: { locationId: 10, typeId: 34 },
+        quantity: 36_000,
+        source: "production",
+        activity: "reaction",
+        producingJobId: "planned-reaction-job",
+      },
+    ],
+  );
+  const balance = projection.balances.get("10:34");
+  assert.ok(balance);
+  assert.equal(balance.inFlightQuantity, 154_200);
+  assert.equal(balance.availableFromProduction, 36_000);
+  assert.equal(balance.activityType, "reaction");
+  assert.equal(balance.futureSupply, 190_200);
+  assert.deepEqual(projection.invariantViolations, []);
+});
+
+void test("flags mixed production activity types in one material row", () => {
+  const projection = projectSimulationLedger(
+    [
+      {
+        lotId: "manufacturing-output",
+        typeId: 34,
+        quantity: 10,
+        locationId: 10,
+        activity: "manufacturing",
+      },
+    ],
+    [
+      {
+        id: "planned-reaction",
+        kind: "production-commitment",
+        account: { locationId: 10, typeId: 34 },
+        destinationAccount: { locationId: 10, typeId: 34 },
+        quantity: 5,
+        source: "production",
+        activity: "reaction",
+        producingJobId: "planned-reaction-job",
+      },
+    ],
+  );
+  const balance = projection.balances.get("10:34");
+  assert.ok(balance);
+  assert.equal(balance.activityType, "manufacturing");
+  assert.equal(balance.inFlightQuantity, 10);
+  assert.equal(balance.availableFromProduction, 5);
+  assert.equal(
+    projection.invariantViolations.some((message) => /mixed activity types/.test(message)),
+    true,
+  );
+});
+
+void test("rejects source-lot claims that exceed gross output", () => {
+  const projection = projectSimulationLedger(
+    [
+      {
+        lotId: "existing-output",
+        typeId: 34,
+        quantity: 10,
+        locationId: 10,
+        activity: "manufacturing",
+      },
+    ],
+    [
+      {
+        id: "overclaim",
+        kind: "production-commitment",
+        account: { locationId: 10, typeId: 34 },
+        destinationAccount: { locationId: 10, typeId: 34 },
+        quantity: 11,
+        source: "production",
+        activity: "manufacturing",
+        sourceLotId: "existing-output",
+        producingJobId: "existing-job",
+      },
+    ],
+  );
+  assert.equal(
+    projection.invariantViolations.some((message) => /excess units/.test(message)),
+    true,
+  );
 });
 
 void test("projects an allowed purchase as market supply at its destination", () => {
@@ -248,6 +467,7 @@ void test("projects an allowed purchase as market supply at its destination", ()
   const balance = projection.balances.get("20:34");
   assert.ok(balance);
   assert.equal(balance.availableFromMarket, 8);
+  assert.equal(balance.futureSupply, 8);
   assert.equal(balance.unsatisfied, 0);
   assert.equal(balance.surplus, 0);
 });

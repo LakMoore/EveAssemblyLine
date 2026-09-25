@@ -20,7 +20,11 @@ import type {
   PlanStockItem,
   ResponseHaulTask,
 } from "@/lib/planning/types";
-import type { SimulationAsset, SimulationHaulTask } from "@/lib/planning/simulator/types";
+import type {
+  SimulationAsset,
+  SimulationHaulTask,
+  SimulationIndustryOutputMarker,
+} from "@/lib/planning/simulator/types";
 import { prepareSimulationAssets } from "@/lib/planning/simulator/requestAssets";
 import { loadBuildList } from "@/lib/planning/buildListStore";
 import EveAuthorizationWarning from "@/components/EveAuthorizationWarning";
@@ -157,7 +161,7 @@ import {
 import type { FacilityGroupBonus } from "@/lib/planning/facilityBonuses";
 import type { ProductionGroupKey, ProductionGroupReference } from "@/lib/planning/productionGroups";
 import { fetchProductionGroups } from "@/lib/reference/productionGroups";
-import type { HaulingAllocationMode, SimulationResultV1 } from "@/lib/planning/simulator/types";
+import type { HaulingAllocationMode, SimulationResultV2 } from "@/lib/planning/simulator/types";
 
 type StockpileEditorMode = "details" | "items";
 type PlanRunMode = "calculate" | "simulate";
@@ -230,6 +234,25 @@ type PlannerAssetWithPresentation = PlanStockItem & {
 
 /** Removes SDE and display metadata before sending assets to the simulator. */
 function toSimulationAsset(item: PlanStockItem): SimulationAsset {
+  const normalizedActivity = item.activityName?.toLowerCase();
+  const industryOutput: SimulationIndustryOutputMarker | undefined =
+    item.inBuild === true
+    && item.category === "item"
+    && (
+      normalizedActivity === "manufacturing"
+      || normalizedActivity === "reaction"
+      || normalizedActivity === "reactions"
+    )
+      ? {
+          activity: normalizedActivity === "manufacturing" ? "manufacturing" : "reaction",
+          state:
+            item.industryJobStatus === "cancelled" || item.industryJobStatus === "reverted"
+              ? "excluded"
+              : item.industryJobStatus === "active" || item.industryJobStatus === "paused"
+                ? item.industryJobStatus
+                : "available",
+        }
+      : undefined;
   const {
     assembledVolume: _assembledVolume,
     assemblyLineGroup: _assemblyLineGroup,
@@ -242,12 +265,20 @@ function toSimulationAsset(item: PlanStockItem): SimulationAsset {
     sourceSystemName: _sourceSystemName,
     techLevel: _techLevel,
     marketOrderIssuerId: _marketOrderIssuerId,
+    inBuild: _inBuild,
+    jobId: _jobId,
+    industryJobStatus: _industryJobStatus,
+    industryJobEndDate: _industryJobEndDate,
+    activityName: _activityName,
     isCargoContainer: _isCargoContainer,
     isPackaged: _isPackaged,
     isShip: _isShip,
     ...simulationAsset
   } = item as PlannerAssetWithPresentation;
-  return simulationAsset;
+  return {
+    ...simulationAsset,
+    ...(industryOutput ? { industryOutput } : {}),
+  };
 }
 
 function getPlannerStock(
@@ -524,7 +555,7 @@ function Planner() {
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
   const [isExcludedLocationsModalOpen, setIsExcludedLocationsModalOpen] = useState(false);
   const [plan, setPlan] = useState<PlanResponse | null>(null);
-  const [simulationResult, setSimulationResult] = useState<SimulationResultV1 | null>(null);
+  const [simulationResult, setSimulationResult] = useState<SimulationResultV2 | null>(null);
   const [displayedResult, setDisplayedResult] = useState<PlanRunMode | null>(null);
   const [isDeleteAllDialogOpen, setIsDeleteAllDialogOpen] = useState(false);
   const [isClearExcludedLocationsDialogOpen, setIsClearExcludedLocationsDialogOpen] =
@@ -1086,7 +1117,7 @@ function Planner() {
       const data =
         response.status === 304
           ? null
-          : ((await response.json()) as PlanResponse | SimulationResultV1 | { error?: string });
+          : ((await response.json()) as PlanResponse | SimulationResultV2 | { error?: string });
       if (!response.ok && response.status !== 304) {
         setPlanStatus(
           `Error: ${
@@ -1100,7 +1131,7 @@ function Planner() {
         return false;
       }
       if (mode === "simulate") {
-        const nextSimulationResult = (data as SimulationResultV1 | null) ?? simulationResult;
+        const nextSimulationResult = (data as SimulationResultV2 | null) ?? simulationResult;
         if (!nextSimulationResult) {
           setPlanStatus("Error: The simulator returned no result");
           return false;

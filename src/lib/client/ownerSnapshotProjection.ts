@@ -261,6 +261,7 @@ function projectMarketOrderStock(
       name: metadata?.name ?? `Type ${item.typeId}`,
       rootLocationId,
       category: metadata?.category ?? "item",
+      isPackaged: true,
       ...(metadata?.isShip !== undefined ? { isShip: metadata.isShip } : {}),
       ...(metadata?.isCargoContainer !== undefined
         ? { isCargoContainer: metadata.isCargoContainer }
@@ -444,7 +445,7 @@ function projectIndustryJobAssets(
         ownerId: job.ownerId,
         inBuild: true,
         inBuildQuantity: job.outputQuantity,
-        isPackaged: false,
+        isPackaged: true,
         jobId: job.jobId,
         industryJobStatus: status === "paused" ? "paused" : "active",
         industryJobEndDate: job.endDate,

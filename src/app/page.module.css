@@ -2690,6 +2690,10 @@
   color: #72d3b1;
 }
 
+.simulationSourceIcon[data-source="production"] {
+  color: var(--muted-foreground);
+}
+
 .simulationSourceIcon[data-source="reaction"] {
   color: #78c7d2;
 }

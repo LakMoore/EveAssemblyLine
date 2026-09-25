@@ -100,7 +100,7 @@ import type {
   SimulationReactionFormulaBalance,
   SimulationReactionFormulaLocationBucket,
   SimulationReprocessingJobGroup,
-  SimulationResultV1,
+  SimulationResultV2,
 } from "@/lib/planning/simulator/types";
 
 type SimulationTab =
@@ -303,7 +303,7 @@ function simulationHaulExclusionKey(
 
 /** Builds route-scoped simulator exclusions from the haul rows currently switched off. */
 function simulationHaulExclusions(
-  result: SimulationResultV1 | null,
+  result: SimulationResultV2 | null,
   includedRows: Readonly<Record<string, boolean>>,
   currentExclusions: readonly PlanHaulExclusion[],
   visibleHaulTasks: readonly SimulationHaulTask[] = result?.lists.haulingTasks ?? [],
@@ -382,18 +382,6 @@ function createGroupAvatars<T>(items: readonly T[], getAvatar: (item: T) => Simu
     });
 }
 
-/** Calculates the total future material supply shown in a simulator balance row. */
-function futureSupply(item: SimulationMaterialBalance): number {
-  return (
-    item.availableFromHauling
-    + item.availableFromProduction
-    + item.availableFromCopying
-    + item.availableFromInvention
-    + item.availableFromReprocessing
-    + item.availableFromMarket
-  );
-}
-
 /** Returns immediate supply sources that need a provenance icon beside availability. */
 function immediateSupplySources(item: SimulationMaterialBalance) {
   return item.availableFromSellOrders > 0
@@ -413,12 +401,22 @@ type FutureSupplySource = {
   key: string;
   label: string;
   quantity: number;
-  source: "haul" | "industry" | "copying" | "invention" | "reprocessing" | "market";
+  source:
+    | "haul"
+    | "industry"
+    | "reaction"
+    | "production"
+    | "copying"
+    | "invention"
+    | "reprocessing"
+    | "market";
   Icon: LucideIcon;
 };
 
 /** Returns the non-empty source contributions shown beside a future supply total. */
 function futureSupplySources(item: SimulationMaterialBalance): FutureSupplySource[] {
+  const productionIcon = item.activityType === "reaction" ? Atom : Factory;
+  const inFlightSource = item.activityType === "reaction" ? "reaction" : "industry";
   const sources: FutureSupplySource[] = [
     {
       key: "hauling",
@@ -428,11 +426,18 @@ function futureSupplySources(item: SimulationMaterialBalance): FutureSupplySourc
       Icon: Truck,
     },
     {
-      key: "production",
-      label: "Produce",
+      key: "in-flight-production",
+      label: "In Production",
+      quantity: item.inFlightQuantity,
+      source: inFlightSource,
+      Icon: productionIcon,
+    },
+    {
+      key: "planned-production",
+      label: item.activityType === "reaction" ? "React" : "Produce",
       quantity: item.availableFromProduction,
-      source: "industry",
-      Icon: Factory,
+      source: "production",
+      Icon: productionIcon,
     },
     {
       key: "copying",
@@ -1347,8 +1352,8 @@ function SimulationMaterialsTab({
           item.typeName,
           (item.availableNow + item.availableFromSellOrders).toLocaleString(),
           item.requiredNow.toLocaleString(),
-          futureSupply(item).toLocaleString(),
-          item.reserved.toLocaleString(),
+          item.futureSupply.toLocaleString(),
+          item.futureDemand.toLocaleString(),
           item.transferredOut.toLocaleString(),
           item.surplus.toLocaleString(),
         ].join("\t"),
@@ -1867,12 +1872,12 @@ function MaterialBalanceSummary({
           ))}
         </span>
         <span className="shrink-0">
-          <CopyableNumber value={futureSupply(item)} copyLabel="Future supply" />
+          <CopyableNumber value={item.futureSupply} copyLabel="Future supply" />
         </span>
       </span>
       <span className="text-muted-foreground md:hidden">Future Demand</span>
-      <span>
-        <CopyableNumber value={item.reserved} copyLabel="Future demand" />
+      <span className="flex min-w-0 items-center justify-end gap-2">
+        <CopyableNumber value={item.futureDemand} copyLabel="Future demand" />
       </span>
       <span className="text-muted-foreground md:hidden">Transferred Out</span>
       <span>
@@ -3065,7 +3070,7 @@ function SimulationBuyTab({
   openGroups,
   onOpenGroupChange,
 }: {
-  result: SimulationResultV1;
+  result: SimulationResultV2;
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
   controls: SimulationRowControls;
   openGroups: Record<string, boolean>;
@@ -3216,7 +3221,7 @@ function SimulationSkillsTab({
   result,
   controls,
 }: {
-  result: SimulationResultV1;
+  result: SimulationResultV2;
   controls: SimulationRowControls;
 }) {
   return (
@@ -3251,12 +3256,12 @@ function SimulationWarningsTab({
   openGroups,
   onOpenGroupChange,
 }: {
-  result: SimulationResultV1;
+  result: SimulationResultV2;
   locationNamesById: ReadonlyMap<number, string>;
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
-  const warningsByLocation = new Map<number | undefined, SimulationResultV1["lists"]["warnings"]>();
+  const warningsByLocation = new Map<number | undefined, SimulationResultV2["lists"]["warnings"]>();
   for (const warning of result.lists.warnings) {
     const group = warningsByLocation.get(warning.locationId) ?? [];
     group.push(warning);
@@ -3330,7 +3335,7 @@ export default function SimulationResults({
   instanceId = "planner",
   readOnly = false,
 }: {
-  result: SimulationResultV1 | null;
+  result: SimulationResultV2 | null;
   status: string;
   stock: readonly PlanStockItem[];
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
@@ -3765,7 +3770,7 @@ function SimulationTabContent({
   readOnly,
 }: {
   activeTab: SimulationTab;
-  result: SimulationResultV1;
+  result: SimulationResultV2;
   haulTasks: readonly SimulationHaulTask[];
   stock: readonly PlanStockItem[];
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;

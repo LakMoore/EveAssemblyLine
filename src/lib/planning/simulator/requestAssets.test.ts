@@ -13,13 +13,14 @@ void test("filters non-packaged ordinary assets and preserves packaged assets", 
   );
 });
 
-void test("preserves market sell orders even without packaged metadata", () => {
+void test("preserves packaged market orders", () => {
   const prepared = prepareSimulationAssets([
     {
       typeId: 34,
       name: "Tritanium",
       quantity: 81,
       locationId: 10,
+      isPackaged: true,
       source: "marketOrder",
     },
   ]);
@@ -27,6 +28,42 @@ void test("preserves market sell orders even without packaged metadata", () => {
   assert.deepEqual(
     prepared.map((item) => item.typeId),
     [34],
+  );
+});
+
+void test("preserves packaged in-flight industry outputs", () => {
+  const prepared = prepareSimulationAssets([
+    {
+      typeId: 57453,
+      name: "Carbon Fiber",
+      quantity: 154_200,
+      locationId: 20,
+      rootLocationId: 20,
+      category: "item",
+      inBuild: true,
+      isPackaged: true,
+      jobId: 123,
+      activityName: "manufacturing",
+      industryJobStatus: "active",
+    },
+    {
+      typeId: 34,
+      name: "Tritanium",
+      quantity: 2,
+      locationId: 20,
+      rootLocationId: 20,
+      category: "item",
+      inBuild: true,
+      isPackaged: true,
+      jobId: 124,
+      activityName: "Reactions",
+      industryJobStatus: "paused",
+    },
+  ]);
+
+  assert.deepEqual(
+    prepared.map((item) => item.typeId),
+    [57453, 34],
   );
 });
 

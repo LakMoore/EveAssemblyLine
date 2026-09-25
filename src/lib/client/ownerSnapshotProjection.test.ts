@@ -681,6 +681,7 @@ void test("projects job output and remaining blueprint runs without an asset rec
   assert.ok(blueprint);
   assert.equal(output.quantity, 30);
   assert.equal(output.inBuildQuantity, 30);
+  assert.equal(output.isPackaged, true);
   assert.equal(output.rootLocationId, 600);
   assert.deepEqual(
     output.corporationSource,
@@ -1013,4 +1014,5 @@ void test("projects normalized market order quantities", () => {
   assert.ok(projectedMarketOrder);
   assert.equal(projectedMarketOrder.sourceLocationId, 600);
   assert.equal(projectedMarketOrder.quantity, 25);
+  assert.equal(projectedMarketOrder.isPackaged, true);
 });
