@@ -69,6 +69,7 @@ import { getAvailableSlotCount } from "@/lib/client/slotUsage";
 import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageServer";
 import { cn } from "@/lib/utils";
 import { useAppLanguage } from "@/app/AppShell";
+import { fulleriteGasSites } from "@/lib/reference/fulleriteGasSites";
 import { fetchTypeMetadata } from "@/lib/reference/types";
 import {
   groupSimulationActivityJobs,
@@ -2127,6 +2128,7 @@ function SimulationSimpleJobRow({
   variation = "icon",
   wideBreakpoint = "sm",
   showCheckbox = false,
+  identityTrailingContent,
   controls,
 }: {
   rowKey: string;
@@ -2137,6 +2139,7 @@ function SimulationSimpleJobRow({
   variation?: "icon" | "bp" | "bpc";
   wideBreakpoint?: "sm" | "md";
   showCheckbox?: boolean;
+  identityTrailingContent?: ReactNode;
   controls: SimulationRowControls;
 }) {
   const rowProps = {
@@ -2160,6 +2163,7 @@ function SimulationSimpleJobRow({
   return showCheckbox ? (
     <SwitchedResultRow
       {...rowProps}
+      identityTrailingContent={identityTrailingContent}
       showSwitch={false}
       checkboxChecked={checkboxChecked}
       installed={checkboxChecked}
@@ -2170,6 +2174,39 @@ function SimulationSimpleJobRow({
     </SwitchedResultRow>
   ) : (
     <SimpleResultRow {...rowProps}>{summary}</SimpleResultRow>
+  );
+}
+
+/** Renders the Fullerite gas sites and wormhole classes associated with a gas type. */
+function FulleriteGasSiteBadges({ typeId }: { typeId: number }) {
+  const sites = fulleriteGasSites.filter((site) =>
+    site.types.some((siteTypeId) => siteTypeId === typeId),
+  );
+  if (sites.length === 0) return null;
+
+  return (
+    <span className="flex flex-wrap items-center gap-1" role="group" aria-label="Gas sites">
+      {sites.map((site) => (
+        <Tooltip key={site.name}>
+          <TooltipTrigger
+            render={
+              <Badge
+                variant="outline"
+                className="shrink-0"
+                role="img"
+                tabIndex={0}
+                aria-label={`${site.name}, ${site.wormholeClasses}`}
+              >
+                {site.name.split(" ", 1)[0]}
+              </Badge>
+            }
+          />
+          <TooltipContent>
+            {site.name} ({site.wormholeClasses})
+          </TooltipContent>
+        </Tooltip>
+      ))}
+    </span>
   );
 }
 
@@ -3188,6 +3225,11 @@ function SimulationBuyTab({
                             suffix={` destination${purchase.destinations.length === 1 ? "" : "s"}`}
                             copyLabel="Destinations"
                           />
+                        }
+                        identityTrailingContent={
+                          isMaterial ? (
+                            <FulleriteGasSiteBadges typeId={purchase.typeId} />
+                          ) : undefined
                         }
                         summary={
                           <span className="flex items-center justify-end gap-2">

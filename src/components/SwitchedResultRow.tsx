@@ -35,6 +35,7 @@ export type SwitchedResultRowProps = Omit<
   wideBreakpoint?: "sm" | "md" | "lg";
   className?: string;
   identityClassName?: string;
+  identityTrailingContent?: ReactNode;
   contentClassName?: string;
   switchClassName?: string;
   checkboxClassName?: string;
@@ -65,6 +66,7 @@ export default function SwitchedResultRow({
   wideBreakpoint = "sm",
   className,
   identityClassName,
+  identityTrailingContent,
   contentClassName,
   switchClassName,
   checkboxClassName,
@@ -165,18 +167,23 @@ export default function SwitchedResultRow({
           )}
         </ResultRowControl>
       )}
-      <TypeIdentity
-        {...typeIdentityProps}
-        name={name}
-        typeId={typeId}
+      <div
         className={cn(
-          "col-start-2 row-start-1 min-w-0",
+          "col-start-2 row-start-1 flex min-w-0 items-center gap-3",
           showSwitch ? wideLayoutClasses.identity : noSwitchLayoutClasses.identity,
           !showSwitch && "col-start-1",
           rowHasMutedContent && "opacity-50",
           identityClassName,
         )}
-      />
+      >
+        <TypeIdentity
+          {...typeIdentityProps}
+          name={name}
+          typeId={typeId}
+          className="min-w-0 flex-1"
+        />
+        {identityTrailingContent}
+      </div>
       <div
         className={cn(
           "col-span-2 col-start-2 row-start-2 flex min-w-0 items-center justify-end gap-1",
