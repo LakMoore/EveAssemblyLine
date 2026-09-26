@@ -1095,6 +1095,7 @@ export function setFresh<T>(
   previous?: EndpointCache<T>,
   preserveLastModified = false,
   sourceCharacterId?: number,
+  preserveLastUpdated = false,
 ): EndpointCache<T> {
   const lastModified = normalizeUtcTimestamp(
     headers?.get("last-modified"),
@@ -1106,7 +1107,9 @@ export function setFresh<T>(
     sourceCharacterId: sourceCharacterId ?? previous?.sourceCharacterId,
     etag: headers?.get("etag") ?? previous?.etag,
     lastModified,
-    lastUpdated: new Date().toISOString(),
+    lastUpdated: preserveLastUpdated
+      ? (previous?.lastUpdated ?? new Date().toISOString())
+      : new Date().toISOString(),
     expires,
     status: endpointDataStatus(lastModified, expires),
   };
@@ -1573,7 +1576,7 @@ async function refreshIndustryJobs(
     const jobs = await fetchJobs(character, cache.jobs?.etag, assetsLastModified);
     cache.jobs =
       jobs.notModified && cache.jobs
-        ? setFresh(cache.jobs.lastBody, jobs.headers, cache.jobs, true)
+        ? setFresh(cache.jobs.lastBody, jobs.headers, cache.jobs, true, undefined, true)
         : setFresh(jobs.jobs ?? [], jobs.headers, cache.jobs, false, character.characterId);
   }
   else {

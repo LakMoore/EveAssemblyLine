@@ -750,6 +750,25 @@ void test("preserves Last-Modified when a 304 response omits it", () => {
   assert.equal(current.expires, "2026-08-26T17:00:00.000Z");
 });
 
+void test("preserves the jobs update marker when a 304 response is revalidated", () => {
+  const previous = {
+    lastBody: [],
+    lastUpdated: "2026-08-26T16:05:00.000Z",
+    lastModified: "2026-08-26T16:00:00.000Z",
+    status: "stale" as const,
+  };
+  const current = setFresh(
+    [],
+    new Headers({ expires: "Wed, 26 Aug 2026 17:00:00 GMT" }),
+    previous,
+    true,
+    undefined,
+    true,
+  );
+
+  assert.equal(current.lastUpdated, previous.lastUpdated);
+});
+
 void test("expiry takes precedence when determining stale status", () => {
   assert.equal(endpointDataStatus("2026-08-26T16:59:59.000Z", "2020-01-01T00:00:00.000Z"), "stale");
 });

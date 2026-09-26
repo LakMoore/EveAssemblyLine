@@ -2451,6 +2451,7 @@ function Planner() {
           characterNamesById={characterNamesById}
           characterStatuses={characterStatuses}
           slotUsage={jobs?.slotUsage}
+          jobsLastUpdated={jobs?.lastUpdated}
           corporationNamesById={corporationNamesById}
           stockpileNamesById={
             new Map(stockpiles.map((stockpile) => [stockpile.id, stockpile.name]))

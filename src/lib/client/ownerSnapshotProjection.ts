@@ -671,7 +671,12 @@ export function projectOwnerSnapshotsToClientJobs(
         job.productTypeId === undefined ? undefined : metadataByTypeId.get(job.productTypeId)?.name,
     })),
   );
-  return { slotUsage, jobs };
+  const lastUpdated = snapshots
+    .map((snapshot) => snapshot.jobs.status.lastUpdated)
+    .filter((value): value is string => value !== undefined)
+    .sort((left, right) => Date.parse(left) - Date.parse(right))
+    .at(-1);
+  return { lastUpdated, slotUsage, jobs };
 }
 
 /** Projects owner-scoped ships and fitting assets into the existing ships page response contract. */

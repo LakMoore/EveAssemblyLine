@@ -8,8 +8,12 @@ import {
 import type { ClientOwnerSnapshot } from "./ownerSnapshotCache";
 import { filterClientAssetsForPlanning, filterClientSellOrdersForPlanning } from "./requestCache";
 
-function slice<T>(data: T) {
-  return { eTag: "test", data, status: { status: "cached" as const, hasBody: true } };
+function slice<T extends readonly unknown[]>(data: T, lastUpdated?: string) {
+  return {
+    eTag: "test",
+    data,
+    status: { status: "cached" as const, hasBody: true, lastUpdated },
+  };
 }
 
 const snapshot: ClientOwnerSnapshot = {
@@ -256,6 +260,25 @@ void test("projects stable owner assets into enriched client assets", () => {
     },
   );
   assert.equal(filterClientAssetsForPlanning(result).assets?.length, 0);
+});
+
+void test("projects the newest jobs endpoint update timestamp", () => {
+  const result = projectOwnerSnapshotsToClientJobs(
+    [
+      {
+        ...snapshot,
+        jobs: slice([], "2026-09-26T10:00:00.000Z"),
+      },
+      {
+        ...snapshot,
+        owner: { kind: "character", id: 901 },
+        jobs: slice([], "2026-09-26T10:05:00.000Z"),
+      },
+    ],
+    [],
+  );
+
+  assert.equal(result.lastUpdated, "2026-09-26T10:05:00.000Z");
 });
 
 void test("labels assets in an undocked ship with its solar system", () => {

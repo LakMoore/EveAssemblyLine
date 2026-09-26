@@ -423,6 +423,7 @@ export type ClientShipsResponse = {
 };
 
 export type ClientJobsResponse = {
+  lastUpdated?: string;
   slotUsage?: Record<
     string,
     {

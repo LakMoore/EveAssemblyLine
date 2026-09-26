@@ -1,7 +1,14 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import {
+  startTransition,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import {
   AlertTriangle,
   Atom,
@@ -142,6 +149,103 @@ const materialBalanceColumns = [
 const reactionFormulaBalanceColumns = ["Available", "Owned", "In Use", "Runs to Install"] as const;
 const typeIdChangedEvent = "assembly-line-planner-type-id-changed";
 const simulationTabParam = "simulationTab";
+const completedTypeDatesStoragePrefix = "assembly-line-simulation-completed-types:";
+type SimulationActivityTab = "react" | "manufacture";
+type CompletedTypeDates = Record<SimulationActivityTab, Map<number, Date>>;
+
+/** Creates an empty completion map for each activity type. */
+function emptyCompletedTypeDates(): CompletedTypeDates {
+  return { react: new Map(), manufacture: new Map() };
+}
+
+/** Returns the localStorage key for one simulation identity. */
+function completedTypeDatesStorageKey(simulationRevision: string): string {
+  return `${completedTypeDatesStoragePrefix}${encodeURIComponent(simulationRevision)}`;
+}
+
+/** Parses persisted type completion timestamps while rejecting malformed entries. */
+function parseCompletedTypeDates(value: unknown): Map<number, Date> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return new Map();
+  const dates = new Map<number, Date>();
+  for (const [typeIdText, timestamp] of Object.entries(value)) {
+    const typeId = Number(typeIdText);
+    const date = typeof timestamp === "string" ? new Date(timestamp) : undefined;
+    if (Number.isSafeInteger(typeId) && typeId > 0 && date && Number.isFinite(date.getTime())) {
+      dates.set(typeId, date);
+    }
+  }
+  return dates;
+}
+
+/** Loads persisted completion timestamps for one simulation identity. */
+function loadCompletedTypeDates(simulationRevision: string): CompletedTypeDates {
+  const empty = emptyCompletedTypeDates();
+  if (typeof window === "undefined") return empty;
+  try {
+    const stored = window.localStorage.getItem(completedTypeDatesStorageKey(simulationRevision));
+    if (!stored) return empty;
+    const parsed: unknown = JSON.parse(stored);
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return empty;
+    const persisted = parsed as Partial<Record<SimulationActivityTab, unknown>>;
+    return {
+      react: parseCompletedTypeDates(persisted.react),
+      manufacture: parseCompletedTypeDates(persisted.manufacture),
+    };
+  }
+  catch {
+    return empty;
+  }
+}
+
+/** Persists completion timestamps for one simulation identity. */
+function saveCompletedTypeDates(
+  simulationRevision: string,
+  completedTypeDates: CompletedTypeDates,
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    const key = completedTypeDatesStorageKey(simulationRevision);
+    if (completedTypeDates.react.size === 0 && completedTypeDates.manufacture.size === 0) {
+      window.localStorage.removeItem(key);
+      return;
+    }
+    const serialize = (dates: Map<number, Date>) =>
+      Object.fromEntries([...dates].map(([typeId, date]) => [String(typeId), date.toISOString()]));
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({
+        react: serialize(completedTypeDates.react),
+        manufacture: serialize(completedTypeDates.manufacture),
+      }),
+    );
+  }
+  catch {
+    // Browser storage may be unavailable or full; completion remains usable in memory.
+  }
+}
+
+/** Removes completion timestamps that predate the latest jobs endpoint update. */
+function pruneCompletedTypeDates(
+  completedTypeDates: CompletedTypeDates,
+  jobsLastUpdated?: string,
+): CompletedTypeDates {
+  const lastUpdated = Date.parse(jobsLastUpdated ?? "");
+  if (!Number.isFinite(lastUpdated)) return completedTypeDates;
+  let changed = false;
+  const next = { ...completedTypeDates };
+  for (const tab of ["react", "manufacture"] as const) {
+    const retained = new Map(
+      [...completedTypeDates[tab]].filter(
+        ([, completedAt]) => completedAt.getTime() >= lastUpdated,
+      ),
+    );
+    if (retained.size !== completedTypeDates[tab].size) {
+      next[tab] = retained;
+      changed = true;
+    }
+  }
+  return changed ? next : completedTypeDates;
+}
 
 /** Returns whether a URL value identifies a simulator output tab. */
 function isSimulationTab(value: string | null): value is SimulationTab {
@@ -220,6 +324,8 @@ type SimulationRowControls = {
   isIncluded: (rowKey: string) => boolean;
   onIncludedChange: (rowKey: string, included: boolean) => void;
   onHaulIncludedChange: (rowKeys: readonly string[], included: boolean) => void;
+  isTypeCompleted: (tab: "react" | "manufacture", typeId: number) => boolean;
+  onTypeCompletedChange: (tab: "react" | "manufacture", typeId: number, completed: boolean) => void;
   isCompleted: (
     rowKey: string,
     scheduleIdentity?: string,
@@ -782,27 +888,30 @@ function displayInstallsForEntry(
   ];
 }
 
-/** Renders the install plan for one or more simulator activity rows. */
-function SimulationInstallPlanDialog({
-  entries,
-  activityLabel,
-  solveMode,
-  scheduleOptions,
-  characterNamesById,
-  onOpenPlan,
-  readOnly,
-}: {
+type SimulationInstallPlanDialogLayoutProps = {
   entries: readonly SimulationInstallPlanEntry[];
+  installDetails: SimulationInstallDetail[];
+  compactGroups: CompactInstallGroup[];
   activityLabel: "reaction" | "manufacturing";
-  solveMode: ClientSimulationSolveMode;
+  characterNamesById: ReadonlyMap<number, string>;
+  onOpenPlan: () => void;
+  readOnly: boolean;
+};
+
+type SimulationInstallPlanDialogModelProps = {
+  entries: readonly SimulationInstallPlanEntry[];
   scheduleOptions: ClientSimulationScheduleOptions;
   characterNamesById: ReadonlyMap<number, string>;
   onOpenPlan: () => void;
   readOnly: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [view, setView] = useState<SimulationInstallPlanView>("compact");
-  const installDetails = entries.flatMap((entry) => {
+};
+
+/** Creates install details using the activity-specific display and completion rules. */
+function simulationInstallDetails(
+  entries: readonly SimulationInstallPlanEntry[],
+  activityLabel: "reaction" | "manufacturing",
+): SimulationInstallDetail[] {
+  return entries.flatMap((entry) => {
     const displayInstalls = displayInstallsForEntry(entry, activityLabel);
     const scheduleInstalls = entry.schedule?.installs ?? [];
     const scheduleIdentity = simulationInstallScheduleIdentity(
@@ -816,11 +925,71 @@ function SimulationInstallPlanDialog({
       trackCompletion,
     }));
   });
+}
+
+/** Renders the reaction-specific install plan and runtime grouping behavior. */
+function SimulationReactionInstallPlanDialog({
+  entries,
+  solveMode,
+  scheduleOptions,
+  characterNamesById,
+  onOpenPlan,
+  readOnly,
+}: SimulationInstallPlanDialogModelProps & { solveMode: ClientSimulationSolveMode }) {
+  const installDetails = simulationInstallDetails(entries, "reaction");
   const compactGroups = compactInstallGroups(
     installDetails,
-    activityLabel === "reaction" && solveMode !== "available-slots",
+    solveMode !== "available-slots",
     scheduleOptions,
   );
+  return (
+    <SimulationInstallPlanDialogLayout
+      entries={entries}
+      installDetails={installDetails}
+      compactGroups={compactGroups}
+      activityLabel="reaction"
+      characterNamesById={characterNamesById}
+      onOpenPlan={onOpenPlan}
+      readOnly={readOnly}
+    />
+  );
+}
+
+/** Renders the manufacturing-specific install plan and server-install fallback behavior. */
+function SimulationManufacturingInstallPlanDialog({
+  entries,
+  scheduleOptions,
+  characterNamesById,
+  onOpenPlan,
+  readOnly,
+}: SimulationInstallPlanDialogModelProps) {
+  const installDetails = simulationInstallDetails(entries, "manufacturing");
+  const compactGroups = compactInstallGroups(installDetails, false, scheduleOptions);
+  return (
+    <SimulationInstallPlanDialogLayout
+      entries={entries}
+      installDetails={installDetails}
+      compactGroups={compactGroups}
+      activityLabel="manufacturing"
+      characterNamesById={characterNamesById}
+      onOpenPlan={onOpenPlan}
+      readOnly={readOnly}
+    />
+  );
+}
+
+/** Renders the shared install-plan dialog presentation for an activity-specific model. */
+function SimulationInstallPlanDialogLayout({
+  entries,
+  installDetails,
+  compactGroups,
+  activityLabel,
+  characterNamesById,
+  onOpenPlan,
+  readOnly,
+}: SimulationInstallPlanDialogLayoutProps) {
+  const [open, setOpen] = useState(false);
+  const [view, setView] = useState<SimulationInstallPlanView>("compact");
   const detailedInstallDetails = detailedInstallDetailsFromGroups(compactGroups);
   const installableRuns = entries.reduce((total, entry) => total + entry.job.readyNowRuns, 0);
   const totalRuns = entries.reduce((total, entry) => total + entry.job.requiredRuns, 0);
@@ -2318,7 +2487,9 @@ function SimulationActivityTab({
       .map(([locationId, bonus]) => `${locationId}:${bonus}`),
   ].join("|");
   const activeJobs = jobs.filter(
-    (job) => !controls.isCompleted(`${tab}:${job.jobId}`, baseScheduleRevision, true),
+    (job) =>
+      !controls.isTypeCompleted(tab, job.productTypeId)
+      && !controls.isCompleted(`${tab}:${job.jobId}`, baseScheduleRevision, true),
   );
   const scheduleRevision = [
     baseScheduleRevision,
@@ -2648,11 +2819,11 @@ function SimulationActivityTab({
             (total, entry) => total + entry.installedRuns,
             0,
           );
-          const groupCompleted =
-            groupInstallableRuns > 0 && groupInstalledRuns >= groupInstallableRuns;
+          const groupCompleted = controls.isTypeCompleted(tab, group.productTypeId);
           const groupPartiallyInstalled = groupInstalledRuns > 0 && !groupCompleted;
           const groupIncluded = groupEntries.every((entry) => entry.included);
           const updateGroupCompletion = (checked: boolean) => {
+            controls.onTypeCompletedChange(tab, group.productTypeId, checked);
             for (const entry of groupEntries) {
               controls.onInstalledRunsChange(
                 entry.rowKey,
@@ -2724,18 +2895,30 @@ function SimulationActivityTab({
               )}
             >
               <span className="flex items-center justify-self-start">
-                <SimulationInstallPlanDialog
-                  entries={installPlanEntries}
-                  activityLabel={activityLabel}
-                  solveMode={solveMode}
-                  scheduleOptions={{
-                    protectReactionMaterialBonus: tab === "react" && protectReactionMaterialBonus,
-                    reactionMaterialBonusesByLocation,
-                  }}
-                  characterNamesById={characterNamesById}
-                  onOpenPlan={controls.onOpenPlan}
-                  readOnly={readOnly}
-                />
+                {tab === "react" ? (
+                  <SimulationReactionInstallPlanDialog
+                    entries={installPlanEntries}
+                    solveMode={solveMode}
+                    scheduleOptions={{
+                      protectReactionMaterialBonus: protectReactionMaterialBonus,
+                      reactionMaterialBonusesByLocation,
+                    }}
+                    characterNamesById={characterNamesById}
+                    onOpenPlan={controls.onOpenPlan}
+                    readOnly={readOnly}
+                  />
+                ) : (
+                  <SimulationManufacturingInstallPlanDialog
+                    entries={installPlanEntries}
+                    scheduleOptions={{
+                      protectReactionMaterialBonus: false,
+                      reactionMaterialBonusesByLocation,
+                    }}
+                    characterNamesById={characterNamesById}
+                    onOpenPlan={controls.onOpenPlan}
+                    readOnly={readOnly}
+                  />
+                )}
               </span>
               <span className="flex items-center justify-self-center">
                 <SimulationJobInputsResponsive
@@ -3376,6 +3559,7 @@ export default function SimulationResults({
   characterNamesById,
   characterStatuses,
   slotUsage,
+  jobsLastUpdated,
   corporationNamesById,
   stockpileNamesById,
   haulExclusions,
@@ -3398,6 +3582,7 @@ export default function SimulationResults({
   characterNamesById: ReadonlyMap<number, string>;
   characterStatuses: readonly ClientCharacterStatus[];
   slotUsage: ClientJobsResponse["slotUsage"];
+  jobsLastUpdated?: string;
   corporationNamesById: ReadonlyMap<number, string>;
   stockpileNamesById: ReadonlyMap<string, string>;
   haulExclusions: readonly PlanHaulExclusion[];
@@ -3425,11 +3610,52 @@ export default function SimulationResults({
   const [completionByRow, setCompletionByRow] = useState<
     Partial<Record<string, SimulationCompletionState>>
   >({});
+  const [completedTypeDates, setCompletedTypeDates] =
+    useState<CompletedTypeDates>(emptyCompletedTypeDates);
+  const [completedTypeDatesHydratedRevision, setCompletedTypeDatesHydratedRevision] =
+    useState<string>();
   const [isBugReportOpen, setIsBugReportOpen] = useState(false);
   const isMobile = useIsMobileSimulationView();
   const statusIsError = status.startsWith("Error:");
   const hasSurplusTab = result?.lists.surplusItems !== undefined;
   const selectedTab = !hasSurplusTab && activeTab === "surplus" ? "warnings" : activeTab;
+  const simulationInputRevision = result
+    ? `${result.metadata.simulationId ?? ""}|${result.metadata.normalizedInputHash}|${result.metadata.sdeRevision}`
+    : undefined;
+  const jobsLastUpdatedRef = useRef(jobsLastUpdated);
+  jobsLastUpdatedRef.current = jobsLastUpdated;
+  useEffect(() => {
+    startTransition(() => {
+      setCompletionByRow({});
+    });
+  }, [simulationInputRevision]);
+  useEffect(() => {
+    if (!simulationInputRevision) return;
+    startTransition(() => {
+      setCompletedTypeDates(
+        pruneCompletedTypeDates(
+          loadCompletedTypeDates(simulationInputRevision),
+          jobsLastUpdatedRef.current,
+        ),
+      );
+      setCompletedTypeDatesHydratedRevision(simulationInputRevision);
+    });
+  }, [simulationInputRevision]);
+  useEffect(() => {
+    if (
+      !simulationInputRevision
+      || completedTypeDatesHydratedRevision !== simulationInputRevision
+    ) {
+      return;
+    }
+    saveCompletedTypeDates(simulationInputRevision, completedTypeDates);
+  }, [completedTypeDates, completedTypeDatesHydratedRevision, simulationInputRevision]);
+  useEffect(() => {
+    if (!jobsLastUpdated) return;
+    startTransition(() => {
+      setCompletedTypeDates((current) => pruneCompletedTypeDates(current, jobsLastUpdated));
+    });
+  }, [jobsLastUpdated]);
   async function copySimulationId() {
     const simulationId = result?.metadata.simulationId;
     if (!simulationId) return;
@@ -3526,6 +3752,14 @@ export default function SimulationResults({
         setLocalPreservedHaulTasks(previousLocalPreservedHaulTasks);
       });
     },
+    isTypeCompleted: (tab, typeId) => completedTypeDates[tab].has(typeId),
+    onTypeCompletedChange: (tab, typeId, completed) =>
+      setCompletedTypeDates((current) => {
+        const next = new Map(current[tab]);
+        if (completed) next.set(typeId, new Date());
+        else next.delete(typeId);
+        return { ...current, [tab]: next };
+      }),
     isCompleted: (rowKey, scheduleIdentity, matchScheduleRevision = false) => {
       const completion = completionByRow[rowKey];
       if (!completion) return false;
@@ -3915,7 +4149,7 @@ function SimulationTabContent({
         tab={activeTab}
         jobs={activeTab === "react" ? result.lists.reactionJobs : result.lists.manufacturingJobs}
         allJobs={[...result.lists.manufacturingJobs, ...result.lists.reactionJobs]}
-        simulationInputRevision={`${result.metadata.normalizedInputHash}|${result.metadata.sdeRevision}`}
+        simulationInputRevision={`${result.metadata.simulationId ?? ""}|${result.metadata.normalizedInputHash}|${result.metadata.sdeRevision}`}
         stock={stock}
         locationNamesById={locationNamesById}
         reactionMaterialBonusesByLocation={reactionMaterialBonusesByLocation}

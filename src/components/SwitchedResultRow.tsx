@@ -108,7 +108,7 @@ export default function SwitchedResultRow({
   const effectiveSwitchDisabled = disabled || switchDisabled || rowIsChecked;
   const effectiveCheckboxDisabled =
     disabled || checkboxDisabled || (showSwitch && switchChecked !== true);
-  const effectiveOnClick = rowIsChecked ? undefined : onClick;
+  const effectiveOnClick = disabled || rowIsChecked ? undefined : onClick;
   const effectiveSelected = selected && !rowIsChecked;
 
   return (
@@ -117,9 +117,7 @@ export default function SwitchedResultRow({
       data-disabled={disabled || undefined}
       data-installed={rowIsChecked || undefined}
       data-selected={effectiveSelected || undefined}
-      role={effectiveOnClick ? "group" : undefined}
-      tabIndex={effectiveOnClick ? 0 : undefined}
-      aria-label={effectiveOnClick ? `Select ${name}` : undefined}
+      role="group"
       className={cn(
         "group/result-row grid min-h-14 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-[13px] gap-y-2 border-b border-border px-2 py-2.5 transition-colors hover:bg-muted/50 data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[installed=true]:opacity-50 data-[installed=true]:hover:bg-transparent data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:hover:bg-accent",
         showSwitch ? wideLayoutClasses.grid : "grid-cols-[minmax(0,1fr)_auto]",
@@ -178,8 +176,23 @@ export default function SwitchedResultRow({
           identityClassName,
         )}
       >
+        {effectiveOnClick && (
+          <button
+            type="button"
+            aria-label={`Select ${name}`}
+            aria-pressed={effectiveSelected}
+            className="sr-only focus:not-sr-only focus:absolute focus:z-10 focus:rounded-sm focus:bg-background focus:px-2 focus:py-1 focus:text-xs focus:text-foreground focus:ring-2 focus:ring-ring focus:outline-none"
+            onClick={(event) => {
+              event.stopPropagation();
+              effectiveOnClick();
+            }}
+          >
+            Select
+          </button>
+        )}
         <TypeIdentity
           {...typeIdentityProps}
+          linkPath={disabled ? null : typeIdentityProps.linkPath}
           name={name}
           typeId={typeId}
           className="min-w-0 flex-1"
