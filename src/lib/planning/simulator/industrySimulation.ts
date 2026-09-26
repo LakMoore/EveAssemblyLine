@@ -235,13 +235,23 @@ class IndustryDemandSimulation {
               isReprocessingInput ? "reprocessing" : "stock",
             );
             this.declareDemand(account, item.quantity, source);
+            const sellOrderQuantity = isReprocessingInput
+              ? 0
+              : this.allocator.claimSellOrderSupply(
+                  item.typeId,
+                  item.quantity,
+                  account.locationId,
+                  account,
+                  undefined,
+                  stockpile.id,
+                );
             const existing = measureSyncProfiled(
               this.profiler,
               "claim-stockpile-supply",
               () =>
                 this.allocator.claimOrdinarySupply(
                   item.typeId,
-                  item.quantity,
+                  item.quantity - sellOrderQuantity,
                   account.locationId,
                   account,
                   undefined,
@@ -249,16 +259,6 @@ class IndustryDemandSimulation {
                   isReprocessingInput ? "reprocessing" : "stock",
                 ),
             );
-            const sellOrderQuantity = isReprocessingInput
-              ? 0
-              : this.allocator.claimSellOrderSupply(
-                  item.typeId,
-                  item.quantity - existing.local - existing.remote - existing.future,
-                  account.locationId,
-                  account,
-                  undefined,
-                  stockpile.id,
-                );
             this.setDemandReadiness(source, existing.local + sellOrderQuantity);
             const remaining =
               item.quantity

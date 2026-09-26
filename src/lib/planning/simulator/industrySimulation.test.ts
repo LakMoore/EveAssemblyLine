@@ -220,6 +220,49 @@ void test("uses sell orders for direct demand and keeps their ledger source sepa
   assert.equal(result.lists.haulingTasks.length, 0);
 });
 
+void test("does not haul remote stock when local sell orders satisfy demand", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "market-stockpile",
+        name: "Market stockpile",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 34, quantity: 2, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [
+      { typeId: 34, name: "Tritanium", quantity: 3, locationId: 10, source: "marketOrder" },
+      { typeId: 34, name: "Tritanium", quantity: 2, locationId: 20 },
+    ],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1 },
+  });
+  const result = await simulateIndustry(request);
+  const balance = result.ledgers
+    .find((ledger) => ledger.locationId === 10)
+    ?.balances.find((candidate) => candidate.typeId === 34);
+  const remoteBalance = result.ledgers
+    .find((ledger) => ledger.locationId === 20)
+    ?.balances.find((candidate) => candidate.typeId === 34);
+
+  assert.ok(balance);
+  assert.ok(remoteBalance);
+  assert.equal(balance.availableFromSellOrders, 3);
+  assert.equal(balance.availableFromHauling, 0);
+  assert.equal(balance.futureDemand, 0);
+  assert.equal(balance.unsatisfied, 0);
+  assert.deepEqual(result.lists.haulingTasks, []);
+  assert.equal(remoteBalance.availableNow, 2);
+  assert.equal(remoteBalance.transferredOut, 0);
+});
+
 void test("does not use sell orders for manufacturing inputs or hauling", async () => {
   const request = parseSimulatorRequest({
     stockpiles: [
