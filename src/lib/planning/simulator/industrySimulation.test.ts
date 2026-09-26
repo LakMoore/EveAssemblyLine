@@ -263,6 +263,57 @@ void test("does not haul remote stock when local sell orders satisfy demand", as
   assert.equal(remoteBalance.transferredOut, 0);
 });
 
+void test("satisfies Amarr stockpile demand from local Reinforced Carbon Fiber sell orders", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "amarr-stockpile",
+        name: "Amarr Stockpile",
+        locations: {
+          stock: 60008494,
+          manufacturing: 1055354926818,
+          reactions: 1055354982663,
+          reprocessing: 1055354982663,
+          copying: 1055355113677,
+          invention: 1055355113677,
+        },
+        items: [{ typeId: 57457, quantity: 500_000, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [
+      {
+        typeId: 57457,
+        name: "Reinforced Carbon Fiber",
+        quantity: 1_027_851,
+        locationId: 60008494,
+        source: "marketOrder",
+      },
+      {
+        typeId: 57457,
+        name: "Reinforced Carbon Fiber",
+        quantity: 500_000,
+        locationId: 60003760,
+      },
+    ],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1 },
+  });
+  const result = await simulateIndustry(request);
+  const balance = result.ledgers
+    .find((ledger) => ledger.locationId === 60008494)
+    ?.balances.find((candidate) => candidate.typeId === 57457);
+
+  assert.ok(balance);
+  assert.equal(balance.availableFromSellOrders, 1_027_851);
+  assert.equal(balance.requiredNow, 500_000);
+  assert.equal(balance.futureSupply, 0);
+  assert.equal(balance.surplus, 527_851);
+  assert.equal(
+    result.lists.haulingTasks.some((task) => task.typeId === 57457),
+    false,
+  );
+});
+
 void test("does not use sell orders for manufacturing inputs or hauling", async () => {
   const request = parseSimulatorRequest({
     stockpiles: [
@@ -301,4 +352,67 @@ void test("does not use sell orders for manufacturing inputs or hauling", async 
   assert.equal(input.availableFromHauling, 0);
   assert.ok((input.purchaseQuantity ?? 0) > 0);
   assert.equal(result.lists.haulingTasks.length, 0);
+});
+
+void test("hauls only the missing quantity from a remote in-flight reaction output", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "industrial-menace",
+        name: "The Industrial Menace",
+        locations: {
+          stock: 100,
+          manufacturing: 100,
+          reactions: 200,
+          reprocessing: 100,
+          copying: 100,
+          invention: 100,
+        },
+        items: [{ typeId: 30305, quantity: 5_991, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: {
+      items: [{ typeId: 30305, quantity: 402, locationId: 100, rootLocationId: 100 }],
+      market: [],
+      blueprints: [],
+      industry: [
+        {
+          jobId: 123,
+          typeId: 30305,
+          blueprintTypeId: 46160,
+          quantity: 5_760,
+          runs: 48,
+          activity: "reaction",
+          status: "active",
+          locationId: 200,
+          rootLocationId: 200,
+        },
+      ],
+    },
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1 },
+  });
+  const result = await simulateIndustry(request);
+  const destinationBalance = result.ledgers
+    .find((ledger) => ledger.locationId === 100)
+    ?.balances.find((candidate) => candidate.typeId === 30305);
+  const sourceBalance = result.ledgers
+    .find((ledger) => ledger.locationId === 200)
+    ?.balances.find((candidate) => candidate.typeId === 30305);
+
+  assert.equal(result.lists.reactionJobs.length, 0);
+  assert.ok(destinationBalance);
+  assert.ok(sourceBalance);
+  assert.equal(destinationBalance.availableNow, 402);
+  assert.equal(destinationBalance.availableFromHauling, 5_589);
+  assert.equal(destinationBalance.unsatisfied, 0);
+  assert.equal(sourceBalance.inFlightQuantity, 5_760);
+  assert.equal(sourceBalance.transferredOut, 5_589);
+  assert.equal(sourceBalance.surplus, 171);
+  assert.deepEqual(
+    result.lists.haulingTasks.map((task) => task.quantity),
+    [5_589],
+  );
+  assert.equal(result.lists.haulingTasks[0]?.fromLocationId, 200);
+  assert.equal(result.lists.haulingTasks[0]?.toLocationId, 100);
 });

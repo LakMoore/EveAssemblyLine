@@ -122,7 +122,10 @@ export class SimulationAllocator {
       const quantity = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
       if (quantity <= 0) continue;
       if (lot.horizon === "after-upstream") {
-        if (lot.locationId === destinationLocationId) future += quantity;
+        if (
+          lot.locationId === destinationLocationId
+          || (lot.locationId !== undefined && !this.isExcluded(lot, destinationLocationId))
+        ) future += quantity;
         continue;
       }
       else if (lot.locationId === destinationLocationId) local += quantity;
@@ -211,22 +214,37 @@ export class SimulationAllocator {
     let remaining = quantity;
     let claimed = 0;
     const reservations: SimulationUpstreamReservation[] = [];
-    for (const lot of (this.itemLotsByTypeId.get(typeId) ?? []).filter(
-      (candidate) =>
-        candidate.source !== "market-order"
-        && candidate.horizon === "after-upstream"
-        && candidate.locationId === account.locationId,
-    )) {
+    for (const lot of (this.itemLotsByTypeId.get(typeId) ?? [])
+      .filter(
+        (candidate) =>
+          candidate.source !== "market-order"
+          && candidate.horizon === "after-upstream"
+          && candidate.locationId !== undefined
+          && (
+            candidate.locationId === account.locationId
+            || !this.isExcluded(candidate, account.locationId)
+          ),
+      )
+      .slice()
+      .sort(
+        (left, right) =>
+          Number(left.locationId !== account.locationId)
+            - Number(right.locationId !== account.locationId)
+          || left.lotId.localeCompare(right.lotId),
+      )) {
       if (remaining <= 0) break;
       const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
       const next = Math.min(remaining, available);
-      if (next <= 0) continue;
-      if (lot.activity === undefined) continue;
+      const sourceLocationId = lot.locationId;
+      if (next <= 0 || sourceLocationId === undefined || lot.activity === undefined) continue;
       this.remainingItemQuantityByLotId.set(lot.lotId, available - next);
       this.transactions.push({
         id: this.nextTransactionId("existing-output"),
         kind: "production-commitment",
-        account,
+        account: {
+          locationId: sourceLocationId,
+          typeId: lot.typeId,
+        },
         destinationAccount: account,
         quantity: next,
         source: "production",
@@ -256,6 +274,31 @@ export class SimulationAllocator {
           ? { sourceCompletionAt: lot.industryJobEndDate }
           : {}),
       });
+      if (lot.locationId !== account.locationId) {
+        this.transactions.push({
+          id: this.nextTransactionId("existing-output-transfer"),
+          kind: "transfer-commitment",
+          sourceAccount: { locationId: sourceLocationId, typeId: lot.typeId },
+          destinationAccount: account,
+          lotId: lot.lotId,
+          quantity: next,
+          demandingJobId,
+        });
+        this.haulingTasks.push({
+          transferId: `haul:${lot.lotId}:${account.locationId}:${demandingJobId ?? "stock"}`,
+          lotId: lot.lotId,
+          typeId: lot.typeId,
+          typeName: lot.name,
+          quantity: next,
+          unitVolume: lot.unitVolume,
+          fromLocationId: sourceLocationId,
+          toLocationId: account.locationId,
+          ownerType: lot.ownerType,
+          ownerId: lot.ownerId,
+          purpose: "industry-input",
+          demands: [{ jobId: demandingJobId, quantity: next }],
+        });
+      }
     }
     return {
       quantity: claimed,

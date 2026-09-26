@@ -290,7 +290,7 @@ void test("retains the full output when an active job only supplies part of dema
   );
 });
 
-void test("does not claim future output delivered to another location", () => {
+void test("does not claim future output across an excluded route", () => {
   const allocator = new SimulationAllocator(
     {
       ...inventory,
@@ -308,7 +308,7 @@ void test("does not claim future output delivered to another location", () => {
         },
       ],
     },
-    [],
+    [{ typeId: 34, fromLocationId: 30, toLocationId: 20 }],
   );
 
   assert.deepEqual(allocator.availability(34, 20), { local: 0, remote: 0, future: 0 });
@@ -319,6 +319,38 @@ void test("does not claim future output delivered to another location", () => {
       reservations: [],
     },
   );
+});
+
+void test("claims remote future output after completion and creates a deferred haul", () => {
+  const allocator = new SimulationAllocator(
+    {
+      ...inventory,
+      itemLots: [
+        {
+          ...inventory.itemLots[0],
+          lotId: "remote-active-output",
+          quantity: 5_760,
+          locationId: 30,
+          horizon: "after-upstream",
+          source: "industry-output",
+          activity: "reaction",
+          industryJobId: 123,
+          industryJobStatus: "active",
+          industryJobEndDate: "2026-01-01T02:00:00.000Z",
+        },
+      ],
+    },
+    [],
+  );
+
+  const claim = allocator.claimOrdinarySupply(34, 5_589, 20, account, "stockpile-demand");
+
+  assert.equal(claim.local, 0);
+  assert.equal(claim.remote, 0);
+  assert.equal(claim.future, 5_589);
+  assert.equal(allocator.haulingTasks[0]?.quantity, 5_589);
+  assert.equal(allocator.remainingItemQuantity("remote-active-output"), 171);
+  assert.equal(allocator.transactions.at(-1)?.kind, "transfer-commitment");
 });
 
 void test("conserves finite BPC runs across allocations", () => {
