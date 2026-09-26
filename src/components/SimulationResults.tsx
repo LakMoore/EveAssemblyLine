@@ -2074,7 +2074,7 @@ function SimulationInventionTab({
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
-  const blueprintNamesById = useSimulationTypeNames(jobs.map((job) => job.outputBlueprintTypeId));
+  const blueprintNamesById = useSimulationTypeNames(jobs.map((job) => job.sourceBlueprintTypeId));
   return (
     <SimulationResultsTab hasResults={jobs.length > 0}>
       <SimulationLocationResultGroups
@@ -2085,19 +2085,19 @@ function SimulationInventionTab({
         onOpenGroupChange={onOpenGroupChange}
         getRowKey={(job) => job.jobId}
         getAvatar={(job) => ({
-          typeId: job.outputBlueprintTypeId,
+          typeId: job.sourceBlueprintTypeId,
           name:
-            blueprintNamesById.get(job.outputBlueprintTypeId)
-            ?? `Blueprint ${job.outputBlueprintTypeId}`,
+            blueprintNamesById.get(job.sourceBlueprintTypeId)
+            ?? `Blueprint ${job.sourceBlueprintTypeId}`,
           imageVariation: "bpc",
         })}
         renderRow={(job) => (
           <SimulationSimpleJobRow
             rowKey={`invent:${job.jobId}`}
-            typeId={job.outputBlueprintTypeId}
+            typeId={job.sourceBlueprintTypeId}
             name={
-              blueprintNamesById.get(job.outputBlueprintTypeId)
-              ?? `Blueprint ${job.outputBlueprintTypeId}`
+              blueprintNamesById.get(job.sourceBlueprintTypeId)
+              ?? `Blueprint ${job.sourceBlueprintTypeId}`
             }
             subline={
               <CopyableNumber
