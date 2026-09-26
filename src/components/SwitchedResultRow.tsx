@@ -104,35 +104,37 @@ export default function SwitchedResultRow({
   };
   const rowIsChecked = installed || checkboxChecked === true;
   const rowHasUncheckedSwitch = showSwitch && switchChecked !== true;
-  const rowHasMutedContent = rowIsChecked || rowHasUncheckedSwitch;
+  const rowHasMutedContent = !rowIsChecked && rowHasUncheckedSwitch;
   const effectiveSwitchDisabled = disabled || switchDisabled || rowIsChecked;
   const effectiveCheckboxDisabled =
     disabled || checkboxDisabled || (showSwitch && switchChecked !== true);
+  const effectiveOnClick = rowIsChecked ? undefined : onClick;
+  const effectiveSelected = selected && !rowIsChecked;
 
   return (
     <div
       aria-disabled={disabled}
       data-disabled={disabled || undefined}
       data-installed={rowIsChecked || undefined}
-      data-selected={selected || undefined}
-      role={onClick ? "group" : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      aria-label={onClick ? `Select ${name}` : undefined}
+      data-selected={effectiveSelected || undefined}
+      role={effectiveOnClick ? "group" : undefined}
+      tabIndex={effectiveOnClick ? 0 : undefined}
+      aria-label={effectiveOnClick ? `Select ${name}` : undefined}
       className={cn(
-        "group/result-row grid min-h-14 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-[13px] gap-y-2 border-b border-border px-2 py-2.5 transition-colors hover:bg-muted/50 data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[installed=true]:hover:bg-transparent data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:hover:bg-accent",
+        "group/result-row grid min-h-14 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-[13px] gap-y-2 border-b border-border px-2 py-2.5 transition-colors hover:bg-muted/50 data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[installed=true]:opacity-50 data-[installed=true]:hover:bg-transparent data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:hover:bg-accent",
         showSwitch ? wideLayoutClasses.grid : "grid-cols-[minmax(0,1fr)_auto]",
         showSwitch ? undefined : noSwitchLayoutClasses.grid,
         className,
       )}
-      onClick={onClick}
+      onClick={effectiveOnClick}
       onKeyDown={(event) => {
         if (
-          onClick
+          effectiveOnClick
           && event.currentTarget === event.target
           && (event.key === "Enter" || event.key === " ")
         ) {
           event.preventDefault();
-          onClick();
+          effectiveOnClick();
         }
       }}
     >
@@ -155,7 +157,7 @@ export default function SwitchedResultRow({
                 render={
                   <Switch
                     aria-label={switchTooltip}
-                    checked={switchChecked}
+                    checked={switchChecked ?? false}
                     disabled={effectiveSwitchDisabled}
                     onClick={(event) => event.stopPropagation()}
                     onCheckedChange={onSwitchChange}
@@ -211,11 +213,11 @@ export default function SwitchedResultRow({
                 render={
                   <Checkbox
                     aria-label={checkboxTooltip}
-                    checked={checkboxChecked}
+                    checked={checkboxChecked ?? false}
                     indeterminate={checkboxIndeterminate}
                     disabled={effectiveCheckboxDisabled}
                     className={cn(
-                      selected && "border-secondary",
+                      effectiveSelected && "border-secondary",
                       checkboxIndeterminate
                         && "before:absolute before:h-px before:w-2 before:bg-current before:content-[''] data-indeterminate:[&>span>svg]:hidden",
                     )}

@@ -2091,28 +2091,37 @@ function SimulationInventionTab({
             ?? `Blueprint ${job.sourceBlueprintTypeId}`,
           imageVariation: "bpc",
         })}
-        renderRow={(job) => (
-          <SimulationSimpleJobRow
-            rowKey={`invent:${job.jobId}`}
-            typeId={job.sourceBlueprintTypeId}
-            name={
-              blueprintNamesById.get(job.sourceBlueprintTypeId)
-              ?? `Blueprint ${job.sourceBlueprintTypeId}`
-            }
-            subline={
-              <CopyableNumber
-                value={Math.round(job.successProbability * 100)}
-                suffix="% success probability"
-                copyLabel="Success probability"
-              />
-            }
-            summary={
+        renderRow={(job) => {
+          const rowKey = `invent:${job.jobId}`;
+          const completed = controls.isCompleted(rowKey);
+          return (
+            <SwitchedResultRow
+              typeId={job.sourceBlueprintTypeId}
+              name={
+                blueprintNamesById.get(job.sourceBlueprintTypeId)
+                ?? `Blueprint ${job.sourceBlueprintTypeId}`
+              }
+              linkPath="planner"
+              linkIcon={ClipboardList}
+              linkSearchParams={{ simulationTab: "plan" }}
+              linkHash="plan-breakdown"
+              navigateInPlace
+              onNavigate={controls.onOpenPlan}
+              selected={controls.selectedRowKey === rowKey}
+              onClick={() => controls.onSelectRow(rowKey)}
+              showSwitch={false}
+              showCheckbox
+              checkboxChecked={completed}
+              checkboxTooltip="Mark invention complete"
+              onCheckboxChange={(checked) => controls.onCompletedChange(rowKey, checked)}
+              subline={`${Math.round(job.successProbability * 100)}% success probability`}
+              variation="bpc"
+              contentClassName="self-end text-right font-mono text-xs sm:self-auto"
+            >
               <CopyableNumber value={job.attempts} suffix=" attempts" copyLabel="Attempts" />
-            }
-            variation="bpc"
-            controls={controls}
-          />
-        )}
+            </SwitchedResultRow>
+          );
+        }}
       />
     </SimulationResultsTab>
   );
