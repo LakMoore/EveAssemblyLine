@@ -64,9 +64,7 @@ export function groupSimulationActivityJobs(
       group.jobs.push(job);
       group.quantities.installableRuns += job.readyNowRuns;
       group.quantities.totalRuns += job.requiredRuns;
-      group.quantities.inputs = aggregateSimulationInputs(
-        group.jobs.flatMap((groupJob) => groupJob.inputs),
-      );
+      group.quantities.inputs = aggregateSimulationInputs(group.jobs.flatMap((job) => job.inputs));
       continue;
     }
     groups.set(

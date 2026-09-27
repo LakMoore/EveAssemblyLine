@@ -65,10 +65,6 @@ function addPercentageModifier(multiplierValue: number, modifier: number) {
   return multiplierValue * (1 + modifier / 100);
 }
 
-function addMaterialPercentageModifier(multiplierValue: number, modifier: number | undefined) {
-  return modifier === undefined ? multiplierValue : multiplierValue + modifier / 100;
-}
-
 function securityClass(securityStatus: number | undefined) {
   if (securityStatus === undefined || securityStatus >= 0.5) return "high";
   return securityStatus > 0 ? "low" : "null";
@@ -225,7 +221,7 @@ export function calculateFacilityBonuses(
     reprocessingYield += rigAttributes.get(rigReprocessingAttribute) ?? 0;
   }
 
-  material = addMaterialPercentageModifier(material, bestManufacturingMaterialModifier);
+  material = applyModifier(material, bestManufacturingMaterialModifier);
 
   return {
     manufacturing: {
@@ -324,7 +320,7 @@ export function calculateFacilityGroupBonuses(
         );
         return value === undefined ? [] : [value];
       });
-      const manufacturingMaterialMultiplier = addMaterialPercentageModifier(
+      const manufacturingMaterialMultiplier = applyModifier(
         structureMaterial,
         manufacturingMaterialModifier,
       );

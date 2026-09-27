@@ -4,11 +4,15 @@ import { groupSimulationActivityJobs } from "./presentation";
 import type { SimulationIndustryJob, SimulationJobInput } from "./types";
 
 /** Creates a minimal simulator input for presentation aggregation tests. */
-function input(requiredQuantity: number, availableNow: number): SimulationJobInput {
+function input(
+  requiredQuantity: number,
+  availableNow: number,
+  quantityPerRun = 10,
+): SimulationJobInput {
   return {
     typeId: 34,
     typeName: "Tritanium",
-    quantityPerRun: 10,
+    quantityPerRun,
     requiredQuantity,
     availableNow,
     availableFromHauling: 0,

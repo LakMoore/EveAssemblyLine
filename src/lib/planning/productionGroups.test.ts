@@ -145,7 +145,7 @@ void test("applies a rig only to its matching group and scales low-security bonu
     0.1,
   );
 
-  assert.equal(bonuses.mediumShips.manufacturingMaterialMultiplier, 0.94);
+  assert.equal(bonuses.mediumShips.manufacturingMaterialMultiplier, 0.9408);
   assert.equal(bonuses.mediumShips.manufacturingTimeMultiplier, 0.9);
   assert.equal(bonuses.smallShips.manufacturingMaterialMultiplier, 0.98);
   assert.equal(bonuses.smallShips.manufacturingTimeMultiplier, 1);
@@ -196,8 +196,8 @@ void test("applies a broad Ships rig to every ship subgroup", () => {
     0.1,
   );
 
-  assert.ok(Math.abs(bonuses.smallShips.manufacturingMaterialPercentage + 4.8) < 1e-9);
-  assert.ok(Math.abs(bonuses.largeShips.manufacturingMaterialPercentage + 4.8) < 1e-9);
+  assert.ok(Math.abs(bonuses.smallShips.manufacturingMaterialPercentage + 4.762) < 1e-9);
+  assert.ok(Math.abs(bonuses.largeShips.manufacturingMaterialPercentage + 4.762) < 1e-9);
   assert.ok(Math.abs(bonuses.charges.manufacturingMaterialPercentage + 1) < 1e-9);
   assert.ok(Math.abs(bonuses.drones.manufacturingMaterialPercentage + 1) < 1e-9);
 });
@@ -244,5 +244,5 @@ void test("applies a capital component rig through its specialized material attr
     0.1,
   );
 
-  assert.ok(Math.abs(bonuses.capitalComponents.manufacturingMaterialMultiplier - 0.9197) < 1e-9);
+  assert.ok(Math.abs(bonuses.capitalComponents.manufacturingMaterialMultiplier - 0.920403) < 1e-9);
 });

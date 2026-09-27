@@ -54,6 +54,11 @@ function sourceQuantityLabel(
   return `${quantityLabel(quantity)} (${quantityLabel(claimedQuantity)} reserved)`;
 }
 
+/** Formats the simulator's authoritative required quantity. */
+function requiredQuantityLabel(input: SimulationJobInput): string {
+  return input.requiredQuantity.toLocaleString();
+}
+
 /** Converts a reservation completion timestamp or simulated offset into minutes remaining. */
 function reservationMinutesUntil(
   reservation: SimulationUpstreamReservation,
@@ -324,8 +329,8 @@ function SimulationInputRow({
         >
           {percent}%
         </Badge>
-        <span className="order-3 justify-self-end text-right whitespace-nowrap sm:min-w-20">
-          {input.availableNow.toLocaleString()} / {input.requiredQuantity.toLocaleString()}
+        <span className="order-3 justify-self-end text-right whitespace-normal sm:min-w-20">
+          {input.availableNow.toLocaleString()} / {requiredQuantityLabel(input)}
         </span>
       </div>
     </div>
@@ -375,7 +380,7 @@ export default function SimulationJobInputsResponsive({
     0,
   );
   const totalRuns = displayedJobs.reduce((total, inputJob) => total + inputJob.requiredRuns, 0);
-  const inputs = aggregateSimulationInputs(displayedJobs.flatMap((inputJob) => inputJob.inputs));
+  const inputs = aggregateSimulationInputs(displayedJobs.flatMap((job) => job.inputs));
   const completionPercent =
     totalRuns > 0 ? Math.min(100, Math.round((installableRuns / totalRuns) * 100)) : 100;
   const status: InputStatus =

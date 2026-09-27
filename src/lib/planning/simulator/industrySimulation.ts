@@ -82,6 +82,37 @@ interface ProductionSupply {
   plannedQuantity: number;
   readyQuantity: number;
   reservations: SimulationUpstreamReservation[];
+  jobs: SimulationIndustryJob[];
+}
+
+interface ProductionDemandRequest {
+  quantity: number;
+  demandSource: SimulationDemandSource;
+  supply: ProductionSupply;
+  aggregateSupply?: ProductionSupply;
+  allocationOffset: number;
+}
+
+interface ProductionDemandBucket {
+  productTypeId: number;
+  stockpile: PlanStockpile;
+  destinationAccount: SimulationLedgerAccount;
+  stack: ReadonlySet<number>;
+  quantity: number;
+  requests: ProductionDemandRequest[];
+}
+
+interface DeferredProductionSupply {
+  input: SimulationJobInput;
+  supply: ProductionSupply;
+  localQuantity: number;
+  remoteQuantity: number;
+  futureQuantity: number;
+  activity: ProductionActivity;
+  blueprint: BlueprintClaim;
+  profile: ActivityProfile;
+  materials: readonly MaterialSpecification[];
+  job?: SimulationIndustryJob;
 }
 
 interface ActivityProfile {
@@ -167,6 +198,10 @@ class IndustryDemandSimulation {
     number,
     { requiredLevel: number; jobIds: Set<string> }
   >();
+  private pendingProductionDemands = new Map<string, ProductionDemandBucket>();
+  private readonly deferredProductionSupplies: DeferredProductionSupply[] = [];
+  private readonly productionDemandRequests: ProductionDemandRequest[] = [];
+  private readonly productionSupplies = new Set<ProductionSupply>();
   private sequence = 0;
 
   /** Creates one isolated deterministic simulation state. */
@@ -278,6 +313,8 @@ class IndustryDemandSimulation {
         }
       },
     );
+    this.drainProductionDemands();
+    this.finalizeDeferredProductionSupplies();
 
     measureSyncProfiled(
       this.profiler,
@@ -288,6 +325,8 @@ class IndustryDemandSimulation {
         }
       },
     );
+    this.drainProductionDemands();
+    this.finalizeDeferredProductionSupplies();
     measureSyncProfiled(
       this.profiler,
       "expand-skill-prerequisites",
@@ -324,19 +363,203 @@ class IndustryDemandSimulation {
     demandSource: SimulationDemandSource,
     stack: ReadonlySet<number>,
   ): ProductionSupply {
-    return measureSyncProfiled(
-      this.profiler,
-      "plan-production",
-      () =>
-        this.planProductionCore(
-          productTypeId,
-          quantity,
-          stockpile,
-          destinationAccount,
-          demandSource,
-          stack,
+    if (quantity <= 0) return this.emptyProductionSupply();
+    if (stack.has(productTypeId)) {
+      this.recordUnmet(destinationAccount, quantity, demandSource);
+      this.warnings.push({
+        code: "cycle-detected",
+        typeId: productTypeId,
+        message: `Quantity expansion stopped at cyclic type ${productTypeId}.`,
+      });
+      return this.emptyProductionSupply();
+    }
+    if (this.request.settings.buildBlacklist.includes(productTypeId)) {
+      this.recordUnmet(destinationAccount, quantity, demandSource);
+      return this.emptyProductionSupply();
+    }
+    const production = this.context.blueprints.byBuildProductTypeId.get(productTypeId);
+    const details = production ? productionDetails(production, productTypeId) : undefined;
+    if (!production || !details) {
+      this.recordUnmet(destinationAccount, quantity, demandSource);
+      if (this.request.settings.buyBlacklist.includes(productTypeId)) {
+        this.warnings.push({
+          code: "blocked-by-policy",
+          typeId: productTypeId,
+          message: `Type ${productTypeId} cannot be built and is prohibited from purchase.`,
+        });
+      }
+      return this.emptyProductionSupply();
+    }
+    const profile = this.activityProfile(stockpile, productTypeId, production.activity);
+    const key = [
+      stockpile.id,
+      productTypeId,
+      production.activity,
+      profile.locationId,
+      destinationAccount.locationId,
+      destinationAccount.typeId,
+      [...stack].sort((left, right) => left - right).join(","),
+    ].join(":");
+    let bucket = this.pendingProductionDemands.get(key);
+    if (!bucket) {
+      bucket = {
+        productTypeId,
+        stockpile,
+        destinationAccount,
+        stack,
+        quantity: 0,
+        requests: [],
+      };
+      this.pendingProductionDemands.set(key, bucket);
+    }
+    const supply = this.emptyProductionSupply();
+    const request: ProductionDemandRequest = {
+      quantity,
+      demandSource,
+      supply,
+      allocationOffset: bucket.quantity,
+    };
+    bucket.quantity += quantity;
+    bucket.requests.push(request);
+    this.productionDemandRequests.push(request);
+    return supply;
+  }
+
+  private emptyProductionSupply(): ProductionSupply {
+    return { plannedQuantity: 0, readyQuantity: 0, reservations: [], jobs: [] };
+  }
+
+  private drainProductionDemands(): void {
+    while (this.pendingProductionDemands.size > 0) {
+      const [key, bucket] = this.pendingProductionDemands.entries().next().value as [
+        string,
+        ProductionDemandBucket,
+      ];
+      this.pendingProductionDemands.delete(key);
+      const aggregate = measureSyncProfiled(
+        this.profiler,
+        "plan-production",
+        () =>
+          this.planProductionCore(
+            bucket.productTypeId,
+            bucket.quantity,
+            bucket.stockpile,
+            bucket.destinationAccount,
+            bucket.requests[0].demandSource,
+            bucket.stack,
+          ),
+      );
+      for (const request of bucket.requests) {
+        request.aggregateSupply = aggregate;
+      }
+      this.syncProductionDemandRequests();
+    }
+  }
+
+  private syncProductionDemandRequests(): void {
+    for (const request of this.productionDemandRequests) {
+      const aggregate = request.aggregateSupply;
+      if (!aggregate) continue;
+      request.supply.plannedQuantity = Math.min(
+        request.quantity,
+        Math.max(0, aggregate.plannedQuantity - request.allocationOffset),
+      );
+      request.supply.readyQuantity = Math.min(
+        request.quantity,
+        Math.max(0, aggregate.readyQuantity - request.allocationOffset),
+      );
+      request.supply.reservations = this.reservationRange(
+        aggregate.reservations,
+        request.allocationOffset,
+        request.quantity,
+      );
+      request.supply.jobs = aggregate.jobs;
+    }
+  }
+
+  private reservationRange(
+    reservations: readonly SimulationUpstreamReservation[],
+    offset: number,
+    quantity: number,
+  ): SimulationUpstreamReservation[] {
+    const selected: SimulationUpstreamReservation[] = [];
+    let skipped = offset;
+    let remaining = quantity;
+    for (const reservation of reservations) {
+      if (remaining <= 0) break;
+      if (skipped >= reservation.quantity) {
+        skipped -= reservation.quantity;
+        continue;
+      }
+      const available = reservation.quantity - skipped;
+      const selectedQuantity = Math.min(remaining, available);
+      selected.push({ ...reservation, quantity: selectedQuantity });
+      remaining -= selectedQuantity;
+      skipped = 0;
+    }
+    return selected;
+  }
+
+  private finalizeDeferredProductionSupplies(): void {
+    for (let pass = 0; pass <= this.deferredProductionSupplies.length; pass += 1) {
+      this.syncProductionSupplies();
+      this.syncProductionDemandRequests();
+      for (const deferred of [...this.deferredProductionSupplies].reverse()) {
+        const input = deferred.input;
+        const availableAfterUpstream =
+          deferred.localQuantity
+          + deferred.remoteQuantity
+          + deferred.futureQuantity
+          + deferred.supply.readyQuantity;
+        input.availableAfterUpstream = availableAfterUpstream;
+        input.unsatisfiedQuantity = Math.max(
+          0,
+          input.requiredQuantity
+            - deferred.localQuantity
+            - deferred.remoteQuantity
+            - deferred.futureQuantity
+            - deferred.supply.plannedQuantity,
+        );
+        input.upstreamReservations = this.reservationRange(
+          deferred.supply.reservations,
+          0,
+          deferred.supply.reservations.reduce(
+            (total, reservation) => total + reservation.quantity,
+            0,
+          ),
+        );
+        if (deferred.job) {
+          const readyAfterUpstreamRuns = Math.min(
+            horizonRunLimit(deferred.blueprint, deferred.blueprint.runs).afterUpstream,
+            this.installableRuns(
+              deferred.activity,
+              deferred.blueprint,
+              deferred.profile.materialMultiplier,
+              deferred.materials,
+              (material) =>
+                deferred.job?.inputs.find((candidate) => candidate.typeId === material.typeId)
+                  ?.availableAfterUpstream ?? 0,
+            ),
+          );
+          deferred.job.readyAfterUpstreamRuns = readyAfterUpstreamRuns;
+          deferred.job.blockedRuns = Math.max(0, deferred.blueprint.runs - readyAfterUpstreamRuns);
+        }
+      }
+    }
+    this.syncProductionSupplies();
+    this.syncProductionDemandRequests();
+  }
+
+  private syncProductionSupplies(): void {
+    for (const supply of this.productionSupplies) {
+      supply.readyQuantity = Math.min(
+        supply.plannedQuantity,
+        supply.jobs.reduce(
+          (total, job) => total + job.readyAfterUpstreamRuns * job.outputPerRun,
+          0,
         ),
-    );
+      );
+    }
   }
 
   private reserveRecursiveLocalDemand(): void {
@@ -401,7 +624,7 @@ class IndustryDemandSimulation {
     demandSource: SimulationDemandSource,
     stack: ReadonlySet<number>,
   ): ProductionSupply {
-    if (quantity <= 0) return { plannedQuantity: 0, readyQuantity: 0, reservations: [] };
+    if (quantity <= 0) return this.emptyProductionSupply();
     if (stack.has(productTypeId)) {
       this.recordUnmet(destinationAccount, quantity, demandSource);
       this.warnings.push({
@@ -409,11 +632,11 @@ class IndustryDemandSimulation {
         typeId: productTypeId,
         message: `Quantity expansion stopped at cyclic type ${productTypeId}.`,
       });
-      return { plannedQuantity: 0, readyQuantity: 0, reservations: [] };
+      return this.emptyProductionSupply();
     }
     if (this.request.settings.buildBlacklist.includes(productTypeId)) {
       this.recordUnmet(destinationAccount, quantity, demandSource);
-      return { plannedQuantity: 0, readyQuantity: 0, reservations: [] };
+      return this.emptyProductionSupply();
     }
     const production = this.context.blueprints.byBuildProductTypeId.get(productTypeId);
     const details = production ? productionDetails(production, productTypeId) : undefined;
@@ -426,7 +649,7 @@ class IndustryDemandSimulation {
           message: `Type ${productTypeId} cannot be built and is prohibited from purchase.`,
         });
       }
-      return { plannedQuantity: 0, readyQuantity: 0, reservations: [] };
+      return this.emptyProductionSupply();
     }
 
     const profile = this.activityProfile(stockpile, productTypeId, production.activity);
@@ -482,9 +705,15 @@ class IndustryDemandSimulation {
 
     const nextStack = new Set(stack);
     nextStack.add(productTypeId);
+    const supply: ProductionSupply = {
+      plannedQuantity: 0,
+      readyQuantity: 0,
+      reservations: [],
+      jobs: [],
+    };
+    this.productionSupplies.add(supply);
     let plannedOutput = 0;
     let readyOutput = 0;
-    const reservations: SimulationUpstreamReservation[] = [];
     for (const [allocationIndex, allocation] of allocations.entries()) {
       const jobId = `${baseJobId}:${allocationIndex}`;
       const job = measureSyncProfiled(
@@ -517,9 +746,10 @@ class IndustryDemandSimulation {
       });
       if (production.activity === "manufacturing") this.manufacturingJobs.push(job);
       else this.reactionJobs.push(job);
+      supply.jobs.push(job);
       plannedOutput += outputQuantity;
       readyOutput += job.readyAfterUpstreamRuns * details.product.quantity;
-      reservations.push({
+      supply.reservations.push({
         activity: production.activity,
         quantity: reservedQuantity,
         state: "planned",
@@ -548,11 +778,9 @@ class IndustryDemandSimulation {
         }
       }
     }
-    return {
-      plannedQuantity: Math.min(quantity, plannedOutput),
-      readyQuantity: Math.min(quantity, readyOutput),
-      reservations,
-    };
+    supply.plannedQuantity = Math.min(quantity, plannedOutput);
+    supply.readyQuantity = Math.min(quantity, readyOutput);
+    return supply;
   }
 
   private planIndustryJob(
@@ -655,6 +883,7 @@ class IndustryDemandSimulation {
     );
 
     const inputs: SimulationJobInput[] = [];
+    const deferredInputs: DeferredProductionSupply[] = [];
     for (const material of materialSpecifications) {
       const nowQuantity = this.materialQuantityForRuns(
         activity,
@@ -686,7 +915,7 @@ class IndustryDemandSimulation {
       const availableAfterUpstream =
         physicalClaimed + claimedFuture + productionSupply.readyQuantity;
       this.setDemandReadiness(material.source, nowQuantity);
-      inputs.push({
+      const input: SimulationJobInput = {
         typeId: material.typeId,
         typeName: typeName(this.context, material.typeId, this.request.language),
         quantityPerRun: material.quantityPerRun,
@@ -705,6 +934,18 @@ class IndustryDemandSimulation {
           ...physicalClaim.futureReservations,
           ...productionSupply.reservations,
         ],
+      };
+      inputs.push(input);
+      deferredInputs.push({
+        input,
+        supply: productionSupply,
+        localQuantity: physicalClaim.local,
+        remoteQuantity: physicalClaim.remote,
+        futureQuantity: physicalClaim.future,
+        activity,
+        blueprint,
+        profile,
+        materials: materialSpecifications,
       });
     }
 
@@ -727,7 +968,7 @@ class IndustryDemandSimulation {
           * (activity === "manufacturing" ? 1 - blueprint.timeEfficiency / 100 : 1),
       ),
     );
-    return {
+    const job: SimulationIndustryJob = {
       jobId,
       activity,
       stockpileId: stockpile.id,
@@ -749,6 +990,9 @@ class IndustryDemandSimulation {
       installs: [],
       demandSources: [parentDemandSource],
     };
+    for (const deferred of deferredInputs) deferred.job = job;
+    this.deferredProductionSupplies.push(...deferredInputs);
+    return job;
   }
 
   private planInventionAndCopying(shortage: BlueprintShortage): void {

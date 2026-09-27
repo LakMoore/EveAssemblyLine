@@ -110,7 +110,11 @@ void test("keeps upstream demand separate from a multi-unit job output", async (
   );
   const job = result.manufacturingJobs.find((candidate) => candidate.productTypeId === 33017);
   const input = job?.inputs.find((candidate) => candidate.typeId === 4312);
+  const upstreamJob = result.manufacturingJobs.find(
+    (candidate) => candidate.productTypeId === 4312,
+  );
   assert.ok(input);
+  assert.ok(upstreamJob);
   assert.equal(input.requiredQuantity, 6);
   assert.deepEqual(
     input.upstreamReservations?.[0],
@@ -118,9 +122,112 @@ void test("keeps upstream demand separate from a multi-unit job output", async (
       activity: "manufacturing",
       quantity: 6,
       state: "planned",
-      sourceJobId: "fba93b5d4b2c079a:0",
+      sourceJobId: upstreamJob.jobId,
       sourceOutputQuantity: 40,
     },
+  );
+});
+
+void test("aggregates repeated component demand before blueprint allocation", async () => {
+  const blueprint = (typeId: number, runs: number) => ({
+    typeId,
+    quantity: 1,
+    locationId: 20,
+    rootLocationId: 20,
+    type: "bpc" as const,
+    runs,
+    me: 10,
+    te: 0,
+  });
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "main",
+        name: "Main",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 57483, quantity: 3, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: {
+      items: [],
+      blueprints: [
+        blueprint(57520, 1),
+        blueprint(57520, 1),
+        blueprint(57520, 1),
+        blueprint(57517, 40),
+        blueprint(57517, 11),
+      ],
+      industry: [],
+      market: [],
+    },
+    settings: {
+      includeCorporationAssets: true,
+      personalSellOrdersAsStock: false,
+      allCorporationSellOrdersAsStock: false,
+      myCorporationSellOrdersAsStock: false,
+      buildBlacklist: [],
+      buyBlacklist: [],
+    },
+    facilityProfiles: [
+      {
+        locationId: 20,
+        sizeId: 1,
+        buildTypeGroups: {
+          components: {
+            manufacturingMaterialMultiplier: 0.94842,
+            manufacturingMaterialPercentage: -5.158,
+            manufacturingTimeMultiplier: 1,
+            manufacturingTimePercentage: 0,
+            reactionMaterialMultiplier: 1,
+            reactionMaterialPercentage: 0,
+            reactionTimeMultiplier: 1,
+            reactionTimePercentage: 0,
+          },
+        },
+      },
+    ],
+    simulation: { version: 1 },
+  });
+  const result = await simulateIndustry(request);
+  const membraneJobs = result.lists.manufacturingJobs.filter((job) => job.productTypeId === 57480);
+
+  assert.equal(membraneJobs.length, 1);
+  assert.equal(membraneJobs[0]?.requiredRuns, 3);
+  assert.deepEqual(
+    membraneJobs[0]?.inputs.map((input) => [input.typeId, input.requiredQuantity]),
+    [
+      [2361, 257],
+      [2348, 769],
+      [11399, 3842],
+    ],
+  );
+
+  const parentJobs = result.lists.manufacturingJobs.filter((job) => job.productTypeId === 57483);
+  assert.equal(parentJobs.length, 3);
+  assert.deepEqual(
+    parentJobs.map(
+      (job) =>
+        job.inputs.find((input) => input.typeId === 57480)?.upstreamReservations?.[0]?.quantity,
+    ),
+    [1, 1, 1],
+  );
+  assert.equal(
+    new Set(
+      parentJobs.flatMap(
+        (job) =>
+          job.inputs
+            .find((input) => input.typeId === 57480)
+            ?.upstreamReservations?.map((reservation) => reservation.sourceJobId) ?? [],
+      ),
+    ).size,
+    1,
   );
 });
 

@@ -14,6 +14,7 @@ export function requiredMaterialQuantity(
 ): number {
   if (runs <= 0) return 0;
   const efficiencyMultiplier = activity === "manufacturing" ? 1 - efficiency.me / 100 : 1;
-  const adjustedTotalQuantity = materialQuantity * runs * efficiencyMultiplier * materialMultiplier;
+  const adjustedTotalQuantity =
+    Math.ceil(materialQuantity * runs * efficiencyMultiplier) * materialMultiplier;
   return Math.max(runs, Math.ceil(adjustedTotalQuantity));
 }
