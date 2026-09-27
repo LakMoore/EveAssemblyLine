@@ -161,13 +161,14 @@ import {
 import type { FacilityGroupBonus } from "@/lib/planning/facilityBonuses";
 import type { ProductionGroupKey, ProductionGroupReference } from "@/lib/planning/productionGroups";
 import { fetchProductionGroups } from "@/lib/reference/productionGroups";
-import type { HaulingAllocationMode, SimulationResultV2 } from "@/lib/planning/simulator/types";
+import type { SimulationResultV2 } from "@/lib/planning/simulator/types";
 
 type StockpileEditorMode = "details" | "items";
 type PlanRunMode = "calculate" | "simulate";
 type PlanLocationOption = {
   id: string;
   locationId: number;
+  systemId: number;
   name: string;
   locationType: "station" | "structure";
   baseYield: number;
@@ -600,8 +601,6 @@ function Planner() {
   const [includeStock, setIncludeStock] = useState(true);
   const [simulateSurplus, setSimulateSurplus] = useState(false);
   const [allowInterStockpileHauling, setAllowInterStockpileHauling] = useState(false);
-  const [haulingAllocationMode, setHaulingAllocationMode] =
-    useState<HaulingAllocationMode>("local-first");
   const [haulItemExclusion, setHaulItemExclusion] = useState<HaulItemExclusion>(() => new Map());
   const [simulationHaulExclusions, setSimulationHaulExclusions] = useState<PlanHaulExclusion[]>([]);
   const [simulationPreservedHaulTasks, setSimulationPreservedHaulTasks] = useState<
@@ -883,6 +882,7 @@ function Planner() {
               locationId: location.locationId,
               name: location.name,
               kind: location.locationType,
+              systemId: location.systemId,
               baseYield: 0,
               baseManufacturingMe: 0,
             })),
@@ -896,6 +896,7 @@ function Planner() {
         .map((facility) => ({
           id: String(facility.id),
           locationId: facility.id,
+          systemId: facility.systemId,
           name: facility.name,
           locationType: facility.locationType,
           baseYield: (facility.activities.reprocessing.baseYield ?? 0) * 100,
@@ -1056,11 +1057,27 @@ function Planner() {
                     })),
                   }))
                 : undefined,
-            facilityProfiles: locationOptions.map((location) => ({
-              locationId: location.locationId,
-              sizeId: location.sizeId,
-              buildTypeGroups: location.buildTypeGroups,
-            })),
+            facilityProfiles:
+              mode === "simulate"
+                ? sharedLocationOptions.flatMap((location) => {
+                    if (location.systemId === undefined) return [];
+                    const facility = locationOptions.find(
+                      (candidate) => candidate.locationId === location.locationId,
+                    );
+                    return [
+                      {
+                        locationId: location.locationId,
+                        systemId: location.systemId,
+                        sizeId: facility?.sizeId ?? 0,
+                        buildTypeGroups: facility?.buildTypeGroups ?? {},
+                      },
+                    ];
+                  })
+                : locationOptions.map((location) => ({
+                    locationId: location.locationId,
+                    sizeId: location.sizeId,
+                    buildTypeGroups: location.buildTypeGroups,
+                  })),
             haulExclusions:
               mode === "simulate"
                 ? toSimulationHaulExclusions(
@@ -1113,7 +1130,6 @@ function Planner() {
                     version: 1,
                     simulateSurplus,
                     blockInterStockpileHauling: !allowInterStockpileHauling,
-                    haulingAllocationMode,
                   },
                 }
               : {}),
@@ -1570,6 +1586,7 @@ function Planner() {
   const sharedLocationOptions: ActivityLocationOption[] = [
     ...locationOptions.map((location) => ({
       locationId: location.locationId,
+      systemId: location.systemId,
       name: location.name,
       kind: location.locationType,
       baseYield: location.baseYield,
@@ -1582,6 +1599,7 @@ function Planner() {
         : [
             {
               locationId: structure.esiStructureId,
+              systemId: structure.systemId,
               name: structure.name,
               kind: "structure" as const,
               baseYield: 0,
@@ -1804,27 +1822,6 @@ function Planner() {
                 onCheckedChange={setAllowInterStockpileHauling}
               />
               Allow inter-stockpile hauling
-            </Label>
-            <Label className="flex items-center gap-2 text-sm">
-              <span>Hauling allocation</span>
-              <Select
-                value={haulingAllocationMode}
-                onValueChange={(value) =>
-                  value && setHaulingAllocationMode(value as HaulingAllocationMode)
-                }
-              >
-                <SelectTrigger aria-label="Hauling allocation mode" className="w-44">
-                  <SelectValue>
-                    {haulingAllocationMode === "greedy" ? "Greedy" : "Local-first"}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="local-first">Local-first (protect local)</SelectItem>
-                    <SelectItem value="greedy">Greedy (remote first)</SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
             </Label>
             <span className="text-sm text-muted-foreground">{selectedSourceLabel}</span>
             <Button

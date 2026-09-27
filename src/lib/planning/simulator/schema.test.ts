@@ -37,7 +37,6 @@ void test("defaults the simulator policy", () => {
   const parsed = parseSimulatorRequest(request());
   assert.equal(parsed.simulation.simulateSurplus, false);
   assert.equal(parsed.simulation.blockInterStockpileHauling, false);
-  assert.equal(parsed.simulation.haulingAllocationMode, "local-first");
   assert.equal(parsed.simulation.policy.inventionExpectedOutputFactor, 1.2);
   assert.equal(parsed.simulation.policy.fallbackInventionSkillLevel, 3);
   assert.deepEqual(parsed.simulation.characters, []);
@@ -51,12 +50,24 @@ void test("accepts the inter-stockpile hauling policy", () => {
   assert.equal(parsed.simulation.blockInterStockpileHauling, true);
 });
 
-void test("accepts the greedy hauling allocation policy", () => {
-  const parsed = parseSimulatorRequest({
+void test("requires a system ID for facility profiles", () => {
+  const input = {
     ...request(),
-    simulation: { version: 1, haulingAllocationMode: "greedy" },
-  });
-  assert.equal(parsed.simulation.haulingAllocationMode, "greedy");
+    facilityProfiles: [
+      {
+        locationId: 20,
+        systemId: 30000142,
+        sizeId: 1,
+        buildTypeGroups: {},
+      },
+    ],
+  };
+  assert.equal(simulatorRequestSchema.safeParse(input).success, true);
+  const withoutSystem = {
+    ...input,
+    facilityProfiles: [{ ...input.facilityProfiles[0], systemId: undefined }],
+  };
+  assert.equal(simulatorRequestSchema.safeParse(withoutSystem).success, false);
 });
 
 void test("removes owner identity from simulator haul exclusions", () => {

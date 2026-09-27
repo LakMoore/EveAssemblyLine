@@ -128,6 +128,61 @@ void test("keeps upstream demand separate from a multi-unit job output", async (
   );
 });
 
+void test("prioritizes same-system remote stockpile demand", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "cross-system",
+        name: "Cross-system",
+        locations: {
+          stock: 20,
+          manufacturing: 20,
+          reactions: 20,
+          reprocessing: 20,
+          copying: 20,
+          invention: 20,
+        },
+        items: [{ typeId: 34, quantity: 1, me: 0, te: 0, fromCompression: false }],
+      },
+      {
+        id: "same-system",
+        name: "Same-system",
+        locations: {
+          stock: 40,
+          manufacturing: 40,
+          reactions: 40,
+          reprocessing: 40,
+          copying: 40,
+          invention: 40,
+        },
+        items: [{ typeId: 34, quantity: 1, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [
+      {
+        typeId: 34,
+        quantity: 1,
+        locationId: 30,
+        rootLocationId: 30,
+        sourceSystemId: 30000142,
+      },
+    ],
+    facilityProfiles: [
+      { locationId: 20, systemId: 30000143, sizeId: 1, buildTypeGroups: {} },
+      { locationId: 30, systemId: 30000142, sizeId: 1, buildTypeGroups: {} },
+      { locationId: 40, systemId: 30000142, sizeId: 1, buildTypeGroups: {} },
+    ],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1 },
+  });
+
+  const result = await simulateIndustry(request);
+  assert.deepEqual(
+    result.lists.haulingTasks.map((task) => [task.fromLocationId, task.toLocationId]),
+    [[30, 40]],
+  );
+});
+
 void test("aggregates repeated component demand before blueprint allocation", async () => {
   const blueprint = (typeId: number, runs: number) => ({
     typeId,
@@ -178,6 +233,7 @@ void test("aggregates repeated component demand before blueprint allocation", as
     facilityProfiles: [
       {
         locationId: 20,
+        systemId: 30000142,
         sizeId: 1,
         buildTypeGroups: {
           components: {

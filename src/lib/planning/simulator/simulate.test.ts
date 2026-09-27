@@ -605,7 +605,7 @@ void test("keeps connected material surplus on the plan tab", async () => {
   );
 });
 
-void test("preserves local recursive demand before hauling in local-first mode", async () => {
+void test("preserves local recursive activity demand before final stockpile hauling", async () => {
   const input = {
     stockpiles: [
       {
@@ -644,31 +644,15 @@ void test("preserves local recursive demand before hauling in local-first mode",
       buildBlacklist: [],
       buyBlacklist: [],
     },
-    simulation: { version: 1, haulingAllocationMode: "local-first" as const },
+    simulation: { version: 1 },
   };
-  const localFirst = await simulateIndustry(parseSimulatorRequest(input));
-  const greedy = await simulateIndustry(
-    parseSimulatorRequest({
-      ...input,
-      simulation: { version: 1, haulingAllocationMode: "greedy" },
-    }),
-  );
+  const result = await simulateIndustry(parseSimulatorRequest(input));
 
   assert.deepEqual(
-    localFirst.lists.haulingTasks.filter((task) => task.typeId === 11370),
+    result.lists.haulingTasks.filter((task) => task.typeId === 11370),
     [],
   );
-  assert.deepEqual(
-    greedy.lists.haulingTasks
-      .filter((task) => task.typeId === 11370)
-      .map((task) => ({
-        from: task.fromLocationId,
-        to: task.toLocationId,
-        quantity: task.quantity,
-      })),
-    [{ from: 20, to: 10, quantity: 96 }],
-  );
-  const localAunerBalance = localFirst.ledgers
+  const localAunerBalance = result.ledgers
     .find((ledger) => ledger.locationId === 20)
     ?.balances.find((balance) => balance.typeId === 11370);
   assert.ok(localAunerBalance);

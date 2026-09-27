@@ -217,7 +217,7 @@ class IndustryDemandSimulation {
       request.haulExclusions ?? [],
       request.stockpiles,
       request.simulation.blockInterStockpileHauling,
-      request.simulation.haulingAllocationMode,
+      request.facilityProfiles ?? [],
     );
     this.warnings = [...dependencyGraph.warnings];
     if (inventory.unresolvedLotCount > 0) {
@@ -230,28 +230,43 @@ class IndustryDemandSimulation {
 
   /** Runs demand expansion followed by invention/copying derivation. */
   run(): IndustrySimulationResult {
-    if (this.request.simulation.haulingAllocationMode === "local-first") {
-      measureSyncProfiled(
-        this.profiler,
-        "reserve-recursive-local-demand",
-        () => this.reserveRecursiveLocalDemand(),
-      );
-    }
+    measureSyncProfiled(
+      this.profiler,
+      "reserve-activity-demand",
+      () => this.reserveRecursiveLocalDemand(),
+    );
+    measureSyncProfiled(
+      this.profiler,
+      "reserve-local-stockpile-demand",
+      () => this.reserveLocalStockpileDemand(),
+    );
     measureSyncProfiled(
       this.profiler,
       "expand-stockpile-demand",
       () => {
-        const stockpiles = [...this.request.stockpiles].sort((left, right) =>
-          left.id.localeCompare(right.id),
+        const stockpiles = [...this.request.stockpiles].sort(
+          (left, right) =>
+            Number(!this.stockpileHasSameSystemRemoteSupply(left))
+              - Number(!this.stockpileHasSameSystemRemoteSupply(right))
+            || left.id.localeCompare(right.id),
         );
         for (const stockpile of stockpiles) {
-          const items = [...stockpile.items].sort(
-            (left, right) =>
-              left.typeId - right.typeId
+          const items = [...stockpile.items].sort((left, right) => {
+            const leftLocationId = isSimulatorReprocessingType(this.context, left.typeId)
+              ? stockpile.locations.reprocessing
+              : stockpile.locations.stock;
+            const rightLocationId = isSimulatorReprocessingType(this.context, right.typeId)
+              ? stockpile.locations.reprocessing
+              : stockpile.locations.stock;
+            return (
+              Number(!this.allocator.hasSameSystemRemoteSupply(left.typeId, leftLocationId))
+                - Number(!this.allocator.hasSameSystemRemoteSupply(right.typeId, rightLocationId))
+              || left.typeId - right.typeId
               || left.quantity - right.quantity
               || left.me - right.me
-              || left.te - right.te,
-          );
+              || left.te - right.te
+            );
+          });
           for (const item of items) {
             const isReprocessingInput = isSimulatorReprocessingType(this.context, item.typeId);
             const account: SimulationLedgerAccount = {
@@ -292,6 +307,7 @@ class IndustryDemandSimulation {
                   undefined,
                   stockpile.id,
                   isReprocessingInput ? "reprocessing" : "stock",
+                  "stockpile-demand",
                 ),
             );
             this.setDemandReadiness(source, existing.local + sellOrderQuantity);
@@ -582,6 +598,36 @@ class IndustryDemandSimulation {
     }
   }
 
+  private reserveLocalStockpileDemand(): void {
+    const stockpiles = [...this.request.stockpiles].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    );
+    for (const stockpile of stockpiles) {
+      for (const item of [...stockpile.items].sort(
+        (left, right) => left.typeId - right.typeId || left.quantity - right.quantity,
+      )) {
+        const destinationLocationId = isSimulatorReprocessingType(this.context, item.typeId)
+          ? stockpile.locations.reprocessing
+          : stockpile.locations.stock;
+        this.allocator.reserveLocalStockpileDemand(
+          item.typeId,
+          item.quantity,
+          destinationLocationId,
+        );
+      }
+    }
+  }
+
+  /** Prioritizes stockpiles that can receive eligible remote stock from their own system. */
+  private stockpileHasSameSystemRemoteSupply(stockpile: PlanStockpile): boolean {
+    return stockpile.items.some((item) => {
+      const destinationLocationId = isSimulatorReprocessingType(this.context, item.typeId)
+        ? stockpile.locations.reprocessing
+        : stockpile.locations.stock;
+      return this.allocator.hasSameSystemRemoteSupply(item.typeId, destinationLocationId);
+    });
+  }
+
   private reserveProductionInputs(
     productTypeId: number,
     quantity: number,
@@ -606,12 +652,12 @@ class IndustryDemandSimulation {
         { me: 0 },
         profile.materialMultiplier,
       );
-      const availability = this.allocator.availability(material.typeID, profile.locationId);
+      const availability = this.allocator.physicalAvailability(material.typeID, profile.locationId);
       const quantityToBuild = Math.max(
         0,
         requiredQuantity - availability.local - availability.remote - availability.future,
       );
-      this.allocator.reserveLocalDemand(material.typeID, requiredQuantity, profile.locationId);
+      this.allocator.reserveActivityDemand(material.typeID, requiredQuantity, profile.locationId);
       this.reserveProductionInputs(material.typeID, quantityToBuild, stockpile, nextStack);
     }
   }
@@ -922,6 +968,7 @@ class IndustryDemandSimulation {
         jobId,
         undefined,
         activity,
+        "activity-input",
       );
       const physicalClaimed = physicalClaim.local + physicalClaim.remote;
       const claimedFuture = physicalClaim.future;
@@ -1331,6 +1378,7 @@ class IndustryDemandSimulation {
       jobId,
       undefined,
       activity,
+      "activity-input",
     );
     this.setDemandReadiness(source, claim.local);
     const existing = claim.local + claim.remote + claim.future;

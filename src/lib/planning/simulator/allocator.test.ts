@@ -60,12 +60,67 @@ void test("claims local stock before remote stock and creates an exact haul", ()
   assert.equal(allocator.remainingItemQuantity("remote"), 2);
 });
 
-void test("greedy hauling claims remote stock before preserving local stock", () => {
-  const allocator = new SimulationAllocator(inventory, [], [], false, "greedy");
-  const claim = allocator.claimOrdinarySupply(34, 10, 20, account, "job");
-  assert.deepEqual(claim, { local: 2, remote: 8, future: 0, futureReservations: [] });
-  assert.equal(allocator.haulingTasks[0].quantity, 8);
-  assert.equal(allocator.remainingItemQuantity("local"), 2);
+void test("protects reserved activity inputs from stockpile demand", () => {
+  const allocator = new SimulationAllocator(inventory, []);
+  allocator.reserveActivityDemand(34, 4, 20);
+
+  const stockpileClaim = allocator.claimOrdinarySupply(
+    34,
+    4,
+    20,
+    account,
+    undefined,
+    "stockpile",
+    "stock",
+  );
+  const activityClaim = allocator.claimOrdinarySupply(
+    34,
+    4,
+    20,
+    account,
+    "industry-job",
+    undefined,
+    "manufacturing",
+    "activity-input",
+  );
+
+  assert.deepEqual(stockpileClaim, { local: 0, remote: 4, future: 0, futureReservations: [] });
+  assert.deepEqual(activityClaim, { local: 4, remote: 0, future: 0, futureReservations: [] });
+  assert.equal(allocator.haulingTasks[0].purpose, "stockpile-demand");
+  assert.equal(allocator.remainingItemQuantity("local"), 0);
+});
+
+void test("protects local stockpile demand from an earlier remote claim", () => {
+  const allocator = new SimulationAllocator(
+    { ...inventory, itemLots: [inventory.itemLots[0]] },
+    [],
+  );
+  allocator.reserveLocalStockpileDemand(34, 4, 20);
+
+  const remoteClaim = allocator.claimOrdinarySupply(
+    34,
+    4,
+    30,
+    { ...account, locationId: 30 },
+    "remote-stockpile",
+    "remote",
+    "stock",
+    "stockpile-demand",
+  );
+  const localClaim = allocator.claimOrdinarySupply(
+    34,
+    4,
+    20,
+    account,
+    "local-stockpile",
+    "local",
+    "stock",
+    "stockpile-demand",
+  );
+
+  assert.deepEqual(remoteClaim, { local: 0, remote: 0, future: 0, futureReservations: [] });
+  assert.deepEqual(localClaim, { local: 4, remote: 0, future: 0, futureReservations: [] });
+  assert.equal(allocator.haulingTasks.length, 0);
 });
 
 void test("blocks a haul route for every owner", () => {

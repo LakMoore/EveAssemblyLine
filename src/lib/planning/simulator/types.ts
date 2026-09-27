@@ -1,4 +1,10 @@
-import type { PlanRequest, PlanStockItem, StockItem, StockOwnerType } from "@/lib/planning/types";
+import type {
+  PlanFacilityProfile,
+  PlanRequest,
+  PlanStockItem,
+  StockItem,
+  StockOwnerType,
+} from "@/lib/planning/types";
 
 /** Sanitized provenance needed to model an already-installed industry output. */
 export interface SimulationIndustryOutputMarker {
@@ -75,8 +81,11 @@ export interface SimulationScienceProfile {
   inventionMaterialMultiplier: number;
 }
 
-/** Controls whether ordinary supply claims prioritize remote or local stock. */
-export type HaulingAllocationMode = "greedy" | "local-first";
+/** Identifies whether a supply claim protects activity inputs from stockpile allocation. */
+export type SimulationAllocationPurpose = "activity-input" | "stockpile-demand";
+
+/** Facility location metadata needed to prioritize same-system stockpile hauls. */
+export type SimulationFacilityProfile = PlanFacilityProfile & { systemId: number };
 
 /** Versioned policy controls for deterministic simulation. */
 export interface SimulationPolicyV1 {
@@ -92,7 +101,6 @@ export interface SimulationOptionsV1 {
   version: 1;
   simulateSurplus: boolean;
   blockInterStockpileHauling: boolean;
-  haulingAllocationMode: HaulingAllocationMode;
   characters: SimulationCharacterProfile[];
   scienceProfiles: SimulationScienceProfile[];
   policy: SimulationPolicyV1;
@@ -106,8 +114,12 @@ export interface SimulationHaulExclusion {
 }
 
 /** Public request accepted by the versioned simulator endpoint. */
-export type SimulationRequestV1 = Omit<PlanRequest, "assets" | "haulExclusions" | "settings"> & {
+export type SimulationRequestV1 = Omit<
+  PlanRequest,
+  "assets" | "facilityProfiles" | "haulExclusions" | "settings"
+> & {
   assets?: SimulationAsset[] | CategorizedPlanAssets;
+  facilityProfiles?: SimulationFacilityProfile[];
   haulExclusions?: SimulationHaulExclusion[];
   settings: Omit<
     PlanRequest["settings"],
@@ -378,7 +390,7 @@ export interface SimulationHaulTask {
   toLocationId: number;
   ownerType?: StockOwnerType;
   ownerId?: number;
-  purpose: "industry-input" | "completion" | "reprocessing-input";
+  purpose: "industry-input" | "stockpile-demand" | "completion" | "reprocessing-input";
   demands: SimulationHaulDemand[];
 }
 

@@ -15,6 +15,7 @@ import type { SimulationAsset, SimulationIndustryOutputMarker, SimulationRequest
 /** Physical or committed ordinary stock available to the simulator. */
 export interface SimulationItemLot extends SimulationSourceLot {
   name: string;
+  systemId?: number;
   unitVolume: number;
   horizon: "now" | "after-upstream";
   source: "asset" | "market-order" | "industry-output";
@@ -356,6 +357,7 @@ export function normalizeSimulatorInventory(
       name: localizedTypeName(context, item.typeId, request.language),
       quantity: item.quantity,
       locationId,
+      ...(item.sourceSystemId !== undefined ? { systemId: item.sourceSystemId } : {}),
       ownerType: item.ownerType,
       ownerId: item.ownerId,
       unitVolume: unitVolume(context, item.typeId),

@@ -2,8 +2,9 @@ import type { PlanStockpile } from "@/lib/planning/types";
 import type { SimulationLedgerAccount, SimulationTransaction } from "./ledger";
 import type { SimulatorBlueprintLot, SimulatorInventory, SimulationItemLot } from "./sourceLots";
 import type {
-  HaulingAllocationMode,
+  SimulationAllocationPurpose,
   SimulationBlueprintAllocation,
+  SimulationFacilityProfile,
   SimulationHaulTask,
   SimulationHaulExclusion,
   SimulationActivity,
@@ -78,8 +79,9 @@ export class SimulationAllocator {
   private readonly stockpileLocationIds: ReadonlySet<number>;
   private readonly sameStockpileLocationPairs: ReadonlySet<string>;
   private readonly blockInterStockpileHauling: boolean;
-  private readonly haulingAllocationMode: HaulingAllocationMode;
-  private readonly localDemandReservations = new Map<string, number>();
+  private readonly systemIdByLocationId: ReadonlyMap<number, number>;
+  private readonly activityReservationsByLotId = new Map<string, number>();
+  private readonly stockpileReservationsByLotId = new Map<string, number>();
   private readonly transferredBlueprintLotIds = new Set<string>();
   private transactionSequence = 0;
   readonly transactions: SimulationTransaction[] = [];
@@ -91,13 +93,15 @@ export class SimulationAllocator {
     private readonly haulExclusions: readonly SimulationHaulExclusion[],
     stockpiles: readonly Pick<PlanStockpile, "locations">[] = [],
     blockInterStockpileHauling = false,
-    haulingAllocationMode: HaulingAllocationMode = "local-first",
+    facilityProfiles: readonly SimulationFacilityProfile[] = [],
   ) {
     const routePolicy = stockpileRoutePolicy(stockpiles);
     this.stockpileLocationIds = routePolicy.stockpileLocationIds;
     this.sameStockpileLocationPairs = routePolicy.sameStockpileLocationPairs;
     this.blockInterStockpileHauling = blockInterStockpileHauling;
-    this.haulingAllocationMode = haulingAllocationMode;
+    this.systemIdByLocationId = new Map(
+      facilityProfiles.map((profile) => [profile.locationId, profile.systemId]),
+    );
     this.itemLotsByTypeId = new Map();
     for (const lot of inventory.itemLots) {
       const lots = this.itemLotsByTypeId.get(lot.typeId) ?? [];
@@ -131,11 +135,11 @@ export class SimulationAllocator {
         ) future += quantity;
         continue;
       }
-      else if (lot.locationId === destinationLocationId) local += quantity;
+      else if (lot.locationId === destinationLocationId) {
+        local += Math.max(0, quantity - this.activityReservation(lot.lotId));
+      }
       else if (lot.locationId !== undefined && !this.isExcluded(lot, destinationLocationId)) {
-        const protectedQuantity =
-          this.localDemandReservations.get(this.localDemandKey(lot.typeId, lot.locationId)) ?? 0;
-        remote += Math.max(0, quantity - protectedQuantity);
+        remote += Math.max(0, quantity - this.activityReservation(lot.lotId));
       }
     }
     return { local, remote, future };
@@ -151,6 +155,7 @@ export class SimulationAllocator {
     reservationHorizon: "now" | "after-hauling" = "now",
     stockpileId?: string,
     demandActivity?: Exclude<SimulationActivity, "surplus">,
+    allocationPurpose: SimulationAllocationPurpose = "stockpile-demand",
   ): number {
     return this.claimItemLots(
       (this.itemLotsByTypeId.get(typeId) ?? []).filter(
@@ -167,6 +172,7 @@ export class SimulationAllocator {
       reservationHorizon,
       stockpileId,
       demandActivity,
+      allocationPurpose,
     );
   }
 
@@ -179,6 +185,7 @@ export class SimulationAllocator {
     demandingJobId?: string,
     stockpileId?: string,
     demandActivity?: Exclude<SimulationActivity, "surplus">,
+    allocationPurpose: SimulationAllocationPurpose = "stockpile-demand",
   ): number {
     return this.claimItemLots(
       (this.itemLotsByTypeId.get(typeId) ?? []).filter(
@@ -196,15 +203,119 @@ export class SimulationAllocator {
       "after-hauling",
       stockpileId,
       demandActivity,
-      true,
+      allocationPurpose,
     );
   }
 
-  /** Reserves local source quantity for demand discovered during recursive expansion. */
-  reserveLocalDemand(typeId: number, quantity: number, locationId: number): void {
-    if (this.haulingAllocationMode !== "local-first" || quantity <= 0) return;
-    const key = this.localDemandKey(typeId, locationId);
-    this.localDemandReservations.set(key, (this.localDemandReservations.get(key) ?? 0) + quantity);
+  /** Reserves eligible physical lots for activity inputs before stockpile allocation begins. */
+  reserveActivityDemand(typeId: number, quantity: number, destinationLocationId: number): void {
+    let remaining = quantity;
+    const candidates = (this.itemLotsByTypeId.get(typeId) ?? [])
+      .filter(
+        (lot) =>
+          lot.source !== "market-order"
+          && lot.horizon === "now"
+          && lot.locationId !== undefined
+          && (
+            lot.locationId === destinationLocationId
+            || !this.isExcluded(lot, destinationLocationId)
+          ),
+      )
+      .slice()
+      .sort(
+        (left, right) =>
+          Number(left.locationId !== destinationLocationId)
+            - Number(right.locationId !== destinationLocationId)
+          || left.lotId.localeCompare(right.lotId),
+      );
+    for (const lot of candidates) {
+      if (remaining <= 0) break;
+      const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
+      const reserved = this.activityReservation(lot.lotId);
+      const next = Math.min(remaining, Math.max(0, available - reserved));
+      if (next <= 0) continue;
+      this.activityReservationsByLotId.set(lot.lotId, reserved + next);
+      remaining -= next;
+    }
+  }
+
+  /** Reserves local physical stock for its own final stockpile demand before remote claims. */
+  reserveLocalStockpileDemand(
+    typeId: number,
+    quantity: number,
+    destinationLocationId: number,
+  ): void {
+    if (quantity <= 0) return;
+    const marketOrderQuantity = (this.itemLotsByTypeId.get(typeId) ?? [])
+      .filter(
+        (lot) =>
+          lot.source === "market-order"
+          && lot.horizon === "now"
+          && lot.locationId === destinationLocationId,
+      )
+      .reduce((total, lot) => total + (this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0), 0);
+    let remaining = Math.max(0, quantity - marketOrderQuantity);
+    const candidates = (this.itemLotsByTypeId.get(typeId) ?? [])
+      .filter(
+        (lot) =>
+          lot.source !== "market-order"
+          && lot.horizon === "now"
+          && lot.locationId === destinationLocationId,
+      )
+      .slice()
+      .sort((left, right) => left.lotId.localeCompare(right.lotId));
+    for (const lot of candidates) {
+      if (remaining <= 0) break;
+      const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
+      const reserved = this.totalProtectedReservation(lot.lotId);
+      const next = Math.min(remaining, Math.max(0, available - reserved));
+      if (next <= 0) continue;
+      this.stockpileReservationsByLotId.set(lot.lotId, this.stockpileReservation(lot.lotId) + next);
+      remaining -= next;
+    }
+  }
+
+  /** Returns whether same-system remote stock can satisfy a stockpile demand. */
+  hasSameSystemRemoteSupply(typeId: number, destinationLocationId: number): boolean {
+    const destinationSystemId = this.systemIdByLocationId.get(destinationLocationId);
+    if (destinationSystemId === undefined) return false;
+    return (this.itemLotsByTypeId.get(typeId) ?? []).some((lot) => {
+      if (
+        lot.source === "market-order"
+        || lot.horizon !== "now"
+        || lot.locationId === undefined
+        || lot.locationId === destinationLocationId
+        || this.isExcluded(lot, destinationLocationId)
+      ) return false;
+      const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
+      return (
+        available > this.totalProtectedReservation(lot.lotId)
+        && lot.systemId === destinationSystemId
+      );
+    });
+  }
+
+  /** Returns physical supply without subtracting provisional activity reservations. */
+  physicalAvailability(typeId: number, destinationLocationId: number): SupplyAvailability {
+    let local = 0;
+    let remote = 0;
+    let future = 0;
+    for (const lot of this.itemLotsByTypeId.get(typeId) ?? []) {
+      if (lot.source === "market-order") continue;
+      const quantity = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
+      if (quantity <= 0) continue;
+      if (lot.horizon === "after-upstream") {
+        if (
+          lot.locationId === destinationLocationId
+          || (lot.locationId !== undefined && !this.isExcluded(lot, destinationLocationId))
+        ) future += quantity;
+      }
+      else if (lot.locationId === destinationLocationId) local += quantity;
+      else if (lot.locationId !== undefined && !this.isExcluded(lot, destinationLocationId)) {
+        remote += quantity;
+      }
+    }
+    return { local, remote, future };
   }
 
   /** Claims existing active-job output without treating it as physical stock. */
@@ -213,6 +324,7 @@ export class SimulationAllocator {
     quantity: number,
     account: SimulationLedgerAccount,
     demandingJobId?: string,
+    allocationPurpose: SimulationAllocationPurpose = "stockpile-demand",
   ): FutureClaim {
     let remaining = quantity;
     let claimed = 0;
@@ -304,7 +416,7 @@ export class SimulationAllocator {
           toLocationId: account.locationId,
           ownerType: lot.ownerType,
           ownerId: lot.ownerId,
-          purpose: "industry-input",
+          purpose: allocationPurpose === "stockpile-demand" ? "stockpile-demand" : "industry-input",
           demands: [{ jobId: demandingJobId, quantity: next }],
         });
       }
@@ -324,56 +436,35 @@ export class SimulationAllocator {
     demandingJobId?: string,
     stockpileId?: string,
     demandActivity?: Exclude<SimulationActivity, "surplus">,
+    allocationPurpose: SimulationAllocationPurpose = "stockpile-demand",
   ): ItemClaim {
-    let local: number;
-    let remote: number;
-    if (this.haulingAllocationMode === "greedy") {
-      remote = this.claimRemote(
-        typeId,
-        quantity,
-        destinationLocationId,
-        account,
-        demandingJobId,
-        stockpileId,
-        demandActivity,
-      );
-      local = this.claimLocal(
-        typeId,
-        quantity - remote,
-        destinationLocationId,
-        account,
-        demandingJobId,
-        "now",
-        stockpileId,
-        demandActivity,
-      );
-    }
-    else {
-      local = this.claimLocal(
-        typeId,
-        quantity,
-        destinationLocationId,
-        account,
-        demandingJobId,
-        "now",
-        stockpileId,
-        demandActivity,
-      );
-      remote = this.claimRemote(
-        typeId,
-        quantity - local,
-        destinationLocationId,
-        account,
-        demandingJobId,
-        stockpileId,
-        demandActivity,
-      );
-    }
+    const local = this.claimLocal(
+      typeId,
+      quantity,
+      destinationLocationId,
+      account,
+      demandingJobId,
+      "now",
+      stockpileId,
+      demandActivity,
+      allocationPurpose,
+    );
+    const remote = this.claimRemote(
+      typeId,
+      quantity - local,
+      destinationLocationId,
+      account,
+      demandingJobId,
+      stockpileId,
+      demandActivity,
+      allocationPurpose,
+    );
     const futureClaim = this.claimFuture(
       typeId,
       quantity - local - remote,
       account,
       demandingJobId,
+      allocationPurpose,
     );
     return {
       local,
@@ -746,23 +837,43 @@ export class SimulationAllocator {
     reservationHorizon: "now" | "after-hauling",
     stockpileId?: string,
     demandActivity?: Exclude<SimulationActivity, "surplus">,
-    protectLocalDemand = false,
+    allocationPurpose: SimulationAllocationPurpose = "stockpile-demand",
   ): number {
     let remaining = quantity;
     let claimed = 0;
-    for (const lot of lots) {
+    const orderedLots = [...lots].sort(
+      (left, right) =>
+        Number(this.activityReservation(right.lotId) > 0)
+          - Number(this.activityReservation(left.lotId) > 0)
+        || left.lotId.localeCompare(right.lotId),
+    );
+    for (const lot of orderedLots) {
       if (remaining <= 0) break;
       const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
+      const activityReservation = this.activityReservation(lot.lotId);
+      const stockpileReservation = this.stockpileReservation(lot.lotId);
       const protectedQuantity =
-        protectLocalDemand && lot.locationId !== undefined
-          ? (this.localDemandReservations.get(this.localDemandKey(lot.typeId, lot.locationId)) ?? 0)
+        allocationPurpose === "stockpile-demand"
+          ? activityReservation
+            + (lot.locationId === destinationLocationId ? 0 : stockpileReservation)
           : 0;
       const usable = Math.max(0, available - protectedQuantity);
       const next = Math.min(remaining, usable);
       if (next <= 0) continue;
       this.remainingItemQuantityByLotId.set(lot.lotId, available - next);
-      if (!protectLocalDemand && lot.locationId !== undefined) {
-        this.consumeLocalDemandReservation(lot.typeId, lot.locationId, next);
+      if (allocationPurpose === "activity-input") {
+        this.consumeActivityReservation(lot.lotId, next);
+        const unreservedQuantity = Math.max(
+          0,
+          available - activityReservation - stockpileReservation,
+        );
+        this.consumeStockpileReservation(
+          lot.lotId,
+          Math.max(0, next - activityReservation - unreservedQuantity),
+        );
+      }
+      else {
+        this.consumeStockpileReservation(lot.lotId, next);
       }
       this.transactions.push({
         id: this.nextTransactionId("reserve"),
@@ -796,7 +907,7 @@ export class SimulationAllocator {
           toLocationId: destinationLocationId,
           ownerType: lot.ownerType,
           ownerId: lot.ownerId,
-          purpose: "industry-input",
+          purpose: allocationPurpose === "stockpile-demand" ? "stockpile-demand" : "industry-input",
           demands: [{ jobId: demandingJobId, quantity: next }],
         });
       }
@@ -831,20 +942,28 @@ export class SimulationAllocator {
     );
   }
 
-  private localDemandKey(typeId: number, locationId: number): string {
-    return `${typeId}:${locationId}`;
+  private activityReservation(lotId: string): number {
+    return this.activityReservationsByLotId.get(lotId) ?? 0;
   }
 
-  private consumeLocalDemandReservation(
-    typeId: number,
-    locationId: number,
-    quantity: number,
-  ): void {
-    if (this.haulingAllocationMode !== "local-first") return;
-    const key = this.localDemandKey(typeId, locationId);
-    const remaining = this.localDemandReservations.get(key) ?? 0;
-    if (remaining <= quantity) this.localDemandReservations.delete(key);
-    else this.localDemandReservations.set(key, remaining - quantity);
+  private stockpileReservation(lotId: string): number {
+    return this.stockpileReservationsByLotId.get(lotId) ?? 0;
+  }
+
+  private totalProtectedReservation(lotId: string): number {
+    return this.activityReservation(lotId) + this.stockpileReservation(lotId);
+  }
+
+  private consumeActivityReservation(lotId: string, quantity: number): void {
+    const remaining = this.activityReservation(lotId);
+    if (remaining <= quantity) this.activityReservationsByLotId.delete(lotId);
+    else this.activityReservationsByLotId.set(lotId, remaining - quantity);
+  }
+
+  private consumeStockpileReservation(lotId: string, quantity: number): void {
+    const remaining = this.stockpileReservation(lotId);
+    if (remaining <= quantity) this.stockpileReservationsByLotId.delete(lotId);
+    else this.stockpileReservationsByLotId.set(lotId, remaining - quantity);
   }
 
   private blueprintHorizon(
