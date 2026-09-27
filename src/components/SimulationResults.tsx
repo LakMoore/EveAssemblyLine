@@ -77,7 +77,7 @@ import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageS
 import { cn } from "@/lib/utils";
 import { useAppLanguage } from "@/app/AppShell";
 import { fulleriteGasSites } from "@/lib/reference/fulleriteGasSites";
-import { fetchTypeMetadata } from "@/lib/reference/types";
+import { fetchTypeMetadata, type TypeMetadata } from "@/lib/reference/types";
 import {
   groupSimulationActivityJobs,
   type SimulationIndustryJobGroup,
@@ -518,12 +518,28 @@ type FutureSupplySource = {
     | "reprocessing"
     | "market";
   Icon: LucideIcon;
+  colored?: boolean;
 };
 
 /** Returns the non-empty source contributions shown beside a future supply total. */
 function futureSupplySources(item: SimulationMaterialBalance): FutureSupplySource[] {
   const productionIcon = item.activityType === "reaction" ? Atom : Factory;
-  const inFlightSource = item.activityType === "reaction" ? "reaction" : "industry";
+  const inFlightSource =
+    item.activityType === "reaction"
+      ? "reaction"
+      : item.activityType === "copying"
+        ? "copying"
+        : item.activityType === "invention"
+          ? "invention"
+          : "industry";
+  const inFlightIcon =
+    item.activityType === "reaction"
+      ? Atom
+      : item.activityType === "copying"
+        ? TestTubes
+        : item.activityType === "invention"
+          ? FlaskConical
+          : Factory;
   const sources: FutureSupplySource[] = [
     {
       key: "hauling",
@@ -537,7 +553,8 @@ function futureSupplySources(item: SimulationMaterialBalance): FutureSupplySourc
       label: "In Production",
       quantity: item.inFlightQuantity,
       source: inFlightSource,
-      Icon: productionIcon,
+      Icon: inFlightIcon,
+      colored: true,
     },
     {
       key: "planned-production",
@@ -559,6 +576,7 @@ function futureSupplySources(item: SimulationMaterialBalance): FutureSupplySourc
       quantity: item.availableFromInvention,
       source: "invention",
       Icon: FlaskConical,
+      colored: false,
     },
     {
       key: "reprocessing",
@@ -1261,14 +1279,70 @@ function SimulationInstallPlanDialogLayout({
   );
 }
 
-/** Selects blueprint artwork for blueprint-named balances in the plan ledger. */
-function materialImageVariation(typeName: string): "icon" | "bp" {
-  return /\bblueprint$/i.test(typeName) ? "bp" : "icon";
+/** Counts owned BPO records for one blueprint type. */
+function ownedBpoCount(typeId: number, stock: readonly PlanStockItem[]): number {
+  return stock
+    .filter((item) => item.typeId === typeId && item.category === "blueprint")
+    .reduce(
+      (total, item) => {
+        if (item.blueprintType === "bpo") return total + Math.max(0, item.quantity);
+        return total + (item.blueprintPrints?.filter((print) => print.type === "bpo").length ?? 0);
+      },
+      0,
+    );
+}
+
+/** Selects blueprint artwork, preferring BPCs unless a BPO is owned. */
+function materialImageVariation(
+  item: Pick<SimulationMaterialBalance, "typeId" | "typeName">,
+  stock: readonly PlanStockItem[],
+  metadataByTypeId: ReadonlyMap<number, TypeMetadata>,
+): "icon" | "bp" | "bpc" {
+  if (!/\bblueprint$/i.test(item.typeName)) return "icon";
+  const techLevel = metadataByTypeId.get(item.typeId)?.techLevel;
+  if (techLevel === undefined) return "bpc";
+  if (techLevel === 2) return "bpc";
+  return ownedBpoCount(item.typeId, stock) > 0 ? "bp" : "bpc";
 }
 
 /** Identifies material balances whose type names represent blueprint records. */
 function isBlueprintBalance(item: Pick<SimulationMaterialBalance, "typeName">): boolean {
-  return materialImageVariation(item.typeName) === "bp";
+  return /\bblueprint$/i.test(item.typeName);
+}
+
+/** Loads localized type metadata needed for blueprint artwork decisions. */
+function useSimulationTypeMetadata(typeIds: readonly number[]) {
+  const { language } = useAppLanguage();
+  const typeIdKey = [...new Set(typeIds)].sort((left, right) => left - right).join(",");
+  const requestKey = `${language}:${typeIdKey}`;
+  const [loadedMetadata, setLoadedMetadata] = useState<{
+    requestKey: string;
+    metadataByTypeId: ReadonlyMap<number, TypeMetadata>;
+  }>({ requestKey: "", metadataByTypeId: new Map() });
+
+  useEffect(() => {
+    const requestedTypeIds = typeIdKey.split(",").filter(Boolean).map(Number);
+    if (requestedTypeIds.length === 0) return;
+    let cancelled = false;
+    void fetchTypeMetadata(requestedTypeIds, language)
+      .then((metadata) => {
+        if (cancelled) return;
+        setLoadedMetadata({
+          requestKey,
+          metadataByTypeId: new Map(metadata.map((item) => [item.typeId, item])),
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setLoadedMetadata({ requestKey, metadataByTypeId: new Map() });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [language, requestKey, typeIdKey]);
+
+  return loadedMetadata.requestKey === requestKey
+    ? loadedMetadata.metadataByTypeId
+    : new Map<number, TypeMetadata>();
 }
 
 /** Loads localized names for simulator type IDs while retaining a stable ID fallback. */
@@ -1451,6 +1525,8 @@ function SimulationPlanLocationGroups({
   tab,
   items,
   reactionFormulaItems,
+  stock,
+  metadataByTypeId,
   locationNamesById,
   stockpileNamesById,
   marketBuyOrderQuantities,
@@ -1463,6 +1539,8 @@ function SimulationPlanLocationGroups({
   tab: "plan" | "surplus";
   items: readonly SimulationMaterialBalance[];
   reactionFormulaItems: readonly SimulationReactionFormulaBalance[];
+  stock: readonly PlanStockItem[];
+  metadataByTypeId: ReadonlyMap<number, TypeMetadata>;
   locationNamesById: ReadonlyMap<number, string>;
   stockpileNamesById: ReadonlyMap<string, string>;
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
@@ -1494,7 +1572,7 @@ function SimulationPlanLocationGroups({
             (item) => ({
               typeId: item.typeId,
               name: item.typeName,
-              imageVariation: materialImageVariation(item.typeName),
+              imageVariation: materialImageVariation(item, stock, metadataByTypeId),
             }),
           ),
           ...createGroupAvatars(
@@ -1541,7 +1619,7 @@ function SimulationPlanLocationGroups({
                           linkPath="assets"
                           selected={controls.selectedRowKey === rowKey}
                           onClick={() => controls.onSelectRow(rowKey)}
-                          variation={materialImageVariation(item.typeName)}
+                          variation={materialImageVariation(item, stock, metadataByTypeId)}
                           wideBreakpoint="md"
                           contentClassName="self-end text-right font-mono text-xs md:w-full md:self-auto"
                         >
@@ -1549,6 +1627,11 @@ function SimulationPlanLocationGroups({
                             {tab === "plan" && item.demandSources.length > 0 ? (
                               <SimulationDemandSourcesDrawer
                                 item={item}
+                                imageVariation={materialImageVariation(
+                                  item,
+                                  stock,
+                                  metadataByTypeId,
+                                )}
                                 demandTypeNamesById={demandTypeNamesById}
                                 locationLabel={groupLabel}
                                 onSelectSimulationTab={onSelectSimulationTab}
@@ -1590,7 +1673,7 @@ function SimulationPlanLocationGroups({
                           linkPath="assets"
                           selected={controls.selectedRowKey === rowKey}
                           onClick={() => controls.onSelectRow(rowKey)}
-                          variation="bp"
+                          variation={materialImageVariation(item, stock, metadataByTypeId)}
                           wideBreakpoint="md"
                           contentClassName="self-end text-right font-mono text-xs md:w-full md:self-auto"
                         >
@@ -1598,6 +1681,11 @@ function SimulationPlanLocationGroups({
                             {tab === "plan" && item.demandSources.length > 0 ? (
                               <SimulationDemandSourcesDrawer
                                 item={item}
+                                imageVariation={materialImageVariation(
+                                  item,
+                                  stock,
+                                  metadataByTypeId,
+                                )}
                                 demandTypeNamesById={demandTypeNamesById}
                                 locationLabel={groupLabel}
                                 onSelectSimulationTab={onSelectSimulationTab}
@@ -1661,6 +1749,7 @@ function SimulationMaterialsTab({
   tab,
   buckets,
   reactionFormulaBuckets,
+  stock,
   locationNamesById,
   stockpileNamesById,
   marketBuyOrderQuantities,
@@ -1674,6 +1763,7 @@ function SimulationMaterialsTab({
   tab: "plan" | "surplus";
   buckets: SimulationMaterialLocationBucket[];
   reactionFormulaBuckets?: SimulationReactionFormulaLocationBucket[];
+  stock: readonly PlanStockItem[];
   locationNamesById: ReadonlyMap<number, string>;
   stockpileNamesById: ReadonlyMap<string, string>;
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
@@ -1686,6 +1776,7 @@ function SimulationMaterialsTab({
 }) {
   const items = buckets.flatMap((bucket) => bucket.items);
   const reactionFormulaItems = reactionFormulaBuckets?.flatMap((bucket) => bucket.items) ?? [];
+  const metadataByTypeId = useSimulationTypeMetadata(items.map((item) => item.typeId));
   const urlSelectedTypeId = useSyncExternalStore(
     subscribeToTypeId,
     readTypeIdFromUrl,
@@ -1838,6 +1929,8 @@ function SimulationMaterialsTab({
           tab={tab}
           items={filteredItems}
           reactionFormulaItems={filteredReactionFormulaItems}
+          stock={stock}
+          metadataByTypeId={metadataByTypeId}
           locationNamesById={locationNamesById}
           stockpileNamesById={stockpileNamesById}
           marketBuyOrderQuantities={marketBuyOrderQuantities}
@@ -2001,11 +2094,13 @@ function summarizeSimulationDemandSources(
 /** Shows the demand contributors for one material balance at its physical location. */
 function SimulationDemandSourcesDrawer({
   item,
+  imageVariation,
   demandTypeNamesById,
   locationLabel,
   onSelectSimulationTab,
 }: {
   item: SimulationMaterialBalance;
+  imageVariation: "icon" | "bp" | "bpc";
   demandTypeNamesById: ReadonlyMap<number, string>;
   locationLabel: string;
   onSelectSimulationTab: (tab: SimulationTab) => void;
@@ -2044,6 +2139,7 @@ function SimulationDemandSourcesDrawer({
               name={item.typeName}
               typeId={item.typeId}
               imageSize={40}
+              variation={imageVariation}
               linkPath="planner"
               linkSearchParams={{ simulationTab: "plan" }}
               linkHash="plan-breakdown"
@@ -2182,14 +2278,14 @@ function MaterialBalanceSummary({
           aria-label="Future supply sources"
         >
           <MarketBuyOrderIndicator quantity={marketBuyOrderQuantity} />
-          {supplySources.map(({ key, label, quantity, source, Icon }) => (
+          {supplySources.map(({ key, label, quantity, source, Icon, colored }) => (
             <Tooltip key={key}>
               <TooltipTrigger
                 render={
                   <span
                     aria-label={`${label}: ${quantity.toLocaleString()}`}
                     className={cn(
-                      styles.simulationSourceIcon,
+                      colored ? styles.simulationSourceIcon : "text-muted-foreground",
                       "inline-flex size-5 items-center justify-center",
                     )}
                     data-source={source}
@@ -4268,6 +4364,7 @@ function SimulationTabContent({
         tab={activeTab}
         buckets={activeTab === "plan" ? result.lists.planItems : (result.lists.surplusItems ?? [])}
         reactionFormulaBuckets={activeTab === "plan" ? result.lists.reactionFormulas : undefined}
+        stock={stock}
         locationNamesById={locationNamesById}
         stockpileNamesById={stockpileNamesById}
         marketBuyOrderQuantities={marketBuyOrderQuantities}

@@ -438,6 +438,8 @@ function projectIndustryJobAssets(
     const metadata =
       job.productTypeId === undefined ? undefined : metadataByTypeId.get(job.productTypeId);
     if (job.productTypeId !== undefined && job.outputQuantity > 0) {
+      const outputActivity = activityName(job.activityId);
+      const isBlueprintCopyOutput = outputActivity === "Copying" || outputActivity === "Invention";
       assets.push({
         typeId: job.productTypeId,
         name: metadata?.name ?? `Type ${job.productTypeId}`,
@@ -462,6 +464,18 @@ function projectIndustryJobAssets(
         techLevel: metadata?.techLevel,
         assemblyLineGroup: metadata?.assemblyLineGroup,
         activityName: activityName(job.activityId),
+        ...(isBlueprintCopyOutput && job.outputRunsPerCopy !== undefined
+          ? {
+              blueprintPrints: [
+                {
+                  itemId: job.jobId,
+                  runs: job.outputRunsPerCopy,
+                  type: "bpc" as const,
+                  activity: outputActivity,
+                },
+              ],
+            }
+          : {}),
         ...(corporationSource ? { corporationSource } : {}),
       });
     }

@@ -133,6 +133,7 @@ export function isSimulationResultV2(value: unknown): value is SimulationResultV
   const hasBalance = (balance: unknown) =>
     hasTypeIdentity(balance)
     && isPositiveInteger(balance.locationId)
+    && (balance.quantityKind === "item" || balance.quantityKind === "blueprint-run")
     && [
       "requiredNow",
       "reserved",
@@ -155,6 +156,8 @@ export function isSimulationResultV2(value: unknown): value is SimulationResultV
       balance.activityType === undefined
       || balance.activityType === "manufacturing"
       || balance.activityType === "reaction"
+      || balance.activityType === "copying"
+      || balance.activityType === "invention"
     )
     && Array.isArray(balance.demandSources)
     && balance.demandSources.every(

@@ -37,7 +37,7 @@ const ownerSchema = z
   });
 
 const industryOutputMarkerSchema = z.object({
-  activity: z.enum(["manufacturing", "reaction"]),
+  activity: z.enum(["manufacturing", "reaction", "copying", "invention"]),
   state: z.enum(["active", "paused", "available", "excluded"]),
 });
 

@@ -6,6 +6,7 @@ import { simulateIndustryDemand, type IndustrySimulationResult } from "./industr
 import {
   projectSimulationLedger,
   simulationAccountKey,
+  type SimulationSourceLot,
   type SimulationTransaction,
 } from "./ledger";
 import { settleReprocessing } from "./reprocessing";
@@ -25,6 +26,7 @@ import type {
   SimulationResultWithDiagnostics,
   SimulationWarning,
   SimulationRequestV1,
+  SimulationQuantityKind,
 } from "./types";
 
 /** Converts an input into a recursively key-sorted JSON-compatible value. */
@@ -108,7 +110,19 @@ function sourceAvailabilityTransactions(
   visibleLocationIds: ReadonlySet<number>,
   usedLotIds: ReadonlySet<string>,
 ): SimulationTransaction[] {
-  return inventory.itemLots.flatMap((lot) => {
+  const blueprintLots = inventory.blueprintLots
+    .filter((lot) => lot.kind === "bpc" && lot.runs > 0)
+    .map((lot) => ({
+      lotId: lot.lotId,
+      typeId: lot.typeId,
+      quantity: lot.runs,
+      locationId: lot.locationId,
+      ownerType: lot.ownerType,
+      ownerId: lot.ownerId,
+      horizon: lot.horizon,
+      source: "asset" as const,
+    }));
+  return [...inventory.itemLots, ...blueprintLots].flatMap((lot) => {
     if (
       lot.horizon !== "now"
       || lot.locationId === undefined
@@ -123,11 +137,28 @@ function sourceAvailabilityTransactions(
         account: { locationId: lot.locationId, typeId: lot.typeId },
         lotId: lot.lotId,
         quantity: lot.quantity,
+        quantityKind: "blueprint-run" as const,
         horizon: "now" as const,
         source: lot.source === "market-order" ? "market-order" : "asset",
       },
     ];
   });
+}
+
+/** Converts finite blueprint lots into ledger source lots measured in licensed runs. */
+function blueprintSourceLots(inventory: SimulatorInventory): SimulationSourceLot[] {
+  return inventory.blueprintLots
+    .filter((lot) => lot.kind === "bpc" && lot.runs > 0)
+    .map((lot) => ({
+      lotId: lot.lotId,
+      typeId: lot.typeId,
+      quantity: lot.runs,
+      locationId: lot.locationId,
+      ownerType: lot.ownerType,
+      ownerId: lot.ownerId,
+      quantityKind: "blueprint-run" as const,
+      ...(lot.activity ? { activity: lot.activity } : {}),
+    }));
 }
 
 /** Returns source lots that contributed to a plan demand or physical transfer. */
@@ -144,16 +175,34 @@ function usedSourceLotIds(transactions: readonly SimulationTransaction[]): Reado
 /** Returns accounts participating in the requested plan, excluding unrelated source availability. */
 function connectedAccountKeys(transactions: readonly SimulationTransaction[]): ReadonlySet<string> {
   const keys = new Set<string>();
+  const transactionQuantityKind = (transaction: SimulationTransaction): SimulationQuantityKind => {
+    if (transaction.kind === "demand") return transaction.source.quantityKind ?? "item";
+    if (transaction.kind === "transfer-commitment") return transaction.quantityKind ?? "item";
+    if (transaction.kind === "production-commitment") {
+      return transaction.quantityKind ?? "item";
+    }
+    if (transaction.kind === "blueprint-run-reservation") return "blueprint-run";
+    return "item";
+  };
   for (const transaction of transactions) {
     if (transaction.kind === "source-availability") continue;
+    const quantityKind = transactionQuantityKind(transaction);
     if (transaction.kind === "transfer-commitment") {
-      keys.add(simulationAccountKey(transaction.sourceAccount));
-      keys.add(simulationAccountKey(transaction.destinationAccount));
+      keys.add(`${simulationAccountKey(transaction.sourceAccount)}:${quantityKind}`);
+      keys.add(`${simulationAccountKey(transaction.destinationAccount)}:${quantityKind}`);
       continue;
     }
-    keys.add(simulationAccountKey(transaction.account));
+    keys.add(
+      quantityKind === "item"
+        ? simulationAccountKey(transaction.account)
+        : `${simulationAccountKey(transaction.account)}:${quantityKind}`,
+    );
     if ("destinationAccount" in transaction && transaction.destinationAccount) {
-      keys.add(simulationAccountKey(transaction.destinationAccount));
+      keys.add(
+        quantityKind === "item"
+          ? simulationAccountKey(transaction.destinationAccount)
+          : `${simulationAccountKey(transaction.destinationAccount)}:${quantityKind}`,
+      );
     }
   }
   return keys;
@@ -219,7 +268,9 @@ function presentationItems(
   for (const ledger of ledgers) {
     const items = ledger.balances.filter((balance) => {
       const connected = connectedKeys.has(
-        simulationAccountKey({ locationId: balance.locationId, typeId: balance.typeId }),
+        balance.quantityKind === "item"
+          ? simulationAccountKey({ locationId: balance.locationId, typeId: balance.typeId })
+          : `${simulationAccountKey({ locationId: balance.locationId, typeId: balance.typeId })}:${balance.quantityKind}`,
       );
       if (kind === "plan") {
         return (
@@ -484,6 +535,10 @@ export async function simulateIndustry(
     "normalize-inventory",
     () => normalizeSimulatorInventory(request, context),
   );
+  const sourceLots: SimulationSourceLot[] = [
+    ...inventory.itemLots,
+    ...blueprintSourceLots(inventory),
+  ];
   const industry = measureSyncProfiled(
     profiler,
     "simulate-industry-demand",
@@ -546,7 +601,7 @@ export async function simulateIndustry(
     ...baseTransactions,
     ...sourceAvailabilityTransactions(inventory, visibleLocationIds, usedLotIds),
   ]);
-  const ledgerSourceLots = inventory.itemLots.filter(
+  const ledgerSourceLots = sourceLots.filter(
     (lot) =>
       lot.locationId !== undefined
       && (visibleLocationIds.has(lot.locationId) || usedLotIds.has(lot.lotId)),

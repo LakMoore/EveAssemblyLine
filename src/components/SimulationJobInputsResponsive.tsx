@@ -12,9 +12,18 @@ import { cn } from "@/lib/utils";
 import type {
   SimulationIndustryJob,
   SimulationJobInput,
+  SimulationQuantityKind,
   SimulationUpstreamReservation,
 } from "@/lib/planning/simulator/types";
-import { Atom, ClipboardList, Factory, ShoppingCart, Truck, type LucideIcon } from "lucide-react";
+import {
+  Atom,
+  ClipboardList,
+  Factory,
+  FlaskConical,
+  ShoppingCart,
+  Truck,
+  type LucideIcon,
+} from "lucide-react";
 
 type InputStatus = "ready" | "partial" | "blocked";
 
@@ -40,7 +49,10 @@ function statusClassName(status: InputStatus): string {
 }
 
 /** Formats one quantity with the correct singular or plural unit label. */
-function quantityLabel(quantity: number): string {
+function quantityLabel(quantity: number, quantityKind: SimulationQuantityKind = "item"): string {
+  if (quantityKind === "blueprint-run") {
+    return `${quantity.toLocaleString()} ${quantity === 1 ? "run" : "runs"}`;
+  }
   return `${quantity.toLocaleString()} ${quantity === 1 ? "unit" : "units"}`;
 }
 
@@ -49,9 +61,10 @@ function sourceQuantityLabel(
   quantity: number,
   claimedQuantity: number,
   showJobOutput: boolean,
+  quantityKind: SimulationQuantityKind = "item",
 ): string {
-  if (!showJobOutput) return quantityLabel(quantity);
-  return `${quantityLabel(quantity)} (${quantityLabel(claimedQuantity)} reserved)`;
+  if (!showJobOutput) return quantityLabel(quantity, quantityKind);
+  return `${quantityLabel(quantity, quantityKind)} (${quantityLabel(claimedQuantity, quantityKind)} reserved)`;
 }
 
 /** Formats the simulator's authoritative required quantity. */
@@ -94,9 +107,10 @@ function completionDetail(minutes: number | undefined): string {
 type InputSupplySource = {
   key: string;
   label: string;
-  source: "industry" | "reaction" | "market" | "haul";
+  source: "industry" | "reaction" | "copying" | "invention" | "market" | "haul";
   sourceJobIds: readonly string[];
   inBuild: boolean;
+  quantityKind: SimulationQuantityKind;
   quantity: number;
   claimedQuantity: number;
   showJobOutput: boolean;
@@ -150,13 +164,25 @@ function reservationSources(
     ) source.completionMinutes = completionMinutes;
     sourcesByKey.set(key, source);
   }
-  return (["manufacturing", "reaction"] as const).flatMap((activity) =>
+  return (["manufacturing", "reaction", "copying", "invention"] as const).flatMap((activity) =>
     (["in-production", "paused", "planned"] as const).flatMap((state) => {
       const key = `${activity}:${state}`;
       const source = sourcesByKey.get(key);
       if (!source || source.quantity <= 0) return [];
       const showJobOutput = source.hasJobOutput && !source.hasIncompleteOutput;
-      const activityLabel = activity === "manufacturing" ? "Manufacturing" : "Reaction";
+      const activityLabels = {
+        manufacturing: "Manufacturing",
+        reaction: "Reaction",
+        copying: "Copying",
+        invention: "Invention",
+      } as const;
+      const activityLabel = activityLabels[activity];
+      const plannedLabels = {
+        manufacturing: "To Be Manufactured",
+        reaction: "To Be Reacted",
+        copying: "To Be Copied",
+        invention: "To Be Invented",
+      } as const;
       return [
         {
           key,
@@ -164,18 +190,25 @@ function reservationSources(
             state === "in-production"
               ? `${activityLabel}: In Production`
               : state === "paused"
-                ? `${activityLabel}: Paused Production`
-                : activity === "manufacturing"
-                  ? "To Be Manufactured"
-                  : "To Be Reacted",
+                ? `${activityLabel}: Paused`
+                : plannedLabels[activity],
           quantity: showJobOutput ? source.quantity : source.claimedQuantity,
           claimedQuantity: source.claimedQuantity,
           showJobOutput,
-          source: activity === "manufacturing" ? ("industry" as const) : ("reaction" as const),
+          source: activity === "manufacturing" ? "industry" : activity,
           sourceJobIds: [...source.sourceJobIds],
           inBuild: state !== "planned",
+          quantityKind:
+            activity === "copying" || activity === "invention" ? "blueprint-run" : "item",
           completion: completionDetail(source.completionMinutes),
-          Icon: activity === "manufacturing" ? Factory : Atom,
+          Icon:
+            activity === "manufacturing"
+              ? Factory
+              : activity === "reaction"
+                ? Atom
+                : activity === "copying"
+                  ? ClipboardList
+                  : FlaskConical,
         },
       ];
     }),
@@ -196,6 +229,7 @@ function inputSupplySources(input: SimulationJobInput, now: number): InputSupply
             quantity: input.availableFromHauling,
             claimedQuantity: input.availableFromHauling,
             showJobOutput: false,
+            quantityKind: input.quantityKind ?? "item",
             sourceJobIds: [],
             Icon: Truck,
           },
@@ -212,6 +246,7 @@ function inputSupplySources(input: SimulationJobInput, now: number): InputSupply
             quantity: input.purchaseQuantity,
             claimedQuantity: input.purchaseQuantity,
             showJobOutput: false,
+            quantityKind: input.quantityKind ?? "item",
             sourceJobIds: [],
             Icon: ShoppingCart,
           },
@@ -252,8 +287,8 @@ function SimulationInputRow({
         onNavigate={onNavigate}
         className="min-w-0"
       />
-      <div className="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 font-mono text-xs sm:w-auto sm:grid-cols-[5rem_5rem_12rem] sm:gap-2">
-        <span className="order-2 flex items-center justify-start gap-1 sm:order-1 sm:w-20 sm:justify-end">
+      <div className="grid w-full min-w-0 grid-cols-[minmax(0,auto)_minmax(0,1fr)_auto] items-center gap-3 font-mono text-xs sm:w-auto sm:grid-cols-[5rem_5rem_12rem] sm:gap-2">
+        <span className="order-2 flex min-w-0 flex-wrap items-center justify-start gap-1 sm:order-1 sm:w-20 sm:justify-end">
           {supplySources.map(
             ({
               key,
@@ -264,6 +299,7 @@ function SimulationInputRow({
               quantity,
               claimedQuantity,
               showJobOutput,
+              quantityKind,
               completion = "",
               Icon,
             }) => {
@@ -276,7 +312,7 @@ function SimulationInputRow({
                 return sourceJob ? [sourceJob] : [];
               });
               const opensJobInputs = label === "To Be Manufactured";
-              const sourceDescription = `${label}: ${sourceQuantityLabel(quantity, claimedQuantity, showJobOutput)}${completion}`;
+              const sourceDescription = `${label}: ${sourceQuantityLabel(quantity, claimedQuantity, showJobOutput, quantityKind)}${completion}`;
               return (
                 <Tooltip key={key}>
                   <TooltipTrigger
@@ -300,7 +336,7 @@ function SimulationInputRow({
                         </Button>
                       ) : (
                         <span
-                          aria-label={`${label}: ${sourceQuantityLabel(quantity, claimedQuantity, showJobOutput)}${completion}`}
+                          aria-label={`${label}: ${sourceQuantityLabel(quantity, claimedQuantity, showJobOutput, quantityKind)}${completion}`}
                           className={cn(
                             "inline-flex size-5 items-center justify-center",
                             iconClassName,
@@ -330,7 +366,8 @@ function SimulationInputRow({
           {percent}%
         </Badge>
         <span className="order-3 justify-self-end text-right whitespace-normal sm:min-w-20">
-          {input.availableNow.toLocaleString()} / {requiredQuantityLabel(input)}
+          {quantityLabel(input.availableNow, input.quantityKind)} /{" "}
+          {quantityLabel(input.requiredQuantity, input.quantityKind)}
         </span>
       </div>
     </div>

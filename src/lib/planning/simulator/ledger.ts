@@ -2,6 +2,7 @@ import type {
   SimulationDemandSource,
   SimulationMaterialBalance,
   SimulationActivity,
+  SimulationQuantityKind,
   SupplyHorizon,
 } from "./types";
 
@@ -13,7 +14,8 @@ export interface SimulationSourceLot {
   locationId?: number;
   ownerType?: "character" | "corporation";
   ownerId?: number;
-  activity?: "manufacturing" | "reaction";
+  quantityKind?: SimulationQuantityKind;
+  activity?: "manufacturing" | "reaction" | "copying" | "invention";
 }
 
 /** Exact identity of one physical material ledger account. */
@@ -58,6 +60,7 @@ export type SimulationTransaction =
           account: SimulationLedgerAccount;
           destinationAccount: SimulationLedgerAccount;
           quantity: number;
+          quantityKind?: "item";
           source: "production";
           activity: "manufacturing" | "reaction";
           sourceLotId?: string;
@@ -69,6 +72,7 @@ export type SimulationTransaction =
           account: SimulationLedgerAccount;
           destinationAccount: SimulationLedgerAccount;
           quantity: number;
+          quantityKind: "blueprint-run";
           source: "copying" | "invention";
           producingJobId: string;
         }
@@ -95,6 +99,7 @@ export type SimulationTransaction =
       blueprintLotId: string;
       quantity: number;
       demandingJobId: string;
+      horizon?: Extract<SupplyHorizon, "now" | "after-hauling" | "after-upstream">;
     }
   | {
       id: string;
@@ -103,6 +108,7 @@ export type SimulationTransaction =
       destinationAccount: SimulationLedgerAccount;
       lotId: string;
       quantity: number;
+      quantityKind?: SimulationQuantityKind;
       demandingJobId?: string;
     };
 
@@ -118,16 +124,25 @@ export function simulationAccountKey(account: SimulationLedgerAccount): string {
   return `${account.locationId}:${account.typeId}`;
 }
 
+/** Produces a ledger key that keeps physical items separate from licensed blueprint runs. */
+function quantityLedgerKey(account: SimulationLedgerAccount, quantityKind: SimulationQuantityKind) {
+  return quantityKind === "item"
+    ? simulationAccountKey(account)
+    : `${simulationAccountKey(account)}:${quantityKind}`;
+}
+
 function emptyBalance(
   account: SimulationLedgerAccount,
   typeName: string,
   unitVolume: number,
+  quantityKind: SimulationQuantityKind = "item",
 ): SimulationMaterialBalance {
   return {
     typeId: account.typeId,
     typeName,
     unitVolume,
     locationId: account.locationId,
+    quantityKind,
     requiredNow: 0,
     reserved: 0,
     futureDemand: 0,
@@ -150,7 +165,7 @@ function emptyBalance(
 
 function setProductionActivity(
   balance: SimulationMaterialBalance,
-  activity: "manufacturing" | "reaction",
+  activity: "manufacturing" | "reaction" | "copying" | "invention",
   invariantViolations: string[],
   sourceDescription: string,
 ): void {
@@ -182,14 +197,21 @@ export function projectSimulationLedger(
   for (const lot of sourceLots) {
     if (lot.locationId === undefined || lot.activity === undefined) continue;
     const account = { locationId: lot.locationId, typeId: lot.typeId };
-    const key = simulationAccountKey(account);
+    const key = quantityLedgerKey(account, lot.quantityKind ?? "item");
     const balance =
       mutableBalances.get(key)
       ?? emptyBalance(
         account,
         names.get(account.typeId) ?? `Type ${account.typeId}`,
         volumes.get(account.typeId) ?? 0,
+        lot.quantityKind,
       );
+    if (balance.quantityKind !== (lot.quantityKind ?? "item")) {
+      invariantViolations.push(
+        `Ledger row ${balance.locationId}:${balance.typeId} mixes item and blueprint-run quantities.`,
+      );
+      continue;
+    }
     balance.inFlightQuantity += lot.quantity;
     setProductionActivity(balance, lot.activity, invariantViolations, `source lot ${lot.lotId}`);
     mutableBalances.set(key, balance);
@@ -201,15 +223,18 @@ export function projectSimulationLedger(
       continue;
     }
     if (transaction.kind === "transfer-commitment") {
-      const sourceKey = simulationAccountKey(transaction.sourceAccount);
+      const sourceLot = sourceLotsById.get(transaction.lotId);
+      const quantityKind = transaction.quantityKind ?? sourceLot?.quantityKind ?? "item";
+      const sourceKey = quantityLedgerKey(transaction.sourceAccount, quantityKind);
       const source =
         mutableBalances.get(sourceKey)
         ?? emptyBalance(
           transaction.sourceAccount,
           names.get(transaction.sourceAccount.typeId) ?? `Type ${transaction.sourceAccount.typeId}`,
           volumes.get(transaction.sourceAccount.typeId) ?? 0,
+          quantityKind,
         );
-      const destinationKey = simulationAccountKey(transaction.destinationAccount);
+      const destinationKey = quantityLedgerKey(transaction.destinationAccount, quantityKind);
       const destination =
         mutableBalances.get(destinationKey)
         ?? emptyBalance(
@@ -217,14 +242,31 @@ export function projectSimulationLedger(
           names.get(transaction.destinationAccount.typeId)
             ?? `Type ${transaction.destinationAccount.typeId}`,
           volumes.get(transaction.destinationAccount.typeId) ?? 0,
+          quantityKind,
         );
+      if (source.quantityKind !== quantityKind || destination.quantityKind !== quantityKind) {
+        invariantViolations.push(
+          `Transfer ${transaction.id} mixes item and blueprint-run quantities.`,
+        );
+        continue;
+      }
       source.transferredOut += transaction.quantity;
       destination.availableFromHauling += transaction.quantity;
       mutableBalances.set(sourceKey, source);
       mutableBalances.set(destinationKey, destination);
       continue;
     }
-    const key = simulationAccountKey(transaction.account);
+    const transactionQuantityKind =
+      transaction.kind === "demand"
+        ? (transaction.source.quantityKind ?? "item")
+        : transaction.kind === "source-availability" || transaction.kind === "source-reservation"
+          ? (sourceLotsById.get(transaction.lotId)?.quantityKind ?? "item")
+          : transaction.kind === "production-commitment"
+            ? (transaction.quantityKind ?? "item")
+            : transaction.kind === "blueprint-run-reservation"
+              ? "blueprint-run"
+              : "item";
+    const key = quantityLedgerKey(transaction.account, transactionQuantityKind);
     const hadBalance = mutableBalances.has(key);
     const balance =
       mutableBalances.get(key)
@@ -232,12 +274,19 @@ export function projectSimulationLedger(
         transaction.account,
         names.get(transaction.account.typeId) ?? `Type ${transaction.account.typeId}`,
         volumes.get(transaction.account.typeId) ?? 0,
+        transactionQuantityKind,
       );
     if (transaction.kind === "source-availability") {
       const lot = sourceLotsById.get(transaction.lotId);
       if (!lot || lot.typeId !== transaction.account.typeId) {
         invariantViolations.push(
           `Availability ${transaction.id} references an invalid source lot.`,
+        );
+        continue;
+      }
+      if (balance.quantityKind !== (lot.quantityKind ?? "item")) {
+        invariantViolations.push(
+          `Availability ${transaction.id} mixes item and blueprint-run quantities.`,
         );
         continue;
       }
@@ -261,6 +310,12 @@ export function projectSimulationLedger(
         invariantViolations.push(`Demand ${transaction.id} has inconsistent readiness quantities.`);
         continue;
       }
+      if (balance.quantityKind !== (transaction.source.quantityKind ?? "item")) {
+        invariantViolations.push(
+          `Demand ${transaction.id} mixes item and blueprint-run quantities.`,
+        );
+        continue;
+      }
       balance.requiredNow += transaction.source.requiredNow;
       balance.reserved += transaction.source.reserved;
       balance.demandSources.push(transaction.source);
@@ -269,6 +324,12 @@ export function projectSimulationLedger(
       const lot = sourceLotsById.get(transaction.lotId);
       if (!lot || lot.typeId !== transaction.account.typeId) {
         invariantViolations.push(`Reservation ${transaction.id} references an invalid source lot.`);
+        continue;
+      }
+      if (balance.quantityKind !== (lot.quantityKind ?? "item")) {
+        invariantViolations.push(
+          `Reservation ${transaction.id} mixes item and blueprint-run quantities.`,
+        );
         continue;
       }
       reservedByLotId.set(
@@ -283,6 +344,7 @@ export function projectSimulationLedger(
       }
     }
     else if (transaction.kind === "production-commitment") {
+      const quantityKind = transaction.quantityKind ?? "item";
       if (transaction.source === "production" && transaction.sourceLotId !== undefined) {
         const sourceLot = sourceLotsById.get(transaction.sourceLotId);
         if (
@@ -301,7 +363,7 @@ export function projectSimulationLedger(
           (claimedProductionByLotId.get(transaction.sourceLotId) ?? 0) + transaction.quantity,
         );
       }
-      const destinationKey = simulationAccountKey(transaction.destinationAccount);
+      const destinationKey = quantityLedgerKey(transaction.destinationAccount, quantityKind);
       const destination =
         mutableBalances.get(destinationKey)
         ?? emptyBalance(
@@ -309,8 +371,21 @@ export function projectSimulationLedger(
           names.get(transaction.destinationAccount.typeId)
             ?? `Type ${transaction.destinationAccount.typeId}`,
           volumes.get(transaction.destinationAccount.typeId) ?? 0,
+          quantityKind,
         );
       const isRemoteOutput = destinationKey !== key;
+      if ((!isRemoteOutput || hadBalance) && balance.quantityKind !== quantityKind) {
+        invariantViolations.push(
+          `Production commitment ${transaction.id} mixes item and blueprint-run quantities.`,
+        );
+        continue;
+      }
+      if (destination.quantityKind !== quantityKind) {
+        invariantViolations.push(
+          `Production commitment ${transaction.id} mixes item and blueprint-run quantities.`,
+        );
+        continue;
+      }
       const persistSourceBalance = !isRemoteOutput || hadBalance;
       if (transaction.source === "production" && transaction.sourceLotId === undefined) {
         const productionBalance = isRemoteOutput ? destination : balance;
@@ -335,7 +410,7 @@ export function projectSimulationLedger(
     }
     else if (transaction.kind === "reprocessing-output") {
       const destinationKey = transaction.destinationAccount
-        ? simulationAccountKey(transaction.destinationAccount)
+        ? quantityLedgerKey(transaction.destinationAccount, "item")
         : key;
       if (destinationKey === key) {
         balance.availableFromReprocessing += transaction.quantity;

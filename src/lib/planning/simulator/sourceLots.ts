@@ -18,7 +18,6 @@ export interface SimulationItemLot extends SimulationSourceLot {
   unitVolume: number;
   horizon: "now" | "after-upstream";
   source: "asset" | "market-order" | "industry-output";
-  activity?: "manufacturing" | "reaction";
   industryJobId?: number;
   industryJobStatus?: IndustryJobStatus;
   industryJobEndDate?: string;
@@ -40,6 +39,10 @@ export interface SimulatorBlueprintLot {
   ownerId?: number;
   inUse: boolean;
   horizon: "now" | "after-upstream";
+  activity?: "copying" | "invention";
+  industryJobId?: number;
+  industryJobStatus?: IndustryJobStatus;
+  industryJobEndDate?: string;
 }
 
 /** Canonical inventory registry consumed by every simulation phase. */
@@ -164,11 +167,16 @@ function industryOutputItem(
     const runsPerCopy =
       normalizedActivity === "copying"
         ? (job.licensedRuns ?? 1)
-        : (blueprint.activities.invention?.products?.[0]?.quantity ?? 1);
+        : (
+            blueprint.activities.invention?.products?.find(
+              (product) => product.typeID === productTypeId,
+            )?.quantity ?? 1
+          );
+    const outputCopies = Math.max(0, job.quantity);
     return {
       typeId: productTypeId,
       name: localizedTypeName(context, productTypeId),
-      quantity: job.quantity,
+      quantity: outputCopies,
       locationId: job.locationId,
       rootLocationId: job.rootLocationId,
       category: "blueprint",
@@ -179,11 +187,15 @@ function industryOutputItem(
       blueprintPrints: [
         {
           itemId: job.jobId,
-          runs: Math.max(0, job.runs * runsPerCopy),
+          runs: runsPerCopy,
           type: "bpc",
           activity: job.activity,
         },
       ],
+      industryOutput: {
+        activity: normalizedActivity,
+        state: job.status === "active" || job.status === "paused" ? job.status : "available",
+      },
     };
   }
   const activity = normalizedActivity.startsWith("reaction")
@@ -274,13 +286,21 @@ export function normalizeSimulatorInventory(
       );
       if (prints.length > 0) {
         for (const [printIndex, print] of prints.entries()) {
-          const formulaCopies = category === "reactionformula" ? Math.max(0, item.quantity) : 1;
+          const normalizedPrintActivity = print.activity?.toLowerCase();
+          const formulaCopies =
+            category === "reactionformula"
+              ? Math.max(0, item.quantity)
+              : normalizedPrintActivity === "copying" || normalizedPrintActivity === "invention"
+                ? Math.max(0, item.quantity)
+                : 1;
           for (let copyIndex = 0; copyIndex < formulaCopies; copyIndex += 1) {
+            const isInFlightOutput =
+              item.industryOutput?.state === "active" || item.industryOutput?.state === "paused";
             blueprintLots.push({
               lotId:
                 category === "reactionformula"
                   ? `blueprint:${stockIndex}:${print.itemId}:${printIndex}:${copyIndex}`
-                  : `blueprint:${stockIndex}:${print.itemId}:${printIndex}`,
+                  : `blueprint:${stockIndex}:${print.itemId}:${printIndex}:${copyIndex}`,
               itemId: category === "reactionformula" ? undefined : print.itemId,
               typeId: item.typeId,
               name: localizedTypeName(context, item.typeId, request.language),
@@ -296,6 +316,15 @@ export function normalizeSimulatorInventory(
               ownerId: item.ownerId,
               inUse: item.inUse === true,
               horizon: isUsableIndustryOutput(item) ? "now" : "after-upstream",
+              ...(isInFlightOutput
+              && (normalizedPrintActivity === "copying" || normalizedPrintActivity === "invention")
+                ? { activity: normalizedPrintActivity as "copying" | "invention" }
+                : {}),
+              ...(item.jobId !== undefined ? { industryJobId: item.jobId } : {}),
+              ...(item.industryOutput?.state === "active" || item.industryOutput?.state === "paused"
+                ? { industryJobStatus: item.industryOutput.state }
+                : {}),
+              ...(item.industryJobEndDate ? { industryJobEndDate: item.industryJobEndDate } : {}),
             });
           }
         }

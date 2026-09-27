@@ -235,16 +235,27 @@ type PlannerAssetWithPresentation = PlanStockItem & {
 /** Removes SDE and display metadata before sending assets to the simulator. */
 function toSimulationAsset(item: PlanStockItem): SimulationAsset {
   const normalizedActivity = item.activityName?.toLowerCase();
+  const isBlueprintOutput =
+    item.category === "blueprint"
+    && item.inUse !== true
+    && (normalizedActivity === "copying" || normalizedActivity === "invention");
   const industryOutput: SimulationIndustryOutputMarker | undefined =
     item.inBuild === true
-    && item.category === "item"
+    && (item.category === "item" || isBlueprintOutput)
     && (
       normalizedActivity === "manufacturing"
       || normalizedActivity === "reaction"
       || normalizedActivity === "reactions"
+      || normalizedActivity === "copying"
+      || normalizedActivity === "invention"
     )
       ? {
-          activity: normalizedActivity === "manufacturing" ? "manufacturing" : "reaction",
+          activity:
+            normalizedActivity === "manufacturing"
+              ? "manufacturing"
+              : normalizedActivity === "reaction" || normalizedActivity === "reactions"
+                ? "reaction"
+                : normalizedActivity,
           state:
             item.industryJobStatus === "cancelled" || item.industryJobStatus === "reverted"
               ? "excluded"

@@ -705,6 +705,27 @@ class IndustryDemandSimulation {
 
     const nextStack = new Set(stack);
     nextStack.add(productTypeId);
+    if (production.activity === "manufacturing") {
+      const blueprintDemand = this.demandSource(
+        stockpile,
+        productTypeId,
+        quantity,
+        production.blueprint._key,
+        requiredRuns,
+        profile.locationId,
+        production.activity,
+        baseJobId,
+        "blueprint-run",
+      );
+      this.declareDemand(blueprintAccount, requiredRuns, blueprintDemand);
+      this.setDemandReadiness(
+        blueprintDemand,
+        allocations.reduce(
+          (total, allocation) => total + (allocation.horizon === "now" ? allocation.runs : 0),
+          0,
+        ),
+      );
+    }
     const supply: ProductionSupply = {
       plannedQuantity: 0,
       readyQuantity: 0,
@@ -740,6 +761,7 @@ class IndustryDemandSimulation {
         account: outputAccount,
         destinationAccount,
         quantity: outputQuantity,
+        quantityKind: "item",
         source: "production",
         activity: production.activity,
         producingJobId: jobId,
@@ -1040,6 +1062,22 @@ class IndustryDemandSimulation {
     const attempts = Math.ceil(
       targetExpectedRuns / Math.max(Number.EPSILON, probability * runsPerSuccess),
     );
+    const sourceBlueprintAccount: SimulationLedgerAccount = {
+      locationId: inventionLocationId,
+      typeId: sourceBlueprint._key,
+    };
+    const sourceBlueprintDemand = this.demandSource(
+      shortage.stockpile,
+      shortage.outputBlueprintTypeId,
+      shortage.requiredRuns,
+      sourceBlueprint._key,
+      attempts,
+      inventionLocationId,
+      "invention",
+      inventionJobId,
+      "blueprint-run",
+    );
+    this.declareDemand(sourceBlueprintAccount, attempts, sourceBlueprintDemand);
     const scienceProfile = this.request.simulation.scienceProfiles.find(
       (profile) => profile.locationId === inventionLocationId,
     );
@@ -1064,10 +1102,6 @@ class IndustryDemandSimulation {
       ),
     );
 
-    const sourceBlueprintAccount: SimulationLedgerAccount = {
-      locationId: inventionLocationId,
-      typeId: sourceBlueprint._key,
-    };
     const sourceCopyClaims = this.allocator.claimBlueprintCopyRuns(
       sourceBlueprint._key,
       attempts,
@@ -1077,11 +1111,49 @@ class IndustryDemandSimulation {
     );
     const claimedSourceRuns = sourceCopyClaims.reduce((total, claim) => total + claim.runs, 0);
     const sourceRunsMissing = Math.max(0, attempts - claimedSourceRuns);
-    if (sourceRunsMissing > 0) {
-      this.planCopying(shortage, sourceBlueprint, sourceRunsMissing, sourceBlueprintAccount);
+    const copyingJob =
+      sourceRunsMissing > 0
+        ? this.planCopying(shortage, sourceBlueprint, sourceRunsMissing, sourceBlueprintAccount)
+        : undefined;
+    const claimedSourceRunsNow = sourceCopyClaims
+      .filter((claim) => claim.horizon === "now")
+      .reduce((total, claim) => total + claim.runs, 0);
+    const claimedSourceRunsAfterHauling = sourceCopyClaims
+      .filter((claim) => claim.horizon === "after-hauling")
+      .reduce((total, claim) => total + claim.runs, 0);
+    const sourceInputReservations: SimulationUpstreamReservation[] = sourceCopyClaims
+      .filter((claim) => claim.horizon === "after-upstream")
+      .map((claim) => ({
+        activity: claim.sourceActivity ?? "copying",
+        quantity: claim.runs,
+        state: claim.sourceActivity ? "in-production" : "planned",
+        ...(claim.sourceJobId !== undefined ? { sourceJobId: claim.sourceJobId } : {}),
+        ...(claim.sourceCompletionAt ? { sourceCompletionAt: claim.sourceCompletionAt } : {}),
+      }));
+    if (copyingJob) {
+      sourceInputReservations.push({
+        activity: "copying",
+        quantity: sourceRunsMissing,
+        state: "planned",
+        sourceJobId: copyingJob.jobId,
+        sourceOutputQuantity: copyingJob.totalLicensedRuns,
+      });
     }
+    this.setDemandReadiness(sourceBlueprintDemand, claimedSourceRunsNow);
+    const sourceInput: SimulationJobInput = {
+      typeId: sourceBlueprint._key,
+      typeName: typeName(this.context, sourceBlueprint._key, this.request.language),
+      quantityKind: "blueprint-run",
+      requiredQuantity: attempts,
+      availableNow: claimedSourceRunsNow,
+      availableFromHauling: claimedSourceRunsAfterHauling,
+      availableAfterUpstream: claimedSourceRuns + sourceRunsMissing,
+      unsatisfiedQuantity: Math.max(0, attempts - claimedSourceRuns - sourceRunsMissing),
+      upstreamReservations: sourceInputReservations,
+    };
 
-    const expectedOutputRuns = attempts * probability * runsPerSuccess;
+    const expectedOutputCopies = Math.floor(attempts * probability);
+    const expectedOutputRuns = expectedOutputCopies * runsPerSuccess;
     this.inventionJobs.push({
       jobId: inventionJobId,
       stockpileId: shortage.stockpile.id,
@@ -1093,6 +1165,7 @@ class IndustryDemandSimulation {
       runsPerSuccess,
       requiredOutputRuns: shortage.requiredRuns,
       targetExpectedRuns,
+      expectedOutputCopies,
       expectedOutputRuns,
       materialEfficiency:
         baseOutcome.materialEfficiency + (decryptor?.materialEfficiencyModifier ?? 0),
@@ -1104,7 +1177,7 @@ class IndustryDemandSimulation {
           * attempts
           * (scienceProfile?.inventionDurationMultiplier ?? 1),
       ),
-      inputs: inventionInputs,
+      inputs: [sourceInput, ...inventionInputs],
       assignments: [],
       unscheduledAttempts: attempts,
     });
@@ -1119,7 +1192,8 @@ class IndustryDemandSimulation {
         locationId: shortage.manufacturingLocationId,
         typeId: shortage.outputBlueprintTypeId,
       },
-      quantity: Math.floor(expectedOutputRuns),
+      quantity: expectedOutputRuns,
+      quantityKind: "blueprint-run",
       source: "invention",
       producingJobId: inventionJobId,
     });
@@ -1140,7 +1214,7 @@ class IndustryDemandSimulation {
     sourceBlueprint: BlueprintsRecord,
     requiredRuns: number,
     outputAccount: SimulationLedgerAccount,
-  ): void {
+  ): SimulationCopyJob {
     const locationId = shortage.stockpile.locations.copying;
     const jobId = this.stableId(
       "copying",
@@ -1191,7 +1265,7 @@ class IndustryDemandSimulation {
         copies,
       ),
     );
-    this.copyJobs.push({
+    const copyJob: SimulationCopyJob = {
       jobId,
       stockpileId: shortage.stockpile.id,
       locationId,
@@ -1208,17 +1282,20 @@ class IndustryDemandSimulation {
       inputs,
       assignments: [],
       unscheduledCopies: copies,
-    });
+    };
+    this.copyJobs.push(copyJob);
     this.transactions.push({
       id: this.nextId("copy-output"),
       kind: "production-commitment",
       account: blueprintAccount,
       destinationAccount: outputAccount,
       quantity: totalLicensedRuns,
+      quantityKind: "blueprint-run",
       source: "copying",
       producingJobId: jobId,
     });
     this.addActivitySkills(sourceBlueprint.activities.copying?.skills, jobId);
+    return copyJob;
   }
 
   private planSimpleInput(
@@ -1560,6 +1637,7 @@ class IndustryDemandSimulation {
     destinationLocationId: number,
     activity: Exclude<SimulationActivity, "surplus">,
     demandingJobId?: string,
+    quantityKind?: "item" | "blueprint-run",
   ): SimulationDemandSource {
     return {
       demandId: this.nextId("source"),
@@ -1572,6 +1650,7 @@ class IndustryDemandSimulation {
       reserved: plannedQuantity,
       destinationLocationId,
       activity,
+      ...(quantityKind ? { quantityKind } : {}),
       demandingJobId,
     };
   }

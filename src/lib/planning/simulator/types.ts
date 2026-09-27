@@ -2,9 +2,12 @@ import type { PlanRequest, PlanStockItem, StockItem, StockOwnerType } from "@/li
 
 /** Sanitized provenance needed to model an already-installed industry output. */
 export interface SimulationIndustryOutputMarker {
-  activity: "manufacturing" | "reaction";
+  activity: "manufacturing" | "reaction" | "copying" | "invention";
   state: "active" | "paused" | "available" | "excluded";
 }
+
+/** Unit represented by a simulator quantity. Blueprint quantities are licensed runs. */
+export type SimulationQuantityKind = "item" | "blueprint-run";
 
 /** Asset fields required by simulation; display metadata is resolved from SDE context. */
 export type SimulationAsset = Omit<
@@ -135,6 +138,7 @@ export interface SimulationDemandSource {
   reserved: number;
   destinationLocationId: number;
   activity: Exclude<SimulationActivity, "surplus">;
+  quantityKind?: SimulationQuantityKind;
   demandingJobId?: string;
 }
 
@@ -144,6 +148,7 @@ export interface SimulationMaterialBalance {
   typeName: string;
   unitVolume: number;
   locationId: number;
+  quantityKind: SimulationQuantityKind;
   requiredNow: number;
   reserved: number;
   futureDemand: number;
@@ -153,7 +158,7 @@ export interface SimulationMaterialBalance {
   availableFromHauling: number;
   inFlightQuantity: number;
   availableFromProduction: number;
-  activityType?: "manufacturing" | "reaction";
+  activityType?: "manufacturing" | "reaction" | "copying" | "invention";
   availableFromCopying: number;
   availableFromInvention: number;
   availableFromReprocessing: number;
@@ -202,7 +207,7 @@ export type SimulationUpstreamSupplyState = "in-production" | "paused" | "planne
 
 /** Identifies the upstream activity, quantity, and execution state reserved for an input. */
 export interface SimulationUpstreamReservation {
-  activity: "manufacturing" | "reaction";
+  activity: "manufacturing" | "reaction" | "copying" | "invention";
   quantity: number;
   state: SimulationUpstreamSupplyState;
   sourceJobId?: number | string;
@@ -215,6 +220,7 @@ export interface SimulationUpstreamReservation {
 export interface SimulationJobInput {
   typeId: number;
   typeName: string;
+  quantityKind?: SimulationQuantityKind;
   quantityPerRun?: number;
   requiredQuantity: number;
   availableNow: number;
@@ -285,6 +291,7 @@ export interface SimulationInventionJob {
   runsPerSuccess: number;
   requiredOutputRuns: number;
   targetExpectedRuns: number;
+  expectedOutputCopies: number;
   expectedOutputRuns: number;
   materialEfficiency: number;
   timeEfficiency: number;

@@ -523,3 +523,123 @@ void test("hauls only the missing quantity from a remote in-flight reaction outp
   assert.equal(result.lists.haulingTasks[0]?.fromLocationId, 200);
   assert.equal(result.lists.haulingTasks[0]?.toLocationId, 100);
 });
+
+void test("reports T1 invention runs and expected T2 BPC runs without overstatement", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "main",
+        name: "Main",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 1952, quantity: 95, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [
+      {
+        typeId: 11620,
+        quantity: 1,
+        rootLocationId: 60,
+        blueprintPrints: [{ itemId: 1, runs: 25, type: "bpc" }],
+      },
+    ],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: {
+      version: 1,
+      characters: [
+        {
+          characterId: 1,
+          freeSlots: { manufacturing: 100, reactions: 100, science: 100 },
+          timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
+          skillLevels: { "11448": 4, "11453": 4, "21790": 4 },
+        },
+      ],
+    },
+  });
+
+  const result = await simulateIndustry(request);
+  const inventionJob = result.lists.inventionJobs.find(
+    (job) => job.sourceBlueprintTypeId === 11620,
+  );
+  const sourceInput = inventionJob?.inputs.find((input) => input.typeId === 11620);
+
+  assert.ok(inventionJob);
+  assert.ok(sourceInput);
+  assert.equal(inventionJob.attempts, 25);
+  assert.equal(inventionJob.expectedOutputCopies, 11);
+  assert.equal(inventionJob.expectedOutputRuns, 110);
+  assert.notEqual(inventionJob.expectedOutputRuns, 250);
+  assert.equal(sourceInput.quantityKind, "blueprint-run");
+  assert.equal(sourceInput.requiredQuantity, 25);
+  assert.equal(result.metadata.invariantViolationCount, 0);
+});
+
+void test("uses every active invention BPC copy and exposes manufacturing blueprint demand", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "main",
+        name: "Main",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 1952, quantity: 95, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: {
+      items: [],
+      market: [],
+      blueprints: [],
+      industry: [
+        {
+          jobId: 2,
+          typeId: 11808,
+          blueprintTypeId: 11620,
+          quantity: 11,
+          runs: 1,
+          licensedRuns: 10,
+          activity: "invention",
+          status: "active",
+          locationId: 60,
+          rootLocationId: 60,
+        },
+      ],
+    },
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1 },
+  });
+
+  const result = await simulateIndustry(request);
+  const blueprintBalance = result.ledgers
+    .find((ledger) => ledger.locationId === 20)
+    ?.balances.find(
+      (balance) => balance.typeId === 11808 && balance.quantityKind === "blueprint-run",
+    );
+  const sourceBalance = result.ledgers
+    .find((ledger) => ledger.locationId === 60)
+    ?.balances.find(
+      (balance) => balance.typeId === 11808 && balance.quantityKind === "blueprint-run",
+    );
+
+  assert.equal(result.lists.inventionJobs.length, 0);
+  assert.ok(blueprintBalance);
+  assert.ok(sourceBalance);
+  assert.equal(blueprintBalance.reserved, 95);
+  assert.equal(blueprintBalance.availableFromHauling, 95);
+  assert.equal(blueprintBalance.futureSupply, 95);
+  assert.equal(blueprintBalance.unsatisfied, 0);
+  assert.equal(sourceBalance.inFlightQuantity, 110);
+  assert.equal(sourceBalance.transferredOut, 95);
+  assert.equal(result.metadata.invariantViolationCount, 0);
+});

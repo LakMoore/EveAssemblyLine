@@ -14,7 +14,13 @@ const context = {
     byBlueprintId: new Map([
       [
         100,
-        { _key: 100, activities: { manufacturing: { products: [{ typeID: 34, quantity: 1 }] } } },
+        {
+          _key: 100,
+          activities: {
+            manufacturing: { products: [{ typeID: 34, quantity: 1 }] },
+            invention: { products: [{ typeID: 100, quantity: 10 }] },
+          },
+        },
       ],
       [
         46207,
@@ -147,6 +153,45 @@ void test("preserves industry job status on future output lots", () => {
   const pausedOutput = inventory.itemLots.find((lot) => lot.industryJobStatus === "paused");
   assert.ok(pausedOutput);
   assert.equal(pausedOutput.activity, "reaction");
+});
+
+void test("normalizes active invention output as finite blueprint runs", () => {
+  const simulationRequest = request();
+  simulationRequest.assets = {
+    items: [],
+    market: [],
+    blueprints: [],
+    industry: [
+      {
+        jobId: 123,
+        typeId: 100,
+        blueprintTypeId: 100,
+        quantity: 11,
+        runs: 25,
+        licensedRuns: 10,
+        activity: "invention",
+        status: "active",
+        locationId: 20,
+        rootLocationId: 20,
+      },
+    ],
+  };
+
+  const inventory = normalizeSimulatorInventory(simulationRequest, context);
+  assert.equal(inventory.itemLots.length, 0);
+  assert.equal(inventory.blueprintLots.length, 11);
+  assert.equal(
+    inventory.blueprintLots.reduce((total, lot) => total + lot.runs, 0),
+    110,
+  );
+  assert.equal(
+    inventory.blueprintLots.every((lot) => lot.activity === "invention"),
+    true,
+  );
+  assert.equal(
+    inventory.blueprintLots.every((lot) => lot.horizon === "after-upstream"),
+    true,
+  );
 });
 
 void test("preserves categorized industry output provenance", () => {
