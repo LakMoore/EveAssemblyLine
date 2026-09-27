@@ -958,6 +958,7 @@ function Results({
         me: 0,
         te: 0,
         fromCompression: true,
+        isIncluded: true,
       }));
       const nextStockpile: ClientPlanStockpile = autoStockpile
         ? {

@@ -30,7 +30,18 @@ function isClientBuildItem(value: unknown): value is ClientBuildItem {
     && typeof item.me === "number"
     && typeof item.te === "number"
     && typeof item.fromCompression === "boolean"
+    && (item.isIncluded === undefined || typeof item.isIncluded === "boolean")
   );
+}
+
+function normalizeStockpile(stockpile: ClientPlanStockpile): ClientPlanStockpile {
+  return {
+    ...stockpile,
+    items: stockpile.items.map((item) => ({
+      ...item,
+      isIncluded: item.isIncluded !== false,
+    })),
+  };
 }
 
 function isGroupAssignments(value: unknown): value is ClientPlanStockpile["groupAssignments"] {
@@ -96,7 +107,7 @@ export async function loadPlannerStockpiles(): Promise<ClientPlanStockpile[] | n
       const request = store.get(stockpilesKey);
       request.onsuccess = () => {
         if (Array.isArray(request.result)) {
-          resolve(request.result.filter(isClientPlanStockpile));
+          resolve(request.result.filter(isClientPlanStockpile).map(normalizeStockpile));
           return;
         }
         const legacyRequest = database
@@ -108,7 +119,7 @@ export async function loadPlannerStockpiles(): Promise<ClientPlanStockpile[] | n
             resolve(null);
             return;
           }
-          resolve(legacyRequest.result.filter(isClientPlanStockpile));
+          resolve(legacyRequest.result.filter(isClientPlanStockpile).map(normalizeStockpile));
         };
         legacyRequest.onerror = () => {
           reject(legacyRequest.error ?? new Error("Could not load planner stockpiles."));
@@ -130,7 +141,9 @@ export async function savePlannerStockpiles(stockpiles: ClientPlanStockpile[]): 
     const database = await getPlanningDatabase();
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(buildStoreName, "readwrite");
-      transaction.objectStore(buildStoreName).put(stockpiles, stockpilesKey);
+      transaction
+        .objectStore(buildStoreName)
+        .put(stockpiles.map(normalizeStockpile), stockpilesKey);
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => {
         reject(transaction.error ?? new Error("Could not save planner stockpiles."));

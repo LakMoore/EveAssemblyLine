@@ -54,6 +54,7 @@ export interface BuildItem extends PlanBuildItem {
 // Client-side BuildItem is a BuildItem with an extra localised CategoryName
 export interface ClientBuildItem extends BuildItem {
   categoryName: string;
+  isIncluded?: boolean;
 }
 
 export interface ClientPlanStockpile extends Omit<PlanStockpile, "items"> {

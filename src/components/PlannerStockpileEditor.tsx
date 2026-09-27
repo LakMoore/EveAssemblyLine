@@ -41,10 +41,13 @@ import {
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import TypeSearch from "@/components/TypeSearch";
 import PasteListDialog from "@/components/PasteListDialog";
 import type { SdeLanguage } from "@/lib/reference/languages";
+import { cn } from "@/lib/utils";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import { Label } from "./ui/label";
 
@@ -254,6 +257,7 @@ function addItems(
             me: 0,
             te: 0,
             fromCompression: false,
+            isIncluded: true,
           };
     next.splice(existingIndex >= 0 ? existingIndex : next.length, 1);
     next.unshift(item);
@@ -542,9 +546,31 @@ function StockpileItemsContent({
           <div className="flex min-w-0 flex-col gap-2">
             {draft.items.map((item, index) => (
               <div
-                className="grid min-w-0 grid-cols-[minmax(0,1fr)_8rem_2rem] items-center gap-2"
+                className={cn(
+                  "grid min-w-0 grid-cols-[2.5rem_minmax(0,1fr)_8rem_2rem] items-center gap-2 transition-opacity",
+                  item.isIncluded === false && "opacity-50",
+                )}
                 key={`${item.typeId}-${item.fromCompression}`}
               >
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Switch
+                        className="mx-1 shrink-0"
+                        aria-label={`Include ${item.name} in plan`}
+                        checked={item.isIncluded !== false}
+                        onCheckedChange={(isIncluded) => {
+                          updateItems(
+                            draft.items.map((entry, itemIndex) =>
+                              itemIndex === index ? { ...entry, isIncluded } : entry,
+                            ),
+                          );
+                        }}
+                      />
+                    }
+                  />
+                  <TooltipContent>Include in stockpile?</TooltipContent>
+                </Tooltip>
                 <TypeIdentity
                   name={item.name}
                   typeId={item.typeId}

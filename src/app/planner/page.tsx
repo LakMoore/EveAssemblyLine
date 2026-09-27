@@ -504,7 +504,7 @@ function createPlannerStockpile(
     name,
     isActive: true,
     locations: stockpileLocationsFromPlannerLocations(locations),
-    items,
+    items: items.map((item) => ({ ...item, isIncluded: item.isIncluded !== false })),
   };
 }
 
@@ -532,7 +532,8 @@ function isImportedPlan(value: unknown): value is {
           Number.isInteger(item.typeId)
           && Number.isFinite(item.quantity)
           && item.quantity > 0
-          && typeof item.name === "string",
+          && typeof item.name === "string"
+          && (item.isIncluded === undefined || typeof item.isIncluded === "boolean"),
       )
       && candidate.locations !== undefined
       && Object
@@ -960,7 +961,13 @@ function Planner() {
     preservedHaulTasks: readonly SimulationHaulTask[] = simulationPreservedHaulTasks,
   ): Promise<boolean> {
     const activeStockpiles = stockpiles.filter((stockpile) => stockpile.isActive !== false);
-    const plannerItems = activeStockpiles.flatMap((stockpile) => stockpile.items);
+    const populatedStockpiles = activeStockpiles
+      .map((stockpile) => ({
+        ...stockpile,
+        items: stockpile.items.filter((item) => item.isIncluded !== false),
+      }))
+      .filter((stockpile) => stockpile.items.length > 0);
+    const plannerItems = populatedStockpiles.flatMap((stockpile) => stockpile.items);
     if (
       plannerItems.length === 0
       || isPlanLoading
@@ -975,9 +982,6 @@ function Planner() {
     });
     await waitForNextPaint();
     try {
-      const populatedStockpiles = activeStockpiles.filter(
-        (stockpile) => stockpile.items.length > 0,
-      );
       const missingEfficiencies = populatedStockpiles.some(
         (stockpile) => Object.keys(stockpile.reprocessingEfficiencies ?? {}).length === 0,
       );
@@ -1515,7 +1519,9 @@ function Planner() {
           (item) => item.typeId === imported.typeId && !item.fromCompression,
         );
         if (existing) existing.quantity += imported.quantity;
-        else next.push({ ...imported, me: 0, te: 0, fromCompression: false });
+        else {
+          next.push({ ...imported, me: 0, te: 0, fromCompression: false, isIncluded: true });
+        }
       }
       return next;
     });
@@ -1835,7 +1841,9 @@ function Planner() {
                 disabled={
                   isPlanLoading
                   || stockpiles.every(
-                    (stockpile) => stockpile.isActive === false || stockpile.items.length === 0,
+                    (stockpile) =>
+                      stockpile.isActive === false
+                      || !stockpile.items.some((item) => item.isIncluded !== false),
                   )
                 }
                 icon={ClipboardList}
@@ -1850,7 +1858,9 @@ function Planner() {
                   isPlanLoading
                   || !simulationStateLoaded
                   || stockpiles.every(
-                    (stockpile) => stockpile.isActive === false || stockpile.items.length === 0,
+                    (stockpile) =>
+                      stockpile.isActive === false
+                      || !stockpile.items.some((item) => item.isIncluded !== false),
                   )
                 }
                 icon={FlaskConical}
