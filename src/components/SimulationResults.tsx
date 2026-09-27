@@ -1266,6 +1266,11 @@ function materialImageVariation(typeName: string): "icon" | "bp" {
   return /\bblueprint$/i.test(typeName) ? "bp" : "icon";
 }
 
+/** Identifies material balances whose type names represent blueprint records. */
+function isBlueprintBalance(item: Pick<SimulationMaterialBalance, "typeName">): boolean {
+  return materialImageVariation(item.typeName) === "bp";
+}
+
 /** Loads localized names for simulator type IDs while retaining a stable ID fallback. */
 function useSimulationTypeNames(typeIds: readonly number[]) {
   const { language } = useAppLanguage();
@@ -1439,6 +1444,216 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
       })}
     </div>
   );
+}
+
+/** Groups the Plan tab's item and reaction rows under one location container. */
+function SimulationPlanLocationGroups({
+  tab,
+  items,
+  reactionFormulaItems,
+  locationNamesById,
+  stockpileNamesById,
+  marketBuyOrderQuantities,
+  demandTypeNamesById,
+  controls,
+  openGroups,
+  onOpenGroupChange,
+  onSelectSimulationTab,
+}: {
+  tab: "plan" | "surplus";
+  items: readonly SimulationMaterialBalance[];
+  reactionFormulaItems: readonly SimulationReactionFormulaBalance[];
+  locationNamesById: ReadonlyMap<number, string>;
+  stockpileNamesById: ReadonlyMap<string, string>;
+  marketBuyOrderQuantities?: Readonly<Record<string, number>>;
+  demandTypeNamesById: ReadonlyMap<number, string>;
+  controls: SimulationRowControls;
+  openGroups: Record<string, boolean>;
+  onOpenGroupChange: (groupKey: string, open: boolean) => void;
+  onSelectSimulationTab: (tab: SimulationTab) => void;
+}) {
+  const itemsByLocation = groupRowsByLocation(items);
+  const reactionFormulaItemsByLocation = groupRowsByLocation(reactionFormulaItems);
+  const locationIds = [
+    ...new Set([...itemsByLocation.keys(), ...reactionFormulaItemsByLocation.keys()]),
+  ].sort((left, right) =>
+    locationName(locationNamesById, left).localeCompare(locationName(locationNamesById, right)),
+  );
+
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      {locationIds.map((locationId) => {
+        const locationItems = itemsByLocation.get(locationId) ?? [];
+        const blueprintItems = locationItems.filter(isBlueprintBalance);
+        const itemBalances = locationItems.filter((item) => !isBlueprintBalance(item));
+        const locationReactionFormulaItems = reactionFormulaItemsByLocation.get(locationId) ?? [];
+        const groupKey = `${tab}:${locationId}`;
+        const avatars = [
+          ...createGroupAvatars(
+            locationItems,
+            (item) => ({
+              typeId: item.typeId,
+              name: item.typeName,
+              imageVariation: materialImageVariation(item.typeName),
+            }),
+          ),
+          ...createGroupAvatars(
+            locationReactionFormulaItems,
+            (item) => ({
+              typeId: item.typeId,
+              name: item.typeName,
+              imageVariation: "bpc" as const,
+            }),
+          ),
+        ].slice(0, 5);
+        const groupLabel = locationName(locationNamesById, locationId);
+
+        return (
+          <SimulationResultGroup
+            groupKey={groupKey}
+            key={groupKey}
+            ariaLabel={groupLabel}
+            label={groupLabel}
+            isOpen={openGroups[groupKey] ?? true}
+            onOpenChange={(open) => onOpenGroupChange(groupKey, open)}
+            avatarRows={avatars}
+            remainingCount={
+              locationItems.length + locationReactionFormulaItems.length - avatars.length
+            }
+            allowOverflow
+          >
+            <div className="flex min-w-0 flex-col">
+              {itemBalances.length > 0 && (
+                <section
+                  aria-labelledby={`${groupKey}-items-label`}
+                  className="flex min-w-0 flex-col"
+                  data-result-section="items"
+                >
+                  <MaterialBalanceHeader label="Items" labelId={`${groupKey}-items-label`} />
+                  {itemBalances.map((item) => {
+                    const rowKey = `${tab}:${item.locationId}:${item.typeId}`;
+                    return (
+                      <div key={rowKey}>
+                        <SimpleResultRow
+                          name={item.typeName}
+                          typeId={item.typeId}
+                          subline={demandStockpiles(item, stockpileNamesById)}
+                          linkPath="assets"
+                          selected={controls.selectedRowKey === rowKey}
+                          onClick={() => controls.onSelectRow(rowKey)}
+                          variation={materialImageVariation(item.typeName)}
+                          wideBreakpoint="md"
+                          contentClassName="self-end text-right font-mono text-xs md:w-full md:self-auto"
+                        >
+                          <div className="flex w-full min-w-0 items-center justify-end gap-1">
+                            {tab === "plan" && item.demandSources.length > 0 ? (
+                              <SimulationDemandSourcesDrawer
+                                item={item}
+                                demandTypeNamesById={demandTypeNamesById}
+                                locationLabel={groupLabel}
+                                onSelectSimulationTab={onSelectSimulationTab}
+                              />
+                            ) : tab === "plan" ? (
+                              <span aria-hidden="true" className="size-6 shrink-0" />
+                            ) : null}
+                            <div className="min-w-0 flex-1">
+                              <MaterialBalanceSummary
+                                item={item}
+                                marketBuyOrderQuantities={marketBuyOrderQuantities}
+                              />
+                            </div>
+                          </div>
+                        </SimpleResultRow>
+                      </div>
+                    );
+                  })}
+                </section>
+              )}
+              {blueprintItems.length > 0 && (
+                <section
+                  aria-labelledby={`${groupKey}-blueprints-label`}
+                  className="flex min-w-0 flex-col"
+                  data-result-section="blueprints"
+                >
+                  <MaterialBalanceHeader
+                    label="Blueprints"
+                    labelId={`${groupKey}-blueprints-label`}
+                  />
+                  {blueprintItems.map((item) => {
+                    const rowKey = `${tab}:${item.locationId}:${item.typeId}`;
+                    return (
+                      <div key={rowKey}>
+                        <SimpleResultRow
+                          name={item.typeName}
+                          typeId={item.typeId}
+                          subline={demandStockpiles(item, stockpileNamesById)}
+                          linkPath="assets"
+                          selected={controls.selectedRowKey === rowKey}
+                          onClick={() => controls.onSelectRow(rowKey)}
+                          variation="bp"
+                          wideBreakpoint="md"
+                          contentClassName="self-end text-right font-mono text-xs md:w-full md:self-auto"
+                        >
+                          <div className="flex w-full min-w-0 items-center justify-end gap-1">
+                            {tab === "plan" && item.demandSources.length > 0 ? (
+                              <SimulationDemandSourcesDrawer
+                                item={item}
+                                demandTypeNamesById={demandTypeNamesById}
+                                locationLabel={groupLabel}
+                                onSelectSimulationTab={onSelectSimulationTab}
+                              />
+                            ) : tab === "plan" ? (
+                              <span aria-hidden="true" className="size-6 shrink-0" />
+                            ) : null}
+                            <div className="min-w-0 flex-1">
+                              <MaterialBalanceSummary
+                                item={item}
+                                marketBuyOrderQuantities={marketBuyOrderQuantities}
+                              />
+                            </div>
+                          </div>
+                        </SimpleResultRow>
+                      </div>
+                    );
+                  })}
+                </section>
+              )}
+              {locationReactionFormulaItems.length > 0 && (
+                <section
+                  aria-labelledby={`${groupKey}-reaction-formulas-label`}
+                  className="flex min-w-0 flex-col"
+                  data-result-section="reaction-formulas"
+                >
+                  <ReactionFormulaBalanceHeader
+                    label="Reaction Formulas"
+                    labelId={`${groupKey}-reaction-formulas-label`}
+                  />
+                  {locationReactionFormulaItems.map((item) => (
+                    <div key={`reaction-formula:${item.locationId}:${item.typeId}`}>
+                      <SimulationReactionFormulaRow item={item} controls={controls} />
+                    </div>
+                  ))}
+                </section>
+              )}
+            </div>
+          </SimulationResultGroup>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Groups rows by physical location while preserving their input order. */
+function groupRowsByLocation<T extends { locationId: number }>(
+  rows: readonly T[],
+): Map<number, T[]> {
+  const rowsByLocation = new Map<number, T[]>();
+  for (const row of rows) {
+    const locationRows = rowsByLocation.get(row.locationId) ?? [];
+    locationRows.push(row);
+    rowsByLocation.set(row.locationId, locationRows);
+  }
+  return rowsByLocation;
 }
 
 /** Renders the grouped material ledger for Plan or Surplus. */
@@ -1619,74 +1834,19 @@ function SimulationMaterialsTab({
           </EmptyHeader>
         </Empty>
       ) : (
-        <SimulationLocationResultGroups
+        <SimulationPlanLocationGroups
           tab={tab}
           items={filteredItems}
+          reactionFormulaItems={filteredReactionFormulaItems}
           locationNamesById={locationNamesById}
+          stockpileNamesById={stockpileNamesById}
+          marketBuyOrderQuantities={marketBuyOrderQuantities}
+          demandTypeNamesById={demandTypeNamesById}
+          controls={controls}
           openGroups={openGroups}
           onOpenGroupChange={onOpenGroupChange}
-          getRowKey={(item) => `${tab}:${item.locationId}:${item.typeId}`}
-          getAvatar={(item) => ({ typeId: item.typeId, name: item.typeName })}
-          groupHeader={<MaterialBalanceHeader />}
-          renderRow={(item) => {
-            const rowKey = `${tab}:${item.locationId}:${item.typeId}`;
-            return (
-              <SimpleResultRow
-                name={item.typeName}
-                typeId={item.typeId}
-                subline={demandStockpiles(item, stockpileNamesById)}
-                linkPath="assets"
-                selected={controls.selectedRowKey === rowKey}
-                onClick={() => controls.onSelectRow(rowKey)}
-                variation={materialImageVariation(item.typeName)}
-                wideBreakpoint="md"
-                contentClassName="self-end text-right font-mono text-xs md:w-full md:self-auto"
-              >
-                <div className="flex w-full min-w-0 items-center justify-end gap-1">
-                  {tab === "plan" && item.demandSources.length > 0 ? (
-                    <SimulationDemandSourcesDrawer
-                      item={item}
-                      demandTypeNamesById={demandTypeNamesById}
-                      locationLabel={locationName(locationNamesById, item.locationId)}
-                      onSelectSimulationTab={onSelectSimulationTab}
-                    />
-                  ) : tab === "plan" ? (
-                    <span aria-hidden="true" className="size-6 shrink-0" />
-                  ) : null}
-                  <div className="min-w-0 flex-1">
-                    <MaterialBalanceSummary
-                      item={item}
-                      marketBuyOrderQuantities={marketBuyOrderQuantities}
-                    />
-                  </div>
-                </div>
-              </SimpleResultRow>
-            );
-          }}
+          onSelectSimulationTab={onSelectSimulationTab}
         />
-      )}
-      {filteredReactionFormulaItems.length > 0 && (
-        <section className="mb-4 flex min-w-0 flex-col gap-2">
-          <h2 className="px-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-            Reaction formulas
-          </h2>
-          <SimulationLocationResultGroups
-            tab={tab}
-            items={filteredReactionFormulaItems}
-            groupKeyPrefix="reaction-formula"
-            locationNamesById={locationNamesById}
-            openGroups={openGroups}
-            onOpenGroupChange={onOpenGroupChange}
-            getRowKey={(item) => `reaction-formula:${item.locationId}:${item.typeId}`}
-            getAvatar={(item) => ({
-              typeId: item.typeId,
-              name: item.typeName,
-              imageVariation: "bpc",
-            })}
-            groupHeader={<ReactionFormulaBalanceHeader />}
-            renderRow={(item) => <SimulationReactionFormulaRow item={item} controls={controls} />}
-          />
-        </section>
       )}
     </SimulationResultsTab>
   );
@@ -1708,7 +1868,7 @@ function SimulationReactionFormulaRow({
       variation="bpc"
       wideBreakpoint="md"
       summary={
-        <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_minmax(5rem,auto)] gap-x-3 gap-y-1 text-right md:grid-cols-4 md:gap-x-3">
+        <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_minmax(5rem,auto)] items-center gap-x-3 gap-y-1 text-right md:grid-cols-4 md:gap-x-3">
           <span className="text-muted-foreground md:hidden">Available</span>
           <span>
             <CopyableNumber value={item.availableQuantity} copyLabel="Available formula count" />
@@ -1736,11 +1896,16 @@ function SimulationReactionFormulaRow({
 }
 
 /** Renders the desktop labels for reaction formula balance columns. */
-function ReactionFormulaBalanceHeader() {
+function ReactionFormulaBalanceHeader({ label, labelId }: { label: string; labelId: string }) {
   return (
-    <div className="sticky top-0 z-10 hidden min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-[13px] bg-card p-2 shadow-[0_1px_0_var(--border)] md:grid">
-      <span aria-hidden="true" />
-      <div className="grid min-w-0 grid-cols-4 gap-x-3 text-right font-mono text-[10px] text-muted-foreground uppercase">
+    <div className="sticky top-0 z-10 grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-center gap-[13px] bg-card p-2 shadow-[0_1px_0_var(--border)]">
+      <span
+        id={labelId}
+        className="text-xs font-semibold tracking-wide text-muted-foreground uppercase"
+      >
+        {label}
+      </span>
+      <div className="hidden min-w-0 grid-cols-4 items-center gap-x-3 text-right font-mono text-[10px] text-muted-foreground uppercase md:grid">
         {reactionFormulaBalanceColumns.map((column) => (
           <span key={column}>{column}</span>
         ))}
@@ -1975,7 +2140,7 @@ function MaterialBalanceSummary({
   const immediateSources = immediateSupplySources(item);
   const marketBuyOrderQuantity = marketBuyOrderQuantities?.[String(item.typeId)] ?? 0;
   return (
-    <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_minmax(5rem,auto)] gap-x-3 gap-y-1 text-right md:grid-cols-6 md:gap-x-3">
+    <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_minmax(5rem,auto)] items-center gap-x-3 gap-y-1 text-right md:grid-cols-6 md:gap-x-3">
       <span className="text-muted-foreground md:hidden">Available</span>
       <span className="flex items-center justify-end gap-2">
         {immediateSources.map(({ key, label, quantity: sourceQuantity, source, Icon }) => (
@@ -2062,13 +2227,18 @@ function MaterialBalanceSummary({
 }
 
 /** Renders the desktop labels for the Plan and Surplus material columns. */
-function MaterialBalanceHeader() {
+function MaterialBalanceHeader({ label, labelId }: { label: string; labelId: string }) {
   return (
-    <div className="sticky top-0 z-10 hidden min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-[13px] bg-card p-2 shadow-[0_1px_0_var(--border)] md:grid">
-      <span aria-hidden="true" />
-      <div className="flex min-w-0 items-center justify-end gap-1">
+    <div className="sticky top-0 z-10 grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-center gap-[13px] bg-card p-2 shadow-[0_1px_0_var(--border)]">
+      <span
+        id={labelId}
+        className="text-xs font-semibold tracking-wide text-muted-foreground uppercase"
+      >
+        {label}
+      </span>
+      <div className="hidden min-w-0 items-center justify-end gap-1 md:flex">
         <span className="size-6 shrink-0" aria-hidden="true" />
-        <div className="grid min-w-0 flex-1 grid-cols-6 gap-x-3 text-right font-mono text-[10px] text-muted-foreground uppercase">
+        <div className="grid min-w-0 flex-1 grid-cols-6 items-center gap-x-3 text-right font-mono text-[10px] text-muted-foreground uppercase">
           {materialBalanceColumns.map((column) => (
             <span key={column}>{column}</span>
           ))}
