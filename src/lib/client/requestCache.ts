@@ -516,6 +516,7 @@ export type ClientCharacterStatus = {
 export type ClientEndpointStatus = {
   status: "fresh" | "cached" | "stale" | "rate_limited" | "error";
   hasBody: boolean;
+  systemId?: number;
   lastModified?: string;
   lastUpdated?: string;
   expires?: string;

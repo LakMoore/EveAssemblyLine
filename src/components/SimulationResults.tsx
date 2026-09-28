@@ -33,6 +33,7 @@ import {
   TestTubes,
 } from "lucide-react";
 import SimpleResultRow from "@/components/SimpleResultRow";
+import PlannerSkillsTab from "@/components/PlannerSkillsTab";
 import SimulationJobInputsResponsive from "@/components/SimulationJobInputsResponsive";
 import SimulationResultGroup from "@/components/SimulationResultGroup";
 import SimulationResultsTab from "@/components/SimulatorResultsTab";
@@ -89,6 +90,7 @@ import {
   getSimulationInstallableRuns,
   solveSimulationActivity,
   splitSimulationRuns,
+  isWormholeSystemId,
   type ClientSimulationInstall,
   type ClientSimulationScheduleOptions,
   type ClientSimulationSolveMode,
@@ -260,11 +262,11 @@ function readSimulationTabFromUrl(): SimulationTab {
 }
 
 /** Writes the selected simulator tab without navigating away from the planner. */
-function updateSimulationTabInUrl(tab: SimulationTab): void {
+function updateSimulationTabInUrl(tab: SimulationTab, historyMode: "push" | "replace"): void {
   if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
   url.searchParams.set(simulationTabParam, tab);
-  window.history.replaceState(null, "", url);
+  window.history[historyMode === "push" ? "pushState" : "replaceState"](null, "", url);
 }
 
 /** Tracks whether simulator output controls should use the compact mobile select. */
@@ -624,6 +626,7 @@ type SimulationActivitySlotCharacter = {
   characterId: number;
   name: string;
   availableSlots: number;
+  systemId?: number;
 };
 
 type SimulationGroupCopyStatus = {
@@ -647,10 +650,113 @@ function simulationSlotCharacters(
       );
       const name = characterNamesById.get(character.characterId);
       return name && availableSlots > 0
-        ? [{ characterId: character.characterId, name, availableSlots }]
+        ? [
+            {
+              characterId: character.characterId,
+              name,
+              availableSlots,
+              systemId: character.location?.systemId,
+            },
+          ]
         : [];
     })
     .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+/** Renders activity metrics and the character list for a scoped slot pool. */
+function SimulationActivitySummary({
+  availableSlots,
+  slotCharacters,
+  activityLabel,
+  suggestedInstalls,
+  maxJobLength,
+  scheduledRuns,
+  installableRuns,
+  totalRuns,
+  poolLabel,
+}: {
+  availableSlots: number;
+  slotCharacters: readonly SimulationActivitySlotCharacter[];
+  activityLabel: string;
+  suggestedInstalls: number;
+  maxJobLength: number;
+  scheduledRuns: number;
+  installableRuns: number;
+  totalRuns: number;
+  poolLabel?: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-start gap-x-6 gap-y-3 font-mono">
+      <span className="flex flex-col">
+        <strong className="flex items-center gap-1 text-sm">
+          {availableSlots.toLocaleString()}
+          <ResponsiveDialogDrawer
+            trigger={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="size-5 text-muted-foreground transition-colors hover:text-foreground"
+                aria-label={`View characters with available ${activityLabel} slots${poolLabel ? ` in ${poolLabel}` : ""}`}
+                title={`View characters with available ${activityLabel} slots${poolLabel ? ` in ${poolLabel}` : ""}`}
+              >
+                <UsersRound aria-hidden="true" />
+              </Button>
+            }
+            title={`${activityLabel[0].toUpperCase()}${activityLabel.slice(1)} slots by character${poolLabel ? ` in ${poolLabel}` : ""}`}
+            description={`Characters with available ${activityLabel} slots${poolLabel ? ` in ${poolLabel}` : ""}.`}
+          >
+            <div className="flex flex-col gap-2">
+              {slotCharacters.length > 0 ? (
+                slotCharacters.map((character) => (
+                  <div
+                    className="grid grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 border-t border-border/60 py-2 first:border-t-0"
+                    key={character.characterId}
+                  >
+                    <Image
+                      src={eveCharacterPortraitUrl(character.characterId, 64)}
+                      alt={`${character.name} portrait`}
+                      width={32}
+                      height={32}
+                      className="size-8 rounded-none"
+                    />
+                    <span className="min-w-0 truncate font-medium">{character.name}</span>
+                    <Badge variant="outline">
+                      {character.availableSlots.toLocaleString()} slot
+                      {character.availableSlots === 1 ? "" : "s"}
+                    </Badge>
+                  </div>
+                ))
+              ) : (
+                <p className="py-4 text-muted-foreground">
+                  No characters have available {activityLabel} slots.
+                </p>
+              )}
+            </div>
+          </ResponsiveDialogDrawer>
+        </strong>
+        <small className="text-[10px] text-muted-foreground uppercase">
+          Available slots{poolLabel ? ` · ${poolLabel}` : ""}
+        </small>
+      </span>
+      <span className="flex flex-col">
+        <strong className="text-sm">{suggestedInstalls.toLocaleString()}</strong>
+        <small className="text-[10px] text-muted-foreground uppercase">Suggested installs</small>
+      </span>
+      <span className="flex flex-col">
+        <strong className="text-sm">{simulationDuration(maxJobLength)}</strong>
+        <small className="text-[10px] text-muted-foreground uppercase">Max job length</small>
+      </span>
+      <span className="flex flex-col">
+        <strong className="text-sm">{simulationCoverage(scheduledRuns, installableRuns)}</strong>
+        <small className="text-[10px] text-muted-foreground uppercase">Installable coverage</small>
+      </span>
+      <span className="flex flex-col">
+        <strong className="text-sm">{simulationCoverage(scheduledRuns, totalRuns)}</strong>
+        <small className="text-[10px] text-muted-foreground uppercase">Total coverage</small>
+      </span>
+    </div>
+  );
 }
 
 type SimulationBlueprintCounts = {
@@ -1440,6 +1546,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
   getRowKey,
   getAvatar,
   groupHeader,
+  getGroupHeader,
   getGroupAction,
   renderRow,
 }: {
@@ -1453,6 +1560,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
   getRowKey: (item: T) => string;
   getAvatar: (item: T) => SimulationGroupAvatar;
   groupHeader?: ReactNode;
+  getGroupHeader?: (locationId: number, items: readonly T[]) => ReactNode;
   getGroupAction?: (
     locationId: number,
     items: readonly T[],
@@ -1475,6 +1583,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
         const groupKey = `${groupKeyPrefix ?? tab}:${locationId}`;
         const avatars = createGroupAvatars(groupItems, getAvatar);
         const groupAction = getGroupAction?.(locationId, groupItems);
+        const resolvedGroupHeader = getGroupHeader?.(locationId, groupItems) ?? groupHeader;
         const hasReactionMaterialBonus =
           reactionMaterialBonusesByLocation?.has(locationId) ?? false;
         const reactionMaterialBonus = -(reactionMaterialBonusesByLocation?.get(locationId) ?? 0);
@@ -1508,7 +1617,7 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
             allowOverflow={groupHeader !== undefined}
           >
             <div className="flex min-w-0 flex-col">
-              {groupHeader}
+              {resolvedGroupHeader}
               {groupItems.map((item) => (
                 <div key={getRowKey(item)}>{renderRow(item)}</div>
               ))}
@@ -2692,6 +2801,7 @@ function SimulationActivityTab({
   simulationInputRevision,
   stock,
   locationNamesById,
+  locationSystemIdsById,
   reactionMaterialBonusesByLocation,
   characterNamesById,
   characterStatuses,
@@ -2708,6 +2818,7 @@ function SimulationActivityTab({
   simulationInputRevision: string;
   stock: readonly PlanStockItem[];
   locationNamesById: ReadonlyMap<number, string>;
+  locationSystemIdsById?: ReadonlyMap<number, number>;
   reactionMaterialBonusesByLocation: ReadonlyMap<number, number>;
   characterNamesById: ReadonlyMap<number, string>;
   characterStatuses: readonly ClientCharacterStatus[];
@@ -2724,12 +2835,19 @@ function SimulationActivityTab({
   const [protectReactionMaterialBonus, setProtectReactionMaterialBonus] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
   const [groupCopyStatus, setGroupCopyStatus] = useState<SimulationGroupCopyStatus>(null);
-  const slotCharacters = simulationSlotCharacters(
+  const allSlotCharacters = simulationSlotCharacters(
     characterStatuses,
     characterNamesById,
     slotUsage,
     tab,
   );
+  const slotCharacters =
+    tab === "react" && locationSystemIdsById
+      ? allSlotCharacters.filter(
+          (character) =>
+            character.systemId !== undefined && !isWormholeSystemId(character.systemId),
+        )
+      : allSlotCharacters;
   const availableSlots = slotCharacters.reduce(
     (total, character) => total + character.availableSlots,
     0,
@@ -2741,9 +2859,15 @@ function SimulationActivityTab({
     targetTime,
     protectReactionMaterialBonus,
     availableSlots,
-    ...slotCharacters.map(
-      ({ characterId, availableSlots: characterSlots }) => `${characterId}:${characterSlots}`,
+    ...allSlotCharacters.map(
+      ({ characterId, availableSlots: characterSlots, systemId }) =>
+        `${characterId}:${systemId ?? "unknown"}:${characterSlots}`,
     ),
+    ...(locationSystemIdsById
+      ? [...locationSystemIdsById.entries()]
+          .sort(([left], [right]) => left - right)
+          .map(([locationId, systemId]) => `${locationId}:${systemId}`)
+      : []),
     ...jobs
       .filter((job) => controls.isIncluded(`${tab}:${job.jobId}`))
       .map((job) => job.jobId)
@@ -2770,32 +2894,41 @@ function SimulationActivityTab({
     effectiveSolveMode,
     Number(targetTime),
     enabledJobIds,
-    slotCharacters.map(
-      ({ characterId, availableSlots }): ClientSimulationSlotGroup => ({
+    allSlotCharacters.map(
+      ({ characterId, availableSlots, systemId }): ClientSimulationSlotGroup => ({
         characterId,
         availableSlots,
+        systemId,
       }),
     ),
     {
       protectReactionMaterialBonus: tab === "react" && protectReactionMaterialBonus,
       reactionMaterialBonusesByLocation,
+      ...(tab === "react" && locationSystemIdsById ? { locationSystemIdsById } : {}),
     },
   );
-  const scheduledRuns = activeJobs.reduce(
+  const metricJobs =
+    tab === "react" && locationSystemIdsById
+      ? activeJobs.filter((job) => {
+          const systemId = locationSystemIdsById.get(job.locationId);
+          return systemId !== undefined && !isWormholeSystemId(systemId);
+        })
+      : activeJobs;
+  const scheduledRuns = metricJobs.reduce(
     (total, job) => total + (schedules.get(job.jobId)?.runs ?? 0),
     0,
   );
-  const installableRuns = activeJobs.reduce(
+  const installableRuns = metricJobs.reduce(
     (total, job) => total + getSimulationInstallableRuns(job),
     0,
   );
-  const totalRuns = activeJobs.reduce((total, job) => total + job.requiredRuns, 0);
-  const suggestedInstalls = activeJobs.reduce(
+  const totalRuns = metricJobs.reduce((total, job) => total + job.requiredRuns, 0);
+  const suggestedInstalls = metricJobs.reduce(
     (total, job) => total + (schedules.get(job.jobId)?.installs.length ?? 0),
     0,
   );
   const maxJobLength = Math.max(
-    ...activeJobs.map((job) => schedules.get(job.jobId)?.timeSeconds ?? 0),
+    ...metricJobs.map((job) => schedules.get(job.jobId)?.timeSeconds ?? 0),
     0,
   );
   const presentationGroups: SimulationIndustryJobGroup[] = groupSimulationActivityJobs(jobs);
@@ -2914,80 +3047,17 @@ function SimulationActivityTab({
               {copyStatus || "Copy list"}
             </Button>
           </div>
-          <div className="flex flex-wrap items-start gap-x-6 gap-y-3 font-mono">
-            <span className="flex flex-col">
-              <strong className="flex items-center gap-1 text-sm">
-                {availableSlots.toLocaleString()}
-                <ResponsiveDialogDrawer
-                  trigger={
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      className="size-5 text-muted-foreground transition-colors hover:text-foreground"
-                      aria-label={`View characters with available ${activityLabel} slots`}
-                      title={`View characters with available ${activityLabel} slots`}
-                    >
-                      <UsersRound aria-hidden="true" />
-                    </Button>
-                  }
-                  title={`${activityLabel[0].toUpperCase()}${activityLabel.slice(1)} slots by character`}
-                  description={`Characters with available ${activityLabel} slots.`}
-                >
-                  <div className="flex flex-col gap-2">
-                    {slotCharacters.length > 0 ? (
-                      slotCharacters.map((character) => (
-                        <div
-                          className="grid grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3 border-t border-border/60 py-2 first:border-t-0"
-                          key={character.characterId}
-                        >
-                          <Image
-                            src={eveCharacterPortraitUrl(character.characterId, 64)}
-                            alt={`${character.name} portrait`}
-                            width={32}
-                            height={32}
-                            className="size-8 rounded-none"
-                          />
-                          <span className="min-w-0 truncate font-medium">{character.name}</span>
-                          <Badge variant="outline">
-                            {character.availableSlots.toLocaleString()} slot
-                            {character.availableSlots === 1 ? "" : "s"}
-                          </Badge>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="py-4 text-muted-foreground">
-                        No characters have available {activityLabel} slots.
-                      </p>
-                    )}
-                  </div>
-                </ResponsiveDialogDrawer>
-              </strong>
-              <small className="text-[10px] text-muted-foreground uppercase">Available slots</small>
-            </span>
-            <span className="flex flex-col">
-              <strong className="text-sm">{suggestedInstalls.toLocaleString()}</strong>
-              <small className="text-[10px] text-muted-foreground uppercase">
-                Suggested installs
-              </small>
-            </span>
-            <span className="flex flex-col">
-              <strong className="text-sm">{simulationDuration(maxJobLength)}</strong>
-              <small className="text-[10px] text-muted-foreground uppercase">Max job length</small>
-            </span>
-            <span className="flex flex-col">
-              <strong className="text-sm">
-                {simulationCoverage(scheduledRuns, installableRuns)}
-              </strong>
-              <small className="text-[10px] text-muted-foreground uppercase">
-                Installable coverage
-              </small>
-            </span>
-            <span className="flex flex-col">
-              <strong className="text-sm">{simulationCoverage(scheduledRuns, totalRuns)}</strong>
-              <small className="text-[10px] text-muted-foreground uppercase">Total coverage</small>
-            </span>
-          </div>
+          <SimulationActivitySummary
+            availableSlots={availableSlots}
+            slotCharacters={slotCharacters}
+            activityLabel={activityLabel}
+            suggestedInstalls={suggestedInstalls}
+            maxJobLength={maxJobLength}
+            scheduledRuns={scheduledRuns}
+            installableRuns={installableRuns}
+            totalRuns={totalRuns}
+            poolLabel={tab === "react" && locationSystemIdsById ? "K-Space" : undefined}
+          />
         </div>
       }
     >
@@ -2995,6 +3065,53 @@ function SimulationActivityTab({
         tab={tab}
         items={presentationGroups}
         locationNamesById={locationNamesById}
+        getGroupHeader={(locationId, groupItems) => {
+          const systemId = locationSystemIdsById?.get(locationId);
+          if (tab !== "react" || !isWormholeSystemId(systemId)) return undefined;
+
+          const groupJobIds = new Set(
+            groupItems.flatMap((group) => group.jobs.map((job) => job.jobId)),
+          );
+          const scopedJobs = activeJobs.filter((job) => groupJobIds.has(job.jobId));
+          const scopedScheduledRuns = scopedJobs.reduce(
+            (total, job) => total + (schedules.get(job.jobId)?.runs ?? 0),
+            0,
+          );
+          const scopedInstallableRuns = scopedJobs.reduce(
+            (total, job) => total + getSimulationInstallableRuns(job),
+            0,
+          );
+          const scopedTotalRuns = scopedJobs.reduce((total, job) => total + job.requiredRuns, 0);
+          const scopedSuggestedInstalls = scopedJobs.reduce(
+            (total, job) => total + (schedules.get(job.jobId)?.installs.length ?? 0),
+            0,
+          );
+          const scopedMaxJobLength = Math.max(
+            ...scopedJobs.map((job) => schedules.get(job.jobId)?.timeSeconds ?? 0),
+            0,
+          );
+          const scopedCharacters = allSlotCharacters.filter(
+            (character) => character.systemId === systemId,
+          );
+          const scopedSlots = scopedCharacters.reduce(
+            (total, character) => total + character.availableSlots,
+            0,
+          );
+
+          return (
+            <SimulationActivitySummary
+              availableSlots={scopedSlots}
+              slotCharacters={scopedCharacters}
+              activityLabel={activityLabel}
+              suggestedInstalls={scopedSuggestedInstalls}
+              maxJobLength={scopedMaxJobLength}
+              scheduledRuns={scopedScheduledRuns}
+              installableRuns={scopedInstallableRuns}
+              totalRuns={scopedTotalRuns}
+              poolLabel="Wormhole"
+            />
+          );
+        }}
         reactionMaterialBonusesByLocation={
           tab === "react" ? reactionMaterialBonusesByLocation : undefined
         }
@@ -3721,32 +3838,24 @@ function SimulationBuyTab({
 /** Renders simulator skill requirements as a simple result list. */
 function SimulationSkillsTab({
   result,
-  controls,
+  characterNamesById,
+  characterStatuses,
 }: {
   result: SimulationResultV2;
-  controls: SimulationRowControls;
+  characterNamesById: ReadonlyMap<number, string>;
+  characterStatuses: readonly ClientCharacterStatus[];
 }) {
   return (
-    <SimulationResultsTab hasResults={result.lists.skillsRequired.length > 0}>
-      <div className="flex min-w-0 flex-col">
-        {result.lists.skillsRequired.map((skill) => (
-          <SimulationSimpleJobRow
-            key={skill.skillId}
-            rowKey={`skills:${skill.skillId}`}
-            typeId={skill.skillId}
-            name={skill.name}
-            subline={<CopyableNumber value={skill.jobIds.length} suffix=" jobs" copyLabel="Jobs" />}
-            summary={
-              <CopyableNumber
-                value={skill.requiredLevel}
-                suffix=" required level"
-                copyLabel="Required skill level"
-              />
-            }
-            controls={controls}
-          />
-        ))}
-      </div>
+    <SimulationResultsTab
+      hasResults={true}
+      emptyTitle="No character skill data"
+      emptyDescription="Connect a character and refresh status to compare trained skills."
+    >
+      <PlannerSkillsTab
+        requirements={result.lists.skillsRequired}
+        characters={characterStatuses}
+        characterNamesById={characterNamesById}
+      />
     </SimulationResultsTab>
   );
 }
@@ -3820,6 +3929,7 @@ export default function SimulationResults({
   stock,
   marketBuyOrderQuantities,
   locationNamesById,
+  locationSystemIdsById,
   stockpileLocations,
   reactionMaterialBonusesByLocation,
   characterNamesById,
@@ -3843,6 +3953,7 @@ export default function SimulationResults({
   stock: readonly PlanStockItem[];
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
   locationNamesById: ReadonlyMap<number, string>;
+  locationSystemIdsById?: ReadonlyMap<number, number>;
   stockpileLocations: ReadonlySet<number>;
   reactionMaterialBonusesByLocation: ReadonlyMap<number, number>;
   characterNamesById: ReadonlyMap<number, string>;
@@ -4114,7 +4225,7 @@ export default function SimulationResults({
   function selectTab(value: string) {
     if (!isSimulationTab(value) || (value === "surplus" && !hasSurplusTab)) return;
     setActiveTab(value);
-    if (usePlannerUrlState) updateSimulationTabInUrl(value);
+    if (usePlannerUrlState) updateSimulationTabInUrl(value, "push");
   }
 
   useEffect(() => {
@@ -4124,7 +4235,7 @@ export default function SimulationResults({
       const nextTab = requestedTab === "surplus" && !hasSurplusTab ? "warnings" : requestedTab;
       setActiveTab(nextTab);
       if (new URLSearchParams(window.location.search).get(simulationTabParam) !== nextTab) {
-        updateSimulationTabInUrl(nextTab);
+        updateSimulationTabInUrl(nextTab, "replace");
       }
     };
     applyUrlState();
@@ -4174,6 +4285,7 @@ export default function SimulationResults({
       stock={stock}
       marketBuyOrderQuantities={marketBuyOrderQuantities}
       locationNamesById={locationNamesById}
+      locationSystemIdsById={locationSystemIdsById}
       stockpileLocations={stockpileLocations}
       reactionMaterialBonusesByLocation={reactionMaterialBonusesByLocation}
       characterNamesById={characterNamesById}
@@ -4302,6 +4414,7 @@ function SimulationTabContent({
   stock,
   marketBuyOrderQuantities,
   locationNamesById,
+  locationSystemIdsById,
   stockpileLocations,
   reactionMaterialBonusesByLocation,
   characterNamesById,
@@ -4328,6 +4441,7 @@ function SimulationTabContent({
   stock: readonly PlanStockItem[];
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
   locationNamesById: ReadonlyMap<number, string>;
+  locationSystemIdsById?: ReadonlyMap<number, number>;
   stockpileLocations: ReadonlySet<number>;
   reactionMaterialBonusesByLocation: ReadonlyMap<number, number>;
   characterNamesById: ReadonlyMap<number, string>;
@@ -4419,6 +4533,7 @@ function SimulationTabContent({
         simulationInputRevision={`${result.metadata.simulationId ?? ""}|${result.metadata.normalizedInputHash}|${result.metadata.sdeRevision}`}
         stock={stock}
         locationNamesById={locationNamesById}
+        locationSystemIdsById={locationSystemIdsById}
         reactionMaterialBonusesByLocation={reactionMaterialBonusesByLocation}
         characterNamesById={characterNamesById}
         characterStatuses={characterStatuses}
@@ -4461,5 +4576,11 @@ function SimulationTabContent({
       />
     );
   }
-  return <SimulationSkillsTab result={result} controls={controls} />;
+  return (
+    <SimulationSkillsTab
+      result={result}
+      characterNamesById={characterNamesById}
+      characterStatuses={characterStatuses}
+    />
+  );
 }

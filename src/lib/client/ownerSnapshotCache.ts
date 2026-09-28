@@ -79,6 +79,7 @@ export type ClientOwnerSnapshotSlice<T extends readonly unknown[]> = {
 export type ClientOwnerSnapshotEndpointStatus = {
   status: "fresh" | "cached" | "stale" | "rate_limited" | "error";
   hasBody: boolean;
+  systemId?: number;
   lastModified?: string;
   lastUpdated?: string;
   expires?: string;
@@ -362,6 +363,7 @@ function isSnapshotEndpointStatus(value: unknown): value is ClientOwnerSnapshotE
     isRecord(value)
     && ["fresh", "cached", "stale", "rate_limited", "error"].includes(String(value.status))
     && typeof value.hasBody === "boolean"
+    && isOptional(value.systemId, isPositiveInteger)
     && isOptional(value.lastModified, (candidate) => typeof candidate === "string")
     && isOptional(value.lastUpdated, (candidate) => typeof candidate === "string")
     && isOptional(value.expires, (candidate) => typeof candidate === "string")

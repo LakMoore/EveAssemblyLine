@@ -54,7 +54,7 @@ import PlannerHaulTab, {
 import PlannerListToolbar, { PlannerCopyHeader } from "@/components/PlannerListToolbar";
 import SimulationResultGroupHeader from "@/components/SimulationResultGroupHeader";
 import ResultRow from "@/components/ResultRow";
-import PlannerSkillsTab, { type PlannerSkillCharacter } from "@/components/PlannerSkillsTab";
+import PlannerSkillsTab from "@/components/PlannerSkillsTab";
 import MarketBuyOrderIndicator from "@/components/MarketBuyOrderIndicator";
 import { toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -1093,24 +1093,6 @@ function PlanList({
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const planListHeaderRef = useRef<HTMLDivElement>(null);
   const skillRequirements = plan.lists.skillsRequired;
-  const skillsByCharacter = characterStatuses.map((character) => {
-    const skillsAvailable =
-      character.skills?.hasBody === true && Array.isArray(character.skills.body);
-    const trainedSkills = new Map(
-      (character.skills?.body ?? []).map((skill) => [skill.skillId, skill.activeSkillLevel]),
-    );
-    return {
-      characterId: character.characterId,
-      name: characterNamesById.get(character.characterId) ?? `Character ${character.characterId}`,
-      skillsAvailable,
-      skills: (skillsAvailable ? skillRequirements : [])
-        .map((required) => ({
-          ...required,
-          currentLevel: trainedSkills.get(required.skillId) ?? 0,
-        }))
-        .filter((skill) => skill.currentLevel < skill.requiredLevel),
-    };
-  });
   const planItems = plan.lists.planItems.all;
   const warningBuckets = plan.lists.warnings;
   const planTypeOptions = [
@@ -1650,8 +1632,9 @@ function PlanList({
   if (activeTab === "Skills") {
     return (
       <PlannerSkillsTab
-        requiredSkillCount={skillRequirements.length}
-        characters={skillsByCharacter satisfies PlannerSkillCharacter[]}
+        requirements={skillRequirements}
+        characters={characterStatuses}
+        characterNamesById={characterNamesById}
       />
     );
   }

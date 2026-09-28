@@ -64,6 +64,46 @@ void test("allocates available slots across the largest installable jobs", () =>
   assert.equal(schedules.get("B")?.runs, 3);
 });
 
+void test("isolates wormhole reaction slots by system and shares K-space slots", () => {
+  const jobs = [
+    { ...job("WH-B", 1, 1, 60), locationId: 102 },
+    { ...job("WH-A", 1, 1, 60), locationId: 101 },
+    { ...job("KS-B", 1, 1, 60), locationId: 104 },
+    { ...job("KS-A", 1, 1, 60), locationId: 103 },
+  ];
+  const schedules = solveSimulationActivity(
+    jobs,
+    4,
+    "available-slots",
+    24,
+    new Set(jobs.map(({ jobId }) => jobId)),
+    [
+      { characterId: 1, availableSlots: 1, systemId: 31_000_001 },
+      { characterId: 2, availableSlots: 1, systemId: 31_000_002 },
+      { characterId: 3, availableSlots: 1, systemId: 30_000_001 },
+      { characterId: 4, availableSlots: 1, systemId: 30_000_002 },
+    ],
+    {
+      locationSystemIdsById: new Map([
+        [101, 31_000_001],
+        [102, 31_000_002],
+        [103, 30_000_001],
+        [104, 30_000_002],
+      ]),
+    },
+  );
+
+  assert.equal(schedules.get("WH-A")?.installs[0]?.characterId, 1);
+  assert.equal(schedules.get("WH-B")?.installs[0]?.characterId, 2);
+  assert.deepEqual(
+    [
+      schedules.get("KS-A")?.installs[0]?.characterId,
+      schedules.get("KS-B")?.installs[0]?.characterId,
+    ].sort(),
+    [3, 4],
+  );
+});
+
 void test("keeps unprotected reactions on largest-job allocation", () => {
   const schedules = solveSimulationActivity(
     [job("A", 100, 100, 60), job("B", 40, 40, 60), job("C", 10, 10, 60)],

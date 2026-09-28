@@ -3546,7 +3546,12 @@ export function getOwnerSnapshotEndpointStatuses(
     ...(owner.kind === "character"
       ? {
           clones: endpointStatusOrUnavailable(cache.clones),
-          location: endpointStatusOrUnavailable(cache.currentLocation),
+          location: {
+            ...endpointStatusOrUnavailable(cache.currentLocation),
+            ...(cache.currentLocation?.lastBody?.solarSystemId !== undefined
+              ? { systemId: cache.currentLocation.lastBody.solarSystemId }
+              : {}),
+          },
         }
       : {}),
     rootLocations: assetStatus,

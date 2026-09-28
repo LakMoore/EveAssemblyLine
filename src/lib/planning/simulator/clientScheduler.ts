@@ -7,6 +7,7 @@ export type ClientSimulationSolveMode = "available-slots" | "run-time-hours" | "
 export type ClientSimulationSlotGroup = {
   characterId: number;
   availableSlots: number;
+  systemId?: number;
 };
 
 /** Converts a runtime target between the hour and day solve modes. */
@@ -44,7 +45,13 @@ export type ClientSimulationSchedule = {
 export type ClientSimulationScheduleOptions = {
   protectReactionMaterialBonus?: boolean;
   reactionMaterialBonusesByLocation?: ReadonlyMap<number, number>;
+  locationSystemIdsById?: ReadonlyMap<number, number>;
 };
+
+/** Returns whether a solar-system ID belongs to EVE's wormhole system range. */
+export function isWormholeSystemId(systemId: number | undefined): boolean {
+  return systemId !== undefined && systemId >= 31_000_000 && systemId < 32_000_000;
+}
 
 /** Returns the runs that can be installed immediately for a simulator job. */
 export function getSimulationInstallableRuns(job: SimulationIndustryJob): number {
@@ -74,6 +81,126 @@ export function solveSimulationActivity(
       enabledJobIds.has(job.jobId) && runs > 0 && job.durationPerRunSeconds > 0,
   );
 
+  if (mode === "available-slots") {
+    const partitions = simulationSchedulePartitions(
+      enabledRows,
+      availableSlots,
+      slotGroups,
+      options,
+    );
+    for (const partition of partitions) {
+      allocateSimulationPartition(
+        partition.rows,
+        partition.availableSlots,
+        mode,
+        targetTime,
+        options,
+      );
+      assignSlotDetails(partition.rows, partition.slotGroups);
+    }
+  }
+  else {
+    const partitions = simulationSchedulePartitions(
+      enabledRows,
+      availableSlots,
+      slotGroups,
+      options,
+    );
+    for (const partition of partitions) {
+      allocateSimulationPartition(
+        partition.rows,
+        partition.availableSlots,
+        mode,
+        targetTime,
+        options,
+      );
+      assignSlotDetails(partition.rows, partition.slotGroups);
+    }
+  }
+
+  return new Map(
+    rows.map(({ job, minimumRunsPerInstall, installs, scheduledRuns, assignedSlots }) => {
+      const allocations = splitSimulationRuns(scheduledRuns, installs, minimumRunsPerInstall);
+      const scheduleInstalls = allocations.map((installRuns, index) => ({
+        installId: `client-install:${job.jobId}:${index}`,
+        runs: installRuns,
+        durationSeconds: Math.ceil(installRuns * job.durationPerRunSeconds),
+        characterId: assignedSlots[index]?.characterId,
+        slotIndex: assignedSlots[index]?.slotIndex,
+      }));
+      return [
+        job.jobId,
+        {
+          installs: scheduleInstalls,
+          runs: scheduleInstalls.reduce((total, install) => total + install.runs, 0),
+          timeSeconds: Math.max(...scheduleInstalls.map((install) => install.durationSeconds), 0),
+        },
+      ] as const;
+    }),
+  );
+}
+
+type SimulationSchedulePartition = {
+  rows: SimulationScheduleRow[];
+  availableSlots: number;
+  slotGroups: readonly ClientSimulationSlotGroup[];
+};
+
+/** Splits reaction work into a shared K-space pool and isolated wormhole systems. */
+function simulationSchedulePartitions(
+  rows: SimulationScheduleRow[],
+  availableSlots: number,
+  slotGroups: readonly ClientSimulationSlotGroup[],
+  options: ClientSimulationScheduleOptions,
+): SimulationSchedulePartition[] {
+  const systemIdsByLocation = options.locationSystemIdsById;
+  if (!systemIdsByLocation || !rows.every(({ job }) => job.activity === "reaction")) {
+    return [{ rows, availableSlots, slotGroups }];
+  }
+
+  const rowsBySystem = new Map<string, SimulationScheduleRow[]>();
+  const systemIdByKey = new Map<string, number | undefined>();
+  for (const row of rows) {
+    const systemId = systemIdsByLocation.get(row.job.locationId);
+    const key =
+      systemId === undefined
+        ? "unknown-system"
+        : isWormholeSystemId(systemId)
+          ? `wormhole:${systemId}`
+          : "k-space";
+    const partitionRows = rowsBySystem.get(key) ?? [];
+    partitionRows.push(row);
+    rowsBySystem.set(key, partitionRows);
+    systemIdByKey.set(key, isWormholeSystemId(systemId) ? systemId : undefined);
+  }
+
+  return [...rowsBySystem.entries()].map(([key, partitionRows]) => {
+    const systemId = systemIdByKey.get(key);
+    const eligibleSlotGroups = slotGroups.filter((group) => {
+      if (key === "k-space") {
+        return group.systemId !== undefined && !isWormholeSystemId(group.systemId);
+      }
+      return systemId !== undefined && group.systemId === systemId;
+    });
+    return {
+      rows: partitionRows,
+      slotGroups: eligibleSlotGroups,
+      availableSlots: eligibleSlotGroups.reduce(
+        (total, group) => total + Math.max(0, Math.floor(group.availableSlots)),
+        0,
+      ),
+    };
+  });
+}
+
+/** Applies the selected scheduling policy to one eligible slot pool. */
+function allocateSimulationPartition(
+  enabledRows: SimulationScheduleRow[],
+  availableSlots: number,
+  mode: ClientSimulationSolveMode,
+  targetTime: number,
+  options: ClientSimulationScheduleOptions,
+): void {
   if (mode === "available-slots") {
     const shouldBalanceProtectedReactions =
       options.protectReactionMaterialBonus
@@ -110,29 +237,6 @@ export function solveSimulationActivity(
       }
     }
   }
-
-  assignSlotDetails(enabledRows, slotGroups);
-
-  return new Map(
-    rows.map(({ job, minimumRunsPerInstall, installs, scheduledRuns, assignedSlots }) => {
-      const allocations = splitSimulationRuns(scheduledRuns, installs, minimumRunsPerInstall);
-      const scheduleInstalls = allocations.map((installRuns, index) => ({
-        installId: `client-install:${job.jobId}:${index}`,
-        runs: installRuns,
-        durationSeconds: Math.ceil(installRuns * job.durationPerRunSeconds),
-        characterId: assignedSlots[index]?.characterId,
-        slotIndex: assignedSlots[index]?.slotIndex,
-      }));
-      return [
-        job.jobId,
-        {
-          installs: scheduleInstalls,
-          runs: scheduleInstalls.reduce((total, install) => total + install.runs, 0),
-          timeSeconds: Math.max(...scheduleInstalls.map((install) => install.durationSeconds), 0),
-        },
-      ] as const;
-    }),
-  );
 }
 
 type SimulationScheduleRow = {

@@ -1618,6 +1618,11 @@ function Planner() {
     (location) => location.locationId === locations.reactions,
   );
   const activityLocationOptions = sharedLocationOptions;
+  const plannerLocationSystemIds = new Map<number, number>(
+    sharedLocationOptions.flatMap((location) =>
+      location.systemId === undefined ? [] : [[location.locationId, location.systemId] as const],
+    ),
+  );
   const stockLocationOptions: StockLocationOption[] = sharedLocationOptions;
   const stockpileLocations = getStockpileLocations(stockpiles);
   const plannerLocationNames = new Map<number, string>([
@@ -2465,6 +2470,7 @@ function Planner() {
           stock={stock}
           marketBuyOrderQuantities={clientAssets?.marketBuyOrderQuantities}
           locationNamesById={plannerLocationNames}
+          locationSystemIdsById={plannerLocationSystemIds}
           reactionMaterialBonusesByLocation={simulationReactionMaterialBonuses(locationOptions)}
           characterNamesById={characterNamesById}
           characterStatuses={characterStatuses}
