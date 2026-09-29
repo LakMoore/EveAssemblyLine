@@ -796,7 +796,7 @@ function SimulationActivitySummary({
 /** Renders reaction fact headers aligned to the wide activity-row columns. */
 function SimulationActivityColumnsHeader() {
   return (
-    <div className="hidden items-center gap-x-[13px] px-2 pb-1 font-mono text-[10px] text-muted-foreground uppercase lg:grid lg:grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)_auto]">
+    <div className="sticky top-0 z-10 hidden items-center gap-x-[13px] bg-card px-2 pb-1 font-mono text-[10px] text-muted-foreground uppercase lg:grid lg:grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)_auto]">
       <span aria-hidden="true" />
       <span aria-hidden="true" />
       <div className="grid grid-cols-[3rem_3rem_6rem_7rem_6rem_4rem] gap-x-3 text-right">
@@ -3398,24 +3398,26 @@ function SimulationActivityTab({
           );
 
           return (
-            <div className="flex flex-col gap-2">
-              <SimulationActivitySummary
-                availableSlots={scopedSlots}
-                slotCharacters={scopedCharacters}
-                activityLabel={activityLabel}
-                suggestedInstalls={scopedSuggestedInstalls}
-                maxJobLength={scopedMaxJobLength}
-                scheduledRuns={scopedScheduledRuns}
-                installableRuns={scopedInstallableRuns}
-                totalRuns={scopedTotalRuns}
-                poolLabel={
-                  systemId === undefined
-                    ? "Wormhole"
-                    : (systemNamesById?.get(systemId) ?? "Wormhole")
-                }
-              />
+            <>
+              <div className="mb-2">
+                <SimulationActivitySummary
+                  availableSlots={scopedSlots}
+                  slotCharacters={scopedCharacters}
+                  activityLabel={activityLabel}
+                  suggestedInstalls={scopedSuggestedInstalls}
+                  maxJobLength={scopedMaxJobLength}
+                  scheduledRuns={scopedScheduledRuns}
+                  installableRuns={scopedInstallableRuns}
+                  totalRuns={scopedTotalRuns}
+                  poolLabel={
+                    systemId === undefined
+                      ? "Wormhole"
+                      : (systemNamesById?.get(systemId) ?? "Wormhole")
+                  }
+                />
+              </div>
               <SimulationActivityColumnsHeader />
-            </div>
+            </>
           );
         }}
         reactionMaterialBonusesByLocation={
