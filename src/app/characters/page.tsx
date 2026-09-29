@@ -287,7 +287,9 @@ export default function CharactersPage() {
       .finally(() => setIsLoading(false));
     const freshnessTimer = window.setInterval(() => setFreshnessTick((tick) => tick + 1), 5_000);
     const handleRefreshFinished = () => {
-      void loadStatuses();
+      void Promise
+        .all([loadCharacters(), loadStatuses()])
+        .catch(() => setError("Could not reach the character service."));
     };
     window.addEventListener("assembly-line-esi-refresh-finished", handleRefreshFinished);
     return () => {

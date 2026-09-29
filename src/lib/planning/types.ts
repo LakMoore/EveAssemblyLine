@@ -139,6 +139,8 @@ export interface StockItemBase {
     rootLocationId: number;
     locationFlag: string;
     containerItemIds: number[];
+    canTake?: boolean;
+    canQuery?: boolean;
   };
 }
 

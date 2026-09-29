@@ -497,18 +497,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }
 
   const refreshData = useCallback(async () => {
-    if (isRefreshingDataRef.current || !authenticated || characters.length === 0) return false;
+    if (isRefreshingDataRef.current || !authenticated) return false;
     isRefreshingDataRef.current = true;
     setIsRefreshingData(true);
-    const units = buildRefreshUnits(
-      characters.map((character) => ({
-        characterId: character.characterId,
-        corporationId: character.corporationId,
-        hasDirectorRole: character.hasDirectorRole,
-        corporationSupportEnabled: character.corporationSupportEnabled,
-      })),
-    );
-    setRefreshProgress({ completed: 0, total: units.length });
     window.dispatchEvent(new CustomEvent("assembly-line-esi-refresh-started"));
     let assetLocations: EsiStockResponse["locations"] | undefined;
     let corporationSources: ClientCorporationSource[] | undefined;
@@ -517,12 +508,30 @@ export default function AppShell({ children }: { children: ReactNode }) {
     const ownerSnapshots: ClientOwnerSnapshot[] = [];
     let refreshSucceeded = false;
     try {
+      const session = await refreshClientSession();
+      const refreshCharacters = session.characters ?? [];
+      const refreshSnapshotScope = session.snapshotScope;
+      setAuthenticated(Boolean(session.authenticated));
+      setSnapshotScope(refreshSnapshotScope);
+      setCharacters(refreshCharacters);
+      if (!session.authenticated || !refreshSnapshotScope || refreshCharacters.length === 0) {
+        return false;
+      }
+      const units = buildRefreshUnits(
+        refreshCharacters.map((character) => ({
+          characterId: character.characterId,
+          corporationId: character.corporationId,
+          hasDirectorRole: character.hasDirectorRole,
+          corporationSupportEnabled: character.corporationSupportEnabled,
+        })),
+      );
+      setRefreshProgress({ completed: 0, total: units.length });
       const results = await runRefreshUnits(
         units,
         async (unit) => {
           const owner = { kind: unit.kind, id: unit.ownerId } as const;
-          const cachedSnapshot = snapshotScope
-            ? await loadOwnerSnapshot(owner, snapshotScope)
+          const cachedSnapshot = refreshSnapshotScope
+            ? await loadOwnerSnapshot(owner, refreshSnapshotScope)
             : null;
           const response = await fetch(
             `/api/state/refresh/${unit.kind}/${unit.ownerId}`,
@@ -550,7 +559,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   : "Could not refresh ESI data."),
             );
           }
-          if (data.ownerSnapshot && snapshotScope) {
+          if (data.ownerSnapshot && refreshSnapshotScope) {
             if (!isCompleteClientOwnerSnapshotResponse(data.ownerSnapshot)) {
               throw new Error("Refresh returned an invalid owner snapshot.");
             }
@@ -564,7 +573,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
               cachedSnapshot?.snapshot ?? null,
               data.ownerSnapshot,
             );
-            await saveOwnerSnapshot(mergedSnapshot, snapshotScope);
+            await saveOwnerSnapshot(mergedSnapshot, refreshSnapshotScope);
             ownerSnapshots.push(mergedSnapshot);
           }
         },
@@ -587,7 +596,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
         );
       }
       const refreshedAt = new Date().toISOString();
-      await refreshClientSession();
       const requiredEndpoints = new Set<string>(refreshDependentEndpoints[activePage]);
       let jobsResponse;
       let shipsResponse;
@@ -663,7 +671,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         ),
       );
     }
-  }, [activePage, authenticated, characters, language, snapshotScope]);
+  }, [activePage, authenticated, language]);
 
   useEffect(() => {
     if (!authenticated || characters.length === 0 || activePage === "imagechecker") return;

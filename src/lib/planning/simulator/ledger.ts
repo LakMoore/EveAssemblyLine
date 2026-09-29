@@ -470,10 +470,6 @@ export function projectSimulationLedger(
     [...mutableBalances].map(([key, balance]) => {
       const plannedRequirement = balance.requiredNow + balance.reserved;
       const physicalAvailable = balance.availableNow + balance.availableFromHauling;
-      const immediateSurplus = Math.max(
-        0,
-        balance.availableNow + balance.availableFromSellOrders - balance.requiredNow,
-      );
       const futureSupply =
         balance.availableFromHauling
         + balance.inFlightQuantity
@@ -493,7 +489,8 @@ export function projectSimulationLedger(
         + balance.availableFromMarket;
       const finalized = Object.freeze({
         ...balance,
-        futureDemand: Math.max(0, balance.reserved - immediateSurplus),
+        // Demand horizons are additive ledger facts. Supply must not reduce the demand total.
+        futureDemand: balance.reserved,
         futureSupply,
         demandSources: [...balance.demandSources],
         unsatisfied: Math.max(0, plannedRequirement - plannedSupply),

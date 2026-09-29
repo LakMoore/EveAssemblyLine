@@ -90,9 +90,57 @@ void test("projects source availability before demand reservations and hauling",
   assert.equal(balance.reserved, 6);
   assert.equal(balance.availableNow, 4);
   assert.equal(balance.availableFromHauling, 3);
+  assert.equal(balance.futureDemand, 6);
   assert.equal(balance.unsatisfied, 3);
   assert.equal(projection.balances.get("30:34")?.transferredOut, 3);
   assert.deepEqual(projection.invariantViolations, []);
+});
+
+void test("keeps deferred demand independent from immediately available stock", () => {
+  const projection = projectSimulationLedger(
+    [{ lotId: "on-hand", typeId: 34, quantity: 9_812, locationId: 20 }],
+    [
+      {
+        id: "on-hand-availability",
+        kind: "source-availability",
+        account,
+        lotId: "on-hand",
+        quantity: 9_812,
+        horizon: "now",
+      },
+      {
+        id: "deferred-demand",
+        kind: "demand",
+        account,
+        quantity: 18_945,
+        source: {
+          demandId: "deferred-demand",
+          stockpileId: "main",
+          materialTypeId: 34,
+          productTypeId: 34,
+          productQuantity: 18_945,
+          plannedQuantity: 18_945,
+          requiredNow: 0,
+          reserved: 18_945,
+          destinationLocationId: 20,
+          activity: "reaction",
+        },
+      },
+      {
+        id: "planned-purchase",
+        kind: "purchase-requirement",
+        account,
+        quantity: 9_133,
+      },
+    ],
+  );
+  const balance = projection.balances.get("20:34");
+  assert.ok(balance);
+  assert.equal(balance.availableNow, 9_812);
+  assert.equal(balance.futureDemand, 18_945);
+  assert.equal(balance.futureSupply, 9_133);
+  assert.equal(balance.unsatisfied, 0);
+  assert.equal(balance.surplus, 0);
 });
 
 void test("detects reservations shared across ledgers that exceed one physical lot", () => {
@@ -298,7 +346,7 @@ void test("retains total in-flight output after claiming only the required quant
   assert.equal(balance.availableFromProduction, 0);
   assert.equal(balance.activityType, "reaction");
   assert.equal(balance.futureSupply, 154_200);
-  assert.equal(balance.futureDemand, 44_995);
+  assert.equal(balance.futureDemand, 45_005);
   assert.equal(balance.surplus, 109_205);
   assert.equal(balance.unsatisfied, 0);
 });

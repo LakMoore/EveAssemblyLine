@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { convertSimulationTargetTime, solveSimulationActivity } from "./clientScheduler";
+import {
+  convertSimulationTargetTime,
+  simulationReactionFormulaKey,
+  solveSimulationActivity,
+  summarizeClientSimulationInstalls,
+} from "./clientScheduler";
+import { simulationReactionFormulaAvailability } from "./reactionFormulaAvailability";
 import type { SimulationIndustryJob } from "./types";
 
 /** Creates a minimal simulator job for client scheduler tests. */
@@ -62,6 +68,350 @@ void test("allocates available slots across the largest installable jobs", () =>
   assert.equal(schedules.get("B")?.installs.length, 1);
   assert.equal(schedules.get("A")?.runs, 8);
   assert.equal(schedules.get("B")?.runs, 3);
+});
+
+void test("keeps short reactions in one install and uses spare slots for long reactions", () => {
+  const schedules = solveSimulationActivity(
+    [job("long", 100, 100, 3600), job("few-runs", 8, 8, 3600), job("short-time", 1000, 1000, 60)],
+    5,
+    "available-slots",
+    24,
+  );
+
+  assert.equal(schedules.get("long")?.installs.length, 3);
+  assert.equal(schedules.get("few-runs")?.installs.length, 1);
+  assert.equal(schedules.get("short-time")?.installs.length, 1);
+});
+
+void test("does not schedule more installs than available reaction formulas", () => {
+  const schedules = solveSimulationActivity(
+    [job("A", 100, 100, 3600), job("B", 50, 50, 3600)],
+    4,
+    "available-slots",
+    24,
+    new Set(["A", "B"]),
+    [],
+    {
+      availableReactionFormulaCountsByLocationAndType: new Map([
+        [simulationReactionFormulaKey(20, 46207), 1],
+      ]),
+    },
+  );
+
+  assert.equal(
+    [...schedules.values()].reduce((total, schedule) => total + schedule.installs.length, 0),
+    1,
+  );
+  assert.equal(schedules.get("A")?.runs, 100);
+  assert.equal(schedules.get("B")?.runs, 0);
+});
+
+void test("splits a fractional per-install average into exact integer-run batches", () => {
+  const summary = summarizeClientSimulationInstalls([
+    { installId: "first", runs: 10, durationSeconds: 3600 },
+    { installId: "second", runs: 11, durationSeconds: 7200 },
+  ]);
+
+  assert.deepEqual(
+    summary,
+    {
+      count: 2,
+      totalRuns: 21,
+      batches: [
+        {
+          runsPerInstall: 11,
+          installCount: 1,
+          estimatedDurationSecondsPerInstall: 5657.142857142858,
+        },
+        {
+          runsPerInstall: 10,
+          installCount: 1,
+          estimatedDurationSecondsPerInstall: 5142.857142857143,
+        },
+      ],
+    },
+  );
+});
+
+void test("keeps an integer per-install average in one batch", () => {
+  const summary = summarizeClientSimulationInstalls([
+    { installId: "first", runs: 10, durationSeconds: 3600 },
+    { installId: "second", runs: 10, durationSeconds: 3600 },
+  ]);
+
+  assert.deepEqual(
+    summary.batches,
+    [{ runsPerInstall: 10, installCount: 2, estimatedDurationSecondsPerInstall: 3600 }],
+  );
+});
+
+void test("reports no suggested work when there are no generated installs", () => {
+  assert.deepEqual(
+    summarizeClientSimulationInstalls([]),
+    {
+      count: 0,
+      totalRuns: 0,
+      batches: [],
+    },
+  );
+});
+
+void test("does not subtract unrelated in-flight jobs from available formulas", () => {
+  const availability = simulationReactionFormulaAvailability(
+    [
+      { category: "reactionformula", name: "Formula A", quantity: 2, typeId: 100, locationId: 10 },
+      { category: "reactionformula", name: "Formula B", quantity: 1, typeId: 200, locationId: 20 },
+    ],
+    [
+      {
+        activity: "Reaction",
+        status: "active",
+        ownerType: "character",
+        ownerId: 1,
+        jobId: 11,
+        facilityId: 20,
+        blueprintTypeId: 200,
+      },
+      {
+        activity: "Reaction",
+        status: "paused",
+        ownerType: "character",
+        ownerId: 1,
+        jobId: 12,
+        facilityId: 30,
+        blueprintTypeId: 300,
+      },
+    ],
+  );
+
+  assert.equal(
+    availability.availableByLocationAndType.get(simulationReactionFormulaKey(10, 100)),
+    2,
+  );
+  assert.equal(
+    availability.availableByLocationAndType.get(simulationReactionFormulaKey(20, 200)),
+    0,
+  );
+  assert.equal(availability.visibleByLocationAndType.get(simulationReactionFormulaKey(10, 100)), 2);
+  assert.equal(availability.visibleByLocationAndType.get(simulationReactionFormulaKey(20, 200)), 1);
+  assert.equal(
+    availability.visibleByLocationAndType.get(simulationReactionFormulaKey(30, 300)),
+    undefined,
+  );
+});
+
+void test("separates owned formula totals from visible and in-use location counts", () => {
+  const availability = simulationReactionFormulaAvailability(
+    [
+      { category: "reactionformula", name: "Formula A", quantity: 2, typeId: 100, locationId: 10 },
+      { category: "reactionformula", name: "Formula A", quantity: 3, typeId: 100, locationId: 20 },
+      { category: "reactionformula", name: "Formula A", quantity: 1, typeId: 100 },
+    ],
+    [
+      {
+        activity: "Reaction",
+        status: "active",
+        ownerType: "character",
+        ownerId: 1,
+        jobId: 11,
+        facilityId: 10,
+        blueprintTypeId: 100,
+      },
+      {
+        activity: "Reaction",
+        status: "paused",
+        ownerType: "character",
+        ownerId: 1,
+        jobId: 12,
+        facilityId: 20,
+        blueprintTypeId: 100,
+      },
+    ],
+  );
+
+  assert.equal(availability.ownedByLocationAndType.get(simulationReactionFormulaKey(10, 100)), 2);
+  assert.equal(availability.ownedByLocationAndType.get(simulationReactionFormulaKey(20, 100)), 3);
+  assert.equal(
+    availability.ownedByLocationAndType.has(simulationReactionFormulaKey(30, 100)),
+    false,
+  );
+  assert.equal(availability.visibleByLocationAndType.get(simulationReactionFormulaKey(10, 100)), 2);
+  assert.equal(availability.inUseByLocationAndType.get(simulationReactionFormulaKey(10, 100)), 1);
+  assert.equal(
+    availability.availableByLocationAndType.get(simulationReactionFormulaKey(10, 100)),
+    1,
+  );
+  assert.equal(availability.visibleByLocationAndType.get(simulationReactionFormulaKey(20, 100)), 3);
+  assert.equal(availability.inUseByLocationAndType.get(simulationReactionFormulaKey(20, 100)), 1);
+  assert.equal(
+    availability.availableByLocationAndType.get(simulationReactionFormulaKey(20, 100)),
+    2,
+  );
+});
+
+void test("uses TAKE for owned counts and QUERY for visible counts", () => {
+  const source = (canTake: boolean, canQuery: boolean) => ({
+    rootLocationId: 10,
+    locationFlag: "CorpSAG1",
+    containerItemIds: [101],
+    canTake,
+    canQuery,
+  });
+  const availability = simulationReactionFormulaAvailability(
+    [
+      {
+        category: "reactionformula",
+        name: "Formula A",
+        quantity: 1,
+        typeId: 100,
+        ownerType: "character",
+        locationId: 10,
+      },
+      {
+        category: "reactionformula",
+        name: "Formula A",
+        quantity: 2,
+        typeId: 100,
+        ownerType: "corporation",
+        rootLocationId: 10,
+        corporationSource: source(true, false),
+      },
+      {
+        category: "reactionformula",
+        name: "Formula A",
+        quantity: 3,
+        typeId: 100,
+        ownerType: "corporation",
+        rootLocationId: 10,
+        corporationSource: source(true, true),
+      },
+      {
+        category: "reactionformula",
+        name: "Formula A",
+        quantity: 4,
+        typeId: 100,
+        ownerType: "corporation",
+        rootLocationId: 10,
+        corporationSource: source(false, true),
+      },
+      {
+        category: "reactionformula",
+        name: "Formula A",
+        quantity: 5,
+        typeId: 100,
+        ownerType: "corporation",
+        rootLocationId: 10,
+      },
+    ],
+    [],
+  );
+  const key = simulationReactionFormulaKey(10, 100);
+
+  assert.equal(availability.ownedByLocationAndType.get(key), 6);
+  assert.equal(availability.visibleByLocationAndType.get(key), 8);
+  assert.equal(availability.availableByLocationAndType.get(key), 6);
+});
+
+void test("matches visible totals when a query-only container is unchecked", () => {
+  const ownedFormula = {
+    category: "reactionformula" as const,
+    name: "Formula A",
+    quantity: 4,
+    typeId: 100,
+    ownerType: "corporation" as const,
+    rootLocationId: 10,
+    corporationSource: {
+      rootLocationId: 10,
+      locationFlag: "CorpSAG3",
+      containerItemIds: [101],
+      canTake: true,
+      canQuery: true,
+    },
+  };
+  const uncheckedQueryOnlyFormula = {
+    ...ownedFormula,
+    quantity: 10,
+    corporationSource: {
+      ...ownedFormula.corporationSource,
+      locationFlag: "CorpSAG6",
+      containerItemIds: [102],
+      canTake: false,
+      canQuery: true,
+    },
+  };
+  const availability = simulationReactionFormulaAvailability(
+    [ownedFormula],
+    [],
+    [ownedFormula, uncheckedQueryOnlyFormula],
+  );
+  const key = simulationReactionFormulaKey(10, 100);
+
+  assert.equal(availability.visibleByLocationAndType.get(key), 14);
+  assert.equal(availability.ownedByLocationAndType.get(key), 4);
+  assert.equal(availability.availableByLocationAndType.get(key), 4);
+});
+
+void test("counts unchecked TAKE and QUERY formulas as visible only", () => {
+  const corporationSource = {
+    rootLocationId: 10,
+    locationFlag: "CorpSAG1",
+    containerItemIds: [101],
+    canTake: true,
+    canQuery: true,
+  };
+  const personalFormula = {
+    category: "reactionformula" as const,
+    name: "Formula A",
+    quantity: 1,
+    typeId: 100,
+    ownerType: "character" as const,
+    locationId: 10,
+  };
+  const selectedFormula = {
+    category: "reactionformula" as const,
+    name: "Formula A",
+    quantity: 2,
+    typeId: 100,
+    ownerType: "corporation" as const,
+    rootLocationId: 10,
+    corporationSource: corporationSource,
+  };
+  const uncheckedFormula = {
+    ...selectedFormula,
+    quantity: 3,
+    corporationSource: { ...corporationSource, containerItemIds: [102] },
+  };
+  const availability = simulationReactionFormulaAvailability(
+    [personalFormula, selectedFormula],
+    [],
+    [personalFormula, selectedFormula, uncheckedFormula],
+  );
+  const key = simulationReactionFormulaKey(10, 100);
+
+  assert.equal(availability.ownedByLocationAndType.get(key), 3);
+  assert.equal(availability.visibleByLocationAndType.get(key), 6);
+  assert.equal(availability.availableByLocationAndType.get(key), 3);
+});
+
+void test("distinguishes missing industry jobs from a known empty job list", () => {
+  const stock = [
+    {
+      category: "reactionformula" as const,
+      name: "Formula A",
+      quantity: 2,
+      typeId: 100,
+      locationId: 10,
+    },
+  ];
+  const formulaKey = simulationReactionFormulaKey(10, 100);
+  const unknown = simulationReactionFormulaAvailability(stock, undefined);
+  const knownEmpty = simulationReactionFormulaAvailability(stock, []);
+
+  assert.equal(unknown.availabilityKnown, false);
+  assert.equal(unknown.visibleByLocationAndType.get(formulaKey), 2);
+  assert.equal(unknown.availableByLocationAndType.has(formulaKey), false);
+  assert.equal(knownEmpty.availabilityKnown, true);
+  assert.equal(knownEmpty.availableByLocationAndType.get(formulaKey), 2);
 });
 
 void test("isolates wormhole reaction slots by system and shares K-space slots", () => {
@@ -127,7 +477,7 @@ void test("recalculates the reaction average after allocating low-run jobs", () 
 
   assert.deepEqual(
     schedules.get("A")?.installs.map((install) => install.runs),
-    [50, 50],
+    [100],
   );
   assert.deepEqual(
     schedules.get("B")?.installs.map((install) => install.runs),
@@ -184,7 +534,7 @@ void test("respects the protected reaction minimum during average allocation", (
   );
   assert.deepEqual(
     installRuns.sort((left, right) => right - left),
-    [25, 25, 13, 12],
+    [25, 25, 25],
   );
   assert.ok(installRuns.every((runs) => runs >= 10));
 });
@@ -199,6 +549,25 @@ void test("splits reaction runtime installs across floor and ceiling averages", 
   assert.equal(schedules.get("A")?.runs, 10);
 });
 
+void test("balances runtime-limited installs across eligible reaction jobs", () => {
+  const schedules = solveSimulationActivity(
+    [job("A", 100, 100, 3600), job("B", 100, 100, 3600)],
+    4,
+    "run-time-hours",
+    2,
+  );
+
+  assert.equal(schedules.get("A")?.installs.length, 2);
+  assert.equal(schedules.get("B")?.installs.length, 2);
+  assert.equal(schedules.get("A")?.runs, 4);
+  assert.equal(schedules.get("B")?.runs, 4);
+  assert.ok(
+    [...schedules.values()].every((schedule) =>
+      schedule.installs.every((install) => install.durationSeconds <= 7200),
+    ),
+  );
+});
+
 void test("converts reaction runtime days to hours before calculating runs", () => {
   const schedules = solveSimulationActivity([job("A", 25, 25, 3600)], 2, "run-time-days", 1);
 
@@ -208,7 +577,7 @@ void test("converts reaction runtime days to hours before calculating runs", () 
   );
 });
 
-void test("keeps reaction runtime splits above the protected minimum", () => {
+void test("does not exceed the runtime cap when it conflicts with the protected minimum", () => {
   const schedules = solveSimulationActivity(
     [job("A", 10, 10, 3600, [10])],
     4,
@@ -222,10 +591,7 @@ void test("keeps reaction runtime splits above the protected minimum", () => {
     },
   );
 
-  assert.deepEqual(
-    schedules.get("A")?.installs.map((install) => install.runs),
-    [5, 5],
-  );
+  assert.deepEqual(schedules.get("A")?.installs, []);
 });
 
 void test("limits each suggested install to the requested run time", () => {
@@ -264,10 +630,7 @@ void test("retains character slot details for the install plan", () => {
         slotIndex,
         runs,
       })),
-    [
-      { characterId: 7, slotIndex: 0, runs: 3 },
-      { characterId: 8, slotIndex: 0, runs: 2 },
-    ],
+    [{ characterId: 7, slotIndex: 0, runs: 5 }],
   );
 });
 
@@ -287,7 +650,7 @@ void test("protects the ME bonus by keeping reaction installs above the minimum 
 
   assert.deepEqual(
     schedules.get("A")?.installs.map((install) => install.runs),
-    [5, 5],
+    [10],
   );
 });
 
@@ -339,7 +702,7 @@ void test("derives the ME minimum from persisted jobs without per-run input quan
 
   assert.deepEqual(
     schedules.get("A")?.installs.map((install) => install.runs),
-    [10, 10],
+    [20],
   );
 });
 
@@ -371,7 +734,7 @@ void test("keeps all but one persisted-result install at the ten-run minimum", (
 
   assert.deepEqual(
     schedules.get("A")?.installs.map((install) => install.runs),
-    [10, 10, 10, 5],
+    [35],
   );
 });
 
@@ -433,6 +796,6 @@ void test("uses a protected full install and one remainder install", () => {
 
   assert.deepEqual(
     schedules.get("A")?.installs.map((install) => install.runs),
-    [10, 1],
+    [11],
   );
 });

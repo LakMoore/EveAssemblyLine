@@ -90,6 +90,37 @@ void test("protects reserved activity inputs from stockpile demand", () => {
   assert.equal(allocator.remainingItemQuantity("local"), 0);
 });
 
+void test("preserves locally reserved activity inputs from a remote activity claim", () => {
+  const allocator = new SimulationAllocator(inventory, []);
+  allocator.reserveActivityDemand(34, 4, 20);
+
+  const remoteClaim = allocator.claimOrdinarySupply(
+    34,
+    8,
+    40,
+    { ...account, locationId: 40 },
+    "remote-industry-job",
+    undefined,
+    "manufacturing",
+    "activity-input",
+  );
+  const localClaim = allocator.claimOrdinarySupply(
+    34,
+    4,
+    20,
+    account,
+    "local-industry-job",
+    undefined,
+    "reaction",
+    "activity-input",
+  );
+
+  assert.deepEqual(remoteClaim, { local: 0, remote: 8, future: 0, futureReservations: [] });
+  assert.deepEqual(localClaim, { local: 4, remote: 0, future: 0, futureReservations: [] });
+  assert.equal(allocator.remainingItemQuantity("local"), 0);
+  assert.equal(allocator.remainingItemQuantity("remote"), 0);
+});
+
 void test("protects local stockpile demand from an earlier remote claim", () => {
   const allocator = new SimulationAllocator(
     { ...inventory, itemLots: [inventory.itemLots[0]] },

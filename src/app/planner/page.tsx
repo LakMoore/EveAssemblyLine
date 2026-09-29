@@ -169,6 +169,7 @@ type PlanLocationOption = {
   id: string;
   locationId: number;
   systemId: number;
+  systemName?: string;
   name: string;
   locationType: "station" | "structure";
   baseYield: number;
@@ -312,6 +313,20 @@ function getPlannerStock(
     characterIds,
   );
   return (planningAssets.assets ?? []).filter((item) => {
+    const locationId = getStockLocationId(item);
+    return locationId === undefined || !excludedLocationIds.has(locationId);
+  });
+}
+
+/** Returns formula stock before corporation hangar selections for visibility counts. */
+function getVisibleReactionFormulaStock(
+  assets: ClientAssetsResponse | null,
+  includeStock: boolean,
+  excludedLocationIds: ReadonlySet<number>,
+): PlanStockItem[] {
+  if (!includeStock || !assets) return [];
+  return (assets.assets ?? []).filter((item) => {
+    if (item.category !== "reactionformula") return false;
     const locationId = getStockLocationId(item);
     return locationId === undefined || !excludedLocationIds.has(locationId);
   });
@@ -770,12 +785,18 @@ function Planner() {
     };
   }, [language]);
 
+  const excludedStockLocationIds = new Set(excludedLocationIds);
   const stock = getPlannerStock(
     clientAssets,
     includeStock,
-    new Set(excludedLocationIds),
+    excludedStockLocationIds,
     settings,
     characterStatuses.map((character) => character.characterId),
+  );
+  const visibleReactionFormulaStock = getVisibleReactionFormulaStock(
+    clientAssets,
+    includeStock,
+    excludedStockLocationIds,
   );
   const activeHaulPatches =
     haulPatchesLoaded && characterStatuses.length > 0
@@ -897,6 +918,7 @@ function Planner() {
           id: String(facility.id),
           locationId: facility.id,
           systemId: facility.systemId,
+          systemName: facility.systemName,
           name: facility.name,
           locationType: facility.locationType,
           baseYield: (facility.activities.reprocessing.baseYield ?? 0) * 100,
@@ -1587,6 +1609,7 @@ function Planner() {
     ...locationOptions.map((location) => ({
       locationId: location.locationId,
       systemId: location.systemId,
+      systemName: location.systemName,
       name: location.name,
       kind: location.locationType,
       baseYield: location.baseYield,
@@ -1621,6 +1644,13 @@ function Planner() {
   const plannerLocationSystemIds = new Map<number, number>(
     sharedLocationOptions.flatMap((location) =>
       location.systemId === undefined ? [] : [[location.locationId, location.systemId] as const],
+    ),
+  );
+  const plannerSystemNames = new Map<number, string>(
+    sharedLocationOptions.flatMap((location) =>
+      location.systemId === undefined || location.systemName === undefined
+        ? []
+        : [[location.systemId, location.systemName] as const],
     ),
   );
   const stockLocationOptions: StockLocationOption[] = sharedLocationOptions;
@@ -2468,9 +2498,12 @@ function Planner() {
           result={simulationResult}
           status={planStatus}
           stock={stock}
+          visibleReactionFormulaStock={visibleReactionFormulaStock}
+          industryJobs={jobs?.jobs}
           marketBuyOrderQuantities={clientAssets?.marketBuyOrderQuantities}
           locationNamesById={plannerLocationNames}
           locationSystemIdsById={plannerLocationSystemIds}
+          systemNamesById={plannerSystemNames}
           reactionMaterialBonusesByLocation={simulationReactionMaterialBonuses(locationOptions)}
           characterNamesById={characterNamesById}
           characterStatuses={characterStatuses}

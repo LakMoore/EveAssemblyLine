@@ -54,6 +54,7 @@ import { Label } from "./ui/label";
 type ActivityLocationOption = {
   locationId: number;
   systemId?: number;
+  systemName?: string;
   name: string;
   kind: "station" | "structure";
   disabled?: boolean;

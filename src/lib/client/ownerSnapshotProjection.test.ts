@@ -229,6 +229,8 @@ void test("projects stable owner assets into enriched client assets", () => {
           rootLocationId: 600,
           locationFlag: "CorpSAG1",
           containerItemIds: [44],
+          canTake: true,
+          canQuery: true,
         },
       },
     ],
@@ -279,6 +281,32 @@ void test("projects the newest jobs endpoint update timestamp", () => {
   );
 
   assert.equal(result.lastUpdated, "2026-09-26T10:05:00.000Z");
+});
+
+void test("preserves corporation TAKE-only access on projected assets", () => {
+  const takeOnlySnapshot: ClientOwnerSnapshot = {
+    ...snapshot,
+    corporationSources: slice(
+      snapshot.corporationSources.data.map((source) => ({ ...source, canQuery: false })),
+    ),
+  };
+  const result = projectOwnerSnapshotsToClientAssets(
+    [takeOnlySnapshot],
+    {
+      metadata: [{ typeId: 34, name: "Tritanium", category: "item" }],
+    },
+  );
+
+  assert.deepEqual(
+    result.assets?.[0]?.corporationSource,
+    {
+      rootLocationId: 600,
+      locationFlag: "CorpSAG1",
+      containerItemIds: [44],
+      canTake: true,
+      canQuery: false,
+    },
+  );
 });
 
 void test("labels assets in an undocked ship with its solar system", () => {
@@ -423,6 +451,8 @@ void test("associates nested assets with their corporation container source", ()
       rootLocationId: 700,
       locationFlag: "CorpSAG3",
       containerItemIds: [44],
+      canTake: true,
+      canQuery: true,
     },
   );
   assert.equal(filterClientAssetsForPlanning(result).assets?.length, 1);
@@ -470,6 +500,8 @@ void test("filters assets from an unselected container when a sibling is selecte
       rootLocationId: 600,
       locationFlag: "CorpSAG1",
       containerItemIds: [44],
+      canTake: true,
+      canQuery: true,
     },
   );
   assert.equal(filterClientAssetsForPlanning(result).assets?.length, 0);
@@ -627,6 +659,81 @@ void test("projects a blueprint instance when its asset record is unavailable", 
   assert.equal(filterClientAssetsForPlanning(result).assets?.length, 1);
 });
 
+void test("projects unchecked reaction formulas from the blueprint snapshot", () => {
+  const formulaSnapshot: ClientOwnerSnapshot = {
+    ...snapshot,
+    assets: slice([]),
+    blueprintInstances: slice([
+      {
+        itemId: 7001,
+        typeId: 46165,
+        locationId: 70,
+        locationFlag: "CorpSAG1",
+        quantity: -2,
+        runs: 10,
+        me: 0,
+        te: 0,
+        ownerType: "corporation",
+        ownerId: 900,
+      },
+    ]),
+    rootLocations: slice([
+      {
+        itemId: 70,
+        location: {
+          locationId: 700,
+          kind: "structure",
+          name: "Second Production Fortizar",
+          systemId: 30000142,
+          resolved: true,
+        },
+      },
+    ]),
+    corporationSources: slice([
+      {
+        ...snapshot.corporationSources.data[0],
+        canTake: false,
+        canQuery: false,
+        containerItemIds: [44],
+      },
+      {
+        ...snapshot.corporationSources.data[0],
+        rootLocationId: 700,
+        canTake: true,
+        canQuery: true,
+        selected: false,
+        containerItemIds: [70],
+        containers: [
+          {
+            itemId: 70,
+            name: "Unchecked Formula Container",
+            locationId: 700,
+            rootLocationId: 700,
+            selected: false,
+          },
+        ],
+      },
+    ]),
+  };
+  const result = projectOwnerSnapshotsToClientAssets(
+    [formulaSnapshot],
+    {
+      metadata: [
+        { typeId: 46165, name: "C3-FTM Acid Reaction Formula", category: "reactionformula" },
+      ],
+    },
+  );
+  const formula = result.assets?.find((asset) => asset.typeId === 46165);
+
+  assert.ok(formula);
+  assert.equal(formula.category, "reactionformula");
+  assert.ok(formula.corporationSource);
+  assert.equal(formula.corporationSource.rootLocationId, 700);
+  assert.equal(formula.corporationSource.canTake, true);
+  assert.equal(formula.corporationSource.canQuery, true);
+  assert.deepEqual(filterClientAssetsForPlanning(result).assets, []);
+});
+
 void test("projects job output and remaining blueprint runs without an asset record", () => {
   const jobSnapshot: ClientOwnerSnapshot = {
     ...snapshot,
@@ -712,6 +819,8 @@ void test("projects job output and remaining blueprint runs without an asset rec
       rootLocationId: 600,
       locationFlag: "CorpSAG1",
       containerItemIds: [44],
+      canTake: true,
+      canQuery: true,
     },
   );
   assert.equal(output.industryJobEndDate, "2026-01-02T00:00:00.000Z");

@@ -104,6 +104,19 @@ function completionDetail(minutes: number | undefined): string {
   return `; next job completes in ${days} ${days === 1 ? "day" : "days"}`;
 }
 
+/** Formats reaction run durations using the simulator's compact day/hour/minute style. */
+function reactionRunDuration(totalSeconds: number): string {
+  const totalMinutes = Math.ceil(totalSeconds / 60);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  const parts = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  return parts.length > 0 ? parts.join(" ") : "0m";
+}
+
 type InputSupplySource = {
   key: string;
   label: string;
@@ -382,6 +395,7 @@ export default function SimulationJobInputsResponsive({
   onOpenPlan,
   onOpenBuy,
   variation = "icon",
+  showLabel = true,
 }: {
   job: SimulationIndustryJob;
   jobs?: readonly SimulationIndustryJob[];
@@ -389,6 +403,7 @@ export default function SimulationJobInputsResponsive({
   onOpenPlan: () => void;
   onOpenBuy: () => void;
   variation?: "icon" | "render" | "bp" | "bpc";
+  showLabel?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [selectedJobs, setSelectedJobs] = useState<readonly SimulationIndustryJob[] | null>(null);
@@ -417,6 +432,18 @@ export default function SimulationJobInputsResponsive({
     0,
   );
   const totalRuns = displayedJobs.reduce((total, inputJob) => total + inputJob.requiredRuns, 0);
+  const isReaction = displayedJobs.every((inputJob) => inputJob.activity === "reaction");
+  const installableRuntimeSeconds = displayedJobs.reduce(
+    (total, inputJob) =>
+      total
+      + Math.min(inputJob.requiredRuns, Math.max(0, inputJob.readyNowRuns))
+        * inputJob.durationPerRunSeconds,
+    0,
+  );
+  const totalRuntimeSeconds = displayedJobs.reduce(
+    (total, inputJob) => total + inputJob.requiredRuns * inputJob.durationPerRunSeconds,
+    0,
+  );
   const inputs = aggregateSimulationInputs(displayedJobs.flatMap((job) => job.inputs));
   const completionPercent =
     totalRuns > 0 ? Math.min(100, Math.round((installableRuns / totalRuns) * 100)) : 100;
@@ -442,6 +469,7 @@ export default function SimulationJobInputsResponsive({
         <Button
           type="button"
           variant="outline"
+          aria-label={showLabel ? undefined : `${completionPercent}% inputs`}
           className={cn(
             "inline-flex h-6 items-center justify-center gap-1 border px-2 text-[10px] font-semibold tracking-[0.08em] uppercase transition-colors hover:brightness-125",
             statusClassName(status),
@@ -452,7 +480,7 @@ export default function SimulationJobInputsResponsive({
           }}
         >
           <span>{completionPercent}%</span>
-          Inputs
+          {showLabel ? "Inputs" : null}
         </Button>
       }
       title={displayedJobs.length > 1 ? "Grouped job inputs" : "Job inputs"}
@@ -480,11 +508,16 @@ export default function SimulationJobInputsResponsive({
             <div className="grid shrink-0 grid-cols-2 gap-x-4 font-mono text-xs">
               <div className="flex flex-col items-end">
                 <strong>{installableRuns.toLocaleString()}</strong>
-                <small className="text-[9px] text-muted-foreground uppercase">Installable</small>
+                <small className="text-[9px] text-muted-foreground uppercase">
+                  Installable
+                  {isReaction ? ` · ${reactionRunDuration(installableRuntimeSeconds)}` : ""}
+                </small>
               </div>
               <div className="flex flex-col items-end">
                 <strong>{totalRuns.toLocaleString()}</strong>
-                <small className="text-[9px] text-muted-foreground uppercase">Total</small>
+                <small className="text-[9px] text-muted-foreground uppercase">
+                  Total{isReaction ? ` · ${reactionRunDuration(totalRuntimeSeconds)}` : ""}
+                </small>
               </div>
             </div>
           </div>

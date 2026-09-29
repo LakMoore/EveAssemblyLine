@@ -547,7 +547,7 @@ const emptyJobsResponse: ClientJobsResponse = { slotUsage: {}, jobs: [] };
 
 function createClientSessionRequest() {
   if (!sessionRequest) {
-    const request = fetch("/api/auth/session")
+    const request = fetch("/api/auth/session", { cache: "no-store" })
       .then((response) => response.json() as Promise<ClientSession>)
       .then(async (session) => {
         if (!session.authenticated || !session.snapshotScope) return session;

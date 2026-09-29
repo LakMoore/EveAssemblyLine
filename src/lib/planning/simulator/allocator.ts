@@ -80,7 +80,7 @@ export class SimulationAllocator {
   private readonly sameStockpileLocationPairs: ReadonlySet<string>;
   private readonly blockInterStockpileHauling: boolean;
   private readonly systemIdByLocationId: ReadonlyMap<number, number>;
-  private readonly activityReservationsByLotId = new Map<string, number>();
+  private readonly activityReservationsByLotId = new Map<string, Map<number, number>>();
   private readonly stockpileReservationsByLotId = new Map<string, number>();
   private readonly transferredBlueprintLotIds = new Set<string>();
   private transactionSequence = 0;
@@ -136,10 +136,20 @@ export class SimulationAllocator {
         continue;
       }
       else if (lot.locationId === destinationLocationId) {
-        local += Math.max(0, quantity - this.activityReservation(lot.lotId));
+        local
+          += Math.max(
+            0,
+            quantity
+              - this.activityReservationsForOtherDestinations(lot.lotId, destinationLocationId),
+          );
       }
       else if (lot.locationId !== undefined && !this.isExcluded(lot, destinationLocationId)) {
-        remote += Math.max(0, quantity - this.activityReservation(lot.lotId));
+        remote
+          += Math.max(
+            0,
+            quantity
+              - this.activityReservationsForOtherDestinations(lot.lotId, destinationLocationId),
+          );
       }
     }
     return { local, remote, future };
@@ -207,7 +217,7 @@ export class SimulationAllocator {
     );
   }
 
-  /** Reserves eligible physical lots for activity inputs before stockpile allocation begins. */
+  /** Reserves local physical lots for activity inputs before remote allocation begins. */
   reserveActivityDemand(typeId: number, quantity: number, destinationLocationId: number): void {
     let remaining = quantity;
     const candidates = (this.itemLotsByTypeId.get(typeId) ?? [])
@@ -215,26 +225,22 @@ export class SimulationAllocator {
         (lot) =>
           lot.source !== "market-order"
           && lot.horizon === "now"
-          && lot.locationId !== undefined
-          && (
-            lot.locationId === destinationLocationId
-            || !this.isExcluded(lot, destinationLocationId)
-          ),
+          && lot.locationId === destinationLocationId,
       )
       .slice()
-      .sort(
-        (left, right) =>
-          Number(left.locationId !== destinationLocationId)
-            - Number(right.locationId !== destinationLocationId)
-          || left.lotId.localeCompare(right.lotId),
-      );
+      .sort((left, right) => left.lotId.localeCompare(right.lotId));
     for (const lot of candidates) {
       if (remaining <= 0) break;
       const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
       const reserved = this.activityReservation(lot.lotId);
       const next = Math.min(remaining, Math.max(0, available - reserved));
       if (next <= 0) continue;
-      this.activityReservationsByLotId.set(lot.lotId, reserved + next);
+      const reservations = this.activityReservationsByLotId.get(lot.lotId) ?? new Map();
+      reservations.set(
+        destinationLocationId,
+        (reservations.get(destinationLocationId) ?? 0) + next,
+      );
+      this.activityReservationsByLotId.set(lot.lotId, reservations);
       remaining -= next;
     }
   }
@@ -843,33 +849,34 @@ export class SimulationAllocator {
     let claimed = 0;
     const orderedLots = [...lots].sort(
       (left, right) =>
-        Number(this.activityReservation(right.lotId) > 0)
-          - Number(this.activityReservation(left.lotId) > 0)
+        Number(this.activityReservation(right.lotId, destinationLocationId) > 0)
+          - Number(this.activityReservation(left.lotId, destinationLocationId) > 0)
         || left.lotId.localeCompare(right.lotId),
     );
     for (const lot of orderedLots) {
       if (remaining <= 0) break;
       const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
       const activityReservation = this.activityReservation(lot.lotId);
+      const ownActivityReservation = this.activityReservation(lot.lotId, destinationLocationId);
       const stockpileReservation = this.stockpileReservation(lot.lotId);
       const protectedQuantity =
         allocationPurpose === "stockpile-demand"
           ? activityReservation
             + (lot.locationId === destinationLocationId ? 0 : stockpileReservation)
-          : 0;
+          : activityReservation - ownActivityReservation;
       const usable = Math.max(0, available - protectedQuantity);
       const next = Math.min(remaining, usable);
       if (next <= 0) continue;
       this.remainingItemQuantityByLotId.set(lot.lotId, available - next);
       if (allocationPurpose === "activity-input") {
-        this.consumeActivityReservation(lot.lotId, next);
+        this.consumeActivityReservation(lot.lotId, destinationLocationId, next);
         const unreservedQuantity = Math.max(
           0,
           available - activityReservation - stockpileReservation,
         );
         this.consumeStockpileReservation(
           lot.lotId,
-          Math.max(0, next - activityReservation - unreservedQuantity),
+          Math.max(0, next - ownActivityReservation - unreservedQuantity),
         );
       }
       else {
@@ -942,8 +949,19 @@ export class SimulationAllocator {
     );
   }
 
-  private activityReservation(lotId: string): number {
-    return this.activityReservationsByLotId.get(lotId) ?? 0;
+  private activityReservation(lotId: string, destinationLocationId?: number): number {
+    const reservations = this.activityReservationsByLotId.get(lotId);
+    if (!reservations) return 0;
+    if (destinationLocationId !== undefined) return reservations.get(destinationLocationId) ?? 0;
+    return [...reservations.values()].reduce((total, quantity) => total + quantity, 0);
+  }
+
+  /** Returns activity reservations on a lot that belong to other destinations. */
+  private activityReservationsForOtherDestinations(
+    lotId: string,
+    destinationLocationId: number,
+  ): number {
+    return this.activityReservation(lotId) - this.activityReservation(lotId, destinationLocationId);
   }
 
   private stockpileReservation(lotId: string): number {
@@ -954,10 +972,19 @@ export class SimulationAllocator {
     return this.activityReservation(lotId) + this.stockpileReservation(lotId);
   }
 
-  private consumeActivityReservation(lotId: string, quantity: number): void {
-    const remaining = this.activityReservation(lotId);
-    if (remaining <= quantity) this.activityReservationsByLotId.delete(lotId);
-    else this.activityReservationsByLotId.set(lotId, remaining - quantity);
+  private consumeActivityReservation(
+    lotId: string,
+    destinationLocationId: number,
+    quantity: number,
+  ): void {
+    const reservations = this.activityReservationsByLotId.get(lotId);
+    const reserved = reservations?.get(destinationLocationId) ?? 0;
+    if (!reservations || reserved <= quantity) {
+      reservations?.delete(destinationLocationId);
+      if (reservations?.size === 0) this.activityReservationsByLotId.delete(lotId);
+      return;
+    }
+    reservations.set(destinationLocationId, reserved - quantity);
   }
 
   private consumeStockpileReservation(lotId: string, quantity: number): void {

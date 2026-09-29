@@ -158,6 +158,8 @@ function corporationSourceForAsset(
     containerItemIds: source.containerItemIds.includes(asset.containerId)
       ? [asset.containerId]
       : [],
+    canTake: source.canTake,
+    canQuery: source.canQuery,
   };
 }
 
@@ -293,17 +295,26 @@ function projectMissingBlueprintAssets(
     .filter((blueprint) => !assetItemIds.has(blueprint.itemId))
     .flatMap((blueprint) => {
       const metadata = metadataByTypeId.get(blueprint.typeId);
-      if (metadata?.category !== "blueprint") return [];
-      const source = snapshot.corporationSources.data.find(
+      if (metadata?.category !== "blueprint" && metadata?.category !== "reactionformula") return [];
+      const rootLocation = snapshot.rootLocations.data.find(
+        (entry) => entry.itemId === blueprint.locationId,
+      )?.location;
+      const sourceCandidates = snapshot.corporationSources.data.filter(
         (candidate) =>
           candidate.corporationId === blueprint.ownerId
           && candidate.locationFlag === blueprint.locationFlag,
       );
-      const rootLocation = snapshot.rootLocations.data.find(
-        (entry) => entry.itemId === blueprint.locationId,
-      )?.location;
+      const source =
+        sourceCandidates.find((candidate) =>
+          candidate.containerItemIds.includes(blueprint.locationId),
+        )
+        ?? sourceCandidates.find(
+          (candidate) =>
+            candidate.rootLocationId === (rootLocation?.locationId ?? blueprint.locationId),
+        );
       const rootLocationId =
         rootLocation?.locationId ?? source?.rootLocationId ?? blueprint.locationId;
+      const isReactionFormula = metadata.category === "reactionformula";
       const isBpo = blueprint.runs === -1;
       const corporationSource = source && {
         rootLocationId: source.rootLocationId,
@@ -311,6 +322,8 @@ function projectMissingBlueprintAssets(
         containerItemIds: source.containerItemIds.includes(blueprint.locationId)
           ? [blueprint.locationId]
           : [],
+        canTake: source.canTake,
+        canQuery: source.canQuery,
       };
       return [
         {
@@ -322,17 +335,21 @@ function projectMissingBlueprintAssets(
           ownerType: blueprint.ownerType,
           ownerId: blueprint.ownerId,
           ...(blueprint.inUse ? { inUse: true } : {}),
-          category: "blueprint" as const,
-          blueprintType: isBpo ? ("bpo" as const) : ("bpc" as const),
-          blueprintPrints: [
-            {
-              itemId: blueprint.itemId,
-              runs: blueprint.runs,
-              type: isBpo ? ("bpo" as const) : ("bpc" as const),
-              me: blueprint.me,
-              te: blueprint.te,
-            },
-          ],
+          category: metadata.category,
+          ...(!isReactionFormula
+            ? {
+                blueprintType: isBpo ? ("bpo" as const) : ("bpc" as const),
+                blueprintPrints: [
+                  {
+                    itemId: blueprint.itemId,
+                    runs: blueprint.runs,
+                    type: isBpo ? ("bpo" as const) : ("bpc" as const),
+                    me: blueprint.me,
+                    te: blueprint.te,
+                  },
+                ],
+              }
+            : {}),
           ...(rootLocation
             ? {
                 sourceLocationName: sourceLocationName(rootLocation, systemNames),
@@ -376,6 +393,8 @@ function corporationSourceForJob(
     rootLocationId: source.rootLocationId,
     locationFlag: source.locationFlag,
     containerItemIds: outputIsContainer ? [job.outputLocationId] : [],
+    canTake: source.canTake,
+    canQuery: source.canQuery,
   };
 }
 

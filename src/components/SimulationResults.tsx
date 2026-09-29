@@ -4,6 +4,7 @@ import Image from "next/image";
 import {
   startTransition,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -88,15 +89,20 @@ import {
   convertSimulationTargetTime,
   getSimulationMinimumRunsPerInstall,
   getSimulationInstallableRuns,
+  simulationReactionFormulaKey,
+  summarizeClientSimulationInstalls,
   solveSimulationActivity,
   splitSimulationRuns,
   isWormholeSystemId,
   type ClientSimulationInstall,
+  type ClientSimulationInstallBatch,
   type ClientSimulationScheduleOptions,
   type ClientSimulationSolveMode,
   type ClientSimulationSlotGroup,
   type ClientSimulationSchedule,
 } from "@/lib/planning/simulator/clientScheduler";
+import { simulationReactionFormulaAvailability } from "@/lib/planning/simulator/reactionFormulaAvailability";
+import type { SimulationReactionFormulaAvailability } from "@/lib/planning/simulator/reactionFormulaAvailability";
 import type { PlanHaulExclusion, PlanStockItem } from "@/lib/planning/types";
 import type {
   SimulationCopyJob,
@@ -358,6 +364,7 @@ type SimulationRowControls = {
     schedule?: ClientSimulationSchedule,
   ) => void;
   onOpenPlan: () => void;
+  onNavigateToPlan: () => void;
   onOpenBuy: () => void;
 };
 
@@ -617,6 +624,29 @@ function simulationDuration(totalSeconds: number): string {
   return parts.length > 0 ? parts.join(" ") : "0m";
 }
 
+/** Rounds a reaction row duration to its two largest useful time units. */
+function simulationReactionRowDuration(totalSeconds: number): string {
+  const safeSeconds = Math.max(0, totalSeconds);
+  const days = Math.floor(safeSeconds / 86_400);
+  if (days > 0) {
+    const roundedHours = Math.round((safeSeconds - days * 86_400) / 3_600);
+    return roundedHours === 24
+      ? `${days + 1}d`
+      : `${days}d${roundedHours > 0 ? ` ${roundedHours}h` : ""}`;
+  }
+
+  const hours = Math.floor(safeSeconds / 3_600);
+  if (hours > 0) {
+    const roundedMinutes = Math.round((safeSeconds - hours * 3_600) / 60);
+    return roundedMinutes === 60
+      ? `${hours + 1}h`
+      : `${hours}h${roundedMinutes > 0 ? ` ${roundedMinutes}m` : ""}`;
+  }
+
+  const roundedMinutes = Math.round(safeSeconds / 60);
+  return roundedMinutes >= 60 ? "1h" : `${roundedMinutes}m`;
+}
+
 /** Formats a covered-run ratio for the activity summary. */
 function simulationCoverage(coveredRuns: number, totalRuns: number): string {
   return totalRuns > 0 ? `${((coveredRuns / totalRuns) * 100).toFixed(1)}%` : "0.0%";
@@ -736,12 +766,16 @@ function SimulationActivitySummary({
           </ResponsiveDialogDrawer>
         </strong>
         <small className="text-[10px] text-muted-foreground uppercase">
-          Available slots{poolLabel ? ` · ${poolLabel}` : ""}
+          {poolLabel ? `${poolLabel} ` : ""}Available slots
         </small>
       </span>
       <span className="flex flex-col">
         <strong className="text-sm">{suggestedInstalls.toLocaleString()}</strong>
         <small className="text-[10px] text-muted-foreground uppercase">Suggested installs</small>
+      </span>
+      <span className="flex flex-col">
+        <strong className="text-sm">{scheduledRuns.toLocaleString()}</strong>
+        <small className="text-[10px] text-muted-foreground uppercase">Suggested runs</small>
       </span>
       <span className="flex flex-col">
         <strong className="text-sm">{simulationDuration(maxJobLength)}</strong>
@@ -759,9 +793,204 @@ function SimulationActivitySummary({
   );
 }
 
+/** Renders reaction fact headers aligned to the wide activity-row columns. */
+function SimulationActivityColumnsHeader() {
+  return (
+    <div className="hidden items-center gap-x-[13px] px-2 pb-1 font-mono text-[10px] text-muted-foreground uppercase lg:grid lg:grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)_auto]">
+      <span aria-hidden="true" />
+      <span aria-hidden="true" />
+      <div className="grid grid-cols-[3rem_3rem_6rem_7rem_6rem_4rem] gap-x-3 text-right">
+        <span aria-hidden="true" />
+        <span className="text-center">Inputs</span>
+        <span className="leading-tight">Reaction Formulas</span>
+        <span>Installable / Total Runs</span>
+        <span>Suggested Runs Per Install</span>
+        <span className="leading-tight">Suggested Installs</span>
+      </div>
+      <span aria-hidden="true" className="w-4" />
+    </div>
+  );
+}
+
+/** Counts owned, visible, in-use, and available formulas for one reaction result row. */
+function simulationReactionFormulaCountsForGroup(
+  group: SimulationIndustryJobGroup,
+  availability: SimulationReactionFormulaAvailability | undefined,
+): {
+  available: number | undefined;
+  visible: number;
+  owned: number;
+  inUse: number | undefined;
+} {
+  if (!availability) return { available: undefined, visible: 0, owned: 0, inUse: undefined };
+
+  return [...new Set(group.jobs.map((job) => job.blueprint.blueprintTypeId))].reduce(
+    (counts, typeId) => {
+      const key = simulationReactionFormulaKey(group.locationId, typeId);
+      if (counts.available !== undefined) {
+        counts.available += availability.availableByLocationAndType.get(key) ?? 0;
+      }
+      if (counts.inUse !== undefined) {
+        counts.inUse += availability.inUseByLocationAndType.get(key) ?? 0;
+      }
+      counts.visible += availability.visibleByLocationAndType.get(key) ?? 0;
+      counts.owned += availability.ownedByLocationAndType.get(key) ?? 0;
+      return counts;
+    },
+    {
+      available: availability.availabilityKnown ? 0 : undefined,
+      visible: 0,
+      owned: 0,
+      inUse: availability.availabilityKnown ? 0 : undefined,
+    },
+  );
+}
+
+/** Renders reaction facts as two label/value columns on narrow screens. */
+function SimulationReactionRowFacts({
+  installPlan,
+  inputs,
+  availableFormulas,
+  visibleFormulas,
+  ownedFormulas,
+  inUseFormulas,
+  installableRuns,
+  totalRuns,
+  installableRuntimeSeconds,
+  totalRuntimeSeconds,
+  suggestedInstallBatches,
+}: {
+  installPlan: ReactNode;
+  inputs: ReactNode;
+  availableFormulas: number | undefined;
+  visibleFormulas: number;
+  ownedFormulas: number;
+  inUseFormulas: number | undefined;
+  installableRuns: number;
+  totalRuns: number;
+  installableRuntimeSeconds: number;
+  totalRuntimeSeconds: number;
+  suggestedInstallBatches: readonly ClientSimulationInstallBatch[];
+}) {
+  const formulaTooltipLabel = [
+    "Reaction Formulas",
+    `Visible: ${quantity(visibleFormulas)}`,
+    `Owned: ${quantity(ownedFormulas)}`,
+    `In Use: ${inUseFormulas === undefined ? "Unknown" : quantity(inUseFormulas)}`,
+    `Available: ${availableFormulas === undefined ? "Unknown" : quantity(availableFormulas)}`,
+  ].join(". ");
+  const displayInstallBatches =
+    suggestedInstallBatches.length > 0
+      ? suggestedInstallBatches
+      : [{ runsPerInstall: 0, installCount: 0, estimatedDurationSecondsPerInstall: 0 }];
+
+  return (
+    <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 text-right font-mono text-xs lg:grid-cols-[3rem_3rem_6rem_7rem_6rem_4rem] lg:gap-x-3">
+      <span className="col-span-2 flex items-center justify-self-start lg:col-span-1 lg:col-start-1">
+        {installPlan}
+      </span>
+      <span className="text-muted-foreground lg:hidden">Inputs</span>
+      <span className="flex justify-self-center lg:col-start-2 lg:row-start-1">{inputs}</span>
+      <span className="text-muted-foreground lg:hidden">Reaction Formulas</span>
+      <span className="flex items-center justify-end lg:col-start-3 lg:row-start-1">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                aria-label={formulaTooltipLabel}
+                className="flex items-center justify-end"
+                role="group"
+                tabIndex={0}
+              >
+                {availableFormulas === undefined ? (
+                  <span className="text-muted-foreground">?</span>
+                ) : (
+                  <CopyableNumber
+                    value={availableFormulas}
+                    copyLabel="Available reaction formulas"
+                  />
+                )}
+                <span aria-hidden="true" className="whitespace-pre">
+                  {" / "}
+                </span>
+                <CopyableNumber value={visibleFormulas} copyLabel="Visible reaction formulas" />
+              </span>
+            }
+          />
+          <TooltipContent>
+            <div className="flex flex-col items-start gap-1">
+              <strong>Reaction Formulas</strong>
+              <span>Visible: {quantity(visibleFormulas)}</span>
+              <span>Owned: {quantity(ownedFormulas)}</span>
+              <span>
+                In Use: {inUseFormulas === undefined ? "Unknown" : quantity(inUseFormulas)}
+              </span>
+              <span>
+                Available:{" "}
+                {availableFormulas === undefined ? "Unknown" : quantity(availableFormulas)}
+              </span>
+            </div>
+          </TooltipContent>
+        </Tooltip>
+      </span>
+      <span className="text-muted-foreground lg:hidden">Installable / Total Runs</span>
+      <span className="flex min-w-0 flex-col items-end justify-self-end lg:col-start-4 lg:row-start-1">
+        <span className="flex items-center justify-end">
+          <CopyableNumber value={installableRuns} copyLabel="Installable runs" />
+          <span aria-hidden="true" className="whitespace-pre">
+            {" / "}
+          </span>
+          <CopyableNumber value={totalRuns} copyLabel="Total runs" />
+        </span>
+        <small className="text-muted-foreground">
+          {simulationReactionRowDuration(installableRuntimeSeconds)} /{" "}
+          {simulationReactionRowDuration(totalRuntimeSeconds)}
+        </small>
+      </span>
+      <span className="text-muted-foreground lg:hidden">Suggested Runs Per Install</span>
+      <span className="flex min-w-0 flex-col items-end gap-y-1 justify-self-end lg:col-start-5 lg:row-start-1">
+        {displayInstallBatches.map((batch) => (
+          <span
+            key={`${batch.runsPerInstall}:${batch.installCount}`}
+            className="flex flex-col items-end"
+          >
+            <CopyableNumber
+              value={batch.runsPerInstall}
+              copyLabel={`${batch.runsPerInstall} runs per install`}
+            />
+            <small className="text-muted-foreground">
+              {simulationReactionRowDuration(batch.estimatedDurationSecondsPerInstall)}
+            </small>
+          </span>
+        ))}
+      </span>
+      <span className="text-muted-foreground lg:hidden">Suggested Installs</span>
+      <span className="flex flex-col items-end gap-y-1 justify-self-end lg:col-start-6 lg:row-start-1">
+        {displayInstallBatches.map((batch) => (
+          <span
+            key={`${batch.runsPerInstall}:${batch.installCount}`}
+            className="flex flex-col items-end"
+          >
+            <CopyableNumber
+              value={batch.installCount}
+              copyLabel={`${batch.installCount} installs at ${batch.runsPerInstall} runs each`}
+            />
+            <span aria-hidden="true" className="h-4" />
+          </span>
+        ))}
+      </span>
+    </div>
+  );
+}
+
 type SimulationBlueprintCounts = {
   owned: number;
   available: number;
+};
+
+type SimulationBlueprintCountSummary = {
+  owned: number;
+  available: number | undefined;
 };
 
 /** Counts owned and currently available blueprint assets for one simulator job. */
@@ -815,6 +1044,7 @@ type SimulationInstallDetail = {
 
 type CompactInstallGroup = {
   runs: number;
+  durationSeconds: number;
   installs: SimulationInstallDetail[];
   displayInstallCount: number;
   completionDetails: SimulationInstallDetail[];
@@ -873,6 +1103,10 @@ function compactInstallGroups(
     )
     .map(([, groupedInstalls]) => ({
       runs: groupedInstalls[0].install.runs,
+      durationSeconds: Math.max(
+        ...groupedInstalls.map((detail) => detail.install.durationSeconds),
+        0,
+      ),
       installs: groupedInstalls,
       displayInstallCount: groupedInstalls.length,
       completionDetails: groupedInstalls,
@@ -934,6 +1168,7 @@ function compactReactionRuntimeGroups(
       completionOffset += completionDetails.length;
       groups.push({
         runs,
+        durationSeconds: Math.max(...details.map((detail) => detail.install.durationSeconds), 0),
         installs: details,
         displayInstallCount,
         completionDetails,
@@ -953,6 +1188,7 @@ function installDetailsWithRuns(
     install: {
       ...detail.install,
       runs,
+      durationSeconds: Math.ceil(runs * detail.entry.job.durationPerRunSeconds),
     },
   }));
 }
@@ -1017,6 +1253,7 @@ type SimulationInstallPlanDialogLayoutProps = {
   installDetails: SimulationInstallDetail[];
   compactGroups: CompactInstallGroup[];
   activityLabel: "reaction" | "manufacturing";
+  blueprintCounts?: SimulationBlueprintCountSummary;
   characterNamesById: ReadonlyMap<number, string>;
   onOpenPlan: () => void;
   readOnly: boolean;
@@ -1025,6 +1262,7 @@ type SimulationInstallPlanDialogLayoutProps = {
 type SimulationInstallPlanDialogModelProps = {
   entries: readonly SimulationInstallPlanEntry[];
   scheduleOptions: ClientSimulationScheduleOptions;
+  blueprintCounts?: SimulationBlueprintCountSummary;
   characterNamesById: ReadonlyMap<number, string>;
   onOpenPlan: () => void;
   readOnly: boolean;
@@ -1056,6 +1294,7 @@ function SimulationReactionInstallPlanDialog({
   entries,
   solveMode,
   scheduleOptions,
+  blueprintCounts,
   characterNamesById,
   onOpenPlan,
   readOnly,
@@ -1072,6 +1311,7 @@ function SimulationReactionInstallPlanDialog({
       installDetails={installDetails}
       compactGroups={compactGroups}
       activityLabel="reaction"
+      blueprintCounts={blueprintCounts}
       characterNamesById={characterNamesById}
       onOpenPlan={onOpenPlan}
       readOnly={readOnly}
@@ -1108,6 +1348,7 @@ function SimulationInstallPlanDialogLayout({
   installDetails,
   compactGroups,
   activityLabel,
+  blueprintCounts: blueprintCountsOverride,
   characterNamesById,
   onOpenPlan,
   readOnly,
@@ -1117,16 +1358,25 @@ function SimulationInstallPlanDialogLayout({
   const detailedInstallDetails = detailedInstallDetailsFromGroups(compactGroups);
   const installableRuns = entries.reduce((total, entry) => total + entry.job.readyNowRuns, 0);
   const totalRuns = entries.reduce((total, entry) => total + entry.job.requiredRuns, 0);
+  const installableRuntimeSeconds = entries.reduce(
+    (total, entry) => total + entry.job.readyNowRuns * entry.job.durationPerRunSeconds,
+    0,
+  );
+  const totalRuntimeSeconds = entries.reduce(
+    (total, entry) => total + entry.job.requiredRuns * entry.job.durationPerRunSeconds,
+    0,
+  );
   const allocatedSlots = installDetails.filter(
     ({ install }) => install.characterId !== undefined && install.slotIndex !== undefined,
   ).length;
-  const blueprintCounts = entries.reduce(
+  const entryBlueprintCounts = entries.reduce(
     (counts, entry) => ({
       owned: counts.owned + entry.blueprintCounts.owned,
       available: counts.available + entry.blueprintCounts.available,
     }),
     { owned: 0, available: 0 },
   );
+  const blueprintCounts = blueprintCountsOverride ?? entryBlueprintCounts;
   const hasInsufficientInputs = entries.some(
     (entry) =>
       entry.job.inputs.length > 0
@@ -1187,16 +1437,18 @@ function SimulationInstallPlanDialogLayout({
       open={open}
       onOpenChange={setOpen}
       trigger={
-        <Button
-          type="button"
-          variant="outline"
-          size="icon-xs"
-          aria-label={`View ${productName} install plan`}
-          className="size-6 text-muted-foreground transition-colors hover:text-foreground"
-          onClick={(event) => event.stopPropagation()}
-        >
-          <ListChecks aria-hidden="true" />
-        </Button>
+        installableRuns > 0 ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-xs"
+            aria-label={`View ${productName} install plan`}
+            className="size-6 text-muted-foreground transition-colors hover:text-foreground"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <ListChecks aria-hidden="true" />
+          </Button>
+        ) : undefined
       }
       triggerTooltip={`View ${productName} install plan`}
       title={`${productName} install plan`}
@@ -1208,11 +1460,19 @@ function SimulationInstallPlanDialogLayout({
               <strong>{installableRuns.toLocaleString()}</strong>
               <small className="text-[10px] text-muted-foreground uppercase">
                 Installable runs
+                {activityLabel === "reaction"
+                  ? ` · ${simulationDuration(installableRuntimeSeconds)}`
+                  : ""}
               </small>
             </div>
             <div className="flex flex-col">
               <strong>{totalRuns.toLocaleString()}</strong>
-              <small className="text-[10px] text-muted-foreground uppercase">Total runs</small>
+              <small className="text-[10px] text-muted-foreground uppercase">
+                Total runs
+                {activityLabel === "reaction"
+                  ? ` · ${simulationDuration(totalRuntimeSeconds)}`
+                  : ""}
+              </small>
             </div>
             <div className="flex flex-col">
               <strong>{allocatedSlots.toLocaleString()}</strong>
@@ -1221,7 +1481,7 @@ function SimulationInstallPlanDialogLayout({
             <div className="flex flex-col">
               <strong>
                 {blueprintCounts.owned.toLocaleString()} /{" "}
-                {blueprintCounts.available.toLocaleString()}
+                {blueprintCounts.available?.toLocaleString() ?? "?"}
               </strong>
               <small className="text-[10px] text-muted-foreground uppercase">
                 BPs owned / available
@@ -1315,7 +1575,7 @@ function SimulationInstallPlanDialogLayout({
                   )}
                   <CopyableNumber
                     value={install.runs}
-                    suffix={` run${install.runs === 1 ? "" : "s"}`}
+                    suffix={` run${install.runs === 1 ? "" : "s"}${activityLabel === "reaction" ? ` · ${simulationDuration(install.durationSeconds)}` : ""}`}
                     copyLabel={`Install run${install.runs === 1 ? "" : "s"}`}
                   />
                 </SwitchedResultRow>
@@ -1323,13 +1583,6 @@ function SimulationInstallPlanDialogLayout({
             })
           : compactGroups.map((group) => {
               const firstDetail = group.installs[0];
-              const blueprintTypeIds = [
-                ...new Set(
-                  group.installs.map((detail) => detail.entry.job.blueprint.blueprintTypeId),
-                ),
-              ];
-              const blueprintLabel =
-                blueprintTypeIds.length === 1 ? `BP ${blueprintTypeIds[0]}` : "Multiple blueprints";
               return (
                 <SwitchedResultRow
                   key={`${firstDetail.entry.job.productTypeId}:${group.runs}`}
@@ -1341,7 +1594,6 @@ function SimulationInstallPlanDialogLayout({
                   linkHash="plan-breakdown"
                   navigateInPlace
                   onNavigate={navigateToPlan}
-                  subline={`${blueprintLabel} · ${group.displayInstallCount} install${group.displayInstallCount === 1 ? "" : "s"} grouped by runs per install`}
                   variation="icon"
                   showSwitch={false}
                   checkboxChecked={allCompleted(group.completionDetails)}
@@ -1358,11 +1610,16 @@ function SimulationInstallPlanDialogLayout({
                   }
                   contentClassName="w-full justify-between gap-3 self-end text-right font-mono text-xs sm:grid sm:min-w-[11rem] sm:grid-cols-[minmax(0,1fr)_max-content] sm:gap-x-4 sm:justify-normal sm:self-auto"
                 >
-                  <CopyableNumber
-                    value={group.runs}
-                    suffix={` run${group.runs === 1 ? "" : "s"} each`}
-                    copyLabel="Runs per install"
-                  />
+                  <span className="flex flex-col items-end">
+                    <CopyableNumber
+                      value={group.runs}
+                      suffix={` run${group.runs === 1 ? "" : "s"} each`}
+                      copyLabel="Runs per install"
+                    />
+                    <small className="text-muted-foreground">
+                      {simulationDuration(group.durationSeconds)}
+                    </small>
+                  </span>
                   <span>
                     {quantity(group.displayInstallCount)} install
                     {group.displayInstallCount === 1 ? "" : "s"}
@@ -2067,6 +2324,7 @@ function SimulationReactionFormulaRow({
       rowKey={`reaction-formula:${item.locationId}:${item.typeId}`}
       typeId={item.typeId}
       name={item.typeName}
+      linkPath="assets"
       variation="bpc"
       wideBreakpoint="md"
       summary={
@@ -2650,7 +2908,7 @@ function SimulationInventionTab({
               linkSearchParams={{ simulationTab: "plan" }}
               linkHash="plan-breakdown"
               navigateInPlace
-              onNavigate={controls.onOpenPlan}
+              onNavigate={controls.onNavigateToPlan}
               selected={controls.selectedRowKey === rowKey}
               onClick={() => controls.onSelectRow(rowKey)}
               showSwitch={false}
@@ -2680,6 +2938,7 @@ function SimulationSimpleJobRow({
   summary,
   variation = "icon",
   wideBreakpoint = "sm",
+  linkPath = "planner",
   showCheckbox = false,
   identityTrailingContent,
   controls,
@@ -2691,6 +2950,7 @@ function SimulationSimpleJobRow({
   summary: ReactNode;
   variation?: "icon" | "bp" | "bpc";
   wideBreakpoint?: "sm" | "md";
+  linkPath?: "planner" | "assets";
   showCheckbox?: boolean;
   identityTrailingContent?: ReactNode;
   controls: SimulationRowControls;
@@ -2700,12 +2960,16 @@ function SimulationSimpleJobRow({
     typeId,
     subline,
     variation,
-    linkPath: "planner" as const,
-    linkIcon: ClipboardList,
-    linkSearchParams: { simulationTab: "plan" },
-    linkHash: "plan-breakdown",
-    navigateInPlace: true,
-    onNavigate: controls.onOpenPlan,
+    linkPath,
+    ...(linkPath === "assets"
+      ? {}
+      : {
+          linkIcon: ClipboardList,
+          linkSearchParams: { simulationTab: "plan" },
+          linkHash: "plan-breakdown",
+          navigateInPlace: true,
+          onNavigate: controls.onNavigateToPlan,
+        }),
     wideBreakpoint,
     selected: controls.selectedRowKey === rowKey,
     onClick: () => controls.onSelectRow(rowKey),
@@ -2798,10 +3062,14 @@ function SimulationActivityTab({
   tab,
   jobs,
   allJobs,
+  includedRows,
+  industryJobs,
   simulationInputRevision,
   stock,
+  visibleReactionFormulaStock,
   locationNamesById,
   locationSystemIdsById,
+  systemNamesById,
   reactionMaterialBonusesByLocation,
   characterNamesById,
   characterStatuses,
@@ -2815,10 +3083,14 @@ function SimulationActivityTab({
   tab: "react" | "manufacture";
   jobs: SimulationIndustryJob[];
   allJobs: readonly SimulationIndustryJob[];
+  includedRows: Readonly<Record<string, boolean>>;
+  industryJobs?: ClientJobsResponse["jobs"];
   simulationInputRevision: string;
   stock: readonly PlanStockItem[];
+  visibleReactionFormulaStock: readonly PlanStockItem[];
   locationNamesById: ReadonlyMap<number, string>;
   locationSystemIdsById?: ReadonlyMap<number, number>;
+  systemNamesById?: ReadonlyMap<number, string>;
   reactionMaterialBonusesByLocation: ReadonlyMap<number, number>;
   characterNamesById: ReadonlyMap<number, string>;
   characterStatuses: readonly ClientCharacterStatus[];
@@ -2835,11 +3107,20 @@ function SimulationActivityTab({
   const [protectReactionMaterialBonus, setProtectReactionMaterialBonus] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
   const [groupCopyStatus, setGroupCopyStatus] = useState<SimulationGroupCopyStatus>(null);
-  const allSlotCharacters = simulationSlotCharacters(
-    characterStatuses,
-    characterNamesById,
-    slotUsage,
-    tab,
+  const allSlotCharacters = useMemo(
+    () => simulationSlotCharacters(characterStatuses, characterNamesById, slotUsage, tab),
+    [characterStatuses, characterNamesById, slotUsage, tab],
+  );
+  const slotGroups = useMemo(
+    () =>
+      allSlotCharacters.map(
+        ({ characterId, availableSlots, systemId }): ClientSimulationSlotGroup => ({
+          characterId,
+          availableSlots,
+          systemId,
+        }),
+      ),
+    [allSlotCharacters],
   );
   const slotCharacters =
     tab === "react" && locationSystemIdsById
@@ -2851,6 +3132,13 @@ function SimulationActivityTab({
   const availableSlots = slotCharacters.reduce(
     (total, character) => total + character.availableSlots,
     0,
+  );
+  const reactionFormulaCounts = useMemo(
+    () =>
+      tab === "react"
+        ? simulationReactionFormulaAvailability(stock, industryJobs, visibleReactionFormulaStock)
+        : undefined,
+    [industryJobs, stock, tab, visibleReactionFormulaStock],
   );
   const effectiveSolveMode = tab === "react" ? solveMode : "available-slots";
   const baseScheduleRevision = [
@@ -2876,44 +3164,56 @@ function SimulationActivityTab({
       .sort(([left], [right]) => left - right)
       .map(([locationId, bonus]) => `${locationId}:${bonus}`),
   ].join("|");
-  const activeJobs = jobs.filter(
-    (job) =>
-      !controls.isTypeCompleted(tab, job.productTypeId)
-      && !controls.isCompleted(`${tab}:${job.jobId}`, baseScheduleRevision, true),
+  const scheduleRevision = [baseScheduleRevision, ...jobs.map((job) => job.jobId).sort()].join("|");
+  const enabledJobIds = useMemo(
+    () =>
+      new Set(
+        jobs.filter((job) => includedRows[`${tab}:${job.jobId}`] ?? true).map((job) => job.jobId),
+      ),
+    [includedRows, jobs, tab],
   );
-  const scheduleRevision = [
-    baseScheduleRevision,
-    ...activeJobs.map((job) => job.jobId).sort(),
-  ].join("|");
-  const enabledJobIds = new Set(
-    activeJobs.filter((job) => controls.isIncluded(`${tab}:${job.jobId}`)).map((job) => job.jobId),
-  );
-  const schedules = solveSimulationActivity(
-    jobs,
-    availableSlots,
-    effectiveSolveMode,
-    Number(targetTime),
-    enabledJobIds,
-    allSlotCharacters.map(
-      ({ characterId, availableSlots, systemId }): ClientSimulationSlotGroup => ({
-        characterId,
+  const schedules = useMemo(
+    () =>
+      solveSimulationActivity(
+        jobs,
         availableSlots,
-        systemId,
-      }),
-    ),
-    {
-      protectReactionMaterialBonus: tab === "react" && protectReactionMaterialBonus,
+        effectiveSolveMode,
+        Number(targetTime),
+        enabledJobIds,
+        slotGroups,
+        {
+          ...(reactionFormulaCounts?.availabilityKnown
+            ? {
+                availableReactionFormulaCountsByLocationAndType:
+                  reactionFormulaCounts.availableByLocationAndType,
+              }
+            : {}),
+          protectReactionMaterialBonus: tab === "react" && protectReactionMaterialBonus,
+          reactionMaterialBonusesByLocation,
+          ...(tab === "react" && locationSystemIdsById ? { locationSystemIdsById } : {}),
+        },
+      ),
+    [
+      availableSlots,
+      effectiveSolveMode,
+      enabledJobIds,
+      jobs,
+      locationSystemIdsById,
+      protectReactionMaterialBonus,
+      reactionFormulaCounts,
       reactionMaterialBonusesByLocation,
-      ...(tab === "react" && locationSystemIdsById ? { locationSystemIdsById } : {}),
-    },
+      slotGroups,
+      tab,
+      targetTime,
+    ],
   );
   const metricJobs =
     tab === "react" && locationSystemIdsById
-      ? activeJobs.filter((job) => {
+      ? jobs.filter((job) => {
           const systemId = locationSystemIdsById.get(job.locationId);
           return systemId !== undefined && !isWormholeSystemId(systemId);
         })
-      : activeJobs;
+      : jobs;
   const scheduledRuns = metricJobs.reduce(
     (total, job) => total + (schedules.get(job.jobId)?.runs ?? 0),
     0,
@@ -2932,8 +3232,6 @@ function SimulationActivityTab({
     0,
   );
   const presentationGroups: SimulationIndustryJobGroup[] = groupSimulationActivityJobs(jobs);
-  const activeJobIds = new Set(activeJobs.map((job) => job.jobId));
-
   async function copyEntries(entries: readonly SimulationIndustryJob[], status: "list" | number) {
     const text = installableRunsText(entries);
     try {
@@ -3041,7 +3339,7 @@ function SimulationActivityTab({
               type="button"
               variant="outline"
               className="ml-auto max-[640px]:ml-0 max-[640px]:w-full"
-              onClick={() => void copyEntries(activeJobs, "list")}
+              onClick={() => void copyEntries(jobs, "list")}
             >
               <CopyIcon aria-hidden="true" />
               {copyStatus || "Copy list"}
@@ -3065,6 +3363,7 @@ function SimulationActivityTab({
         tab={tab}
         items={presentationGroups}
         locationNamesById={locationNamesById}
+        groupHeader={tab === "react" ? <SimulationActivityColumnsHeader /> : undefined}
         getGroupHeader={(locationId, groupItems) => {
           const systemId = locationSystemIdsById?.get(locationId);
           if (tab !== "react" || !isWormholeSystemId(systemId)) return undefined;
@@ -3072,7 +3371,7 @@ function SimulationActivityTab({
           const groupJobIds = new Set(
             groupItems.flatMap((group) => group.jobs.map((job) => job.jobId)),
           );
-          const scopedJobs = activeJobs.filter((job) => groupJobIds.has(job.jobId));
+          const scopedJobs = jobs.filter((job) => groupJobIds.has(job.jobId));
           const scopedScheduledRuns = scopedJobs.reduce(
             (total, job) => total + (schedules.get(job.jobId)?.runs ?? 0),
             0,
@@ -3099,17 +3398,24 @@ function SimulationActivityTab({
           );
 
           return (
-            <SimulationActivitySummary
-              availableSlots={scopedSlots}
-              slotCharacters={scopedCharacters}
-              activityLabel={activityLabel}
-              suggestedInstalls={scopedSuggestedInstalls}
-              maxJobLength={scopedMaxJobLength}
-              scheduledRuns={scopedScheduledRuns}
-              installableRuns={scopedInstallableRuns}
-              totalRuns={scopedTotalRuns}
-              poolLabel="Wormhole"
-            />
+            <div className="flex flex-col gap-2">
+              <SimulationActivitySummary
+                availableSlots={scopedSlots}
+                slotCharacters={scopedCharacters}
+                activityLabel={activityLabel}
+                suggestedInstalls={scopedSuggestedInstalls}
+                maxJobLength={scopedMaxJobLength}
+                scheduledRuns={scopedScheduledRuns}
+                installableRuns={scopedInstallableRuns}
+                totalRuns={scopedTotalRuns}
+                poolLabel={
+                  systemId === undefined
+                    ? "Wormhole"
+                    : (systemNamesById?.get(systemId) ?? "Wormhole")
+                }
+              />
+              <SimulationActivityColumnsHeader />
+            </div>
           );
         }}
         reactionMaterialBonusesByLocation={
@@ -3121,9 +3427,7 @@ function SimulationActivityTab({
         getGroupAction={(locationId, groupItems) => ({
           onCopyGroup: () =>
             void copyEntries(
-              groupItems.flatMap((group) =>
-                group.jobs.filter((job) => activeJobIds.has(job.jobId)),
-              ),
+              groupItems.flatMap((group) => group.jobs),
               locationId,
             ),
           copyLabel:
@@ -3140,22 +3444,15 @@ function SimulationActivityTab({
           const groupEntries = group.jobs.map((job) => {
             const rowKey = `${tab}:${job.jobId}`;
             const generatedSchedule = schedules.get(job.jobId);
-            const active = activeJobIds.has(job.jobId);
             const generatedScheduleIdentity = simulationInstallScheduleIdentity(
               scheduleRevision,
               generatedSchedule?.installs ?? [],
             );
-            const jobScheduleRevision = active ? scheduleRevision : baseScheduleRevision;
-            const scheduleIdentity = active
-              ? generatedScheduleIdentity
-              : simulationInstallScheduleIdentity(
-                  baseScheduleRevision,
-                  generatedSchedule?.installs ?? [],
-                );
+            const jobScheduleRevision = scheduleRevision;
+            const scheduleIdentity = generatedScheduleIdentity;
             const completedSchedule = controls.getCompletedSchedule(
               rowKey,
-              active ? generatedScheduleIdentity : baseScheduleRevision,
-              !active,
+              generatedScheduleIdentity,
             );
             const schedule =
               generatedSchedule && generatedSchedule.installs.length > 0
@@ -3164,24 +3461,16 @@ function SimulationActivityTab({
             const included = controls.isIncluded(rowKey);
             const installableRuns =
               schedule && schedule.runs > 0 ? schedule.runs : getSimulationInstallableRuns(job);
-            const installedRuns = controls.getInstalledRuns(
-              rowKey,
-              active ? generatedScheduleIdentity : baseScheduleRevision,
-              !active,
-            );
-            const completed = controls.isCompleted(
-              rowKey,
-              active ? generatedScheduleIdentity : baseScheduleRevision,
-              !active,
-            );
+            const installedRuns = controls.getInstalledRuns(rowKey, generatedScheduleIdentity);
+            const completed = controls.isCompleted(rowKey, generatedScheduleIdentity);
             const completedInstallIds = controls.getCompletedInstallIds(
               rowKey,
-              active ? generatedScheduleIdentity : baseScheduleRevision,
-              !active,
+              generatedScheduleIdentity,
             );
             return {
               job,
               rowKey,
+              generatedSchedule,
               schedule,
               scheduleIdentity,
               scheduleRevision: jobScheduleRevision,
@@ -3202,9 +3491,26 @@ function SimulationActivityTab({
             (total, entry) => total + entry.installedRuns,
             0,
           );
-          const groupCompleted = controls.isTypeCompleted(tab, group.productTypeId);
+          const groupCompleted =
+            controls.isTypeCompleted(tab, group.productTypeId)
+            || (groupInstallableRuns > 0 && groupInstalledRuns >= groupInstallableRuns);
           const groupPartiallyInstalled = groupInstalledRuns > 0 && !groupCompleted;
           const groupIncluded = groupEntries.every((entry) => entry.included);
+          const suggestedInstallSummary = summarizeClientSimulationInstalls(
+            groupEntries.flatMap((entry) => entry.generatedSchedule?.installs ?? []),
+          );
+          const installableRuntimeSeconds = group.jobs.reduce(
+            (total, job) => total + getSimulationInstallableRuns(job) * job.durationPerRunSeconds,
+            0,
+          );
+          const totalRuntimeSeconds = group.jobs.reduce(
+            (total, job) => total + job.requiredRuns * job.durationPerRunSeconds,
+            0,
+          );
+          const formulaCounts = simulationReactionFormulaCountsForGroup(
+            group,
+            reactionFormulaCounts,
+          );
           const updateGroupCompletion = (checked: boolean) => {
             controls.onTypeCompletedChange(tab, group.productTypeId, checked);
             for (const entry of groupEntries) {
@@ -3254,7 +3560,7 @@ function SimulationActivityTab({
               linkSearchParams={{ simulationTab: "plan" }}
               linkHash="plan-breakdown"
               navigateInPlace
-              onNavigate={controls.onOpenPlan}
+              onNavigate={controls.onNavigateToPlan}
               wideBreakpoint="lg"
               selected={!groupCompleted && controls.selectedRowKey === group.groupKey}
               installed={groupCompleted}
@@ -3272,63 +3578,93 @@ function SimulationActivityTab({
                 tab === "react" ? "Mark reaction installed" : "Mark manufacturing job installed"
               }
               onCheckboxChange={updateGroupCompletion}
-              contentClassName={cn(
-                "grid w-full grid-cols-[1fr_auto_1fr] items-center gap-3 self-end text-right font-mono text-xs",
-                "lg:w-auto lg:grid-cols-[3rem_9rem_minmax(11rem,max-content)] lg:justify-end lg:gap-x-5 lg:self-auto",
-              )}
+              contentClassName={
+                tab === "react"
+                  ? "w-full self-end text-right font-mono text-xs lg:w-auto lg:self-auto"
+                  : "grid w-full grid-cols-[1fr_auto_1fr] items-center gap-3 self-end text-right font-mono text-xs lg:w-auto lg:grid-cols-[3rem_9rem_minmax(11rem,max-content)] lg:justify-end lg:gap-x-5 lg:self-auto"
+              }
             >
-              <span className="flex items-center justify-self-start">
-                {tab === "react" ? (
-                  <SimulationReactionInstallPlanDialog
-                    entries={installPlanEntries}
-                    solveMode={solveMode}
-                    scheduleOptions={{
-                      protectReactionMaterialBonus: protectReactionMaterialBonus,
-                      reactionMaterialBonusesByLocation,
-                    }}
-                    characterNamesById={characterNamesById}
-                    onOpenPlan={controls.onOpenPlan}
-                    readOnly={readOnly}
-                  />
-                ) : (
-                  <SimulationManufacturingInstallPlanDialog
-                    entries={installPlanEntries}
-                    scheduleOptions={{
-                      protectReactionMaterialBonus: false,
-                      reactionMaterialBonusesByLocation,
-                    }}
-                    characterNamesById={characterNamesById}
-                    onOpenPlan={controls.onOpenPlan}
-                    readOnly={readOnly}
-                  />
-                )}
-              </span>
-              <span className="flex items-center justify-self-center">
-                <SimulationJobInputsResponsive
-                  job={group.jobs[0]}
-                  jobs={group.jobs}
-                  allJobs={allJobs}
-                  onOpenPlan={controls.onOpenPlan}
-                  onOpenBuy={controls.onOpenBuy}
+              {tab === "react" ? (
+                <SimulationReactionRowFacts
+                  installPlan={
+                    <SimulationReactionInstallPlanDialog
+                      entries={installPlanEntries}
+                      solveMode={solveMode}
+                      blueprintCounts={{
+                        owned: formulaCounts.owned,
+                        available: formulaCounts.available,
+                      }}
+                      scheduleOptions={{
+                        protectReactionMaterialBonus,
+                        reactionMaterialBonusesByLocation,
+                      }}
+                      characterNamesById={characterNamesById}
+                      onOpenPlan={controls.onOpenPlan}
+                      readOnly={readOnly}
+                    />
+                  }
+                  inputs={
+                    <SimulationJobInputsResponsive
+                      job={group.jobs[0]}
+                      jobs={group.jobs}
+                      allJobs={allJobs}
+                      onOpenPlan={controls.onOpenPlan}
+                      onOpenBuy={controls.onOpenBuy}
+                      showLabel={false}
+                    />
+                  }
+                  availableFormulas={formulaCounts.available}
+                  visibleFormulas={formulaCounts.visible}
+                  ownedFormulas={formulaCounts.owned}
+                  inUseFormulas={formulaCounts.inUse}
+                  installableRuns={group.quantities.installableRuns}
+                  totalRuns={group.quantities.totalRuns}
+                  installableRuntimeSeconds={installableRuntimeSeconds}
+                  totalRuntimeSeconds={totalRuntimeSeconds}
+                  suggestedInstallBatches={suggestedInstallSummary.batches}
                 />
-              </span>
-              <span
-                className={cn(
-                  "flex min-w-0 items-center gap-1 justify-self-end whitespace-normal",
-                  "lg:whitespace-nowrap",
-                )}
-              >
-                <CopyableNumber
-                  value={group.quantities.installableRuns}
-                  suffix=" / "
-                  copyLabel="Installable runs"
-                />
-                <CopyableNumber
-                  value={group.quantities.totalRuns}
-                  suffix=" runs"
-                  copyLabel="Total runs"
-                />
-              </span>
+              ) : (
+                <>
+                  <span className="flex items-center justify-self-start">
+                    <SimulationManufacturingInstallPlanDialog
+                      entries={installPlanEntries}
+                      scheduleOptions={{
+                        protectReactionMaterialBonus: false,
+                        reactionMaterialBonusesByLocation,
+                      }}
+                      characterNamesById={characterNamesById}
+                      onOpenPlan={controls.onOpenPlan}
+                      readOnly={readOnly}
+                    />
+                  </span>
+                  <span className="flex items-center justify-self-center">
+                    <SimulationJobInputsResponsive
+                      job={group.jobs[0]}
+                      jobs={group.jobs}
+                      allJobs={allJobs}
+                      onOpenPlan={controls.onOpenPlan}
+                      onOpenBuy={controls.onOpenBuy}
+                    />
+                  </span>
+                  <span
+                    className={cn(
+                      "flex min-w-0 items-center gap-1 justify-self-end whitespace-normal",
+                      "lg:whitespace-nowrap",
+                    )}
+                  >
+                    <CopyableNumber
+                      value={group.quantities.installableRuns}
+                      suffix=" / "
+                      copyLabel="Installable runs"
+                    />
+                    <CopyableNumber
+                      value={group.quantities.totalRuns}
+                      suffix=" runs"
+                      copyLabel="Total runs"
+                    />
+                  </span>
+                </>
+              )}
             </SwitchedResultRow>
           );
         }}
@@ -3604,7 +3940,7 @@ function SimulationHaulRow({
       linkSearchParams={{ simulationTab: "plan" }}
       linkHash="plan-breakdown"
       navigateInPlace
-      onNavigate={controls.onOpenPlan}
+      onNavigate={controls.onNavigateToPlan}
       selected={!completed && controls.selectedRowKey === rowKey}
       installed={completed}
       onClick={completed || isLoading || readOnly ? undefined : () => controls.onSelectRow(rowKey)}
@@ -3927,9 +4263,12 @@ export default function SimulationResults({
   result,
   status,
   stock,
+  visibleReactionFormulaStock = stock,
+  industryJobs,
   marketBuyOrderQuantities,
   locationNamesById,
   locationSystemIdsById,
+  systemNamesById,
   stockpileLocations,
   reactionMaterialBonusesByLocation,
   characterNamesById,
@@ -3951,9 +4290,12 @@ export default function SimulationResults({
   result: SimulationResultV2 | null;
   status: string;
   stock: readonly PlanStockItem[];
+  visibleReactionFormulaStock?: readonly PlanStockItem[];
+  industryJobs?: ClientJobsResponse["jobs"];
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
   locationNamesById: ReadonlyMap<number, string>;
   locationSystemIdsById?: ReadonlyMap<number, number>;
+  systemNamesById?: ReadonlyMap<number, string>;
   stockpileLocations: ReadonlySet<number>;
   reactionMaterialBonusesByLocation: ReadonlyMap<number, number>;
   characterNamesById: ReadonlyMap<number, string>;
@@ -4217,6 +4559,7 @@ export default function SimulationResults({
       }));
     },
     onOpenPlan: () => selectTab("plan"),
+    onNavigateToPlan: () => setActiveTab("plan"),
     onOpenBuy: () => selectTab("buy"),
   };
   const onOpenGroupChange = (groupKey: string, open: boolean) =>
@@ -4281,11 +4624,15 @@ export default function SimulationResults({
     <SimulationTabContent
       activeTab={selectedTab}
       result={result}
+      includedRows={includedRows}
       haulTasks={visibleHaulTasks}
       stock={stock}
+      visibleReactionFormulaStock={visibleReactionFormulaStock}
+      industryJobs={industryJobs}
       marketBuyOrderQuantities={marketBuyOrderQuantities}
       locationNamesById={locationNamesById}
       locationSystemIdsById={locationSystemIdsById}
+      systemNamesById={systemNamesById}
       stockpileLocations={stockpileLocations}
       reactionMaterialBonusesByLocation={reactionMaterialBonusesByLocation}
       characterNamesById={characterNamesById}
@@ -4410,11 +4757,15 @@ export default function SimulationResults({
 function SimulationTabContent({
   activeTab,
   result,
+  includedRows,
   haulTasks,
   stock,
+  visibleReactionFormulaStock,
+  industryJobs,
   marketBuyOrderQuantities,
   locationNamesById,
   locationSystemIdsById,
+  systemNamesById,
   stockpileLocations,
   reactionMaterialBonusesByLocation,
   characterNamesById,
@@ -4437,11 +4788,15 @@ function SimulationTabContent({
 }: {
   activeTab: SimulationTab;
   result: SimulationResultV2;
+  includedRows: Readonly<Record<string, boolean>>;
   haulTasks: readonly SimulationHaulTask[];
   stock: readonly PlanStockItem[];
+  visibleReactionFormulaStock: readonly PlanStockItem[];
+  industryJobs?: ClientJobsResponse["jobs"];
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
   locationNamesById: ReadonlyMap<number, string>;
   locationSystemIdsById?: ReadonlyMap<number, number>;
+  systemNamesById?: ReadonlyMap<number, string>;
   stockpileLocations: ReadonlySet<number>;
   reactionMaterialBonusesByLocation: ReadonlyMap<number, number>;
   characterNamesById: ReadonlyMap<number, string>;
@@ -4530,10 +4885,14 @@ function SimulationTabContent({
         tab={activeTab}
         jobs={activeTab === "react" ? result.lists.reactionJobs : result.lists.manufacturingJobs}
         allJobs={[...result.lists.manufacturingJobs, ...result.lists.reactionJobs]}
+        includedRows={includedRows}
+        industryJobs={industryJobs}
         simulationInputRevision={`${result.metadata.simulationId ?? ""}|${result.metadata.normalizedInputHash}|${result.metadata.sdeRevision}`}
         stock={stock}
+        visibleReactionFormulaStock={visibleReactionFormulaStock}
         locationNamesById={locationNamesById}
         locationSystemIdsById={locationSystemIdsById}
+        systemNamesById={systemNamesById}
         reactionMaterialBonusesByLocation={reactionMaterialBonusesByLocation}
         characterNamesById={characterNamesById}
         characterStatuses={characterStatuses}
