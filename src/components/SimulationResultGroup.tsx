@@ -12,6 +12,7 @@ type SimulationResultGroupProps = {
   label: ReactNode;
   ariaLabel?: string;
   trailingContent?: ReactNode;
+  stickyHeader?: "viewport" | "parent";
   variant?: "card" | "nested";
   allowOverflow?: boolean;
   isOpen: boolean;
@@ -34,6 +35,7 @@ export default function SimulationResultGroup({
   label,
   ariaLabel,
   trailingContent,
+  stickyHeader,
   variant = "card",
   allowOverflow = false,
   isOpen,
@@ -64,6 +66,7 @@ export default function SimulationResultGroup({
         label={label}
         ariaLabel={ariaLabel}
         trailingContent={trailingContent}
+        sticky={stickyHeader}
         isOpen={isOpen}
         avatarRows={avatarRows}
         remainingCount={remainingCount}

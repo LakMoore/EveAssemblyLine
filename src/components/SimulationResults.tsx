@@ -3777,6 +3777,8 @@ function SimulationHaulTab({
               <SimulationResultGroup
                 groupKey={sourceKey}
                 key={sourceKey}
+                allowOverflow
+                stickyHeader="viewport"
                 label={
                   <>
                     <span className="text-(--theme-info)">From:&nbsp;</span>
@@ -3837,8 +3839,7 @@ function SimulationHaulTab({
                       const destinationVolume = simulationHaulVolume(includedDestinationTasks);
                       const destinationVolumeLabel = `${quantity(destinationVolume)} cubic meters`;
                       const includedTaskCount = includedDestinationTasks.length;
-                      const destinationIncluded =
-                        includedTaskCount > sortedDestinationTasks.length / 2;
+                      const destinationIncluded = includedTaskCount > 0;
                       const destinationRowKeys = sortedDestinationTasks.map(
                         (task) => `haul:${task.transferId}`,
                       );
@@ -3874,6 +3875,7 @@ function SimulationHaulTab({
                             controls.onHaulIncludedChange(destinationRowKeys, checked)
                           }
                           variant="nested"
+                          stickyHeader="parent"
                           isOpen={openGroups[destinationKey] ?? true}
                           onOpenChange={(open) => onOpenGroupChange(destinationKey, open)}
                           avatarRows={destinationAvatars}

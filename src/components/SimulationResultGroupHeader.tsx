@@ -23,6 +23,7 @@ type SimulationResultGroupHeaderProps = {
   label: ReactNode;
   ariaLabel?: string;
   trailingContent?: ReactNode;
+  sticky?: "viewport" | "parent";
   isOpen: boolean;
   avatarRows: SimulationGroupAvatar[];
   remainingCount: number;
@@ -40,6 +41,7 @@ export default function SimulationResultGroupHeader({
   label,
   ariaLabel,
   trailingContent,
+  sticky,
   isOpen,
   avatarRows,
   remainingCount,
@@ -52,7 +54,9 @@ export default function SimulationResultGroupHeader({
   copyLabel,
 }: SimulationResultGroupHeaderProps) {
   return (
-    <div className="py-4 text-foreground uppercase">
+    <div
+      className={`${sticky === "viewport" ? "sticky top-0 z-20 bg-card" : sticky === "parent" ? "sticky top-18 z-10 bg-card" : ""} py-4 text-foreground uppercase`}
+    >
       <div className="flex flex-1 flex-row items-center justify-between gap-4 px-2">
         {onSwitchChange
           && (switchPending ? (
