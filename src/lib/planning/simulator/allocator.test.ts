@@ -90,6 +90,75 @@ void test("protects reserved activity inputs from stockpile demand", () => {
   assert.equal(allocator.remainingItemQuantity("local"), 0);
 });
 
+void test("protects local stockpile supply from remote activity demand", () => {
+  const allocator = new SimulationAllocator(
+    { ...inventory, itemLots: [inventory.itemLots[0]] },
+    [],
+  );
+  allocator.reserveLocalStockpileDemand(34, 4, 20);
+  allocator.reserveRemoteActivityDemand();
+
+  const activityClaim = allocator.claimOrdinarySupply(
+    34,
+    4,
+    40,
+    { ...account, locationId: 40 },
+    "remote-industry-job",
+    undefined,
+    "manufacturing",
+    "activity-input",
+  );
+  const stockpileClaim = allocator.claimOrdinarySupply(
+    34,
+    4,
+    20,
+    account,
+    undefined,
+    "local-stockpile",
+    "stock",
+    "stockpile-demand",
+  );
+
+  assert.deepEqual(activityClaim, { local: 0, remote: 0, future: 0, futureReservations: [] });
+  assert.deepEqual(stockpileClaim, { local: 4, remote: 0, future: 0, futureReservations: [] });
+});
+
+void test("protects remote activity supply from remote stockpile demand", () => {
+  const allocator = new SimulationAllocator(
+    {
+      ...inventory,
+      itemLots: [{ ...inventory.itemLots[1], quantity: 4, locationId: 30 }],
+    },
+    [],
+  );
+  allocator.reserveActivityDemand(34, 4, 40);
+  allocator.reserveRemoteActivityDemand();
+
+  const stockpileClaim = allocator.claimOrdinarySupply(
+    34,
+    4,
+    20,
+    account,
+    undefined,
+    "remote-stockpile",
+    "stock",
+    "stockpile-demand",
+  );
+  const activityClaim = allocator.claimOrdinarySupply(
+    34,
+    4,
+    40,
+    { ...account, locationId: 40 },
+    "remote-industry-job",
+    undefined,
+    "manufacturing",
+    "activity-input",
+  );
+
+  assert.deepEqual(stockpileClaim, { local: 0, remote: 0, future: 0, futureReservations: [] });
+  assert.deepEqual(activityClaim, { local: 0, remote: 4, future: 0, futureReservations: [] });
+});
+
 void test("preserves locally reserved activity inputs from a remote activity claim", () => {
   const allocator = new SimulationAllocator(inventory, []);
   allocator.reserveActivityDemand(34, 4, 20);
@@ -127,6 +196,7 @@ void test("protects local stockpile demand from an earlier remote claim", () => 
     [],
   );
   allocator.reserveLocalStockpileDemand(34, 4, 20);
+  allocator.reserveRemoteStockpileDemand();
 
   const remoteClaim = allocator.claimOrdinarySupply(
     34,
@@ -407,7 +477,7 @@ void test("does not claim future output across an excluded route", () => {
   );
 });
 
-void test("claims remote future output after completion and creates a deferred haul", () => {
+void test("claims remote future output without scheduling a physical haul", () => {
   const allocator = new SimulationAllocator(
     {
       ...inventory,
@@ -434,9 +504,44 @@ void test("claims remote future output after completion and creates a deferred h
   assert.equal(claim.local, 0);
   assert.equal(claim.remote, 0);
   assert.equal(claim.future, 5_589);
-  assert.equal(allocator.haulingTasks[0]?.quantity, 5_589);
+  assert.equal(allocator.haulingTasks.length, 0);
   assert.equal(allocator.remainingItemQuantity("remote-active-output"), 171);
-  assert.equal(allocator.transactions.at(-1)?.kind, "transfer-commitment");
+  assert.equal(
+    allocator.transactions.some((transaction) => transaction.kind === "transfer-commitment"),
+    false,
+  );
+});
+
+void test("reserves future blueprint runs without scheduling a physical haul", () => {
+  const allocator = new SimulationAllocator(
+    {
+      ...inventory,
+      itemLots: [],
+      blueprintLots: [
+        {
+          ...inventory.blueprintLots[0],
+          lotId: "remote-in-flight-copy",
+          locationId: 30,
+          horizon: "after-upstream",
+          activity: "copying",
+          industryJobId: 456,
+          industryJobStatus: "active",
+        },
+      ],
+    },
+    [],
+  );
+
+  const claims = allocator.claimBlueprintCopyRuns(100, 3, 20, account, "manufacturing-job");
+
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0]?.runs, 3);
+  assert.equal(claims[0]?.horizon, "after-upstream");
+  assert.equal(allocator.haulingTasks.length, 0);
+  assert.equal(
+    allocator.transactions.some((transaction) => transaction.kind === "transfer-commitment"),
+    false,
+  );
 });
 
 void test("conserves finite BPC runs across allocations", () => {

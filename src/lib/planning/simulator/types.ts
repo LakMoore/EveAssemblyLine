@@ -138,7 +138,7 @@ export type SimulationRequestV1 = Omit<
   simulation: SimulationOptionsV1;
 };
 
-/** Stable, readiness-aware provenance for one planned material requirement. */
+/** Stable local-versus-future provenance for one planned material requirement. */
 export interface SimulationDemandSource {
   demandId: string;
   stockpileId: string;

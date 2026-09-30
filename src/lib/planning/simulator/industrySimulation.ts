@@ -202,6 +202,10 @@ class IndustryDemandSimulation {
   private readonly deferredProductionSupplies: DeferredProductionSupply[] = [];
   private readonly productionDemandRequests: ProductionDemandRequest[] = [];
   private readonly productionSupplies = new Set<ProductionSupply>();
+  /** Tracks physical inventory already attributed to earlier recursive activity inputs. */
+  private readonly reservedPrepassPhysicalDemand = new Map<string, number>();
+  private readonly reservedPrepassManufacturingRuns = new Map<string, number>();
+  private readonly reservedPrepassCopyRuns = new Map<string, number>();
   private sequence = 0;
 
   /** Creates one isolated deterministic simulation state. */
@@ -233,13 +237,15 @@ class IndustryDemandSimulation {
     measureSyncProfiled(
       this.profiler,
       "reserve-activity-demand",
-      () => this.reserveRecursiveLocalDemand(),
+      () => this.reserveRecursiveActivityDemand(),
     );
     measureSyncProfiled(
       this.profiler,
       "reserve-local-stockpile-demand",
       () => this.reserveLocalStockpileDemand(),
     );
+    this.allocator.reserveRemoteActivityDemand();
+    this.allocator.reserveRemoteStockpileDemand();
     measureSyncProfiled(
       this.profiler,
       "expand-stockpile-demand",
@@ -626,9 +632,12 @@ class IndustryDemandSimulation {
     return readinessChanged;
   }
 
-  private reserveRecursiveLocalDemand(): void {
-    const stockpiles = [...this.request.stockpiles].sort((left, right) =>
-      left.id.localeCompare(right.id),
+  private reserveRecursiveActivityDemand(): void {
+    const stockpiles = [...this.request.stockpiles].sort(
+      (left, right) =>
+        Number(!this.stockpileHasSameSystemRemoteSupply(left))
+          - Number(!this.stockpileHasSameSystemRemoteSupply(right))
+        || left.id.localeCompare(right.id),
     );
     for (const stockpile of stockpiles) {
       const items = [...stockpile.items].sort(
@@ -700,14 +709,189 @@ class IndustryDemandSimulation {
         { me: 0 },
         profile.materialMultiplier,
       );
-      const availability = this.allocator.physicalAvailability(material.typeID, profile.locationId);
-      const quantityToBuild = Math.max(
-        0,
-        requiredQuantity - availability.local - availability.remote - availability.future,
+      this.reserveActivityInput(
+        material.typeID,
+        requiredQuantity,
+        stockpile,
+        profile.locationId,
+        nextStack,
       );
-      this.allocator.reserveActivityDemand(material.typeID, requiredQuantity, profile.locationId);
-      this.reserveProductionInputs(material.typeID, quantityToBuild, stockpile, nextStack);
     }
+    if (production.activity === "manufacturing") {
+      this.reserveBlueprintScienceInputs(
+        production.blueprint._key,
+        requiredRuns,
+        stockpile,
+        profile.locationId,
+        nextStack,
+      );
+    }
+  }
+
+  private reserveActivityInput(
+    typeId: number,
+    quantity: number,
+    stockpile: PlanStockpile,
+    locationId: number,
+    stack: ReadonlySet<number>,
+  ): void {
+    const demandKey = `${typeId}:${locationId}`;
+    const availability = this.allocator.physicalAvailability(typeId, locationId);
+    const previouslyAllocated = this.reservedPrepassPhysicalDemand.get(demandKey) ?? 0;
+    const availableQuantity = availability.local + availability.remote + availability.future;
+    const coveredByExistingSupply = Math.min(
+      quantity,
+      Math.max(0, availableQuantity - previouslyAllocated),
+    );
+    this.reservedPrepassPhysicalDemand.set(
+      demandKey,
+      previouslyAllocated + coveredByExistingSupply,
+    );
+    const quantityToBuild = quantity - coveredByExistingSupply;
+    this.allocator.reserveActivityDemand(typeId, quantity, locationId);
+    this.reserveProductionInputs(typeId, quantityToBuild, stockpile, stack);
+  }
+
+  private reserveBlueprintScienceInputs(
+    outputBlueprintTypeId: number,
+    requiredRuns: number,
+    stockpile: PlanStockpile,
+    manufacturingLocationId: number,
+    stack: ReadonlySet<number>,
+  ): void {
+    const manufacturingKey = `${outputBlueprintTypeId}:${manufacturingLocationId}`;
+    const availableManufacturingRuns = this.allocator.availableManufacturingBlueprintRuns(
+      outputBlueprintTypeId,
+      manufacturingLocationId,
+      requiredRuns,
+    );
+    const previouslyReservedManufacturingRuns =
+      this.reservedPrepassManufacturingRuns.get(manufacturingKey) ?? 0;
+    const coveredManufacturingRuns = Math.min(
+      requiredRuns,
+      Math.max(0, availableManufacturingRuns - previouslyReservedManufacturingRuns),
+    );
+    this.reservedPrepassManufacturingRuns.set(
+      manufacturingKey,
+      previouslyReservedManufacturingRuns + coveredManufacturingRuns,
+    );
+    const inventionRuns = requiredRuns - coveredManufacturingRuns;
+    if (inventionRuns <= 0) return;
+
+    const sourceBlueprint = this.inventionSourceBlueprint(outputBlueprintTypeId);
+    if (!sourceBlueprint) return;
+    const inventionPlan = this.inventionAttemptPlan(
+      sourceBlueprint,
+      outputBlueprintTypeId,
+      inventionRuns,
+    );
+    if (!inventionPlan) return;
+
+    const inventionLocationId = stockpile.locations.invention;
+    const scienceProfile = this.request.simulation.scienceProfiles.find(
+      (profile) => profile.locationId === inventionLocationId,
+    );
+    for (const material of sourceBlueprint.activities.invention?.materials ?? []) {
+      this.reserveActivityInput(
+        material.typeID,
+        Math.ceil(
+          material.quantity
+            * inventionPlan.attempts
+            * (scienceProfile?.inventionMaterialMultiplier ?? 1),
+        ),
+        stockpile,
+        inventionLocationId,
+        stack,
+      );
+    }
+    if (inventionPlan.decryptorTypeId !== undefined) {
+      this.reserveActivityInput(
+        inventionPlan.decryptorTypeId,
+        inventionPlan.attempts,
+        stockpile,
+        inventionLocationId,
+        stack,
+      );
+    }
+
+    const copyKey = `${sourceBlueprint._key}:${inventionLocationId}`;
+    const availableCopyRuns = this.allocator.availableBlueprintCopyRuns(
+      sourceBlueprint._key,
+      inventionLocationId,
+      inventionPlan.attempts,
+    );
+    const previouslyReservedCopyRuns = this.reservedPrepassCopyRuns.get(copyKey) ?? 0;
+    const coveredCopyRuns = Math.min(
+      inventionPlan.attempts,
+      Math.max(0, availableCopyRuns - previouslyReservedCopyRuns),
+    );
+    this.reservedPrepassCopyRuns.set(copyKey, previouslyReservedCopyRuns + coveredCopyRuns);
+    const copyRuns = inventionPlan.attempts - coveredCopyRuns;
+    if (copyRuns <= 0) return;
+
+    const copyingLocationId = stockpile.locations.copying;
+    const copyingProfile = this.request.simulation.scienceProfiles.find(
+      (profile) => profile.locationId === copyingLocationId,
+    );
+    const copies = Math.ceil(copyRuns / Math.max(1, sourceBlueprint.maxProductionLimit));
+    for (const material of sourceBlueprint.activities.copying?.materials ?? []) {
+      this.reserveActivityInput(
+        material.typeID,
+        Math.ceil(material.quantity * copies * (copyingProfile?.copyingMaterialMultiplier ?? 1)),
+        stockpile,
+        copyingLocationId,
+        stack,
+      );
+    }
+  }
+
+  private inventionSourceBlueprint(outputBlueprintTypeId: number) {
+    return (this.context.blueprints.byInventionProductId.get(outputBlueprintTypeId) ?? [])
+      .slice()
+      .sort((left, right) => left._key - right._key)
+      .at(0);
+  }
+
+  private inventionAttemptPlan(
+    sourceBlueprint: BlueprintsRecord,
+    outputBlueprintTypeId: number,
+    requiredRuns: number,
+  ) {
+    const baseOutcome = getNoDecryptorInventionOutput(sourceBlueprint, outputBlueprintTypeId);
+    if (!baseOutcome) return undefined;
+    const decryptorTypeId = Object
+      .entries(this.request.simulation.policy.decryptorTypeIdByProductBlueprintTypeId)
+      .find(
+        ([productBlueprintTypeId]) => productBlueprintTypeId === String(outputBlueprintTypeId),
+      )?.[1];
+    const decryptor =
+      decryptorTypeId === undefined
+        ? undefined
+        : getInventionDecryptorModifiers(
+            decryptorTypeId,
+            this.context.typeDogma.get(decryptorTypeId),
+          );
+    const skillPlan = this.inventionSkillPlan(sourceBlueprint);
+    const probability = Math.min(
+      1,
+      baseOutcome.probability * skillPlan.multiplier * (decryptor?.probabilityMultiplier ?? 1),
+    );
+    const runsPerSuccess = Math.max(1, baseOutcome.runs + (decryptor?.maxRunModifier ?? 0));
+    const targetExpectedRuns =
+      requiredRuns * this.request.simulation.policy.inventionExpectedOutputFactor;
+    const attempts = Math.ceil(
+      targetExpectedRuns / Math.max(Number.EPSILON, probability * runsPerSuccess),
+    );
+    return {
+      attempts,
+      baseOutcome,
+      decryptor,
+      decryptorTypeId,
+      probability,
+      runsPerSuccess,
+      skillPlan,
+      targetExpectedRuns,
+    };
   }
 
   private planProductionCore(
@@ -1001,13 +1185,6 @@ class IndustryDemandSimulation {
     const inputs: SimulationJobInput[] = [];
     const deferredInputs: DeferredProductionSupply[] = [];
     for (const material of materialSpecifications) {
-      const nowQuantity = this.materialQuantityForRuns(
-        activity,
-        material,
-        readyNowRuns,
-        blueprint,
-        profile.materialMultiplier,
-      );
       const physicalClaim = this.allocator.claimOrdinarySupply(
         material.typeId,
         material.requiredQuantity,
@@ -1031,7 +1208,7 @@ class IndustryDemandSimulation {
       );
       const availableAfterUpstream =
         physicalClaimed + claimedFuture + productionSupply.readyQuantity;
-      this.setDemandReadiness(material.source, nowQuantity);
+      this.setDemandReadiness(material.source, physicalClaim.local);
       const input: SimulationJobInput = {
         typeId: material.typeId,
         typeName: typeName(this.context, material.typeId, this.request.language),
@@ -1113,18 +1290,24 @@ class IndustryDemandSimulation {
   }
 
   private planInventionAndCopying(shortage: BlueprintShortage): void {
-    const sourceBlueprint = (
-      this.context.blueprints.byInventionProductId.get(shortage.outputBlueprintTypeId) ?? []
-    )
-      .slice()
-      .sort((left, right) => left._key - right._key)
-      .at(0);
+    const sourceBlueprint = this.inventionSourceBlueprint(shortage.outputBlueprintTypeId);
     if (!sourceBlueprint) return;
-    const baseOutcome = getNoDecryptorInventionOutput(
+    const attemptPlan = this.inventionAttemptPlan(
       sourceBlueprint,
       shortage.outputBlueprintTypeId,
+      shortage.requiredRuns,
     );
-    if (!baseOutcome) return;
+    if (!attemptPlan) return;
+    const {
+      attempts,
+      baseOutcome,
+      decryptor,
+      decryptorTypeId,
+      probability,
+      runsPerSuccess,
+      skillPlan,
+      targetExpectedRuns,
+    } = attemptPlan;
     const inventionLocationId = shortage.stockpile.locations.invention;
     const inventionJobId = this.stableId(
       "invention",
@@ -1132,30 +1315,6 @@ class IndustryDemandSimulation {
       shortage.outputBlueprintTypeId,
       inventionLocationId,
       this.sequence,
-    );
-    const decryptorTypeId = Object
-      .entries(this.request.simulation.policy.decryptorTypeIdByProductBlueprintTypeId)
-      .find(
-        ([productBlueprintTypeId]) =>
-          productBlueprintTypeId === String(shortage.outputBlueprintTypeId),
-      )?.[1];
-    const decryptor =
-      decryptorTypeId === undefined
-        ? undefined
-        : getInventionDecryptorModifiers(
-            decryptorTypeId,
-            this.context.typeDogma.get(decryptorTypeId),
-          );
-    const skillPlan = this.inventionSkillPlan(sourceBlueprint);
-    const probability = Math.min(
-      1,
-      baseOutcome.probability * skillPlan.multiplier * (decryptor?.probabilityMultiplier ?? 1),
-    );
-    const runsPerSuccess = Math.max(1, baseOutcome.runs + (decryptor?.maxRunModifier ?? 0));
-    const targetExpectedRuns =
-      shortage.requiredRuns * this.request.simulation.policy.inventionExpectedOutputFactor;
-    const attempts = Math.ceil(
-      targetExpectedRuns / Math.max(Number.EPSILON, probability * runsPerSuccess),
     );
     const sourceBlueprintAccount: SimulationLedgerAccount = {
       locationId: inventionLocationId,
@@ -1520,22 +1679,6 @@ class IndustryDemandSimulation {
     return lower;
   }
 
-  private materialQuantityForRuns(
-    activity: ProductionActivity,
-    material: MaterialSpecification,
-    runs: number,
-    blueprint: SimulationBlueprintAllocation,
-    materialMultiplier: number,
-  ): number {
-    return requiredMaterialQuantity(
-      activity,
-      material.quantityPerRun,
-      runs,
-      { me: blueprint.materialEfficiency },
-      materialMultiplier,
-    );
-  }
-
   private fallbackBlueprint(
     blueprintTypeId: number,
     runs: number,
@@ -1751,7 +1894,7 @@ class IndustryDemandSimulation {
     };
   }
 
-  /** Splits one material demand into immediately installable and deferred quantities. */
+  /** Splits one material demand into locally allocated and future quantities. */
   private setDemandReadiness(source: SimulationDemandSource, requiredNow: number): void {
     source.requiredNow = Math.min(source.plannedQuantity, Math.max(0, requiredNow));
     source.reserved = source.plannedQuantity - source.requiredNow;

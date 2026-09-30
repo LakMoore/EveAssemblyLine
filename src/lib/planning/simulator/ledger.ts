@@ -74,6 +74,7 @@ export type SimulationTransaction =
           quantity: number;
           quantityKind: "blueprint-run";
           source: "copying" | "invention";
+          sourceLotId?: string;
           producingJobId: string;
         }
     )
@@ -189,7 +190,8 @@ export function projectSimulationLedger(
 ): SimulationLedgerProjection {
   const sourceLotsById = new Map(sourceLots.map((lot) => [lot.lotId, lot]));
   const reservedByLotId = new Map<string, number>();
-  const claimedProductionByLotId = new Map<string, number>();
+  const claimedOutputByLotId = new Map<string, number>();
+  const committedFutureOutputBySourceKey = new Map<string, number>();
   const exposedByLotId = new Map<string, number>();
   const mutableBalances = new Map<string, SimulationMaterialBalance>();
   const invariantViolations: string[] = [];
@@ -345,22 +347,25 @@ export function projectSimulationLedger(
     }
     else if (transaction.kind === "production-commitment") {
       const quantityKind = transaction.quantityKind ?? "item";
-      if (transaction.source === "production" && transaction.sourceLotId !== undefined) {
+      if (transaction.sourceLotId !== undefined) {
         const sourceLot = sourceLotsById.get(transaction.sourceLotId);
+        const sourceActivity =
+          transaction.source === "production" ? transaction.activity : transaction.source;
         if (
           !sourceLot
           || sourceLot.typeId !== transaction.account.typeId
           || sourceLot.locationId !== transaction.account.locationId
-          || sourceLot.activity !== transaction.activity
+          || sourceLot.activity !== sourceActivity
+          || (sourceLot.quantityKind ?? "item") !== quantityKind
         ) {
           invariantViolations.push(
-            `Production claim ${transaction.id} references an invalid source lot.`,
+            `Future-output claim ${transaction.id} references an invalid source lot.`,
           );
           continue;
         }
-        claimedProductionByLotId.set(
+        claimedOutputByLotId.set(
           transaction.sourceLotId,
-          (claimedProductionByLotId.get(transaction.sourceLotId) ?? 0) + transaction.quantity,
+          (claimedOutputByLotId.get(transaction.sourceLotId) ?? 0) + transaction.quantity,
         );
       }
       const destinationKey = quantityLedgerKey(transaction.destinationAccount, quantityKind);
@@ -387,7 +392,16 @@ export function projectSimulationLedger(
         continue;
       }
       const persistSourceBalance = !isRemoteOutput || hadBalance;
-      if (transaction.source === "production" && transaction.sourceLotId === undefined) {
+      if (transaction.sourceLotId !== undefined && isRemoteOutput) {
+        committedFutureOutputBySourceKey.set(
+          key,
+          (committedFutureOutputBySourceKey.get(key) ?? 0) + transaction.quantity,
+        );
+      }
+      if (
+        transaction.source === "production"
+        && (transaction.sourceLotId === undefined || isRemoteOutput)
+      ) {
         const productionBalance = isRemoteOutput ? destination : balance;
         productionBalance.availableFromProduction += transaction.quantity;
         setProductionActivity(
@@ -397,11 +411,17 @@ export function projectSimulationLedger(
           `production commitment ${transaction.id}`,
         );
       }
-      else if (transaction.source === "copying") {
+      else if (
+        transaction.source === "copying"
+        && (transaction.sourceLotId === undefined || isRemoteOutput)
+      ) {
         if (isRemoteOutput) destination.availableFromCopying += transaction.quantity;
         else balance.availableFromCopying += transaction.quantity;
       }
-      else if (transaction.source === "invention") {
+      else if (
+        transaction.source === "invention"
+        && (transaction.sourceLotId === undefined || isRemoteOutput)
+      ) {
         if (isRemoteOutput) destination.availableFromInvention += transaction.quantity;
         else balance.availableFromInvention += transaction.quantity;
       }
@@ -449,7 +469,7 @@ export function projectSimulationLedger(
       );
     }
   }
-  for (const [lotId, claimedQuantity] of claimedProductionByLotId) {
+  for (const [lotId, claimedQuantity] of claimedOutputByLotId) {
     const lot = sourceLotsById.get(lotId);
     if (lot && claimedQuantity > lot.quantity) {
       invariantViolations.push(
@@ -470,9 +490,13 @@ export function projectSimulationLedger(
     [...mutableBalances].map(([key, balance]) => {
       const plannedRequirement = balance.requiredNow + balance.reserved;
       const physicalAvailable = balance.availableNow + balance.availableFromHauling;
+      const uncommittedInFlight = Math.max(
+        0,
+        balance.inFlightQuantity - (committedFutureOutputBySourceKey.get(key) ?? 0),
+      );
       const futureSupply =
         balance.availableFromHauling
-        + balance.inFlightQuantity
+        + uncommittedInFlight
         + balance.availableFromProduction
         + balance.availableFromCopying
         + balance.availableFromInvention
@@ -481,7 +505,7 @@ export function projectSimulationLedger(
       const plannedSupply =
         physicalAvailable
         + balance.availableFromSellOrders
-        + balance.inFlightQuantity
+        + uncommittedInFlight
         + balance.availableFromProduction
         + balance.availableFromCopying
         + balance.availableFromInvention

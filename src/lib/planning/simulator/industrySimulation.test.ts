@@ -287,7 +287,7 @@ void test("aggregates repeated component demand before blueprint allocation", as
   );
 });
 
-void test("defers available Tritanium when another job prerequisite blocks installation", async () => {
+void test("reports local Tritanium allocation when another prerequisite blocks installation", async () => {
   const request = parseSimulatorRequest({
     stockpiles: [
       {
@@ -332,9 +332,16 @@ void test("defers available Tritanium when another job prerequisite blocks insta
     (transaction): transaction is Extract<typeof transaction, { kind: "demand" }> =>
       transaction.kind === "demand" && transaction.source.materialTypeId === 34,
   );
+  const tritaniumInput = result.manufacturingJobs
+    .flatMap((job) => job.inputs)
+    .find((input) => input.typeId === 34);
   assert.ok(tritaniumDemand);
-  assert.equal(tritaniumDemand.source.requiredNow, 0);
-  assert.equal(tritaniumDemand.source.reserved, tritaniumDemand.source.plannedQuantity);
+  assert.ok(tritaniumInput);
+  assert.equal(tritaniumDemand.source.requiredNow, tritaniumInput.availableNow);
+  assert.equal(
+    tritaniumDemand.source.reserved,
+    tritaniumDemand.source.plannedQuantity - tritaniumInput.availableNow,
+  );
   assert.equal(
     result.unmetDemands.some((demand) => demand.account.typeId === 34),
     false,
@@ -517,7 +524,7 @@ void test("does not use sell orders for manufacturing inputs or hauling", async 
   assert.equal(result.lists.haulingTasks.length, 0);
 });
 
-void test("hauls only the missing quantity from a remote in-flight reaction output", async () => {
+void test("credits remote in-flight reaction output without recommending a haul", async () => {
   const request = parseSimulatorRequest({
     stockpiles: [
       {
@@ -567,17 +574,12 @@ void test("hauls only the missing quantity from a remote in-flight reaction outp
   assert.ok(destinationBalance);
   assert.ok(sourceBalance);
   assert.equal(destinationBalance.availableNow, 402);
-  assert.equal(destinationBalance.availableFromHauling, 5_589);
+  assert.equal(destinationBalance.availableFromHauling, 0);
+  assert.equal(destinationBalance.availableFromProduction, 5_589);
+  assert.equal(destinationBalance.futureSupply, 5_589);
   assert.equal(destinationBalance.unsatisfied, 0);
   assert.equal(sourceBalance.inFlightQuantity, 5_760);
-  assert.equal(sourceBalance.transferredOut, 5_589);
-  assert.equal(sourceBalance.surplus, 171);
-  assert.deepEqual(
-    result.lists.haulingTasks.map((task) => task.quantity),
-    [5_589],
-  );
-  assert.equal(result.lists.haulingTasks[0]?.fromLocationId, 200);
-  assert.equal(result.lists.haulingTasks[0]?.toLocationId, 100);
+  assert.deepEqual(result.lists.haulingTasks, []);
 });
 
 void test("reports T1 invention runs and expected T2 BPC runs without overstatement", async () => {
@@ -636,6 +638,153 @@ void test("reports T1 invention runs and expected T2 BPC runs without overstatem
   assert.equal(result.metadata.invariantViolationCount, 0);
 });
 
+void test("reserves invention materials before competing stockpile demand", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "fuel-stock",
+        name: "Fuel stock",
+        locations: {
+          stock: 60,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [
+          { typeId: 1952, quantity: 95, me: 0, te: 0, fromCompression: false },
+          { typeId: 20417, quantity: 10, me: 0, te: 0, fromCompression: false },
+        ],
+      },
+    ],
+    assets: [
+      {
+        typeId: 11620,
+        quantity: 1,
+        rootLocationId: 60,
+        blueprintPrints: [{ itemId: 1, runs: 25, type: "bpc" }],
+      },
+      { typeId: 20417, quantity: 10, rootLocationId: 60 },
+    ],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: {
+      version: 1,
+      characters: [
+        {
+          characterId: 1,
+          freeSlots: { manufacturing: 100, reactions: 100, science: 100 },
+          timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
+          skillLevels: { "11448": 4, "11453": 4, "21790": 4 },
+        },
+      ],
+    },
+  });
+
+  const result = await simulateIndustry(request);
+  const inventionJob = result.lists.inventionJobs.find(
+    (job) => job.sourceBlueprintTypeId === 11620,
+  );
+  const scienceInput = inventionJob?.inputs.find((input) => input.typeId === 20417);
+
+  assert.ok(scienceInput);
+  assert.ok(scienceInput.availableNow > 0);
+});
+
+void test("reserves full local reaction inputs before competing stockpile demand", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "stockpile-1790119900393-hrnhot",
+        name: "Main",
+        locations: {
+          stock: 60,
+          manufacturing: 20,
+          reactions: 60,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 4312, quantity: 20_000, me: 0, te: 0, fromCompression: false }],
+      },
+      {
+        id: "a-munory",
+        name: "Manufacturing demand one",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 60,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 61199, quantity: 4, me: 0, te: 0, fromCompression: false }],
+      },
+      {
+        id: "z-jita",
+        name: "Manufacturing demand two",
+        locations: {
+          stock: 11,
+          manufacturing: 20,
+          reactions: 60,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 11688, quantity: 17, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [
+      { typeId: 16682, quantity: 87, locationId: 20, rootLocationId: 20 },
+      { typeId: 16664, quantity: 59, locationId: 60, rootLocationId: 60 },
+      {
+        typeId: 4312,
+        quantity: 14_535,
+        locationId: 60,
+        rootLocationId: 60,
+        ownerType: "corporation",
+        ownerId: 98686879,
+      },
+    ],
+    settings: {
+      includeCorporationAssets: true,
+      buildBlacklist: [4312],
+      buyBlacklist: [],
+    },
+    simulation: { version: 1 },
+  });
+
+  const result = await simulateIndustry(request);
+  const fuelTotalsByProduct = new Map<number, { required: number; availableNow: number }>();
+  for (const job of result.lists.reactionJobs) {
+    if (job.productTypeId !== 16682 && job.productTypeId !== 16664) continue;
+    const input = job.inputs.find((candidate) => candidate.typeId === 4312);
+    assert.ok(input);
+    const totals = fuelTotalsByProduct.get(job.productTypeId) ?? {
+      required: 0,
+      availableNow: 0,
+    };
+    totals.required += input.requiredQuantity;
+    totals.availableNow += input.availableNow;
+    fuelTotalsByProduct.set(job.productTypeId, totals);
+  }
+
+  assert.equal(fuelTotalsByProduct.get(16682)?.required, 10);
+  assert.equal(fuelTotalsByProduct.get(16682)?.availableNow, 10);
+  assert.equal(fuelTotalsByProduct.get(16664)?.required, 10);
+  assert.equal(fuelTotalsByProduct.get(16664)?.availableNow, 10);
+  const fuelBalance = result.ledgers
+    .find((ledger) => ledger.locationId === 60)
+    ?.balances.find((balance) => balance.typeId === 4312);
+  assert.ok(fuelBalance);
+  assert.equal(
+    fuelBalance.demandSources.find(
+      (source) => source.stockpileId === "stockpile-1790119900393-hrnhot",
+    )?.requiredNow,
+    14_515,
+  );
+});
+
 void test("uses every active invention BPC copy and exposes manufacturing blueprint demand", async () => {
   const request = parseSimulatorRequest({
     stockpiles: [
@@ -692,10 +841,12 @@ void test("uses every active invention BPC copy and exposes manufacturing bluepr
   assert.ok(blueprintBalance);
   assert.ok(sourceBalance);
   assert.equal(blueprintBalance.reserved, 95);
-  assert.equal(blueprintBalance.availableFromHauling, 95);
+  assert.equal(blueprintBalance.availableFromHauling, 0);
+  assert.equal(blueprintBalance.availableFromInvention, 95);
   assert.equal(blueprintBalance.futureSupply, 95);
   assert.equal(blueprintBalance.unsatisfied, 0);
   assert.equal(sourceBalance.inFlightQuantity, 110);
-  assert.equal(sourceBalance.transferredOut, 95);
+  assert.equal(sourceBalance.futureSupply, 15);
+  assert.equal(sourceBalance.transferredOut, 0);
   assert.equal(result.metadata.invariantViolationCount, 0);
 });

@@ -41,6 +41,12 @@ export interface BlueprintClaim extends SimulationBlueprintAllocation {
   sourceCompletionAt?: string;
 }
 
+interface PendingItemDemand {
+  typeId: number;
+  destinationLocationId: number;
+  quantity: number;
+}
+
 function locationPairKey(firstLocationId: number, secondLocationId: number): string {
   return firstLocationId < secondLocationId
     ? `${firstLocationId}:${secondLocationId}`
@@ -81,7 +87,9 @@ export class SimulationAllocator {
   private readonly blockInterStockpileHauling: boolean;
   private readonly systemIdByLocationId: ReadonlyMap<number, number>;
   private readonly activityReservationsByLotId = new Map<string, Map<number, number>>();
-  private readonly stockpileReservationsByLotId = new Map<string, number>();
+  private readonly stockpileReservationsByLotId = new Map<string, Map<number, number>>();
+  private readonly pendingRemoteActivityDemands = new Map<string, PendingItemDemand>();
+  private readonly pendingRemoteStockpileDemands = new Map<string, PendingItemDemand>();
   private readonly transferredBlueprintLotIds = new Set<string>();
   private transactionSequence = 0;
   readonly transactions: SimulationTransaction[] = [];
@@ -232,17 +240,47 @@ export class SimulationAllocator {
     for (const lot of candidates) {
       if (remaining <= 0) break;
       const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
-      const reserved = this.activityReservation(lot.lotId);
+      const reserved = this.totalProtectedReservation(lot.lotId);
       const next = Math.min(remaining, Math.max(0, available - reserved));
       if (next <= 0) continue;
-      const reservations = this.activityReservationsByLotId.get(lot.lotId) ?? new Map();
-      reservations.set(
-        destinationLocationId,
-        (reservations.get(destinationLocationId) ?? 0) + next,
-      );
-      this.activityReservationsByLotId.set(lot.lotId, reservations);
+      this.addActivityReservation(lot.lotId, destinationLocationId, next);
       remaining -= next;
     }
+    this.addPendingDemand(
+      this.pendingRemoteActivityDemands,
+      typeId,
+      destinationLocationId,
+      remaining,
+    );
+  }
+
+  /** Reserves remote physical supply for activity only after local stockpile demand is protected. */
+  reserveRemoteActivityDemand(): void {
+    for (const demand of this.sortedPendingDemands(this.pendingRemoteActivityDemands)) {
+      let remaining = demand.quantity;
+      const candidates = (this.itemLotsByTypeId.get(demand.typeId) ?? [])
+        .filter(
+          (lot) =>
+            lot.source !== "market-order"
+            && lot.horizon === "now"
+            && lot.locationId !== demand.destinationLocationId
+            && !this.isExcluded(lot, demand.destinationLocationId),
+        )
+        .slice()
+        .sort((left, right) => left.lotId.localeCompare(right.lotId));
+      for (const lot of candidates) {
+        if (remaining <= 0) break;
+        const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
+        const next = Math.min(
+          remaining,
+          Math.max(0, available - this.totalProtectedReservation(lot.lotId)),
+        );
+        if (next <= 0) continue;
+        this.addActivityReservation(lot.lotId, demand.destinationLocationId, next);
+        remaining -= next;
+      }
+    }
+    this.pendingRemoteActivityDemands.clear();
   }
 
   /** Reserves local physical stock for its own final stockpile demand before remote claims. */
@@ -276,9 +314,51 @@ export class SimulationAllocator {
       const reserved = this.totalProtectedReservation(lot.lotId);
       const next = Math.min(remaining, Math.max(0, available - reserved));
       if (next <= 0) continue;
-      this.stockpileReservationsByLotId.set(lot.lotId, this.stockpileReservation(lot.lotId) + next);
+      this.addStockpileReservation(lot.lotId, destinationLocationId, next);
       remaining -= next;
     }
+    this.addPendingDemand(
+      this.pendingRemoteStockpileDemands,
+      typeId,
+      destinationLocationId,
+      remaining,
+    );
+  }
+
+  /** Reserves remote physical supply for stockpiles after activity demand has been protected. */
+  reserveRemoteStockpileDemand(): void {
+    const demands = this.sortedPendingDemands(this.pendingRemoteStockpileDemands).sort(
+      (left, right) =>
+        Number(!this.hasSameSystemRemoteSupply(left.typeId, left.destinationLocationId))
+          - Number(!this.hasSameSystemRemoteSupply(right.typeId, right.destinationLocationId))
+        || left.typeId - right.typeId
+        || left.destinationLocationId - right.destinationLocationId,
+    );
+    for (const demand of demands) {
+      let remaining = demand.quantity;
+      const candidates = (this.itemLotsByTypeId.get(demand.typeId) ?? [])
+        .filter(
+          (lot) =>
+            lot.source !== "market-order"
+            && lot.horizon === "now"
+            && lot.locationId !== demand.destinationLocationId
+            && !this.isExcluded(lot, demand.destinationLocationId),
+        )
+        .slice()
+        .sort((left, right) => left.lotId.localeCompare(right.lotId));
+      for (const lot of candidates) {
+        if (remaining <= 0) break;
+        const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
+        const next = Math.min(
+          remaining,
+          Math.max(0, available - this.totalProtectedReservation(lot.lotId)),
+        );
+        if (next <= 0) continue;
+        this.addStockpileReservation(lot.lotId, demand.destinationLocationId, next);
+        remaining -= next;
+      }
+    }
+    this.pendingRemoteStockpileDemands.clear();
   }
 
   /** Returns whether same-system remote stock can satisfy a stockpile demand. */
@@ -322,6 +402,47 @@ export class SimulationAllocator {
       }
     }
     return { local, remote, future };
+  }
+
+  /** Returns usable manufacturing blueprint runs, treating originals as reusable. */
+  availableManufacturingBlueprintRuns(
+    blueprintTypeId: number,
+    destinationLocationId: number,
+    maximumRuns: number,
+  ): number {
+    let availableRuns = 0;
+    for (const lot of this.inventory.blueprintLots) {
+      if (
+        lot.typeId !== blueprintTypeId
+        || lot.kind === "formula"
+        || lot.inUse
+        || (lot.locationId !== destinationLocationId && this.isExcluded(lot, destinationLocationId))
+      ) continue;
+      if (lot.kind === "bpo") return Number.MAX_SAFE_INTEGER;
+      availableRuns += this.remainingBlueprintRunsByLotId.get(lot.lotId) ?? 0;
+      if (availableRuns >= maximumRuns) return maximumRuns;
+    }
+    return Math.min(availableRuns, maximumRuns);
+  }
+
+  /** Returns usable BPC runs for invention up to the requested maximum. */
+  availableBlueprintCopyRuns(
+    blueprintTypeId: number,
+    destinationLocationId: number,
+    maximumRuns: number,
+  ): number {
+    let availableRuns = 0;
+    for (const lot of this.inventory.blueprintLots) {
+      if (
+        lot.typeId !== blueprintTypeId
+        || lot.kind !== "bpc"
+        || lot.inUse
+        || (lot.locationId !== destinationLocationId && this.isExcluded(lot, destinationLocationId))
+      ) continue;
+      availableRuns += this.remainingBlueprintRunsByLotId.get(lot.lotId) ?? 0;
+      if (availableRuns >= maximumRuns) return maximumRuns;
+    }
+    return Math.min(availableRuns, maximumRuns);
   }
 
   /** Claims existing active-job output without treating it as physical stock. */
@@ -401,31 +522,6 @@ export class SimulationAllocator {
           ? { sourceCompletionAt: lot.industryJobEndDate }
           : {}),
       });
-      if (lot.locationId !== account.locationId) {
-        this.transactions.push({
-          id: this.nextTransactionId("existing-output-transfer"),
-          kind: "transfer-commitment",
-          sourceAccount: { locationId: sourceLocationId, typeId: lot.typeId },
-          destinationAccount: account,
-          lotId: lot.lotId,
-          quantity: next,
-          demandingJobId,
-        });
-        this.haulingTasks.push({
-          transferId: `haul:${lot.lotId}:${account.locationId}:${demandingJobId ?? "stock"}`,
-          lotId: lot.lotId,
-          typeId: lot.typeId,
-          typeName: lot.name,
-          quantity: next,
-          unitVolume: lot.unitVolume,
-          fromLocationId: sourceLocationId,
-          toLocationId: account.locationId,
-          ownerType: lot.ownerType,
-          ownerId: lot.ownerId,
-          purpose: allocationPurpose === "stockpile-demand" ? "stockpile-demand" : "industry-input",
-          demands: [{ jobId: demandingJobId, quantity: next }],
-        });
-      }
     }
     return {
       quantity: claimed,
@@ -851,6 +947,8 @@ export class SimulationAllocator {
       (left, right) =>
         Number(this.activityReservation(right.lotId, destinationLocationId) > 0)
           - Number(this.activityReservation(left.lotId, destinationLocationId) > 0)
+        || Number(this.stockpileReservation(right.lotId, destinationLocationId) > 0)
+          - Number(this.stockpileReservation(left.lotId, destinationLocationId) > 0)
         || left.lotId.localeCompare(right.lotId),
     );
     for (const lot of orderedLots) {
@@ -859,11 +957,15 @@ export class SimulationAllocator {
       const activityReservation = this.activityReservation(lot.lotId);
       const ownActivityReservation = this.activityReservation(lot.lotId, destinationLocationId);
       const stockpileReservation = this.stockpileReservation(lot.lotId);
+      const ownStockpileReservation = this.stockpileReservation(lot.lotId, destinationLocationId);
+      const isLocal = lot.locationId === destinationLocationId;
       const protectedQuantity =
         allocationPurpose === "stockpile-demand"
-          ? activityReservation
-            + (lot.locationId === destinationLocationId ? 0 : stockpileReservation)
-          : activityReservation - ownActivityReservation;
+          ? (isLocal ? this.activityReservation(lot.lotId, lot.locationId) : activityReservation)
+            + (isLocal ? 0 : stockpileReservation - ownStockpileReservation)
+          : activityReservation
+            - ownActivityReservation
+            + (isLocal ? 0 : this.stockpileReservation(lot.lotId, lot.locationId));
       const usable = Math.max(0, available - protectedQuantity);
       const next = Math.min(remaining, usable);
       if (next <= 0) continue;
@@ -877,10 +979,12 @@ export class SimulationAllocator {
         this.consumeStockpileReservation(
           lot.lotId,
           Math.max(0, next - ownActivityReservation - unreservedQuantity),
+          undefined,
+          isLocal ? undefined : lot.locationId,
         );
       }
       else {
-        this.consumeStockpileReservation(lot.lotId, next);
+        this.consumeStockpileReservation(lot.lotId, next, destinationLocationId);
       }
       this.transactions.push({
         id: this.nextTransactionId("reserve"),
@@ -964,8 +1068,13 @@ export class SimulationAllocator {
     return this.activityReservation(lotId) - this.activityReservation(lotId, destinationLocationId);
   }
 
-  private stockpileReservation(lotId: string): number {
-    return this.stockpileReservationsByLotId.get(lotId) ?? 0;
+  private stockpileReservation(lotId: string, destinationLocationId?: number): number {
+    const reservations = this.stockpileReservationsByLotId.get(lotId);
+    if (!reservations) return 0;
+    if (destinationLocationId !== undefined) {
+      return reservations.get(destinationLocationId) ?? 0;
+    }
+    return [...reservations.values()].reduce((total, quantity) => total + quantity, 0);
   }
 
   private totalProtectedReservation(lotId: string): number {
@@ -987,10 +1096,104 @@ export class SimulationAllocator {
     reservations.set(destinationLocationId, reserved - quantity);
   }
 
-  private consumeStockpileReservation(lotId: string, quantity: number): void {
-    const remaining = this.stockpileReservation(lotId);
-    if (remaining <= quantity) this.stockpileReservationsByLotId.delete(lotId);
-    else this.stockpileReservationsByLotId.set(lotId, remaining - quantity);
+  private consumeStockpileReservation(
+    lotId: string,
+    quantity: number,
+    destinationLocationId?: number,
+    excludedDestinationLocationId?: number,
+  ): void {
+    if (destinationLocationId !== undefined) {
+      this.consumeStockpileReservationEntry(lotId, destinationLocationId, quantity);
+      return;
+    }
+    this.consumeStockpileReservationEntries(lotId, quantity, excludedDestinationLocationId);
+  }
+
+  private addActivityReservation(
+    lotId: string,
+    destinationLocationId: number,
+    quantity: number,
+  ): void {
+    const reservations = this.activityReservationsByLotId.get(lotId) ?? new Map();
+    reservations.set(
+      destinationLocationId,
+      (reservations.get(destinationLocationId) ?? 0) + quantity,
+    );
+    this.activityReservationsByLotId.set(lotId, reservations);
+  }
+
+  private addStockpileReservation(
+    lotId: string,
+    destinationLocationId: number,
+    quantity: number,
+  ): void {
+    const reservations = this.stockpileReservationsByLotId.get(lotId) ?? new Map();
+    reservations.set(
+      destinationLocationId,
+      (reservations.get(destinationLocationId) ?? 0) + quantity,
+    );
+    this.stockpileReservationsByLotId.set(lotId, reservations);
+  }
+
+  private addPendingDemand(
+    demands: Map<string, PendingItemDemand>,
+    typeId: number,
+    destinationLocationId: number,
+    quantity: number,
+  ): void {
+    if (quantity <= 0) return;
+    const key = `${typeId}:${destinationLocationId}`;
+    const demand = demands.get(key);
+    demands.set(
+      key,
+      {
+        typeId,
+        destinationLocationId,
+        quantity: (demand?.quantity ?? 0) + quantity,
+      },
+    );
+  }
+
+  private sortedPendingDemands(demands: Map<string, PendingItemDemand>): PendingItemDemand[] {
+    return [...demands.values()].sort(
+      (left, right) =>
+        left.typeId - right.typeId || left.destinationLocationId - right.destinationLocationId,
+    );
+  }
+
+  private consumeStockpileReservationEntry(
+    lotId: string,
+    destinationLocationId: number,
+    quantity: number,
+  ): void {
+    const reservations = this.stockpileReservationsByLotId.get(lotId);
+    const reserved = reservations?.get(destinationLocationId) ?? 0;
+    if (!reservations || reserved <= quantity) {
+      reservations?.delete(destinationLocationId);
+      if (reservations?.size === 0) this.stockpileReservationsByLotId.delete(lotId);
+      return;
+    }
+    reservations.set(destinationLocationId, reserved - quantity);
+  }
+
+  private consumeStockpileReservationEntries(
+    lotId: string,
+    quantity: number,
+    excludedDestinationLocationId?: number,
+  ): void {
+    let remaining = quantity;
+    const reservations = this.stockpileReservationsByLotId.get(lotId);
+    if (!reservations) return;
+    for (const [destinationLocationId] of [...reservations].sort(
+      ([left], [right]) => left - right,
+    )) {
+      if (remaining <= 0) break;
+      if (destinationLocationId === excludedDestinationLocationId) continue;
+      const reserved = reservations.get(destinationLocationId) ?? 0;
+      const consumed = Math.min(remaining, reserved);
+      this.consumeStockpileReservationEntry(lotId, destinationLocationId, consumed);
+      remaining -= consumed;
+    }
   }
 
   private blueprintHorizon(
@@ -1057,6 +1260,22 @@ export class SimulationAllocator {
       || lot.locationId === undefined
       || lot.locationId === destinationLocationId
     ) return;
+    if (lot.horizon === "after-upstream") {
+      if (lot.activity !== "copying" && lot.activity !== "invention") return;
+      this.transactions.push({
+        id: this.nextTransactionId("blueprint-production-commitment"),
+        kind: "production-commitment",
+        account: { locationId: lot.locationId, typeId: lot.typeId },
+        destinationAccount: { locationId: destinationLocationId, typeId: lot.typeId },
+        quantity,
+        quantityKind: "blueprint-run",
+        source: lot.activity,
+        sourceLotId: lot.lotId,
+        producingJobId:
+          lot.industryJobId === undefined ? demandingJobId : String(lot.industryJobId),
+      });
+      return;
+    }
     this.transactions.push({
       id: this.nextTransactionId("blueprint-transfer"),
       kind: "transfer-commitment",
