@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import styles from "../page.module.css";
 import { Label } from "@/components/ui/label";
+import { trackAnalyticsEvent } from "@/lib/client/analyticsConsent";
 
 type AppraiseItem = {
   name: string;
@@ -144,6 +145,7 @@ export default function AppraisePage() {
       }
       setItems(data.items ?? []);
       setTotals(data.totals ?? null);
+      trackAnalyticsEvent("appraise", { outcome: "success" });
     }
     catch (caughtError) {
       if (
@@ -153,6 +155,7 @@ export default function AppraisePage() {
       ) {
         return;
       }
+      trackAnalyticsEvent("appraise", { outcome: "failure" });
       setError(
         caughtError instanceof Error ? caughtError.message : "Could not appraise this list.",
       );

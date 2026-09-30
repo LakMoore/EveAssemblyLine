@@ -28,7 +28,8 @@ export default function PrivacyPage() {
                 the app.
               </li>
               <li>
-                Aggregate page usage through Google Analytics only when you explicitly allow it.
+                Aggregate page and feature usage through Google Analytics only when you explicitly
+                allow it.
               </li>
             </ul>
           ),

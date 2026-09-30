@@ -3,6 +3,14 @@ export const analyticsConsentChangeEvent = "assembly-line-analytics-consent-chan
 
 export type AnalyticsConsent = "granted" | "denied";
 
+type AnalyticsEventParameters = Record<string, string | number | boolean>;
+
+declare global {
+  interface Window {
+    gtag?: (...args: unknown[]) => void;
+  }
+}
+
 /**
  * Returns the configured GA4 measurement ID when it has the expected public format.
  *
@@ -65,4 +73,24 @@ export function setAnalyticsConsent(consent: AnalyticsConsent): void {
       },
     ),
   );
+}
+
+/**
+ * Sends a privacy-safe GA4 event only when analytics is configured and consented to.
+ *
+ * @param eventName The GA4 event name.
+ * @param parameters Low-cardinality event parameters without user or EVE data.
+ */
+export function trackAnalyticsEvent(
+  eventName: string,
+  parameters: AnalyticsEventParameters = {},
+): void {
+  if (
+    typeof window === "undefined"
+    || readAnalyticsConsent() !== "granted"
+    || !getAnalyticsMeasurementId()
+    || !window.gtag
+  ) return;
+
+  window.gtag("event", eventName, parameters);
 }

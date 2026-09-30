@@ -98,6 +98,7 @@ import SimulationResults from "@/components/SimulationResults";
 import CalculateButton from "@/components/CalculateButton";
 import TypeSearch from "@/components/TypeSearch";
 import { toast } from "@/components/ui/toast";
+import { trackAnalyticsEvent } from "@/lib/client/analyticsConsent";
 import {
   Avatar,
   AvatarFallback,
@@ -1015,6 +1016,7 @@ function Planner() {
       setPlanStatus(mode === "simulate" ? "Simulating..." : "Calculating...");
     });
     await waitForNextPaint();
+    let simulationSucceeded = false;
     try {
       const missingEfficiencies = populatedStockpiles.some(
         (stockpile) => Object.keys(stockpile.reprocessingEfficiencies ?? {}).length === 0,
@@ -1219,6 +1221,7 @@ function Planner() {
       }
       await savePlannerLocations(locations);
       setPlanStatus(mode === "simulate" ? "Simulation updated just now" : "Plan updated just now");
+      simulationSucceeded = true;
       return true;
     }
     catch {
@@ -1226,6 +1229,14 @@ function Planner() {
       return false;
     }
     finally {
+      if (mode === "simulate") {
+        trackAnalyticsEvent(
+          "simulate",
+          {
+            outcome: simulationSucceeded ? "success" : "failure",
+          },
+        );
+      }
       setIsPlanLoading(false);
       setActivePlanRun(null);
     }

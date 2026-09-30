@@ -69,10 +69,10 @@ export default function CookiesPage() {
             <>
               <p>
                 When configured, AssemblyLine uses Google Analytics 4 to understand aggregate page
-                usage and improve the product. It is loaded only after you choose &quot;Allow
-                analytics&quot;. AssemblyLine does not send EVE credentials, character data, assets,
-                jobs, orders, or planning data to Google Analytics, and it does not use analytics
-                for advertising or cross-site profiling.
+                and feature usage and improve the product. It is loaded only after you choose
+                &quot;Allow analytics&quot;. AssemblyLine does not send EVE credentials, character
+                data, assets, jobs, orders, or planning data to Google Analytics, and it does not
+                use analytics for advertising or cross-site profiling.
               </p>
               <AnalyticsConsentSettings />
             </>

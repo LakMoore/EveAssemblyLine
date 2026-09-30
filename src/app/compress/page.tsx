@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
+import { trackAnalyticsEvent } from "@/lib/client/analyticsConsent";
 import {
   loadCompressSettings,
   saveCompressSettings,
@@ -536,8 +537,10 @@ function CompressContent() {
       }
       if (!data) throw new Error("The compression service returned an invalid response.");
       setResult(data);
+      trackAnalyticsEvent("compress", { outcome: "success" });
     }
     catch (error) {
+      trackAnalyticsEvent("compress", { outcome: "failure" });
       setError(error instanceof Error ? error.message : "Could not reach the compression service.");
     }
     finally {

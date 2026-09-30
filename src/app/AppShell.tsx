@@ -47,6 +47,7 @@ import {
 } from "@/lib/client/ownerSnapshotCache";
 import { loadCompressOptions } from "@/lib/planning/reprocessingClient";
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
+import { trackAnalyticsEvent } from "@/lib/client/analyticsConsent";
 import {
   ArrowUp,
   BadgeDollarSign,
@@ -496,182 +497,192 @@ export default function AppShell({ children }: { children: ReactNode }) {
     }
   }
 
-  const refreshData = useCallback(async () => {
-    if (isRefreshingDataRef.current || !authenticated) return false;
-    isRefreshingDataRef.current = true;
-    setIsRefreshingData(true);
-    window.dispatchEvent(new CustomEvent("assembly-line-esi-refresh-started"));
-    let assetLocations: EsiStockResponse["locations"] | undefined;
-    let corporationSources: ClientCorporationSource[] | undefined;
-    let assetsResponse: ClientAssetsResponse | undefined;
-    let stateResponse: ClientCharacterState | undefined;
-    const ownerSnapshots: ClientOwnerSnapshot[] = [];
-    let refreshSucceeded = false;
-    try {
-      const session = await refreshClientSession();
-      const refreshCharacters = session.characters ?? [];
-      const refreshSnapshotScope = session.snapshotScope;
-      setAuthenticated(Boolean(session.authenticated));
-      setSnapshotScope(refreshSnapshotScope);
-      setCharacters(refreshCharacters);
-      if (!session.authenticated || !refreshSnapshotScope || refreshCharacters.length === 0) {
-        return false;
-      }
-      const units = buildRefreshUnits(
-        refreshCharacters.map((character) => ({
-          characterId: character.characterId,
-          corporationId: character.corporationId,
-          hasDirectorRole: character.hasDirectorRole,
-          corporationSupportEnabled: character.corporationSupportEnabled,
-        })),
-      );
-      setRefreshProgress({ completed: 0, total: units.length });
-      const results = await runRefreshUnits(
-        units,
-        async (unit) => {
-          const owner = { kind: unit.kind, id: unit.ownerId } as const;
-          const cachedSnapshot = refreshSnapshotScope
-            ? await loadOwnerSnapshot(owner, refreshSnapshotScope)
-            : null;
-          const response = await fetch(
-            `/api/state/refresh/${unit.kind}/${unit.ownerId}`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                eTags: cachedSnapshot ? getOwnerSnapshotETags(cachedSnapshot.snapshot) : {},
-              }),
-            },
-          );
-          const data = (await response.json()) as {
-            success?: boolean;
-            rateLimitedUntil?: string | null;
-            error?: string;
-            errors?: string[];
-            ownerSnapshot?: unknown;
-          };
-          if (!response.ok || data.success !== true) {
-            throw new Error(
-              data.errors?.[0]
-                ?? data.error
-                ?? (data.rateLimitedUntil
-                  ? `Refresh is rate limited until ${new Date(data.rateLimitedUntil).toLocaleString()}.`
-                  : "Could not refresh ESI data."),
-            );
-          }
-          if (data.ownerSnapshot && refreshSnapshotScope) {
-            if (!isCompleteClientOwnerSnapshotResponse(data.ownerSnapshot)) {
-              throw new Error("Refresh returned an invalid owner snapshot.");
-            }
-            if (
-              data.ownerSnapshot.owner.kind !== owner.kind
-              || data.ownerSnapshot.owner.id !== owner.id
-            ) {
-              throw new Error("Refresh returned an owner snapshot for the wrong owner.");
-            }
-            const mergedSnapshot = mergeOwnerSnapshot(
-              cachedSnapshot?.snapshot ?? null,
-              data.ownerSnapshot,
-            );
-            await saveOwnerSnapshot(mergedSnapshot, refreshSnapshotScope);
-            ownerSnapshots.push(mergedSnapshot);
-          }
-        },
-        {
-          concurrency: 5,
-          onSettled: () => {
-            setRefreshProgress((current) =>
-              current
-                ? { ...current, completed: Math.min(current.total, current.completed + 1) }
-                : current,
-            );
-          },
-        },
-      );
-      refreshSucceeded = results.every((result) => result.success);
-      if (!refreshSucceeded) {
-        const failure = results.find((result) => !result.success)?.error;
-        showRefreshError(
-          failure instanceof Error ? failure.message : "Could not refresh ESI data.",
-        );
-      }
-      const refreshedAt = new Date().toISOString();
-      const requiredEndpoints = new Set<string>(refreshDependentEndpoints[activePage]);
-      let jobsResponse;
-      let shipsResponse;
-      const [loadedJobs, loadedShips, loadedAssets, loadedState] = await Promise.all([
-        requiredEndpoints.has("owner-jobs")
-          ? loadClientJobs(true).catch(() => undefined)
-          : Promise.resolve(undefined),
-        requiredEndpoints.has("owner-ships")
-          ? loadClientShips(true).catch(() => undefined)
-          : Promise.resolve(undefined),
-        requiredEndpoints.has("owner-assets")
-          ? loadClientAssets(language, true).catch(() => undefined)
-          : Promise.resolve(undefined),
-        loadClientCharacterState().catch(() => undefined),
-        requiredEndpoints.has("compress/options")
-          ? loadCompressOptions(language, true).catch(() => undefined)
-          : Promise.resolve(undefined),
-      ]);
-      jobsResponse = loadedJobs;
-      shipsResponse = loadedShips;
-      stateResponse = loadedState;
-      if (loadedAssets) {
-        assetsResponse = loadedAssets;
-        corporationSources = loadedAssets.corporationSources;
-        assetLocations = groupClientAssetsByLocation(filterClientAssetsForPlanning(loadedAssets));
-        await replaceEsiStock(
-          assetLocations.map((location) => ({
-            systemId: location.systemId ?? 0,
-            systemName: location.systemName ?? "Unknown system",
-            structureId: String(location.locationId),
-            structureName: location.name,
-            source: "esi" as const,
-            items: location.items,
+  const refreshData = useCallback(
+    async (trigger: "manual" | "auth_return" = "manual") => {
+      if (isRefreshingDataRef.current || !authenticated) return false;
+      isRefreshingDataRef.current = true;
+      setIsRefreshingData(true);
+      window.dispatchEvent(new CustomEvent("assembly-line-esi-refresh-started"));
+      let assetLocations: EsiStockResponse["locations"] | undefined;
+      let corporationSources: ClientCorporationSource[] | undefined;
+      let assetsResponse: ClientAssetsResponse | undefined;
+      let stateResponse: ClientCharacterState | undefined;
+      const ownerSnapshots: ClientOwnerSnapshot[] = [];
+      let refreshSucceeded = false;
+      try {
+        const session = await refreshClientSession();
+        const refreshCharacters = session.characters ?? [];
+        const refreshSnapshotScope = session.snapshotScope;
+        setAuthenticated(Boolean(session.authenticated));
+        setSnapshotScope(refreshSnapshotScope);
+        setCharacters(refreshCharacters);
+        if (!session.authenticated || !refreshSnapshotScope || refreshCharacters.length === 0) {
+          return false;
+        }
+        const units = buildRefreshUnits(
+          refreshCharacters.map((character) => ({
+            characterId: character.characterId,
+            corporationId: character.corporationId,
+            hasDirectorRole: character.hasDirectorRole,
+            corporationSupportEnabled: character.corporationSupportEnabled,
           })),
         );
-      }
-      if (refreshSucceeded) await saveLastRefreshAt(refreshedAt);
-      window.dispatchEvent(
-        new CustomEvent(
-          "assembly-line-esi-refreshed",
+        setRefreshProgress({ completed: 0, total: units.length });
+        const results = await runRefreshUnits(
+          units,
+          async (unit) => {
+            const owner = { kind: unit.kind, id: unit.ownerId } as const;
+            const cachedSnapshot = refreshSnapshotScope
+              ? await loadOwnerSnapshot(owner, refreshSnapshotScope)
+              : null;
+            const response = await fetch(
+              `/api/state/refresh/${unit.kind}/${unit.ownerId}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  eTags: cachedSnapshot ? getOwnerSnapshotETags(cachedSnapshot.snapshot) : {},
+                }),
+              },
+            );
+            const data = (await response.json()) as {
+              success?: boolean;
+              rateLimitedUntil?: string | null;
+              error?: string;
+              errors?: string[];
+              ownerSnapshot?: unknown;
+            };
+            if (!response.ok || data.success !== true) {
+              throw new Error(
+                data.errors?.[0]
+                  ?? data.error
+                  ?? (data.rateLimitedUntil
+                    ? `Refresh is rate limited until ${new Date(data.rateLimitedUntil).toLocaleString()}.`
+                    : "Could not refresh ESI data."),
+              );
+            }
+            if (data.ownerSnapshot && refreshSnapshotScope) {
+              if (!isCompleteClientOwnerSnapshotResponse(data.ownerSnapshot)) {
+                throw new Error("Refresh returned an invalid owner snapshot.");
+              }
+              if (
+                data.ownerSnapshot.owner.kind !== owner.kind
+                || data.ownerSnapshot.owner.id !== owner.id
+              ) {
+                throw new Error("Refresh returned an owner snapshot for the wrong owner.");
+              }
+              const mergedSnapshot = mergeOwnerSnapshot(
+                cachedSnapshot?.snapshot ?? null,
+                data.ownerSnapshot,
+              );
+              await saveOwnerSnapshot(mergedSnapshot, refreshSnapshotScope);
+              ownerSnapshots.push(mergedSnapshot);
+            }
+          },
           {
-            detail: {
-              refreshedAt,
-              rateLimitedUntil: null,
-              state: stateResponse,
-              assets: assetsResponse,
-              assetLocations,
-              corporationSources,
-              ships: shipsResponse ?? null,
-              jobs: jobsResponse ?? null,
-              ownerSnapshots,
+            concurrency: 5,
+            onSettled: () => {
+              setRefreshProgress((current) =>
+                current
+                  ? { ...current, completed: Math.min(current.total, current.completed + 1) }
+                  : current,
+              );
             },
           },
-        ),
-      );
-      if (refreshSucceeded) showRefreshSuccess();
-      return refreshSucceeded;
-    }
-    catch (error) {
-      showRefreshError(error instanceof Error ? error.message : "Could not refresh ESI data.");
-      return false;
-    }
-    finally {
-      isRefreshingDataRef.current = false;
-      setIsRefreshingData(false);
-      setRefreshProgress(null);
-      window.dispatchEvent(
-        new CustomEvent(
-          "assembly-line-esi-refresh-finished",
+        );
+        refreshSucceeded = results.every((result) => result.success);
+        if (!refreshSucceeded) {
+          const failure = results.find((result) => !result.success)?.error;
+          showRefreshError(
+            failure instanceof Error ? failure.message : "Could not refresh ESI data.",
+          );
+        }
+        const refreshedAt = new Date().toISOString();
+        const requiredEndpoints = new Set<string>(refreshDependentEndpoints[activePage]);
+        let jobsResponse;
+        let shipsResponse;
+        const [loadedJobs, loadedShips, loadedAssets, loadedState] = await Promise.all([
+          requiredEndpoints.has("owner-jobs")
+            ? loadClientJobs(true).catch(() => undefined)
+            : Promise.resolve(undefined),
+          requiredEndpoints.has("owner-ships")
+            ? loadClientShips(true).catch(() => undefined)
+            : Promise.resolve(undefined),
+          requiredEndpoints.has("owner-assets")
+            ? loadClientAssets(language, true).catch(() => undefined)
+            : Promise.resolve(undefined),
+          loadClientCharacterState().catch(() => undefined),
+          requiredEndpoints.has("compress/options")
+            ? loadCompressOptions(language, true).catch(() => undefined)
+            : Promise.resolve(undefined),
+        ]);
+        jobsResponse = loadedJobs;
+        shipsResponse = loadedShips;
+        stateResponse = loadedState;
+        if (loadedAssets) {
+          assetsResponse = loadedAssets;
+          corporationSources = loadedAssets.corporationSources;
+          assetLocations = groupClientAssetsByLocation(filterClientAssetsForPlanning(loadedAssets));
+          await replaceEsiStock(
+            assetLocations.map((location) => ({
+              systemId: location.systemId ?? 0,
+              systemName: location.systemName ?? "Unknown system",
+              structureId: String(location.locationId),
+              structureName: location.name,
+              source: "esi" as const,
+              items: location.items,
+            })),
+          );
+        }
+        if (refreshSucceeded) await saveLastRefreshAt(refreshedAt);
+        window.dispatchEvent(
+          new CustomEvent(
+            "assembly-line-esi-refreshed",
+            {
+              detail: {
+                refreshedAt,
+                rateLimitedUntil: null,
+                state: stateResponse,
+                assets: assetsResponse,
+                assetLocations,
+                corporationSources,
+                ships: shipsResponse ?? null,
+                jobs: jobsResponse ?? null,
+                ownerSnapshots,
+              },
+            },
+          ),
+        );
+        if (refreshSucceeded) showRefreshSuccess();
+        return refreshSucceeded;
+      }
+      catch (error) {
+        showRefreshError(error instanceof Error ? error.message : "Could not refresh ESI data.");
+        return false;
+      }
+      finally {
+        trackAnalyticsEvent(
+          "refresh",
           {
-            detail: { success: refreshSucceeded },
+            outcome: refreshSucceeded ? "success" : "failure",
+            trigger,
           },
-        ),
-      );
-    }
-  }, [activePage, authenticated, language]);
+        );
+        isRefreshingDataRef.current = false;
+        setIsRefreshingData(false);
+        setRefreshProgress(null);
+        window.dispatchEvent(
+          new CustomEvent(
+            "assembly-line-esi-refresh-finished",
+            {
+              detail: { success: refreshSucceeded },
+            },
+          ),
+        );
+      }
+    },
+    [activePage, authenticated, language],
+  );
 
   useEffect(() => {
     if (!authenticated || characters.length === 0 || activePage === "imagechecker") return;
@@ -750,7 +761,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     setIsMobileMetaExpanded(true);
     setIsMobileMetaCollapsing(false);
     if (authenticated) {
-      await refreshData();
+      await refreshData("manual");
     }
     scheduleMobileMetaCollapse();
   }, [authenticated, refreshData, scheduleMobileMetaCollapse]);
@@ -774,7 +785,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
     authChangeRefreshRequested.current = true;
     url.searchParams.delete("refresh");
     window.history.replaceState({}, "", url);
-    window.setTimeout(() => void refreshData(), 0);
+    window.setTimeout(() => void refreshData("auth_return"), 0);
   }, [authenticated, characters.length, refreshData]);
 
   return (
@@ -1184,6 +1195,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
                       type="button"
                       variant="ghost"
                       className={`${styles.addButton} ${styles.navText} ${!authenticated ? styles.addButtonDisconnected : ""}`}
+                      onClick={() =>
+                        trackAnalyticsEvent(
+                          "add_character",
+                          {
+                            source: "sidebar",
+                          },
+                        )
+                      }
                     >
                       <UserRoundPlus
                         data-icon="inline-start"

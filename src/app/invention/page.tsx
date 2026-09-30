@@ -27,6 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { inventionSkillsByTypeId } from "@/lib/invention/skills";
+import { trackAnalyticsEvent } from "@/lib/client/analyticsConsent";
 import {
   isCompleteClientOwnerSnapshotResponse,
   loadOwnerSnapshot,
@@ -297,11 +298,13 @@ export default function InventionPage() {
         if (!response.ok) throw new Error(payload.error ?? "Could not load invention data.");
         if (currentRequestId === requestId.current) {
           startTransition(() => setResult(payload));
+          trackAnalyticsEvent("invention", { outcome: "success" });
         }
       })
       .catch((fetchError: unknown) => {
         if (fetchError instanceof DOMException && fetchError.name === "AbortError") return;
         if (currentRequestId !== requestId.current) return;
+        trackAnalyticsEvent("invention", { outcome: "failure" });
         setResult(null);
         setError(
           fetchError instanceof Error ? fetchError.message : "Could not load invention data.",

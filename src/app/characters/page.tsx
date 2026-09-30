@@ -43,6 +43,7 @@ import {
 } from "@/lib/client/requestCache";
 import styles from "../page.module.css";
 import { Label } from "@/components/ui/label";
+import { trackAnalyticsEvent } from "@/lib/client/analyticsConsent";
 
 type Character = ClientCharacter;
 
@@ -613,7 +614,19 @@ export default function CharactersPage() {
         </div>
         <div className={styles.pageIntroActions}>
           <EveAuthorizationWarning href="/api/auth/eve/start">
-            <Button variant="link" className={styles.characterAction} type="button">
+            <Button
+              variant="link"
+              className={styles.characterAction}
+              type="button"
+              onClick={() =>
+                trackAnalyticsEvent(
+                  "add_character",
+                  {
+                    source: "characters_page",
+                  },
+                )
+              }
+            >
               <Plus data-icon="inline-start" aria-hidden="true" />
               <span>Add character</span>
             </Button>
@@ -673,7 +686,19 @@ export default function CharactersPage() {
               Connect an EVE character to make assets, jobs, and corporation access available.
             </EmptyDescription>
             <EveAuthorizationWarning href="/api/auth/eve/start">
-              <Button variant="link" className={styles.characterAction} type="button">
+              <Button
+                variant="link"
+                className={styles.characterAction}
+                type="button"
+                onClick={() =>
+                  trackAnalyticsEvent(
+                    "add_character",
+                    {
+                      source: "characters_page",
+                    },
+                  )
+                }
+              >
                 <Plus data-icon="inline-start" aria-hidden="true" />
                 <span>Connect with EVE SSO</span>
               </Button>
