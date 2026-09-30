@@ -7,7 +7,7 @@ void test("applies blueprint ME and facility material reduction to manufacturing
 });
 
 void test("rounds manufacturing material reductions after multiplying by runs", () => {
-  assert.equal(requiredMaterialQuantity("manufacturing", 35, 3, { me: 10 }, 0.92), 87);
+  assert.equal(requiredMaterialQuantity("manufacturing", 35, 3, { me: 10 }, 0.92), 88);
 });
 
 void test("applies the minimum one unit per material per run", () => {

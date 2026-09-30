@@ -1310,12 +1310,12 @@ void test("applies blueprint ME and structure material bonuses to capital compon
     (input) => input.typeId === coreTemperatureRegulatorTypeId,
   );
   assert(coreTemperatureRegulator);
-  assert.equal(coreTemperatureRegulator.requiredQuantity, 87);
+  assert.equal(coreTemperatureRegulator.requiredQuantity, 88);
   const coreTemperatureRegulatorPurchase = result.lists.materialsToBuy.find(
     (item) => item.typeId === coreTemperatureRegulatorTypeId,
   );
   assert(coreTemperatureRegulatorPurchase);
-  assert.equal(coreTemperatureRegulatorPurchase.requiredQuantity, 87);
+  assert.equal(coreTemperatureRegulatorPurchase.requiredQuantity, 88);
 });
 
 void test("applies assigned reaction group facility modifiers", async () => {

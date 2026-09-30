@@ -2558,6 +2558,7 @@ function PlannerStockpileSummary({
     locationNamesById.get(locationId) ?? String(locationId);
   const productAvatarItems = stockpile.items.slice(0, 5);
   const remainingProductCount = stockpile.items.length - productAvatarItems.length;
+  const disabledItemTypeCount = stockpile.items.filter((item) => item.isIncluded === false).length;
 
   return (
     <article
@@ -2581,6 +2582,11 @@ function PlannerStockpileSummary({
             <div className="flex min-w-0 items-center gap-2">
               <h3 className="truncate text-base font-medium">{stockpile.name}</h3>
               {stockpile.kind === "special" && <Badge variant="outline">Special</Badge>}
+              {disabledItemTypeCount > 0 && (
+                <Badge variant="outline">
+                  {disabledItemTypeCount} excluded item{disabledItemTypeCount === 1 ? "" : "s"}
+                </Badge>
+              )}
             </div>
             <p className="text-sm text-muted-foreground">
               {stockpile.items.length.toLocaleString()} item types,{" "}
@@ -2593,7 +2599,11 @@ function PlannerStockpileSummary({
           <div className="flex w-full flex-col items-center gap-2 sm:w-auto sm:flex-row sm:gap-3">
             <AvatarGroup>
               {productAvatarItems.map((item) => (
-                <Avatar key={item.typeId} size="lg">
+                <Avatar
+                  key={item.typeId}
+                  size="lg"
+                  className={cn(item.isIncluded === false && "opacity-50")}
+                >
                   <AvatarImage
                     className="bg-muted"
                     src={eveTypeImageUrl(
@@ -2605,7 +2615,7 @@ function PlannerStockpileSummary({
                           : "icon",
                       64,
                     )}
-                    alt={`${item.name} icon`}
+                    alt={`${item.name} icon${item.isIncluded === false ? ", disabled" : ""}`}
                   />
                   <AvatarFallback>{item.name.slice(0, 2)}</AvatarFallback>
                 </Avatar>
