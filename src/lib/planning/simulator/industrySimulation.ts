@@ -330,7 +330,11 @@ class IndustryDemandSimulation {
       },
     );
     this.drainProductionDemands();
-    this.finalizeDeferredProductionSupplies();
+    measureSyncProfiled(
+      this.profiler,
+      "finalize-deferred-production-supplies",
+      () => this.finalizeDeferredProductionSupplies(),
+    );
 
     measureSyncProfiled(
       this.profiler,
@@ -342,7 +346,11 @@ class IndustryDemandSimulation {
       },
     );
     this.drainProductionDemands();
-    this.finalizeDeferredProductionSupplies();
+    measureSyncProfiled(
+      this.profiler,
+      "finalize-deferred-production-supplies",
+      () => this.finalizeDeferredProductionSupplies(),
+    );
     measureSyncProfiled(
       this.profiler,
       "expand-skill-prerequisites",
@@ -468,22 +476,27 @@ class IndustryDemandSimulation {
       for (const request of bucket.requests) {
         request.aggregateSupply = aggregate;
       }
-      this.syncProductionDemandRequests();
+      this.syncProductionDemandRequests(bucket.requests);
     }
   }
 
-  private syncProductionDemandRequests(): void {
-    for (const request of this.productionDemandRequests) {
+  private syncProductionDemandRequests(
+    requests: readonly ProductionDemandRequest[] = this.productionDemandRequests,
+  ): boolean {
+    let readinessChanged = false;
+    for (const request of requests) {
       const aggregate = request.aggregateSupply;
       if (!aggregate) continue;
       request.supply.plannedQuantity = Math.min(
         request.quantity,
         Math.max(0, aggregate.plannedQuantity - request.allocationOffset),
       );
-      request.supply.readyQuantity = Math.min(
+      const readyQuantity = Math.min(
         request.quantity,
         Math.max(0, aggregate.readyQuantity - request.allocationOffset),
       );
+      if (request.supply.readyQuantity !== readyQuantity) readinessChanged = true;
+      request.supply.readyQuantity = readyQuantity;
       request.supply.reservations = this.reservationRange(
         aggregate.reservations,
         request.allocationOffset,
@@ -491,6 +504,7 @@ class IndustryDemandSimulation {
       );
       request.supply.jobs = aggregate.jobs;
     }
+    return readinessChanged;
   }
 
   private reservationRange(
@@ -517,65 +531,99 @@ class IndustryDemandSimulation {
   }
 
   private finalizeDeferredProductionSupplies(): void {
-    for (let pass = 0; pass <= this.deferredProductionSupplies.length; pass += 1) {
-      this.syncProductionSupplies();
-      this.syncProductionDemandRequests();
-      for (const deferred of [...this.deferredProductionSupplies].reverse()) {
-        const input = deferred.input;
-        const availableAfterUpstream =
-          deferred.localQuantity
-          + deferred.remoteQuantity
-          + deferred.futureQuantity
-          + deferred.supply.readyQuantity;
-        input.availableAfterUpstream = availableAfterUpstream;
-        input.unsatisfiedQuantity = Math.max(
-          0,
-          input.requiredQuantity
-            - deferred.localQuantity
-            - deferred.remoteQuantity
-            - deferred.futureQuantity
-            - deferred.supply.plannedQuantity,
-        );
-        input.upstreamReservations = this.reservationRange(
-          deferred.supply.reservations,
-          0,
-          deferred.supply.reservations.reduce(
-            (total, reservation) => total + reservation.quantity,
-            0,
-          ),
-        );
-        if (deferred.job) {
-          const readyAfterUpstreamRuns = Math.min(
-            horizonRunLimit(deferred.blueprint, deferred.blueprint.runs).afterUpstream,
-            this.installableRuns(
-              deferred.activity,
-              deferred.blueprint,
-              deferred.profile.materialMultiplier,
-              deferred.materials,
-              (material) =>
-                deferred.job?.inputs.find((candidate) => candidate.typeId === material.typeId)
-                  ?.availableAfterUpstream ?? 0,
-            ),
+    const deferredSupplies = [...this.deferredProductionSupplies].reverse();
+    for (let pass = 0; pass <= deferredSupplies.length; pass += 1) {
+      const readinessChanged = measureSyncProfiled(
+        this.profiler,
+        "finalize-deferred-pass",
+        () => {
+          let changed = measureSyncProfiled(
+            this.profiler,
+            "sync-production-supplies",
+            () => this.syncProductionSupplies(),
           );
-          deferred.job.readyAfterUpstreamRuns = readyAfterUpstreamRuns;
-          deferred.job.blockedRuns = Math.max(0, deferred.blueprint.runs - readyAfterUpstreamRuns);
-        }
-      }
+          changed =
+            measureSyncProfiled(
+              this.profiler,
+              "sync-production-demand-requests",
+              () => this.syncProductionDemandRequests(),
+            ) || changed;
+          for (const deferred of deferredSupplies) {
+            const input = deferred.input;
+            const availableAfterUpstream =
+              deferred.localQuantity
+              + deferred.remoteQuantity
+              + deferred.futureQuantity
+              + deferred.supply.readyQuantity;
+            input.availableAfterUpstream = availableAfterUpstream;
+            input.unsatisfiedQuantity = Math.max(
+              0,
+              input.requiredQuantity
+                - deferred.localQuantity
+                - deferred.remoteQuantity
+                - deferred.futureQuantity
+                - deferred.supply.plannedQuantity,
+            );
+            input.upstreamReservations = this.reservationRange(
+              deferred.supply.reservations,
+              0,
+              deferred.supply.reservations.reduce(
+                (total, reservation) => total + reservation.quantity,
+                0,
+              ),
+            );
+            if (deferred.job) {
+              const readyAfterUpstreamRuns = Math.min(
+                horizonRunLimit(deferred.blueprint, deferred.blueprint.runs).afterUpstream,
+                this.installableRuns(
+                  deferred.activity,
+                  deferred.blueprint,
+                  deferred.profile.materialMultiplier,
+                  deferred.materials,
+                  (material) =>
+                    deferred.job?.inputs.find((candidate) => candidate.typeId === material.typeId)
+                      ?.availableAfterUpstream ?? 0,
+                ),
+              );
+              if (deferred.job.readyAfterUpstreamRuns !== readyAfterUpstreamRuns) changed = true;
+              deferred.job.readyAfterUpstreamRuns = readyAfterUpstreamRuns;
+              deferred.job.blockedRuns = Math.max(
+                0,
+                deferred.blueprint.runs - readyAfterUpstreamRuns,
+              );
+            }
+          }
+          return changed;
+        },
+      );
+      if (!readinessChanged) break;
     }
-    this.syncProductionSupplies();
-    this.syncProductionDemandRequests();
+    measureSyncProfiled(
+      this.profiler,
+      "sync-production-supplies",
+      () => this.syncProductionSupplies(),
+    );
+    measureSyncProfiled(
+      this.profiler,
+      "sync-production-demand-requests",
+      () => this.syncProductionDemandRequests(),
+    );
   }
 
-  private syncProductionSupplies(): void {
+  private syncProductionSupplies(): boolean {
+    let readinessChanged = false;
     for (const supply of this.productionSupplies) {
-      supply.readyQuantity = Math.min(
+      const readyQuantity = Math.min(
         supply.plannedQuantity,
         supply.jobs.reduce(
           (total, job) => total + job.readyAfterUpstreamRuns * job.outputPerRun,
           0,
         ),
       );
+      if (supply.readyQuantity !== readyQuantity) readinessChanged = true;
+      supply.readyQuantity = readyQuantity;
     }
+    return readinessChanged;
   }
 
   private reserveRecursiveLocalDemand(): void {

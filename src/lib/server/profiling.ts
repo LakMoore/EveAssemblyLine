@@ -6,6 +6,11 @@ export type ProfileValue =
       count?: number;
     };
 
+export type RequestProfile = {
+  totalMS: number;
+  sections: Record<string, ProfileValue>;
+};
+
 type ProfileGroup = Exclude<ProfileValue, number>;
 
 function profileCount(group: ProfileGroup): number {
@@ -17,7 +22,7 @@ export type RequestProfiler = {
   end(section: string): void;
   measureSync<T>(section: string, operation: () => T): T;
   measure<T>(section: string, operation: () => Promise<T>): Promise<T>;
-  finish(): void;
+  finish(): RequestProfile | undefined;
 };
 
 /** Collects nested development-only timings without changing request behavior. */
@@ -129,19 +134,17 @@ export function createRequestProfiler(
       }
     },
     finish() {
-      if (!enabled) return;
-      console.info(
-        `[${label} profile]`,
-        JSON.stringify(
-          {
-            ...details,
-            totalMS: Math.round((performance.now() - startedAt) * 100) / 100,
-            sections: Object.fromEntries(rootSections),
-          },
-          null,
-          2,
-        ),
-      );
+      if (!enabled) return undefined;
+      const profile = {
+        ...details,
+        totalMS: Math.round((performance.now() - startedAt) * 100) / 100,
+        sections: Object.fromEntries(rootSections),
+      };
+      console.info(`[${label} profile]`, JSON.stringify(profile, null, 2));
+      return {
+        totalMS: profile.totalMS,
+        sections: profile.sections,
+      };
     },
   };
 }

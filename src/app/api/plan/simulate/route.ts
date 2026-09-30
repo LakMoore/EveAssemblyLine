@@ -20,9 +20,8 @@ const noStoreResponseInit: ResponseInit = {
   headers: { "Cache-Control": "no-store" },
 };
 
-/** Removes diagnostic ledger projections from non-development responses. */
+/** Removes diagnostic ledger projections from simulator presentation responses. */
 export function presentationResult(result: SimulationResultWithDiagnostics): SimulationResultV2 {
-  if (process.env.NODE_ENV === "development") return result;
   const { ledgers: _ledgers, ...publicResult } = result;
   return publicResult;
 }

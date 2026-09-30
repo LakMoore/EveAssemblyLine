@@ -46,11 +46,11 @@ function restoreNodeEnvironment(previous: string | undefined): void {
   }
 }
 
-void test("includes diagnostic ledgers in development responses", () => {
+void test("omits diagnostic ledgers from development responses", () => {
   const previous = process.env.NODE_ENV;
   testEnvironment.NODE_ENV = "development";
   try {
-    assert.equal("ledgers" in presentationResult(diagnosticResult()), true);
+    assert.equal("ledgers" in presentationResult(diagnosticResult()), false);
   }
   finally {
     restoreNodeEnvironment(previous);
