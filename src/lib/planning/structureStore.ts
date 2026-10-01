@@ -9,6 +9,13 @@ function isKnownStructure(value: unknown): value is KnownStructure {
   const structure = value as Record<string, unknown>;
   return (
     typeof structure.id === "string"
+    && (
+      structure.plannerLocationId === undefined
+      || (
+        Number.isSafeInteger(structure.plannerLocationId)
+        && Number(structure.plannerLocationId) < 0
+      )
+    )
     && Number.isInteger(structure.systemId)
     && typeof structure.systemName === "string"
     && typeof structure.type === "string"
@@ -17,6 +24,41 @@ function isKnownStructure(value: unknown): value is KnownStructure {
     && Array.isArray(structure.rigs)
     && structure.rigs.every((rig) => typeof rig === "string")
   );
+}
+
+/** Assigns stable negative planner IDs to local structures without an ESI structure ID. */
+export function assignPlannerLocationIds(structures: KnownStructure[]): KnownStructure[] {
+  const usedIds = new Set<number>();
+  const nextStructures = structures.map((structure) => ({ ...structure }));
+
+  for (const structure of nextStructures) {
+    const locationId = structure.plannerLocationId;
+    if (
+      structure.esiStructureId === undefined
+      && locationId !== undefined
+      && Number.isSafeInteger(locationId)
+      && locationId < 0
+      && !usedIds.has(locationId)
+    ) {
+      usedIds.add(locationId);
+    }
+    else {
+      delete structure.plannerLocationId;
+    }
+  }
+
+  let nextId = -1;
+  for (const structure of nextStructures) {
+    if (structure.esiStructureId !== undefined || structure.plannerLocationId !== undefined) {
+      continue;
+    }
+    while (usedIds.has(nextId)) nextId -= 1;
+    structure.plannerLocationId = nextId;
+    usedIds.add(nextId);
+    nextId -= 1;
+  }
+
+  return nextStructures;
 }
 
 function loadLocalStructures() {
@@ -38,7 +80,12 @@ function saveLocalStructures(structures: KnownStructure[]) {
 
 export async function loadStructures() {
   if (typeof window !== "undefined" && window.localStorage.getItem(localStorageKey) !== null) {
-    return loadLocalStructures();
+    const storedStructures = loadLocalStructures();
+    const structures = assignPlannerLocationIds(storedStructures);
+    if (JSON.stringify(structures) !== JSON.stringify(storedStructures)) {
+      void saveStructures(structures);
+    }
+    return structures;
   }
   try {
     const database = await getPlanningDatabase();
@@ -55,21 +102,31 @@ export async function loadStructures() {
       };
     });
     if (structures.length > 0) {
-      saveLocalStructures(structures);
-      return structures;
+      const normalizedStructures = assignPlannerLocationIds(structures);
+      saveLocalStructures(normalizedStructures);
+      if (JSON.stringify(normalizedStructures) !== JSON.stringify(structures)) {
+        void saveStructures(normalizedStructures);
+      }
+      return normalizedStructures;
     }
   }
   catch {}
-  return loadLocalStructures();
+  const storedStructures = loadLocalStructures();
+  const structures = assignPlannerLocationIds(storedStructures);
+  if (JSON.stringify(structures) !== JSON.stringify(storedStructures)) {
+    void saveStructures(structures);
+  }
+  return structures;
 }
 
 export async function saveStructures(structures: KnownStructure[]) {
-  saveLocalStructures(structures);
+  const normalizedStructures = assignPlannerLocationIds(structures);
+  saveLocalStructures(normalizedStructures);
   try {
     const database = await getPlanningDatabase();
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(structureStoreName, "readwrite");
-      transaction.objectStore(structureStoreName).put(structures, structureKey);
+      transaction.objectStore(structureStoreName).put(normalizedStructures, structureKey);
       transaction.oncomplete = () => {
         resolve();
       };

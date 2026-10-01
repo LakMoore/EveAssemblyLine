@@ -112,6 +112,37 @@ void test("accepts stockpiles that share a physical activity location", () => {
   assert.equal(simulatorRequestSchema.safeParse(input).success, true);
 });
 
+void test("accepts negative local structure locations and rejects zero", () => {
+  const input = {
+    ...request(),
+    stockpiles: request().stockpiles.map((stockpile) => ({
+      ...stockpile,
+      locations: { ...stockpile.locations, manufacturing: -1 },
+      groupAssignments: { standard: -1 },
+    })),
+    facilityProfiles: [
+      {
+        locationId: -1,
+        systemId: 30000142,
+        sizeId: 1,
+        buildTypeGroups: {},
+      },
+    ],
+    assets: [
+      {
+        typeId: 34,
+        quantity: 1,
+        locationId: -1,
+        rootLocationId: -1,
+        sourceLocationId: -1,
+      },
+    ],
+  };
+  assert.equal(simulatorRequestSchema.safeParse(input).success, true);
+  input.stockpiles[0].locations.reactions = 0;
+  assert.equal(simulatorRequestSchema.safeParse(input).success, false);
+});
+
 void test("strips asset presentation metadata at the simulator boundary", () => {
   const parsed = parseSimulatorRequest({
     ...request(),

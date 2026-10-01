@@ -72,8 +72,14 @@ const planBuildItemSchema = z.object({
   fromCompression: z.boolean(),
 });
 const productionGroupKeys = new Set(productionGroupDefinitions.map((group) => group.key));
+const plannerLocationIdSchema = z
+  .number()
+  .int()
+  .min(Number.MIN_SAFE_INTEGER)
+  .max(Number.MAX_SAFE_INTEGER)
+  .refine((locationId) => locationId !== 0);
 const groupAssignmentsSchema = z
-  .record(z.string(), z.number().int().positive())
+  .record(z.string(), plannerLocationIdSchema)
   .superRefine((assignments, context) => {
     for (const key of Object.keys(assignments)) {
       if (!productionGroupKeys.has(key as (typeof productionGroupDefinitions)[number]["key"])) {
@@ -89,12 +95,12 @@ const planStockpileSchema = z.object({
   name: z.string().trim().min(1).max(100),
   kind: z.enum(["standard", "special"]).optional(),
   locations: z.object({
-    stock: z.number().int().positive(),
-    manufacturing: z.number().int().positive(),
-    reactions: z.number().int().positive(),
-    reprocessing: z.number().int().positive(),
-    copying: z.number().int().positive(),
-    invention: z.number().int().positive(),
+    stock: plannerLocationIdSchema,
+    manufacturing: plannerLocationIdSchema,
+    reactions: plannerLocationIdSchema,
+    reprocessing: plannerLocationIdSchema,
+    copying: plannerLocationIdSchema,
+    invention: plannerLocationIdSchema,
   }),
   groupAssignments: groupAssignmentsSchema.optional(),
   reprocessingEfficiencies: reprocessingEfficienciesSchema.optional(),
@@ -113,7 +119,7 @@ const facilityGroupBonusSchema = z.object({
 const facilityProfilesSchema = z
   .array(
     z.object({
-      locationId: z.number().int().positive(),
+      locationId: plannerLocationIdSchema,
       sizeId: z.number().finite().min(0),
       buildTypeGroups: z.record(z.string(), facilityGroupBonusSchema),
     }),

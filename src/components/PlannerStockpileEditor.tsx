@@ -47,6 +47,7 @@ import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import TypeSearch from "@/components/TypeSearch";
 import PasteListDialog from "@/components/PasteListDialog";
 import type { SdeLanguage } from "@/lib/reference/languages";
+import { reconcilePasteListItems } from "@/lib/reference/pasteListOperations";
 import { cn } from "@/lib/utils";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import { Label } from "./ui/label";
@@ -629,7 +630,22 @@ function StockpileItemsContent({
           currentItems={draft.items}
           onCancel={() => setIsPasteOpen(false)}
           onImport={(items) => {
-            updateItems(addItems(draft.items, items));
+            updateItems(
+              reconcilePasteListItems(
+                draft.items,
+                items,
+                (item) => ({
+                  name: item.name,
+                  categoryName: item.category ?? "Unknown",
+                  typeId: item.typeId,
+                  quantity: item.quantity ?? 1,
+                  me: 0,
+                  te: 0,
+                  fromCompression: false,
+                  isIncluded: true,
+                }),
+              ),
+            );
             setIsPasteOpen(false);
           }}
         />

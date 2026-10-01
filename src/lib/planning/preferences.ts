@@ -13,6 +13,7 @@ export type PlannerLocations = {
 
 export type KnownStructure = {
   id: string;
+  plannerLocationId?: number;
   systemId: number;
   systemName: string;
   securityStatus?: number;

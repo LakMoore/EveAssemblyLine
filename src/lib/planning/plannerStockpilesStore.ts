@@ -15,7 +15,7 @@ function isStockpileLocations(value: unknown): value is PlanStockpileLocations {
     locations.reprocessing,
     locations.copying,
     locations.invention,
-  ].every((locationId) => Number.isSafeInteger(locationId) && Number(locationId) > 0);
+  ].every((locationId) => Number.isSafeInteger(locationId) && Number(locationId) !== 0);
 }
 
 function isClientBuildItem(value: unknown): value is ClientBuildItem {
@@ -53,7 +53,7 @@ function isGroupAssignments(value: unknown): value is ClientPlanStockpile["group
       ([key, locationId]) =>
         validKeys.has(key as (typeof productionGroupDefinitions)[number]["key"])
         && Number.isSafeInteger(locationId)
-        && Number(locationId) > 0,
+        && Number(locationId) !== 0,
     );
 }
 

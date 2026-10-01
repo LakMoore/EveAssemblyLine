@@ -40,7 +40,11 @@ import {
   type StructureSize,
   type StructureType,
 } from "@/lib/reference/structureTypes";
-import { loadStructures, saveStructures } from "@/lib/planning/structureStore";
+import {
+  assignPlannerLocationIds,
+  loadStructures,
+  saveStructures,
+} from "@/lib/planning/structureStore";
 import {
   facilitySettingsKey,
   facilitySettingsName,
@@ -671,12 +675,13 @@ export default function LocationsPage() {
               previous === undefined
                 ? (structure.rigTypeIds?.length ?? 0) > 0
                 : !sameRigTypeIds(previous.rigTypeIds, structure.rigTypeIds);
-            const structures =
+            const structures = assignPlannerLocationIds(
               previous !== undefined
                 ? knownStructures.map((current) =>
                     current.id === structure.id ? structure : current,
                   )
-                : [...knownStructures, structure];
+                : [...knownStructures, structure],
+            );
             setLocations((current) => ({
               ...current,
               structures,

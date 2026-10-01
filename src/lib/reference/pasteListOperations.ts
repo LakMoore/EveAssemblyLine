@@ -5,6 +5,26 @@ export type PasteListQuantityItem = {
   quantity?: number;
 };
 
+/** Reconciles result rows with existing rows without reusing duplicate type metadata. */
+export function reconcilePasteListItems<
+  T extends PasteListQuantityItem,
+  R extends PasteListQuantityItem,
+>(currentItems: T[], resultItems: R[], createItem: (item: R) => T): T[] {
+  const existingItemsByTypeId = new Map<number, T[]>();
+  for (const item of currentItems) {
+    const matchingItems = existingItemsByTypeId.get(item.typeId) ?? [];
+    matchingItems.push(item);
+    existingItemsByTypeId.set(item.typeId, matchingItems);
+  }
+
+  return resultItems.map((item) => {
+    const existing = existingItemsByTypeId.get(item.typeId)?.shift();
+    return existing
+      ? { ...existing, quantity: item.quantity ?? existing.quantity }
+      : createItem(item);
+  });
+}
+
 /** Applies a paste mode while preserving existing rows that are reduced to zero. */
 export function applyPasteListMode<T extends PasteListQuantityItem>(
   currentItems: T[],

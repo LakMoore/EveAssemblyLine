@@ -2,6 +2,12 @@ import { z } from "zod";
 import type { SimulationRequestV1 } from "./types";
 
 const positiveSafeInteger = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const plannerLocationId = z
+  .number()
+  .int()
+  .min(Number.MIN_SAFE_INTEGER)
+  .max(Number.MAX_SAFE_INTEGER)
+  .refine((locationId) => locationId !== 0);
 const nonNegativeInteger = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const percentage = z.number().finite().min(0).max(100);
 const multiplier = z.number().finite().positive().max(10);
@@ -63,9 +69,9 @@ const planStockItemSchema = z
   .object({
     typeId: positiveSafeInteger,
     quantity: nonNegativeInteger,
-    locationId: positiveSafeInteger.optional(),
-    rootLocationId: positiveSafeInteger.optional(),
-    sourceLocationId: positiveSafeInteger.optional(),
+    locationId: plannerLocationId.optional(),
+    rootLocationId: plannerLocationId.optional(),
+    sourceLocationId: plannerLocationId.optional(),
     sourceLocationName: z.string().max(500).optional(),
     sourceSystemId: positiveSafeInteger.optional(),
     blueprintPrints: z.array(blueprintPrintSchema).max(10000).optional(),
@@ -86,8 +92,8 @@ const planStockItemSchema = z
 const categorizedItemSchema = z.object({
   typeId: positiveSafeInteger,
   quantity: nonNegativeInteger,
-  locationId: positiveSafeInteger,
-  rootLocationId: positiveSafeInteger,
+  locationId: plannerLocationId,
+  rootLocationId: plannerLocationId,
 });
 
 const categorizedBlueprintSchema = categorizedItemSchema.extend({
@@ -119,15 +125,15 @@ const buildItemSchema = z.object({
 });
 
 const locationsSchema = z.object({
-  stock: positiveSafeInteger,
-  manufacturing: positiveSafeInteger,
-  reactions: positiveSafeInteger,
-  reprocessing: positiveSafeInteger,
-  copying: positiveSafeInteger,
-  invention: positiveSafeInteger,
+  stock: plannerLocationId,
+  manufacturing: plannerLocationId,
+  reactions: plannerLocationId,
+  reprocessing: plannerLocationId,
+  copying: plannerLocationId,
+  invention: plannerLocationId,
 });
 
-const groupAssignmentsSchema = z.record(z.string().min(1), positiveSafeInteger);
+const groupAssignmentsSchema = z.record(z.string().min(1), plannerLocationId);
 
 const stockpileSchema = z.object({
   id: z.string().trim().min(1).max(100),
@@ -179,7 +185,7 @@ const simulationSchema = z
     scienceProfiles: z
       .array(
         z.object({
-          locationId: positiveSafeInteger,
+          locationId: plannerLocationId,
           copyingDurationMultiplier: multiplier,
           copyingMaterialMultiplier: multiplier,
           inventionDurationMultiplier: multiplier,
@@ -225,7 +231,7 @@ export const simulatorRequestSchema = z
     facilityProfiles: z
       .array(
         z.object({
-          locationId: positiveSafeInteger,
+          locationId: plannerLocationId,
           systemId: positiveSafeInteger,
           sizeId: z.number().finite().nonnegative(),
           buildTypeGroups: z.record(z.string(), facilityBonusSchema),

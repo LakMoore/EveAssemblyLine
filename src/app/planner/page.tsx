@@ -32,7 +32,8 @@ import {
   loadPlannerStockpiles,
   savePlannerStockpiles,
 } from "@/lib/planning/plannerStockpilesStore";
-import { loadStructures } from "@/lib/planning/structureStore";
+import { assignPlannerLocationIds, loadStructures } from "@/lib/planning/structureStore";
+import { facilitySettingsKey, facilitySettingsName } from "@/lib/planning/facilities";
 import {
   loadHaulItemExclusions,
   saveHaulItemExclusions,
@@ -91,6 +92,7 @@ import {
 } from "@/lib/planning/preferences";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import { fetchTypeMetadata } from "@/lib/reference/types";
+import { reconcilePasteListItems } from "@/lib/reference/pasteListOperations";
 import { useAppLanguage } from "../AppShell";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import PlannerResults from "@/components/PlannerResults";
@@ -910,30 +912,58 @@ function Planner() {
             })),
         );
       }
-      const options = (data?.facilities ?? [])
-        .filter(
-          (facility): facility is typeof facility & { id: number } =>
-            typeof facility.id === "number",
-        )
-        .map((facility) => ({
-          id: String(facility.id),
-          locationId: facility.id,
-          systemId: facility.systemId,
-          systemName: facility.systemName,
-          name: facility.name,
-          locationType: facility.locationType,
-          baseYield: (facility.activities.reprocessing.baseYield ?? 0) * 100,
-          baseManufacturingMe: facility.activities.manufacturing.materialConsumption ?? 0,
-          manufacturingTimeMultiplier:
-            facility.activities.manufacturing.rawJobDurationMultiplier ?? 1,
-          reactionTimeMultiplier: facility.activities.reactions.rawJobDurationMultiplier ?? 1,
-          sizeId: facility.sizeId,
-          activities: {
-            manufacturing: facility.activities.manufacturing.available,
-            reactions: facility.activities.reactions.available,
+      const localStructuresByFacilityKey = new Map(
+        knownStructures.flatMap((structure) =>
+          structure.plannerLocationId === undefined
+            ? []
+            : [
+                [
+                  facilitySettingsKey(
+                    structure.systemId,
+                    facilitySettingsName(structure.systemName, structure.name),
+                  ),
+                  structure,
+                ] as const,
+              ],
+        ),
+      );
+      const options = (data?.facilities ?? []).flatMap((facility) => {
+        const localStructure = localStructuresByFacilityKey.get(
+          facilitySettingsKey(
+            facility.systemId,
+            facilitySettingsName(facility.systemName, facility.name),
+          ),
+        );
+        const locationId =
+          localStructure?.plannerLocationId
+          ?? (typeof facility.id === "number"
+          && Number.isSafeInteger(facility.id)
+          && facility.id > 0
+            ? facility.id
+            : undefined);
+        if (locationId === undefined) return [];
+        return [
+          {
+            id: String(facility.id),
+            locationId,
+            systemId: facility.systemId,
+            systemName: facility.systemName,
+            name: facility.name,
+            locationType: facility.locationType,
+            baseYield: (facility.activities.reprocessing.baseYield ?? 0) * 100,
+            baseManufacturingMe: facility.activities.manufacturing.materialConsumption ?? 0,
+            manufacturingTimeMultiplier:
+              facility.activities.manufacturing.rawJobDurationMultiplier ?? 1,
+            reactionTimeMultiplier: facility.activities.reactions.rawJobDurationMultiplier ?? 1,
+            sizeId: facility.sizeId,
+            activities: {
+              manufacturing: facility.activities.manufacturing.available,
+              reactions: facility.activities.reactions.available,
+            },
+            buildTypeGroups: facility.buildTypeGroups,
           },
-          buildTypeGroups: facility.buildTypeGroups,
-        }));
+        ];
+      });
       const manufacturingOptions = options
         .slice()
         .sort(
@@ -981,7 +1011,7 @@ function Planner() {
       cancelled = true;
       window.removeEventListener("assembly-line-esi-refreshed", handleFacilitiesRefresh);
     };
-  }, [language]);
+  }, [knownStructures, language]);
 
   useEffect(() => {
     if (areStockpilesLoaded) void savePlannerStockpiles(stockpiles);
@@ -1627,20 +1657,22 @@ function Planner() {
       baseManufacturingMe: location.baseManufacturingMe,
     })),
     ...cachedAssetLocations,
-    ...knownStructures.flatMap((structure) =>
-      structure.esiStructureId === undefined
+    ...knownStructures.flatMap((structure) => {
+      const locationId = structure.esiStructureId ?? structure.plannerLocationId;
+      return locationId === undefined
         ? []
         : [
             {
-              locationId: structure.esiStructureId,
+              locationId,
               systemId: structure.systemId,
-              name: structure.name,
+              systemName: structure.systemName,
+              name: facilitySettingsName(structure.systemName, structure.name),
               kind: "structure" as const,
               baseYield: 0,
               baseManufacturingMe: 0,
             },
-          ],
-    ),
+          ];
+    }),
   ].filter(
     (location, index, allLocations) =>
       allLocations.findIndex((candidate) => candidate.locationId === location.locationId) === index,
@@ -2370,15 +2402,24 @@ function Planner() {
           language={language}
           currentItems={items}
           onCancel={() => setIsPasteModalOpen(false)}
-          onImport={(importedItems) =>
-            importItems(
-              importedItems.map((item) => ({
-                ...item,
-                categoryName: "Unknown",
-                quantity: item.quantity ?? 1,
-              })),
-            )
-          }
+          onImport={(pastedItems) => {
+            setItems((current) =>
+              reconcilePasteListItems(
+                current,
+                pastedItems,
+                (item) => ({
+                  ...item,
+                  categoryName: "Unknown",
+                  quantity: item.quantity ?? 1,
+                  me: 0,
+                  te: 0,
+                  fromCompression: false,
+                  isIncluded: true,
+                }),
+              ),
+            );
+            setIsPasteModalOpen(false);
+          }}
         />
       )}
       {isExcludedLocationsModalOpen && (
