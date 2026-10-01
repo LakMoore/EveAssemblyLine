@@ -3106,6 +3106,15 @@ type SimulationBuyEntry = {
   isMaterial: boolean;
 };
 
+/** Selects the correct artwork for a purchase row and its group avatar. */
+function simulationPurchaseImageVariation(
+  entry: SimulationBuyEntry,
+  metadataByTypeId: ReadonlyMap<number, TypeMetadata>,
+): "icon" | "bp" | "relic" {
+  if (!entry.isMaterial) return "bp";
+  return metadataByTypeId.get(entry.purchase.typeId)?.isAncientRelic ? "relic" : "icon";
+}
+
 /** Serializes material purchases in the format accepted by EVE Multibuy. */
 function multibuyText(entries: readonly SimulationBuyEntry[]): string {
   return entries
@@ -4108,6 +4117,9 @@ function SimulationBuyTab({
     ...result.lists.materialsToBuy.map((purchase) => ({ purchase, isMaterial: true })),
     ...result.lists.bpoToBuy.map((purchase) => ({ purchase, isMaterial: false })),
   ];
+  const metadataByTypeId = useSimulationTypeMetadata(
+    entries.map((entry) => entry.purchase.typeId),
+  );
   const {
     groupsByTypeId,
     error: assemblyLineGroupError,
@@ -4175,7 +4187,7 @@ function SimulationBuyTab({
               (entry) => ({
                 typeId: entry.purchase.typeId,
                 name: entry.purchase.typeName,
-                imageVariation: entry.isMaterial ? "icon" : "bp",
+                imageVariation: simulationPurchaseImageVariation(entry, metadataByTypeId),
               }),
             );
             return (
@@ -4233,7 +4245,10 @@ function SimulationBuyTab({
                             />
                           </span>
                         }
-                        variation={isMaterial ? "icon" : "bp"}
+                        variation={simulationPurchaseImageVariation(
+                          { purchase, isMaterial },
+                          metadataByTypeId,
+                        )}
                         showCheckbox
                         controls={controls}
                       />
