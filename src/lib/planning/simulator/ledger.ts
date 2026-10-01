@@ -279,15 +279,8 @@ export function projectSimulationLedger(
         }
         else source.transferredOut += transaction.quantity;
         if (transaction.outputSource === "production") {
-          destination.availableFromProduction += transaction.quantity;
-          if (transaction.activity) {
-            setProductionActivity(
-              destination,
-              transaction.activity,
-              invariantViolations,
-              transaction.id,
-            );
-          }
+          // Upstream production is recorded at the source; the receiver gets its output by haul.
+          destination.availableFromHauling += transaction.quantity;
         }
         else if (transaction.outputSource === "copying") {
           destination.availableFromCopying += transaction.quantity;

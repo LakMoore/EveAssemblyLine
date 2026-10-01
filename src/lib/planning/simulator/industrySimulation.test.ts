@@ -715,8 +715,8 @@ void test("credits remote in-flight reaction output without an actionable haul",
   assert.ok(destinationBalance);
   assert.ok(sourceBalance);
   assert.equal(destinationBalance.availableNow, 402);
-  assert.equal(destinationBalance.availableFromHauling, 0);
-  assert.equal(destinationBalance.availableFromProduction, 5_589);
+  assert.equal(destinationBalance.availableFromHauling, 5_589);
+  assert.equal(destinationBalance.availableFromProduction, 0);
   assert.equal(destinationBalance.futureSupply, 5_589);
   assert.equal(destinationBalance.unsatisfied, 0);
   assert.equal(sourceBalance.inFlightQuantity, 5_760);
