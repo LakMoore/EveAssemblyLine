@@ -830,11 +830,12 @@ function simulationReactionFormulaCountsForGroup(
   return [...new Set(group.jobs.map((job) => job.blueprint.blueprintTypeId))].reduce(
     (counts, typeId) => {
       const key = simulationReactionFormulaKey(group.locationId, typeId);
+      const inUse = availability.inUseByLocationAndType.get(key) ?? 0;
       if (counts.available !== undefined) {
         counts.available += availability.availableByLocationAndType.get(key) ?? 0;
       }
       if (counts.inUse !== undefined) {
-        counts.inUse += availability.inUseByLocationAndType.get(key) ?? 0;
+        counts.inUse += inUse;
       }
       counts.visible += availability.visibleByLocationAndType.get(key) ?? 0;
       counts.owned += availability.ownedByLocationAndType.get(key) ?? 0;

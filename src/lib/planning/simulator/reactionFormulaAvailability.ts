@@ -2,7 +2,7 @@ import type { ClientJobsResponse } from "@/lib/client/requestCache";
 import type { PlanStockItem } from "@/lib/planning/types";
 import { simulationReactionFormulaKey } from "./clientScheduler";
 
-/** Per-location owned/visible formula counts and scheduler availability capacities. */
+/** Per-location owned, visible, in-use, and available formula counts. */
 export type SimulationReactionFormulaAvailability = {
   availabilityKnown: boolean;
   ownedByLocationAndType: ReadonlyMap<string, number>;
@@ -65,7 +65,7 @@ export function simulationReactionFormulaAvailability(
   const availableByLocationAndType = new Map<string, number>();
   if (industryJobs !== undefined) {
     const formulaKeys = new Set([
-      ...ownedByLocationAndType.keys(),
+      ...visibleByLocationAndType.keys(),
       ...inFlightByLocationAndType.keys(),
     ]);
     for (const key of formulaKeys) {
@@ -73,7 +73,7 @@ export function simulationReactionFormulaAvailability(
         key,
         Math.max(
           0,
-          (ownedByLocationAndType.get(key) ?? 0) - (inFlightByLocationAndType.get(key) ?? 0),
+          (visibleByLocationAndType.get(key) ?? 0) - (inFlightByLocationAndType.get(key) ?? 0),
         ),
       );
     }

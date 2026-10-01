@@ -106,6 +106,54 @@ void test("does not schedule more installs than available reaction formulas", ()
   assert.equal(schedules.get("B")?.runs, 0);
 });
 
+void test("caps local reaction installs at visible formulas minus in-use formulas", () => {
+  const industryJobs = Array.from(
+    { length: 33 },
+    (_, index) =>
+      ({
+        activity: "Reaction",
+        status: "active",
+        ownerType: "character",
+        ownerId: 1,
+        jobId: index + 1,
+        facilityId: 20,
+        blueprintTypeId: 46207,
+      }) as const,
+  );
+  const availability = simulationReactionFormulaAvailability(
+    [
+      {
+        category: "reactionformula",
+        name: "Formula A",
+        quantity: 35,
+        typeId: 46207,
+        locationId: 20,
+      },
+    ],
+    industryJobs,
+  );
+  const schedules = solveSimulationActivity(
+    [job("A", 100, 100, 3600), job("B", 100, 100, 3600)],
+    4,
+    "available-slots",
+    24,
+    new Set(["A", "B"]),
+    [],
+    {
+      availableReactionFormulaCountsByLocationAndType: availability.availableByLocationAndType,
+    },
+  );
+  const key = simulationReactionFormulaKey(20, 46207);
+
+  assert.equal(availability.visibleByLocationAndType.get(key), 35);
+  assert.equal(availability.inUseByLocationAndType.get(key), 33);
+  assert.equal(availability.availableByLocationAndType.get(key), 2);
+  assert.equal(
+    [...schedules.values()].reduce((total, schedule) => total + schedule.installs.length, 0),
+    2,
+  );
+});
+
 void test("splits a fractional per-install average into exact integer-run batches", () => {
   const summary = summarizeClientSimulationInstalls([
     { installId: "first", runs: 10, durationSeconds: 3600 },
@@ -309,7 +357,7 @@ void test("uses TAKE for owned counts and QUERY for visible counts", () => {
 
   assert.equal(availability.ownedByLocationAndType.get(key), 6);
   assert.equal(availability.visibleByLocationAndType.get(key), 8);
-  assert.equal(availability.availableByLocationAndType.get(key), 6);
+  assert.equal(availability.availableByLocationAndType.get(key), 8);
 });
 
 void test("matches visible totals when a query-only container is unchecked", () => {
@@ -348,7 +396,7 @@ void test("matches visible totals when a query-only container is unchecked", () 
 
   assert.equal(availability.visibleByLocationAndType.get(key), 14);
   assert.equal(availability.ownedByLocationAndType.get(key), 4);
-  assert.equal(availability.availableByLocationAndType.get(key), 4);
+  assert.equal(availability.availableByLocationAndType.get(key), 14);
 });
 
 void test("counts unchecked TAKE and QUERY formulas as visible only", () => {
@@ -390,7 +438,7 @@ void test("counts unchecked TAKE and QUERY formulas as visible only", () => {
 
   assert.equal(availability.ownedByLocationAndType.get(key), 3);
   assert.equal(availability.visibleByLocationAndType.get(key), 6);
-  assert.equal(availability.availableByLocationAndType.get(key), 3);
+  assert.equal(availability.availableByLocationAndType.get(key), 6);
 });
 
 void test("distinguishes missing industry jobs from a known empty job list", () => {
