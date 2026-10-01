@@ -16,7 +16,7 @@ import { ChevronsDownUp, ChevronsUpDown, Copy as CopyIcon } from "lucide-react";
 export type SimulationGroupAvatar = {
   typeId: number;
   name: string;
-  imageVariation: "icon" | "bpc" | "bp";
+  imageVariation: "icon" | "bpc" | "bp" | "relic";
 };
 
 type SimulationResultGroupHeaderProps = {

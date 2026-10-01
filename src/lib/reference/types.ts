@@ -8,6 +8,7 @@ export type TypeMetadata = {
   packagedVolume?: number;
   isShip?: boolean;
   isCargoContainer?: boolean;
+  isAncientRelic?: boolean;
   category?: "blueprint" | "reactionformula" | "item";
   assemblyLineGroup?: string;
 };

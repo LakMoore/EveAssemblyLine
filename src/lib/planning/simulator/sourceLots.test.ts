@@ -8,6 +8,7 @@ const context = {
   types: new Map([
     [34, { _key: 34, name: { en: "Tritanium" }, groupID: 1, volume: 0.01 }],
     [100, { _key: 100, name: { en: "Blueprint" }, groupID: 2, volume: 0.01 }],
+    [30752, { _key: 30752, name: { en: "Intact Hull Section" }, groupID: 34, volume: 0.01 }],
     [46207, { _key: 46207, name: { en: "Reaction Formula" }, groupID: 3, volume: 0.01 }],
   ]),
   blueprints: {
@@ -26,8 +27,10 @@ const context = {
         46207,
         { _key: 46207, activities: { reaction: { products: [{ typeID: 34, quantity: 1 }] } } },
       ],
+      [30752, { _key: 30752, activities: { copying: { time: 1 } } }],
     ]),
   },
+  groups: new Map([[34, { _key: 34, categoryID: 34 }]]),
   compressibleTypes: new Map(),
   typeMaterials: new Map(),
 } as unknown as SimulationContext;
@@ -69,7 +72,6 @@ function request(): SimulationRequestV1 {
       characters: [],
       scienceProfiles: [],
       policy: {
-        inventionExpectedOutputFactor: 1.2,
         fallbackInventionSkillLevel: 3,
         decryptorTypeIdByProductBlueprintTypeId: {},
         maxGraphNodes: 100,
@@ -115,6 +117,60 @@ void test("normalizes reaction formulas with print metadata as reusable formulas
   assert.equal(formulaLot.kind, "formula");
   assert.equal(formulaLot.itemId, undefined);
   assert.equal(formulaLot.runs, Number.MAX_SAFE_INTEGER);
+});
+
+void test("normalizes Ancient Relics from blueprint assets as consumable item lots", () => {
+  const simulationRequest = request();
+  simulationRequest.assets = {
+    items: [],
+    blueprints: [
+      {
+        typeId: 30752,
+        type: "bpc",
+        quantity: 3,
+        runs: 10,
+        locationId: 80,
+        rootLocationId: 80,
+      },
+    ],
+    industry: [],
+    market: [],
+  };
+
+  const inventory = normalizeSimulatorInventory(simulationRequest, context);
+
+  assert.equal(inventory.itemLots.length, 1);
+  assert.equal(inventory.itemLots[0].typeId, 30752);
+  assert.equal(inventory.itemLots[0].quantity, 3);
+  assert.equal(inventory.blueprintLots.length, 0);
+});
+
+void test("does not project copying jobs for Ancient Relics as future blueprint supply", () => {
+  const simulationRequest = request();
+  simulationRequest.assets = {
+    items: [],
+    blueprints: [],
+    industry: [
+      {
+        jobId: 42,
+        typeId: 30752,
+        blueprintTypeId: 30752,
+        quantity: 8,
+        runs: 8,
+        licensedRuns: 10,
+        activity: "copying",
+        status: "active",
+        locationId: 80,
+        rootLocationId: 80,
+      },
+    ],
+    market: [],
+  };
+
+  const inventory = normalizeSimulatorInventory(simulationRequest, context);
+
+  assert.equal(inventory.itemLots.length, 0);
+  assert.equal(inventory.blueprintLots.length, 0);
 });
 
 void test("preserves industry job status on future output lots", () => {

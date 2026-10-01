@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { getSessionFromRequest } from "@/lib/auth/session";
 import { logSimulationRequest } from "@/lib/planning/planRequestLogger";
-import { createSimulationEtag } from "@/lib/planning/simulator/etag";
+import { createSimulationEtag, simulationCalculationVersion } from "@/lib/planning/simulator/etag";
 import { simulatorRequestSchema } from "@/lib/planning/simulator/schema";
 import { simulateIndustry, simulationInputHash } from "@/lib/planning/simulator/simulate";
 import type {
@@ -106,7 +106,11 @@ export async function POST(request: Request) {
       () => simulationInputHash(parsed.data),
     );
     const sdeRevision = await profiler.measure("read-sde-revision", getSdeBuildNumber);
-    const etag = createSimulationEtag(normalizedInputHash, sdeRevision);
+    const etag = createSimulationEtag(
+      normalizedInputHash,
+      sdeRevision,
+      simulationCalculationVersion,
+    );
     if (matchesIfNoneMatch(request.headers.get("if-none-match"), etag)) {
       logResponse("", 304);
       return new Response(

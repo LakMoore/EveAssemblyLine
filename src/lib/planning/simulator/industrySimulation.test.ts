@@ -7,6 +7,7 @@ import { projectSimulationLedger } from "./ledger";
 import { parseSimulatorRequest } from "./schema";
 import { simulateIndustry } from "./simulate";
 import { normalizeSimulatorInventory } from "./sourceLots";
+import { inventionSuccessConfidence, minimumAttemptsForSuccesses } from "./binomial";
 
 void test("declares an exact SDE-backed manufacturing job without inventing available stock", async () => {
   const request = parseSimulatorRequest({
@@ -723,7 +724,7 @@ void test("credits remote in-flight reaction output without an actionable haul",
   assert.deepEqual(result.lists.haulingTasks, []);
 });
 
-void test("reports T1 invention runs and expected T2 BPC runs without overstatement", async () => {
+void test("rounds invention output to the whole copies needed for demand", async () => {
   const request = parseSimulatorRequest({
     stockpiles: [
       {
@@ -737,7 +738,7 @@ void test("reports T1 invention runs and expected T2 BPC runs without overstatem
           copying: 50,
           invention: 60,
         },
-        items: [{ typeId: 1952, quantity: 95, me: 0, te: 0, fromCompression: false }],
+        items: [{ typeId: 1952, quantity: 10, me: 0, te: 0, fromCompression: false }],
       },
     ],
     assets: [
@@ -762,21 +763,118 @@ void test("reports T1 invention runs and expected T2 BPC runs without overstatem
     },
   });
 
-  const result = await simulateIndustry(request);
-  const inventionJob = result.lists.inventionJobs.find(
-    (job) => job.sourceBlueprintTypeId === 11620,
-  );
-  const sourceInput = inventionJob?.inputs.find((input) => input.typeId === 11620);
+  for (const requiredOutputRuns of [4, 10, 40]) {
+    const demandRequest = structuredClone(request);
+    demandRequest.stockpiles[0].items[0].quantity = requiredOutputRuns;
+    const result = await simulateIndustry(demandRequest);
+    const inventionJob = result.lists.inventionJobs.find(
+      (job) => job.sourceBlueprintTypeId === 11620,
+    );
+    const sourceInput = inventionJob?.inputs.find((input) => input.typeId === 11620);
+    const requiredOutputCopies = Math.ceil(requiredOutputRuns / 10);
 
-  assert.ok(inventionJob);
-  assert.ok(sourceInput);
-  assert.equal(inventionJob.attempts, 25);
-  assert.equal(inventionJob.expectedOutputCopies, 11);
-  assert.equal(inventionJob.expectedOutputRuns, 110);
-  assert.notEqual(inventionJob.expectedOutputRuns, 250);
-  assert.equal(sourceInput.quantityKind, "blueprint-run");
-  assert.equal(sourceInput.requiredQuantity, 25);
-  assert.equal(result.metadata.invariantViolationCount, 0);
+    assert.ok(inventionJob);
+    assert.ok(sourceInput);
+    assert.equal(inventionJob.runsPerSuccess, 10);
+    assert.equal(inventionJob.requiredOutputRuns, requiredOutputRuns);
+    assert.equal(inventionJob.targetSuccessProbability, inventionSuccessConfidence);
+    assert.equal(
+      inventionJob.attempts,
+      minimumAttemptsForSuccesses(requiredOutputCopies, inventionJob.successProbability),
+    );
+    assert.equal(inventionJob.expectedOutputCopies, requiredOutputCopies);
+    assert.equal(inventionJob.expectedOutputRuns, requiredOutputCopies * 10);
+    assert.equal(sourceInput.quantityKind, "blueprint-run");
+    assert.equal(sourceInput.requiredQuantity, inventionJob.attempts);
+    assert.equal(result.metadata.invariantViolationCount, 0);
+  }
+});
+
+void test("buys one relic per T3 invention attempt after remote relic stock is hauled", async () => {
+  const baseRequest = {
+    stockpiles: [
+      {
+        id: "t3-stockpile",
+        name: "T3 stockpile",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 29990, quantity: 1, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1 },
+  };
+  const unstockedResult = await simulateIndustry(
+    parseSimulatorRequest({
+      ...baseRequest,
+      assets: [],
+    }),
+  );
+  const unstockedJob = unstockedResult.lists.inventionJobs.find(
+    (job) => job.sourceBlueprintTypeId === 30752,
+  );
+  const unstockedRelicPurchase = unstockedResult.lists.materialsToBuy.find(
+    (purchase) => purchase.typeId === 30752,
+  );
+
+  assert.ok(unstockedJob);
+  assert.ok(unstockedRelicPurchase);
+  assert.equal(
+    unstockedJob.inputs.find((input) => input.typeId === 30752)?.requiredQuantity,
+    unstockedJob.attempts,
+  );
+  assert.equal(unstockedRelicPurchase.quantity, unstockedJob.attempts);
+  assert.equal(
+    unstockedResult.lists.bpcToCopy.some((job) => job.blueprintTypeId === 30752),
+    false,
+  );
+  assert.equal(
+    unstockedResult.lists.bpoToBuy.some((purchase) => purchase.typeId === 30752),
+    false,
+  );
+
+  const hauledResult = await simulateIndustry(
+    parseSimulatorRequest({
+      ...baseRequest,
+      assets: {
+        items: [],
+        blueprints: [
+          {
+            typeId: 30752,
+            type: "bpc",
+            quantity: 1,
+            runs: 1,
+            locationId: 80,
+            rootLocationId: 80,
+          },
+        ],
+        industry: [],
+        market: [],
+      },
+    }),
+  );
+  const hauledJob = hauledResult.lists.inventionJobs.find(
+    (job) => job.sourceBlueprintTypeId === 30752,
+  );
+  const hauledRelicPurchase = hauledResult.lists.materialsToBuy.find(
+    (purchase) => purchase.typeId === 30752,
+  );
+  const inventionRelicBalance = hauledResult.ledgers
+    .find((ledger) => ledger.locationId === 60)
+    ?.balances.find((balance) => balance.typeId === 30752 && balance.quantityKind === "item");
+
+  assert.ok(hauledJob);
+  assert.ok(inventionRelicBalance);
+  assert.equal(hauledJob.inputs.find((input) => input.typeId === 30752)?.availableFromHauling, 1);
+  assert.equal(hauledRelicPurchase?.quantity, hauledJob.attempts - 1);
+  assert.equal(hauledResult.lists.haulingTasks.find((task) => task.typeId === 30752)?.quantity, 1);
+  assert.equal(inventionRelicBalance.availableFromCopying, 0);
 });
 
 void test("reserves invention materials before competing stockpile demand", async () => {

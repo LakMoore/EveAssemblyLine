@@ -266,7 +266,7 @@ export function isSimulationResultV2(value: unknown): value is SimulationResultV
   );
   return (
     (metadata.simulationId === undefined || typeof metadata.simulationId === "string")
-    && metadata.simulatorVersion === 2
+    && metadata.simulatorVersion === 3
     && metadata.policyVersion === 1
     && typeof metadata.generatedAt === "string"
     && typeof metadata.sdeRevision === "string"

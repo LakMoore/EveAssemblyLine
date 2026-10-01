@@ -65,7 +65,7 @@ import {
   loadSimulationPreservedHaulTasks,
   saveSimulationState,
 } from "@/lib/planning/planResultStore";
-import { createSimulationEtag } from "@/lib/planning/simulator/etag";
+import { createSimulationEtag, simulationCalculationVersion } from "@/lib/planning/simulator/etag";
 import {
   applyHaulItemExclusionsToPlan,
   createHaulItemExclusionKey,
@@ -1087,11 +1087,13 @@ function Planner() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(mode === "simulate" && simulationResult
+            ...(mode === "simulate"
+            && simulationResult?.metadata.simulatorVersion === simulationCalculationVersion
               ? {
                   "If-None-Match": createSimulationEtag(
                     simulationResult.metadata.normalizedInputHash,
                     simulationResult.metadata.sdeRevision,
+                    simulationCalculationVersion,
                   ),
                 }
               : {}),

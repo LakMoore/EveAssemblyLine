@@ -11,6 +11,7 @@ import type {
 import type { SimulationContext } from "./context";
 import type { SimulationSourceLot } from "./ledger";
 import type { SimulationAsset, SimulationIndustryOutputMarker, SimulationRequestV1 } from "./types";
+import { isAncientRelicType } from "@/lib/reference/category";
 
 /** Physical or committed ordinary stock available to the simulator. */
 export interface SimulationItemLot extends SimulationSourceLot {
@@ -72,6 +73,7 @@ function assetCategory(
   item: SimulationAsset | NormalizedSimulationAsset,
   context: SimulationContext,
 ): "blueprint" | "reactionformula" | "item" {
+  if (isAncientRelicType(context.types.get(item.typeId), context.groups)) return "item";
   if (context.blueprints.byBlueprintId.get(item.typeId)?.activities.reaction) {
     return "reactionformula";
   }
@@ -127,6 +129,16 @@ function categorizedBlueprintItem(
   item: PlanBlueprintInput,
   context: SimulationContext,
 ): PlanStockItem {
+  if (isAncientRelicType(context.types.get(item.typeId), context.groups)) {
+    return {
+      typeId: item.typeId,
+      name: localizedTypeName(context, item.typeId),
+      quantity: item.quantity,
+      locationId: item.locationId,
+      rootLocationId: item.rootLocationId,
+      category: "item",
+    };
+  }
   const itemId = item.itemId ?? item.typeId * 1_000_000 + item.rootLocationId;
   return {
     typeId: item.typeId,
@@ -160,6 +172,10 @@ function industryOutputItem(
     ?? context.blueprints.byBlueprintId.get(job.typeId);
   if (!blueprint) return undefined;
   const normalizedActivity = job.activity.toLowerCase();
+  if (
+    normalizedActivity === "copying"
+    && isAncientRelicType(context.types.get(job.blueprintTypeId ?? blueprint._key), context.groups)
+  ) return undefined;
   if (normalizedActivity === "copying" || normalizedActivity === "invention") {
     const productTypeId =
       normalizedActivity === "copying"
@@ -276,6 +292,10 @@ export function normalizeSimulatorInventory(
   const blueprintLots: SimulatorBlueprintLot[] = [];
 
   for (const [stockIndex, item] of stock.entries()) {
+    if (
+      isAncientRelicType(context.types.get(item.typeId), context.groups)
+      && item.industryOutput?.activity === "copying"
+    ) continue;
     const locationId = getStockRootLocationId(item);
     const category = assetCategory(item, context);
     if (category === "blueprint" || category === "reactionformula") {

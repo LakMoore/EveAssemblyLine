@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import type { BlueprintsRecord } from "@/lib/sde/generated";
 import { getInventionDecryptorModifiers, getNoDecryptorInventionOutput } from "@/lib/sde/invention";
+import { inventionSuccessConfidence, minimumAttemptsForSuccesses } from "./binomial";
 import { requiredMaterialQuantity } from "@/lib/planning/materialQuantities";
+import { isAncientRelicType } from "@/lib/reference/category";
 import { productionGroupForType } from "@/lib/planning/productionGroups";
 import type { PlanStockpile } from "@/lib/planning/types";
 import { SimulationAllocator, type BlueprintClaim } from "./allocator";
@@ -983,6 +985,17 @@ class IndustryDemandSimulation {
       );
     }
 
+    if (isAncientRelicType(this.context.types.get(sourceBlueprint._key), this.context.groups)) {
+      this.reserveActivityInput(
+        sourceBlueprint._key,
+        inventionPlan.attempts,
+        stockpile,
+        inventionLocationId,
+        stack,
+      );
+      return;
+    }
+
     const copyKey = `${sourceBlueprint._key}:${inventionLocationId}`;
     const availableCopyRuns = this.allocator.availableBlueprintCopyRuns(
       sourceBlueprint._key,
@@ -1046,10 +1059,13 @@ class IndustryDemandSimulation {
       baseOutcome.probability * skillPlan.multiplier * (decryptor?.probabilityMultiplier ?? 1),
     );
     const runsPerSuccess = Math.max(1, baseOutcome.runs + (decryptor?.maxRunModifier ?? 0));
-    const targetExpectedRuns =
-      requiredRuns * this.request.simulation.policy.inventionExpectedOutputFactor;
-    const attempts = Math.ceil(
-      targetExpectedRuns / Math.max(Number.EPSILON, probability * runsPerSuccess),
+    const requiredOutputCopies = Math.ceil(requiredRuns / runsPerSuccess);
+    const maximumOutputRuns = requiredOutputCopies * runsPerSuccess;
+    const targetSuccessProbability = inventionSuccessConfidence;
+    const attempts = minimumAttemptsForSuccesses(
+      requiredOutputCopies,
+      probability,
+      targetSuccessProbability,
     );
     return {
       attempts,
@@ -1058,8 +1074,9 @@ class IndustryDemandSimulation {
       decryptorTypeId,
       probability,
       runsPerSuccess,
+      requiredOutputCopies,
+      targetSuccessProbability,
       skillPlan,
-      targetExpectedRuns,
     };
   }
 
@@ -1481,8 +1498,9 @@ class IndustryDemandSimulation {
       decryptorTypeId,
       probability,
       runsPerSuccess,
+      requiredOutputCopies,
+      targetSuccessProbability,
       skillPlan,
-      targetExpectedRuns,
     } = attemptPlan;
     const inventionLocationId = shortage.stockpile.locations.invention;
     const inventionJobId = this.stableId(
@@ -1492,22 +1510,6 @@ class IndustryDemandSimulation {
       inventionLocationId,
       this.sequence,
     );
-    const sourceBlueprintAccount: SimulationLedgerAccount = {
-      locationId: inventionLocationId,
-      typeId: sourceBlueprint._key,
-    };
-    const sourceBlueprintDemand = this.demandSource(
-      shortage.stockpile,
-      shortage.outputBlueprintTypeId,
-      shortage.requiredRuns,
-      sourceBlueprint._key,
-      attempts,
-      inventionLocationId,
-      "invention",
-      inventionJobId,
-      "blueprint-run",
-    );
-    this.declareDemand(sourceBlueprintAccount, attempts, sourceBlueprintDemand);
     const scienceProfile = this.request.simulation.scienceProfiles.find(
       (profile) => profile.locationId === inventionLocationId,
     );
@@ -1532,57 +1534,89 @@ class IndustryDemandSimulation {
       ),
     );
 
-    const sourceCopyClaims = this.allocator.claimBlueprintCopyRuns(
-      sourceBlueprint._key,
-      attempts,
-      inventionLocationId,
-      sourceBlueprintAccount,
-      inventionJobId,
-    );
-    const claimedSourceRuns = sourceCopyClaims.reduce((total, claim) => total + claim.runs, 0);
-    const sourceRunsMissing = Math.max(0, attempts - claimedSourceRuns);
-    const copyingJob =
-      sourceRunsMissing > 0
-        ? this.planCopying(shortage, sourceBlueprint, sourceRunsMissing, sourceBlueprintAccount)
-        : undefined;
-    const claimedSourceRunsNow = sourceCopyClaims
-      .filter((claim) => claim.horizon === "now")
-      .reduce((total, claim) => total + claim.runs, 0);
-    const claimedSourceRunsAfterHauling = sourceCopyClaims
-      .filter((claim) => claim.horizon === "after-hauling")
-      .reduce((total, claim) => total + claim.runs, 0);
-    const sourceInputReservations: SimulationUpstreamReservation[] = sourceCopyClaims
-      .filter((claim) => claim.horizon === "after-upstream")
-      .map((claim) => ({
-        activity: claim.sourceActivity ?? "copying",
-        quantity: claim.runs,
-        state: claim.sourceActivity ? "in-production" : "planned",
-        ...(claim.sourceJobId !== undefined ? { sourceJobId: claim.sourceJobId } : {}),
-        ...(claim.sourceCompletionAt ? { sourceCompletionAt: claim.sourceCompletionAt } : {}),
-      }));
-    if (copyingJob) {
-      sourceInputReservations.push({
-        activity: "copying",
-        quantity: sourceRunsMissing,
-        state: "planned",
-        sourceJobId: copyingJob.jobId,
-        sourceOutputQuantity: copyingJob.totalLicensedRuns,
-      });
+    let sourceInput: SimulationJobInput;
+    if (isAncientRelicType(this.context.types.get(sourceBlueprint._key), this.context.groups)) {
+      sourceInput = this.planSimpleInput(
+        sourceBlueprint._key,
+        attempts,
+        shortage.stockpile,
+        "invention",
+        inventionLocationId,
+        inventionJobId,
+        sourceBlueprint._key,
+        attempts,
+      );
     }
-    this.setDemandReadiness(sourceBlueprintDemand, claimedSourceRunsNow);
-    const sourceInput: SimulationJobInput = {
-      typeId: sourceBlueprint._key,
-      typeName: typeName(this.context, sourceBlueprint._key, this.request.language),
-      quantityKind: "blueprint-run",
-      requiredQuantity: attempts,
-      availableNow: claimedSourceRunsNow,
-      availableFromHauling: claimedSourceRunsAfterHauling,
-      availableAfterUpstream: claimedSourceRuns + sourceRunsMissing,
-      unsatisfiedQuantity: Math.max(0, attempts - claimedSourceRuns - sourceRunsMissing),
-      upstreamReservations: sourceInputReservations,
-    };
+    else {
+      const sourceBlueprintAccount: SimulationLedgerAccount = {
+        locationId: inventionLocationId,
+        typeId: sourceBlueprint._key,
+      };
+      const sourceBlueprintDemand = this.demandSource(
+        shortage.stockpile,
+        shortage.outputBlueprintTypeId,
+        shortage.requiredRuns,
+        sourceBlueprint._key,
+        attempts,
+        inventionLocationId,
+        "invention",
+        inventionJobId,
+        "blueprint-run",
+      );
+      this.declareDemand(sourceBlueprintAccount, attempts, sourceBlueprintDemand);
+      const sourceCopyClaims = this.allocator.claimBlueprintCopyRuns(
+        sourceBlueprint._key,
+        attempts,
+        inventionLocationId,
+        sourceBlueprintAccount,
+        inventionJobId,
+      );
+      const claimedSourceRuns = sourceCopyClaims.reduce((total, claim) => total + claim.runs, 0);
+      const sourceRunsMissing = Math.max(0, attempts - claimedSourceRuns);
+      const copyingJob =
+        sourceRunsMissing > 0
+          ? this.planCopying(shortage, sourceBlueprint, sourceRunsMissing, sourceBlueprintAccount)
+          : undefined;
+      const claimedSourceRunsNow = sourceCopyClaims
+        .filter((claim) => claim.horizon === "now")
+        .reduce((total, claim) => total + claim.runs, 0);
+      const claimedSourceRunsAfterHauling = sourceCopyClaims
+        .filter((claim) => claim.horizon === "after-hauling")
+        .reduce((total, claim) => total + claim.runs, 0);
+      const sourceInputReservations: SimulationUpstreamReservation[] = sourceCopyClaims
+        .filter((claim) => claim.horizon === "after-upstream")
+        .map((claim) => ({
+          activity: claim.sourceActivity ?? "copying",
+          quantity: claim.runs,
+          state: claim.sourceActivity ? "in-production" : "planned",
+          ...(claim.sourceJobId !== undefined ? { sourceJobId: claim.sourceJobId } : {}),
+          ...(claim.sourceCompletionAt ? { sourceCompletionAt: claim.sourceCompletionAt } : {}),
+        }));
+      if (copyingJob) {
+        sourceInputReservations.push({
+          activity: "copying",
+          quantity: sourceRunsMissing,
+          state: "planned",
+          sourceJobId: copyingJob.jobId,
+          sourceOutputQuantity: copyingJob.totalLicensedRuns,
+        });
+      }
+      this.setDemandReadiness(sourceBlueprintDemand, claimedSourceRunsNow);
+      sourceInput = {
+        typeId: sourceBlueprint._key,
+        typeName: typeName(this.context, sourceBlueprint._key, this.request.language),
+        quantityKind: "blueprint-run",
+        requiredQuantity: attempts,
+        availableNow: claimedSourceRunsNow,
+        availableFromHauling: claimedSourceRunsAfterHauling,
+        availableAfterUpstream: claimedSourceRuns + sourceRunsMissing,
+        unsatisfiedQuantity: Math.max(0, attempts - claimedSourceRuns - sourceRunsMissing),
+        upstreamReservations: sourceInputReservations,
+      };
+    }
 
-    const expectedOutputCopies = Math.floor(attempts * probability);
+    // Round fractional copies up without planning more copies than the demand can use.
+    const expectedOutputCopies = Math.min(requiredOutputCopies, Math.ceil(attempts * probability));
     const expectedOutputRuns = expectedOutputCopies * runsPerSuccess;
     this.inventionJobs.push({
       jobId: inventionJobId,
@@ -1594,7 +1628,7 @@ class IndustryDemandSimulation {
       successProbability: probability,
       runsPerSuccess,
       requiredOutputRuns: shortage.requiredRuns,
-      targetExpectedRuns,
+      targetSuccessProbability,
       expectedOutputCopies,
       expectedOutputRuns,
       materialEfficiency:

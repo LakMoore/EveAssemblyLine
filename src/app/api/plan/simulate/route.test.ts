@@ -9,7 +9,7 @@ const testEnvironment = process.env as unknown as Record<string, string | undefi
 function diagnosticResult(): SimulationResultWithDiagnostics {
   return {
     metadata: {
-      simulatorVersion: 2,
+      simulatorVersion: 3,
       policyVersion: 1,
       generatedAt: "2026-09-20T00:00:00.000Z",
       sdeRevision: "test",

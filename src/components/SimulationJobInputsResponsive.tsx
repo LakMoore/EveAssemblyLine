@@ -11,6 +11,7 @@ import { aggregateSimulationInputs } from "@/lib/planning/simulator/presentation
 import { cn } from "@/lib/utils";
 import type {
   SimulationIndustryJob,
+  SimulationInventionJob,
   SimulationJobInput,
   SimulationQuantityKind,
   SimulationUpstreamReservation,
@@ -276,6 +277,7 @@ function SimulationInputRow({
   onOpenBuy,
   onOpenJobInputs,
   jobsById,
+  blueprintVariation,
 }: {
   input: SimulationJobInput;
   now: number;
@@ -283,6 +285,7 @@ function SimulationInputRow({
   onOpenBuy: () => void;
   onOpenJobInputs: (jobs: readonly SimulationIndustryJob[]) => void;
   jobsById: ReadonlyMap<string, SimulationIndustryJob>;
+  blueprintVariation?: "bpc" | "relic";
 }) {
   const percent = inputCompletionPercent(input);
   const status = inputStatus(input);
@@ -292,6 +295,10 @@ function SimulationInputRow({
       <TypeIdentity
         name={input.typeName}
         typeId={input.typeId}
+        variation={
+          blueprintVariation
+          ?? (input.quantityKind === "blueprint-run" ? "bpc" : "icon")
+        }
         linkPath="planner"
         linkIcon={ClipboardList}
         linkSearchParams={{ simulationTab: "plan" }}
@@ -544,6 +551,132 @@ export default function SimulationJobInputsResponsive({
               onOpenBuy={navigateToBuy}
               onOpenJobInputs={openJobInputs}
               jobsById={jobsById}
+            />
+          ))
+        ) : (
+          <p className="py-2 text-muted-foreground">No material inputs</p>
+        )}
+      </div>
+    </ResponsiveDialogDrawer>
+  );
+}
+
+/** Renders invention material readiness and the responsive input detail drawer. */
+export function SimulationInventionInputsResponsive({
+  job,
+  outputBlueprintName,
+  sourceBlueprintVariation,
+  onOpenPlan,
+  onOpenBuy,
+}: {
+  job: SimulationInventionJob;
+  outputBlueprintName: string;
+  sourceBlueprintVariation: "bpc" | "relic";
+  onOpenPlan: () => void;
+  onOpenBuy: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!open) return;
+    const updateNow = () => setNow(Date.now());
+    updateNow();
+    const intervalId = window.setInterval(updateNow, 60_000);
+    return () => window.clearInterval(intervalId);
+  }, [open]);
+
+  const inputs = aggregateSimulationInputs(job.inputs);
+  const completionPercent =
+    inputs.length > 0 ? Math.min(...inputs.map(inputCompletionPercent)) : 100;
+  const status: InputStatus =
+    completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked";
+  const jobsById = new Map<string, SimulationIndustryJob>();
+  const navigateToPlan = () => {
+    setOpen(false);
+    onOpenPlan();
+  };
+  const navigateToBuy = () => {
+    setOpen(false);
+    onOpenBuy();
+  };
+
+  return (
+    <ResponsiveDialogDrawer
+      open={open}
+      onOpenChange={setOpen}
+      trigger={
+        <Button
+          type="button"
+          variant="outline"
+          aria-label={`${completionPercent}% inputs`}
+          className={cn(
+            "inline-flex h-6 items-center justify-center gap-1 border px-2 text-[10px] font-semibold tracking-[0.08em] uppercase transition-colors hover:brightness-125",
+            statusClassName(status),
+          )}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <span>{completionPercent}%</span>
+        </Button>
+      }
+      title="Invention inputs"
+      description={`Material availability for the invention that produces ${outputBlueprintName}.`}
+      headerContent={
+        <div className="flex flex-col gap-3">
+          <div className="flex min-w-0 flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+            <TypeIdentity
+              name={outputBlueprintName}
+              typeId={job.outputBlueprintTypeId}
+              variation="bpc"
+              imageSize={40}
+              linkPath="planner"
+              linkIcon={ClipboardList}
+              linkSearchParams={{ simulationTab: "plan" }}
+              linkHash="plan-breakdown"
+              navigateInPlace
+              onNavigate={navigateToPlan}
+              className="w-full min-w-0 sm:flex-1"
+            />
+            <div className="grid w-full grid-cols-2 gap-x-4 font-mono text-xs sm:w-auto sm:shrink-0 sm:grid-cols-3">
+              <div className="flex flex-col items-end">
+                <strong>{job.requiredOutputRuns.toLocaleString()}</strong>
+                <small className="text-[10px] text-muted-foreground uppercase">Required runs</small>
+              </div>
+              <div className="flex flex-col items-end">
+                <strong>{job.runsPerSuccess.toLocaleString()}</strong>
+                <small className="text-[10px] text-muted-foreground uppercase">Runs per BPC</small>
+              </div>
+              <div className="col-span-2 flex flex-col items-center sm:col-span-1 sm:items-end">
+                <strong>{job.attempts.toLocaleString()}</strong>
+                <small className="text-[10px] text-muted-foreground uppercase">Attempts</small>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+            <p className="font-semibold">{completionPercent}% inputs ready now</p>
+            <Badge variant="outline" className={statusClassName(status)}>
+              {status}
+            </Badge>
+          </div>
+        </div>
+      }
+    >
+      <div>
+        <p className="pt-2 text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+          Materials
+        </p>
+        {inputs.length > 0 ? (
+          inputs.map((input) => (
+            <SimulationInputRow
+              input={input}
+              key={input.typeId}
+              now={now}
+              onNavigate={navigateToPlan}
+              onOpenBuy={navigateToBuy}
+              onOpenJobInputs={() => {}}
+              jobsById={jobsById}
+              blueprintVariation={
+                input.typeId === job.sourceBlueprintTypeId ? sourceBlueprintVariation : undefined
+              }
             />
           ))
         ) : (

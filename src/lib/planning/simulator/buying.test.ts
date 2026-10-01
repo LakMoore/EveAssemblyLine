@@ -26,7 +26,6 @@ const request = {
     characters: [],
     scienceProfiles: [],
     policy: {
-      inventionExpectedOutputFactor: 1.2,
       fallbackInventionSkillLevel: 3,
       decryptorTypeIdByProductBlueprintTypeId: {},
       maxGraphNodes: 100,

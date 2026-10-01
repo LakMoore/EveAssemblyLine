@@ -217,7 +217,7 @@ void test("does not timestamp an invention attempt with missing materials", () =
     successProbability: 0.5,
     runsPerSuccess: 1,
     requiredOutputRuns: 1,
-    targetExpectedRuns: 1.2,
+    targetSuccessProbability: 0.95,
     expectedOutputCopies: 1,
     expectedOutputRuns: 1,
     materialEfficiency: 0,

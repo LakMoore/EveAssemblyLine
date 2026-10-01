@@ -12,7 +12,6 @@ const nonNegativeInteger = z.number().int().nonnegative().max(Number.MAX_SAFE_IN
 const percentage = z.number().finite().min(0).max(100);
 const multiplier = z.number().finite().positive().max(10);
 const defaultSimulationPolicy = {
-  inventionExpectedOutputFactor: 1.2,
   fallbackInventionSkillLevel: 3,
   decryptorTypeIdByProductBlueprintTypeId: {},
   maxGraphNodes: 10000,
@@ -196,7 +195,6 @@ const simulationSchema = z
       .default([]),
     policy: z
       .object({
-        inventionExpectedOutputFactor: z.number().finite().min(1).max(10).default(1.2),
         fallbackInventionSkillLevel: z.number().int().min(0).max(5).default(3),
         decryptorTypeIdByProductBlueprintTypeId: z
           .record(z.string().regex(/^\d+$/), positiveSafeInteger)

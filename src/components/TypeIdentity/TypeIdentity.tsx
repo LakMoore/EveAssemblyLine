@@ -15,7 +15,7 @@ type TypeIdentityProps = {
   subline?: ReactNode;
   typeId: number;
   imageSize?: number;
-  variation?: "icon" | "render" | "bp" | "bpc";
+  variation?: "icon" | "render" | "bp" | "bpc" | "relic";
   blueprintType?: "bpo" | "bpc";
   linkPath?: string | null;
   linkIcon?: LucideIcon;
@@ -59,11 +59,17 @@ export default function TypeIdentity({
       <Image
         className={styles.image}
         src={eveTypeImageUrl(typeId, activeVariation)}
-        alt={`${name} icon`}
+        alt=""
         width={imageSize}
         height={imageSize}
         style={{ width: imageSize, height: imageSize }}
-        onError={() => variation === "render" && setUseIconFallback(true)}
+        onError={(event) => {
+          if (variation !== "render" && variation !== "relic") return;
+          const failedImageUrl = new URL(event.currentTarget.currentSrc).searchParams.get("url");
+          if (failedImageUrl === eveTypeImageUrl(typeId, activeVariation)) {
+            setUseIconFallback(true);
+          }
+        }}
       />
       <span className={styles.details}>
         <span className={styles.nameRow}>

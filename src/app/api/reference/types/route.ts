@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getGroups, getMarketGroups, getShipTypeIds, getTypes } from "@/cache/services/sdeCache";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
-import { categorizeType, isCargoContainerType, type ItemCategory } from "@/lib/reference/category";
+import {
+  categorizeType,
+  isAncientRelicType,
+  isCargoContainerType,
+  type ItemCategory,
+} from "@/lib/reference/category";
 
 const typeMetadataRequestSchema = z.object({
   language: z.string().optional(),
@@ -36,6 +41,7 @@ async function resolveTypeMetadata(typeIds: number[], language: SdeLanguage) {
         packagedVolume: item.packagedVolume,
         isShip: shipTypeIds.has(item._key),
         isCargoContainer: isCargoContainerType(item, groupById, marketGroupById),
+        isAncientRelic: isAncientRelicType(item, groupById),
         ...categorizeType(item, language, marketGroupById, groupById),
         name: item.name[language] ?? item.name.en,
       },
@@ -125,6 +131,7 @@ export async function POST(request: Request) {
         packagedVolume?: number;
         isShip?: boolean;
         isCargoContainer?: boolean;
+        isAncientRelic?: boolean;
         category: ItemCategory;
         assemblyLineGroup?: string;
       }
@@ -142,6 +149,7 @@ export async function POST(request: Request) {
             packagedVolume: item.packagedVolume,
             isShip: shipTypeIds.has(item._key),
             isCargoContainer: isCargoContainerType(item, groupById, marketGroupById),
+            isAncientRelic: isAncientRelicType(item, groupById),
             ...categorizeType(item, language, marketGroupById, groupById),
           },
         );

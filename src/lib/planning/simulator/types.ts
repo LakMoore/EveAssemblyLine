@@ -89,7 +89,6 @@ export type SimulationFacilityProfile = PlanFacilityProfile & { systemId: number
 
 /** Versioned policy controls for deterministic simulation. */
 export interface SimulationPolicyV1 {
-  inventionExpectedOutputFactor: number;
   fallbackInventionSkillLevel: number;
   decryptorTypeIdByProductBlueprintTypeId: Record<string, number>;
   maxGraphNodes: number;
@@ -302,7 +301,7 @@ export interface SimulationInventionJob {
   successProbability: number;
   runsPerSuccess: number;
   requiredOutputRuns: number;
-  targetExpectedRuns: number;
+  targetSuccessProbability: number;
   expectedOutputCopies: number;
   expectedOutputRuns: number;
   materialEfficiency: number;
@@ -461,7 +460,7 @@ export interface SimulationLedgerView {
 export interface SimulationResultV2 {
   metadata: {
     simulationId?: string;
-    simulatorVersion: 2;
+    simulatorVersion: 3;
     policyVersion: 1;
     generatedAt: string;
     sdeRevision: string;

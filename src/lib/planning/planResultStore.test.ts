@@ -20,7 +20,7 @@ const listNames = [
 function simulationResult() {
   return {
     metadata: {
-      simulatorVersion: 2,
+      simulatorVersion: 3,
       policyVersion: 1,
       generatedAt: "2026-09-19T00:00:00.000Z",
       sdeRevision: "test-sde",

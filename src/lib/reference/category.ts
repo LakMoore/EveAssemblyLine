@@ -11,6 +11,18 @@ type CategorizedType = {
 
 const blueprintCategoryId = 9;
 const reactionFormulaGroupIds = new Set([1888, 1889, 1890, 4097]);
+const ancientRelicCategoryId = 34;
+
+/** Returns whether an SDE type belongs to EVE's Ancient Relics category. */
+export function isAncientRelicType(
+  type: CategorizedType | undefined,
+  groupById: ReadonlyMap<number, GroupsRecord>,
+): boolean {
+  return (
+    type?.groupID !== undefined
+    && groupById.get(type.groupID)?.categoryID === ancientRelicCategoryId
+  );
+}
 
 function categoryName(group: MarketGroupsRecord | undefined, language: SdeLanguage) {
   return group?.name[language] ?? group?.name.en;

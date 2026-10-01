@@ -932,7 +932,7 @@ void test("plans invention attempts and materials for a missing T2 BPC", async (
     (job) => job.typeId === capRechargerInventionBlueprintTypeId,
   );
   assert(inventionJob);
-  assert.equal(inventionJob.countNeeded, 3);
+  assert.equal(inventionJob.countNeeded, 8);
   assert.equal(inventionJob.locationId, inventionLocationId);
 
   const sourceBlueprint = result.lists.bpcsToBuy.find(
@@ -944,8 +944,8 @@ void test("plans invention attempts and materials for a missing T2 BPC", async (
   for (const typeId of [highEnergyPhysicsDatacoreTypeId, quantumPhysicsDatacoreTypeId]) {
     const datacore = result.lists.materialsToBuy.find((item) => item.typeId === typeId);
     assert(datacore);
-    assert.equal(datacore.requiredQuantity, 6);
-    assert.equal(datacore.buyQuantity, 6);
+    assert.equal(datacore.requiredQuantity, 16);
+    assert.equal(datacore.buyQuantity, 16);
     assert.equal(datacore.activityLocationId, inventionLocationId);
   }
   assert.equal(
@@ -964,6 +964,50 @@ void test("plans invention attempts and materials for a missing T2 BPC", async (
   assert.equal(requiredSkills.get(21718), 2);
   assert.equal(requiredSkills.get(3432), 3);
   assert.equal(requiredSkills.get(3426), 5);
+});
+
+void test("buys one relic per T3 invention attempt after remote relic stock is hauled", async () => {
+  const t3Request = request(
+    0,
+    [
+      {
+        typeId: 30752,
+        name: "Intact Hull Section",
+        quantity: 1,
+        category: "item",
+        rootLocationId: sourceLocationId,
+      },
+    ],
+    {
+      items: [
+        {
+          typeId: 29990,
+          name: "Loki",
+          quantity: 1,
+          me: 0,
+          te: 0,
+          fromCompression: false,
+        },
+      ],
+    },
+  );
+  const result = await calculatePlanCalculation(t3Request);
+  const inventionJob = result.lists.inventionJobs.find((job) => job.typeId === 30752);
+  const relic = result.lists.materialsToBuy.find((material) => material.typeId === 30752);
+
+  assert(inventionJob);
+  assert(relic);
+  assert.equal(relic.requiredQuantity, inventionJob.countNeeded);
+  assert.equal(relic.buyQuantity, inventionJob.countNeeded - 1);
+  assert.equal(result.lists.haulingTasks.find((task) => task.typeId === 30752)?.neededQuantity, 1);
+  assert.equal(
+    result.lists.bpcsToBuy.some((blueprint) => blueprint.typeId === 30752),
+    false,
+  );
+  assert.equal(
+    result.lists.bpcsNeeded.some((blueprint) => blueprint.typeId === 30752),
+    false,
+  );
 });
 
 void test("merges invention jobs by location and blueprint type", async () => {
@@ -1055,12 +1099,12 @@ void test("merges invention jobs by location and blueprint type", async () => {
       {
         locationId: manufacturingLocationId,
         typeId: capRechargerInventionBlueprintTypeId,
-        countNeeded: 6,
+        countNeeded: 16,
       },
       {
         locationId: alternateSourceLocationId,
         typeId: capRechargerInventionBlueprintTypeId,
-        countNeeded: 3,
+        countNeeded: 8,
       },
     ],
   );

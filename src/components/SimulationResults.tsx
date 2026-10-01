@@ -12,6 +12,7 @@ import {
 } from "react";
 import {
   AlertTriangle,
+  ArrowRight,
   Atom,
   ChartLine,
   Boxes,
@@ -35,7 +36,9 @@ import {
 } from "lucide-react";
 import SimpleResultRow from "@/components/SimpleResultRow";
 import PlannerSkillsTab from "@/components/PlannerSkillsTab";
-import SimulationJobInputsResponsive from "@/components/SimulationJobInputsResponsive";
+import SimulationJobInputsResponsive, {
+  SimulationInventionInputsResponsive,
+} from "@/components/SimulationJobInputsResponsive";
 import SimulationResultGroup from "@/components/SimulationResultGroup";
 import SimulationResultsTab from "@/components/SimulatorResultsTab";
 import SwitchedResultRow from "@/components/SwitchedResultRow";
@@ -379,7 +382,7 @@ type SimulationCompletionState = {
 type SimulationGroupAvatar = {
   typeId: number;
   name: string;
-  imageVariation?: "icon" | "bp" | "bpc";
+  imageVariation?: "icon" | "bp" | "bpc" | "relic";
 };
 
 /** Formats simulator quantities for compact operational rows. */
@@ -1660,12 +1663,21 @@ function materialImageVariation(
   item: Pick<SimulationMaterialBalance, "typeId" | "typeName">,
   stock: readonly PlanStockItem[],
   metadataByTypeId: ReadonlyMap<number, TypeMetadata>,
-): "icon" | "bp" | "bpc" {
+): "icon" | "bp" | "bpc" | "relic" {
+  if (metadataByTypeId.get(item.typeId)?.isAncientRelic) return "relic";
   if (!/\bblueprint$/i.test(item.typeName)) return "icon";
   const techLevel = metadataByTypeId.get(item.typeId)?.techLevel;
   if (techLevel === undefined) return "bpc";
   if (techLevel === 2) return "bpc";
   return ownedBpoCount(item.typeId, stock) > 0 ? "bp" : "bpc";
+}
+
+/** Uses relic artwork when an invention source is categorized as an Ancient Relic. */
+function simulationInventionSourceImageVariation(
+  job: SimulationInventionJob,
+  metadataByTypeId: ReadonlyMap<number, TypeMetadata>,
+): "bpc" | "relic" {
+  return metadataByTypeId.get(job.sourceBlueprintTypeId)?.isAncientRelic ? "relic" : "bpc";
 }
 
 /** Identifies material balances whose type names represent blueprint records. */
@@ -2467,7 +2479,7 @@ function SimulationDemandSourcesDrawer({
   onSelectSimulationTab,
 }: {
   item: SimulationMaterialBalance;
-  imageVariation: "icon" | "bp" | "bpc";
+  imageVariation: "icon" | "bp" | "bpc" | "relic";
   demandTypeNamesById: ReadonlyMap<number, string>;
   locationLabel: string;
   onSelectSimulationTab: (tab: SimulationTab) => void;
@@ -2876,13 +2888,30 @@ function SimulationInventionTab({
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
-  const blueprintNamesById = useSimulationTypeNames(jobs.map((job) => job.sourceBlueprintTypeId));
+  const blueprintTypeIds = jobs.flatMap((job) => [
+    job.sourceBlueprintTypeId,
+    job.outputBlueprintTypeId,
+  ]);
+  const blueprintNamesById = useSimulationTypeNames(blueprintTypeIds);
+  const blueprintMetadataById = useSimulationTypeMetadata(blueprintTypeIds);
   return (
     <SimulationResultsTab hasResults={jobs.length > 0}>
       <SimulationLocationResultGroups
         tab="invent"
         items={jobs}
         locationNamesById={locationNamesById}
+        groupHeader={
+          <div className="sticky top-0 z-10 hidden grid-cols-[minmax(0,1fr)_minmax(24rem,1fr)_auto] items-center gap-x-[13px] bg-card px-2 pb-1 font-mono text-[10px] text-muted-foreground uppercase sm:grid md:grid-cols-[minmax(0,0.7fr)_minmax(24rem,1fr)_auto]">
+            <span aria-hidden="true" />
+            <div className="grid grid-cols-[minmax(0,1fr)_3rem_8rem] gap-x-4 text-right sm:min-w-96 sm:grid-cols-[1.5rem_minmax(0,1fr)_3rem_8rem] md:grid-cols-[1.5rem_minmax(0,1fr)_3rem_5rem]">
+              <span aria-hidden="true" className="hidden sm:block" />
+              <span aria-hidden="true" />
+              <span className="text-center">Inputs</span>
+              <span>Attempts</span>
+            </div>
+            <span aria-hidden="true" className="w-4" />
+          </div>
+        }
         openGroups={openGroups}
         onOpenGroupChange={onOpenGroupChange}
         getRowKey={(job) => job.jobId}
@@ -2891,18 +2920,26 @@ function SimulationInventionTab({
           name:
             blueprintNamesById.get(job.sourceBlueprintTypeId)
             ?? `Blueprint ${job.sourceBlueprintTypeId}`,
-          imageVariation: "bpc",
+          imageVariation: simulationInventionSourceImageVariation(job, blueprintMetadataById),
         })}
         renderRow={(job) => {
           const rowKey = `invent:${job.jobId}`;
           const completed = controls.isCompleted(rowKey);
+          const sourceBlueprintVariation = simulationInventionSourceImageVariation(
+            job,
+            blueprintMetadataById,
+          );
+          const sourceBlueprintName =
+            blueprintNamesById.get(job.sourceBlueprintTypeId)
+            ?? `Blueprint ${job.sourceBlueprintTypeId}`;
+          const outputBlueprintName =
+            blueprintNamesById.get(job.outputBlueprintTypeId)
+            ?? `Blueprint ${job.outputBlueprintTypeId}`;
           return (
             <SwitchedResultRow
               typeId={job.sourceBlueprintTypeId}
-              name={
-                blueprintNamesById.get(job.sourceBlueprintTypeId)
-                ?? `Blueprint ${job.sourceBlueprintTypeId}`
-              }
+              name={sourceBlueprintName}
+              className="sm:grid-cols-[minmax(0,1fr)_minmax(24rem,1fr)_auto] md:grid-cols-[minmax(0,0.7fr)_minmax(24rem,1fr)_auto]"
               linkPath="planner"
               linkIcon={ClipboardList}
               linkSearchParams={{ simulationTab: "plan" }}
@@ -2915,12 +2952,49 @@ function SimulationInventionTab({
               showCheckbox
               checkboxChecked={completed}
               checkboxTooltip="Mark invention complete"
+              checkboxClassName="row-start-4 self-center sm:row-auto"
               onCheckboxChange={(checked) => controls.onCompletedChange(rowKey, checked)}
               subline={`${Math.round(job.successProbability * 100)}% success probability`}
-              variation="bpc"
-              contentClassName="self-end text-right font-mono text-xs sm:self-auto"
+              variation={sourceBlueprintVariation}
+              contentClassName="contents sm:col-span-1 sm:col-start-2 sm:row-auto sm:grid sm:w-full sm:min-w-96 sm:grid-cols-[1.5rem_minmax(0,1fr)_3rem_8rem] sm:items-center sm:gap-x-4 sm:self-auto sm:text-right sm:font-mono sm:text-xs md:grid-cols-[1.5rem_minmax(0,1fr)_3rem_5rem]"
             >
-              <CopyableNumber value={job.attempts} suffix=" attempts" copyLabel="Attempts" />
+              <span
+                aria-hidden="true"
+                className="col-start-1 row-start-2 flex items-center justify-center sm:col-start-1 sm:row-start-1"
+              >
+                <ArrowRight className="size-4 rotate-90 text-muted-foreground sm:rotate-0" />
+              </span>
+              <TypeIdentity
+                name={outputBlueprintName}
+                typeId={job.outputBlueprintTypeId}
+                variation="bpc"
+                linkPath="planner"
+                linkIcon={ClipboardList}
+                linkSearchParams={{ simulationTab: "plan" }}
+                linkHash="plan-breakdown"
+                navigateInPlace
+                onNavigate={controls.onNavigateToPlan}
+                className="col-start-1 row-start-3 w-full min-w-0 sm:col-start-2 sm:row-start-1"
+              />
+              <span className="col-start-1 row-start-4 flex items-center justify-between gap-3 sm:contents">
+                <span className="flex justify-center sm:col-start-3 sm:row-start-1">
+                  <SimulationInventionInputsResponsive
+                    job={job}
+                    outputBlueprintName={outputBlueprintName}
+                    sourceBlueprintVariation={sourceBlueprintVariation}
+                    onOpenPlan={controls.onOpenPlan}
+                    onOpenBuy={controls.onOpenBuy}
+                  />
+                </span>
+                <span className="flex justify-end sm:col-start-4 sm:row-start-1">
+                  <span className="sm:hidden">
+                    <CopyableNumber value={job.attempts} suffix=" attempts" copyLabel="Attempts" />
+                  </span>
+                  <span className="hidden sm:inline">
+                    <CopyableNumber value={job.attempts} copyLabel="Attempts" />
+                  </span>
+                </span>
+              </span>
             </SwitchedResultRow>
           );
         }}

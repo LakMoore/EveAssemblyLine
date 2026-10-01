@@ -10,8 +10,9 @@ import {
   getTypeMaterials,
 } from "@/cache/services/sdeCache";
 import { getTypes } from "@/lib/sde/loader";
-import { categorizeType } from "@/lib/reference/category";
+import { categorizeType, isAncientRelicType } from "@/lib/reference/category";
 import { AssemblyLineGroups } from "@/lib/reference/assemblyLineGroups";
+import { minimumAttemptsForSuccesses } from "@/lib/planning/simulator/binomial";
 import { getProductionGroupReferences, productionGroupForType } from "./productionGroups";
 import { requiredMaterialQuantity } from "./materialQuantities";
 import type { RequestProfiler } from "@/lib/server/profiling";
@@ -2830,9 +2831,12 @@ async function calculatePlanPass(
         addRequiredSkills(invention.skills);
         inventedBpcTypeIds.add(bpc.typeId);
 
-        const successfulBpcRuns = inventingBlueprint.maxProductionLimit;
+        const successfulBpcRuns = inventionProduct.quantity;
         const successfulBpcQuantity = Math.ceil(remainingBpcRuns / successfulBpcRuns);
-        const inventionAttempts = Math.ceil(successfulBpcQuantity / successProbability);
+        const inventionAttempts = minimumAttemptsForSuccesses(
+          successfulBpcQuantity,
+          successProbability,
+        );
         const jobKey = locationTypeKey(locations?.invention, inventingBlueprint._key);
         const existing = inventionJobs.get(jobKey);
         inventionJobs.set(
@@ -2848,42 +2852,56 @@ async function calculatePlanPass(
               : {}),
           },
         );
-        const sourceBpc = bpcs.get(inventingBlueprint._key);
-        const sourceBpoCount = blueprintOriginalCounts.get(inventingBlueprint._key) ?? 0;
-        const sourceCopyStock = blueprintCopyStock.get(inventingBlueprint._key);
-        const sourceNeededQuantity = (sourceBpc?.neededQuantity ?? 0) + inventionAttempts;
-        const sourceRemainingRuns = Math.max(
-          0,
-          sourceNeededQuantity - (sourceCopyStock?.runs ?? 0),
-        );
-        bpcs.set(
-          inventingBlueprint._key,
-          {
-            typeId: inventingBlueprint._key,
-            unitVolume:
-              typeRecords.get(inventingBlueprint._key)?.packagedVolume
-              ?? typeRecords.get(inventingBlueprint._key)?.volume
-              ?? 0,
-            demandSources: addDemandSource(
-              sourceBpc?.demandSources ?? new Map(),
-              bpc.typeId,
-              remainingBpcRuns,
-              inventionAttempts,
-            ),
-            neededQuantity: sourceNeededQuantity,
-            stockQuantity: sourceBpc?.stockQuantity ?? 0,
-            stockRuns: sourceBpc?.stockRuns ?? 0,
-            availableSourceCounts: sourceMetadata(inventingBlueprint._key)?.counts,
-            bpoCount: sourceBpoCount,
-            bposInUse: blueprintInUseCounts.get(inventingBlueprint._key) ?? 0,
-            buildTime: inventingBlueprint.activities.copying?.time ?? 0,
-            activityLocationId: locations?.invention,
-            buyQuantity:
-              sourceBpoCount > 0
-                ? Math.ceil(sourceRemainingRuns / inventingBlueprint.maxProductionLimit)
-                : sourceRemainingRuns,
-          },
-        );
+        if (isAncientRelicType(typeRecords.get(inventingBlueprint._key), groups)) {
+          await addMaterial(
+            inventingBlueprint._key,
+            inventionAttempts,
+            false,
+            true,
+            locations?.invention,
+            undefined,
+            bpc.typeId,
+            inventionAttempts,
+          );
+        }
+        else {
+          const sourceBpc = bpcs.get(inventingBlueprint._key);
+          const sourceBpoCount = blueprintOriginalCounts.get(inventingBlueprint._key) ?? 0;
+          const sourceCopyStock = blueprintCopyStock.get(inventingBlueprint._key);
+          const sourceNeededQuantity = (sourceBpc?.neededQuantity ?? 0) + inventionAttempts;
+          const sourceRemainingRuns = Math.max(
+            0,
+            sourceNeededQuantity - (sourceCopyStock?.runs ?? 0),
+          );
+          bpcs.set(
+            inventingBlueprint._key,
+            {
+              typeId: inventingBlueprint._key,
+              unitVolume:
+                typeRecords.get(inventingBlueprint._key)?.packagedVolume
+                ?? typeRecords.get(inventingBlueprint._key)?.volume
+                ?? 0,
+              demandSources: addDemandSource(
+                sourceBpc?.demandSources ?? new Map(),
+                bpc.typeId,
+                remainingBpcRuns,
+                inventionAttempts,
+              ),
+              neededQuantity: sourceNeededQuantity,
+              stockQuantity: sourceBpc?.stockQuantity ?? 0,
+              stockRuns: sourceBpc?.stockRuns ?? 0,
+              availableSourceCounts: sourceMetadata(inventingBlueprint._key)?.counts,
+              bpoCount: sourceBpoCount,
+              bposInUse: blueprintInUseCounts.get(inventingBlueprint._key) ?? 0,
+              buildTime: inventingBlueprint.activities.copying?.time ?? 0,
+              activityLocationId: locations?.invention,
+              buyQuantity:
+                sourceBpoCount > 0
+                  ? Math.ceil(sourceRemainingRuns / inventingBlueprint.maxProductionLimit)
+                  : sourceRemainingRuns,
+            },
+          );
+        }
         for (const material of invention.materials ?? []) {
           await addMaterial(
             material.typeID,
