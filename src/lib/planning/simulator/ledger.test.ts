@@ -143,6 +143,43 @@ void test("keeps deferred demand independent from immediately available stock", 
   assert.equal(balance.surplus, 0);
 });
 
+void test("projects additive readiness without changing the demand declaration", () => {
+  const declaration: Extract<SimulationTransaction, { kind: "demand" }> = {
+    id: "demand-1",
+    kind: "demand",
+    account,
+    quantity: 10,
+    source: {
+      demandId: "demand-1",
+      stockpileId: "main",
+      materialTypeId: 34,
+      productTypeId: 34,
+      productQuantity: 10,
+      plannedQuantity: 10,
+      requiredNow: 0,
+      reserved: 10,
+      destinationLocationId: 20,
+      activity: "stock",
+    },
+  };
+  const projection = projectSimulationLedger(
+    [],
+    [
+      declaration,
+      { id: "ready-1", kind: "demand-readiness", account, demandId: "demand-1", quantity: 4 },
+      { id: "ready-2", kind: "demand-readiness", account, demandId: "demand-1", quantity: 3 },
+    ],
+  );
+  const balance = projection.balances.get("20:34");
+  assert.ok(balance);
+  assert.equal(balance.requiredNow, 7);
+  assert.equal(balance.reserved, 3);
+  assert.equal(balance.demandSources[0].requiredNow, 7);
+  assert.equal(declaration.source.requiredNow, 0);
+  assert.equal(declaration.source.reserved, 10);
+  assert.deepEqual(projection.invariantViolations, []);
+});
+
 void test("detects reservations shared across ledgers that exceed one physical lot", () => {
   const projection = projectSimulationLedger(
     [{ lotId: "shared", typeId: 34, quantity: 5, locationId: 20 }],
@@ -165,6 +202,43 @@ void test("detects reservations shared across ledgers that exceed one physical l
       },
     ],
   );
+  assert.equal(
+    projection.invariantViolations.some((message) => /over-reserved/.test(message)),
+    true,
+  );
+});
+
+void test("detects blueprint-run reservations that exceed one finite print", () => {
+  const projection = projectSimulationLedger(
+    [
+      {
+        lotId: "finite-print",
+        typeId: 100,
+        quantity: 5,
+        locationId: 20,
+        quantityKind: "blueprint-run",
+      },
+    ],
+    [
+      {
+        id: "first-job",
+        kind: "blueprint-run-reservation",
+        account: { locationId: 20, typeId: 100 },
+        blueprintLotId: "finite-print",
+        quantity: 4,
+        demandingJobId: "first-job",
+      },
+      {
+        id: "second-job",
+        kind: "blueprint-run-reservation",
+        account: { locationId: 30, typeId: 100 },
+        blueprintLotId: "finite-print",
+        quantity: 4,
+        demandingJobId: "second-job",
+      },
+    ],
+  );
+  assert.equal(projection.reservedByLotId.get("finite-print"), 8);
   assert.equal(
     projection.invariantViolations.some((message) => /over-reserved/.test(message)),
     true,

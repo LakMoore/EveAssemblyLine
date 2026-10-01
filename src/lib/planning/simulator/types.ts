@@ -322,6 +322,7 @@ export interface SimulationCopyJob {
   locationId: number;
   blueprintTypeId: number;
   sourceBlueprintItemId?: number;
+  sourceBlueprintLocationId?: number;
   copies: number;
   licensedRunsPerCopy: number;
   totalLicensedRuns: number;
@@ -363,6 +364,7 @@ export interface SimulationReprocessingJobGroup {
   locationId: number;
   sourceTypeId: number;
   sourceTypeName: string;
+  jobs: SimulationReprocessingJob[];
   quantities: {
     totalSourceQuantity: number;
     immediateSourceQuantity: number;
@@ -377,13 +379,21 @@ export interface SimulationHaulDemand {
   quantity: number;
 }
 
+/** Physical source lot contribution to one presentation haul. */
+export interface SimulationHaulSourceLot {
+  lotId: string;
+  quantity: number;
+}
+
 /** Physical haul requirement aggregated by source, type, destination, and owner. */
 export interface SimulationHaulTask {
   transferId: string;
-  lotId: string;
+  lotId?: string;
+  sourceLots?: SimulationHaulSourceLot[];
   typeId: number;
   typeName: string;
   blueprintKind?: "bpo" | "bpc" | "formula";
+  horizon?: "now" | "after-hauling" | "after-upstream";
   quantity: number;
   unitVolume: number;
   fromLocationId: number;

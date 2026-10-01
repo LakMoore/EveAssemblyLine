@@ -38,17 +38,22 @@ use `Cache-Control: no-store`.
 
 The simulator reports availability at `now`, `after-hauling`, `after-upstream`, and
 `after-purchase` horizons. Physical item lots and finite BPC runs are conserved once across all
-stockpiles. Manufacturing, reactions, copying, and invention are assigned to reusable character
-capacity lanes when character profiles are supplied. Reprocessing runs after industry expansion
-and is limited to eligible ore, compressed gas, and scrap types; buying is the final settlement
+stockpiles. Manufacturing and reaction installs are assigned to reusable character capacity lanes
+when character profiles are supplied; known upstream completion times constrain dependent starts.
+Science assignments likewise require known input availability. Work waiting on an undated purchase
+or haul remains unscheduled rather than receiving a time-zero install. Planned and active outputs
+are credited at their producing location, with a future transfer when demand is elsewhere; those
+transfers are not presented as actionable hauling until the output exists as an asset.
+Reprocessing runs after industry expansion and is limited to eligible ore, compressed gas, and
+scrap types. Committed sources round up to complete SDE portions; buying is the final settlement
 phase.
 
 The request policy defaults to a 1.2 expected invention-output factor, level-3 fallback invention
 skills, no decryptor, a 10,000-node graph limit, and a depth limit of 100. A type cannot appear in
-both build and buy blacklists. The response contains the ten native result lists, activity/location
-ledger views, stable input and policy metadata, warnings, and invariant counts. The pure
-`toCompatiblePlanResponse()` adapter in `src/lib/planning/simulator/compatibility.ts` maps native
-facts to the existing `PlanResponse` contract; the visible planner continues to use `/api/plan`.
+both build and buy blacklists. The response contains native result lists, stable input and policy
+metadata, warnings, and invariant counts. Presentation lists
+are grouped on the server and include per-lot hauling and per-job reprocessing details; the ledger
+views are diagnostic and are not required for the planner to display the native result.
 
 ## Firebase persistence
 

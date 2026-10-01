@@ -77,18 +77,39 @@ export function aggregateHaulingTasks(tasks: readonly SimulationHaulTask[]): Sim
       task.toLocationId,
       task.ownerType ?? "",
       task.ownerId ?? "",
+      task.horizon ?? "",
+      task.purpose,
+      task.blueprintKind ?? "",
     ].join(":");
     const existingTask = groupedTasks.get(key);
     if (!existingTask) {
-      groupedTasks.set(key, { ...task, demands: [...task.demands] });
+      const { lotId, sourceLots, ...presentationTask } = task;
+      groupedTasks.set(
+        key,
+        {
+          ...presentationTask,
+          transferId: `haul-group:${key}`,
+          sourceLots: sourceLots ?? (lotId ? [{ lotId, quantity: task.quantity }] : []),
+          demands: [...task.demands],
+        },
+      );
       continue;
     }
     existingTask.quantity += task.quantity;
     existingTask.demands.push(...task.demands);
+    existingTask.sourceLots?.push(...(task.sourceLots ?? []));
+    if (task.lotId) {
+      const sourceLot = existingTask.sourceLots?.find((lot) => lot.lotId === task.lotId);
+      if (sourceLot) sourceLot.quantity += task.quantity;
+      else existingTask.sourceLots?.push({ lotId: task.lotId, quantity: task.quantity });
+    }
   }
   return [...groupedTasks.values()]
-    .map((task) => ({
+    .map(({ sourceLots, ...task }) => ({
       ...task,
+      ...(sourceLots?.length === 1
+        ? { lotId: sourceLots[0].lotId }
+        : { sourceLots: sourceLots?.sort((left, right) => left.lotId.localeCompare(right.lotId)) }),
       demands: task.demands.sort(
         (left, right) =>
           (left.jobId ?? "").localeCompare(right.jobId ?? "") || left.quantity - right.quantity,
@@ -100,7 +121,10 @@ export function aggregateHaulingTasks(tasks: readonly SimulationHaulTask[]): Sim
         || left.typeId - right.typeId
         || left.toLocationId - right.toLocationId
         || (left.ownerType ?? "").localeCompare(right.ownerType ?? "")
-        || (left.ownerId ?? 0) - (right.ownerId ?? 0),
+        || (left.ownerId ?? 0) - (right.ownerId ?? 0)
+        || left.purpose.localeCompare(right.purpose)
+        || (left.horizon ?? "").localeCompare(right.horizon ?? "")
+        || (left.blueprintKind ?? "").localeCompare(right.blueprintKind ?? ""),
     );
 }
 
@@ -498,7 +522,9 @@ function assembleLists(
     inventionJobs: schedules.inventionJobs,
     reactionJobs: schedules.reactionJobs,
     manufacturingJobs: schedules.manufacturingJobs,
-    haulingTasks: aggregateHaulingTasks(industry.allocator.haulingTasks),
+    haulingTasks: aggregateHaulingTasks(
+      industry.allocator.haulingTasks.filter((task) => task.purpose !== "completion"),
+    ),
     skillsRequired: industry.skillsRequired,
   };
   if (request.simulation.simulateSurplus) {

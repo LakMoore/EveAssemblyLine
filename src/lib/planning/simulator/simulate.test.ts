@@ -51,6 +51,112 @@ void test("aggregates hauling tasks by route and owner with demand provenance", 
   assert.equal(tasks.length, 3);
   assert.equal(tasks[0].quantity, 10);
   assert.deepEqual(tasks[0].demands, [{ jobId: "job-a", quantity: 10 }]);
+  assert.equal(tasks[0].lotId, "one");
+  assert.equal(tasks[0].sourceLots, undefined);
+});
+
+void test("groups source lots by haul route while retaining purpose and lot quantities", () => {
+  const sharedRoute = {
+    typeId: 34,
+    typeName: "Tritanium",
+    unitVolume: 0.01,
+    fromLocationId: 10,
+    toLocationId: 20,
+    ownerType: "character" as const,
+    ownerId: 7,
+  };
+  const tasks = aggregateHaulingTasks([
+    {
+      ...sharedRoute,
+      transferId: "first",
+      lotId: "lot-a",
+      quantity: 5,
+      purpose: "stockpile-demand",
+      demands: [{ jobId: "first-job", quantity: 5 }],
+    },
+    {
+      ...sharedRoute,
+      transferId: "second",
+      lotId: "lot-b",
+      quantity: 7,
+      purpose: "stockpile-demand",
+      demands: [{ jobId: "second-job", quantity: 7 }],
+    },
+    {
+      ...sharedRoute,
+      transferId: "third",
+      lotId: "lot-c",
+      quantity: 3,
+      purpose: "industry-input",
+      demands: [{ jobId: "third-job", quantity: 3 }],
+    },
+  ]);
+  assert.deepEqual(
+    tasks.map((task) => [task.purpose, task.quantity]),
+    [
+      ["industry-input", 3],
+      ["stockpile-demand", 12],
+    ],
+  );
+  assert.deepEqual(
+    tasks[1].sourceLots,
+    [
+      { lotId: "lot-a", quantity: 5 },
+      { lotId: "lot-b", quantity: 7 },
+    ],
+  );
+  assert.equal(tasks[1].lotId, undefined);
+  assert.deepEqual(
+    tasks[1].demands,
+    [
+      { jobId: "first-job", quantity: 5 },
+      { jobId: "second-job", quantity: 7 },
+    ],
+  );
+});
+
+void test("keeps haul horizons and blueprint kinds distinct with stable grouped identities", () => {
+  const common = {
+    typeId: 57457,
+    typeName: "Reinforced Carbon Fiber",
+    unitVolume: 0.1,
+    fromLocationId: 10,
+    toLocationId: 20,
+    ownerType: "character" as const,
+    ownerId: 7,
+    purpose: "stockpile-demand" as const,
+    demands: [],
+  };
+  const transfers = Array.from(
+    { length: 5 },
+    (_, index) => ({
+      ...common,
+      transferId: `transfer-${index}`,
+      lotId: `lot-${index}`,
+      quantity: 3600,
+      horizon: "now" as const,
+    }),
+  );
+  const distinctHorizon = {
+    ...transfers[0],
+    transferId: "future-transfer",
+    lotId: "future-lot",
+    horizon: "after-upstream" as const,
+  };
+  const distinctBlueprintKind = {
+    ...transfers[0],
+    transferId: "blueprint-transfer",
+    lotId: "blueprint-lot",
+    blueprintKind: "bpc" as const,
+  };
+  const tasks = aggregateHaulingTasks([...transfers, distinctHorizon, distinctBlueprintKind]);
+  assert.equal(tasks.length, 3);
+  const combined = tasks.find((task) => task.horizon === "now" && !task.blueprintKind);
+  assert.equal(combined?.quantity, 18000);
+  assert.equal(combined.quantity * combined.unitVolume, 1800);
+  assert.equal(combined.sourceLots?.length, 5);
+  assert.equal(combined.lotId, undefined);
+  assert.equal(aggregateHaulingTasks([...transfers].reverse())[0].transferId, combined.transferId);
 });
 
 void test("assembles a versioned invariant-safe result from the cached SDE", async () => {
@@ -102,6 +208,17 @@ void test("assembles a versioned invariant-safe result from the cached SDE", asy
       ledger.balances.some((balance) => balance.requiredNow + balance.reserved > 0),
     ),
   );
+  const facilityOutput = first.ledgers
+    .find((ledger) => ledger.locationId === 20)
+    ?.balances.find((balance) => balance.typeId === 587);
+  assert.equal(facilityOutput?.availableFromProduction, 1);
+  assert.equal(facilityOutput.transferredOut, 1);
+  assert.deepEqual(
+    first.lists.haulingTasks
+      .filter((task) => task.typeId === 587)
+      .map((task) => [task.fromLocationId, task.toLocationId, task.quantity, task.purpose]),
+    [],
+  );
 });
 
 void test("keeps sell-order availability in the Plan presentation", async () => {
@@ -142,6 +259,37 @@ void test("keeps sell-order availability in the Plan presentation", async () => 
   assert.ok(item);
   assert.equal(item.availableNow, 0);
   assert.equal(item.availableFromSellOrders, 81);
+});
+
+void test("buys and declares complete portions for committed reprocessing input", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "main",
+        name: "Main",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 18, quantity: 99, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1 },
+  });
+
+  const result = await simulateIndustry(request);
+  assert.equal(result.lists.materialsToBuy.find((item) => item.typeId === 18)?.quantity, 100);
+  assert.equal(result.lists.reprocessingJobs[0]?.quantities.afterPurchaseSourceQuantity, 100);
+  const source = result.lists.planItems
+    .flatMap((bucket) => bucket.items)
+    .find((item) => item.typeId === 18);
+  assert.equal((source?.requiredNow ?? 0) + (source?.reserved ?? 0), 100);
 });
 
 void test("tracks reaction formula counts and required runs at the reaction location", async () => {
@@ -287,6 +435,33 @@ void test("buys one missing reaction formula per type and reaction location", as
   assert.equal(formulaPurchases[0]?.destinations[0]?.locationId, 30);
 });
 
+void test("buys one reusable original for stockpiles sharing a manufacturing location", async () => {
+  const locations = {
+    stock: 10,
+    manufacturing: 20,
+    reactions: 30,
+    reprocessing: 40,
+    copying: 50,
+    invention: 60,
+  };
+  const request = parseSimulatorRequest({
+    stockpiles: ["alpha", "beta"].map((id) => ({
+      id,
+      name: id,
+      locations,
+      items: [{ typeId: 587, quantity: 1, me: 0, te: 0, fromCompression: false }],
+    })),
+    assets: [],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1 },
+  });
+
+  const result = await simulateIndustry(request);
+  const originals = result.lists.bpoToBuy.filter((purchase) => purchase.typeId === 691);
+  assert.equal(originals.length, 1);
+  assert.equal(originals[0]?.quantity, 1);
+});
+
 void test("buys a reaction formula when the only available copy is haul-excluded", async () => {
   const request = parseSimulatorRequest({
     stockpiles: [
@@ -419,10 +594,11 @@ void test("combines stockpile demand in one canonical location ledger", async ()
   const manufacturingLedger = result.ledgers.find((ledger) => ledger.locationId === 20);
   assert.ok(manufacturingLedger);
   assert.equal(manufacturingLedger.ledgerId, "location:20");
-  assert.ok(
-    manufacturingLedger.balances.some(
-      (balance) => new Set(balance.demandSources.map((source) => source.stockpileId)).size === 2,
-    ),
+  const sharedJob = result.lists.manufacturingJobs.find((job) => job.productTypeId === 587);
+  assert.ok(sharedJob);
+  assert.deepEqual(
+    sharedJob.demandSources.map((source) => source.stockpileId).sort(),
+    ["alpha", "beta"],
   );
 });
 
@@ -605,6 +781,66 @@ void test("keeps connected material surplus on the plan tab", async () => {
   );
 });
 
+void test("uses unclaimed stock after exact blueprint efficiency is known", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "main",
+        name: "Main",
+        locations: {
+          stock: 20,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [
+          { typeId: 587, quantity: 1, me: 0, te: 0, fromCompression: false },
+          { typeId: 34, quantity: 3200, me: 0, te: 0, fromCompression: false },
+        ],
+      },
+    ],
+    assets: {
+      items: [{ typeId: 34, quantity: 32000, locationId: 20, rootLocationId: 20 }],
+      blueprints: [
+        {
+          typeId: 691,
+          itemId: 1,
+          quantity: 1,
+          locationId: 20,
+          rootLocationId: 20,
+          type: "bpo",
+          runs: 0,
+          me: 10,
+          te: 0,
+        },
+      ],
+      market: [],
+      industry: [],
+    },
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1 },
+  });
+
+  const result = await simulateIndustry(request);
+  assert.equal(
+    result.lists.manufacturingJobs
+      .find((job) => job.productTypeId === 587)
+      ?.inputs.find((input) => input.typeId === 34)?.requiredQuantity,
+    28800,
+  );
+  assert.equal(
+    result.lists.materialsToBuy.some((item) => item.typeId === 34),
+    false,
+  );
+  const tritanium = result.lists.planItems
+    .flatMap((bucket) => bucket.items)
+    .find((item) => item.typeId === 34 && item.locationId === 20);
+  assert.equal(tritanium?.requiredNow, 32000);
+  assert.equal(tritanium.surplus, 0);
+});
+
 void test("preserves local recursive activity demand before final stockpile hauling", async () => {
   const input = {
     stockpiles: [
@@ -659,4 +895,69 @@ void test("preserves local recursive activity demand before final stockpile haul
   assert.equal(localAunerBalance.availableNow, 96);
   assert.equal(localAunerBalance.availableFromProduction, 203);
   assert.equal(localAunerBalance.transferredOut, 0);
+});
+
+void test("protects complete local reaction inputs when earlier demand consumes finished stock", async () => {
+  const locations = (stock: number, reactions: number) => ({
+    stock,
+    manufacturing: reactions,
+    reactions,
+    reprocessing: reactions,
+    copying: reactions,
+    invention: reactions,
+  });
+  const item = (typeId: number, quantity: number) => ({
+    typeId,
+    quantity,
+    me: 0,
+    te: 0,
+    fromCompression: false,
+  });
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      { id: "a-first", name: "First", locations: locations(10, 20), items: [item(30304, 250)] },
+      { id: "b-react", name: "React", locations: locations(10, 20), items: [item(30304, 7500)] },
+      { id: "c-remote", name: "Remote", locations: locations(30, 30), items: [item(35, 783)] },
+    ],
+    assets: [
+      { typeId: 30304, name: "PPD Fullerene Fibers", quantity: 250, locationId: 10 },
+      { typeId: 35, name: "Pyerite", quantity: 23475, locationId: 20 },
+    ],
+    facilityProfiles: [
+      {
+        locationId: 20,
+        systemId: 30000142,
+        sizeId: 1,
+        buildTypeGroups: {
+          hybridReactions: {
+            manufacturingMaterialMultiplier: 1,
+            manufacturingMaterialPercentage: 0,
+            manufacturingTimeMultiplier: 1,
+            manufacturingTimePercentage: 0,
+            reactionMaterialMultiplier: 0.978125,
+            reactionMaterialPercentage: -2.1875,
+            reactionTimeMultiplier: 1,
+            reactionTimePercentage: 0,
+          },
+        },
+      },
+    ],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1 },
+  });
+
+  const result = await simulateIndustry(request);
+  const reaction = result.lists.reactionJobs.find((job) => job.productTypeId === 30304);
+  const pyerite = reaction?.inputs.find((input) => input.typeId === 35);
+  assert.ok(pyerite);
+  assert.equal(pyerite.requiredQuantity, 23475);
+  assert.equal(pyerite.availableNow, 23475);
+  assert.equal(result.lists.haulingTasks.filter((task) => task.typeId === 35).length, 0);
+  assert.equal(result.lists.materialsToBuy.find((buy) => buy.typeId === 35)?.quantity, 783);
+  const balance = result.ledgers
+    .find((ledger) => ledger.locationId === 20)
+    ?.balances.find((row) => row.typeId === 35);
+  assert.ok(balance);
+  assert.equal(balance.requiredNow, 23475);
+  assert.equal(balance.transferredOut, 0);
 });

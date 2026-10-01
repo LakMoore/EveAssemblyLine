@@ -128,6 +128,134 @@ void test("keeps upstream demand separate from a multi-unit job output", async (
   );
 });
 
+void test("pools shared fuel-block demand before rounding manufacturing runs", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "main",
+        name: "Main",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [
+          { typeId: 30304, quantity: 250, me: 0, te: 0, fromCompression: false },
+          { typeId: 16660, quantity: 200, me: 0, te: 0, fromCompression: false },
+        ],
+      },
+    ],
+    assets: [],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1 },
+  });
+  const result = await simulateIndustry(request);
+  const fuelJobs = result.lists.manufacturingJobs.filter((job) => job.productTypeId === 4246);
+  const fuelDemand = result.lists.planItems
+    .flatMap((bucket) => bucket.items)
+    .find((item) => item.typeId === 4246 && item.locationId === 30);
+  const fuelProduction = result.ledgers
+    .find((ledger) => ledger.locationId === 20)
+    ?.balances.find((item) => item.typeId === 4246);
+
+  assert.ok(fuelDemand);
+  assert.equal(
+    fuelDemand.demandSources.reduce((total, source) => total + source.plannedQuantity, 0),
+    10,
+  );
+  assert.equal(
+    fuelJobs.reduce((total, job) => total + job.requiredRuns, 0),
+    1,
+  );
+  assert.deepEqual(
+    fuelJobs[0].demandSources
+      .map((source) => source.productTypeId)
+      .sort((left, right) => left - right),
+    [16660, 30304],
+  );
+  assert.equal(fuelProduction?.availableFromProduction, 40);
+});
+
+void test("pools production for stockpiles sharing activity facilities", async () => {
+  const stockpile = (id: string, stock: number, productTypeId: number, quantity: number) => ({
+    id,
+    name: id,
+    locations: {
+      stock,
+      manufacturing: 20,
+      reactions: 30,
+      reprocessing: 40,
+      copying: 50,
+      invention: 60,
+    },
+    items: [{ typeId: productTypeId, quantity, me: 0, te: 0, fromCompression: false }],
+  });
+  const result = await simulateIndustry(
+    parseSimulatorRequest({
+      stockpiles: [stockpile("first", 10, 30304, 250), stockpile("second", 11, 16660, 200)],
+      assets: [],
+      settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+      simulation: { version: 1, blockInterStockpileHauling: true },
+    }),
+  );
+  const fuelJobs = result.lists.manufacturingJobs.filter((job) => job.productTypeId === 4246);
+
+  assert.equal(
+    fuelJobs.reduce((total, job) => total + job.requiredRuns, 0),
+    1,
+  );
+  assert.deepEqual(
+    fuelJobs[0].demandSources.map((source) => source.stockpileId).sort(),
+    ["first", "second"],
+  );
+});
+
+void test("plans nested reaction parents before rounding shared fuel-block demand", async () => {
+  const result = await simulateIndustry(
+    parseSimulatorRequest({
+      stockpiles: [
+        {
+          id: "main",
+          name: "Main",
+          locations: {
+            stock: 10,
+            manufacturing: 20,
+            reactions: 30,
+            reprocessing: 40,
+            copying: 50,
+            invention: 60,
+          },
+          items: [
+            { typeId: 30304, quantity: 250, me: 0, te: 0, fromCompression: false },
+            { typeId: 16673, quantity: 10_000, me: 0, te: 0, fromCompression: false },
+          ],
+        },
+      ],
+      assets: [],
+      settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+      simulation: { version: 1 },
+    }),
+  );
+  const fuelJobs = result.lists.manufacturingJobs.filter((job) => job.productTypeId === 4246);
+  const fuelDemand = result.lists.planItems
+    .flatMap((bucket) => bucket.items)
+    .find((item) => item.typeId === 4246 && item.locationId === 30);
+
+  assert.ok(fuelDemand);
+  const totalDemand = fuelDemand.demandSources.reduce(
+    (total, source) => total + source.plannedQuantity,
+    0,
+  );
+  assert.ok(totalDemand > 5 && totalDemand <= 40);
+  assert.equal(
+    fuelJobs.reduce((total, job) => total + job.requiredRuns, 0),
+    1,
+  );
+});
+
 void test("prioritizes same-system remote stockpile demand", async () => {
   const request = parseSimulatorRequest({
     stockpiles: [
@@ -337,11 +465,17 @@ void test("reports local Tritanium allocation when another prerequisite blocks i
     .find((input) => input.typeId === 34);
   assert.ok(tritaniumDemand);
   assert.ok(tritaniumInput);
-  assert.equal(tritaniumDemand.source.requiredNow, tritaniumInput.availableNow);
-  assert.equal(
-    tritaniumDemand.source.reserved,
-    tritaniumDemand.source.plannedQuantity - tritaniumInput.availableNow,
+  assert.equal(tritaniumDemand.source.requiredNow, 0);
+  const readiness = result.transactions.filter(
+    (transaction) =>
+      transaction.kind === "demand-readiness"
+      && transaction.demandId === tritaniumDemand.source.demandId,
   );
+  assert.equal(
+    readiness.reduce((total, transaction) => total + transaction.quantity, 0),
+    tritaniumInput.availableNow,
+  );
+  assert.equal(tritaniumDemand.source.reserved, tritaniumDemand.source.plannedQuantity);
   assert.equal(
     result.unmetDemands.some((demand) => demand.account.typeId === 34),
     false,
@@ -521,10 +655,17 @@ void test("does not use sell orders for manufacturing inputs or hauling", async 
   assert.equal(input.availableNow, 0);
   assert.equal(input.availableFromHauling, 0);
   assert.ok((input.purchaseQuantity ?? 0) > 0);
-  assert.equal(result.lists.haulingTasks.length, 0);
+  assert.equal(
+    result.lists.haulingTasks.some((task) => task.typeId === 34),
+    false,
+  );
+  assert.equal(
+    result.lists.haulingTasks.some((task) => task.typeId === 587),
+    false,
+  );
 });
 
-void test("credits remote in-flight reaction output without recommending a haul", async () => {
+void test("credits remote in-flight reaction output without an actionable haul", async () => {
   const request = parseSimulatorRequest({
     stockpiles: [
       {
@@ -769,10 +910,12 @@ void test("reserves full local reaction inputs before competing stockpile demand
     fuelTotalsByProduct.set(job.productTypeId, totals);
   }
 
-  assert.equal(fuelTotalsByProduct.get(16682)?.required, 10);
-  assert.equal(fuelTotalsByProduct.get(16682)?.availableNow, 10);
-  assert.equal(fuelTotalsByProduct.get(16664)?.required, 10);
-  assert.equal(fuelTotalsByProduct.get(16664)?.availableNow, 10);
+  for (const productTypeId of [16682, 16664]) {
+    const fuel = fuelTotalsByProduct.get(productTypeId);
+    assert.ok(fuel);
+    assert.ok(fuel.required > 0);
+    assert.equal(fuel.availableNow, fuel.required);
+  }
   const fuelBalance = result.ledgers
     .find((ledger) => ledger.locationId === 60)
     ?.balances.find((balance) => balance.typeId === 4312);
@@ -781,7 +924,7 @@ void test("reserves full local reaction inputs before competing stockpile demand
     fuelBalance.demandSources.find(
       (source) => source.stockpileId === "stockpile-1790119900393-hrnhot",
     )?.requiredNow,
-    14_515,
+    14_535 - [...fuelTotalsByProduct.values()].reduce((total, fuel) => total + fuel.required, 0),
   );
 });
 

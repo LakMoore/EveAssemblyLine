@@ -80,33 +80,104 @@ function readiness(job: SimulationIndustryJob): SupplyHorizon {
   return "after-purchase";
 }
 
-function scheduleIndustryActivity(
-  jobs: readonly SimulationIndustryJob[],
+function dependencyDepth(
+  job: SimulationIndustryJob,
+  jobsById: ReadonlyMap<string, SimulationIndustryJob>,
+  visiting: ReadonlySet<string> = new Set(),
+): number {
+  if (visiting.has(job.jobId)) return 0;
+  const nextVisiting = new Set(visiting).add(job.jobId);
+  const dependencies = job.inputs
+    .flatMap((input) => input.upstreamReservations ?? [])
+    .filter((reservation) => reservation.state === "planned")
+    .map((reservation) => jobsById.get(String(reservation.sourceJobId)))
+    .filter((upstream): upstream is SimulationIndustryJob => upstream !== undefined);
+  return dependencies.length === 0
+    ? 0
+    : 1
+        + Math.max(
+          ...dependencies.map((upstream) => dependencyDepth(upstream, jobsById, nextVisiting)),
+        );
+}
+
+function earliestIndustryStart(
+  job: SimulationIndustryJob,
+  scheduledJobs: ReadonlyMap<string, SimulationInstall>,
+  jobsById: ReadonlyMap<string, SimulationIndustryJob>,
+): number | undefined {
+  if (
+    job.blueprint.blueprintKind === "fallback"
+    || (job.blueprint.blueprintKind === "formula" && job.blueprint.blueprintItemId === undefined)
+    || (
+      job.blueprint.sourceLocationId !== undefined
+      && job.blueprint.sourceLocationId !== job.locationId
+    )
+  ) return undefined;
+  if (job.readyNowRuns >= job.requiredRuns) return 0;
+  if (
+    job.readyAfterUpstreamRuns < job.requiredRuns
+    || job.readyAfterHaulingRuns >= job.requiredRuns
+  ) {
+    return undefined;
+  }
+  let earliest = 0;
+  for (const input of job.inputs) {
+    if (input.availableFromHauling > 0 || input.unsatisfiedQuantity > 0) return undefined;
+    let accounted = input.availableNow;
+    for (const reservation of input.upstreamReservations ?? []) {
+      if (reservation.state !== "planned" || typeof reservation.sourceJobId !== "string") {
+        return undefined;
+      }
+      const producer = jobsById.get(reservation.sourceJobId);
+      const install = scheduledJobs.get(reservation.sourceJobId);
+      if (!producer || !install || producer.locationId !== job.locationId) return undefined;
+      accounted += reservation.quantity;
+      earliest = Math.max(earliest, install.endOffsetSeconds);
+    }
+    if (accounted < input.requiredQuantity) return undefined;
+  }
+  return earliest;
+}
+
+function scheduleIndustryActivities(
+  manufacturingJobs: readonly SimulationIndustryJob[],
+  reactionJobs: readonly SimulationIndustryJob[],
   characters: readonly SimulationCharacterProfile[],
-  activity: "manufacturing" | "reaction",
-): { jobs: SimulationIndustryJob[]; warnings: SimulationWarning[] } {
-  const slots = industrySlots(characters, activity).sort(
-    (left, right) =>
-      left.timeMultiplier - right.timeMultiplier
-      || left.characterId - right.characterId
-      || left.slotIndex - right.slotIndex,
-  );
+): {
+  manufacturingJobs: SimulationIndustryJob[];
+  reactionJobs: SimulationIndustryJob[];
+  warnings: SimulationWarning[];
+} {
+  const jobs = [...manufacturingJobs, ...reactionJobs];
+  const slotsByActivity = {
+    manufacturing: industrySlots(characters, "manufacturing"),
+    reaction: industrySlots(characters, "reaction"),
+  };
   const scheduledJobIds = new Map<string, SimulationInstall>();
+  const schedulableJobIds = new Set<string>();
+  const jobsById = new Map(jobs.map((job) => [job.jobId, job]));
   const blueprintAvailableAt = new Map<number, number>();
   const candidates = jobs
     .slice()
     .sort(
       (left, right) =>
-        right.durationPerRunSeconds * right.requiredRuns
-          - left.durationPerRunSeconds * left.requiredRuns || left.jobId.localeCompare(right.jobId),
+        dependencyDepth(left, jobsById) - dependencyDepth(right, jobsById)
+        || right.durationPerRunSeconds * right.requiredRuns
+          - left.durationPerRunSeconds * left.requiredRuns
+        || left.jobId.localeCompare(right.jobId),
     );
   for (const job of candidates) {
+    const earliestFromSupply = earliestIndustryStart(job, scheduledJobIds, jobsById);
+    if (earliestFromSupply === undefined) continue;
+    schedulableJobIds.add(job.jobId);
+    const slots = slotsByActivity[job.activity];
     if (slots.length === 0) continue;
     const blueprintItemId = job.blueprint.blueprintItemId;
     const slot = slots
       .map((candidate) => {
         const startOffsetSeconds = Math.max(
           candidate.availableAtSeconds,
+          earliestFromSupply,
           blueprintItemId === undefined ? 0 : (blueprintAvailableAt.get(blueprintItemId) ?? 0),
         );
         const durationSeconds = Math.ceil(
@@ -147,23 +218,28 @@ function scheduleIndustryActivity(
     };
   });
   const warnings = scheduled
-    .filter((job) => job.unscheduledRuns > 0)
+    .filter((job) => job.unscheduledRuns > 0 && schedulableJobIds.has(job.jobId))
     .map(
       (job): SimulationWarning => ({
         code: "missing-capacity",
         typeId: job.productTypeId,
         locationId: job.locationId,
         jobId: job.jobId,
-        message: `${job.unscheduledRuns} ${activity} runs could not be assigned to a free character slot.`,
+        message: `${job.unscheduledRuns} ${job.activity} runs could not be assigned to a free character slot.`,
       }),
     );
-  return { jobs: scheduled, warnings };
+  return {
+    manufacturingJobs: scheduled.filter((job) => job.activity === "manufacturing"),
+    reactionJobs: scheduled.filter((job) => job.activity === "reaction"),
+    warnings,
+  };
 }
 
 function scheduleScienceJobs(
   inventionJobs: readonly SimulationInventionJob[],
   copyJobs: readonly SimulationCopyJob[],
   characters: readonly SimulationCharacterProfile[],
+  industryJobs: readonly SimulationIndustryJob[],
 ): {
   inventionJobs: SimulationInventionJob[];
   copyJobs: SimulationCopyJob[];
@@ -173,17 +249,68 @@ function scheduleScienceJobs(
     (left, right) => left.characterId - right.characterId || left.slotIndex - right.slotIndex,
   );
   const assignments = new Map<string, SimulationScienceAssignment>();
+  const completionOffsets = new Map(
+    industryJobs.flatMap((job) =>
+      job.installs.map((install) => [job.jobId, install.endOffsetSeconds] as const),
+    ),
+  );
   const jobs = [
-    ...inventionJobs.map((job) => ({ activity: "invention" as const, job })),
     ...copyJobs.map((job) => ({ activity: "copying" as const, job })),
+    ...inventionJobs.map((job) => ({ activity: "invention" as const, job })),
   ];
+  const locationsByJobId = new Map([
+    ...industryJobs.map((job) => [job.jobId, job.locationId] as const),
+    ...jobs.map((entry) => [entry.job.jobId, entry.job.locationId] as const),
+  ]);
+  const schedulableJobIds = new Set<string>();
   for (const entry of jobs
     .slice()
     .sort(
       (left, right) =>
-        right.job.durationSeconds - left.job.durationSeconds
+        Number(left.activity === "invention") - Number(right.activity === "invention")
+        || right.job.durationSeconds - left.job.durationSeconds
         || left.job.jobId.localeCompare(right.job.jobId),
     )) {
+    if (
+      entry.activity === "copying"
+      && (
+        entry.job.sourceBlueprintItemId === undefined
+        || (
+          entry.job.sourceBlueprintLocationId !== undefined
+          && entry.job.sourceBlueprintLocationId !== entry.job.locationId
+        )
+      )
+    ) continue;
+    let earliestFromSupply = 0;
+    let inputReady = true;
+    for (const input of entry.job.inputs) {
+      if (input.availableNow >= input.requiredQuantity) continue;
+      if (input.availableFromHauling > 0 || input.unsatisfiedQuantity > 0) {
+        inputReady = false;
+        break;
+      }
+      let accounted = input.availableNow;
+      for (const reservation of input.upstreamReservations ?? []) {
+        const sourceJobId = String(reservation.sourceJobId ?? "");
+        const completedAt = completionOffsets.get(sourceJobId);
+        if (
+          reservation.state !== "planned"
+          || completedAt === undefined
+          || locationsByJobId.get(sourceJobId) !== entry.job.locationId
+        ) {
+          inputReady = false;
+          break;
+        }
+        accounted += reservation.quantity;
+        earliestFromSupply = Math.max(earliestFromSupply, completedAt);
+      }
+      if (!inputReady || accounted < input.requiredQuantity) {
+        inputReady = false;
+        break;
+      }
+    }
+    if (!inputReady) continue;
+    schedulableJobIds.add(entry.job.jobId);
     if (slots.length === 0) continue;
     const slot = slots
       .map((candidate) => {
@@ -205,7 +332,7 @@ function scheduleScienceJobs(
           || left.candidate.slotIndex - right.candidate.slotIndex,
       )[0];
     const units = entry.activity === "copying" ? entry.job.copies : entry.job.attempts;
-    const startOffsetSeconds = slot.candidate.availableAtSeconds;
+    const startOffsetSeconds = Math.max(slot.candidate.availableAtSeconds, earliestFromSupply);
     const endOffsetSeconds = startOffsetSeconds + slot.durationSeconds;
     assignments.set(
       entry.job.jobId,
@@ -220,6 +347,7 @@ function scheduleScienceJobs(
       },
     );
     slot.candidate.availableAtSeconds = endOffsetSeconds;
+    completionOffsets.set(entry.job.jobId, endOffsetSeconds);
   }
   const scheduledCopying = copyJobs.map((job) => {
     const assignment = assignments.get(job.jobId);
@@ -245,7 +373,7 @@ function scheduleScienceJobs(
       activity: "invention",
     })),
   ].flatMap(({ job, units, activity }): SimulationWarning[] =>
-    units > 0
+    units > 0 && schedulableJobIds.has(job.jobId)
       ? [
           {
             code: "missing-capacity",
@@ -267,14 +395,18 @@ export function scheduleSimulationJobs(
   copyJobs: readonly SimulationCopyJob[],
   characters: readonly SimulationCharacterProfile[],
 ): SimulationScheduleResult {
-  const manufacturing = scheduleIndustryActivity(manufacturingJobs, characters, "manufacturing");
-  const reactions = scheduleIndustryActivity(reactionJobs, characters, "reaction");
-  const science = scheduleScienceJobs(inventionJobs, copyJobs, characters);
+  const industry = scheduleIndustryActivities(manufacturingJobs, reactionJobs, characters);
+  const science = scheduleScienceJobs(
+    inventionJobs,
+    copyJobs,
+    characters,
+    [...industry.manufacturingJobs, ...industry.reactionJobs],
+  );
   return {
-    manufacturingJobs: manufacturing.jobs,
-    reactionJobs: reactions.jobs,
+    manufacturingJobs: industry.manufacturingJobs,
+    reactionJobs: industry.reactionJobs,
     inventionJobs: science.inventionJobs,
     copyJobs: science.copyJobs,
-    warnings: [...manufacturing.warnings, ...reactions.warnings, ...science.warnings],
+    warnings: [...industry.warnings, ...science.warnings],
   };
 }

@@ -60,6 +60,17 @@ void test("claims local stock before remote stock and creates an exact haul", ()
   assert.equal(allocator.remainingItemQuantity("remote"), 2);
 });
 
+void test("previews each physical lot once before remote activity demand", () => {
+  const allocator = new SimulationAllocator(inventory, []);
+
+  assert.equal(allocator.previewOrdinarySupply(34, 4, 20), 4);
+  assert.equal(allocator.previewOrdinarySupply(34, 8, 40), 8);
+  assert.equal(allocator.previewOrdinarySupply(34, 1, 30), 0);
+  assert.equal(allocator.remainingItemQuantity("local"), 4);
+  assert.equal(allocator.remainingItemQuantity("remote"), 8);
+  assert.deepEqual(allocator.transactions, []);
+});
+
 void test("protects reserved activity inputs from stockpile demand", () => {
   const allocator = new SimulationAllocator(inventory, []);
   allocator.reserveActivityDemand(34, 4, 20);
@@ -477,7 +488,7 @@ void test("does not claim future output across an excluded route", () => {
   );
 });
 
-void test("claims remote future output without scheduling a physical haul", () => {
+void test("claims remote future output with a completion haul", () => {
   const allocator = new SimulationAllocator(
     {
       ...inventory,
@@ -504,15 +515,16 @@ void test("claims remote future output without scheduling a physical haul", () =
   assert.equal(claim.local, 0);
   assert.equal(claim.remote, 0);
   assert.equal(claim.future, 5_589);
-  assert.equal(allocator.haulingTasks.length, 0);
+  assert.equal(allocator.haulingTasks[0]?.purpose, "completion");
+  assert.equal(allocator.haulingTasks[0]?.quantity, 5_589);
   assert.equal(allocator.remainingItemQuantity("remote-active-output"), 171);
   assert.equal(
     allocator.transactions.some((transaction) => transaction.kind === "transfer-commitment"),
-    false,
+    true,
   );
 });
 
-void test("reserves future blueprint runs without scheduling a physical haul", () => {
+void test("reserves future blueprint runs with a completion haul for the print", () => {
   const allocator = new SimulationAllocator(
     {
       ...inventory,
@@ -537,10 +549,11 @@ void test("reserves future blueprint runs without scheduling a physical haul", (
   assert.equal(claims.length, 1);
   assert.equal(claims[0]?.runs, 3);
   assert.equal(claims[0]?.horizon, "after-upstream");
-  assert.equal(allocator.haulingTasks.length, 0);
+  assert.equal(allocator.haulingTasks[0]?.quantity, 1);
+  assert.equal(allocator.haulingTasks[0]?.purpose, "completion");
   assert.equal(
     allocator.transactions.some((transaction) => transaction.kind === "transfer-commitment"),
-    false,
+    true,
   );
 });
 
@@ -557,6 +570,48 @@ void test("conserves finite BPC runs across allocations", () => {
     1,
   );
   assert.equal(allocator.remainingBlueprintRuns("bpc"), 0);
+});
+
+void test("does not split one physical BPC across different facilities", () => {
+  const preview = new SimulationAllocator(inventory, []);
+  assert.deepEqual(
+    preview.previewManufacturingBlueprints(100, 3, 30, 10),
+    [{ runs: 3, materialEfficiency: 10 }],
+  );
+  assert.deepEqual(preview.previewManufacturingBlueprints(100, 2, 40, 10), []);
+
+  const allocator = new SimulationAllocator(inventory, []);
+  const first = allocator.claimManufacturingBlueprints(
+    100,
+    3,
+    30,
+    {
+      locationId: 30,
+      typeId: 100,
+    },
+    "job-one",
+    10,
+  );
+  const second = allocator.claimManufacturingBlueprints(
+    100,
+    2,
+    40,
+    {
+      locationId: 40,
+      typeId: 100,
+    },
+    "job-two",
+    10,
+  );
+  assert.equal(
+    first.reduce((total, allocation) => total + allocation.runs, 0),
+    3,
+  );
+  assert.deepEqual(second, []);
+  assert.deepEqual(
+    allocator.haulingTasks.map((task) => task.toLocationId),
+    [30],
+  );
 });
 
 void test("depletes only the runs used from each copy", () => {

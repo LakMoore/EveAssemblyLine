@@ -81,7 +81,11 @@ function stockpileRoutePolicy(stockpiles: readonly Pick<PlanStockpile, "location
 export class SimulationAllocator {
   private readonly itemLotsByTypeId: Map<number, SimulationItemLot[]>;
   private readonly remainingItemQuantityByLotId: Map<string, number>;
+  private readonly previewItemQuantityByLotId: Map<string, number>;
   private readonly remainingBlueprintRunsByLotId: Map<string, number>;
+  private readonly previewBlueprintRunsByLotId: Map<string, number>;
+  private readonly blueprintDestinationByLotId = new Map<string, number>();
+  private readonly previewBlueprintDestinationByLotId = new Map<string, number>();
   private readonly stockpileLocationIds: ReadonlySet<number>;
   private readonly sameStockpileLocationPairs: ReadonlySet<string>;
   private readonly blockInterStockpileHauling: boolean;
@@ -122,9 +126,36 @@ export class SimulationAllocator {
     this.remainingItemQuantityByLotId = new Map(
       inventory.itemLots.map((lot) => [lot.lotId, lot.quantity]),
     );
+    this.previewItemQuantityByLotId = new Map(this.remainingItemQuantityByLotId);
     this.remainingBlueprintRunsByLotId = new Map(
       inventory.blueprintLots.map((lot) => [lot.lotId, lot.runs]),
     );
+    this.previewBlueprintRunsByLotId = new Map(this.remainingBlueprintRunsByLotId);
+  }
+
+  /** Attributes eligible stock to one prepass demand without mutating real claims or the journal. */
+  previewOrdinarySupply(typeId: number, quantity: number, destinationLocationId: number): number {
+    let remaining = quantity;
+    const lots = [...(this.itemLotsByTypeId.get(typeId) ?? [])].sort(
+      (left, right) =>
+        Number(left.horizon !== "now") - Number(right.horizon !== "now")
+        || Number(left.locationId !== destinationLocationId)
+          - Number(right.locationId !== destinationLocationId)
+        || left.lotId.localeCompare(right.lotId),
+    );
+    for (const lot of lots) {
+      if (remaining <= 0) break;
+      if (
+        lot.source === "market-order"
+        || lot.locationId === undefined
+        || (lot.locationId !== destinationLocationId && this.isExcluded(lot, destinationLocationId))
+      ) continue;
+      const available = this.previewItemQuantityByLotId.get(lot.lotId) ?? 0;
+      const claimed = Math.min(remaining, available);
+      this.previewItemQuantityByLotId.set(lot.lotId, available - claimed);
+      remaining -= claimed;
+    }
+    return quantity - remaining;
   }
 
   /** Returns unclaimed ordinary supply for a type at each horizon. */
@@ -416,6 +447,11 @@ export class SimulationAllocator {
         lot.typeId !== blueprintTypeId
         || lot.kind === "formula"
         || lot.inUse
+        || (
+          lot.kind === "bpc"
+          && this.blueprintDestinationByLotId.has(lot.lotId)
+          && this.blueprintDestinationByLotId.get(lot.lotId) !== destinationLocationId
+        )
         || (lot.locationId !== destinationLocationId && this.isExcluded(lot, destinationLocationId))
       ) continue;
       if (lot.kind === "bpo") return Number.MAX_SAFE_INTEGER;
@@ -423,6 +459,74 @@ export class SimulationAllocator {
       if (availableRuns >= maximumRuns) return maximumRuns;
     }
     return Math.min(availableRuns, maximumRuns);
+  }
+
+  /** Previews exact blueprint and ME splits without claiming physical blueprint runs. */
+  previewManufacturingBlueprints(
+    blueprintTypeId: number,
+    runs: number,
+    destinationLocationId: number,
+    maxRunsPerAllocation: number,
+  ): Array<{ runs: number; materialEfficiency: number }> {
+    const allocations: Array<{ runs: number; materialEfficiency: number }> = [];
+    let remaining = runs;
+    for (const lot of this.manufacturingBlueprintCandidates(
+      blueprintTypeId,
+      destinationLocationId,
+      this.previewBlueprintDestinationByLotId,
+    )) {
+      if (remaining <= 0) break;
+      const available =
+        lot.kind === "bpo" ? remaining : (this.previewBlueprintRunsByLotId.get(lot.lotId) ?? 0);
+      let allocated = Math.min(available, remaining);
+      if (lot.kind === "bpc") {
+        this.previewBlueprintRunsByLotId.set(lot.lotId, available - allocated);
+        if (allocated > 0) {
+          this.previewBlueprintDestinationByLotId.set(lot.lotId, destinationLocationId);
+        }
+      }
+      remaining -= allocated;
+      while (allocated > 0) {
+        const next = Math.min(allocated, maxRunsPerAllocation);
+        allocations.push({ runs: next, materialEfficiency: lot.materialEfficiency });
+        allocated -= next;
+      }
+    }
+    return allocations;
+  }
+
+  private manufacturingBlueprintCandidates(
+    blueprintTypeId: number,
+    destinationLocationId: number,
+    destinations: ReadonlyMap<string, number> = this.blueprintDestinationByLotId,
+  ): SimulatorBlueprintLot[] {
+    return this.inventory.blueprintLots
+      .filter(
+        (lot) =>
+          lot.typeId === blueprintTypeId
+          && lot.kind !== "formula"
+          && !lot.inUse
+          && (
+            lot.kind !== "bpc"
+            || !destinations.has(lot.lotId)
+            || destinations.get(lot.lotId) === destinationLocationId
+          )
+          && (
+            lot.locationId === destinationLocationId
+            || !this.isExcluded(lot, destinationLocationId)
+          ),
+      )
+      .slice()
+      .sort((left, right) => {
+        const leftLocationRank = left.locationId === destinationLocationId ? 0 : 1;
+        const rightLocationRank = right.locationId === destinationLocationId ? 0 : 1;
+        return (
+          leftLocationRank - rightLocationRank
+          || right.materialEfficiency - left.materialEfficiency
+          || right.timeEfficiency - left.timeEfficiency
+          || left.lotId.localeCompare(right.lotId)
+        );
+      });
   }
 
   /** Returns usable BPC runs for invention up to the requested maximum. */
@@ -437,6 +541,10 @@ export class SimulationAllocator {
         lot.typeId !== blueprintTypeId
         || lot.kind !== "bpc"
         || lot.inUse
+        || (
+          this.blueprintDestinationByLotId.has(lot.lotId)
+          && this.blueprintDestinationByLotId.get(lot.lotId) !== destinationLocationId
+        )
         || (lot.locationId !== destinationLocationId && this.isExcluded(lot, destinationLocationId))
       ) continue;
       availableRuns += this.remainingBlueprintRunsByLotId.get(lot.lotId) ?? 0;
@@ -486,14 +594,12 @@ export class SimulationAllocator {
       ) continue;
       const activity = lot.activity;
       this.remainingItemQuantityByLotId.set(lot.lotId, available - next);
+      const sourceAccount = { locationId: sourceLocationId, typeId: lot.typeId };
       this.transactions.push({
         id: this.nextTransactionId("existing-output"),
         kind: "production-commitment",
-        account: {
-          locationId: sourceLocationId,
-          typeId: lot.typeId,
-        },
-        destinationAccount: account,
+        account: sourceAccount,
+        destinationAccount: sourceAccount,
         quantity: next,
         source: "production",
         activity,
@@ -503,6 +609,35 @@ export class SimulationAllocator {
             ? (demandingJobId ?? `existing:${lot.lotId}`)
             : String(lot.industryJobId),
       });
+      if (sourceLocationId !== account.locationId) {
+        this.transactions.push({
+          id: this.nextTransactionId("existing-output-transfer"),
+          kind: "transfer-commitment",
+          sourceAccount,
+          destinationAccount: account,
+          lotId: lot.lotId,
+          quantity: next,
+          horizon: "after-upstream",
+          outputSource: "production",
+          activity,
+          demandingJobId,
+        });
+        this.haulingTasks.push({
+          transferId: `completion:${lot.lotId}:${account.locationId}:${demandingJobId ?? "stock"}`,
+          lotId: lot.lotId,
+          typeId: lot.typeId,
+          typeName: lot.name,
+          quantity: next,
+          unitVolume: lot.unitVolume,
+          fromLocationId: sourceLocationId,
+          toLocationId: account.locationId,
+          ownerType: lot.ownerType,
+          ownerId: lot.ownerId,
+          horizon: "after-upstream",
+          purpose: "completion",
+          demands: [{ jobId: demandingJobId, quantity: next }],
+        });
+      }
       remaining -= next;
       claimed += next;
       reservations.push({
@@ -614,28 +749,10 @@ export class SimulationAllocator {
   ): BlueprintClaim[] {
     let remainingRuns = runs;
     const allocations: BlueprintClaim[] = [];
-    const candidates = this.inventory.blueprintLots
-      .filter(
-        (lot) =>
-          lot.typeId === blueprintTypeId
-          && lot.kind !== "formula"
-          && !lot.inUse
-          && (
-            lot.locationId === destinationLocationId
-            || !this.isExcluded(lot, destinationLocationId)
-          ),
-      )
-      .slice()
-      .sort((left, right) => {
-        const leftLocationRank = left.locationId === destinationLocationId ? 0 : 1;
-        const rightLocationRank = right.locationId === destinationLocationId ? 0 : 1;
-        return (
-          leftLocationRank - rightLocationRank
-          || right.materialEfficiency - left.materialEfficiency
-          || right.timeEfficiency - left.timeEfficiency
-          || left.lotId.localeCompare(right.lotId)
-        );
-      });
+    const candidates = this.manufacturingBlueprintCandidates(
+      blueprintTypeId,
+      destinationLocationId,
+    );
     for (const lot of candidates) {
       if (remainingRuns <= 0) break;
       const remainingRunsBeforeLot = remainingRuns;
@@ -676,6 +793,9 @@ export class SimulationAllocator {
       if (lot.kind === "bpc") {
         const runsAllocatedFromLot = remainingRunsBeforeLot - remainingRuns;
         this.remainingBlueprintRunsByLotId.set(lot.lotId, availableRuns - runsAllocatedFromLot);
+        if (runsAllocatedFromLot > 0) {
+          this.blueprintDestinationByLotId.set(lot.lotId, destinationLocationId);
+        }
       }
       this.recordBlueprintHaul(lot, destinationLocationId, demandingJobId);
       this.recordBlueprintTransfer(
@@ -767,6 +887,10 @@ export class SimulationAllocator {
           && lot.kind === "bpc"
           && !lot.inUse
           && (
+            !this.blueprintDestinationByLotId.has(lot.lotId)
+            || this.blueprintDestinationByLotId.get(lot.lotId) === destinationLocationId
+          )
+          && (
             lot.locationId === destinationLocationId
             || !this.isExcluded(lot, destinationLocationId)
           ),
@@ -783,6 +907,7 @@ export class SimulationAllocator {
       const claimedRuns = Math.min(remainingRuns, available);
       if (claimedRuns <= 0) continue;
       this.remainingBlueprintRunsByLotId.set(copy.lotId, available - claimedRuns);
+      this.blueprintDestinationByLotId.set(copy.lotId, destinationLocationId);
       claims.push({
         blueprintTypeId,
         blueprintItemId: copy.itemId,
@@ -872,6 +997,12 @@ export class SimulationAllocator {
     return this.remainingBlueprintRunsByLotId.get(lotId) ?? 0;
   }
 
+  /** Releases provisional protection after exact jobs have claimed their material lots. */
+  releaseUnusedReservations(): void {
+    this.activityReservationsByLotId.clear();
+    this.stockpileReservationsByLotId.clear();
+  }
+
   /** Claims an exact selected lot for late reprocessing and records any required transfer. */
   claimReprocessingLot(
     lotId: string,
@@ -923,6 +1054,7 @@ export class SimulationAllocator {
         toLocationId: destinationLocationId,
         ownerType: lot.ownerType,
         ownerId: lot.ownerId,
+        horizon: lot.horizon,
         purpose: "reprocessing-input",
         demands: [{ jobId: reprocessingJobId, quantity: claimed }],
       });
@@ -1018,6 +1150,7 @@ export class SimulationAllocator {
           toLocationId: destinationLocationId,
           ownerType: lot.ownerType,
           ownerId: lot.ownerId,
+          horizon: lot.horizon,
           purpose: allocationPurpose === "stockpile-demand" ? "stockpile-demand" : "industry-input",
           demands: [{ jobId: demandingJobId, quantity: next }],
         });
@@ -1242,6 +1375,7 @@ export class SimulationAllocator {
       toLocationId: destinationLocationId,
       ownerType: lot.ownerType,
       ownerId: lot.ownerId,
+      horizon: lot.horizon,
       purpose: "industry-input",
       demands: [{ jobId: demandingJobId, quantity: 1 }],
     });
@@ -1262,11 +1396,12 @@ export class SimulationAllocator {
     ) return;
     if (lot.horizon === "after-upstream") {
       if (lot.activity !== "copying" && lot.activity !== "invention") return;
+      const sourceAccount = { locationId: lot.locationId, typeId: lot.typeId };
       this.transactions.push({
         id: this.nextTransactionId("blueprint-production-commitment"),
         kind: "production-commitment",
-        account: { locationId: lot.locationId, typeId: lot.typeId },
-        destinationAccount: { locationId: destinationLocationId, typeId: lot.typeId },
+        account: sourceAccount,
+        destinationAccount: sourceAccount,
         quantity,
         quantityKind: "blueprint-run",
         source: lot.activity,
@@ -1274,6 +1409,36 @@ export class SimulationAllocator {
         producingJobId:
           lot.industryJobId === undefined ? demandingJobId : String(lot.industryJobId),
       });
+      this.transactions.push({
+        id: this.nextTransactionId("blueprint-completion-transfer"),
+        kind: "transfer-commitment",
+        sourceAccount,
+        destinationAccount: { locationId: destinationLocationId, typeId: lot.typeId },
+        lotId: lot.lotId,
+        quantity,
+        quantityKind: "blueprint-run",
+        horizon: "after-upstream",
+        outputSource: lot.activity,
+        demandingJobId,
+      });
+      if (!this.transferredBlueprintLotIds.has(lot.lotId)) {
+        this.transferredBlueprintLotIds.add(lot.lotId);
+        this.haulingTasks.push({
+          transferId: `completion:${lot.lotId}:${destinationLocationId}`,
+          lotId: lot.lotId,
+          typeId: lot.typeId,
+          typeName: lot.name,
+          blueprintKind: "bpc",
+          quantity: 1,
+          unitVolume: 0.01,
+          fromLocationId: lot.locationId,
+          toLocationId: destinationLocationId,
+          ownerType: lot.ownerType,
+          ownerId: lot.ownerId,
+          purpose: "completion",
+          demands: [{ jobId: demandingJobId, quantity: 1 }],
+        });
+      }
       return;
     }
     this.transactions.push({

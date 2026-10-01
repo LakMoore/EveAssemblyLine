@@ -49,8 +49,12 @@ This section is authoritative where the older design below differs from the runn
 - `/api/plan/simulate` is the version-one ledger-based simulator running alongside `/api/plan`. It
   accepts the same asset-driven planner data plus character/science profiles and simulation policy,
   makes no ESI calls, conserves physical lots and finite BPC runs, exposes four readiness horizons,
-  schedules industry work, settles reprocessing late, and creates buying requirements last. Its
-  native ten-list response includes activity/location ledgers and invariant metadata. The visible
+  schedules work with known dependencies, settles complete-portion reprocessing late, and creates
+  buying requirements last. Planned and active outputs remain at their producing facility until a
+  future transfer moves them to a different demand location; only existing assets appear on the
+  actionable hauling list. Undated prerequisites have no timed
+  install. Its native response includes grouped display lists and invariant metadata; location/type
+  diagnostic ledgers remain internal to the endpoint. The visible
   planner offers both workflows: Calculate displays the legacy `/api/plan` response, while
   Simulate displays the native simulator response. The browser stores each result independently.
 - The planner is asset-aware and supports compressed/reprocessable material handling, blueprint print/run accounting, industry-in-progress output, market orders, localized SDE names, ME/TE settings, and source metadata. Its request model is not the original minimal `typeId + quantity` plus raw assets model.

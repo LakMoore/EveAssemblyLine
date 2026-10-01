@@ -44,6 +44,13 @@ export type SimulationTransaction =
     }
   | {
       id: string;
+      kind: "demand-readiness";
+      account: SimulationLedgerAccount;
+      demandId: string;
+      quantity: number;
+    }
+  | {
+      id: string;
       kind: "source-reservation";
       account: SimulationLedgerAccount;
       lotId: string;
@@ -110,6 +117,9 @@ export type SimulationTransaction =
       lotId: string;
       quantity: number;
       quantityKind?: SimulationQuantityKind;
+      horizon?: "after-upstream";
+      outputSource?: "production" | "copying" | "invention" | "reprocessing";
+      activity?: "manufacturing" | "reaction";
       demandingJobId?: string;
     };
 
@@ -194,6 +204,14 @@ export function projectSimulationLedger(
   const committedFutureOutputBySourceKey = new Map<string, number>();
   const exposedByLotId = new Map<string, number>();
   const mutableBalances = new Map<string, SimulationMaterialBalance>();
+  const demandEntries = new Map<
+    string,
+    {
+      account: SimulationLedgerAccount;
+      source: SimulationDemandSource;
+      balance: SimulationMaterialBalance;
+    }
+  >();
   const invariantViolations: string[] = [];
 
   for (const lot of sourceLots) {
@@ -252,10 +270,60 @@ export function projectSimulationLedger(
         );
         continue;
       }
-      source.transferredOut += transaction.quantity;
-      destination.availableFromHauling += transaction.quantity;
+      if (transaction.horizon === "after-upstream") {
+        if (sourceLot?.activity) {
+          committedFutureOutputBySourceKey.set(
+            sourceKey,
+            (committedFutureOutputBySourceKey.get(sourceKey) ?? 0) + transaction.quantity,
+          );
+        }
+        else source.transferredOut += transaction.quantity;
+        if (transaction.outputSource === "production") {
+          destination.availableFromProduction += transaction.quantity;
+          if (transaction.activity) {
+            setProductionActivity(
+              destination,
+              transaction.activity,
+              invariantViolations,
+              transaction.id,
+            );
+          }
+        }
+        else if (transaction.outputSource === "copying") {
+          destination.availableFromCopying += transaction.quantity;
+        }
+        else if (transaction.outputSource === "invention") {
+          destination.availableFromInvention += transaction.quantity;
+        }
+        else if (transaction.outputSource === "reprocessing") {
+          destination.availableFromReprocessing += transaction.quantity;
+        }
+      }
+      else {
+        source.transferredOut += transaction.quantity;
+        destination.availableFromHauling += transaction.quantity;
+      }
       mutableBalances.set(sourceKey, source);
       mutableBalances.set(destinationKey, destination);
+      continue;
+    }
+    if (transaction.kind === "demand-readiness") {
+      const entry = demandEntries.get(transaction.demandId);
+      if (
+        !entry
+        || entry.account.locationId !== transaction.account.locationId
+        || entry.account.typeId !== transaction.account.typeId
+        || transaction.quantity > entry.source.reserved
+      ) {
+        invariantViolations.push(
+          `Readiness ${transaction.id} references an invalid demand or quantity.`,
+        );
+        continue;
+      }
+      entry.source.requiredNow += transaction.quantity;
+      entry.source.reserved -= transaction.quantity;
+      entry.balance.requiredNow += transaction.quantity;
+      entry.balance.reserved -= transaction.quantity;
       continue;
     }
     const transactionQuantityKind =
@@ -320,7 +388,21 @@ export function projectSimulationLedger(
       }
       balance.requiredNow += transaction.source.requiredNow;
       balance.reserved += transaction.source.reserved;
-      balance.demandSources.push(transaction.source);
+      const projectedSource = { ...transaction.source };
+      balance.demandSources.push(projectedSource);
+      if (demandEntries.has(projectedSource.demandId)) {
+        invariantViolations.push(`Demand ${transaction.id} reuses a demand identifier.`);
+      }
+      else {
+        demandEntries.set(
+          projectedSource.demandId,
+          {
+            account: transaction.account,
+            source: projectedSource,
+            balance,
+          },
+        );
+      }
     }
     else if (transaction.kind === "source-reservation") {
       const lot = sourceLotsById.get(transaction.lotId);
@@ -453,10 +535,19 @@ export function projectSimulationLedger(
       balance.availableFromMarket += transaction.quantity;
     }
     else {
-      // Blueprint reservations retain provenance but do not add material supply.
-      const provenanceOnly: Extract<SimulationTransaction, { kind: "blueprint-run-reservation" }> =
-        transaction;
-      void provenanceOnly;
+      const blueprintLot = sourceLotsById.get(transaction.blueprintLotId);
+      if (blueprintLot?.quantityKind === "blueprint-run") {
+        if (blueprintLot.typeId !== transaction.account.typeId) {
+          invariantViolations.push(
+            `Blueprint reservation ${transaction.id} references the wrong blueprint type.`,
+          );
+          continue;
+        }
+        reservedByLotId.set(
+          transaction.blueprintLotId,
+          (reservedByLotId.get(transaction.blueprintLotId) ?? 0) + transaction.quantity,
+        );
+      }
     }
     mutableBalances.set(key, balance);
   }

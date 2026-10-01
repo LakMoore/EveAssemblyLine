@@ -35,7 +35,11 @@ interface AllocatedYield {
   typeId: number;
   quantity: number;
   allocatedQuantity: number;
-  allocations: Array<{ account: SimulationLedgerAccount; quantity: number }>;
+  allocations: Array<{
+    account: SimulationLedgerAccount;
+    quantity: number;
+    demandingJobId?: string;
+  }>;
 }
 
 /** Groups settled reprocessing jobs by location and source type across horizons. */
@@ -47,6 +51,7 @@ export function groupReprocessingJobs(
     const groupKey = `reprocessing:${job.locationId}:${job.sourceTypeId}`;
     const group = groups.get(groupKey);
     if (group) {
+      group.jobs.push(job);
       group.quantities.totalSourceQuantity += job.sourceQuantity;
       if (job.state === "local") group.quantities.immediateSourceQuantity += job.sourceQuantity;
       else if (job.state === "after-hauling") {
@@ -63,6 +68,7 @@ export function groupReprocessingJobs(
         locationId: job.locationId,
         sourceTypeId: job.sourceTypeId,
         sourceTypeName: job.sourceTypeName,
+        jobs: [job],
         quantities: {
           totalSourceQuantity: job.sourceQuantity,
           immediateSourceQuantity: job.state === "local" ? job.sourceQuantity : 0,
@@ -129,7 +135,11 @@ function allocateYields(
       demand.quantity -= allocated;
       remainingYield -= allocated;
       allocatedQuantity += allocated;
-      allocations.push({ account: demand.account, quantity: allocated });
+      allocations.push({
+        account: demand.account,
+        quantity: allocated,
+        demandingJobId: demand.source.demandingJobId,
+      });
     }
     return { ...material, allocatedQuantity, allocations };
   });
@@ -242,30 +252,47 @@ export function settleReprocessing(
       })),
     });
     for (const material of allocatedYields) {
-      for (const allocation of material.allocations) {
+      const sourceAccount = {
+        locationId: stockpile.locations.reprocessing,
+        typeId: material.typeId,
+      };
+      if (material.quantity > 0) {
         transactions.push({
           id: `reprocessing-output:${sequence++}`,
           kind: "reprocessing-output",
-          account: {
-            locationId: stockpile.locations.reprocessing,
-            typeId: material.typeId,
-          },
-          destinationAccount: allocation.account,
-          quantity: allocation.quantity,
+          account: sourceAccount,
+          quantity: material.quantity,
           reprocessingJobId: jobId,
         });
       }
-      const surplus = material.quantity - material.allocatedQuantity;
-      if (surplus > 0) {
+      for (const allocation of material.allocations) {
+        if (allocation.account.locationId === sourceAccount.locationId) continue;
+        const lotId = `reprocessing-output:${jobId}:${material.typeId}`;
         transactions.push({
-          id: `reprocessing-surplus:${sequence++}`,
-          kind: "reprocessing-output",
-          account: {
-            locationId: stockpile.locations.reprocessing,
-            typeId: material.typeId,
-          },
-          quantity: surplus,
-          reprocessingJobId: jobId,
+          id: `reprocessing-transfer:${sequence++}`,
+          kind: "transfer-commitment",
+          sourceAccount,
+          destinationAccount: allocation.account,
+          lotId,
+          quantity: allocation.quantity,
+          horizon: "after-upstream",
+          outputSource: "reprocessing",
+          demandingJobId: allocation.demandingJobId,
+        });
+        industry.allocator.haulingTasks.push({
+          transferId: `completion:${lotId}:${allocation.account.locationId}`,
+          lotId,
+          typeId: material.typeId,
+          typeName: typeName(context, material.typeId, request.language),
+          quantity: allocation.quantity,
+          unitVolume:
+            context.types.get(material.typeId)?.packagedVolume
+            ?? context.types.get(material.typeId)?.volume
+            ?? 0,
+          fromLocationId: sourceAccount.locationId,
+          toLocationId: allocation.account.locationId,
+          purpose: "completion",
+          demands: [{ jobId: allocation.demandingJobId, quantity: allocation.quantity }],
         });
       }
     }

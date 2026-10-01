@@ -5,6 +5,7 @@ import { settleBuying } from "./buying";
 import type { SimulationContext } from "./context";
 import type { IndustrySimulationResult } from "./industrySimulation";
 import type { SimulationLedgerAccount } from "./ledger";
+import { projectSimulationLedger } from "./ledger";
 import { groupReprocessingJobs, settleReprocessing } from "./reprocessing";
 import type { SimulatorInventory } from "./sourceLots";
 import type { SimulationReprocessingJob, SimulationRequestV1 } from "./types";
@@ -175,9 +176,25 @@ void test("allocates complete reprocessing portions and keeps surplus out of Buy
       afterPurchaseSourceQuantity: 0,
     },
   );
+  assert.equal(reprocessing.groups[0]?.jobs[0]?.yields[0]?.quantity, 200);
+  assert.equal(reprocessing.groups[0]?.jobs[0]?.sourceLotId, "ore");
   assert.deepEqual(reprocessing.remainingDemands, []);
   const buying = settleBuying(request, context, industry, reprocessing.remainingDemands);
   assert.deepEqual(buying.materials, []);
+  const projection = projectSimulationLedger(
+    inventory.itemLots,
+    [...industry.transactions, ...reprocessing.transactions],
+  );
+  const source = projection.balances.get("40:34");
+  const destination = projection.balances.get("20:34");
+  assert.equal(source?.availableFromReprocessing, 200);
+  assert.equal(source.transferredOut, 150);
+  assert.equal(source.surplus, 50);
+  assert.equal(destination?.availableFromReprocessing, 150);
+  assert.equal(
+    industry.allocator.haulingTasks.find((task) => task.typeId === 34)?.purpose,
+    "completion",
+  );
 });
 
 void test("groups reprocessing jobs by location and source type and sums horizons", () => {
@@ -195,6 +212,7 @@ void test("groups reprocessing jobs by location and source type and sums horizon
     (group) => group.locationId === 40 && group.sourceTypeId === 100,
   );
   assert.ok(compressedOre);
+  assert.equal(compressedOre.jobs.length, 4);
   assert.deepEqual(
     compressedOre.quantities,
     {
