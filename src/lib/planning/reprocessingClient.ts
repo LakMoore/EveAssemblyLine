@@ -77,7 +77,7 @@ export function loadCompressOptions(language: SdeLanguage, reload = false) {
   if (compressOptionsRequest) return compressOptionsRequest;
   compressOptionsRequest = (async () => {
     const cached = reload ? null : await loadEndpointRecord<CompressOptions>("compress/options");
-    if (cached && cached.data.optionsVersion === 2) return cached.data;
+    if (cached && cached.data.optionsVersion === 4) return cached.data;
     const response = await fetch(
       "/api/compress/options",
       {

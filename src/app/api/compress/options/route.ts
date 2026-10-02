@@ -10,7 +10,12 @@ import {
   getTypeDogma,
   getTypes,
 } from "@/cache/services/sdeCache";
-import { fetchCharacterClones, fetchStationMetadata } from "@/lib/esi/client";
+import {
+  fetchCharacterClones,
+  fetchCharacterImplants,
+  fetchStationMetadata,
+  getCharacterCloneImplantIds,
+} from "@/lib/esi/client";
 import { calculateReprocessingEfficiency } from "@/lib/planning/reprocessingEfficiency";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 
@@ -29,7 +34,7 @@ type OptionsRequest = {
   stationIds?: number[];
 };
 
-const compressOptionsVersion = 2;
+const compressOptionsVersion = 4;
 
 let relevantSkillIdsPromise: Promise<number[]> | undefined;
 
@@ -184,13 +189,11 @@ async function getOptions(
   markPhase("structures");
   const characterImplants = await Promise.all(
     records.map(async (record) => {
-      const clones = await fetchCharacterClones(record).catch(() => ({ data: null }));
-      const cloneRecords = clones.data?.jump_clones ?? clones.data?.clones ?? [];
-      const activeClone = cloneRecords.find(
-        (clone) => (clone.jump_clone_id ?? clone.clone_id) === clones.data?.active_clone_id,
-      );
-      const implants =
-        activeClone?.implants ?? cloneRecords.flatMap((clone) => clone.implants ?? []);
+      const [clones, activeImplants] = await Promise.all([
+        fetchCharacterClones(record).catch(() => ({ data: null })),
+        fetchCharacterImplants(record).catch(() => ({ data: null })),
+      ]);
+      const implants = getCharacterCloneImplantIds(clones.data, activeImplants.data ?? []);
       return {
         characterId: record.characterId,
         implants: [...new Set(implants)],

@@ -92,15 +92,25 @@ type EsiCharacterShip = {
 
 export type EsiCharacterClone = {
   jump_clone_id?: number;
-  clone_id?: number;
   implants?: number[];
 };
 
 export type EsiCharacterClones = {
-  active_clone_id?: number;
-  clones?: EsiCharacterClone[];
   jump_clones?: EsiCharacterClone[];
 };
+
+/** Returns unique implant type IDs from the active clone and every jump clone reported by ESI. */
+export function getCharacterCloneImplantIds(
+  clones: EsiCharacterClones | null,
+  activeImplants: number[] = [],
+) {
+  return [
+    ...new Set([
+      ...activeImplants,
+      ...(clones?.jump_clones ?? []).flatMap((clone) => clone.implants ?? []),
+    ]),
+  ];
+}
 
 /** The complete public character body returned by ESI. */
 export type EsiCharacterPublicInfo = {
@@ -780,9 +790,15 @@ export async function fetchCharacterShip(record: CharacterTokenRecord, etag?: st
 
 export async function fetchCharacterClones(record: CharacterTokenRecord) {
   requireCharacterScope(record, "esi-clones.read_clones.v1");
-  requireCharacterScope(record, "esi-clones.read_implants.v1");
   const token = await getUsableToken(record);
   return requestCachedEsi<EsiCharacterClones>(`/characters/${record.characterId}/clones/`, token);
+}
+
+/** Fetches implant type IDs installed in the character's active clone. */
+export async function fetchCharacterImplants(record: CharacterTokenRecord) {
+  requireCharacterScope(record, "esi-clones.read_implants.v1");
+  const token = await getUsableToken(record);
+  return requestCachedEsi<number[]>(`/characters/${record.characterId}/implants/`, token);
 }
 
 function mapIndustryJob(

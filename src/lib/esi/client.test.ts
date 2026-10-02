@@ -5,6 +5,7 @@ import { clearEsiRequestLogTimer } from "./logger";
 import {
   fetchCharacterCorporationAuthorization,
   fetchCharacterClones,
+  fetchCharacterImplants,
   fetchCharacterIndustryJobs,
   fetchCharacterLocation,
   fetchCharacterRoles,
@@ -13,6 +14,7 @@ import {
   fetchCorporationStructures,
   fetchEsiEndpoint,
   fetchStructureMetadataPerCharacter,
+  getCharacterCloneImplantIds,
   getUsableToken,
 } from "./client";
 
@@ -547,6 +549,45 @@ void test("preserves ESI jump clone implant records", async (t) => {
       jump_clones: [{ jump_clone_id: 77, implants: [27175] }],
     },
   );
+});
+
+void test("fetches active-clone implants from the documented ESI endpoint", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const scopedCharacter: CharacterTokenRecord = {
+    ...character,
+    personalAuth: {
+      ...token,
+      scopes: ["esi-clones.read_implants.v1"],
+    },
+  };
+  let requestUrl = "";
+  globalThis.fetch = async (input) => {
+    requestUrl = String(input);
+    return Response.json([27174]);
+  };
+
+  const result = await fetchCharacterImplants(scopedCharacter);
+
+  assert.equal(requestUrl, "https://esi.evetech.net/latest/characters/42/implants/");
+  assert.deepEqual(result.data, [27174]);
+});
+
+void test("collects unique implants across the active clone and all jump clones", () => {
+  const implants = getCharacterCloneImplantIds(
+    {
+      jump_clones: [
+        { jump_clone_id: 77, implants: [27175, 27116] },
+        { jump_clone_id: 88, implants: [27174] },
+      ],
+    },
+    [27169, 27174],
+  );
+
+  assert.deepEqual(implants, [27169, 27174, 27175, 27116]);
 });
 
 void test("treats a 420 error-limit response as rate limited", async (t) => {

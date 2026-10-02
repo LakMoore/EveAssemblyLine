@@ -103,7 +103,7 @@ const defaultSettings: CompressSettings = {
 };
 
 const emptyOptions: ReprocessingOptions = {
-  optionsVersion: 2,
+  optionsVersion: 3,
   locations: [],
   characters: [],
   characterImplants: {},
@@ -178,7 +178,7 @@ export function useCompressSettings(language: SdeLanguage) {
             ? loadedOptions.characterImplants
             : undefined;
         const hasCachedCharacterImplants =
-          loadedOptions?.optionsVersion === 2
+          loadedOptions?.optionsVersion === 3
           && cachedCharacterImplants !== undefined
           && (session.characters ?? []).every((character) =>
             Object.hasOwn(cachedCharacterImplants, String(character.characterId)),
