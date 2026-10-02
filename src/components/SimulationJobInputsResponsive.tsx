@@ -295,10 +295,7 @@ function SimulationInputRow({
       <TypeIdentity
         name={input.typeName}
         typeId={input.typeId}
-        variation={
-          blueprintVariation
-          ?? (input.quantityKind === "blueprint-run" ? "bpc" : "icon")
-        }
+        variation={blueprintVariation ?? (input.quantityKind === "blueprint-run" ? "bpc" : "icon")}
         linkPath="planner"
         linkIcon={ClipboardList}
         linkSearchParams={{ simulationTab: "plan" }}

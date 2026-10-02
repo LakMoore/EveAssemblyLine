@@ -42,6 +42,18 @@ interface AllocatedYield {
   }>;
 }
 
+/** Calculates rounded material output for complete SDE reprocessing portions. */
+export function calculateReprocessingYields(
+  materials: readonly { materialTypeID: number; quantity: number }[],
+  portionCount: number,
+  efficiency: number,
+): Array<{ typeId: number; quantity: number }> {
+  return materials.map((material) => ({
+    typeId: material.materialTypeID,
+    quantity: Math.floor((material.quantity * portionCount * efficiency) / 100),
+  }));
+}
+
 /** Groups settled reprocessing jobs by location and source type across horizons. */
 export function groupReprocessingJobs(
   jobs: readonly SimulationReprocessingJob[],
@@ -227,10 +239,7 @@ export function settleReprocessing(
     if (portionCount <= 0) return;
     const efficiency = efficiencyFor(request, stockpile, sourceTypeId);
     const materials = context.typeMaterials.get(sourceTypeId)?.materials ?? [];
-    const rawYields = materials.map((material) => ({
-      typeId: material.materialTypeID,
-      quantity: Math.floor((material.quantity * portionCount * efficiency) / 100),
-    }));
+    const rawYields = calculateReprocessingYields(materials, portionCount, efficiency);
     const allocatedYields = allocateYields(stockpile.id, rawYields, demands);
     const jobId = providedJobId ?? `reprocessing:${stockpile.id}:${sourceTypeId}:${sequence++}`;
     jobs.push({

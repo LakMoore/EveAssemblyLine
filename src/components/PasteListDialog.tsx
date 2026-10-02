@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useId, useRef, useState } from "react";
+import { FormEvent, useId, useLayoutEffect, useRef, useState } from "react";
 import type { TypeMetadata } from "@/lib/reference/types";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
@@ -77,7 +77,7 @@ export default function PasteListDialog({
     onCancel();
   }
 
-  useEffect(
+  useLayoutEffect(
     () => () => {
       resolveRequestId.current += 1;
     },

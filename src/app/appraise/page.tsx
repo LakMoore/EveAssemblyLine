@@ -66,7 +66,7 @@ type AppraiseResponse = {
 function formatIsk(value?: number | null) {
   return value === undefined || value === null
     ? "-"
-    : `${new Intl.NumberFormat(undefined, { maximumSignificantDigits: 4 }).format(value)} ISK`;
+    : `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value)} ISK`;
 }
 
 function PriceMetric({ label, value }: { label: string; value?: number | null }) {

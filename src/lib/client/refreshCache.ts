@@ -21,6 +21,7 @@ export const refreshDependentEndpoints = {
   public: [],
   planner: ["owner-assets", "owner-jobs", "compress/options"],
   appraise: [],
+  orePrices: [],
   invention: [],
   signals: ["owner-assets"],
   compress: ["owner-assets", "compress/options"],

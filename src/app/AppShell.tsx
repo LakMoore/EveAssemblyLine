@@ -55,6 +55,7 @@ import {
   ClipboardList,
   Factory,
   FlaskConical,
+  Gem,
   Image as ImageIcon,
   MapPinned,
   Minimize2,
@@ -96,6 +97,7 @@ type ActivePage =
   | "compress"
   | "invention"
   | "appraise"
+  | "orePrices"
   | "signals"
   | "assets"
   | "jobs"
@@ -308,34 +310,36 @@ export default function AppShell({ children }: { children: ReactNode }) {
             ? "invention"
             : pathname === "/appraise"
               ? "appraise"
-              : pathname === "/signals"
-                ? "signals"
-                : pathname === "/assets"
-                  ? "assets"
-                  : pathname === "/jobs"
-                    ? "jobs"
-                    : pathname === "/ships"
-                      ? "ships"
-                      : pathname === "/structures"
-                        ? "structures"
-                        : pathname === "/corp-hangars"
-                          ? "corpHangars"
-                          : pathname === "/settings"
-                            ? "settings"
-                            : pathname === "/imagechecker"
-                              ? "imagechecker"
-                              : pathname === "/characters"
-                                ? "characters"
-                                : [
-                                      "/guides",
-                                      "/about",
-                                      "/contact",
-                                      "/privacy",
-                                      "/terms",
-                                      "/cookies",
-                                    ].includes(pathname)
-                                  ? "public"
-                                  : "planner";
+              : pathname === "/ore-prices"
+                ? "orePrices"
+                : pathname === "/signals"
+                  ? "signals"
+                  : pathname === "/assets"
+                    ? "assets"
+                    : pathname === "/jobs"
+                      ? "jobs"
+                      : pathname === "/ships"
+                        ? "ships"
+                        : pathname === "/structures"
+                          ? "structures"
+                          : pathname === "/corp-hangars"
+                            ? "corpHangars"
+                            : pathname === "/settings"
+                              ? "settings"
+                              : pathname === "/imagechecker"
+                                ? "imagechecker"
+                                : pathname === "/characters"
+                                  ? "characters"
+                                  : [
+                                        "/guides",
+                                        "/about",
+                                        "/contact",
+                                        "/privacy",
+                                        "/terms",
+                                        "/cookies",
+                                      ].includes(pathname)
+                                    ? "public"
+                                    : "planner";
   const isRefreshCurrent =
     authenticated
     && characters.length > 0
@@ -1016,6 +1020,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 <span className={styles.navText}>Signals</span>
               </NoPrefetchLink>
               <div className={styles.sectionLabel}>INFORMATION</div>
+              <NoPrefetchLink
+                prefetch={false}
+                className={`${styles.navItem} ${activePage === "orePrices" ? styles.navActive : ""}`}
+                href="/ore-prices"
+                onClick={closeSidebarOnNavigation}
+                aria-current={activePage === "orePrices" ? "page" : undefined}
+              >
+                <span>
+                  <Gem size={17} strokeWidth={1.8} aria-hidden="true" />
+                </span>
+                <span className={styles.navText}>Ore prices</span>
+              </NoPrefetchLink>
               <NoPrefetchLink
                 prefetch={false}
                 className={`${styles.navItem} ${activePage === "assets" ? styles.navActive : ""}`}

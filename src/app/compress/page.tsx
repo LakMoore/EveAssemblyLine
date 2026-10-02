@@ -1,15 +1,27 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, Suspense, useEffect, useRef, useState } from "react";
+import {
+  FormEvent,
+  KeyboardEvent,
+  Suspense,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import { useAppLanguage } from "../AppShell";
 import CalculateButton from "@/components/CalculateButton";
 import DialogBody from "@/components/DialogBody";
-import EveAuthorizationWarning from "@/components/EveAuthorizationWarning";
 import PasteListDialog from "@/components/PasteListDialog";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import TypeSearch from "@/components/TypeSearch";
+import {
+  CompressSettingsPanel,
+  mergeCompressItems,
+  useCompressSettings,
+  type ReprocessingLocationOption,
+} from "@/components/CompressSettingsPanel";
 import { toast } from "@/components/ui/toast";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import {
@@ -28,25 +40,13 @@ import {
 import Image from "next/image";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import { trackAnalyticsEvent } from "@/lib/client/analyticsConsent";
-import {
-  loadCompressSettings,
-  saveCompressSettings,
-  type CompressMaterial,
-  type CompressSettings,
-} from "@/lib/planning/compressSettingsStore";
-import type { KnownStructure } from "@/lib/planning/preferences";
-import {
-  loadClientCharacterState,
-  loadClientAssets,
-  loadClientSession,
-} from "@/lib/client/requestCache";
-import { loadStructures } from "@/lib/planning/structureStore";
+import { type CompressMaterial } from "@/lib/planning/compressSettingsStore";
+import { loadClientSession } from "@/lib/client/requestCache";
 import {
   loadPlannerStockpiles,
   savePlannerStockpiles,
 } from "@/lib/planning/plannerStockpilesStore";
 import type { ClientBuildItem, ClientPlanStockpile } from "@/lib/planning/types";
-import { loadEndpointRecord, saveEndpointResponse } from "@/lib/client/refreshCache";
 import { refreshPlannerStockpileEfficiencies } from "@/lib/planning/reprocessingClient";
 import {
   Dialog,
@@ -57,7 +57,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -67,7 +67,6 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -107,37 +106,6 @@ type CompressResult = {
   surplus?: ResultItem[];
   efficiencies?: EfficiencyResult;
 };
-type CompressOption = {
-  id: string;
-  name?: string;
-  locationType: "station" | "structure";
-  structureTypeId?: number;
-  securityStatus?: number;
-  rigs?: string[];
-  rankBonus?: number;
-  baseYield?: number;
-  canReprocess?: boolean;
-};
-type CharacterOption = {
-  id: string;
-  characterId: number;
-  name: string;
-  skills?: Record<string, number>;
-  implants: number[];
-};
-type ImplantOption = { id: string; name: string; level: number; typeId?: number };
-type CompressOptionsData = {
-  optionsVersion: number;
-  characterImplants: Partial<Record<string, number[]>>;
-  implants: ImplantOption[];
-  relevantSkillIds: number[];
-  scrapMetalSkillId?: number;
-};
-type CompressOptions = CompressOptionsData & {
-  locations: CompressOption[];
-  characters: CharacterOption[];
-};
-
 function variation(
   category?: CompressItem["category"],
   imageVariation?: CompressItem["imageVariation"],
@@ -162,34 +130,6 @@ function reprocessingRigLevel(rigs: string[]) {
   return rig === undefined ? 0 : / II(?:$|\s)/.test(rig) ? 2 : 1;
 }
 
-function structureDisplayName(structure: KnownStructure) {
-  return structure.name.startsWith(`${structure.systemName} - `)
-    ? structure.name
-    : `${structure.systemName} - ${structure.name}`;
-}
-
-function normalizeLocationName(name: string) {
-  return name.replace(/^(.+?) - \1 - /i, "$1 - ");
-}
-
-function locationKey(location: CompressOption) {
-  return location.structureTypeId !== undefined && location.structureTypeId !== 0 && location.name
-    ? `structure:${normalizeLocationName(location.name).toLocaleLowerCase()}`
-    : location.id;
-}
-
-function mergeCompressItems(items: CompressItem[]) {
-  const merged = new Map<number, CompressItem>();
-  for (const item of items) {
-    const existing = merged.get(item.typeId);
-    merged.set(
-      item.typeId,
-      existing ? { ...existing, quantity: existing.quantity + item.quantity } : item,
-    );
-  }
-  return [...merged.values()];
-}
-
 export default function CompressPage() {
   return (
     <Suspense fallback={null}>
@@ -202,30 +142,17 @@ function CompressContent() {
   const searchParams = useSearchParams();
   const importedMultibuy = searchParams.get("multibuy");
   const { language } = useAppLanguage();
-  const [items, setItems] = useState<CompressItem[]>([]);
   const [result, setResult] = useState<CompressResult | null>(null);
-  const [isPasteOpen, setIsPasteOpen] = useState(false);
+  const [pasteDialogLoadKey, setPasteDialogLoadKey] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
-  const [options, setOptions] = useState<CompressOptions>({
-    optionsVersion: 2,
-    locations: [],
-    characters: [],
-    characterImplants: {},
-    implants: [],
-    relevantSkillIds: [],
-  });
-  const [settings, setSettings] = useState<CompressSettings>({
-    locationId: "npc",
-    characterId: "all-zero",
-    implantId: "none",
-    marketId: "jita",
-    orderType: "sell",
-    items: [],
-  });
-  const [optionsRefreshVersion, setOptionsRefreshVersion] = useState(0);
+  const compressionSettings = useCompressSettings(language);
+  const { settings, updateSettings, selectedLocation, selectedImplant, skillLevels } =
+    compressionSettings;
+  const items = settings.items;
+  const isPasteOpen =
+    pasteDialogLoadKey === compressionSettings.loadKey && !compressionSettings.isLoading;
   const importedRef = useRef("");
-  const optionsLoadKeyRef = useRef("");
 
   useEffect(() => {
     if (!isPasteOpen) return;
@@ -236,212 +163,22 @@ function CompressContent() {
     };
   }, [isPasteOpen]);
 
-  useEffect(() => {
-    const optionsLoadKey = `${language}:${optionsRefreshVersion}`;
-    if (optionsLoadKeyRef.current === optionsLoadKey) return;
-    optionsLoadKeyRef.current = optionsLoadKey;
-    const isRefreshLoad = optionsRefreshVersion > 0;
-    Promise
-      .all([
-        loadCompressSettings(),
-        loadClientSession(),
-        loadEndpointRecord<Partial<CompressOptionsData>>("compress/options"),
-        loadClientAssets(language, isRefreshLoad).catch(() => null),
-        loadStructures().catch(() => []),
-      ])
-      .then(async ([loadedSettings, session, cachedOptions, cachedAssets, knownStructures]) => {
-        const characterState = session.authenticated ? await loadClientCharacterState() : null;
-        const loadedFacilities = cachedAssets?.facilities ?? [];
-        let loadedOptions = cachedOptions?.data;
-        const cachedCharacterImplants =
-          loadedOptions && Object.hasOwn(loadedOptions, "characterImplants")
-            ? loadedOptions.characterImplants
-            : undefined;
-        const hasCachedCharacterImplants =
-          loadedOptions?.optionsVersion === 2
-          && cachedCharacterImplants !== undefined
-          && (session.characters ?? []).every((character) =>
-            Object.hasOwn(cachedCharacterImplants, String(character.characterId)),
-          );
-        if (isRefreshLoad || !loadedOptions || !hasCachedCharacterImplants) {
-          const optionsResponse = await fetch(
-            "/api/compress/options",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              cache: "no-store",
-              body: JSON.stringify({
-                language,
-              }),
-            },
-          );
-          loadedOptions = (await optionsResponse.json()) as CompressOptions;
-          if (!optionsResponse.ok) throw new Error("Could not load compression options.");
-          await saveEndpointResponse("compress/options", "/api/compress/options", loadedOptions);
-        }
-        if (!loadedOptions.characterImplants) {
-          throw new Error("Compression options did not include character implants.");
-        }
-        const characterImplants = loadedOptions.characterImplants;
-        const normalizedItems = mergeCompressItems(
-          Array.isArray(loadedSettings.items) ? loadedSettings.items : [],
-        );
-        const rawLocations: CompressOption[] = [
-          ...loadedFacilities.map((facility) => ({
-            id: String(facility.id),
-            name: facility.name,
-            locationType: facility.locationType,
-            structureTypeId: facility.typeId,
-            securityStatus: facility.securityStatus,
-            rigs: facility.rigTypeIds.map((typeId) => String(typeId)),
-            baseYield: (facility.activities.reprocessing.baseYield ?? 0) * 100,
-            canReprocess: facility.activities.reprocessing.available,
-          })),
-          ...knownStructures.flatMap((structure) =>
-            structure.esiStructureId === undefined
-              ? []
-              : [
-                  {
-                    id: String(structure.esiStructureId),
-                    name: structureDisplayName(structure),
-                    locationType: "structure" as const,
-                    structureTypeId: structure.typeId,
-                    rigs: structure.rigs,
-                    securityStatus: structure.securityStatus,
-                    baseYield: 0,
-                    canReprocess: structure.allowReprocessing !== false,
-                  },
-                ],
-          ),
-        ].filter(
-          (location, index, all) =>
-            all.findIndex((candidate) => locationKey(candidate) === locationKey(location))
-            === index,
-        );
-        const loadedLocations = rawLocations
-          .map((location) => {
-            const baseYield = location.baseYield ?? 50;
-            return { ...location, rankBonus: baseYield - 50 };
-          })
-          .sort(
-            (left, right) =>
-              right.rankBonus - left.rankBonus
-              || (left.name ?? left.id).localeCompare(right.name ?? right.id),
-          );
-        const normalizedSettings = {
-          ...loadedSettings,
-          items: normalizedItems,
-          locationId: loadedLocations.some((location) => location.id === loadedSettings.locationId)
-            ? loadedSettings.locationId
-            : (loadedLocations[0]?.id ?? loadedSettings.locationId),
-          marketId: marketHubs.some((market) => market.id === loadedSettings.marketId)
-            ? loadedSettings.marketId
-            : "jita",
-        };
-        const characters = (session.characters ?? []).map((character) => ({
-          id: `character:${character.characterId}`,
-          characterId: character.characterId,
-          name: character.characterName,
-          implants: characterImplants[String(character.characterId)] ?? [],
-          skills: Object.fromEntries(
-            (
-              characterState?.characters?.find(
-                (status) => status.characterId === character.characterId,
-              )?.skills?.body ?? []
-            ).map((skill) => [String(skill.skillId), skill.activeSkillLevel]),
-          ),
-        }));
-        setOptions({
-          ...loadedOptions,
-          optionsVersion: loadedOptions.optionsVersion ?? 2,
-          characterImplants,
-          implants: loadedOptions.implants ?? [],
-          relevantSkillIds: loadedOptions.relevantSkillIds ?? [],
-          characters,
-          locations: loadedLocations,
-        });
-        setSettings(normalizedSettings);
-        setItems(normalizedSettings.items);
-        void saveCompressSettings(normalizedSettings);
-      })
-      .catch(() => {
-        optionsLoadKeyRef.current = "";
-        setError("Could not load compression options.");
-      });
-  }, [language, optionsRefreshVersion]);
-
-  useEffect(() => {
-    const handleRefresh = (event: Event) => {
-      const detail = (event as CustomEvent<{ rateLimitedUntil?: string | null }>).detail;
-      if (!detail.rateLimitedUntil) setOptionsRefreshVersion((version) => version + 1);
-    };
-    window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
-    return () => window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
-  }, []);
-
-  function updateSettings(next: Partial<CompressSettings>) {
-    setSettings((current) => {
-      const updated = { ...current, ...next };
-      void saveCompressSettings(updated);
-      return updated;
-    });
-  }
-
   function updateItems(nextItems: CompressItem[] | ((current: CompressItem[]) => CompressItem[])) {
-    setItems((current) => {
-      const updated = mergeCompressItems(
-        typeof nextItems === "function" ? nextItems(current) : nextItems,
-      );
-      setSettings((currentSettings) => {
-        const updatedSettings = { ...currentSettings, items: updated };
-        void saveCompressSettings(updatedSettings);
-        return updatedSettings;
-      });
-      return updated;
-    });
-  }
-
-  const locationOptions = options.locations;
-  const groupedLocationOptions = [
-    { kind: "structure" as const, label: "Structures" },
-    { kind: "station" as const, label: "Stations" },
-  ].map((group) => ({
-    ...group,
-    locations: locationOptions
-      .filter((location) => location.locationType === group.kind)
-      .sort(
-        (left, right) =>
-          (right.baseYield ?? 50) - (left.baseYield ?? 50)
-          || (left.name ?? left.id).localeCompare(right.name ?? right.id),
+    updateSettings((current) => ({
+      ...current,
+      items: mergeCompressItems(
+        typeof nextItems === "function" ? nextItems(current.items) : nextItems,
       ),
-  }));
-  const sortedLocationOptions = groupedLocationOptions.flatMap((group) => group.locations);
-  const selectedLocation = locationOptions.find((location) => location.id === settings.locationId);
-  const selectedCharacter = options.characters.find(
-    (character) => character.id === settings.characterId,
-  );
-  const availableImplants = selectedCharacter
-    ? options.implants.filter(
-        (implant) =>
-          implant.id === "none"
-          || (implant.typeId !== undefined && selectedCharacter.implants.includes(implant.typeId)),
-      )
-    : options.implants;
-  const implantOptions = availableImplants.filter(
-    (implant) => implant.id === "none" || implant.name.includes("RX-"),
-  );
-  const selectedImplant = implantOptions.find((implant) => implant.id === settings.implantId);
-  const skillLevels =
-    settings.characterId === "all-zero"
-      ? Object.fromEntries(options.relevantSkillIds.map((id) => [String(id), 0]))
-      : settings.characterId === "all-iv"
-        ? Object.fromEntries(options.relevantSkillIds.map((id) => [String(id), 4]))
-        : settings.characterId === "all-v"
-          ? Object.fromEntries(options.relevantSkillIds.map((id) => [String(id), 5]))
-          : (selectedCharacter?.skills ?? {});
+    }));
+  }
+  const updateItemsFromEffect = useEffectEvent(updateItems);
 
   useEffect(() => {
-    if (!importedMultibuy || importedRef.current === `${language}:${importedMultibuy}`) return;
+    if (
+      compressionSettings.isLoading
+      || !importedMultibuy
+      || importedRef.current === `${language}:${importedMultibuy}`
+    ) return;
     importedRef.current = `${language}:${importedMultibuy}`;
     const parsed = importedMultibuy
       .split(/\r?\n/)
@@ -470,7 +207,7 @@ function CompressContent() {
         if (resolved.length !== parsed.length) {
           throw new Error("Every Buy item must be a published item name and quantity.");
         }
-        updateItems(
+        updateItemsFromEffect(
           resolved.map(({ name, typeId, quantity, category }) => ({
             name,
             typeId,
@@ -484,7 +221,7 @@ function CompressContent() {
       .catch((error) =>
         setError(error instanceof Error ? error.message : "Could not load the Buy list."),
       );
-  }, [importedMultibuy, language]);
+  }, [compressionSettings.isLoading, importedMultibuy, language]);
 
   function addItem(item: TypeResult) {
     updateItems((current) => {
@@ -505,9 +242,6 @@ function CompressContent() {
     setIsLoading(true);
     setError("");
     try {
-      const selectedLocation = locationOptions.find(
-        (location) => location.id === settings.locationId,
-      );
       const response = await fetch(
         "/api/compress",
         {
@@ -570,7 +304,12 @@ function CompressContent() {
               <p className={styles.kicker}>01 / REQUIREMENTS</p>
               <h2>Raw materials</h2>
             </div>
-            <Button type="button" variant="outline" onClick={() => setIsPasteOpen(true)}>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={compressionSettings.isLoading}
+              onClick={() => setPasteDialogLoadKey(compressionSettings.loadKey)}
+            >
               <Clipboard aria-hidden="true" />
               <span>Paste multibuy</span>
             </Button>
@@ -580,6 +319,7 @@ function CompressContent() {
           </p>
           <TypeSearch
             language={language}
+            disabled={compressionSettings.isLoading}
             placeholder="Search material by name or type ID"
             ariaLabel="Search minerals"
             onSelect={(item) =>
@@ -589,188 +329,7 @@ function CompressContent() {
               })
             }
           />
-          <div className={styles.compressOptions}>
-            {locationOptions.length > 0 ? (
-              <Label className="flex-col items-start gap-1.5">
-                <span className="text-xs text-muted-foreground">LOCATION</span>
-                <Select
-                  value={settings.locationId}
-                  onValueChange={(value) => value && updateSettings({ locationId: value })}
-                  items={sortedLocationOptions.map((location) => ({
-                    value: location.id,
-                    label: `${location.name ?? `Location ${location.id}`}${location.canReprocess === false ? " [No Reprocessing]" : ""} · ${Math.round(location.baseYield ?? 50)}%`,
-                    disabled: location.canReprocess === false,
-                  }))}
-                >
-                  <SelectTrigger className="w-full" aria-label="Reprocessing location">
-                    <SelectValue className={styles.selectValue}>
-                      <span className={styles.selectName}>
-                        {selectedLocation?.name ?? `Location ${settings.locationId}`}
-                      </span>
-                      <span className={styles.selectBonus}>
-                        {Math.round(selectedLocation?.baseYield ?? 50)}%
-                      </span>
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent className={styles.locationSelectContent}>
-                    {groupedLocationOptions.map((group) => (
-                      <SelectGroup key={group.kind}>
-                        <SelectLabel>{group.label}</SelectLabel>
-                        {group.locations.map((location) => (
-                          <SelectItem
-                            value={location.id}
-                            key={location.id}
-                            className={styles.locationSelectItem}
-                            disabled={location.canReprocess === false}
-                          >
-                            {location.name ?? `Location ${location.id}`}
-                            {location.canReprocess === false ? " [No Reprocessing]" : ""} ·{" "}
-                            {Math.round(location.baseYield ?? 50)}%
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Label>
-            ) : (
-              <Alert>
-                <Info aria-hidden="true" />
-                <AlertTitle>No reprocessing locations found.</AlertTitle>
-                <AlertDescription>
-                  Add a reprocessing location on the{" "}
-                  <NoPrefetchLink href="/structures">Structures</NoPrefetchLink> page or{" "}
-                  <EveAuthorizationWarning href="/api/auth/eve/start">
-                    <Button
-                      type="button"
-                      variant="link"
-                      size="xs"
-                      className="inline h-auto p-0 align-baseline font-normal"
-                    >
-                      authenticate a character
-                    </Button>
-                  </EveAuthorizationWarning>{" "}
-                  to find the best location automatically.
-                </AlertDescription>
-              </Alert>
-            )}
-            <Label className="flex-col items-start gap-1.5">
-              <span className="text-xs text-muted-foreground">CHARACTER / SKILLS</span>
-              <Select
-                value={settings.characterId}
-                onValueChange={(value) =>
-                  value && updateSettings({ characterId: value, implantId: "none" })
-                }
-                items={[
-                  { value: "all-zero", label: "All zero" },
-                  { value: "all-iv", label: "All IV" },
-                  { value: "all-v", label: "All V" },
-                  ...options.characters.map((character) => ({
-                    value: character.id,
-                    label: character.name,
-                  })),
-                ]}
-              >
-                <SelectTrigger className="w-full" aria-label="Character skills">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="all-zero">All zero</SelectItem>
-                    <SelectItem value="all-iv">All IV</SelectItem>
-                    <SelectItem value="all-v">All V</SelectItem>
-                    {options.characters.map((character) => (
-                      <SelectItem value={character.id} key={character.id}>
-                        {character.name}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </Label>
-            <Label className="flex-col items-start gap-1.5">
-              <span className="text-xs text-muted-foreground">IMPLANT</span>
-              <Select
-                value={
-                  implantOptions.some((implant) => implant.id === settings.implantId)
-                    ? settings.implantId
-                    : "none"
-                }
-                onValueChange={(value) => value && updateSettings({ implantId: value })}
-                items={implantOptions.map((implant) => ({
-                  value: implant.id,
-                  label: implant.name,
-                }))}
-              >
-                <SelectTrigger className="w-full" aria-label="Reprocessing implant">
-                  <SelectValue className={styles.selectValue}>
-                    <span className={styles.selectName}>
-                      {selectedImplant?.name ?? "No implant"}
-                    </span>
-                    <span className={styles.selectBonus}>+{selectedImplant?.level ?? 0}%</span>
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {implantOptions.map((implant) => (
-                      <SelectItem value={implant.id} key={implant.id}>
-                        {implant.name}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </Label>
-            <Label className="flex-col items-start gap-1.5">
-              <span className="text-xs text-muted-foreground">MARKET</span>
-              <Select
-                value={settings.marketId}
-                onValueChange={(value) => value && updateSettings({ marketId: value })}
-                items={marketHubs.map((market) => ({
-                  value: market.id,
-                  label: market.name,
-                }))}
-              >
-                <SelectTrigger className="w-full" aria-label="Market hub">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {marketHubs.map((market) => (
-                      <SelectItem value={market.id} key={market.id}>
-                        {market.name}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </Label>
-            <Label className="flex-col items-start gap-1.5">
-              <span className="text-xs text-muted-foreground">ORDER TYPE</span>
-              <Select
-                value={settings.orderType}
-                onValueChange={(value) =>
-                  value && updateSettings({ orderType: value as CompressSettings["orderType"] })
-                }
-                items={[
-                  { value: "buy-1-day", label: "1 Day)" },
-                  { value: "buy-5-day", label: "Buy (5 Day)" },
-                  { value: "sell", label: "Sell" },
-                ]}
-              >
-                <SelectTrigger className="w-full" aria-label="Order type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="buy-1-day">Buy (1 Day)</SelectItem>
-                    <SelectItem value="buy-5-day">Buy (5 Day)</SelectItem>
-                    <SelectItem value="sell">Sell</SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </Label>
-          </div>
+          <CompressSettingsPanel state={compressionSettings} className={styles.compressOptions} />
           <div className={styles.listHeader}>
             <span>ITEM</span>
             <span>QUANTITY</span>
@@ -793,6 +352,7 @@ function CompressContent() {
                 <Input
                   className="text-right"
                   aria-label={`${item.name} quantity`}
+                  disabled={compressionSettings.isLoading}
                   type="number"
                   min="1"
                   step="1"
@@ -812,6 +372,7 @@ function CompressContent() {
                   variant="destructive"
                   size="icon-sm"
                   aria-label={`Remove ${item.name}`}
+                  disabled={compressionSettings.isLoading}
                   onClick={() =>
                     updateItems((current) => current.filter((_, itemIndex) => itemIndex !== index))
                   }
@@ -829,7 +390,7 @@ function CompressContent() {
           <div className={styles.actionBar}>
             <CalculateButton
               type="submit"
-              disabled={items.length === 0 || isLoading}
+              disabled={compressionSettings.isLoading || items.length === 0 || isLoading}
               icon={Minimize2}
               isLoading={isLoading}
               label="Compress"
@@ -840,7 +401,12 @@ function CompressContent() {
       </form>
 
       {result && (
-        <Results result={result} selectedLocation={selectedLocation} language={language} />
+        <Results
+          result={result}
+          selectedLocation={selectedLocation}
+          language={language}
+          isSettingsLoading={compressionSettings.isLoading}
+        />
       )}
       {isPasteOpen && (
         <PasteListDialog
@@ -851,8 +417,12 @@ function CompressContent() {
 Pyerite 60000`}
           ariaLabel="Multibuy list"
           currentItems={items}
-          onCancel={() => setIsPasteOpen(false)}
+          onCancel={() => setPasteDialogLoadKey(null)}
           onImport={(next) => {
+            if (
+              compressionSettings.isLoading
+              || pasteDialogLoadKey !== compressionSettings.loadKey
+            ) return;
             updateItems(
               next.map((item) => ({
                 name: item.name,
@@ -862,7 +432,7 @@ Pyerite 60000`}
               })),
             );
             setResult(null);
-            setIsPasteOpen(false);
+            setPasteDialogLoadKey(null);
           }}
         />
       )}
@@ -874,10 +444,12 @@ function Results({
   result,
   selectedLocation,
   language,
+  isSettingsLoading,
 }: {
   result: CompressResult;
-  selectedLocation: CompressOption | undefined;
+  selectedLocation: ReprocessingLocationOption | undefined;
   language: SdeLanguage;
+  isSettingsLoading: boolean;
 }) {
   const router = useRouter();
   const [isAddingToPlan, setIsAddingToPlan] = useState(false);
@@ -1077,7 +649,7 @@ function Results({
                     type="button"
                     variant="outline"
                     onClick={() => void addToPlan()}
-                    disabled={isAddingToPlan}
+                    disabled={isSettingsLoading || isAddingToPlan}
                   >
                     <Upload aria-hidden="true" />
                     Add to Plan

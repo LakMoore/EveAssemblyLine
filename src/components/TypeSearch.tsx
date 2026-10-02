@@ -29,6 +29,7 @@ type TypeSearchProps = {
   ariaLabel: string;
   inputId?: string;
   searchEndpoint?: string;
+  disabled?: boolean;
 };
 
 function resultVariation(category?: string) {
@@ -44,6 +45,7 @@ export default function TypeSearch({
   ariaLabel,
   inputId,
   searchEndpoint = "/api/reference/types",
+  disabled = false,
 }: TypeSearchProps) {
   const anchor = useComboboxAnchor();
   const [query, setQuery] = useState("");
@@ -55,7 +57,7 @@ export default function TypeSearch({
   useEffect(() => {
     const trimmedQuery = query.trim();
     const currentRequestId = ++requestId.current;
-    if (trimmedQuery.length < minimumQueryLength) return;
+    if (disabled || trimmedQuery.length < minimumQueryLength) return;
     const controller = new AbortController();
     const timeout = window.setTimeout(
       async () => {
@@ -86,7 +88,7 @@ export default function TypeSearch({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [language, query, searchEndpoint]);
+  }, [disabled, language, query, searchEndpoint]);
 
   function choose(item: TypeSearchResult) {
     onSelect(item);
@@ -103,6 +105,7 @@ export default function TypeSearch({
   return (
     <div ref={anchor} className="w-full">
       <Combobox
+        disabled={disabled}
         items={results}
         open={isOpen && query.trim().length >= minimumQueryLength}
         itemToStringLabel={(item: TypeSearchResult) => item.name}
@@ -132,6 +135,7 @@ export default function TypeSearch({
         <ComboboxInput
           id={inputId}
           className="w-full"
+          disabled={disabled}
           showTrigger={false}
           onFocus={() =>
             results.length > 0 && query.trim().length >= minimumQueryLength && setIsOpen(true)

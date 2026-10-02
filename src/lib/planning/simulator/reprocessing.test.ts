@@ -6,7 +6,11 @@ import type { SimulationContext } from "./context";
 import type { IndustrySimulationResult } from "./industrySimulation";
 import type { SimulationLedgerAccount } from "./ledger";
 import { projectSimulationLedger } from "./ledger";
-import { groupReprocessingJobs, settleReprocessing } from "./reprocessing";
+import {
+  calculateReprocessingYields,
+  groupReprocessingJobs,
+  settleReprocessing,
+} from "./reprocessing";
 import type { SimulatorInventory } from "./sourceLots";
 import type { SimulationReprocessingJob, SimulationRequestV1 } from "./types";
 
@@ -86,6 +90,27 @@ const context = {
     [100, { _key: 100, materials: [{ materialTypeID: 34, quantity: 400 }] }],
   ]),
 } as unknown as SimulationContext;
+
+void test("calculates SDE reprocessing yields per portion at the configured efficiency", () => {
+  assert.deepEqual(
+    calculateReprocessingYields(
+      [
+        { materialTypeID: 34, quantity: 415 },
+        { materialTypeID: 35, quantity: 400 },
+      ],
+      1,
+      50,
+    ),
+    [
+      { typeId: 34, quantity: 207 },
+      { typeId: 35, quantity: 200 },
+    ],
+  );
+  assert.deepEqual(
+    calculateReprocessingYields([{ materialTypeID: 34, quantity: 415 }], 2, 50),
+    [{ typeId: 34, quantity: 415 }],
+  );
+});
 
 /** Creates a minimal reprocessing job for simulator aggregation tests. */
 function reprocessingJob(

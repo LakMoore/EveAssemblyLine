@@ -58,9 +58,9 @@ type SignalsResponse = {
   error?: string;
 };
 
-/** Formats an ISK value without hiding meaningful low-price decimals. */
+/** Formats an ISK value without decimal places. */
 function formatIsk(value: number) {
-  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value)} ISK`;
+  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value)} ISK`;
 }
 
 /** Formats quantities and recent daily volume for compact table display. */

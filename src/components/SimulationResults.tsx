@@ -3023,7 +3023,7 @@ function SimulationSimpleJobRow({
   name: string;
   subline?: ReactNode;
   summary: ReactNode;
-  variation?: "icon" | "bp" | "bpc";
+  variation?: "icon" | "bp" | "bpc" | "relic";
   wideBreakpoint?: "sm" | "md";
   linkPath?: "planner" | "assets";
   showCheckbox?: boolean;
@@ -4118,9 +4118,7 @@ function SimulationBuyTab({
     ...result.lists.materialsToBuy.map((purchase) => ({ purchase, isMaterial: true })),
     ...result.lists.bpoToBuy.map((purchase) => ({ purchase, isMaterial: false })),
   ];
-  const metadataByTypeId = useSimulationTypeMetadata(
-    entries.map((entry) => entry.purchase.typeId),
-  );
+  const metadataByTypeId = useSimulationTypeMetadata(entries.map((entry) => entry.purchase.typeId));
   const {
     groupsByTypeId,
     error: assemblyLineGroupError,

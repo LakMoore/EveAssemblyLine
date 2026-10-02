@@ -1,4 +1,5 @@
 import type { SdeLanguage } from "@/lib/reference/languages";
+import { z } from "zod";
 import {
   loadClientAssets,
   loadClientCharacterState,
@@ -9,6 +10,52 @@ import type { ClientPlanStockpile } from "./types";
 import { loadCompressSettings } from "./compressSettingsStore";
 import type { FacilityResponse } from "./facilities";
 import { loadPlannerStockpiles, savePlannerStockpiles } from "./plannerStockpilesStore";
+
+const reprocessingEfficiencyResponseSchema = z.object({
+  efficiencies: z.record(z.string().regex(/^\d+$/), z.number().finite().min(0).max(150)).optional(),
+  error: z.string().optional(),
+});
+
+/** Requests server-calculated efficiencies for an explicit reprocessing profile. */
+export async function requestReprocessingEfficiencies(
+  profile: {
+    structureTypeId: number;
+    rigTypeIds: number[];
+    skillLevels: Record<string, number>;
+    implantLevel: number;
+    securityStatus?: number;
+  },
+  signal?: AbortSignal,
+): Promise<Record<string, number>> {
+  const response = await fetch(
+    "/api/compress/efficiencies",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      signal,
+      body: JSON.stringify(profile),
+    },
+  );
+  const parsed = reprocessingEfficiencyResponseSchema.safeParse(
+    await response.json().catch(() => null),
+  );
+  if (!response.ok) {
+    throw new Error(
+      parsed.success
+        ? (parsed.data.error ?? "Could not calculate reprocessing efficiencies.")
+        : "Could not calculate reprocessing efficiencies.",
+    );
+  }
+  if (
+    !parsed.success
+    || !parsed.data.efficiencies
+    || Object.keys(parsed.data.efficiencies).length === 0
+  ) {
+    throw new Error("Reprocessing efficiencies were empty or invalid.");
+  }
+  return parsed.data.efficiencies;
+}
 
 type ImplantOption = {
   id: string;
@@ -111,32 +158,13 @@ export async function loadPlannerReprocessingEfficiencies(
         selectedImplant.typeId,
       ) === true
     );
-  const response = await fetch(
-    "/api/compress/efficiencies",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      cache: "no-store",
-      body: JSON.stringify({
-        structureTypeId,
-        rigTypeIds,
-        skillLevels: await selectedSkillLevels(options, settings.characterId),
-        implantLevel: implantAllowed ? (selectedImplant?.level ?? 0) : 0,
-        securityStatus: selectedFacility?.securityStatus,
-      }),
-    },
-  );
-  const result = (await response.json()) as {
-    efficiencies?: Record<string, number>;
-    error?: string;
-  };
-  if (!response.ok) {
-    throw new Error(result.error ?? "Could not calculate compression efficiencies.");
-  }
-  if (!result.efficiencies || Object.keys(result.efficiencies).length === 0) {
-    throw new Error("Compression efficiencies were empty.");
-  }
-  return result.efficiencies;
+  return requestReprocessingEfficiencies({
+    structureTypeId,
+    rigTypeIds,
+    skillLevels: await selectedSkillLevels(options, settings.characterId),
+    implantLevel: implantAllowed ? (selectedImplant?.level ?? 0) : 0,
+    securityStatus: selectedFacility?.securityStatus,
+  });
 }
 
 function hasReprocessingEfficiencies(stockpile: ClientPlanStockpile) {
