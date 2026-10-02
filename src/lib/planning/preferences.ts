@@ -18,12 +18,11 @@ export type KnownStructure = {
   systemName: string;
   securityStatus?: number;
   type: string;
-  typeId?: number;
+  typeId: number;
   size: "Small" | "Medium" | "Large" | "Extra Large";
   sizeId?: number;
   name: string;
-  rigs: string[];
-  rigTypeIds?: number[];
+  rigTypeIds: number[];
   esiStructureId?: number;
   allowStandardBuilds?: boolean;
   allowCapitalBuilds?: boolean;

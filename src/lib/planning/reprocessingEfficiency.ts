@@ -1,4 +1,5 @@
 import type { GroupsRecord, TypeDogmaRecord, TypesRecord } from "@/lib/sde/generated";
+import type { ReprocessingProfile } from "./reprocessingProfile";
 
 export type ReprocessingSkillLevels = Record<string, number>;
 export type ReprocessingEfficiency = {
@@ -13,23 +14,10 @@ export type ReprocessingSkill = { id?: number; name: string };
 
 const refiningYieldMutatorAttribute = 379;
 const refiningYieldMultiplierAttribute = 717;
-const structureSizeAttribute = 1547;
 const securityModifierAttributes = { high: 2355, low: 2356, null: 2357 } as const;
-const structureSizes = { 2: "M", 3: "L", 4: "XL" } as const;
 
-function reprocessingRigTypeId(maps: SdeMaps, structureTypeId: number, rig: number) {
-  if (structureTypeId === 0 || rig === 0) return undefined;
-  const sizeId = dogmaValue(maps.typeDogma.get(structureTypeId), structureSizeAttribute);
-  if (sizeId === undefined || !Object.hasOwn(structureSizes, sizeId)) return undefined;
-  const size = Object.hasOwn(structureSizes, sizeId)
-    ? structureSizes[sizeId as keyof typeof structureSizes]
-    : undefined;
-  return namedTypeId(maps, `Standup ${size}-Set Reprocessing Monitor ${rig === 2 ? "II" : "I"}`);
-}
-
-export function reprocessingRigModifier(maps: SdeMaps, structureTypeId: number, rig: number) {
-  const rigDogma = reprocessingRigTypeId(maps, structureTypeId, rig);
-  const record = rigDogma === undefined ? undefined : maps.typeDogma.get(rigDogma);
+function reprocessingRigModifier(maps: SdeMaps, rigTypeId?: number) {
+  const record = rigTypeId === undefined ? undefined : maps.typeDogma.get(rigTypeId);
   return (
     dogmaValue(record, refiningYieldMutatorAttribute)
     ?? (dogmaValue(record, refiningYieldMultiplierAttribute) ?? 0.5) * 100 - 50
@@ -42,6 +30,9 @@ type SdeMaps = {
   typeDogma: Map<number, TypeDogmaRecord>;
   dogmaAttributes: Map<number, { _key: number; name: string; defaultValue: number }>;
 };
+
+/** SDE lookups required to calculate reprocessing yields. */
+export type ReprocessingSdeMaps = SdeMaps;
 
 function attributeId(maps: SdeMaps, name: string) {
   return [...maps.dogmaAttributes.values()].find((attribute) => attribute.name === name)?._key;
@@ -97,17 +88,10 @@ function securityMultiplier(
   maps: SdeMaps,
   structureTypeId: number,
   securityStatus: number | undefined,
-  rig: number,
-  reprocessingRigTypeIdOverride?: number,
+  rigTypeId?: number,
 ) {
-  if (
-    structureTypeId === 0
-    || securityStatus === undefined
-    || (rig === 0 && reprocessingRigTypeIdOverride === undefined)
-  ) return 1;
-  const rigDogma =
-    reprocessingRigTypeIdOverride ?? reprocessingRigTypeId(maps, structureTypeId, rig);
-  const record = rigDogma === undefined ? undefined : maps.typeDogma.get(rigDogma);
+  if (structureTypeId === 0 || securityStatus === undefined || rigTypeId === undefined) return 1;
+  const record = maps.typeDogma.get(rigTypeId);
   const securityClass = securityStatus >= 0.5 ? "high" : securityStatus > 0 ? "low" : "null";
   return dogmaValue(record, securityModifierAttributes[securityClass]) ?? 1;
 }
@@ -118,20 +102,9 @@ export function calculateReprocessingEfficiency(
   skillLevels: ReprocessingSkillLevels,
   implantLevel: number,
   securityStatus?: number,
-  reprocessingRig = 0,
-  reprocessingRigTypeIdOverride?: number,
+  rigTypeId?: number,
 ): ReprocessingEfficiency {
-  const rigRecord =
-    reprocessingRigTypeIdOverride === undefined
-      ? undefined
-      : maps.typeDogma.get(reprocessingRigTypeIdOverride);
-  const rigModifier =
-    reprocessingRigTypeIdOverride === undefined
-      ? reprocessingRigModifier(maps, structureTypeId, reprocessingRig)
-      : (
-          dogmaValue(rigRecord, refiningYieldMutatorAttribute)
-          ?? (dogmaValue(rigRecord, refiningYieldMultiplierAttribute) ?? 0.5) * 100 - 50
-        );
+  const rigModifier = reprocessingRigModifier(maps, rigTypeId);
   const normalBase =
     maps.dogmaAttributes.get(attributeId(maps, "refiningYieldNormalOres") ?? -1)?.defaultValue ?? 0;
   const moonBase =
@@ -154,13 +127,7 @@ export function calculateReprocessingEfficiency(
       .map((record) => dogmaValue(record, implantMutatorId))
       .find((value) => value === implantLevel) ?? 0;
   const multiplier =
-    securityMultiplier(
-      maps,
-      structureTypeId,
-      securityStatus,
-      reprocessingRig,
-      reprocessingRigTypeIdOverride,
-    )
+    securityMultiplier(maps, structureTypeId, securityStatus, rigTypeId)
     * structureMultiplier(maps, structureTypeId)
     * skillMultiplier(
       maps,
@@ -222,6 +189,39 @@ export function efficiencyForType(
     return calculated.normalOre * (1 + skillBonus / 100);
   }
   return calculated.normalOre;
+}
+
+/** Calculates a per-type efficiency map and its shared category-level rates. */
+export function calculateReprocessingProfile(
+  maps: ReprocessingSdeMaps,
+  typeIds: Iterable<number>,
+  profile: ReprocessingProfile,
+) {
+  const rigTypeId = profile.rigTypeIds.find((typeId) =>
+    maps.typeDogma
+      .get(typeId)
+      ?.dogmaAttributes.some(
+        (attribute) =>
+          attribute.attributeID === refiningYieldMutatorAttribute
+          || attribute.attributeID === refiningYieldMultiplierAttribute,
+      ),
+  );
+  const calculated = calculateReprocessingEfficiency(
+    maps,
+    profile.structureTypeId,
+    profile.skillLevels,
+    profile.implantLevel,
+    profile.securityStatus,
+    rigTypeId,
+  );
+  const efficiencies = Object.fromEntries(
+    [...new Set(typeIds)].map((typeId) => [
+      String(typeId),
+      efficiencyForType(maps, typeId, calculated, profile.skillLevels),
+    ]),
+  );
+
+  return { calculated, efficiencies };
 }
 
 export function reprocessingSkillForType(

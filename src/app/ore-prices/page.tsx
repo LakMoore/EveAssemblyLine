@@ -18,7 +18,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { requestReprocessingEfficiencies } from "@/lib/planning/reprocessingClient";
+import {
+  createReprocessingProfile,
+  type ReprocessingProfile,
+} from "@/lib/planning/reprocessingProfile";
 import { marketHubs } from "@/lib/reference/marketHubs";
 import { useAppLanguage } from "../AppShell";
 import { cn } from "@/lib/utils";
@@ -122,7 +125,7 @@ function formatDifferencePercent(value: number | null) {
 async function fetchOrePrices(
   language: string,
   marketId: string,
-  reprocessingEfficiencies: Record<string, number>,
+  reprocessingProfile: ReprocessingProfile,
   signal: AbortSignal,
 ) {
   const response = await fetch(
@@ -131,7 +134,7 @@ async function fetchOrePrices(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal,
-      body: JSON.stringify({ language, marketId, reprocessingEfficiencies }),
+      body: JSON.stringify({ language, marketId, reprocessingProfile }),
     },
   );
   const result = (await response.json()) as OrePricesResponse;
@@ -217,17 +220,13 @@ export default function OrePricesPage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [openTypeId, setOpenTypeId] = useState<number | null>(null);
   const selectedLocation = reprocessingSettings.selectedLocation;
-  const rigTypeIds = (
-    selectedLocation?.rigTypeIds ?? (selectedLocation?.rigs ?? []).map(Number)
-  ).filter((typeId) => Number.isSafeInteger(typeId) && typeId > 0);
-  const reprocessingProfile = {
-    structureTypeId:
-      selectedLocation?.locationType === "structure" ? (selectedLocation.structureTypeId ?? 0) : 0,
-    rigTypeIds,
-    skillLevels: reprocessingSettings.skillLevels,
-    implantLevel: reprocessingSettings.selectedImplant?.level ?? 0,
-    securityStatus: selectedLocation?.securityStatus,
-  };
+  const reprocessingProfile = selectedLocation
+    ? createReprocessingProfile(
+        selectedLocation,
+        reprocessingSettings.skillLevels,
+        reprocessingSettings.selectedImplant?.level ?? 0,
+      )
+    : null;
   const marketId = reprocessingSettings.settings.marketId;
   const market = marketHubs.find((hub) => hub.id === marketId)?.name ?? marketHubs[0].name;
   const requestKey = JSON.stringify({ language, marketId, reprocessingProfile });
@@ -249,8 +248,14 @@ export default function OrePricesPage() {
 
   /** Fetches prices for the exact profile and market selected at click time. */
   async function fetchCurrentPrices() {
-    if (reprocessingSettings.isLoading || isLoading) return;
+    if (
+      reprocessingSettings.isLoading
+      || reprocessingSettings.error
+      || !selectedLocation
+      || isLoading
+    ) return;
     const selectedProfile = reprocessingProfile;
+    if (!selectedProfile) return;
     const selectedLanguage = language;
     const selectedMarketId = marketId;
     const selectedRequestKey = requestKey;
@@ -268,14 +273,10 @@ export default function OrePricesPage() {
     setGeneratedAt("");
     setLoadedRequestKey(null);
     try {
-      const efficiencies = await requestReprocessingEfficiencies(
-        selectedProfile,
-        controller.signal,
-      );
       const result = await fetchOrePrices(
         selectedLanguage,
         selectedMarketId,
-        efficiencies,
+        selectedProfile,
         controller.signal,
       );
       if (controller.signal.aborted || requestId !== requestIdRef.current) return;
@@ -360,7 +361,12 @@ export default function OrePricesPage() {
         </p>
         <Button
           type="button"
-          disabled={reprocessingSettings.isLoading || isLoading}
+          disabled={
+            reprocessingSettings.isLoading
+            || Boolean(reprocessingSettings.error)
+            || !selectedLocation
+            || isLoading
+          }
           onClick={() => void fetchCurrentPrices()}
         >
           <RefreshCw

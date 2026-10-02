@@ -10,9 +10,10 @@ function localStructure(id: string): KnownStructure {
     systemId: 30000142,
     systemName: "Jita",
     type: "Astrahus",
+    typeId: 35832,
     size: "Medium",
     name: `Structure ${id}`,
-    rigs: [],
+    rigTypeIds: [],
   };
 }
 

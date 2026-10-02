@@ -31,16 +31,16 @@ import type { KnownStructure } from "@/lib/planning/preferences";
 import { loadStructures } from "@/lib/planning/structureStore";
 import { marketHubs } from "@/lib/reference/marketHubs";
 import type { SdeLanguage } from "@/lib/reference/languages";
+import { z } from "zod";
 
 /** One location available for reprocessing configuration. */
 export type ReprocessingLocationOption = {
   id: string;
   name?: string;
   locationType: "station" | "structure";
-  structureTypeId?: number;
+  structureTypeId: number;
   securityStatus?: number;
-  rigs?: string[];
-  rigTypeIds?: number[];
+  rigTypeIds: number[];
   rankBonus?: number;
   baseYield?: number;
   canReprocess?: boolean;
@@ -59,16 +59,29 @@ export type ReprocessingCharacterOption = {
 export type ReprocessingImplantOption = {
   id: string;
   name: string;
-  level: number;
+  level: 0 | 1 | 2 | 4;
   typeId?: number;
 };
 
-type ReprocessingOptionsData = {
-  optionsVersion: number;
-  characterImplants: Partial<Record<string, number[]>>;
-  implants: ReprocessingImplantOption[];
-  relevantSkillIds: number[];
-};
+const reprocessingOptionsDataSchema = z
+  .object({
+    optionsVersion: z.literal(4),
+    characterImplants: z.record(z.string(), z.array(z.number().int())),
+    implants: z.array(
+      z
+        .object({
+          id: z.string(),
+          name: z.string(),
+          level: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(4)]),
+          typeId: z.number().int().optional(),
+        })
+        .strict(),
+    ),
+    relevantSkillIds: z.array(z.number().int()),
+  })
+  .strict();
+
+type ReprocessingOptionsData = z.infer<typeof reprocessingOptionsDataSchema>;
 
 type ReprocessingOptions = ReprocessingOptionsData & {
   locations: ReprocessingLocationOption[];
@@ -103,7 +116,7 @@ const defaultSettings: CompressSettings = {
 };
 
 const emptyOptions: ReprocessingOptions = {
-  optionsVersion: 3,
+  optionsVersion: 4,
   locations: [],
   characters: [],
   characterImplants: {},
@@ -131,7 +144,7 @@ function normalizeLocationName(name: string) {
 
 /** Creates a stable duplicate key for asset and manually configured locations. */
 function locationKey(location: ReprocessingLocationOption) {
-  return location.structureTypeId !== undefined && location.structureTypeId !== 0 && location.name
+  return location.structureTypeId !== 0 && location.name
     ? `structure:${normalizeLocationName(location.name).toLocaleLowerCase()}`
     : location.id;
 }
@@ -165,23 +178,21 @@ export function useCompressSettings(language: SdeLanguage) {
       .all([
         loadCompressSettings(),
         loadClientSession(),
-        loadEndpointRecord<Partial<ReprocessingOptionsData>>("compress/options"),
+        loadEndpointRecord<unknown>("compress/options"),
         loadClientAssets(language, isRefreshLoad).catch(() => null),
         loadStructures().catch(() => []),
       ])
       .then(async ([loadedSettings, session, cachedOptions, cachedAssets, knownStructures]) => {
         const characterState = session.authenticated ? await loadClientCharacterState() : null;
         const loadedFacilities = cachedAssets?.facilities ?? [];
-        let loadedOptions = cachedOptions?.data;
-        const cachedCharacterImplants =
-          loadedOptions && Object.hasOwn(loadedOptions, "characterImplants")
-            ? loadedOptions.characterImplants
-            : undefined;
+        const cachedOptionsData = reprocessingOptionsDataSchema.safeParse(cachedOptions?.data);
+        let loadedOptions = cachedOptionsData.success ? cachedOptionsData.data : undefined;
+        const cachedOptionsValue = loadedOptions;
+        const sessionCharacters = session.characters ?? [];
         const hasCachedCharacterImplants =
-          loadedOptions?.optionsVersion === 3
-          && cachedCharacterImplants !== undefined
-          && (session.characters ?? []).every((character) =>
-            Object.hasOwn(cachedCharacterImplants, String(character.characterId)),
+          cachedOptionsValue !== undefined
+          && sessionCharacters.every((character) =>
+            Object.hasOwn(cachedOptionsValue.characterImplants, String(character.characterId)),
           );
         if (isRefreshLoad || !loadedOptions || !hasCachedCharacterImplants) {
           const optionsResponse = await fetch(
@@ -193,15 +204,23 @@ export function useCompressSettings(language: SdeLanguage) {
               body: JSON.stringify({ language }),
             },
           );
-          loadedOptions = (await optionsResponse.json()) as ReprocessingOptionsData;
-          if (!optionsResponse.ok) throw new Error("Could not load compression options.");
+          const parsedOptions = reprocessingOptionsDataSchema.safeParse(
+            await optionsResponse.json(),
+          );
+          if (!optionsResponse.ok || !parsedOptions.success) {
+            throw new Error("Could not load compression options.");
+          }
+          loadedOptions = parsedOptions.data;
           await saveEndpointResponse("compress/options", "/api/compress/options", loadedOptions);
         }
-        if (!loadedOptions.characterImplants) {
-          throw new Error("Compression options did not include character implants.");
-        }
-
         const characterImplants = loadedOptions.characterImplants;
+        if (
+          !sessionCharacters.every((character) =>
+            Object.hasOwn(characterImplants, String(character.characterId)),
+          )
+        ) {
+          throw new Error("Compression options did not include every attached character.");
+        }
         const rawLocations: ReprocessingLocationOption[] = [
           ...loadedFacilities.map((facility) => ({
             id: String(facility.id),
@@ -209,28 +228,25 @@ export function useCompressSettings(language: SdeLanguage) {
             locationType: facility.locationType,
             structureTypeId: facility.typeId,
             securityStatus: facility.securityStatus,
-            rigs: facility.rigTypeIds.map((typeId) => String(typeId)),
             rigTypeIds: facility.rigTypeIds,
             baseYield: (facility.activities.reprocessing.baseYield ?? 0) * 100,
             canReprocess: facility.activities.reprocessing.available,
           })),
-          ...knownStructures.flatMap((structure) =>
-            structure.esiStructureId === undefined
-              ? []
-              : [
-                  {
-                    id: String(structure.esiStructureId),
-                    name: structureDisplayName(structure),
-                    locationType: "structure" as const,
-                    structureTypeId: structure.typeId,
-                    rigs: structure.rigs,
-                    rigTypeIds: structure.rigTypeIds ?? [],
-                    securityStatus: structure.securityStatus,
-                    baseYield: 0,
-                    canReprocess: structure.allowReprocessing !== false,
-                  },
-                ],
-          ),
+          ...knownStructures.flatMap((structure) => {
+            if (structure.esiStructureId === undefined) return [];
+            return [
+              {
+                id: String(structure.esiStructureId),
+                name: structureDisplayName(structure),
+                locationType: "structure" as const,
+                structureTypeId: structure.typeId,
+                rigTypeIds: structure.rigTypeIds,
+                securityStatus: structure.securityStatus,
+                baseYield: 0,
+                canReprocess: structure.allowReprocessing !== false,
+              },
+            ];
+          }),
         ].filter(
           (location, index, all) =>
             all.findIndex((candidate) => locationKey(candidate) === locationKey(location))
@@ -258,11 +274,11 @@ export function useCompressSettings(language: SdeLanguage) {
             ? loadedSettings.marketId
             : "jita",
         };
-        const characters = (session.characters ?? []).map((character) => ({
+        const characters = sessionCharacters.map((character) => ({
           id: `character:${character.characterId}`,
           characterId: character.characterId,
           name: character.characterName,
-          implants: characterImplants[String(character.characterId)] ?? [],
+          implants: characterImplants[String(character.characterId)],
           skills: Object.fromEntries(
             (
               characterState?.characters?.find(
@@ -274,10 +290,7 @@ export function useCompressSettings(language: SdeLanguage) {
         if (!isActive) return;
         setOptions({
           ...loadedOptions,
-          optionsVersion: loadedOptions.optionsVersion ?? 2,
           characterImplants,
-          implants: loadedOptions.implants ?? [],
-          relevantSkillIds: loadedOptions.relevantSkillIds ?? [],
           characters,
           locations: locationOptions,
         });

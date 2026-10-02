@@ -6,6 +6,7 @@ import {
   loadClientSession,
 } from "@/lib/client/requestCache";
 import { loadEndpointRecord, saveEndpointResponse } from "@/lib/client/refreshCache";
+import { createReprocessingProfile, type ReprocessingProfile } from "./reprocessingProfile";
 import type { ClientPlanStockpile } from "./types";
 import { loadCompressSettings } from "./compressSettingsStore";
 import type { FacilityResponse } from "./facilities";
@@ -18,13 +19,7 @@ const reprocessingEfficiencyResponseSchema = z.object({
 
 /** Requests server-calculated efficiencies for an explicit reprocessing profile. */
 export async function requestReprocessingEfficiencies(
-  profile: {
-    structureTypeId: number;
-    rigTypeIds: number[];
-    skillLevels: Record<string, number>;
-    implantLevel: number;
-    securityStatus?: number;
-  },
+  profile: ReprocessingProfile,
   signal?: AbortSignal,
 ): Promise<Record<string, number>> {
   const response = await fetch(
@@ -34,7 +29,7 @@ export async function requestReprocessingEfficiencies(
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
       signal,
-      body: JSON.stringify(profile),
+      body: JSON.stringify({ reprocessingProfile: profile }),
     },
   );
   const parsed = reprocessingEfficiencyResponseSchema.safeParse(
@@ -60,7 +55,7 @@ export async function requestReprocessingEfficiencies(
 type ImplantOption = {
   id: string;
   typeId?: number;
-  level: number;
+  level: 0 | 1 | 2 | 4;
 };
 
 type CompressOptions = {
@@ -140,16 +135,11 @@ export async function loadPlannerReprocessingEfficiencies(
   const selectedFacility = loadedFacilities?.facilities.find(
     (facility) => facility.id === reprocessingLocationId,
   );
+  if (!selectedFacility) throw new Error("Could not load the selected reprocessing facility.");
   const selectedImplant = options.implants.find((implant) => implant.id === settings.implantId);
   const selectedCharacter = (await loadClientSession()).characters?.find(
     (character) => `character:${character.characterId}` === settings.characterId,
   );
-  const structureTypeId =
-    selectedFacility?.locationType === "structure" ? selectedFacility.typeId : 0;
-  const rigTypeIds =
-    selectedFacility?.locationType === "structure"
-      ? selectedFacility.rigTypeIds.filter((typeId) => typeId > 0)
-      : [];
   const implantAllowed =
     selectedImplant?.typeId === undefined
     || (
@@ -158,13 +148,17 @@ export async function loadPlannerReprocessingEfficiencies(
         selectedImplant.typeId,
       ) === true
     );
-  return requestReprocessingEfficiencies({
-    structureTypeId,
-    rigTypeIds,
-    skillLevels: await selectedSkillLevels(options, settings.characterId),
-    implantLevel: implantAllowed ? (selectedImplant?.level ?? 0) : 0,
-    securityStatus: selectedFacility?.securityStatus,
-  });
+  const profile = createReprocessingProfile(
+    {
+      locationType: selectedFacility.locationType,
+      structureTypeId: selectedFacility.typeId,
+      rigTypeIds: selectedFacility.rigTypeIds,
+      securityStatus: selectedFacility.securityStatus,
+    },
+    await selectedSkillLevels(options, settings.characterId),
+    implantAllowed ? (selectedImplant?.level ?? 0) : 0,
+  );
+  return requestReprocessingEfficiencies(profile);
 }
 
 function hasReprocessingEfficiencies(stockpile: ClientPlanStockpile) {

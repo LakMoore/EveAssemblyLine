@@ -72,6 +72,7 @@ import {
 } from "@/components/ui/select";
 import styles from "./compress.module.css";
 import { marketHubs } from "@/lib/reference/marketHubs";
+import { createReprocessingProfile } from "@/lib/planning/reprocessingProfile";
 
 type CompressItem = CompressMaterial;
 type TypeResult = Pick<CompressItem, "name" | "typeId" | "category">;
@@ -123,11 +124,6 @@ function variation(
 
 function resultVariation(name: string) {
   return /Blueprint Copy$/i.test(name) ? "bpc" : /Blueprint$/i.test(name) ? "bp" : "icon";
-}
-
-function reprocessingRigLevel(rigs: string[]) {
-  const rig = rigs.find((name) => /Ore Grading Processor|Reprocessing Monitor/.test(name));
-  return rig === undefined ? 0 : / II(?:$|\s)/.test(rig) ? 2 : 1;
 }
 
 export default function CompressPage() {
@@ -238,10 +234,21 @@ function CompressContent() {
 
   async function compress(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (items.length === 0 || isLoading) return;
+    if (
+      compressionSettings.isLoading
+      || compressionSettings.error
+      || !selectedLocation
+      || items.length === 0
+      || isLoading
+    ) return;
     setIsLoading(true);
     setError("");
     try {
+      const reprocessingProfile = createReprocessingProfile(
+        selectedLocation,
+        skillLevels,
+        selectedImplant?.level ?? 0,
+      );
       const response = await fetch(
         "/api/compress",
         {
@@ -250,11 +257,7 @@ function CompressContent() {
           body: JSON.stringify({
             language,
             items: items.map(({ typeId, name, quantity }) => ({ typeId, name, quantity })),
-            structureTypeId: selectedLocation?.structureTypeId ?? 0,
-            reprocessingRig: reprocessingRigLevel(selectedLocation?.rigs ?? []),
-            skillLevels,
-            implantLevel: selectedImplant?.level ?? 0,
-            securityStatus: selectedLocation?.securityStatus,
+            reprocessingProfile,
             marketId:
               marketHubs.find((market) => market.id === settings.marketId)?.regionId
               ?? marketHubs[0].regionId,
@@ -390,7 +393,13 @@ function CompressContent() {
           <div className={styles.actionBar}>
             <CalculateButton
               type="submit"
-              disabled={compressionSettings.isLoading || items.length === 0 || isLoading}
+              disabled={
+                compressionSettings.isLoading
+                || Boolean(compressionSettings.error)
+                || !selectedLocation
+                || items.length === 0
+                || isLoading
+              }
               icon={Minimize2}
               isLoading={isLoading}
               label="Compress"

@@ -233,7 +233,7 @@ function normalizeEntry(value: unknown): FacilitySettingsEntry | null {
   if (typeof entry.name !== "string" || entry.name.trim() === "") return null;
   if (!Array.isArray(entry.rigTypeIds)) return null;
   const rigTypeIds = entry.rigTypeIds.filter(
-    (rigTypeId): rigTypeId is number => Number.isInteger(rigTypeId) && rigTypeId >= 0,
+    (rigTypeId): rigTypeId is number => Number.isInteger(rigTypeId) && rigTypeId > 0,
   );
   if (rigTypeIds.length === 0) return null;
   const activities = normalizeActivities(entry.activities);
@@ -254,15 +254,13 @@ function normalizeEntry(value: unknown): FacilitySettingsEntry | null {
 
 export function normalizeFacilitySettings(value: unknown): FacilitySettingsPayload {
   if (!value || typeof value !== "object") return emptyFacilitySettings;
-  const payload = value as Partial<FacilitySettingsPayload> & {
-    structures?: Record<string, unknown>;
-  };
+  const payload = value as Partial<FacilitySettingsPayload>;
   const lastModified =
     typeof payload.lastModified === "string" && !Number.isNaN(Date.parse(payload.lastModified))
       ? payload.lastModified
       : "";
   const facilities: Record<string, FacilitySettingsEntry> = {};
-  const candidates = payload.facilities ?? payload.structures;
+  const candidates = payload.facilities;
   if (candidates && typeof candidates === "object" && !Array.isArray(candidates)) {
     for (const candidate of Object.values(candidates)) {
       const entry = normalizeEntry(candidate);

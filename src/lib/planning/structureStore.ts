@@ -19,10 +19,12 @@ function isKnownStructure(value: unknown): value is KnownStructure {
     && Number.isInteger(structure.systemId)
     && typeof structure.systemName === "string"
     && typeof structure.type === "string"
+    && Number.isSafeInteger(structure.typeId)
+    && Number(structure.typeId) > 0
     && typeof structure.size === "string"
     && typeof structure.name === "string"
-    && Array.isArray(structure.rigs)
-    && structure.rigs.every((rig) => typeof rig === "string")
+    && Array.isArray(structure.rigTypeIds)
+    && structure.rigTypeIds.every((typeId) => Number.isSafeInteger(typeId) && typeId > 0)
   );
 }
 

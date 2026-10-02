@@ -93,7 +93,7 @@ export function facilitySettingsFromStructures(
     facilities: {},
   };
   for (const structure of structures) {
-    const rigTypeIds = structure.rigTypeIds ?? [];
+    const rigTypeIds = structure.rigTypeIds;
     if (!structure.systemId || rigTypeIds.length === 0) continue;
     const name = facilitySettingsName(structure.systemName, structure.name);
     const reactionsAllowed = supportsReactionSettings(structure.typeId, structure.securityStatus);

@@ -10,10 +10,11 @@ import {
 } from "@/cache/services/sdeCache";
 import { compressMaterials, type CompressionRequestItem } from "@/lib/planning/compressEngine";
 import {
-  calculateReprocessingEfficiency,
+  calculateReprocessingProfile,
   efficiencyForType,
   reprocessingSkillForType,
 } from "@/lib/planning/reprocessingEfficiency";
+import { reprocessingProfileSchema } from "@/lib/planning/reprocessingProfile";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { getMarketSellOrders, getSevenDayAverageVolume } from "@/lib/esi/marketHistory";
 import { marketHubs } from "@/lib/reference/marketHubs";
@@ -21,57 +22,37 @@ import { specialReprocessableTypeIds } from "@/lib/planning/reprocessStock";
 import type { GroupsRecord, TypesRecord, TypeDogmaRecord } from "@/lib/sde/generated";
 
 // Zod schema for validating the compression request body
-const compressionRequestSchema = z.object({
-  language: z.string().optional(),
-  items: z
-    .array(
-      z.object({
-        typeId: z.number().int().safe().describe("Type ID"),
-        quantity: z.number().int().safe().positive().describe("Positive quantity"),
-        name: z.string().describe("Type name"),
-      }),
-    )
-    .nonempty("A non-empty list of raw materials is required."),
-  structureTypeId: z
-    .number()
-    .int()
-    .safe()
-    .nonnegative()
-    .optional()
-    .default(0)
-    .describe("Structure type ID, or 0 for an NPC station"),
-  reprocessingRig: z
-    .union([z.literal(0), z.literal(1), z.literal(2)])
-    .optional()
-    .default(0)
-    .describe("Reprocessing rig level"),
-  skillLevels: z
-    .record(
-      z.string().regex(/^\d+$/, "Skill IDs must be numeric strings"),
-      z.number().int().min(0).max(5),
-    )
-    .describe("Map of skill IDs to levels (0-5)"),
-  implantLevel: z
-    .union([z.literal(0), z.literal(1), z.literal(2), z.literal(4)])
-    .optional()
-    .default(0)
-    .describe("Implant level: 0, 1, 2, or 4"),
-  securityStatus: z.number().min(-1).max(1).optional().describe("Security status between -1 and 1"),
-  marketId: z
-    .number()
-    .int()
-    .refine(
-      (id) => marketHubs.some((market) => market.regionId === id),
-      "marketId must be a supported market region ID",
-    )
-    .optional()
-    .default(marketHubs[0].regionId)
-    .describe("Market region ID"),
-  orderType: z
-    .enum(["buy-1-day", "buy-5-day", "sell"])
-    .optional()
-    .describe("Order type for price calculations"),
-});
+const compressionRequestSchema = z
+  .object({
+    language: z.string().optional(),
+    items: z
+      .array(
+        z
+          .object({
+            typeId: z.number().int().safe().describe("Type ID"),
+            quantity: z.number().int().safe().positive().describe("Positive quantity"),
+            name: z.string().describe("Type name"),
+          })
+          .strict(),
+      )
+      .nonempty("A non-empty list of raw materials is required."),
+    reprocessingProfile: reprocessingProfileSchema,
+    marketId: z
+      .number()
+      .int()
+      .refine(
+        (id) => marketHubs.some((market) => market.regionId === id),
+        "marketId must be a supported market region ID",
+      )
+      .optional()
+      .default(marketHubs[0].regionId)
+      .describe("Market region ID"),
+    orderType: z
+      .enum(["buy-1-day", "buy-5-day", "sell"])
+      .optional()
+      .describe("Order type for price calculations"),
+  })
+  .strict();
 
 type OreGroupCache = Map<string, { typeIds: number[]; baseTypeIds: number[] }>;
 type OreGroupMaps = {
@@ -134,12 +115,8 @@ export async function POST(request: Request) {
     }
 
     const body = validationResult.data;
-    const structureTypeId = body.structureTypeId;
     const marketId = body.marketId;
     const orderType = body.orderType;
-    const implantLevel = body.implantLevel;
-    const reprocessingRig = body.reprocessingRig;
-    const skillLevels = body.skillLevels;
 
     const requestedLanguage = body.language ?? null;
     const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
@@ -152,17 +129,12 @@ export async function POST(request: Request) {
         getCompressibleTypes(),
         getTypeMaterials(),
       ]);
-    if (structureTypeId !== 0 && !types.has(structureTypeId)) {
+    if (
+      body.reprocessingProfile.structureTypeId !== 0
+      && !types.has(body.reprocessingProfile.structureTypeId)
+    ) {
       return NextResponse.json({ error: "Unknown structure type ID." }, { status: 400 });
     }
-    const calculatedEfficiency = calculateReprocessingEfficiency(
-      { types, groups, typeDogma, dogmaAttributes },
-      structureTypeId,
-      skillLevels,
-      implantLevel,
-      body.securityStatus,
-      reprocessingRig,
-    );
     const names = new Map<number, string>();
     for (const type of types.values()) {
       names.set(type._key, type.name[language] ?? type.name.en);
@@ -179,6 +151,11 @@ export async function POST(request: Request) {
       ...compressibleTypes.values(),
       ...specialReprocessableTypeIds,
     ]);
+    const { calculated: calculatedEfficiency, efficiencies } = calculateReprocessingProfile(
+      maps,
+      candidateTypeIds,
+      body.reprocessingProfile,
+    );
     const baseCandidates = [...candidateTypeIds].flatMap((compressedTypeId) => {
       const materialRecord = typeMaterials.get(compressedTypeId);
       const type = types.get(compressedTypeId);
@@ -200,12 +177,7 @@ export async function POST(request: Request) {
                 "",
               ),
               unitsToReprocess: type.portionSize,
-              efficiency: efficiencyForType(
-                maps,
-                compressedTypeId,
-                calculatedEfficiency,
-                skillLevels,
-              ),
+              efficiency: efficiencies[String(compressedTypeId)],
               skill,
               yields,
             },
@@ -298,7 +270,12 @@ export async function POST(request: Request) {
       const representativeTypeId = entries[0]?.typeId;
       const groupEfficiency =
         candidate?.efficiency
-        ?? efficiencyForType(maps, representativeTypeId, calculatedEfficiency, skillLevels);
+        ?? efficiencyForType(
+          maps,
+          representativeTypeId,
+          calculatedEfficiency,
+          body.reprocessingProfile.skillLevels,
+        );
       const baseTypeIds = oreGroups.get(key)?.baseTypeIds ?? [];
       return {
         skillId,

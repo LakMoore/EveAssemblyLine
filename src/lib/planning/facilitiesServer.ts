@@ -377,7 +377,6 @@ export async function calculateFacilities(
             {},
             0,
             facility.securityStatus,
-            0,
             reprocessingRigTypeId(typeDogma, facility.rigTypeIds),
           ).normalOre / 100;
     activities.reprocessing.baseYield = reprocessingYield;

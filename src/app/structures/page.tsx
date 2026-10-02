@@ -23,7 +23,6 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
   defaultLocations,
-  locationsStorageKey,
   type KnownStructure,
   type PlannerLocations,
 } from "@/lib/planning/preferences";
@@ -112,6 +111,15 @@ type StructureListItem = {
   rigs: string[];
 };
 
+function rigNamesForTypeIds(rigTypeIds: number[], rigNamesByTypeId: Record<number, string>) {
+  return rigTypeIds.map((rigTypeId) => rigNamesByTypeId[rigTypeId] ?? String(rigTypeId));
+}
+
+function rigSlotsForTypeIds(rigTypeIds: number[], rigNamesByTypeId: Record<number, string>) {
+  const rigNames = rigNamesForTypeIds(rigTypeIds, rigNamesByTypeId);
+  return [0, 1, 2].map((index) => rigNames[index] ?? "No Rig");
+}
+
 const locationSortOptions: Array<{ value: LocationSort; label: string }> = [
   { value: "alphabetical", label: "Alphabetical" },
   { value: "totalVolume", label: "Total volume" },
@@ -173,18 +181,6 @@ function sameRigTypeIds(left: number[] | undefined, right: number[] | undefined)
   );
 }
 
-function readLegacyStructures() {
-  if (typeof window === "undefined") return [];
-  try {
-    const stored = window.localStorage.getItem(locationsStorageKey);
-    const parsed = stored ? (JSON.parse(stored) as Partial<PlannerLocations>) : {};
-    return Array.isArray(parsed.structures) ? parsed.structures : [];
-  }
-  catch {
-    return [];
-  }
-}
-
 export default function LocationsPage() {
   const { language } = useAppLanguage();
   const [structureTypes, setStructureTypes] = useState<StructureType[]>([]);
@@ -200,7 +196,7 @@ export default function LocationsPage() {
     Large: [],
     "Extra Large": [],
   });
-  const [rigTypeIdsByName, setRigTypeIdsByName] = useState<Record<string, number>>({});
+  const [rigTypeIdsByName, setRigTypeIdsByName] = useState<Record<string, number | undefined>>({});
   const [rigNamesByTypeId, setRigNamesByTypeId] = useState<Record<number, string>>({});
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [esiStructures, setEsiStructures] = useState<EsiStructure[]>([]);
@@ -219,15 +215,7 @@ export default function LocationsPage() {
 
     async function loadKnownStructures() {
       try {
-        let structures = await loadStructures();
-        if (structures.length === 0) {
-          const legacyStructures = readLegacyStructures();
-          if (legacyStructures.length > 0) {
-            await saveStructures(legacyStructures);
-            structures = legacyStructures;
-          }
-        }
-        window.localStorage.removeItem(locationsStorageKey);
+        const structures = await loadStructures();
         if (!cancelled) {
           setLocations((current) => ({ ...current, structures }));
         }
@@ -384,7 +372,7 @@ export default function LocationsPage() {
   ) {
     const entry = sharedRigEntry(systemId, systemName, name);
     if (!entry) return null;
-    return entry.rigTypeIds.map((rigTypeId) => rigNamesByTypeId[rigTypeId] ?? "No Rig");
+    return entry.rigTypeIds.map((rigTypeId) => rigNamesByTypeId[rigTypeId] ?? String(rigTypeId));
   }
 
   // The collection rig map is shared by every session, so it wins over the local copy.
@@ -394,7 +382,6 @@ export default function LocationsPage() {
     return {
       ...structure,
       rigTypeIds: entry.rigTypeIds,
-      rigs: entry.rigTypeIds.map((rigTypeId) => rigNamesByTypeId[rigTypeId] ?? "No Rig"),
     };
   });
 
@@ -424,7 +411,7 @@ export default function LocationsPage() {
     if (structure.locationType !== "structure") return structure;
     const localOverride = findLocalOverride(structure);
     const rigs =
-      localOverride?.rigs
+      (localOverride ? rigNamesForTypeIds(localOverride.rigTypeIds, rigNamesByTypeId) : undefined)
       ?? sharedRigNames(structure.systemId, structure.systemName, structure.name);
     return rigs ? { ...structure, rigs } : structure;
   });
@@ -446,7 +433,7 @@ export default function LocationsPage() {
         systemName: structure.systemName,
         type: structure.type,
         size: structure.size,
-        rigs: asset?.rigs ?? structure.rigs,
+        rigs: asset?.rigs ?? rigNamesForTypeIds(structure.rigTypeIds, rigNamesByTypeId),
       };
     }),
     ...displayedEsiStructures
@@ -499,10 +486,11 @@ export default function LocationsPage() {
       size: esiStructure.size ?? type.size,
       sizeId: type.sizeId,
       name: localOverride?.name ?? esiStructure.name,
-      rigs:
-        localOverride?.rigs
-        ?? sharedRigNames(esiStructure.systemId, esiStructure.systemName, esiStructure.name)
-        ?? (esiStructure.rigs.length > 0 ? esiStructure.rigs : ["No Rig", "No Rig", "No Rig"]),
+      rigTypeIds:
+        localOverride?.rigTypeIds
+        ?? sharedRigEntry(esiStructure.systemId, esiStructure.systemName, esiStructure.name)
+          ?.rigTypeIds
+        ?? [],
       allowStandardBuilds: localOverride?.allowStandardBuilds,
       allowCapitalBuilds: localOverride?.allowCapitalBuilds,
       allowReprocessing: localOverride?.allowReprocessing,
@@ -673,7 +661,7 @@ export default function LocationsPage() {
             const previous = knownStructures.find((current) => current.id === structure.id);
             const rigConfigurationChanged =
               previous === undefined
-                ? (structure.rigTypeIds?.length ?? 0) > 0
+                ? structure.rigTypeIds.length > 0
                 : !sameRigTypeIds(previous.rigTypeIds, structure.rigTypeIds);
             const structures = assignPlannerLocationIds(
               previous !== undefined
@@ -728,7 +716,7 @@ function StructureDialog({
   onSave: (structure: KnownStructure) => void;
   structure: KnownStructure | null;
   rigOptionsBySize: Record<StructureSize, string[]>;
-  rigTypeIdsByName: Record<string, number>;
+  rigTypeIdsByName: Record<string, number | undefined>;
   rigNamesByTypeId: Record<number, string>;
 }) {
   const [systemName, setSystemName] = useState(structure?.systemName ?? "");
@@ -749,7 +737,11 @@ function StructureDialog({
   const [type, setType] = useState(structure?.type ?? structureTypes[0].name);
   const [name, setName] = useState(structure?.name ?? "");
   const [fittingWarning, setFittingWarning] = useState("");
-  const [rigs, setRigs] = useState(structure?.rigs ?? ["No Rig", "No Rig", "No Rig"]);
+  const [rigs, setRigs] = useState(
+    structure
+      ? rigSlotsForTypeIds(structure.rigTypeIds, rigNamesByTypeId)
+      : ["No Rig", "No Rig", "No Rig"],
+  );
   const [allowStandardBuilds, setAllowStandardBuilds] = useState(
     structure?.allowStandardBuilds ?? true,
   );
@@ -918,8 +910,10 @@ function StructureDialog({
       size: selectedType.size,
       sizeId: selectedType.sizeId,
       name: name.trim(),
-      rigs,
-      rigTypeIds: rigs.map((rig) => rigTypeIdsByName[rig] ?? 0),
+      rigTypeIds: rigs.flatMap((rig) => {
+        const rigTypeId = rigTypeIdsByName[rig] ?? (/^\d+$/.test(rig) ? Number(rig) : undefined);
+        return rigTypeId === undefined ? [] : [rigTypeId];
+      }),
       allowStandardBuilds,
       allowCapitalBuilds,
       allowSupercapitalBuilds,
@@ -1041,9 +1035,14 @@ function StructureDialog({
                   if (!nextType) return;
                   setType(nextType.name);
                   setRigs((current) =>
-                    current.map((rig) =>
-                      rigOptionsBySize[nextType.size].includes(rig) ? rig : "No Rig",
-                    ),
+                    current.map((rig) => {
+                      if (
+                        rig === "No Rig"
+                        || rigOptionsBySize[nextType.size].includes(rig)
+                        || rigTypeIdsByName[rig] === undefined
+                      ) return rig;
+                      return "No Rig";
+                    }),
                   );
                 }}
               />
@@ -1060,24 +1059,29 @@ function StructureDialog({
                   />
                 </div>
               </Field>
-              {rigs.map((rig, index) => (
-                <StructureSelect
-                  key={index}
-                  label={`RIG ${index + 1}`}
-                  value={rig}
-                  options={rigOptionsBySize[selectedType.size].map((option) => ({
-                    value: option,
-                    label: option,
-                  }))}
-                  onChange={(value) =>
-                    setRigs((current) =>
-                      current.map((currentRig, rigIndex) =>
-                        rigIndex === index ? value : currentRig,
-                      ),
-                    )
-                  }
-                />
-              ))}
+              {rigs.map((rig, index) => {
+                const options = rigOptionsBySize[selectedType.size]
+                  .filter((option) => option !== "No Rig")
+                  .map((option) => ({ value: option, label: option }));
+                if (rig !== "No Rig" && !options.some((option) => option.value === rig)) {
+                  options.push({ value: rig, label: `Rig ${rig}` });
+                }
+                return (
+                  <StructureSelect
+                    key={index}
+                    label={`RIG ${index + 1}`}
+                    value={rig}
+                    options={[{ value: "No Rig", label: "No Rig" }, ...options]}
+                    onChange={(value) =>
+                      setRigs((current) =>
+                        current.map((currentRig, rigIndex) =>
+                          rigIndex === index ? value : currentRig,
+                        ),
+                      )
+                    }
+                  />
+                );
+              })}
             </FieldGroup>
             <div className={styles.constructionGrid}>
               <div className={styles.constructionGridHeader} aria-hidden="true">

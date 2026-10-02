@@ -1,19 +1,30 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getCompressibleTypes, getTypeMaterials, getTypes } from "@/cache/services/sdeCache";
+import {
+  getCompressibleTypes,
+  getDogmaAttributes,
+  getGroups,
+  getTypeDogma,
+  getTypeMaterials,
+  getTypes,
+} from "@/cache/services/sdeCache";
 import { getRegionalAppraisalPrices, type RegionalAppraisalPrices } from "@/lib/esi/marketHistory";
+import { calculateReprocessingProfile } from "@/lib/planning/reprocessingEfficiency";
+import { reprocessingProfileSchema } from "@/lib/planning/reprocessingProfile";
+import { specialReprocessableTypeIds } from "@/lib/planning/reprocessStock";
 import { calculateReprocessingYields } from "@/lib/planning/simulator/reprocessing";
 import { marketHubs } from "@/lib/reference/marketHubs";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 
-const orePricesRequestSchema = z.object({
-  language: z.string().optional(),
-  marketId: z.enum(marketHubs.map((market) => market.id) as [string, ...string[]]).default("jita"),
-  reprocessingEfficiencies: z.record(
-    z.string().regex(/^\d+$/),
-    z.number().finite().min(0).max(150),
-  ),
-});
+const orePricesRequestSchema = z
+  .object({
+    language: z.string().optional(),
+    marketId: z
+      .enum(marketHubs.map((market) => market.id) as [string, ...string[]])
+      .default("jita"),
+    reprocessingProfile: reprocessingProfileSchema,
+  })
+  .strict();
 
 const emptyAppraisalPrices: RegionalAppraisalPrices = {
   fivePercentSellPrice: null,
@@ -28,7 +39,7 @@ export async function POST(request: Request) {
   const parsed = orePricesRequestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Provide a supported market and calculated reprocessing efficiencies." },
+      { error: "Provide a supported market and reprocessing profile." },
       { status: 400 },
     );
   }
@@ -38,14 +49,29 @@ export async function POST(request: Request) {
   const market =
     marketHubs.find((candidate) => candidate.id === parsed.data.marketId) ?? marketHubs[0];
   try {
-    const [types, compressibleTypes, typeMaterials] = await Promise.all([
-      getTypes(),
-      getCompressibleTypes(),
-      getTypeMaterials(),
-    ]);
+    const [types, groups, typeDogma, dogmaAttributes, compressibleTypes, typeMaterials] =
+      await Promise.all([
+        getTypes(),
+        getGroups(),
+        getTypeDogma(),
+        getDogmaAttributes(),
+        getCompressibleTypes(),
+        getTypeMaterials(),
+      ]);
     const compressibleTypeIds = [...new Set(compressibleTypes.values())];
+    if (
+      parsed.data.reprocessingProfile.structureTypeId !== 0
+      && !types.has(parsed.data.reprocessingProfile.structureTypeId)
+    ) {
+      return NextResponse.json({ error: "Unknown structure type ID." }, { status: 400 });
+    }
+    const { efficiencies: reprocessingEfficiencies } = calculateReprocessingProfile(
+      { types, groups, typeDogma, dogmaAttributes },
+      [...compressibleTypeIds, ...specialReprocessableTypeIds],
+      parsed.data.reprocessingProfile,
+    );
     const missingEfficiencies = compressibleTypeIds.filter(
-      (typeId) => !Object.hasOwn(parsed.data.reprocessingEfficiencies, String(typeId)),
+      (typeId) => !Object.hasOwn(reprocessingEfficiencies, String(typeId)),
     );
     if (missingEfficiencies.length > 0) {
       return NextResponse.json(
@@ -58,7 +84,7 @@ export async function POST(request: Request) {
       if (!type) return [];
 
       const sourceMaterials = typeMaterials.get(typeId)?.materials ?? [];
-      const reprocessingEfficiency = parsed.data.reprocessingEfficiencies[String(typeId)];
+      const reprocessingEfficiency = reprocessingEfficiencies[String(typeId)];
       const quantity = Math.max(1, type.portionSize);
       const yields = calculateReprocessingYields(sourceMaterials, 1, reprocessingEfficiency)
         .filter((material) => material.quantity > 0)
