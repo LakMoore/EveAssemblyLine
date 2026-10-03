@@ -692,7 +692,7 @@ export async function simulateIndustry(
     ?? measureSyncProfiled(profiler, "hash-input", () => simulationInputHash(request));
   return {
     metadata: {
-      simulatorVersion: 3,
+      simulatorVersion: 4,
       policyVersion: 1,
       generatedAt,
       sdeRevision: context.sdeRevision,

@@ -2,7 +2,10 @@ import { createHash } from "node:crypto";
 import type { BlueprintsRecord } from "@/lib/sde/generated";
 import { getInventionDecryptorModifiers, getNoDecryptorInventionOutput } from "@/lib/sde/invention";
 import { inventionSuccessConfidence, minimumAttemptsForSuccesses } from "./binomial";
-import { requiredMaterialQuantity } from "@/lib/planning/materialQuantities";
+import {
+  requiredMaterialQuantity,
+  requiredMaterialQuantityInBatches,
+} from "@/lib/planning/materialQuantities";
 import { isAncientRelicType } from "@/lib/reference/category";
 import { productionGroupForType } from "@/lib/planning/productionGroups";
 import type { PlanStockpile } from "@/lib/planning/types";
@@ -114,6 +117,7 @@ interface DeferredProductionSupply {
   blueprint: BlueprintClaim;
   profile: ActivityProfile;
   materials: readonly MaterialSpecification[];
+  maxRunsPerBatch: number;
   job?: SimulationIndustryJob;
 }
 
@@ -626,6 +630,7 @@ class IndustryDemandSimulation {
                   deferred.blueprint,
                   deferred.profile.materialMultiplier,
                   deferred.materials,
+                  deferred.maxRunsPerBatch,
                   (material) =>
                     deferred.job?.inputs.find((candidate) => candidate.typeId === material.typeId)
                       ?.availableNow ?? 0,
@@ -638,6 +643,7 @@ class IndustryDemandSimulation {
                   deferred.blueprint,
                   deferred.profile.materialMultiplier,
                   deferred.materials,
+                  deferred.maxRunsPerBatch,
                   (material) => {
                     const jobInput = deferred.job?.inputs.find(
                       (candidate) => candidate.typeId === material.typeId,
@@ -653,6 +659,7 @@ class IndustryDemandSimulation {
                   deferred.blueprint,
                   deferred.profile.materialMultiplier,
                   deferred.materials,
+                  deferred.maxRunsPerBatch,
                   (material) =>
                     deferred.job?.inputs.find((candidate) => candidate.typeId === material.typeId)
                       ?.availableAfterUpstream ?? 0,
@@ -1292,18 +1299,28 @@ class IndustryDemandSimulation {
       throw new Error(`Production ${production.blueprint._key} has no product ${productTypeId}.`);
     }
     const activity = production.activity;
+    const durationPerRunSeconds = Math.max(
+      1,
+      Math.ceil(
+        details.activity.time
+          * profile.timeMultiplier
+          * (activity === "manufacturing" ? 1 - blueprint.timeEfficiency / 100 : 1),
+      ),
+    );
+    const maxRunsPerBatch = this.maxRunsPerReactionBatch(activity, durationPerRunSeconds);
     const materialSpecifications: MaterialSpecification[] = (details.activity.materials ?? []).map(
       (material) => {
         const account: SimulationLedgerAccount = {
           locationId: profile.locationId,
           typeId: material.typeID,
         };
-        const requiredQuantity = requiredMaterialQuantity(
+        const requiredQuantity = this.requiredMaterialQuantityForInstall(
           activity,
           material.quantity,
           blueprint.runs,
           { me: blueprint.materialEfficiency },
           profile.materialMultiplier,
+          maxRunsPerBatch,
         );
         const source = this.demandSource(
           stockpile,
@@ -1345,6 +1362,7 @@ class IndustryDemandSimulation {
         blueprint,
         profile.materialMultiplier,
         materialSpecifications,
+        maxRunsPerBatch,
         (material) => availabilityByTypeId.get(material.typeId)?.local ?? 0,
       ),
     );
@@ -1355,6 +1373,7 @@ class IndustryDemandSimulation {
         blueprint,
         profile.materialMultiplier,
         materialSpecifications,
+        maxRunsPerBatch,
         (material) => {
           const available = availabilityByTypeId.get(material.typeId);
           return (available?.local ?? 0) + (available?.remote ?? 0);
@@ -1368,6 +1387,7 @@ class IndustryDemandSimulation {
         blueprint,
         profile.materialMultiplier,
         materialSpecifications,
+        maxRunsPerBatch,
         (material) => {
           const available = availabilityByTypeId.get(material.typeId);
           return (available?.local ?? 0) + (available?.remote ?? 0) + (available?.future ?? 0);
@@ -1433,6 +1453,7 @@ class IndustryDemandSimulation {
         blueprint,
         profile,
         materials: materialSpecifications,
+        maxRunsPerBatch,
       });
     }
 
@@ -1443,16 +1464,9 @@ class IndustryDemandSimulation {
         blueprint,
         profile.materialMultiplier,
         materialSpecifications,
+        maxRunsPerBatch,
         (material) =>
           inputs.find((input) => input.typeId === material.typeId)?.availableAfterUpstream ?? 0,
-      ),
-    );
-    const durationPerRunSeconds = Math.max(
-      1,
-      Math.ceil(
-        details.activity.time
-          * profile.timeMultiplier
-          * (activity === "manufacturing" ? 1 - blueprint.timeEfficiency / 100 : 1),
       ),
     );
     const job: SimulationIndustryJob = {
@@ -1885,6 +1899,7 @@ class IndustryDemandSimulation {
     blueprint: SimulationBlueprintAllocation,
     materialMultiplier: number,
     materials: readonly MaterialSpecification[],
+    maxRunsPerBatch: number,
     availableFor: (material: MaterialSpecification) => number,
   ): number {
     if (materials.length === 0) return blueprint.runs;
@@ -1894,18 +1909,59 @@ class IndustryDemandSimulation {
       const candidate = Math.ceil((lower + upper) / 2);
       const fits = materials.every(
         (material) =>
-          requiredMaterialQuantity(
+          this.requiredMaterialQuantityForInstall(
             activity,
             material.quantityPerRun,
             candidate,
             { me: blueprint.materialEfficiency },
             materialMultiplier,
+            maxRunsPerBatch,
           ) <= availableFor(material),
       );
       if (fits) lower = candidate;
       else upper = candidate - 1;
     }
     return lower;
+  }
+
+  private maxRunsPerReactionBatch(
+    activity: ProductionActivity,
+    durationPerRunSeconds: number,
+  ): number {
+    if (activity !== "reaction") return Number.MAX_SAFE_INTEGER;
+    return Math.max(
+      1,
+      Math.floor(
+        (this.request.simulation.maxReactionJobDurationHours * 3600) / durationPerRunSeconds,
+      ),
+    );
+  }
+
+  private requiredMaterialQuantityForInstall(
+    activity: ProductionActivity,
+    materialQuantity: number,
+    runs: number,
+    efficiency: { me: number },
+    materialMultiplier: number,
+    maxRunsPerBatch: number,
+  ): number {
+    if (activity !== "reaction") {
+      return requiredMaterialQuantity(
+        activity,
+        materialQuantity,
+        runs,
+        efficiency,
+        materialMultiplier,
+      );
+    }
+    return requiredMaterialQuantityInBatches(
+      activity,
+      materialQuantity,
+      runs,
+      efficiency,
+      materialMultiplier,
+      maxRunsPerBatch,
+    );
   }
 
   private fallbackBlueprint(

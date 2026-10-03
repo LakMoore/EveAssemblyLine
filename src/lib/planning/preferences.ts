@@ -48,6 +48,7 @@ export type PlannerSettings = {
   marketStations: ConfiguredMarketStation[];
   marketSalesTaxPercent: number;
   marketSignalThresholdIsk: number;
+  maxReactionJobDurationHours: number;
   fallbackT1Me: number;
   fallbackT1Te: number;
   fallbackT2OrT3Me: number;
@@ -74,6 +75,7 @@ export const defaultSettings: PlannerSettings = {
   marketStations: defaultMarketStations,
   marketSalesTaxPercent: 3.6,
   marketSignalThresholdIsk: 5_000_000,
+  maxReactionJobDurationHours: 24,
   fallbackT1Me: 8,
   fallbackT1Te: 10,
   fallbackT2OrT3Me: 2,
@@ -125,6 +127,11 @@ export function parsePlannerSettings(value: unknown): PlannerSettings {
     && Number.isFinite(raw.marketSignalThresholdIsk)
       ? Math.max(0, raw.marketSignalThresholdIsk)
       : defaultSettings.marketSignalThresholdIsk;
+  const maxReactionJobDurationHours =
+    typeof raw.maxReactionJobDurationHours === "number"
+    && Number.isFinite(raw.maxReactionJobDurationHours)
+      ? Math.min(8760, Math.max(1, Math.round(raw.maxReactionJobDurationHours)))
+      : defaultSettings.maxReactionJobDurationHours;
   return {
     ...defaultSettings,
     ...parsed,
@@ -132,6 +139,7 @@ export function parsePlannerSettings(value: unknown): PlannerSettings {
     marketStations,
     marketSalesTaxPercent,
     marketSignalThresholdIsk,
+    maxReactionJobDurationHours,
   };
 }
 

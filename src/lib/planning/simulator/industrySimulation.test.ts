@@ -64,6 +64,64 @@ void test("declares an exact SDE-backed manufacturing job without inventing avai
   assert.deepEqual(projection.invariantViolations, []);
 });
 
+void test("rounds reaction inputs per simulated maximum-duration install", async () => {
+  const createResult = async (maxReactionJobDurationHours: number) =>
+    simulateIndustry(
+      parseSimulatorRequest({
+        stockpiles: [
+          {
+            id: "main",
+            name: "Main",
+            locations: {
+              stock: 10,
+              manufacturing: 20,
+              reactions: 30,
+              reprocessing: 40,
+              copying: 50,
+              invention: 60,
+            },
+            items: [{ typeId: 16680, quantity: 15_400, me: 0, te: 0, fromCompression: false }],
+          },
+        ],
+        assets: [],
+        settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+        facilityProfiles: [
+          {
+            locationId: 30,
+            systemId: 30_000_142,
+            sizeId: 1,
+            buildTypeGroups: {
+              compositeReactions: {
+                manufacturingMaterialMultiplier: 1,
+                manufacturingMaterialPercentage: 0,
+                manufacturingTimeMultiplier: 1,
+                manufacturingTimePercentage: 0,
+                reactionMaterialMultiplier: 0.978,
+                reactionMaterialPercentage: -2.2,
+                reactionTimeMultiplier: 1,
+                reactionTimePercentage: 0,
+              },
+            },
+          },
+        ],
+        simulation: { version: 1, maxReactionJobDurationHours },
+      }),
+    );
+
+  const [oneHourResult, oneDayResult] = await Promise.all([createResult(1), createResult(24)]);
+  const getJob = (result: Awaited<ReturnType<typeof createResult>>) => {
+    const job = result.lists.reactionJobs.find((candidate) => candidate.productTypeId === 16680);
+    assert.ok(job);
+    assert.equal(job.requiredRuns, 7);
+    return job;
+  };
+
+  const oneHourJob = getJob(oneHourResult);
+  const oneDayJob = getJob(oneDayResult);
+  assert.equal(oneHourJob.inputs.find((input) => input.typeId === 16663)?.requiredQuantity, 686);
+  assert.equal(oneDayJob.inputs.find((input) => input.typeId === 16663)?.requiredQuantity, 685);
+});
+
 void test("keeps upstream demand separate from a multi-unit job output", async () => {
   const request = parseSimulatorRequest({
     stockpiles: [

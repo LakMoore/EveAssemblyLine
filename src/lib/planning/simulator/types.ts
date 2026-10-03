@@ -100,6 +100,7 @@ export interface SimulationOptionsV1 {
   version: 1;
   simulateSurplus: boolean;
   blockInterStockpileHauling: boolean;
+  maxReactionJobDurationHours: number;
   characters: SimulationCharacterProfile[];
   scienceProfiles: SimulationScienceProfile[];
   policy: SimulationPolicyV1;
@@ -460,7 +461,7 @@ export interface SimulationLedgerView {
 export interface SimulationResultV2 {
   metadata: {
     simulationId?: string;
-    simulatorVersion: 3;
+    simulatorVersion: 4;
     policyVersion: 1;
     generatedAt: string;
     sdeRevision: string;

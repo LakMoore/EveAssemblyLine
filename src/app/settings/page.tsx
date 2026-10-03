@@ -318,6 +318,42 @@ export default function SettingsPage() {
         </Field>
         <Field className={styles.rule} orientation="horizontal">
           <FieldContent>
+            <FieldLabel htmlFor="max-reaction-job-duration-hours">
+              Simulate split-job rounding
+            </FieldLabel>
+            <FieldDescription id="max-reaction-job-duration-description">
+              Estimate reaction inputs as separate installs no longer than this many hours. Per-job
+              rounding may change required materials; the plan remains grouped into its existing job
+              rows.
+            </FieldDescription>
+          </FieldContent>
+          <div className="flex items-center gap-2">
+            <Input
+              id="max-reaction-job-duration-hours"
+              className={styles.ruleNumber}
+              type="number"
+              min="1"
+              max="8760"
+              step="1"
+              aria-describedby="max-reaction-job-duration-description max-reaction-job-duration-unit"
+              value={settings.maxReactionJobDurationHours}
+              onChange={(event) =>
+                setSettings({
+                  ...settings,
+                  maxReactionJobDurationHours: Math.max(
+                    1,
+                    Math.round(boundedNumber(event.target.value, 8760)),
+                  ),
+                })
+              }
+            />
+            <span id="max-reaction-job-duration-unit" className="text-sm text-muted-foreground">
+              hours
+            </span>
+          </div>
+        </Field>
+        <Field className={styles.rule} orientation="horizontal">
+          <FieldContent>
             <FieldLabel>Fallback T1 Blueprint Bonus</FieldLabel>
             <FieldDescription>Used when a Tech I blueprint is unavailable</FieldDescription>
           </FieldContent>

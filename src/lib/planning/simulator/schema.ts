@@ -21,6 +21,7 @@ const defaultSimulationOptions = {
   version: 1 as const,
   simulateSurplus: false,
   blockInterStockpileHauling: false,
+  maxReactionJobDurationHours: 24,
   characters: [],
   scienceProfiles: [],
   policy: defaultSimulationPolicy,
@@ -161,6 +162,7 @@ const simulationSchema = z
     version: z.literal(1).default(1),
     simulateSurplus: z.boolean().default(false),
     blockInterStockpileHauling: z.boolean().default(false),
+    maxReactionJobDurationHours: z.number().int().min(1).max(8760).default(24),
     characters: z
       .array(
         z.object({

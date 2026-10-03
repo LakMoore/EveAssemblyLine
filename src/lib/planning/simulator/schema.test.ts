@@ -37,6 +37,7 @@ void test("defaults the simulator policy", () => {
   const parsed = parseSimulatorRequest(request());
   assert.equal(parsed.simulation.simulateSurplus, false);
   assert.equal(parsed.simulation.blockInterStockpileHauling, false);
+  assert.equal(parsed.simulation.maxReactionJobDurationHours, 24);
   assert.equal(parsed.simulation.policy.fallbackInventionSkillLevel, 3);
   assert.deepEqual(parsed.simulation.characters, []);
 });
@@ -47,6 +48,21 @@ void test("accepts the inter-stockpile hauling policy", () => {
     simulation: { version: 1, blockInterStockpileHauling: true },
   });
   assert.equal(parsed.simulation.blockInterStockpileHauling, true);
+});
+
+void test("validates the maximum reaction job duration", () => {
+  const parsed = parseSimulatorRequest({
+    ...request(),
+    simulation: { version: 1, maxReactionJobDurationHours: 12 },
+  });
+  assert.equal(parsed.simulation.maxReactionJobDurationHours, 12);
+  assert.equal(
+    simulatorRequestSchema.safeParse({
+      ...request(),
+      simulation: { version: 1, maxReactionJobDurationHours: 0 },
+    }).success,
+    false,
+  );
 });
 
 void test("requires a system ID for facility profiles", () => {

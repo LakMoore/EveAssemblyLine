@@ -634,7 +634,7 @@ function Planner() {
     if (typeof window === "undefined") return defaultSettings;
     try {
       const stored = window.localStorage.getItem(settingsStorageKey);
-      return stored ? { ...defaultSettings, ...JSON.parse(stored) } : defaultSettings;
+      return stored ? parsePlannerSettings(JSON.parse(stored)) : defaultSettings;
     }
     catch {
       return defaultSettings;
@@ -1186,6 +1186,7 @@ function Planner() {
                     version: 1,
                     simulateSurplus,
                     blockInterStockpileHauling: !allowInterStockpileHauling,
+                    maxReactionJobDurationHours: settings.maxReactionJobDurationHours,
                   },
                 }
               : {}),

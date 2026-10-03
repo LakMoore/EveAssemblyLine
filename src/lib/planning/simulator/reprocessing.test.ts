@@ -67,6 +67,7 @@ const request: SimulationRequestV1 = {
     version: 1,
     simulateSurplus: false,
     blockInterStockpileHauling: false,
+    maxReactionJobDurationHours: 24,
     characters: [],
     scienceProfiles: [],
     policy: {
