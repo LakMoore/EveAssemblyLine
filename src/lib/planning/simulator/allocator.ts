@@ -53,17 +53,20 @@ function locationPairKey(firstLocationId: number, secondLocationId: number): str
     : `${secondLocationId}:${firstLocationId}`;
 }
 
-function stockpileRoutePolicy(stockpiles: readonly Pick<PlanStockpile, "locations">[]) {
+function stockpileRoutePolicy(
+  stockpiles: readonly Pick<PlanStockpile, "locations" | "groupAssignments">[],
+) {
   const stockpileLocationIds = new Set<number>();
   const sameStockpileLocationPairs = new Set<string>();
   for (const stockpile of stockpiles) {
     const locationIds = [
-      ...new Set(
-        Object
+      ...new Set([
+        ...Object
           .entries(stockpile.locations)
           .filter(([locationKind]) => locationKind !== "stock")
           .map(([, locationId]) => locationId),
-      ),
+        ...Object.values(stockpile.groupAssignments ?? {}),
+      ]),
     ];
     for (const locationId of locationIds) stockpileLocationIds.add(locationId);
     for (let firstIndex = 0; firstIndex < locationIds.length; firstIndex += 1) {
@@ -103,7 +106,7 @@ export class SimulationAllocator {
   constructor(
     private readonly inventory: SimulatorInventory,
     private readonly haulExclusions: readonly SimulationHaulExclusion[],
-    stockpiles: readonly Pick<PlanStockpile, "locations">[] = [],
+    stockpiles: readonly Pick<PlanStockpile, "locations" | "groupAssignments">[] = [],
     blockInterStockpileHauling = false,
     facilityProfiles: readonly SimulationFacilityProfile[] = [],
   ) {
@@ -171,7 +174,14 @@ export class SimulationAllocator {
         if (
           lot.locationId === destinationLocationId
           || (lot.locationId !== undefined && !this.isExcluded(lot, destinationLocationId))
-        ) future += quantity;
+        ) {
+          future
+            += Math.max(
+              0,
+              quantity
+                - this.activityReservationsForOtherDestinations(lot.lotId, destinationLocationId),
+            );
+        }
         continue;
       }
       else if (lot.locationId === destinationLocationId) {
@@ -285,7 +295,7 @@ export class SimulationAllocator {
     );
   }
 
-  /** Reserves remote physical supply for activity only after local stockpile demand is protected. */
+  /** Reserves remote and future activity supply after local stockpile demand is protected. */
   reserveRemoteActivityDemand(): void {
     for (const demand of this.sortedPendingDemands(this.pendingRemoteActivityDemands)) {
       let remaining = demand.quantity;
@@ -300,6 +310,36 @@ export class SimulationAllocator {
         .slice()
         .sort((left, right) => left.lotId.localeCompare(right.lotId));
       for (const lot of candidates) {
+        if (remaining <= 0) break;
+        const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
+        const next = Math.min(
+          remaining,
+          Math.max(0, available - this.totalProtectedReservation(lot.lotId)),
+        );
+        if (next <= 0) continue;
+        this.addActivityReservation(lot.lotId, demand.destinationLocationId, next);
+        remaining -= next;
+      }
+      // Prefer ready physical supply; reserve future output only for the remaining demand.
+      const futureCandidates = (this.itemLotsByTypeId.get(demand.typeId) ?? [])
+        .filter(
+          (lot) =>
+            lot.source !== "market-order"
+            && lot.horizon === "after-upstream"
+            && lot.locationId !== undefined
+            && (
+              lot.locationId === demand.destinationLocationId
+              || !this.isExcluded(lot, demand.destinationLocationId)
+            ),
+        )
+        .slice()
+        .sort(
+          (left, right) =>
+            Number(left.locationId !== demand.destinationLocationId)
+              - Number(right.locationId !== demand.destinationLocationId)
+            || left.lotId.localeCompare(right.lotId),
+        );
+      for (const lot of futureCandidates) {
         if (remaining <= 0) break;
         const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
         const next = Math.min(
@@ -585,15 +625,44 @@ export class SimulationAllocator {
       )) {
       if (remaining <= 0) break;
       const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
-      const next = Math.min(remaining, available);
       const sourceLocationId = lot.locationId;
       if (
-        next <= 0
-        || sourceLocationId === undefined
+        sourceLocationId === undefined
         || (lot.activity !== "manufacturing" && lot.activity !== "reaction")
       ) continue;
+      const activityReservation = this.activityReservation(lot.lotId);
+      const ownActivityReservation = this.activityReservation(lot.lotId, account.locationId);
+      const stockpileReservation = this.stockpileReservation(lot.lotId);
+      const ownStockpileReservation = this.stockpileReservation(lot.lotId, account.locationId);
+      const isLocal = sourceLocationId === account.locationId;
+      const protectedQuantity =
+        allocationPurpose === "stockpile-demand"
+          ? (isLocal ? this.activityReservation(lot.lotId, sourceLocationId) : activityReservation)
+            + (isLocal ? 0 : stockpileReservation - ownStockpileReservation)
+          : activityReservation
+            - ownActivityReservation
+            + (isLocal ? 0 : this.stockpileReservation(lot.lotId, sourceLocationId));
+      const usable = Math.max(0, available - protectedQuantity);
+      const next = Math.min(remaining, usable);
+      if (next <= 0) continue;
       const activity = lot.activity;
       this.remainingItemQuantityByLotId.set(lot.lotId, available - next);
+      if (allocationPurpose === "activity-input") {
+        this.consumeActivityReservation(lot.lotId, account.locationId, next);
+        const unreservedQuantity = Math.max(
+          0,
+          available - activityReservation - stockpileReservation,
+        );
+        this.consumeStockpileReservation(
+          lot.lotId,
+          Math.max(0, next - ownActivityReservation - unreservedQuantity),
+          undefined,
+          isLocal ? undefined : sourceLocationId,
+        );
+      }
+      else {
+        this.consumeStockpileReservation(lot.lotId, next, account.locationId);
+      }
       const sourceAccount = { locationId: sourceLocationId, typeId: lot.typeId };
       this.transactions.push({
         id: this.nextTransactionId("existing-output"),

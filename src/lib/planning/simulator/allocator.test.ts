@@ -360,6 +360,182 @@ void test("blocks cross-stockpile activity hauls but allows end-destination haul
   );
   assert.equal(endDestinationTarget.claimOrdinarySupply(34, 2, 20, account, "job").remote, 2);
 });
+void test("includes assigned facilities in inter-stockpile haul restrictions", () => {
+  const stockpiles = [
+    {
+      locations: {
+        stock: 10,
+        manufacturing: 11,
+        reactions: 12,
+        reprocessing: 13,
+        copying: 14,
+        invention: 15,
+      },
+      groupAssignments: { capitalComponents: 16 },
+    },
+    {
+      locations: {
+        stock: 20,
+        manufacturing: 21,
+        reactions: 22,
+        reprocessing: 23,
+        copying: 24,
+        invention: 25,
+      },
+    },
+  ] as const;
+  const overrideStationInventory = {
+    ...inventory,
+    itemLots: [{ ...inventory.itemLots[1], lotId: "assigned-station", locationId: 16 }],
+  };
+
+  const blocked = new SimulationAllocator(overrideStationInventory, [], stockpiles, true);
+  assert.equal(
+    blocked.claimOrdinarySupply(34, 2, 21, { ...account, locationId: 21 }, "job").remote,
+    0,
+  );
+
+  const sameStockpile = new SimulationAllocator(overrideStationInventory, [], stockpiles, true);
+  assert.equal(
+    sameStockpile.claimOrdinarySupply(34, 2, 11, { ...account, locationId: 11 }, "job").remote,
+    2,
+  );
+});
+
+void test("protects reserved activity stock from another stockpile's haul", () => {
+  const stockpiles = [
+    {
+      locations: {
+        stock: 10,
+        manufacturing: 11,
+        reactions: 12,
+        reprocessing: 13,
+        copying: 14,
+        invention: 15,
+      },
+      groupAssignments: { capitalComponents: 16 },
+    },
+    {
+      locations: {
+        stock: 20,
+        manufacturing: 21,
+        reactions: 22,
+        reprocessing: 23,
+        copying: 24,
+        invention: 25,
+      },
+    },
+  ] as const;
+  const localInventory = {
+    ...inventory,
+    itemLots: [{ ...inventory.itemLots[0], lotId: "reserved-at-a", quantity: 2, locationId: 11 }],
+  };
+  const allocator = new SimulationAllocator(localInventory, [], stockpiles, true);
+  allocator.reserveActivityDemand(34, 2, 11);
+  allocator.reserveRemoteActivityDemand();
+
+  const competingStockpileClaim = allocator.claimOrdinarySupply(
+    34,
+    2,
+    20,
+    { ...account, locationId: 20 },
+    "other-stockpile-job",
+    "other-stockpile",
+    "stock",
+    "stockpile-demand",
+  );
+  assert.deepEqual(
+    competingStockpileClaim,
+    {
+      local: 0,
+      remote: 0,
+      future: 0,
+      futureReservations: [],
+    },
+  );
+  assert.equal(allocator.haulingTasks.length, 0);
+
+  const activityClaim = allocator.claimOrdinarySupply(
+    34,
+    2,
+    11,
+    { ...account, locationId: 11 },
+    "station-a-job",
+    undefined,
+    "manufacturing",
+    "activity-input",
+  );
+  assert.equal(activityClaim.local, 2);
+});
+
+void test("protects future activity output from another stockpile's haul", () => {
+  const stockpiles = [
+    {
+      locations: {
+        stock: 10,
+        manufacturing: 11,
+        reactions: 12,
+        reprocessing: 13,
+        copying: 14,
+        invention: 15,
+      },
+    },
+    {
+      locations: {
+        stock: 20,
+        manufacturing: 21,
+        reactions: 22,
+        reprocessing: 23,
+        copying: 24,
+        invention: 25,
+      },
+    },
+  ] as const;
+  const futureInventory = {
+    ...inventory,
+    itemLots: [
+      {
+        ...inventory.itemLots[0],
+        lotId: "future-at-a",
+        quantity: 2,
+        locationId: 11,
+        horizon: "after-upstream" as const,
+        source: "industry-output" as const,
+        activity: "manufacturing" as const,
+        industryJobId: 123,
+        industryJobStatus: "active" as const,
+      },
+    ],
+  };
+  const allocator = new SimulationAllocator(futureInventory, [], stockpiles, true);
+  allocator.reserveActivityDemand(34, 2, 11);
+  allocator.reserveRemoteActivityDemand();
+
+  const competingStockpileClaim = allocator.claimOrdinarySupply(
+    34,
+    2,
+    20,
+    { ...account, locationId: 20 },
+    "other-stockpile-job",
+    "other-stockpile",
+    "stock",
+    "stockpile-demand",
+  );
+  assert.equal(competingStockpileClaim.future, 0);
+
+  const activityClaim = allocator.claimOrdinarySupply(
+    34,
+    2,
+    11,
+    { ...account, locationId: 11 },
+    "station-a-job",
+    undefined,
+    "manufacturing",
+    "activity-input",
+  );
+  assert.equal(activityClaim.future, 2);
+  assert.equal(allocator.remainingItemQuantity("future-at-a"), 0);
+});
 
 void test("distinguishes active production from planned future output", () => {
   const allocator = new SimulationAllocator(

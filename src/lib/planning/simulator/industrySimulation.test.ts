@@ -64,6 +64,93 @@ void test("declares an exact SDE-backed manufacturing job without inventing avai
   assert.deepEqual(projection.invariantViolations, []);
 });
 
+void test("hauls available Charon components to A while protecting A-local demand", async () => {
+  const stationA = 70;
+  const stationB = 80;
+  const stationC = 90;
+  const componentTypeId = 21009;
+  const result = await simulateIndustry(
+    parseSimulatorRequest({
+      stockpiles: [
+        {
+          id: "charon",
+          name: "Charon",
+          locations: {
+            stock: stationA,
+            manufacturing: stationA,
+            reactions: 30,
+            reprocessing: 40,
+            copying: 50,
+            invention: 60,
+          },
+          groupAssignments: {
+            largeShips: stationA,
+            capitalComponents: stationB,
+          },
+          items: [{ typeId: 20185, quantity: 1, me: 0, te: 0, fromCompression: false }],
+        },
+        {
+          id: "other-stockpile-demand",
+          name: "Other stockpile demand",
+          locations: {
+            stock: 100,
+            manufacturing: 91,
+            reactions: 91,
+            reprocessing: 91,
+            copying: 91,
+            invention: 91,
+          },
+          items: [{ typeId: componentTypeId, quantity: 2, me: 0, te: 0, fromCompression: false }],
+        },
+      ],
+      assets: [
+        { typeId: componentTypeId, quantity: 1, locationId: stationA },
+        { typeId: componentTypeId, quantity: 1, locationId: stationB },
+        { typeId: componentTypeId, quantity: 2, locationId: stationC },
+      ],
+      settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+      simulation: { version: 1, blockInterStockpileHauling: true },
+    }),
+  );
+
+  const charonJob = result.lists.manufacturingJobs.find((job) => job.productTypeId === 20185);
+  const componentJob = result.lists.manufacturingJobs.find(
+    (job) => job.productTypeId === componentTypeId && job.locationId === stationB,
+  );
+  const componentInput = charonJob?.inputs.find((input) => input.typeId === componentTypeId);
+  assert.ok(charonJob);
+  assert.ok(componentJob);
+  assert.ok(componentInput);
+  assert.equal(charonJob.locationId, stationA);
+  assert.equal(componentJob.locationId, stationB);
+  assert.equal(componentInput.availableNow, 1);
+  assert.equal(componentInput.availableFromHauling, 3);
+  assert.ok(
+    componentInput.upstreamReservations?.some(
+      (reservation) => reservation.sourceJobId === componentJob.jobId && reservation.quantity === 1,
+    ),
+  );
+  assert.deepEqual(
+    result.lists.haulingTasks
+      .filter((task) => task.typeId === componentTypeId)
+      .map((task) => [task.fromLocationId, task.toLocationId, task.quantity])
+      .sort((left, right) => Number(left[0]) - Number(right[0])),
+    [
+      [stationB, stationA, 1],
+      [stationC, stationA, 2],
+    ],
+  );
+  assert.equal(
+    result.lists.haulingTasks.some(
+      (task) =>
+        task.typeId === componentTypeId
+        && task.fromLocationId === stationA
+        && task.toLocationId === 100,
+    ),
+    false,
+  );
+});
+
 void test("rounds reaction inputs per simulated maximum-duration install", async () => {
   const createResult = async (maxReactionJobDurationHours: number) =>
     simulateIndustry(
