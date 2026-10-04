@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import Image from "next/image";
 import { GitMerge, LogOut, Plus, RotateCcw, Trash2, X } from "lucide-react";
-import { languageStorageKey, useAppRefreshStatus } from "../AppShell";
+import { languageStorageKey, useAppRefreshingOwners } from "../AppShell";
 import DialogBody from "@/components/DialogBody";
 import EveAuthorizationWarning from "@/components/EveAuthorizationWarning";
 import { replaceEsiStock } from "@/lib/planning/stockStore";
@@ -36,8 +36,10 @@ import {
   loadClientCharacters,
   loadClientAssets,
   loadClientCorporationSettings,
+  mergeClientOwnerStatuses,
   saveClientCorporationSettings,
   type ClientCharacter,
+  type ClientCharacterState,
   type ClientCorporationSettings,
   type ClientCharacterStatus,
 } from "@/lib/client/requestCache";
@@ -46,6 +48,8 @@ import { Label } from "@/components/ui/label";
 import { trackAnalyticsEvent } from "@/lib/client/analyticsConsent";
 
 type Character = ClientCharacter;
+/** Identifies the character or corporation owner represented by one refresh section. */
+type RefreshOwner = { kind: "character" | "corporation"; ownerId: number };
 
 type MergeDetails = {
   incomingCharacter: { characterId: number; characterName: string };
@@ -113,7 +117,7 @@ function statusClass(status: EndpointStatus | undefined) {
 }
 
 function statusIndicator(status: EndpointStatus | undefined, isRefreshing: boolean) {
-  if (isRefreshing) return <Spinner className={styles.statusDot} aria-label="Refreshing" />;
+  if (isRefreshing) return <Spinner className={styles.statusDot} aria-hidden="true" />;
   return <span className={`${styles.statusDot} ${statusClass(status)}`} />;
 }
 
@@ -246,7 +250,8 @@ export default function CharactersPage() {
   const [statuses, setStatuses] = useState<CharacterStatus[]>([]);
   const [, setFreshnessTick] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const isRefreshing = useAppRefreshStatus();
+  const refreshingOwners = useAppRefreshingOwners();
+  const statusRevision = useRef(0);
   const [removingId, setRemovingId] = useState<number | null>(null);
   const [characterPendingRemoval, setCharacterPendingRemoval] = useState<Character | null>(null);
   const [updatingDeploymentId, setUpdatingDeploymentId] = useState<number | null>(null);
@@ -276,8 +281,9 @@ export default function CharactersPage() {
   }
 
   async function loadStatuses() {
+    const revision = statusRevision.current;
     const data = await loadClientCharacterState();
-    setStatuses(data.characters ?? []);
+    if (revision === statusRevision.current) setStatuses(data.characters ?? []);
     setFreshnessTick((tick) => tick + 1);
   }
 
@@ -292,10 +298,36 @@ export default function CharactersPage() {
         .all([loadCharacters(), loadStatuses()])
         .catch(() => setError("Could not reach the character service."));
     };
+    const handleOwnerRefreshSettled = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{
+          owner: RefreshOwner;
+          state?: ClientCharacterState;
+        }>
+      ).detail;
+      statusRevision.current += 1;
+      if (detail.state) {
+        setStatuses((current) =>
+          mergeClientOwnerStatuses(
+            current,
+            detail.state?.characters ?? [],
+            {
+              kind: detail.owner.kind,
+              id: detail.owner.ownerId,
+            },
+          ),
+        );
+      }
+    };
     window.addEventListener("assembly-line-esi-refresh-finished", handleRefreshFinished);
+    window.addEventListener("assembly-line-esi-owner-refresh-settled", handleOwnerRefreshSettled);
     return () => {
       window.clearInterval(freshnessTimer);
       window.removeEventListener("assembly-line-esi-refresh-finished", handleRefreshFinished);
+      window.removeEventListener(
+        "assembly-line-esi-owner-refresh-settled",
+        handleOwnerRefreshSettled,
+      );
     };
   }, []);
 
@@ -332,7 +364,18 @@ export default function CharactersPage() {
         const data = (await response.json()) as { error?: string };
         throw new Error(data.error ?? "Could not merge character collections.");
       }
-      window.location.assign("/characters?refresh=1");
+      const data = (await response.json()) as {
+        refreshCharacterId?: number;
+        refreshCorporationId?: number;
+      };
+      const query = new URLSearchParams({
+        refresh: "1",
+        ...(data.refreshCharacterId ? { refreshCharacter: String(data.refreshCharacterId) } : {}),
+        ...(data.refreshCorporationId
+          ? { refreshCorporation: String(data.refreshCorporationId) }
+          : {}),
+      });
+      window.location.assign(`/characters?${query}`);
     }
     catch (mergeError) {
       setError(
@@ -670,6 +713,11 @@ export default function CharactersPage() {
         </Alert>
       )}
       <section className={styles.panel}>
+        <span className="sr-only" role="status" aria-live="polite">
+          {refreshingOwners.size > 0
+            ? `Refreshing ESI data for ${refreshingOwners.size} owner${refreshingOwners.size === 1 ? "" : "s"}.`
+            : ""}
+        </span>
         <div className={styles.panelHeader}>
           <div>
             <p className={styles.panelKicker}>01 / CONNECTED PILOTS</p>
@@ -776,7 +824,7 @@ export default function CharactersPage() {
                           </Label>
                         )}
                       <span className={styles.characterActions}>
-                        {hasAuthorizationError && !isRefreshing && (
+                        {hasAuthorizationError && refreshingOwners.size === 0 && (
                           <EveAuthorizationWarning
                             href={`/api/auth/eve/start?characterId=${character.characterId}`}
                           >
@@ -848,7 +896,10 @@ export default function CharactersPage() {
                             </ItemTitle>
                             <ItemDescription className="flex flex-col items-center gap-1 text-center">
                               <span className="flex items-center justify-center gap-1 text-center">
-                                {statusIndicator(endpointStatus, isRefreshing)}
+                                {statusIndicator(
+                                  endpointStatus,
+                                  refreshingOwners.has(`character:${character.characterId}`),
+                                )}
                                 {statusLabel(endpointStatus)}
                               </span>
                               <span className={`${styles.availabilityWide} text-center`}>
@@ -941,7 +992,12 @@ export default function CharactersPage() {
                             </ItemTitle>
                             <ItemDescription className="flex flex-col items-center gap-1 text-center">
                               <span className="flex items-center justify-center gap-1 text-center">
-                                {statusIndicator(endpointStatus, isRefreshing)}
+                                {statusIndicator(
+                                  endpointStatus,
+                                  refreshingOwners.has(
+                                    `character:${selectedCharacter.characterId}`,
+                                  ),
+                                )}
                                 <span>{statusLabel(endpointStatus)}</span>
                               </span>
                               {endpointStatus?.lastModified && (
@@ -1162,7 +1218,12 @@ export default function CharactersPage() {
                               </ItemTitle>
                               <ItemDescription className="flex flex-col items-center gap-1 text-center">
                                 <span className="flex items-center justify-center gap-1 text-center">
-                                  {statusIndicator(endpointStatus, isRefreshing)}
+                                  {statusIndicator(
+                                    endpointStatus,
+                                    refreshingOwners.has(
+                                      `corporation:${corporation.corporationId}`,
+                                    ),
+                                  )}
                                   {statusLabel(endpointStatus, corporation.eligible.length === 0)}
                                 </span>
                                 <span className="flex flex-col items-center text-center">
@@ -1245,7 +1306,12 @@ export default function CharactersPage() {
                               </ItemTitle>
                               <ItemDescription className="flex flex-col items-center gap-1 text-center">
                                 <span className="flex items-center justify-center gap-1 text-center">
-                                  {statusIndicator(endpointStatus, isRefreshing)}
+                                  {statusIndicator(
+                                    endpointStatus,
+                                    refreshingOwners.has(
+                                      `corporation:${corporation.corporationId}`,
+                                    ),
+                                  )}
                                   <span>
                                     {statusLabel(endpointStatus, corporation.eligible.length === 0)}
                                   </span>

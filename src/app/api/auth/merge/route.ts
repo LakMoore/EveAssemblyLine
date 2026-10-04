@@ -8,6 +8,8 @@ import {
   getCollection,
   getPendingMerge,
   getSession,
+  getCollectionCorporationSettings,
+  hasCollectionRefreshEligibleDirector,
   mergeCollections,
   saveCharacter,
   saveSession,
@@ -69,7 +71,6 @@ export async function POST(request: Request) {
   const session = await getSession(pending.sessionId);
   if (!session) return NextResponse.json({ error: "Session not found." }, { status: 404 });
   try {
-    await mergeCollections(pending.targetCollectionId, pending.sourceCollectionId);
     const corporationAuthorization = await fetchCharacterCorporationAuthorization(
       pending.characterId,
       pending.tokenSet,
@@ -80,6 +81,13 @@ export async function POST(request: Request) {
       rolesAtHq: [],
       rolesAtOther: [],
     };
+    const corporationId = corporationAuthorization.authorized
+      ? corporationAuthorization.corporationId
+      : undefined;
+    const hadEligibleDirector =
+      corporationId !== undefined
+      && (await hasCollectionRefreshEligibleDirector(pending.targetCollectionId, corporationId));
+    await mergeCollections(pending.targetCollectionId, pending.sourceCollectionId);
     const existing = await getCharacter(pending.characterId);
     if (!corporationAuthorization.authorized && existing?.corporationId !== undefined) {
       invalidateCorporationCache(existing.corporationId, session.sessionId);
@@ -90,9 +98,7 @@ export async function POST(request: Request) {
       characterName: pending.characterName ?? `Character ${pending.characterId}`,
       collectionId: pending.targetCollectionId,
       personalAuth: corporationAuthorization.token,
-      corporationId: corporationAuthorization.authorized
-        ? corporationAuthorization.corporationId
-        : undefined,
+      corporationId,
       allianceId: corporationAuthorization.authorized
         ? corporationAuthorization.characterInfo.alliance_id
         : undefined,
@@ -110,7 +116,20 @@ export async function POST(request: Request) {
     session.authenticatedCharacterId = pending.characterId;
     await saveSession(session);
     await deletePendingMerge(value.mergeId);
-    const response = NextResponse.json({ success: true });
+    const gainedEligibleDirector =
+      corporationId !== undefined
+      && !hadEligibleDirector
+      && (await hasCollectionRefreshEligibleDirector(pending.targetCollectionId, corporationId));
+    const corporationSupportEnabled =
+      gainedEligibleDirector
+      && (await getCollectionCorporationSettings(pending.targetCollectionId)).some(
+        (settings) => settings.corporationId === corporationId && settings.supportEnabled,
+      );
+    const response = NextResponse.json({
+      success: true,
+      refreshCharacterId: pending.characterId,
+      ...(corporationSupportEnabled ? { refreshCorporationId: corporationId } : {}),
+    });
     response.cookies.set("assembly_line_merge", "", { httpOnly: true, path: "/", maxAge: 0 });
     return response;
   }

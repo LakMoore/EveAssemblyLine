@@ -6,10 +6,62 @@ import {
   getClientOwnerSnapshotOwners,
   groupClientAssetsByLocation,
   isCompleteClientAssetsResponse,
+  mergeClientOwnerStatuses,
   normalizeClientAssetsResponse,
   applyCorporationSettings,
   loadClientSystemNames,
 } from "./requestCache";
+
+void test("merges a refreshed owner without overwriting other owner statuses", () => {
+  const current = [
+    {
+      characterId: 1,
+      assets: { status: "stale" as const, hasBody: true },
+      corporations: [{ corporationId: 90, assets: { status: "stale" as const, hasBody: true } }],
+    },
+    {
+      characterId: 2,
+      assets: { status: "stale" as const, hasBody: true },
+      corporations: [{ corporationId: 90, assets: { status: "stale" as const, hasBody: true } }],
+    },
+  ];
+  const updates = [
+    {
+      characterId: 1,
+      assets: { status: "fresh" as const, hasBody: true },
+      corporations: [{ corporationId: 90, assets: { status: "fresh" as const, hasBody: true } }],
+    },
+    {
+      characterId: 2,
+      assets: { status: "stale" as const, hasBody: true },
+      corporations: [{ corporationId: 90, assets: { status: "fresh" as const, hasBody: true } }],
+    },
+  ];
+
+  const characterStatuses = mergeClientOwnerStatuses(
+    current,
+    updates,
+    {
+      kind: "character",
+      id: 1,
+    },
+  );
+  assert.equal(characterStatuses[0].assets?.status, "fresh");
+  assert.equal(characterStatuses[1].assets?.status, "stale");
+  assert.equal(characterStatuses[0].corporations?.[0].assets?.status, "stale");
+
+  const corporationStatuses = mergeClientOwnerStatuses(
+    current,
+    updates,
+    {
+      kind: "corporation",
+      id: 90,
+    },
+  );
+  assert.equal(corporationStatuses[0].assets?.status, "stale");
+  assert.equal(corporationStatuses[0].corporations?.[0].assets?.status, "fresh");
+  assert.equal(corporationStatuses[1].corporations?.[0].assets?.status, "fresh");
+});
 
 void test("filters sell orders using personal and corporation settings", () => {
   const data = {

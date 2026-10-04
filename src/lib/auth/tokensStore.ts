@@ -569,6 +569,24 @@ export async function getCollectionCorporationSettings(collectionId?: string) {
   return normalizeCorporationSettings((await getCollection(collectionId))?.corporationSettings);
 }
 
+/** Returns whether a collection has a Director with the scopes required for corporation refresh. */
+export async function hasCollectionRefreshEligibleDirector(
+  collectionId: string,
+  corporationId: number,
+) {
+  const collection = await getCollection(collectionId);
+  if (!collection) return false;
+  const characters = await Promise.all(
+    collection.characterIds.map((characterId) => getCharacter(characterId)),
+  );
+  return characters.some(
+    (character) =>
+      character?.corporationId === corporationId
+      && character.hasDirectorRole === true
+      && hasCorporationRefreshScopes(character.personalAuth.scopes),
+  );
+}
+
 /** Saves one corporation's support and planning-source settings for a collection. */
 export async function saveCollectionCorporationSettings(
   collectionId: string,

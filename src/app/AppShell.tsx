@@ -25,6 +25,7 @@ import {
   refreshClientSession,
   loadClientShips,
   loadClientAssets,
+  mergeClientOwnerStatuses,
   type ClientAssetsResponse,
   type ClientCharacterStatus,
   type ClientCharacterState,
@@ -110,6 +111,7 @@ type ActivePage =
 type LanguageContextValue = { language: SdeLanguage; setLanguage: (language: SdeLanguage) => void };
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 const RefreshContext = createContext<boolean>(false);
+const RefreshOwnerContext = createContext<ReadonlySet<string>>(new Set());
 type CharacterSummary = {
   characterId: number;
   characterName: string;
@@ -282,6 +284,9 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [characters, setCharacters] = useState<CharacterSummary[]>([]);
   const [snapshotScope, setSnapshotScope] = useState<string>();
   const [isRefreshingData, setIsRefreshingData] = useState(false);
+  const [refreshingOwnerKeys, setRefreshingOwnerKeys] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [refreshProgress, setRefreshProgress] = useState<{
     completed: number;
     total: number;
@@ -502,7 +507,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
   }
 
   const refreshData = useCallback(
-    async (trigger: "manual" | "auth_return" = "manual") => {
+    async (
+      trigger: "manual" | "auth_return" = "manual",
+      authRefresh?: { characterId: number; corporationId?: number },
+    ) => {
       if (isRefreshingDataRef.current || !authenticated) return false;
       isRefreshingDataRef.current = true;
       setIsRefreshingData(true);
@@ -523,7 +531,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         if (!session.authenticated || !refreshSnapshotScope || refreshCharacters.length === 0) {
           return false;
         }
-        const units = buildRefreshUnits(
+        const allUnits = buildRefreshUnits(
           refreshCharacters.map((character) => ({
             characterId: character.characterId,
             corporationId: character.corporationId,
@@ -531,10 +539,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
             corporationSupportEnabled: character.corporationSupportEnabled,
           })),
         );
+        const units = authRefresh
+          ? allUnits.filter(
+              (unit) =>
+                (unit.kind === "character" && unit.ownerId === authRefresh.characterId)
+                || (unit.kind === "corporation" && unit.ownerId === authRefresh.corporationId),
+            )
+          : allUnits;
         setRefreshProgress({ completed: 0, total: units.length });
         const results = await runRefreshUnits(
           units,
           async (unit) => {
+            setRefreshingOwnerKeys((current) => new Set(current).add(unit.key));
             const owner = { kind: unit.kind, id: unit.ownerId } as const;
             const cachedSnapshot = refreshSnapshotScope
               ? await loadOwnerSnapshot(owner, refreshSnapshotScope)
@@ -585,12 +601,48 @@ export default function AppShell({ children }: { children: ReactNode }) {
           },
           {
             concurrency: 5,
-            onSettled: () => {
+            onSettled: (result) => {
+              setRefreshingOwnerKeys((current) => {
+                const next = new Set(current);
+                next.delete(result.unit.key);
+                return next;
+              });
               setRefreshProgress((current) =>
                 current
                   ? { ...current, completed: Math.min(current.total, current.completed + 1) }
                   : current,
               );
+              void loadClientCharacterState()
+                .then((state) => {
+                  setStateStatuses((current) =>
+                    mergeClientOwnerStatuses(
+                      current,
+                      state.characters ?? [],
+                      {
+                        kind: result.unit.kind,
+                        id: result.unit.ownerId,
+                      },
+                    ),
+                  );
+                  window.dispatchEvent(
+                    new CustomEvent(
+                      "assembly-line-esi-owner-refresh-settled",
+                      {
+                        detail: { owner: result.unit, state },
+                      },
+                    ),
+                  );
+                })
+                .catch(() => {
+                  window.dispatchEvent(
+                    new CustomEvent(
+                      "assembly-line-esi-owner-refresh-settled",
+                      {
+                        detail: { owner: result.unit },
+                      },
+                    ),
+                  );
+                });
             },
           },
         );
@@ -674,6 +726,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
         );
         isRefreshingDataRef.current = false;
         setIsRefreshingData(false);
+        setRefreshingOwnerKeys(new Set());
         setRefreshProgress(null);
         window.dispatchEvent(
           new CustomEvent(
@@ -786,10 +839,21 @@ export default function AppShell({ children }: { children: ReactNode }) {
     if (!authenticated || characters.length === 0 || authChangeRefreshRequested.current) return;
     const url = new URL(window.location.href);
     if (url.searchParams.get("refresh") !== "1") return;
+    const characterId = Number(url.searchParams.get("refreshCharacter"));
+    const corporationId = Number(url.searchParams.get("refreshCorporation"));
+    const authRefresh =
+      Number.isSafeInteger(characterId) && characterId > 0
+        ? {
+            characterId,
+            ...(Number.isSafeInteger(corporationId) && corporationId > 0 ? { corporationId } : {}),
+          }
+        : undefined;
     authChangeRefreshRequested.current = true;
     url.searchParams.delete("refresh");
+    url.searchParams.delete("refreshCharacter");
+    url.searchParams.delete("refreshCorporation");
     window.history.replaceState({}, "", url);
-    window.setTimeout(() => void refreshData("auth_return"), 0);
+    window.setTimeout(() => void refreshData("auth_return", authRefresh), 0);
   }, [authenticated, characters.length, refreshData]);
 
   return (
@@ -797,456 +861,460 @@ export default function AppShell({ children }: { children: ReactNode }) {
       value={{ language, setLanguage: (nextLanguage) => changeLanguage(nextLanguage) }}
     >
       <RefreshContext.Provider value={isRefreshingData}>
-        <main className={styles.shell}>
-          <header className={styles.topbar}>
-            <NoPrefetchLink className={styles.brand} href="/">
-              <span className={styles.brandMark}>E</span>
-              <span>
-                Eve <span className={styles.brandAccent}>AssemblyLine</span>
-              </span>
-            </NoPrefetchLink>
-            <div className={styles.topbarActions}>
-              <div
-                className={`${styles.topMeta} ${isMobileMetaExpanded || isMobileMetaCollapsing ? styles.topMetaExpanded : ""} ${isMobileMetaCollapsing ? styles.topMetaCollapsing : ""}`}
-              >
-                <Label className={styles.themeControl}>
-                  <span>THEME</span>
-                  <ThemeSelect className="w-36" />
-                </Label>
-                <Label className={styles.languageControl}>
-                  <span>LANGUAGE</span>
-                  <Select
-                    aria-label="Language"
-                    value={language}
-                    onValueChange={(value) => {
-                      if (value && isSdeLanguage(value)) changeLanguage(value);
-                    }}
-                    items={sdeLanguages.map(({ code, label }) => ({ value: code, label }))}
-                  >
-                    <SelectTrigger className={styles.languageSelectFull} size="sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent alignItemWithTrigger={false}>
-                      <SelectGroup>
-                        {sdeLanguages.map(({ code, label }) => (
-                          <SelectItem key={code} value={code}>
-                            {label}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    aria-label="Language"
-                    value={language}
-                    onValueChange={(value) => {
-                      if (value && isSdeLanguage(value)) changeLanguage(value);
-                    }}
-                    items={sdeLanguages.map(({ code }) => ({
-                      value: code,
-                      label: code.toUpperCase(),
-                    }))}
-                  >
-                    <SelectTrigger className={styles.languageSelectCompact} size="sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {sdeLanguages.map(({ code }) => (
-                          <SelectItem key={code} value={code}>
-                            {code.toUpperCase()}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </Label>
-                {authenticated ? (
-                  <span
-                    className={styles.esiStatus}
-                    aria-label="ESI connected"
-                    title="ESI connected"
-                  >
-                    <span className={`${styles.onlineDot} ${styles.onlineDotCompact}`} />
-                    <span className={styles.esiStatusLabel}>ESI CONNECTED</span>
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    className={styles.esiStatus}
-                    onClick={() => void handleMobileMetaAction()}
-                    aria-label="ESI not connected"
-                    title="ESI not connected"
-                  >
-                    <span className={`${styles.onlineDot} ${styles.offlineDot}`} />
-                    <span className={styles.esiStatusLabel}>NOT CONNECTED</span>
-                  </button>
-                )}
-                {authenticated && (
-                  <button
-                    type="button"
-                    className={`${styles.refresh} ${isRefreshCurrent ? styles.refreshCurrent : ""}`}
-                    onClick={() => void handleMobileMetaAction()}
-                    disabled={isRefreshingData}
-                    aria-label={isRefreshCurrent ? "Up to date" : "Refresh data"}
-                    title={
-                      hasStateErrors
-                        ? "Refresh data; one or more endpoints failed"
-                        : isRefreshCurrent
-                          ? "Up to date"
-                          : "Refresh data"
-                    }
-                  >
-                    {hasStateErrors ? (
-                      <span className={styles.refreshIconError} aria-hidden="true">
-                        !
-                      </span>
-                    ) : !isRefreshCurrent ? (
-                      <span className={styles.refreshIconWarning} aria-hidden="true">
-                        ↻
-                      </span>
-                    ) : (
-                      <span className={styles.refreshStatusDot} aria-hidden="true" />
-                    )}
-                    <span>
-                      {isRefreshingData
-                        ? "Refreshing..."
-                        : isRefreshCurrent
-                          ? "Up to Date"
-                          : "Refresh Data"}
-                    </span>
-                  </button>
-                )}
-              </div>
-            </div>
-            {isRefreshingData && refreshProgress && (
-              <Progress
-                value={Math.round((refreshProgress.completed / refreshProgress.total) * 100)}
-                className={styles.refreshProgress}
-                aria-label="Refreshing ESI data"
-              >
-                <ProgressLabel className="sr-only">Refreshing ESI data</ProgressLabel>
-              </Progress>
-            )}
-          </header>
-          <div
-            className={`${styles.layout} ${isSidebarCollapsed ? styles.layoutCollapsed : ""} ${!isSidebarReady ? styles.sidebarInitialising : ""}`}
-          >
-            <aside className={styles.sidebar}>
-              <button
-                type="button"
-                className={styles.sidebarToggle}
-                aria-label={isSidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
-                onClick={() =>
-                  setIsSidebarCollapsed((collapsed) => {
-                    const nextState = !collapsed;
-                    if (window.matchMedia("(min-width: 901px)").matches) {
-                      window.localStorage.setItem(sidebarStorageKey, String(nextState));
-                    }
-                    return nextState;
-                  })
-                }
-              >
-                {isSidebarCollapsed ? (
-                  <PanelLeftOpen size={16} strokeWidth={1.8} aria-hidden="true" />
-                ) : (
-                  <PanelLeftClose size={16} strokeWidth={1.8} aria-hidden="true" />
-                )}
-              </button>
-              {showSidebarScrollTop && (
-                <button
-                  type="button"
-                  className={styles.sidebarScrollTop}
-                  aria-label="Scroll to top"
-                  title="Scroll to top"
-                  onClick={scrollSidebarToTop}
+        <RefreshOwnerContext.Provider value={refreshingOwnerKeys}>
+          <main className={styles.shell}>
+            <header className={styles.topbar}>
+              <NoPrefetchLink className={styles.brand} href="/">
+                <span className={styles.brandMark}>E</span>
+                <span>
+                  Eve <span className={styles.brandAccent}>AssemblyLine</span>
+                </span>
+              </NoPrefetchLink>
+              <div className={styles.topbarActions}>
+                <div
+                  className={`${styles.topMeta} ${isMobileMetaExpanded || isMobileMetaCollapsing ? styles.topMetaExpanded : ""} ${isMobileMetaCollapsing ? styles.topMetaCollapsing : ""}`}
                 >
-                  <ArrowUp size={16} strokeWidth={1.8} aria-hidden="true" />
-                </button>
-              )}
-              <div className={`${styles.sectionLabel} ${styles.firstSectionLabel}`}>TOOLS</div>
-              <NoPrefetchLink
-                className={`${styles.navItem} ${activePage === "planner" ? styles.navActive : ""}`}
-                href="/planner"
-                onClick={closeSidebarOnNavigation}
-              >
-                <span>
-                  <ClipboardList size={17} strokeWidth={1.8} aria-hidden="true" />
-                </span>
-                <span className={styles.navText}>Production planner</span>
-              </NoPrefetchLink>
-              <NoPrefetchLink
-                prefetch={false}
-                className={`${styles.navItem} ${activePage === "compress" ? styles.navActive : ""}`}
-                href="/compress"
-                onClick={closeSidebarOnNavigation}
-              >
-                <span>
-                  <Minimize2 size={17} strokeWidth={1.8} aria-hidden="true" />
-                </span>
-                <span className={styles.navText}>Compress</span>
-              </NoPrefetchLink>
-              <NoPrefetchLink
-                prefetch={false}
-                className={`${styles.navItem} ${activePage === "appraise" ? styles.navActive : ""}`}
-                href="/appraise"
-                onClick={closeSidebarOnNavigation}
-              >
-                <span>
-                  <BadgeDollarSign size={17} strokeWidth={1.8} aria-hidden="true" />
-                </span>
-                <span className={styles.navText}>Appraise</span>
-              </NoPrefetchLink>
-              <NoPrefetchLink
-                prefetch={false}
-                className={`${styles.navItem} ${activePage === "invention" ? styles.navActive : ""}`}
-                href="/invention"
-                onClick={closeSidebarOnNavigation}
-              >
-                <span>
-                  <FlaskConical size={17} strokeWidth={1.8} aria-hidden="true" />
-                </span>
-                <span className={styles.navText}>Invention</span>
-              </NoPrefetchLink>
-              <NoPrefetchLink
-                prefetch={false}
-                className={`${styles.navItem} ${activePage === "signals" ? styles.navActive : ""}`}
-                href="/signals"
-                onClick={closeSidebarOnNavigation}
-              >
-                <span>
-                  <TrendingUp size={17} strokeWidth={1.8} aria-hidden="true" />
-                </span>
-                <span className={styles.navText}>Signals</span>
-              </NoPrefetchLink>
-              <div className={styles.sectionLabel}>INFORMATION</div>
-              <NoPrefetchLink
-                prefetch={false}
-                className={`${styles.navItem} ${activePage === "orePrices" ? styles.navActive : ""}`}
-                href="/ore-prices"
-                onClick={closeSidebarOnNavigation}
-                aria-current={activePage === "orePrices" ? "page" : undefined}
-              >
-                <span>
-                  <Gem size={17} strokeWidth={1.8} aria-hidden="true" />
-                </span>
-                <span className={styles.navText}>Ore prices</span>
-              </NoPrefetchLink>
-              <NoPrefetchLink
-                prefetch={false}
-                className={`${styles.navItem} ${activePage === "assets" ? styles.navActive : ""}`}
-                href="/assets"
-                onClick={closeSidebarOnNavigation}
-              >
-                <span>
-                  <Boxes size={17} strokeWidth={1.8} aria-hidden="true" />
-                </span>
-                <span className={styles.navText}>Assets</span>
-              </NoPrefetchLink>
-              <NoPrefetchLink
-                prefetch={false}
-                className={`${styles.navItem} ${activePage === "jobs" ? styles.navActive : ""}`}
-                href="/jobs"
-                onClick={closeSidebarOnNavigation}
-              >
-                <span>
-                  <Factory size={17} strokeWidth={1.8} aria-hidden="true" />
-                </span>
-                <span className={styles.navText}>Jobs</span>
-              </NoPrefetchLink>
-              <NoPrefetchLink
-                prefetch={false}
-                className={`${styles.navItem} ${activePage === "ships" ? styles.navActive : ""}`}
-                href="/ships"
-                onClick={closeSidebarOnNavigation}
-              >
-                <span>
-                  <Rocket size={17} strokeWidth={1.8} aria-hidden="true" />
-                </span>
-                <span className={styles.navText}>Ships</span>
-              </NoPrefetchLink>
-              <div className={styles.sectionLabel}>CONFIGURATION</div>
-              <NoPrefetchLink
-                prefetch={false}
-                className={`${styles.navItem} ${activePage === "structures" ? styles.navActive : ""}`}
-                href="/structures"
-                onClick={closeSidebarOnNavigation}
-              >
-                <span>
-                  <MapPinned size={17} strokeWidth={1.8} aria-hidden="true" />
-                </span>
-                <span className={styles.navText}>Structures</span>
-              </NoPrefetchLink>
-              <NoPrefetchLink
-                prefetch={false}
-                className={`${styles.navItem} ${activePage === "corpHangars" ? styles.navActive : ""}`}
-                href="/corp-hangars"
-                onClick={closeSidebarOnNavigation}
-              >
-                <span>
-                  <Warehouse size={17} strokeWidth={1.8} aria-hidden="true" />
-                </span>
-                <span className={styles.navText}>Corp Hangers</span>
-              </NoPrefetchLink>
-              <NoPrefetchLink
-                prefetch={false}
-                className={`${styles.navItem} ${activePage === "settings" ? styles.navActive : ""}`}
-                href="/settings"
-                onClick={closeSidebarOnNavigation}
-              >
-                <span>
-                  <Settings2 size={17} strokeWidth={1.8} aria-hidden="true" />
-                </span>
-                <span className={styles.navText}>Settings</span>
-              </NoPrefetchLink>
-              <NoPrefetchLink
-                prefetch={false}
-                className={`${styles.navItem} ${activePage === "characters" ? styles.navActive : ""}`}
-                href="/characters"
-                onClick={closeSidebarOnNavigation}
-              >
-                <span>
-                  <UsersRound size={17} strokeWidth={1.8} aria-hidden="true" />
-                </span>
-                <span className={styles.navText}>Characters</span>
-                <b>{characters.length}</b>
-              </NoPrefetchLink>
-              <div className={styles.sectionLabel}>UTILITY</div>
-              <NoPrefetchLink
-                prefetch={false}
-                className={`${styles.navItem} ${activePage === "imagechecker" ? styles.navActive : ""}`}
-                href="/imagechecker"
-                onClick={closeSidebarOnNavigation}
-              >
-                <span>
-                  <ImageIcon size={17} strokeWidth={1.8} aria-hidden="true" />
-                </span>
-                <span className={styles.navText}>Image checker</span>
-              </NoPrefetchLink>
-              <div className={styles.sidebarBottom}>
-                <div className={styles.sectionLabel}>CONNECTED PILOTS</div>
-                <div className={styles.pilotList}>
-                  {characters.map((character) => {
-                    const isNotAuthenticated = characterNeedsReauthorization(
-                      stateStatuses.find((status) => status.characterId === character.characterId),
-                    );
-                    return (
-                      <div className={styles.pilot} key={character.characterId}>
-                        <Avatar>
-                          <AvatarImage
-                            src={eveCharacterPortraitUrl(character.characterId, 64)}
-                            alt={character.characterName}
-                          />
-                          <AvatarFallback>
-                            {character.characterName
-                              .split(" ")
-                              .filter((n) => n)
-                              .map((n) => n[0])
-                              .join("")
-                              .toLocaleUpperCase()}
-                          </AvatarFallback>
-                          <AvatarBadge
-                            className={`${isNotAuthenticated ? styles.pilotNotOk : styles.pilotOk}`}
-                            aria-label={
-                              isNotAuthenticated ? "Authorization required" : "Authorized"
-                            }
-                          />
-                        </Avatar>
-                        <span className={styles.navText}>
-                          <strong>{character.characterName}</strong>
-                          <small>
-                            {character.hasDirectorRole ? "Director access" : "Character access"}
-                          </small>
-                        </span>
-                      </div>
-                    );
-                  })}
-                  {characters.length === 0 && (
-                    <Empty className={styles.pilotEmpty}>
-                      <EmptyDescription>No connected pilots</EmptyDescription>
-                    </Empty>
-                  )}
-                  <span
-                    className={styles.sidebarSentinel}
-                    ref={pilotListSentinelRef}
-                    aria-hidden="true"
-                  />
-                </div>
-                <div className={styles.sidebarCommunity}>
-                  <div className={styles.sectionLabel}>COMMUNITY</div>
-                  <a
-                    className={styles.navItem}
-                    href="https://github.com/LakMoore/EveAssemblyLine"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <span>
-                      <FaGithub size={17} aria-hidden="true" />
+                  <Label className={styles.themeControl}>
+                    <span>THEME</span>
+                    <ThemeSelect className="w-36" />
+                  </Label>
+                  <Label className={styles.languageControl}>
+                    <span>LANGUAGE</span>
+                    <Select
+                      aria-label="Language"
+                      value={language}
+                      onValueChange={(value) => {
+                        if (value && isSdeLanguage(value)) changeLanguage(value);
+                      }}
+                      items={sdeLanguages.map(({ code, label }) => ({ value: code, label }))}
+                    >
+                      <SelectTrigger className={styles.languageSelectFull} size="sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent alignItemWithTrigger={false}>
+                        <SelectGroup>
+                          {sdeLanguages.map(({ code, label }) => (
+                            <SelectItem key={code} value={code}>
+                              {label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      aria-label="Language"
+                      value={language}
+                      onValueChange={(value) => {
+                        if (value && isSdeLanguage(value)) changeLanguage(value);
+                      }}
+                      items={sdeLanguages.map(({ code }) => ({
+                        value: code,
+                        label: code.toUpperCase(),
+                      }))}
+                    >
+                      <SelectTrigger className={styles.languageSelectCompact} size="sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {sdeLanguages.map(({ code }) => (
+                            <SelectItem key={code} value={code}>
+                              {code.toUpperCase()}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </Label>
+                  {authenticated ? (
+                    <span
+                      className={styles.esiStatus}
+                      aria-label="ESI connected"
+                      title="ESI connected"
+                    >
+                      <span className={`${styles.onlineDot} ${styles.onlineDotCompact}`} />
+                      <span className={styles.esiStatusLabel}>ESI CONNECTED</span>
                     </span>
-                    <span className={styles.navText}>GitHub</span>
-                  </a>
-                  <a
-                    className={styles.navItem}
-                    href="https://discord.gg/VdGZWzXahh"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <span>
-                      <FaDiscord size={17} aria-hidden="true" />
-                    </span>
-                    <span className={styles.navText}>Discord</span>
-                  </a>
-                </div>
-                <div className={styles.sidebarFooter}>
-                  <span
-                    className={`${styles.sidebarCount} ${styles.navText}`}
-                    aria-label={`${characters.length} connected characters`}
-                    data-tooltip={`${characters.length} connected character${characters.length === 1 ? "" : "s"}`}
-                    tabIndex={0}
-                  >
-                    {characters.length}
-                  </span>
-                  <EveAuthorizationWarning href="/api/auth/eve/start">
-                    <Button
+                  ) : (
+                    <button
                       type="button"
-                      variant="ghost"
-                      className={`${styles.addButton} ${styles.navText} ${!authenticated ? styles.addButtonDisconnected : ""}`}
-                      onClick={() =>
-                        trackAnalyticsEvent(
-                          "add_character",
-                          {
-                            source: "sidebar",
-                          },
-                        )
+                      className={styles.esiStatus}
+                      onClick={() => void handleMobileMetaAction()}
+                      aria-label="ESI not connected"
+                      title="ESI not connected"
+                    >
+                      <span className={`${styles.onlineDot} ${styles.offlineDot}`} />
+                      <span className={styles.esiStatusLabel}>NOT CONNECTED</span>
+                    </button>
+                  )}
+                  {authenticated && (
+                    <button
+                      type="button"
+                      className={`${styles.refresh} ${isRefreshCurrent ? styles.refreshCurrent : ""}`}
+                      onClick={() => void handleMobileMetaAction()}
+                      disabled={isRefreshingData}
+                      aria-label={isRefreshCurrent ? "Up to date" : "Refresh data"}
+                      title={
+                        hasStateErrors
+                          ? "Refresh data; one or more endpoints failed"
+                          : isRefreshCurrent
+                            ? "Up to date"
+                            : "Refresh data"
                       }
                     >
-                      <UserRoundPlus
-                        data-icon="inline-start"
-                        strokeWidth={1.8}
-                        aria-hidden="true"
-                      />
-                      <span>Add character</span>
-                    </Button>
-                  </EveAuthorizationWarning>
+                      {hasStateErrors ? (
+                        <span className={styles.refreshIconError} aria-hidden="true">
+                          !
+                        </span>
+                      ) : !isRefreshCurrent ? (
+                        <span className={styles.refreshIconWarning} aria-hidden="true">
+                          ↻
+                        </span>
+                      ) : (
+                        <span className={styles.refreshStatusDot} aria-hidden="true" />
+                      )}
+                      <span>
+                        {isRefreshingData
+                          ? "Refreshing..."
+                          : isRefreshCurrent
+                            ? "Up to Date"
+                            : "Refresh Data"}
+                      </span>
+                    </button>
+                  )}
                 </div>
               </div>
-            </aside>
-            <section className={styles.content}>{children}</section>
-            <footer className={styles.siteFooter}>
-              <div className={styles.siteFooterInner}>
-                <span>Independent industry planning for EVE Online.</span>
-                <nav className={styles.siteFooterLinks} aria-label="Site information">
-                  <NoPrefetchLink href="/guides">Guides</NoPrefetchLink>
-                  <NoPrefetchLink href="/about">About</NoPrefetchLink>
-                  <NoPrefetchLink href="/contact">Contact</NoPrefetchLink>
-                  <NoPrefetchLink href="/privacy">Privacy</NoPrefetchLink>
-                  <NoPrefetchLink href="/terms">Terms</NoPrefetchLink>
-                  <NoPrefetchLink href="/cookies">Cookies</NoPrefetchLink>
-                </nav>
-              </div>
-            </footer>
-          </div>
-        </main>
+              {isRefreshingData && refreshProgress && (
+                <Progress
+                  value={Math.round((refreshProgress.completed / refreshProgress.total) * 100)}
+                  className={styles.refreshProgress}
+                  aria-label="Refreshing ESI data"
+                >
+                  <ProgressLabel className="sr-only">Refreshing ESI data</ProgressLabel>
+                </Progress>
+              )}
+            </header>
+            <div
+              className={`${styles.layout} ${isSidebarCollapsed ? styles.layoutCollapsed : ""} ${!isSidebarReady ? styles.sidebarInitialising : ""}`}
+            >
+              <aside className={styles.sidebar}>
+                <button
+                  type="button"
+                  className={styles.sidebarToggle}
+                  aria-label={isSidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
+                  onClick={() =>
+                    setIsSidebarCollapsed((collapsed) => {
+                      const nextState = !collapsed;
+                      if (window.matchMedia("(min-width: 901px)").matches) {
+                        window.localStorage.setItem(sidebarStorageKey, String(nextState));
+                      }
+                      return nextState;
+                    })
+                  }
+                >
+                  {isSidebarCollapsed ? (
+                    <PanelLeftOpen size={16} strokeWidth={1.8} aria-hidden="true" />
+                  ) : (
+                    <PanelLeftClose size={16} strokeWidth={1.8} aria-hidden="true" />
+                  )}
+                </button>
+                {showSidebarScrollTop && (
+                  <button
+                    type="button"
+                    className={styles.sidebarScrollTop}
+                    aria-label="Scroll to top"
+                    title="Scroll to top"
+                    onClick={scrollSidebarToTop}
+                  >
+                    <ArrowUp size={16} strokeWidth={1.8} aria-hidden="true" />
+                  </button>
+                )}
+                <div className={`${styles.sectionLabel} ${styles.firstSectionLabel}`}>TOOLS</div>
+                <NoPrefetchLink
+                  className={`${styles.navItem} ${activePage === "planner" ? styles.navActive : ""}`}
+                  href="/planner"
+                  onClick={closeSidebarOnNavigation}
+                >
+                  <span>
+                    <ClipboardList size={17} strokeWidth={1.8} aria-hidden="true" />
+                  </span>
+                  <span className={styles.navText}>Production planner</span>
+                </NoPrefetchLink>
+                <NoPrefetchLink
+                  prefetch={false}
+                  className={`${styles.navItem} ${activePage === "compress" ? styles.navActive : ""}`}
+                  href="/compress"
+                  onClick={closeSidebarOnNavigation}
+                >
+                  <span>
+                    <Minimize2 size={17} strokeWidth={1.8} aria-hidden="true" />
+                  </span>
+                  <span className={styles.navText}>Compress</span>
+                </NoPrefetchLink>
+                <NoPrefetchLink
+                  prefetch={false}
+                  className={`${styles.navItem} ${activePage === "appraise" ? styles.navActive : ""}`}
+                  href="/appraise"
+                  onClick={closeSidebarOnNavigation}
+                >
+                  <span>
+                    <BadgeDollarSign size={17} strokeWidth={1.8} aria-hidden="true" />
+                  </span>
+                  <span className={styles.navText}>Appraise</span>
+                </NoPrefetchLink>
+                <NoPrefetchLink
+                  prefetch={false}
+                  className={`${styles.navItem} ${activePage === "invention" ? styles.navActive : ""}`}
+                  href="/invention"
+                  onClick={closeSidebarOnNavigation}
+                >
+                  <span>
+                    <FlaskConical size={17} strokeWidth={1.8} aria-hidden="true" />
+                  </span>
+                  <span className={styles.navText}>Invention</span>
+                </NoPrefetchLink>
+                <NoPrefetchLink
+                  prefetch={false}
+                  className={`${styles.navItem} ${activePage === "signals" ? styles.navActive : ""}`}
+                  href="/signals"
+                  onClick={closeSidebarOnNavigation}
+                >
+                  <span>
+                    <TrendingUp size={17} strokeWidth={1.8} aria-hidden="true" />
+                  </span>
+                  <span className={styles.navText}>Signals</span>
+                </NoPrefetchLink>
+                <div className={styles.sectionLabel}>INFORMATION</div>
+                <NoPrefetchLink
+                  prefetch={false}
+                  className={`${styles.navItem} ${activePage === "orePrices" ? styles.navActive : ""}`}
+                  href="/ore-prices"
+                  onClick={closeSidebarOnNavigation}
+                  aria-current={activePage === "orePrices" ? "page" : undefined}
+                >
+                  <span>
+                    <Gem size={17} strokeWidth={1.8} aria-hidden="true" />
+                  </span>
+                  <span className={styles.navText}>Ore prices</span>
+                </NoPrefetchLink>
+                <NoPrefetchLink
+                  prefetch={false}
+                  className={`${styles.navItem} ${activePage === "assets" ? styles.navActive : ""}`}
+                  href="/assets"
+                  onClick={closeSidebarOnNavigation}
+                >
+                  <span>
+                    <Boxes size={17} strokeWidth={1.8} aria-hidden="true" />
+                  </span>
+                  <span className={styles.navText}>Assets</span>
+                </NoPrefetchLink>
+                <NoPrefetchLink
+                  prefetch={false}
+                  className={`${styles.navItem} ${activePage === "jobs" ? styles.navActive : ""}`}
+                  href="/jobs"
+                  onClick={closeSidebarOnNavigation}
+                >
+                  <span>
+                    <Factory size={17} strokeWidth={1.8} aria-hidden="true" />
+                  </span>
+                  <span className={styles.navText}>Jobs</span>
+                </NoPrefetchLink>
+                <NoPrefetchLink
+                  prefetch={false}
+                  className={`${styles.navItem} ${activePage === "ships" ? styles.navActive : ""}`}
+                  href="/ships"
+                  onClick={closeSidebarOnNavigation}
+                >
+                  <span>
+                    <Rocket size={17} strokeWidth={1.8} aria-hidden="true" />
+                  </span>
+                  <span className={styles.navText}>Ships</span>
+                </NoPrefetchLink>
+                <div className={styles.sectionLabel}>CONFIGURATION</div>
+                <NoPrefetchLink
+                  prefetch={false}
+                  className={`${styles.navItem} ${activePage === "structures" ? styles.navActive : ""}`}
+                  href="/structures"
+                  onClick={closeSidebarOnNavigation}
+                >
+                  <span>
+                    <MapPinned size={17} strokeWidth={1.8} aria-hidden="true" />
+                  </span>
+                  <span className={styles.navText}>Structures</span>
+                </NoPrefetchLink>
+                <NoPrefetchLink
+                  prefetch={false}
+                  className={`${styles.navItem} ${activePage === "corpHangars" ? styles.navActive : ""}`}
+                  href="/corp-hangars"
+                  onClick={closeSidebarOnNavigation}
+                >
+                  <span>
+                    <Warehouse size={17} strokeWidth={1.8} aria-hidden="true" />
+                  </span>
+                  <span className={styles.navText}>Corp Hangers</span>
+                </NoPrefetchLink>
+                <NoPrefetchLink
+                  prefetch={false}
+                  className={`${styles.navItem} ${activePage === "settings" ? styles.navActive : ""}`}
+                  href="/settings"
+                  onClick={closeSidebarOnNavigation}
+                >
+                  <span>
+                    <Settings2 size={17} strokeWidth={1.8} aria-hidden="true" />
+                  </span>
+                  <span className={styles.navText}>Settings</span>
+                </NoPrefetchLink>
+                <NoPrefetchLink
+                  prefetch={false}
+                  className={`${styles.navItem} ${activePage === "characters" ? styles.navActive : ""}`}
+                  href="/characters"
+                  onClick={closeSidebarOnNavigation}
+                >
+                  <span>
+                    <UsersRound size={17} strokeWidth={1.8} aria-hidden="true" />
+                  </span>
+                  <span className={styles.navText}>Characters</span>
+                  <b>{characters.length}</b>
+                </NoPrefetchLink>
+                <div className={styles.sectionLabel}>UTILITY</div>
+                <NoPrefetchLink
+                  prefetch={false}
+                  className={`${styles.navItem} ${activePage === "imagechecker" ? styles.navActive : ""}`}
+                  href="/imagechecker"
+                  onClick={closeSidebarOnNavigation}
+                >
+                  <span>
+                    <ImageIcon size={17} strokeWidth={1.8} aria-hidden="true" />
+                  </span>
+                  <span className={styles.navText}>Image checker</span>
+                </NoPrefetchLink>
+                <div className={styles.sidebarBottom}>
+                  <div className={styles.sectionLabel}>CONNECTED PILOTS</div>
+                  <div className={styles.pilotList}>
+                    {characters.map((character) => {
+                      const isNotAuthenticated = characterNeedsReauthorization(
+                        stateStatuses.find(
+                          (status) => status.characterId === character.characterId,
+                        ),
+                      );
+                      return (
+                        <div className={styles.pilot} key={character.characterId}>
+                          <Avatar>
+                            <AvatarImage
+                              src={eveCharacterPortraitUrl(character.characterId, 64)}
+                              alt={character.characterName}
+                            />
+                            <AvatarFallback>
+                              {character.characterName
+                                .split(" ")
+                                .filter((n) => n)
+                                .map((n) => n[0])
+                                .join("")
+                                .toLocaleUpperCase()}
+                            </AvatarFallback>
+                            <AvatarBadge
+                              className={`${isNotAuthenticated ? styles.pilotNotOk : styles.pilotOk}`}
+                              aria-label={
+                                isNotAuthenticated ? "Authorization required" : "Authorized"
+                              }
+                            />
+                          </Avatar>
+                          <span className={styles.navText}>
+                            <strong>{character.characterName}</strong>
+                            <small>
+                              {character.hasDirectorRole ? "Director access" : "Character access"}
+                            </small>
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {characters.length === 0 && (
+                      <Empty className={styles.pilotEmpty}>
+                        <EmptyDescription>No connected pilots</EmptyDescription>
+                      </Empty>
+                    )}
+                    <span
+                      className={styles.sidebarSentinel}
+                      ref={pilotListSentinelRef}
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <div className={styles.sidebarCommunity}>
+                    <div className={styles.sectionLabel}>COMMUNITY</div>
+                    <a
+                      className={styles.navItem}
+                      href="https://github.com/LakMoore/EveAssemblyLine"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <span>
+                        <FaGithub size={17} aria-hidden="true" />
+                      </span>
+                      <span className={styles.navText}>GitHub</span>
+                    </a>
+                    <a
+                      className={styles.navItem}
+                      href="https://discord.gg/VdGZWzXahh"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <span>
+                        <FaDiscord size={17} aria-hidden="true" />
+                      </span>
+                      <span className={styles.navText}>Discord</span>
+                    </a>
+                  </div>
+                  <div className={styles.sidebarFooter}>
+                    <span
+                      className={`${styles.sidebarCount} ${styles.navText}`}
+                      aria-label={`${characters.length} connected characters`}
+                      data-tooltip={`${characters.length} connected character${characters.length === 1 ? "" : "s"}`}
+                      tabIndex={0}
+                    >
+                      {characters.length}
+                    </span>
+                    <EveAuthorizationWarning href="/api/auth/eve/start">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className={`${styles.addButton} ${styles.navText} ${!authenticated ? styles.addButtonDisconnected : ""}`}
+                        onClick={() =>
+                          trackAnalyticsEvent(
+                            "add_character",
+                            {
+                              source: "sidebar",
+                            },
+                          )
+                        }
+                      >
+                        <UserRoundPlus
+                          data-icon="inline-start"
+                          strokeWidth={1.8}
+                          aria-hidden="true"
+                        />
+                        <span>Add character</span>
+                      </Button>
+                    </EveAuthorizationWarning>
+                  </div>
+                </div>
+              </aside>
+              <section className={styles.content}>{children}</section>
+              <footer className={styles.siteFooter}>
+                <div className={styles.siteFooterInner}>
+                  <span>Independent industry planning for EVE Online.</span>
+                  <nav className={styles.siteFooterLinks} aria-label="Site information">
+                    <NoPrefetchLink href="/guides">Guides</NoPrefetchLink>
+                    <NoPrefetchLink href="/about">About</NoPrefetchLink>
+                    <NoPrefetchLink href="/contact">Contact</NoPrefetchLink>
+                    <NoPrefetchLink href="/privacy">Privacy</NoPrefetchLink>
+                    <NoPrefetchLink href="/terms">Terms</NoPrefetchLink>
+                    <NoPrefetchLink href="/cookies">Cookies</NoPrefetchLink>
+                  </nav>
+                </div>
+              </footer>
+            </div>
+          </main>
+        </RefreshOwnerContext.Provider>
       </RefreshContext.Provider>
     </LanguageContext.Provider>
   );
@@ -1262,4 +1330,8 @@ export function useAppLanguage() {
 
 export function useAppRefreshStatus() {
   return useContext(RefreshContext);
+}
+
+export function useAppRefreshingOwners() {
+  return useContext(RefreshOwnerContext);
 }

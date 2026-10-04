@@ -308,25 +308,30 @@ function earliestIndustryStart(
   completionOffsets: ReadonlyMap<string, number>,
   jobsById: ReadonlyMap<string, SimulationIndustryJob>,
 ): IndustryStartDecision {
-  if (
-    job.blueprint.blueprintKind === "fallback"
-    || (job.blueprint.blueprintKind === "formula" && job.blueprint.sourceLocationId === undefined)
-    || (
-      job.blueprint.sourceLocationId !== undefined
-      && job.blueprint.sourceLocationId !== job.locationId
-    )
-  ) {
+  const blueprint = job.blueprint;
+  if (blueprint.blueprintKind === "formula" && blueprint.sourceLocationId === undefined) {
     return {
       noTimingReason: "The required blueprint or reaction formula is unavailable at this facility.",
     };
   }
-  if (job.readyNowRuns >= job.requiredRuns) return { startOffsetSeconds: 0 };
+  let earliest = 0;
+  if (blueprint.sourceLocationId !== undefined && blueprint.sourceLocationId !== job.locationId) {
+    if (blueprint.horizon === "after-hauling") {
+      earliest = Math.max(earliest, missingInputAvailabilityOffsetSeconds);
+    }
+    else if (blueprint.blueprintKind !== "fallback") {
+      return {
+        noTimingReason:
+          "The required blueprint or reaction formula is unavailable at this facility.",
+      };
+    }
+  }
+  if (job.readyNowRuns >= job.requiredRuns) return { startOffsetSeconds: earliest };
   if (existingAssetsNeedHauling(job.inputs) || job.readyAfterHaulingRuns >= job.requiredRuns) {
     return {
       noTimingReason: "Existing input assets must be hauled to this facility before work starts.",
     };
   }
-  let earliest = 0;
   for (const input of job.inputs) {
     if (input.availableNow >= input.requiredQuantity) continue;
     if (input.availableFromHauling > 0) {

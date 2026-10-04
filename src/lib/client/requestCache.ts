@@ -513,6 +513,45 @@ export type ClientCharacterStatus = {
   }>;
 };
 
+/** Merges only the refreshed owner slice so concurrent cache reads cannot replace other updates. */
+export function mergeClientOwnerStatuses(
+  current: ClientCharacterStatus[],
+  updates: ClientCharacterStatus[],
+  owner: ClientOwner,
+) {
+  const merged = new Map(current.map((status) => [status.characterId, status]));
+  for (const update of updates) {
+    if (owner.kind === "character") {
+      if (update.characterId === owner.id) {
+        const existing = merged.get(update.characterId);
+        merged.set(
+          update.characterId,
+          {
+            ...update,
+            corporations: existing?.corporations ?? update.corporations,
+          },
+        );
+      }
+      continue;
+    }
+    const corporationStatus = update.corporations?.find(
+      (corporation) => corporation.corporationId === owner.id,
+    );
+    if (!corporationStatus) continue;
+    const existing = merged.get(update.characterId);
+    if (!existing) {
+      merged.set(update.characterId, { ...update, corporations: [corporationStatus] });
+      continue;
+    }
+    const corporations = [...(existing.corporations ?? [])];
+    const index = corporations.findIndex((corporation) => corporation.corporationId === owner.id);
+    if (index === -1) corporations.push(corporationStatus);
+    else corporations[index] = corporationStatus;
+    merged.set(update.characterId, { ...existing, corporations });
+  }
+  return [...merged.values()];
+}
+
 export type ClientEndpointStatus = {
   status: "fresh" | "cached" | "stale" | "rate_limited" | "error";
   hasBody: boolean;

@@ -477,6 +477,37 @@ void test("preserves the slot index assigned to each in-flight job", () => {
   assert.equal(result.manufacturingJobs[0].installs[0].slotIndex, 1);
 });
 
+void test("schedules a remote blueprint after its hauling horizon", () => {
+  const remoteBlueprintJob = {
+    ...job("remote-blueprint", 1, 3600),
+    blueprint: {
+      ...job("remote-blueprint", 1, 3600).blueprint,
+      blueprintKind: "bpc" as const,
+      sourceLocationId: 60,
+      horizon: "after-hauling" as const,
+    },
+  };
+  const result = scheduleSimulationJobs(
+    [remoteBlueprintJob],
+    [],
+    [],
+    [],
+    [
+      {
+        characterId: 7,
+        systemId: 30_000_142,
+        freeSlots: { manufacturing: 1, reactions: 0, science: 0 },
+        timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
+        skillLevels: {},
+      },
+    ],
+    systemIdsByLocation,
+  );
+
+  assert.equal(result.manufacturingJobs[0].installs.length, 1);
+  assert.equal(result.manufacturingJobs[0].installs[0].startOffsetSeconds, 24 * 60 * 60);
+});
+
 void test("backfills a ready-now job before a future booking on the same slot", () => {
   const delayedJob = {
     ...job("a-delayed", 1, 3600),

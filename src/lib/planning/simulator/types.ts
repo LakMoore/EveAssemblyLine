@@ -269,6 +269,7 @@ export interface SimulationBlueprintAllocation {
   blueprintItemId?: number;
   blueprintKind: "bpo" | "bpc" | "formula" | "fallback";
   sourceLocationId?: number;
+  horizon?: SupplyHorizon;
   runs: number;
   materialEfficiency: number;
   timeEfficiency: number;

@@ -12,8 +12,10 @@ import { invalidateCorporationCache } from "@/lib/esi/cache";
 import {
   createCollection,
   getCollectionForCharacter,
+  getCollectionCorporationSettings,
   getCharacter,
   getSession,
+  hasCollectionRefreshEligibleDirector,
   savePendingMerge,
   saveSession,
   saveCharacter,
@@ -29,9 +31,20 @@ function getPublicOrigin(request: Request, callbackUrl: string) {
   return `${forwardedProtocol}://${forwardedHost}`;
 }
 
-function getReturnUrl(request: Request, pendingReturnPath: string | undefined) {
+function getReturnUrl(
+  request: Request,
+  pendingReturnPath: string | undefined,
+  characterId: number,
+  corporationId?: number,
+) {
   const returnUrl = new URL(pendingReturnPath ?? "/", getPublicOrigin(request, ""));
+  returnUrl.searchParams.delete("refreshCharacter");
+  returnUrl.searchParams.delete("refreshCorporation");
   returnUrl.searchParams.set("refresh", "1");
+  returnUrl.searchParams.set("refreshCharacter", String(characterId));
+  if (corporationId !== undefined) {
+    returnUrl.searchParams.set("refreshCorporation", String(corporationId));
+  }
   return returnUrl.toString();
 }
 
@@ -125,6 +138,12 @@ export async function GET(request: Request) {
       rolesAtHq: [],
       rolesAtOther: [],
     };
+    const corporationId = corporationAuthorization.authorized
+      ? corporationAuthorization.corporationId
+      : undefined;
+    const hadEligibleDirector =
+      corporationId !== undefined
+      && (await hasCollectionRefreshEligibleDirector(resolvedCollectionId, corporationId));
     if (!corporationAuthorization.authorized && existingCharacter?.corporationId !== undefined) {
       invalidateCorporationCache(existingCharacter.corporationId, session.sessionId);
     }
@@ -135,9 +154,7 @@ export async function GET(request: Request) {
       onDeployment: existingCharacter?.onDeployment ?? false,
       collectionId: resolvedCollectionId,
       personalAuth: corporationAuthorization.token,
-      corporationId: corporationAuthorization.authorized
-        ? corporationAuthorization.corporationId
-        : undefined,
+      corporationId,
       allianceId: corporationAuthorization.authorized
         ? corporationAuthorization.characterInfo.alliance_id
         : undefined,
@@ -154,7 +171,23 @@ export async function GET(request: Request) {
     });
     if (!session.collectionId) session.collectionId = resolvedCollectionId;
     await saveSession(session);
-    const response = NextResponse.redirect(getReturnUrl(request, pending.returnPath));
+    const gainedEligibleDirector =
+      corporationId !== undefined
+      && !hadEligibleDirector
+      && (await hasCollectionRefreshEligibleDirector(resolvedCollectionId, corporationId));
+    const corporationSupportEnabled =
+      gainedEligibleDirector
+      && (await getCollectionCorporationSettings(resolvedCollectionId)).some(
+        (settings) => settings.corporationId === corporationId && settings.supportEnabled,
+      );
+    const response = NextResponse.redirect(
+      getReturnUrl(
+        request,
+        pending.returnPath,
+        identity.characterId,
+        corporationSupportEnabled ? corporationId : undefined,
+      ),
+    );
     setSessionCookie(response, session.sessionId);
     response.cookies.set("assembly_line_sso_state", "", { httpOnly: true, path: "/", maxAge: 0 });
     return response;

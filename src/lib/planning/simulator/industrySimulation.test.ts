@@ -4,6 +4,7 @@ import { loadSimulationContext } from "./context";
 import { buildDependencyGraph } from "./dependencyGraph";
 import { simulateIndustryDemand } from "./industrySimulation";
 import { projectSimulationLedger } from "./ledger";
+import { scheduleSimulationJobs } from "./scheduler";
 import { parseSimulatorRequest } from "./schema";
 import { simulateIndustry } from "./simulate";
 import { normalizeSimulatorInventory } from "./sourceLots";
@@ -76,6 +77,110 @@ void test("declares an exact SDE-backed manufacturing job without inventing avai
   );
   const projection = projectSimulationLedger(inventory.itemLots, result.transactions);
   assert.deepEqual(projection.invariantViolations, []);
+});
+
+void test("uses fallback blueprint ME and TE and schedules the modeled manufacturing job", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "main",
+        name: "Main",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 587, quantity: 100, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [],
+    settings: {
+      includeCorporationAssets: true,
+      personalSellOrdersAsStock: false,
+      allCorporationSellOrdersAsStock: false,
+      myCorporationSellOrdersAsStock: false,
+      buildBlacklist: [],
+      buyBlacklist: [],
+      fallbackT1Me: 8,
+      fallbackT1Te: 10,
+    },
+    simulation: { version: 1 },
+  });
+  const baselineRequest = structuredClone(request);
+  baselineRequest.settings.fallbackT1Me = 0;
+  baselineRequest.settings.fallbackT1Te = 0;
+  const context = await loadSimulationContext();
+  const graph = buildDependencyGraph(
+    [587],
+    context,
+    {
+      buildBlacklist: new Set(),
+      buyBlacklist: new Set(),
+      maxNodes: request.simulation.policy.maxGraphNodes,
+      maxDepth: request.simulation.policy.maxGraphDepth,
+    },
+  );
+  const baselineIndustry = simulateIndustryDemand(
+    baselineRequest,
+    context,
+    normalizeSimulatorInventory(baselineRequest, context),
+    graph,
+  );
+  const configuredIndustry = simulateIndustryDemand(
+    request,
+    context,
+    normalizeSimulatorInventory(request, context),
+    graph,
+  );
+  const baselineRifter = baselineIndustry.manufacturingJobs.find(
+    (job) => job.productTypeId === 587,
+  );
+  const configuredRifter = configuredIndustry.manufacturingJobs.find(
+    (job) => job.productTypeId === 587,
+  );
+
+  assert.ok(baselineRifter);
+  assert.ok(configuredRifter);
+  assert.equal(configuredRifter.blueprint.blueprintKind, "fallback");
+  assert.equal(configuredRifter.blueprint.materialEfficiency, 8);
+  assert.equal(configuredRifter.blueprint.timeEfficiency, 10);
+  assert.ok(
+    configuredRifter.inputs.some((input) => {
+      const baselineInput = baselineRifter.inputs.find(
+        (candidate) => candidate.typeId === input.typeId,
+      );
+      return baselineInput !== undefined && input.requiredQuantity < baselineInput.requiredQuantity;
+    }),
+  );
+  assert.ok(configuredRifter.durationPerRunSeconds < baselineRifter.durationPerRunSeconds);
+
+  const scheduled = scheduleSimulationJobs(
+    configuredIndustry.manufacturingJobs,
+    configuredIndustry.reactionJobs,
+    configuredIndustry.inventionJobs,
+    configuredIndustry.copyJobs,
+    [
+      {
+        characterId: 1,
+        systemId: 30_000_142,
+        freeSlots: { manufacturing: 4, reactions: 4, science: 4 },
+        timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
+        skillLevels: {},
+      },
+    ],
+    new Map([[20, 30_000_142]]),
+  );
+  const scheduledRifter = scheduled.manufacturingJobs.find((job) => job.productTypeId === 587);
+
+  assert.ok(scheduledRifter);
+  assert.equal(scheduledRifter.installs.length, 1);
+  assert.equal(
+    scheduledRifter.installs[0].durationSeconds,
+    Math.ceil(scheduledRifter.requiredRuns * scheduledRifter.durationPerRunSeconds),
+  );
 });
 
 void test("hauls available Charon components to A while protecting A-local demand", async () => {
