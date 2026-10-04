@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { SimulationRequestV1 } from "./types";
+import type { SimulationInFlightJobActivity, SimulationRequestV1 } from "./types";
 
 const positiveSafeInteger = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const plannerLocationId = z
@@ -26,6 +26,84 @@ const defaultSimulationOptions = {
   scienceProfiles: [],
   policy: defaultSimulationPolicy,
 };
+
+function simulationInFlightSlotPool(
+  activity: SimulationInFlightJobActivity,
+): "manufacturing" | "reactions" | "science" {
+  if (activity === "manufacturing") return "manufacturing";
+  if (activity === "reaction") return "reactions";
+  return "science";
+}
+
+const simulationCharacterSchema = z
+  .object({
+    characterId: positiveSafeInteger,
+    systemId: positiveSafeInteger,
+    freeSlots: z.object({
+      manufacturing: nonNegativeInteger,
+      reactions: nonNegativeInteger,
+      science: nonNegativeInteger,
+    }),
+    inFlightJobs: z
+      .array(
+        z.object({
+          jobId: positiveSafeInteger,
+          activity: z.enum([
+            "manufacturing",
+            "reaction",
+            "time-research",
+            "material-research",
+            "copying",
+            "invention",
+          ]),
+          remainingSeconds: nonNegativeInteger,
+          slotIndex: nonNegativeInteger,
+        }),
+      )
+      .max(100)
+      .default([]),
+    timeMultipliers: z.object({
+      manufacturing: multiplier,
+      reactions: multiplier,
+      copying: multiplier,
+      invention: multiplier,
+    }),
+    skillLevels: z.record(z.string().regex(/^\d+$/), z.number().int().min(0).max(5)),
+  })
+  .superRefine((character, context) => {
+    const inFlightCountByPool = {
+      manufacturing: 0,
+      reactions: 0,
+      science: 0,
+    };
+    for (const job of character.inFlightJobs) {
+      inFlightCountByPool[simulationInFlightSlotPool(job.activity)] += 1;
+    }
+
+    const seenSlots = new Set<string>();
+    character.inFlightJobs.forEach((job, index) => {
+      const pool = simulationInFlightSlotPool(job.activity);
+      const firstSlotIndex = character.freeSlots[pool];
+      const lastSlotIndex = firstSlotIndex + inFlightCountByPool[pool];
+      if (job.slotIndex < firstSlotIndex || job.slotIndex >= lastSlotIndex) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["inFlightJobs", index, "slotIndex"],
+          message: "In-flight slot indices must follow free slots in their activity pool.",
+        });
+      }
+
+      const slotKey = `${pool}:${job.slotIndex}`;
+      if (seenSlots.has(slotKey)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["inFlightJobs", index, "slotIndex"],
+          message: "In-flight jobs in the same activity pool must use distinct slots.",
+        });
+      }
+      seenSlots.add(slotKey);
+    });
+  });
 
 const ownerSchema = z
   .object({
@@ -163,26 +241,7 @@ const simulationSchema = z
     simulateSurplus: z.boolean().default(false),
     blockInterStockpileHauling: z.boolean().default(false),
     maxReactionJobDurationHours: z.number().int().min(1).max(8760).default(24),
-    characters: z
-      .array(
-        z.object({
-          characterId: positiveSafeInteger,
-          freeSlots: z.object({
-            manufacturing: nonNegativeInteger,
-            reactions: nonNegativeInteger,
-            science: nonNegativeInteger,
-          }),
-          timeMultipliers: z.object({
-            manufacturing: multiplier,
-            reactions: multiplier,
-            copying: multiplier,
-            invention: multiplier,
-          }),
-          skillLevels: z.record(z.string().regex(/^\d+$/), z.number().int().min(0).max(5)),
-        }),
-      )
-      .max(100)
-      .default([]),
+    characters: z.array(simulationCharacterSchema).max(100).default([]),
     scienceProfiles: z
       .array(
         z.object({

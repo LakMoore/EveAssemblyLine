@@ -67,6 +67,12 @@ import {
 } from "@/lib/planning/planResultStore";
 import { createSimulationEtag, simulationCalculationVersion } from "@/lib/planning/simulator/etag";
 import {
+  createSimulationCharacterProfiles,
+  hasUsableSimulationCharacterSnapshots,
+  simulationIndustrySkillIds,
+  simulationTimeMultipliers,
+} from "@/lib/planning/simulator/requestProfiles";
+import {
   applyHaulItemExclusionsToPlan,
   createHaulItemExclusionKey,
   parseHaulItemExclusionKey,
@@ -206,24 +212,6 @@ function simulationReactionMaterialBonuses(
     bonuses.set(location.locationId, reactionMaterialPercentage(location));
   }
   return bonuses;
-}
-
-const industrySkillIds = {
-  industry: 3380,
-  advancedIndustry: 3388,
-  reactions: 45746,
-} as const;
-
-function skillTimeMultiplier(
-  skills: Array<{ skillId: number; activeSkillLevel: number }> | undefined,
-  skillBonuses: Array<{ skillId: number; bonusPerLevel: number }>,
-) {
-  const levels = new Map((skills ?? []).map((skill) => [skill.skillId, skill.activeSkillLevel]));
-  return skillBonuses.reduce(
-    (multiplier, bonus) =>
-      multiplier * (1 - (levels.get(bonus.skillId) ?? 0) * bonus.bonusPerLevel),
-    1,
-  );
 }
 
 function getStockLocationId(item: PlanStockItem) {
@@ -625,6 +613,16 @@ function Planner() {
     SimulationHaulTask[]
   >([]);
   const [simulationStateLoaded, setSimulationStateLoaded] = useState(false);
+  const [simulationCharactersLoadAttempt, setSimulationCharactersLoadAttempt] = useState(0);
+  const simulationCharactersLoadKey = `${language}:${simulationCharactersLoadAttempt}`;
+  const [simulationCharactersLoadedKey, setSimulationCharactersLoadedKey] = useState<string>();
+  const [simulationCharactersLoadError, setSimulationCharactersLoadError] = useState<{
+    key: string;
+    message: string;
+  } | null>(null);
+  const simulationCharactersLoaded =
+    simulationCharactersLoadedKey === simulationCharactersLoadKey
+    && simulationCharactersLoadError?.key !== simulationCharactersLoadKey;
   const planRunStartedRef = useRef(false);
   const [haulPatches, setHaulPatches] = useState<Map<string, HaulPatch>>(() => new Map());
   const [haulPatchesLoaded, setHaulPatchesLoaded] = useState(false);
@@ -712,11 +710,18 @@ function Planner() {
   useEffect(() => {
     let cancelled = false;
     let activeCharacterIds = new Set<number>();
+    const loadKey = `${language}:${simulationCharactersLoadAttempt}`;
     void loadClientSession()
       .then(async (session) => {
         if (cancelled) return;
         setIsAuthenticated(Boolean(session.authenticated));
-        if (!session.authenticated) return;
+        if (!session.authenticated) {
+          setSimulationCharactersLoadError({
+            key: loadKey,
+            message: "Sign in and connect an active character to schedule simulation activities.",
+          });
+          return;
+        }
         const [assets, loadedJobs] = await Promise.all([
           loadClientAssets(language),
           loadClientJobs(),
@@ -757,8 +762,26 @@ function Planner() {
         );
         setCharacterStatuses(activeStatuses);
         setPlanningCharacterId((current) => current ?? activeStatuses[0]?.characterId);
+        if (!hasUsableSimulationCharacterSnapshots(activeStatuses, loadedJobs.slotUsage)) {
+          setSimulationCharactersLoadError({
+            key: loadKey,
+            message:
+              activeStatuses.length === 0
+                ? "Connect an active character with loaded state to schedule simulation activities."
+                : "Character skill, job, or slot snapshots are incomplete. Retry before running a simulation.",
+          });
+          return;
+        }
+        setSimulationCharactersLoadError(null);
+        setSimulationCharactersLoadedKey(loadKey);
       })
-      .catch(() => setIsAuthenticated(false));
+      .catch(() => {
+        if (cancelled) return;
+        setSimulationCharactersLoadError({
+          key: loadKey,
+          message: "Character and job data could not be loaded. Retry before running a simulation.",
+        });
+      });
     const handleRefresh = (event: Event) => {
       const detail = (event as CustomEvent<ClientRefreshEventDetail>).detail;
       void Promise
@@ -773,20 +796,37 @@ function Planner() {
           setHaulItemExclusion((current) => retainCurrentHaulItemExclusions(assets, current));
           setJobs(loadedJobs);
           setCorporationSources(assets.corporationSources ?? []);
-          setCharacterStatuses(
-            (state.characters ?? []).filter((character) =>
-              activeCharacterIds.has(character.characterId),
-            ),
+          const activeStatuses = (state.characters ?? []).filter((character) =>
+            activeCharacterIds.has(character.characterId),
           );
+          setCharacterStatuses(activeStatuses);
+          if (!hasUsableSimulationCharacterSnapshots(activeStatuses, loadedJobs.slotUsage)) {
+            setSimulationCharactersLoadError({
+              key: loadKey,
+              message:
+                activeStatuses.length === 0
+                  ? "Character refresh returned no active state. Retry before running a simulation."
+                  : "Refreshed skill, job, or slot snapshots are incomplete. Retry before running a simulation.",
+            });
+            return;
+          }
+          setSimulationCharactersLoadError(null);
+          setSimulationCharactersLoadedKey(loadKey);
         })
-        .catch(() => undefined);
+        .catch(() => {
+          if (cancelled) return;
+          setSimulationCharactersLoadError({
+            key: loadKey,
+            message: "Character, asset, or job refresh failed. Retry before running a simulation.",
+          });
+        });
     };
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
     return () => {
       cancelled = true;
       window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
     };
-  }, [language]);
+  }, [language, simulationCharactersLoadAttempt]);
 
   const excludedStockLocationIds = new Set(excludedLocationIds);
   const stock = getPlannerStock(
@@ -820,7 +860,7 @@ function Planner() {
   function reactionSkillBonus(characterId: number | undefined) {
     const character = characterStatuses.find((entry) => entry.characterId === characterId);
     const skill = character?.skills?.body?.find(
-      (entry) => entry.skillId === industrySkillIds.reactions,
+      (entry) => entry.skillId === simulationIndustrySkillIds.reactions,
     );
     return (skill?.activeSkillLevel ?? 0) * 4;
   }
@@ -1037,6 +1077,7 @@ function Planner() {
       plannerItems.length === 0
       || isPlanLoading
       || (mode === "simulate" && !simulationStateLoaded)
+      || (mode === "simulate" && !simulationCharactersLoaded)
     ) return false;
     planRunStartedRef.current = true;
     flushSync(() => {
@@ -1081,6 +1122,7 @@ function Planner() {
         (character) => character.characterId === planningCharacterId,
       );
       const planningSkills = planningCharacter?.skills?.body ?? undefined;
+      const planningTimeMultipliers = simulationTimeMultipliers(planningSkills);
       const response = await fetch(
         mode === "simulate" ? "/api/plan/simulate" : "/api/plan",
         {
@@ -1152,17 +1194,8 @@ function Planner() {
               reactions: selectedReactionFacility?.reactionTimeMultiplier ?? 1,
             },
             skillTimeMultipliers: {
-              manufacturing: skillTimeMultiplier(
-                planningSkills,
-                [
-                  { skillId: industrySkillIds.industry, bonusPerLevel: 0.04 },
-                  { skillId: industrySkillIds.advancedIndustry, bonusPerLevel: 0.03 },
-                ],
-              ),
-              reactions: skillTimeMultiplier(
-                planningSkills,
-                [{ skillId: industrySkillIds.reactions, bonusPerLevel: 0.04 }],
-              ),
+              manufacturing: planningTimeMultipliers.manufacturing,
+              reactions: planningTimeMultipliers.reactions,
             },
             settings: {
               ...(mode === "calculate"
@@ -1187,6 +1220,7 @@ function Planner() {
                     simulateSurplus,
                     blockInterStockpileHauling: !allowInterStockpileHauling,
                     maxReactionJobDurationHours: settings.maxReactionJobDurationHours,
+                    characters: createSimulationCharacterProfiles(characterStatuses, jobs),
                   },
                 }
               : {}),
@@ -1924,6 +1958,22 @@ function Planner() {
             >
               Excluded asset locations ({excludedLocationIds.length})
             </Button>
+            {simulationCharactersLoadError?.key === simulationCharactersLoadKey && (
+              <Alert className="w-full basis-full" variant="destructive">
+                <AlertTitle>Simulation unavailable</AlertTitle>
+                <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+                  <span>{simulationCharactersLoadError.message}</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSimulationCharactersLoadAttempt((attempt) => attempt + 1)}
+                  >
+                    Retry
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            )}
             <div className="ml-auto grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
               <CalculateButton
                 type="button"
@@ -1946,6 +1996,7 @@ function Planner() {
                 disabled={
                   isPlanLoading
                   || !simulationStateLoaded
+                  || !simulationCharactersLoaded
                   || stockpiles.every(
                     (stockpile) =>
                       stockpile.isActive === false

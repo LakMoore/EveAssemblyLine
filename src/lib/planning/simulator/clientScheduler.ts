@@ -1,7 +1,11 @@
 import type { SimulationIndustryJob } from "./types";
 
 /** Scheduling modes exposed by the simulator activity controls. */
-export type ClientSimulationSolveMode = "available-slots" | "run-time-hours" | "run-time-days";
+export type ClientSimulationSolveMode =
+  | "schedule"
+  | "available-slots"
+  | "run-time-hours"
+  | "run-time-days";
 
 /** Describes the currently available slots for one character. */
 export type ClientSimulationSlotGroup = {
@@ -40,6 +44,15 @@ export type ClientSimulationSchedule = {
   installs: ClientSimulationInstall[];
   runs: number;
   timeSeconds: number;
+};
+
+/** Manufacturing install-plan display modes selected by the simulator view. */
+export type ClientSimulationManufacturingDisplayMode = "total" | "installable" | "schedule";
+
+/** One install-plan row and whether its completion can be tracked locally. */
+export type ClientSimulationInstallPlanDetail = {
+  install: ClientSimulationInstall;
+  trackCompletion: boolean;
 };
 
 /** One integer-sized batch of generated installs and its per-install duration. */
@@ -122,7 +135,7 @@ export function getSimulationInstallableRuns(job: SimulationIndustryJob): number
 export function solveSimulationActivity(
   jobs: readonly SimulationIndustryJob[],
   availableSlots: number,
-  mode: ClientSimulationSolveMode,
+  mode: Exclude<ClientSimulationSolveMode, "schedule">,
   targetTime: number,
   enabledJobIds: ReadonlySet<string> = new Set(jobs.map((job) => job.jobId)),
   slotGroups: readonly ClientSimulationSlotGroup[] = [],
@@ -220,6 +233,69 @@ export function solveSimulationActivity(
       ] as const;
     }),
   );
+}
+
+/** Builds suggestions from scheduler installs scheduled to start at T+0. */
+export function scheduledSimulationActivity(
+  jobs: readonly SimulationIndustryJob[],
+  enabledJobIds: ReadonlySet<string> = new Set(jobs.map((job) => job.jobId)),
+): ReadonlyMap<string, ClientSimulationSchedule> {
+  return new Map(
+    jobs.map((job) => {
+      const installs = enabledJobIds.has(job.jobId)
+        ? job.installs
+            .filter((install) => install.startOffsetSeconds === 0)
+            .map((install) => ({
+              installId: install.installId,
+              runs: install.runs,
+              durationSeconds: install.durationSeconds,
+              characterId: install.characterId,
+              slotIndex: install.slotIndex,
+            }))
+        : [];
+      return [
+        job.jobId,
+        {
+          installs,
+          runs: installs.reduce((total, install) => total + install.runs, 0),
+          timeSeconds: Math.max(...installs.map((install) => install.durationSeconds), 0),
+        },
+      ] as const;
+    }),
+  );
+}
+
+/** Uses scheduled installs as the base and adds unassigned local suggestions outside Schedule mode. */
+export function simulationManufacturingInstallPlan(
+  job: SimulationIndustryJob,
+  localSchedule: ClientSimulationSchedule | undefined,
+  displayMode: ClientSimulationManufacturingDisplayMode,
+): ClientSimulationInstallPlanDetail[] {
+  const scheduledInstalls = job.installs.map(
+    (install): ClientSimulationInstallPlanDetail => ({
+      install: {
+        installId: install.installId,
+        runs: install.runs,
+        durationSeconds: install.durationSeconds,
+        characterId: install.characterId,
+        slotIndex: install.slotIndex,
+      },
+      trackCompletion: false,
+    }),
+  );
+  if (displayMode === "schedule") return scheduledInstalls;
+
+  const virtualInstalls = (localSchedule?.installs ?? []).map(
+    (install): ClientSimulationInstallPlanDetail => ({
+      install: {
+        ...install,
+        characterId: undefined,
+        slotIndex: undefined,
+      },
+      trackCompletion: true,
+    }),
+  );
+  return [...scheduledInstalls, ...virtualInstalls];
 }
 
 type SimulationSchedulePartition = {

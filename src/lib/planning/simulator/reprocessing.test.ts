@@ -121,6 +121,7 @@ function reprocessingJob(
 ): SimulationReprocessingJob {
   return {
     jobId,
+    depth: 1,
     stockpileId: "main",
     locationId: 40,
     sourceLotId: jobId,
@@ -155,6 +156,7 @@ void test("allocates complete reprocessing portions and keeps surplus out of Buy
           reserved: 0,
           destinationLocationId: 20,
           activity: "manufacturing",
+          demandingJobId: "deep-consumer",
         },
       },
     ],
@@ -177,6 +179,7 @@ void test("allocates complete reprocessing portions and keeps surplus out of Buy
           reserved: 0,
           destinationLocationId: 20,
           activity: "manufacturing",
+          demandingJobId: "deep-consumer",
         },
         blockedByBuyBlacklist: false,
         purpose: "material",
@@ -184,11 +187,19 @@ void test("allocates complete reprocessing portions and keeps surplus out of Buy
     ],
     blueprintPurchases: [],
     skillsRequired: [],
+    jobSkillRequirements: [],
     warnings: [],
     allocator,
   };
-  const reprocessing = settleReprocessing(request, context, inventory, industry);
+  const reprocessing = settleReprocessing(
+    request,
+    context,
+    inventory,
+    industry,
+    new Map([["deep-consumer", 3]]),
+  );
   assert.equal(reprocessing.jobs.length, 1);
+  assert.equal(reprocessing.jobs[0].depth, 4);
   assert.equal(reprocessing.jobs[0].portionCount, 1);
   assert.equal(reprocessing.jobs[0].yields[0].quantity, 200);
   assert.equal(reprocessing.jobs[0].yields[0].allocatedQuantity, 150);
@@ -283,6 +294,7 @@ void test("does not use market-order lots for reprocessing", () => {
     ],
     blueprintPurchases: [],
     skillsRequired: [],
+    jobSkillRequirements: [],
     warnings: [],
     allocator,
   };

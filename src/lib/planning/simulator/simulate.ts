@@ -460,7 +460,13 @@ function annotateUpstreamReservations(
           || reservation.sourceCompletionOffsetSeconds !== undefined
         ) return reservation;
         const producingJob = jobsById.get(reservation.sourceJobId);
-        const endOffsetSeconds = producingJob?.installs[0]?.endOffsetSeconds;
+        const endOffsetSeconds = producingJob?.installs.reduce<number | undefined>(
+          (latestEnd, install) =>
+            latestEnd === undefined
+              ? install.endOffsetSeconds
+              : Math.max(latestEnd, install.endOffsetSeconds),
+          undefined,
+        );
         return endOffsetSeconds === undefined
           ? reservation
           : {
@@ -580,13 +586,31 @@ export async function simulateIndustry(
         industry.inventionJobs,
         industry.copyJobs,
         request.simulation.characters,
+        new Map(
+          (request.facilityProfiles ?? []).map(({ locationId, systemId }) => [
+            locationId,
+            systemId,
+          ]),
+        ),
+        {
+          manufacturing: request.skillTimeMultipliers?.manufacturing ?? 1,
+          reactions: request.skillTimeMultipliers?.reactions ?? 1,
+        },
+        industry.jobSkillRequirements,
+        request.simulation.maxReactionJobDurationHours,
       ),
   );
   const producingJobs = [...schedules.manufacturingJobs, ...schedules.reactionJobs];
+  const jobDepthsById = new Map(
+    [...producingJobs, ...schedules.inventionJobs, ...schedules.copyJobs].map((job) => [
+      job.jobId,
+      job.depth,
+    ]),
+  );
   const reprocessing = measureSyncProfiled(
     profiler,
     "settle-reprocessing",
-    () => settleReprocessing(request, context, inventory, industry),
+    () => settleReprocessing(request, context, inventory, industry, jobDepthsById),
   );
   const buying = measureSyncProfiled(
     profiler,
@@ -692,7 +716,7 @@ export async function simulateIndustry(
     ?? measureSyncProfiled(profiler, "hash-input", () => simulationInputHash(request));
   return {
     metadata: {
-      simulatorVersion: 4,
+      simulatorVersion: 15,
       policyVersion: 1,
       generatedAt,
       sdeRevision: context.sdeRevision,

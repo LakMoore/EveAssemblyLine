@@ -85,3 +85,16 @@ export function groupSimulationActivityJobs(
   }
   return [...groups.values()];
 }
+
+/** Sums scheduled runs across jobs that begin at exactly T+0. */
+export function simulationRunsStartingAtT0(jobs: readonly SimulationIndustryJob[]): number {
+  return jobs.reduce(
+    (total, job) =>
+      total
+      + job.installs.reduce(
+        (jobTotal, install) => jobTotal + (install.startOffsetSeconds === 0 ? install.runs : 0),
+        0,
+      ),
+    0,
+  );
+}

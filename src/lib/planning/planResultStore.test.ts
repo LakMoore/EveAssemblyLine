@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { simulationCalculationVersion } from "./simulator/etag";
 import { isPlanResponse, isSimulationResultV2 } from "./planResultStore";
 
 const listNames = [
@@ -20,7 +21,7 @@ const listNames = [
 function simulationResult() {
   return {
     metadata: {
-      simulatorVersion: 3,
+      simulatorVersion: simulationCalculationVersion,
       policyVersion: 1,
       generatedAt: "2026-09-19T00:00:00.000Z",
       sdeRevision: "test-sde",
@@ -38,6 +39,12 @@ void test("accepts a complete cached native simulation result", () => {
   assert.equal(isSimulationResultV2(simulationResult()), true);
 });
 
+void test("rejects cached native results from an older calculation version", () => {
+  const stale = simulationResult();
+  stale.metadata.simulatorVersion = simulationCalculationVersion - 1;
+  assert.equal(isSimulationResultV2(stale), false);
+});
+
 void test("rejects a v2 result with incomplete metadata", () => {
   const result = simulationResult();
   delete (result.metadata as Record<string, unknown>).sdeRevision;
@@ -52,6 +59,7 @@ void test("accepts grouped reprocessing rows and rejects legacy raw jobs", () =>
       locationId: 10,
       sourceTypeId: 34,
       sourceTypeName: "Tritanium",
+      jobs: [{ depth: 1 }],
       quantities: {
         totalSourceQuantity: 100,
         immediateSourceQuantity: 50,
@@ -150,6 +158,22 @@ void test("rejects a native result with a missing list", () => {
 void test("rejects cached simulator rows missing display identity", () => {
   const result = simulationResult();
   (result.lists as Record<string, unknown>).planItems = [{ typeId: 34 }];
+  assert.equal(isSimulationResultV2(result), false);
+});
+
+void test("rejects scheduled jobs without depth metadata", () => {
+  const result = simulationResult();
+  (result.lists as Record<string, unknown>).manufacturingJobs = [
+    {
+      jobId: "manufacturing-job",
+      productTypeId: 587,
+      productName: "Rifter",
+      readyNowRuns: 1,
+      requiredRuns: 1,
+      inputs: [],
+      locationId: 10,
+    },
+  ];
   assert.equal(isSimulationResultV2(result), false);
 });
 

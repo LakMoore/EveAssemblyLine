@@ -39,6 +39,7 @@ import PlannerSkillsTab from "@/components/PlannerSkillsTab";
 import SimulationJobInputsResponsive, {
   SimulationInventionInputsResponsive,
 } from "@/components/SimulationJobInputsResponsive";
+import SimulationTimeline from "@/components/SimulationTimeline";
 import SimulationResultGroup from "@/components/SimulationResultGroup";
 import SimulationResultsTab from "@/components/SimulatorResultsTab";
 import SwitchedResultRow from "@/components/SwitchedResultRow";
@@ -85,6 +86,7 @@ import { fulleriteGasSites } from "@/lib/reference/fulleriteGasSites";
 import { fetchTypeMetadata, type TypeMetadata } from "@/lib/reference/types";
 import {
   groupSimulationActivityJobs,
+  simulationRunsStartingAtT0,
   type SimulationIndustryJobGroup,
 } from "@/lib/planning/simulator/presentation";
 import { AssemblyLineGroups } from "@/lib/reference/assemblyLineGroups";
@@ -94,11 +96,14 @@ import {
   getSimulationInstallableRuns,
   simulationReactionFormulaKey,
   summarizeClientSimulationInstalls,
+  scheduledSimulationActivity,
+  simulationManufacturingInstallPlan,
   solveSimulationActivity,
   splitSimulationRuns,
   isWormholeSystemId,
   type ClientSimulationInstall,
   type ClientSimulationInstallBatch,
+  type ClientSimulationManufacturingDisplayMode,
   type ClientSimulationScheduleOptions,
   type ClientSimulationSolveMode,
   type ClientSimulationSlotGroup,
@@ -1211,45 +1216,21 @@ function detailedInstallDetailsFromGroups(
   );
 }
 
-/** Converts one server-planned install to the client dialog's display shape. */
-function serverInstallDetail(
-  install: SimulationIndustryJob["installs"][number],
-): ClientSimulationInstall {
-  return {
-    installId: install.installId,
-    runs: install.runs,
-    durationSeconds: install.durationSeconds,
-    characterId: install.characterId,
-    slotIndex: install.slotIndex,
-  };
-}
-
 /** Returns all install rows that should be visible for one grouped simulator job. */
 function displayInstallsForEntry(
   entry: SimulationInstallPlanEntry,
   activityLabel: "reaction" | "manufacturing",
+  manufacturingDisplayMode: ClientSimulationManufacturingDisplayMode,
 ): Array<{ install: ClientSimulationInstall; trackCompletion: boolean }> {
+  if (activityLabel === "manufacturing") {
+    return simulationManufacturingInstallPlan(entry.job, entry.schedule, manufacturingDisplayMode);
+  }
+
   const clientInstalls = entry.schedule?.installs ?? [];
   if (clientInstalls.length > 0) {
     return clientInstalls.map((install) => ({ install, trackCompletion: true }));
   }
-  if (activityLabel === "reaction") return [];
-  if (entry.job.installs.length > 0) {
-    return entry.job.installs.map((install) => ({
-      install: serverInstallDetail(install),
-      trackCompletion: false,
-    }));
-  }
-  return [
-    {
-      install: {
-        installId: `planned-install:${entry.job.jobId}`,
-        runs: entry.job.requiredRuns,
-        durationSeconds: entry.job.requiredRuns * entry.job.durationPerRunSeconds,
-      },
-      trackCompletion: false,
-    },
-  ];
+  return [];
 }
 
 type SimulationInstallPlanDialogLayoutProps = {
@@ -1276,9 +1257,10 @@ type SimulationInstallPlanDialogModelProps = {
 function simulationInstallDetails(
   entries: readonly SimulationInstallPlanEntry[],
   activityLabel: "reaction" | "manufacturing",
+  manufacturingDisplayMode: ClientSimulationManufacturingDisplayMode = "total",
 ): SimulationInstallDetail[] {
   return entries.flatMap((entry) => {
-    const displayInstalls = displayInstallsForEntry(entry, activityLabel);
+    const displayInstalls = displayInstallsForEntry(entry, activityLabel, manufacturingDisplayMode);
     const scheduleInstalls = entry.schedule?.installs ?? [];
     const scheduleIdentity = simulationInstallScheduleIdentity(
       entry.scheduleRevision,
@@ -1306,7 +1288,7 @@ function SimulationReactionInstallPlanDialog({
   const installDetails = simulationInstallDetails(entries, "reaction");
   const compactGroups = compactInstallGroups(
     installDetails,
-    solveMode !== "available-slots",
+    solveMode === "run-time-hours" || solveMode === "run-time-days",
     scheduleOptions,
   );
   return (
@@ -1326,12 +1308,15 @@ function SimulationReactionInstallPlanDialog({
 /** Renders the manufacturing-specific install plan and server-install fallback behavior. */
 function SimulationManufacturingInstallPlanDialog({
   entries,
+  displayMode,
   scheduleOptions,
   characterNamesById,
   onOpenPlan,
   readOnly,
-}: SimulationInstallPlanDialogModelProps) {
-  const installDetails = simulationInstallDetails(entries, "manufacturing");
+}: SimulationInstallPlanDialogModelProps & {
+  displayMode: ClientSimulationManufacturingDisplayMode;
+}) {
+  const installDetails = simulationInstallDetails(entries, "manufacturing", displayMode);
   const compactGroups = compactInstallGroups(installDetails, false, scheduleOptions);
   return (
     <SimulationInstallPlanDialogLayout
@@ -3186,7 +3171,10 @@ function SimulationActivityTab({
   readOnly: boolean;
 }) {
   const activityLabel = tab === "react" ? "reaction" : "manufacturing";
-  const [solveMode, setSolveMode] = useState<ClientSimulationSolveMode>("available-slots");
+  const [manufacturingRunDisplay, setManufacturingRunDisplay] = useState<
+    "total" | "installable" | "schedule"
+  >("total");
+  const [solveMode, setSolveMode] = useState<ClientSimulationSolveMode>("schedule");
   const [targetTime, setTargetTime] = useState("24");
   const [protectReactionMaterialBonus, setProtectReactionMaterialBonus] = useState(false);
   const [copyStatus, setCopyStatus] = useState("");
@@ -3258,25 +3246,27 @@ function SimulationActivityTab({
   );
   const schedules = useMemo(
     () =>
-      solveSimulationActivity(
-        jobs,
-        availableSlots,
-        effectiveSolveMode,
-        Number(targetTime),
-        enabledJobIds,
-        slotGroups,
-        {
-          ...(reactionFormulaCounts?.availabilityKnown
-            ? {
-                availableReactionFormulaCountsByLocationAndType:
-                  reactionFormulaCounts.availableByLocationAndType,
-              }
-            : {}),
-          protectReactionMaterialBonus: tab === "react" && protectReactionMaterialBonus,
-          reactionMaterialBonusesByLocation,
-          ...(tab === "react" && locationSystemIdsById ? { locationSystemIdsById } : {}),
-        },
-      ),
+      effectiveSolveMode === "schedule"
+        ? scheduledSimulationActivity(jobs, enabledJobIds)
+        : solveSimulationActivity(
+            jobs,
+            availableSlots,
+            effectiveSolveMode,
+            Number(targetTime),
+            enabledJobIds,
+            slotGroups,
+            {
+              ...(reactionFormulaCounts?.availabilityKnown
+                ? {
+                    availableReactionFormulaCountsByLocationAndType:
+                      reactionFormulaCounts.availableByLocationAndType,
+                  }
+                : {}),
+              protectReactionMaterialBonus: tab === "react" && protectReactionMaterialBonus,
+              reactionMaterialBonusesByLocation,
+              ...(tab === "react" && locationSystemIdsById ? { locationSystemIdsById } : {}),
+            },
+          ),
     [
       availableSlots,
       effectiveSolveMode,
@@ -3316,6 +3306,14 @@ function SimulationActivityTab({
     0,
   );
   const presentationGroups: SimulationIndustryJobGroup[] = groupSimulationActivityJobs(jobs);
+  const visiblePresentationGroups =
+    tab !== "manufacture" || manufacturingRunDisplay === "total"
+      ? presentationGroups
+      : presentationGroups.filter((group) =>
+          manufacturingRunDisplay === "installable"
+            ? group.quantities.installableRuns > 0
+            : simulationRunsStartingAtT0(group.jobs) > 0,
+        );
   async function copyEntries(entries: readonly SimulationIndustryJob[], status: "list" | number) {
     const text = installableRunsText(entries);
     try {
@@ -3350,8 +3348,8 @@ function SimulationActivityTab({
     if (value === null) return;
     const nextMode = value;
     if (
-      solveMode !== "available-slots"
-      && nextMode !== "available-slots"
+      (solveMode === "run-time-hours" || solveMode === "run-time-days")
+      && (nextMode === "run-time-hours" || nextMode === "run-time-days")
       && solveMode !== nextMode
     ) {
       setTargetTime(String(convertSimulationTargetTime(Number(targetTime), solveMode, nextMode)));
@@ -3365,6 +3363,43 @@ function SimulationActivityTab({
       settings={
         <div className="flex flex-col gap-2.5 py-3.5 pb-2.5">
           <div className="flex flex-wrap items-center gap-2.5 max-[640px]:items-stretch">
+            {tab === "manufacture" && (
+              <>
+                <Label
+                  className="shrink-0 whitespace-nowrap"
+                  htmlFor={`${instanceId}-manufacture-run-display`}
+                >
+                  Show
+                </Label>
+                <Select
+                  value={manufacturingRunDisplay}
+                  onValueChange={(value) => {
+                    if (value === "total" || value === "installable" || value === "schedule") {
+                      setManufacturingRunDisplay(value);
+                    }
+                  }}
+                >
+                  <SelectTrigger
+                    id={`${instanceId}-manufacture-run-display`}
+                    aria-label="Show manufacturing run display"
+                    className="min-w-32"
+                  >
+                    <SelectValue>
+                      {manufacturingRunDisplay === "total"
+                        ? "total"
+                        : manufacturingRunDisplay === "installable"
+                          ? "installable"
+                          : "schedule"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="total">total</SelectItem>
+                    <SelectItem value="installable">installable</SelectItem>
+                    <SelectItem value="schedule">schedule</SelectItem>
+                  </SelectContent>
+                </Select>
+              </>
+            )}
             {tab === "react" && (
               <>
                 <Label
@@ -3380,20 +3415,23 @@ function SimulationActivityTab({
                     className="min-w-44"
                   >
                     <SelectValue>
-                      {solveMode === "available-slots"
-                        ? "available slots"
-                        : solveMode === "run-time-hours"
-                          ? "run time (hours)"
-                          : "run time (days)"}
+                      {solveMode === "schedule"
+                        ? "schedule"
+                        : solveMode === "available-slots"
+                          ? "available slots"
+                          : solveMode === "run-time-hours"
+                            ? "run time (hours)"
+                            : "run time (days)"}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="schedule">schedule</SelectItem>
                     <SelectItem value="available-slots">available slots</SelectItem>
                     <SelectItem value="run-time-hours">run time (hours)</SelectItem>
                     <SelectItem value="run-time-days">run time (days)</SelectItem>
                   </SelectContent>
                 </Select>
-                {solveMode !== "available-slots" && (
+                {(solveMode === "run-time-hours" || solveMode === "run-time-days") && (
                   <Input
                     type="number"
                     min="1"
@@ -3445,7 +3483,7 @@ function SimulationActivityTab({
     >
       <SimulationLocationResultGroups
         tab={tab}
-        items={presentationGroups}
+        items={visiblePresentationGroups}
         locationNamesById={locationNamesById}
         groupHeader={tab === "react" ? <SimulationActivityColumnsHeader /> : undefined}
         getGroupHeader={(locationId, groupItems) => {
@@ -3593,6 +3631,7 @@ function SimulationActivityTab({
             (total, job) => total + job.requiredRuns * job.durationPerRunSeconds,
             0,
           );
+          const scheduledAtT0Runs = simulationRunsStartingAtT0(group.jobs);
           const formulaCounts = simulationReactionFormulaCountsForGroup(
             group,
             reactionFormulaCounts,
@@ -3714,6 +3753,7 @@ function SimulationActivityTab({
                   <span className="flex items-center justify-self-start">
                     <SimulationManufacturingInstallPlanDialog
                       entries={installPlanEntries}
+                      displayMode={manufacturingRunDisplay}
                       scheduleOptions={{
                         protectReactionMaterialBonus: false,
                         reactionMaterialBonusesByLocation,
@@ -3739,9 +3779,17 @@ function SimulationActivityTab({
                     )}
                   >
                     <CopyableNumber
-                      value={group.quantities.installableRuns}
+                      value={
+                        manufacturingRunDisplay === "schedule"
+                          ? scheduledAtT0Runs
+                          : group.quantities.installableRuns
+                      }
                       suffix=" / "
-                      copyLabel="Installable runs"
+                      copyLabel={
+                        manufacturingRunDisplay === "schedule"
+                          ? "T+0 scheduled runs"
+                          : "Installable runs"
+                      }
                     />
                     <CopyableNumber
                       value={group.quantities.totalRuns}
@@ -4755,6 +4803,13 @@ export default function SimulationResults({
           <h2 className="text-lg font-medium">Plan breakdown</h2>
         </div>
         <div className="flex flex-wrap items-center gap-3 max-[640px]:w-full max-[640px]:flex-col max-[640px]:items-stretch">
+          <SimulationTimeline
+            result={result}
+            industryJobs={industryJobs}
+            slotUsage={slotUsage}
+            characterNamesById={characterNamesById}
+            locationNamesById={locationNamesById}
+          />
           <Badge variant="outline">v{result.metadata.simulatorVersion}</Badge>
           {result.metadata.simulationId && (
             <Button

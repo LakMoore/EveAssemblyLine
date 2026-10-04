@@ -55,14 +55,34 @@ export type SimulationActivity =
 /** Availability horizons used to prevent projected stock from becoming physical stock. */
 export type SupplyHorizon = "now" | "after-hauling" | "after-upstream" | "after-purchase";
 
+/** Industry activity recorded on a currently active character job. */
+export type SimulationInFlightJobActivity =
+  | "manufacturing"
+  | "reaction"
+  | "time-research"
+  | "material-research"
+  | "copying"
+  | "invention";
+
+/** Scheduling-only view of an active industry job; it contributes no simulator inventory. */
+export interface SimulationInFlightJob {
+  jobId: number;
+  activity: SimulationInFlightJobActivity;
+  remainingSeconds: number;
+  slotIndex: number;
+}
+
 /** Per-character capacity and skill snapshot supplied by the client. */
 export interface SimulationCharacterProfile {
   characterId: number;
+  systemId: number;
   freeSlots: {
     manufacturing: number;
     reactions: number;
     science: number;
   };
+  /** Active jobs reserve their activity slots until their remaining time has elapsed. */
+  inFlightJobs?: SimulationInFlightJob[];
   timeMultipliers: {
     manufacturing: number;
     reactions: number;
@@ -270,7 +290,10 @@ export interface SimulationInstall {
 /** Fully calculated manufacturing or reaction job row. */
 export interface SimulationIndustryJob {
   jobId: string;
+  /** Dependency depth from a root demand, shared by matching product/location jobs. */
+  depth: number;
   activity: "manufacturing" | "reaction";
+  noTimingReason?: string;
   stockpileId: string;
   locationId: number;
   productTypeId: number;
@@ -294,6 +317,8 @@ export interface SimulationIndustryJob {
 /** Fully calculated invention work required for an output blueprint. */
 export interface SimulationInventionJob {
   jobId: string;
+  depth: number;
+  noTimingReason?: string;
   stockpileId: string;
   locationId: number;
   sourceBlueprintTypeId: number;
@@ -318,6 +343,8 @@ export interface SimulationInventionJob {
 /** Fully calculated copying work required for downstream blueprint runs. */
 export interface SimulationCopyJob {
   jobId: string;
+  depth: number;
+  noTimingReason?: string;
   stockpileId: string;
   locationId: number;
   blueprintTypeId: number;
@@ -346,6 +373,7 @@ export interface SimulationScienceAssignment {
 /** Selected reprocessing source and all resulting material yields. */
 export interface SimulationReprocessingJob {
   jobId: string;
+  depth: number;
   stockpileId: string;
   locationId: number;
   sourceLotId?: string;
@@ -430,6 +458,13 @@ export interface SimulationSkillRequirement {
   jobIds: string[];
 }
 
+/** Exact SDE skill level required by one scheduled activity job. */
+export interface SimulationJobSkillRequirement {
+  jobId: string;
+  skillId: number;
+  requiredLevel: number;
+}
+
 /** Typed non-fatal simulation diagnostic. */
 export interface SimulationWarning {
   code:
@@ -461,7 +496,7 @@ export interface SimulationLedgerView {
 export interface SimulationResultV2 {
   metadata: {
     simulationId?: string;
-    simulatorVersion: 4;
+    simulatorVersion: 15;
     policyVersion: 1;
     generatedAt: string;
     sdeRevision: string;

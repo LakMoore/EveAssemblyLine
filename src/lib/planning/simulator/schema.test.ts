@@ -65,6 +65,107 @@ void test("validates the maximum reaction job duration", () => {
   );
 });
 
+void test("requires a current system ID for every simulation character", () => {
+  const character = {
+    characterId: 7,
+    systemId: 31_000_001,
+    freeSlots: { manufacturing: 1, reactions: 1, science: 1 },
+    timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
+    skillLevels: {},
+  };
+  const withoutFlightJobs = simulatorRequestSchema.safeParse({
+    ...request(),
+    simulation: { version: 1, characters: [character] },
+  });
+  assert.equal(withoutFlightJobs.success, true);
+  assert.deepEqual(withoutFlightJobs.data.simulation.characters[0].inFlightJobs, []);
+  const withFlightJobs = simulatorRequestSchema.safeParse({
+    ...request(),
+    simulation: {
+      version: 1,
+      characters: [
+        {
+          ...character,
+          inFlightJobs: [
+            { jobId: 101, activity: "manufacturing", remainingSeconds: 60, slotIndex: 1 },
+            { jobId: 102, activity: "time-research", remainingSeconds: 120, slotIndex: 1 },
+          ],
+        },
+      ],
+    },
+  });
+  assert.equal(withFlightJobs.success, true);
+  assert.deepEqual(
+    withFlightJobs.data.simulation.characters[0].inFlightJobs,
+    [
+      { jobId: 101, activity: "manufacturing", remainingSeconds: 60, slotIndex: 1 },
+      { jobId: 102, activity: "time-research", remainingSeconds: 120, slotIndex: 1 },
+    ],
+  );
+  assert.equal(
+    simulatorRequestSchema.safeParse({
+      ...request(),
+      simulation: {
+        version: 1,
+        characters: [
+          {
+            ...character,
+            inFlightJobs: [
+              { jobId: 101, activity: "manufacturing", remainingSeconds: -1, slotIndex: 1 },
+            ],
+          },
+        ],
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    simulatorRequestSchema.safeParse({
+      ...request(),
+      simulation: {
+        version: 1,
+        characters: [
+          {
+            ...character,
+            inFlightJobs: [
+              { jobId: 101, activity: "manufacturing", remainingSeconds: 60, slotIndex: 1 },
+              { jobId: 102, activity: "manufacturing", remainingSeconds: 120, slotIndex: 1 },
+            ],
+          },
+        ],
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    simulatorRequestSchema.safeParse({
+      ...request(),
+      simulation: {
+        version: 1,
+        characters: [
+          {
+            ...character,
+            inFlightJobs: [
+              { jobId: 101, activity: "manufacturing", remainingSeconds: 60, slotIndex: 0 },
+            ],
+          },
+        ],
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    simulatorRequestSchema.safeParse({
+      ...request(),
+      simulation: {
+        version: 1,
+        characters: [{ ...character, systemId: undefined }],
+      },
+    }).success,
+    false,
+  );
+});
+
 void test("requires a system ID for facility profiles", () => {
   const input = {
     ...request(),

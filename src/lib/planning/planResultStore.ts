@@ -1,4 +1,5 @@
 import type { SimulationHaulTask, SimulationResultV2 } from "./simulator/types";
+import { simulationCalculationVersion } from "./simulator/etag";
 import type { PlanHaulExclusion, PlanResponse } from "./types";
 import { getPlanningDatabase, plannerPreferencesStoreName } from "./planningDatabase";
 
@@ -262,11 +263,13 @@ export function isSimulationResultV2(value: unknown): value is SimulationResultV
       && isPositiveInteger(group.locationId)
       && isPositiveInteger(group.sourceTypeId)
       && typeof group.sourceTypeName === "string"
+      && Array.isArray(group.jobs)
+      && group.jobs.every((job) => isRecord(job) && isPositiveInteger(job.depth))
       && hasReprocessingQuantities(group.quantities),
   );
   return (
     (metadata.simulationId === undefined || typeof metadata.simulationId === "string")
-    && metadata.simulatorVersion === 3
+    && metadata.simulatorVersion === simulationCalculationVersion
     && metadata.policyVersion === 1
     && typeof metadata.generatedAt === "string"
     && typeof metadata.sdeRevision === "string"
@@ -301,6 +304,7 @@ export function isSimulationResultV2(value: unknown): value is SimulationResultV
       lists.bpcToCopy,
       (job) =>
         typeof job.jobId === "string"
+        && isPositiveInteger(job.depth)
         && isPositiveInteger(job.blueprintTypeId)
         && isQuantity(job.copies)
         && isPositiveInteger(job.locationId),
@@ -309,6 +313,7 @@ export function isSimulationResultV2(value: unknown): value is SimulationResultV
       lists.inventionJobs,
       (job) =>
         typeof job.jobId === "string"
+        && isPositiveInteger(job.depth)
         && isPositiveInteger(job.outputBlueprintTypeId)
         && isQuantity(job.attempts)
         && isPositiveInteger(job.locationId),
@@ -317,6 +322,7 @@ export function isSimulationResultV2(value: unknown): value is SimulationResultV
       lists.reactionJobs,
       (job) =>
         typeof job.jobId === "string"
+        && isPositiveInteger(job.depth)
         && isPositiveInteger(job.productTypeId)
         && typeof job.productName === "string"
         && isQuantity(job.readyNowRuns)
@@ -328,6 +334,7 @@ export function isSimulationResultV2(value: unknown): value is SimulationResultV
       lists.manufacturingJobs,
       (job) =>
         typeof job.jobId === "string"
+        && isPositiveInteger(job.depth)
         && isPositiveInteger(job.productTypeId)
         && typeof job.productName === "string"
         && isQuantity(job.readyNowRuns)

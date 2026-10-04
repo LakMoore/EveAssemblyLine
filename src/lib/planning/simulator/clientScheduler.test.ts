@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   convertSimulationTargetTime,
+  simulationManufacturingInstallPlan,
+  scheduledSimulationActivity,
   simulationReactionFormulaKey,
   solveSimulationActivity,
   summarizeClientSimulationInstalls,
@@ -19,6 +21,7 @@ function job(
 ): SimulationIndustryJob {
   return {
     jobId,
+    depth: 1,
     activity: "reaction",
     stockpileId: "main",
     locationId: 20,
@@ -68,6 +71,151 @@ void test("allocates available slots across the largest installable jobs", () =>
   assert.equal(schedules.get("B")?.installs.length, 1);
   assert.equal(schedules.get("A")?.runs, 8);
   assert.equal(schedules.get("B")?.runs, 3);
+});
+
+void test("uses scheduler installs starting at T+0 for schedule-mode suggestions", () => {
+  const scheduledJob = {
+    ...job("A", 8, 8, 60),
+    installs: [
+      {
+        installId: "now",
+        characterId: 42,
+        slotIndex: 3,
+        runs: 5,
+        startOffsetSeconds: 0,
+        endOffsetSeconds: 300,
+        durationSeconds: 300,
+        readiness: "after-upstream" as const,
+        inputs: [],
+      },
+      {
+        installId: "later",
+        characterId: 43,
+        slotIndex: 1,
+        runs: 3,
+        startOffsetSeconds: 300,
+        endOffsetSeconds: 480,
+        durationSeconds: 180,
+        readiness: "now" as const,
+        inputs: [],
+      },
+    ],
+  };
+  const excludedJob = {
+    ...job("B", 2, 2, 60),
+    installs: [scheduledJob.installs[0]],
+  };
+  const schedules = scheduledSimulationActivity([scheduledJob, excludedJob], new Set(["A"]));
+
+  assert.deepEqual(
+    schedules.get("A"),
+    {
+      installs: [
+        {
+          installId: "now",
+          characterId: 42,
+          slotIndex: 3,
+          runs: 5,
+          durationSeconds: 300,
+        },
+      ],
+      runs: 5,
+      timeSeconds: 300,
+    },
+  );
+  assert.deepEqual(schedules.get("B"), { installs: [], runs: 0, timeSeconds: 0 });
+});
+
+void test("uses only canonical installs in Schedule mode", () => {
+  const scheduledJob = {
+    ...job("A", 8, 8, 60),
+    installs: [
+      {
+        installId: "server-install",
+        characterId: 42,
+        slotIndex: 3,
+        runs: 5,
+        startOffsetSeconds: 0,
+        endOffsetSeconds: 300,
+        durationSeconds: 300,
+        readiness: "now" as const,
+        inputs: [],
+      },
+    ],
+  };
+  const localSchedule = {
+    installs: [
+      {
+        installId: "client-install:A:0",
+        runs: 8,
+        durationSeconds: 480,
+        characterId: 42,
+        slotIndex: 0,
+      },
+    ],
+    runs: 8,
+    timeSeconds: 480,
+  };
+
+  assert.deepEqual(
+    simulationManufacturingInstallPlan(scheduledJob, localSchedule, "schedule"),
+    [
+      {
+        install: {
+          installId: "server-install",
+          runs: 5,
+          durationSeconds: 300,
+          characterId: 42,
+          slotIndex: 3,
+        },
+        trackCompletion: false,
+      },
+    ],
+  );
+});
+
+void test("appends unassigned local virtual installs in total and installable modes", () => {
+  const scheduledJob = {
+    ...job("A", 8, 8, 60),
+    installs: [
+      {
+        installId: "server-install",
+        characterId: 42,
+        slotIndex: 3,
+        runs: 5,
+        startOffsetSeconds: 0,
+        endOffsetSeconds: 300,
+        durationSeconds: 300,
+        readiness: "now" as const,
+        inputs: [],
+      },
+    ],
+  };
+  const localSchedule = {
+    installs: [
+      {
+        installId: "client-install:A:0",
+        runs: 8,
+        durationSeconds: 480,
+        characterId: 42,
+        slotIndex: 0,
+      },
+    ],
+    runs: 8,
+    timeSeconds: 480,
+  };
+
+  for (const displayMode of ["total", "installable"] as const) {
+    const details = simulationManufacturingInstallPlan(scheduledJob, localSchedule, displayMode);
+
+    assert.equal(details.length, 2);
+    assert.equal(details[0].install.characterId, 42);
+    assert.equal(details[0].trackCompletion, false);
+    assert.equal(details[1].install.installId, "client-install:A:0");
+    assert.equal(details[1].install.characterId, undefined);
+    assert.equal(details[1].install.slotIndex, undefined);
+    assert.equal(details[1].trackCompletion, true);
+  }
 });
 
 void test("keeps short reactions in one install and uses spare slots for long reactions", () => {

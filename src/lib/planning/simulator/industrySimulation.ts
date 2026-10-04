@@ -21,6 +21,7 @@ import type {
   SimulationDemandSource,
   SimulationIndustryJob,
   SimulationInventionJob,
+  SimulationJobSkillRequirement,
   SimulationJobInput,
   SimulationPurchaseDestination,
   SimulationSkillRequirement,
@@ -63,6 +64,7 @@ export interface IndustrySimulationResult {
   unmetDemands: SimulationUnmetDemand[];
   blueprintPurchases: SimulationBlueprintPurchase[];
   skillsRequired: SimulationSkillRequirement[];
+  jobSkillRequirements: SimulationJobSkillRequirement[];
   warnings: SimulationWarning[];
   allocator: SimulationAllocator;
 }
@@ -211,6 +213,7 @@ class IndustryDemandSimulation {
     number,
     { requiredLevel: number; jobIds: Set<string> }
   >();
+  private readonly jobSkillRequirements = new Map<string, Map<number, number>>();
   private pendingProductionDemands = new Map<string, ProductionDemandBucket>();
   private readonly deferredProductionSupplies: DeferredProductionSupply[] = [];
   private readonly productionDemandRequests: ProductionDemandRequest[] = [];
@@ -396,6 +399,13 @@ class IndustryDemandSimulation {
           jobIds: [...requirement.jobIds].sort(),
         }))
         .sort((left, right) => left.name.localeCompare(right.name) || left.skillId - right.skillId),
+      jobSkillRequirements: [...this.jobSkillRequirements].flatMap(([jobId, requirements]) =>
+        [...requirements].map(([skillId, requiredLevel]) => ({
+          jobId,
+          skillId,
+          requiredLevel,
+        })),
+      ),
       warnings: this.warnings,
       allocator: this.allocator,
     };
@@ -1471,6 +1481,7 @@ class IndustryDemandSimulation {
     );
     const job: SimulationIndustryJob = {
       jobId,
+      depth: 1,
       activity,
       stockpileId: stockpile.id,
       locationId: profile.locationId,
@@ -1634,6 +1645,7 @@ class IndustryDemandSimulation {
     const expectedOutputRuns = expectedOutputCopies * runsPerSuccess;
     this.inventionJobs.push({
       jobId: inventionJobId,
+      depth: 1,
       stockpileId: shortage.stockpile.id,
       locationId: inventionLocationId,
       sourceBlueprintTypeId: sourceBlueprint._key,
@@ -1754,6 +1766,7 @@ class IndustryDemandSimulation {
     );
     const copyJob: SimulationCopyJob = {
       jobId,
+      depth: 1,
       stockpileId: shortage.stockpile.id,
       locationId,
       blueprintTypeId: sourceBlueprint._key,
@@ -2090,6 +2103,12 @@ class IndustryDemandSimulation {
     jobId: string,
   ): void {
     for (const skill of skills ?? []) {
+      const jobRequirements = this.jobSkillRequirements.get(jobId) ?? new Map<number, number>();
+      jobRequirements.set(
+        skill.typeID,
+        Math.max(jobRequirements.get(skill.typeID) ?? 0, skill.level),
+      );
+      this.jobSkillRequirements.set(jobId, jobRequirements);
       const requirement = this.skillRequirements.get(skill.typeID) ?? {
         requiredLevel: 0,
         jobIds: new Set<string>(),

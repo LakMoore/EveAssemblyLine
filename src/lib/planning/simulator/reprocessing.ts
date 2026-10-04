@@ -214,6 +214,7 @@ export function settleReprocessing(
   context: SimulationContext,
   inventory: SimulatorInventory,
   industry: IndustrySimulationResult,
+  jobDepthsById: ReadonlyMap<string, number> = new Map(),
 ): ReprocessingSettlementResult {
   const demands: MutableDemand[] = industry.unmetDemands.map((demand) => ({ ...demand }));
   const jobs: SimulationReprocessingJob[] = [];
@@ -242,8 +243,19 @@ export function settleReprocessing(
     const rawYields = calculateReprocessingYields(materials, portionCount, efficiency);
     const allocatedYields = allocateYields(stockpile.id, rawYields, demands);
     const jobId = providedJobId ?? `reprocessing:${stockpile.id}:${sourceTypeId}:${sequence++}`;
+    const depth = Math.max(
+      1,
+      ...allocatedYields.flatMap((material) =>
+        material.allocations.flatMap((allocation) =>
+          allocation.demandingJobId === undefined
+            ? []
+            : [(jobDepthsById.get(allocation.demandingJobId) ?? 0) + 1],
+        ),
+      ),
+    );
     jobs.push({
       jobId,
+      depth,
       stockpileId: stockpile.id,
       locationId: stockpile.locations.reprocessing,
       sourceLotId,
@@ -435,9 +447,18 @@ export function settleReprocessing(
     );
   }
 
+  const deepestDepthBySource = new Map<string, number>();
+  for (const job of jobs) {
+    const key = `${job.sourceTypeId}:${job.locationId}`;
+    deepestDepthBySource.set(key, Math.max(deepestDepthBySource.get(key) ?? 1, job.depth));
+  }
+  const depthAnnotatedJobs = jobs.map((job) => ({
+    ...job,
+    depth: deepestDepthBySource.get(`${job.sourceTypeId}:${job.locationId}`) ?? job.depth,
+  }));
   return {
-    jobs,
-    groups: groupReprocessingJobs(jobs),
+    jobs: depthAnnotatedJobs,
+    groups: groupReprocessingJobs(depthAnnotatedJobs),
     transactions,
     remainingDemands: demands.filter((demand) => demand.quantity > 0),
     warnings,

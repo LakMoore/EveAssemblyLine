@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { groupSimulationActivityJobs } from "./presentation";
+import { groupSimulationActivityJobs, simulationRunsStartingAtT0 } from "./presentation";
 import type { SimulationIndustryJob, SimulationJobInput } from "./types";
 
 /** Creates a minimal simulator input for presentation aggregation tests. */
@@ -25,6 +25,7 @@ function input(
 function job(jobId: string, overrides: Partial<SimulationIndustryJob> = {}): SimulationIndustryJob {
   return {
     jobId,
+    depth: 1,
     activity: "manufacturing",
     stockpileId: "main",
     locationId: 20,
@@ -94,4 +95,58 @@ void test("keeps activity locations and activity kinds as separate groups", () =
     groups.map(({ groupKey }) => groupKey),
     ["manufacturing:20:20185", "reaction:20:20185", "manufacturing:30:20185"],
   );
+});
+
+void test("sums scheduled runs starting at T+0 across jobs", () => {
+  const jobs = [
+    job(
+      "job-1",
+      {
+        installs: [
+          {
+            installId: "install-1",
+            characterId: 1,
+            slotIndex: 0,
+            runs: 3,
+            startOffsetSeconds: 0,
+            endOffsetSeconds: 180,
+            durationSeconds: 180,
+            readiness: "after-upstream",
+            inputs: [],
+          },
+          {
+            installId: "install-2",
+            characterId: 1,
+            slotIndex: 1,
+            runs: 2,
+            startOffsetSeconds: 1,
+            endOffsetSeconds: 121,
+            durationSeconds: 120,
+            readiness: "now",
+            inputs: [],
+          },
+        ],
+      },
+    ),
+    job(
+      "job-2",
+      {
+        installs: [
+          {
+            installId: "install-3",
+            characterId: 2,
+            slotIndex: 0,
+            runs: 4,
+            startOffsetSeconds: 0,
+            endOffsetSeconds: 240,
+            durationSeconds: 240,
+            readiness: "now",
+            inputs: [],
+          },
+        ],
+      },
+    ),
+  ];
+
+  assert.equal(simulationRunsStartingAtT0(jobs), 7);
 });

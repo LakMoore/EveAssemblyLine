@@ -53,6 +53,20 @@ void test("declares an exact SDE-backed manufacturing job without inventing avai
   const rifterJob = result.manufacturingJobs.find((job) => job.productTypeId === 587);
   assert.ok(rifterJob);
   assert.equal(rifterJob.requiredRuns, 1);
+  const rifterSkillRequirements = result.jobSkillRequirements.filter(
+    (requirement) => requirement.jobId === rifterJob.jobId,
+  );
+  assert.ok(rifterSkillRequirements.length > 0);
+  assert.ok(
+    rifterSkillRequirements.every((requirement) =>
+      result.skillsRequired.some(
+        (summary) =>
+          summary.skillId === requirement.skillId
+          && summary.jobIds.includes(rifterJob.jobId)
+          && summary.requiredLevel >= requirement.requiredLevel,
+      ),
+    ),
+  );
   assert.equal(rifterJob.readyNowRuns, 0);
   assert.equal(
     rifterJob.inputs.every(
@@ -900,6 +914,7 @@ void test("rounds invention output to the whole copies needed for demand", async
       characters: [
         {
           characterId: 1,
+          systemId: 30_000_142,
           freeSlots: { manufacturing: 100, reactions: 100, science: 100 },
           timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
           skillLevels: { "11448": 4, "11453": 4, "21790": 4 },
@@ -1057,6 +1072,7 @@ void test("reserves invention materials before competing stockpile demand", asyn
       characters: [
         {
           characterId: 1,
+          systemId: 30_000_142,
           freeSlots: { manufacturing: 100, reactions: 100, science: 100 },
           timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
           skillLevels: { "11448": 4, "11453": 4, "21790": 4 },

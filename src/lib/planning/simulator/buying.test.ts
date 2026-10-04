@@ -86,6 +86,7 @@ void test("aggregates allowed purchases and warns for blocked residual demand", 
     unmetDemands: [],
     blueprintPurchases: [],
     skillsRequired: [],
+    jobSkillRequirements: [],
     warnings: [],
     allocator: new SimulationAllocator(inventory, []),
   };
