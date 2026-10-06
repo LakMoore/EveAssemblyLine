@@ -312,7 +312,7 @@ void test("blocks cross-stockpile activity hauls but allows end-destination haul
       11,
       { ...account, locationId: 11 },
       "job",
-      10,
+      () => 10,
     ),
     [],
   );
@@ -735,8 +735,8 @@ void test("reserves future blueprint runs with a completion haul for the print",
 
 void test("conserves finite BPC runs across allocations", () => {
   const allocator = new SimulationAllocator(inventory, []);
-  const first = allocator.claimManufacturingBlueprints(100, 4, 20, account, "job-1", 10);
-  const second = allocator.claimManufacturingBlueprints(100, 4, 20, account, "job-2", 10);
+  const first = allocator.claimManufacturingBlueprints(100, 4, 20, account, "job-1", () => 10);
+  const second = allocator.claimManufacturingBlueprints(100, 4, 20, account, "job-2", () => 10);
   assert.equal(
     first.reduce((total, allocation) => total + allocation.runs, 0),
     4,
@@ -751,10 +751,13 @@ void test("conserves finite BPC runs across allocations", () => {
 void test("does not split one physical BPC across different facilities", () => {
   const preview = new SimulationAllocator(inventory, []);
   assert.deepEqual(
-    preview.previewManufacturingBlueprints(100, 3, 30, 10),
+    preview.previewManufacturingBlueprints(100, 3, 30, () => 10),
     [{ runs: 3, materialEfficiency: 10 }],
   );
-  assert.deepEqual(preview.previewManufacturingBlueprints(100, 2, 40, 10), []);
+  assert.deepEqual(
+    preview.previewManufacturingBlueprints(100, 2, 40, () => 10),
+    [],
+  );
 
   const allocator = new SimulationAllocator(inventory, []);
   const first = allocator.claimManufacturingBlueprints(
@@ -766,7 +769,7 @@ void test("does not split one physical BPC across different facilities", () => {
       typeId: 100,
     },
     "job-one",
-    10,
+    () => 10,
   );
   const second = allocator.claimManufacturingBlueprints(
     100,
@@ -777,7 +780,7 @@ void test("does not split one physical BPC across different facilities", () => {
       typeId: 100,
     },
     "job-two",
-    10,
+    () => 10,
   );
   assert.equal(
     first.reduce((total, allocation) => total + allocation.runs, 0),
@@ -790,7 +793,7 @@ void test("does not split one physical BPC across different facilities", () => {
   );
 });
 
-void test("depletes only the runs used from each copy", () => {
+void test("prefers a blueprint with enough runs for the full batch", () => {
   const allocator = new SimulationAllocator(
     {
       ...inventory,
@@ -801,13 +804,14 @@ void test("depletes only the runs used from each copy", () => {
     },
     [],
   );
-  const allocations = allocator.claimManufacturingBlueprints(100, 5, 20, account, "job", 10);
+  const allocations = allocator.claimManufacturingBlueprints(100, 5, 20, account, "job", () => 10);
   assert.equal(
     allocations.reduce((total, allocation) => total + allocation.runs, 0),
     5,
   );
-  assert.equal(allocator.remainingBlueprintRuns("first"), 0);
-  assert.equal(allocator.remainingBlueprintRuns("second"), 3);
+  assert.equal(allocations[0]?.blueprintItemId, inventory.blueprintLots[0]?.itemId);
+  assert.equal(allocator.remainingBlueprintRuns("first"), 3);
+  assert.equal(allocator.remainingBlueprintRuns("second"), 0);
 });
 
 void test("preserves blueprint names on blueprint hauls", () => {
@@ -818,7 +822,7 @@ void test("preserves blueprint names on blueprint hauls", () => {
     },
     [],
   );
-  allocator.claimManufacturingBlueprints(100, 1, 20, account, "job", 10);
+  allocator.claimManufacturingBlueprints(100, 1, 20, account, "job", () => 10);
   assert.equal(allocator.haulingTasks[0].typeName, "Test Blueprint");
   assert.equal(allocator.haulingTasks[0].blueprintKind, "bpc");
 });

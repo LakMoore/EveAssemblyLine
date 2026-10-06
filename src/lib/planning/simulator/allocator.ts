@@ -47,6 +47,8 @@ interface PendingItemDemand {
   quantity: number;
 }
 
+type MaxRunsPerManufacturingJob = (timeEfficiency: number) => number;
+
 function locationPairKey(firstLocationId: number, secondLocationId: number): string {
   return firstLocationId < secondLocationId
     ? `${firstLocationId}:${secondLocationId}`
@@ -506,30 +508,64 @@ export class SimulationAllocator {
     blueprintTypeId: number,
     runs: number,
     destinationLocationId: number,
-    maxRunsPerAllocation: number,
+    maxRunsPerJob: MaxRunsPerManufacturingJob,
   ): Array<{ runs: number; materialEfficiency: number }> {
-    const allocations: Array<{ runs: number; materialEfficiency: number }> = [];
-    let remaining = runs;
-    for (const lot of this.manufacturingBlueprintCandidates(
+    return this.allocateManufacturingBlueprintBatches(
       blueprintTypeId,
+      runs,
       destinationLocationId,
+      maxRunsPerJob,
+      this.previewBlueprintRunsByLotId,
       this.previewBlueprintDestinationByLotId,
-    )) {
-      if (remaining <= 0) break;
-      const available =
-        lot.kind === "bpo" ? remaining : (this.previewBlueprintRunsByLotId.get(lot.lotId) ?? 0);
-      let allocated = Math.min(available, remaining);
-      if (lot.kind === "bpc") {
-        this.previewBlueprintRunsByLotId.set(lot.lotId, available - allocated);
-        if (allocated > 0) {
-          this.previewBlueprintDestinationByLotId.set(lot.lotId, destinationLocationId);
-        }
-      }
-      remaining -= allocated;
-      while (allocated > 0) {
-        const next = Math.min(allocated, maxRunsPerAllocation);
-        allocations.push({ runs: next, materialEfficiency: lot.materialEfficiency });
-        allocated -= next;
+    ).map(({ lot, runs: allocatedRuns }) => ({
+      runs: allocatedRuns,
+      materialEfficiency: lot.materialEfficiency,
+    }));
+  }
+
+  private allocateManufacturingBlueprintBatches(
+    blueprintTypeId: number,
+    runs: number,
+    destinationLocationId: number,
+    maxRunsPerJob: MaxRunsPerManufacturingJob,
+    remainingRunsByLotId: Map<string, number>,
+    destinations: Map<string, number>,
+  ): Array<{ lot: SimulatorBlueprintLot; runs: number }> {
+    const allocations: Array<{ lot: SimulatorBlueprintLot; runs: number }> = [];
+    let remainingRuns = runs;
+    while (remainingRuns > 0) {
+      const candidates = this.manufacturingBlueprintCandidates(
+        blueprintTypeId,
+        destinationLocationId,
+        destinations,
+      ).flatMap((lot) => {
+        const availableRuns =
+          lot.kind === "bpo" ? remainingRuns : (remainingRunsByLotId.get(lot.lotId) ?? 0);
+        if (availableRuns <= 0) return [];
+        const batchLimit = Math.max(1, Math.floor(maxRunsPerJob(lot.timeEfficiency)));
+        const preferredBatchRuns = Math.min(remainingRuns, batchLimit);
+        return [
+          {
+            lot,
+            availableRuns,
+            preferredBatchRuns,
+            possibleBatchRuns: Math.min(availableRuns, preferredBatchRuns),
+          },
+        ];
+      });
+      if (candidates.length === 0) break;
+
+      const selected =
+        candidates.find((candidate) => candidate.availableRuns >= candidate.preferredBatchRuns)
+        ?? candidates.reduce((best, candidate) =>
+          candidate.possibleBatchRuns > best.possibleBatchRuns ? candidate : best,
+        );
+      const allocatedRuns = selected.possibleBatchRuns;
+      allocations.push({ lot: selected.lot, runs: allocatedRuns });
+      remainingRuns -= allocatedRuns;
+      if (selected.lot.kind === "bpc") {
+        remainingRunsByLotId.set(selected.lot.lotId, selected.availableRuns - allocatedRuns);
+        destinations.set(selected.lot.lotId, destinationLocationId);
       }
     }
     return allocations;
@@ -814,66 +850,44 @@ export class SimulationAllocator {
     destinationLocationId: number,
     account: SimulationLedgerAccount,
     demandingJobId: string,
-    maxRunsPerAllocation: number,
+    maxRunsPerJob: MaxRunsPerManufacturingJob,
   ): BlueprintClaim[] {
-    let remainingRuns = runs;
-    const allocations: BlueprintClaim[] = [];
-    const candidates = this.manufacturingBlueprintCandidates(
+    const plannedBatches = this.allocateManufacturingBlueprintBatches(
       blueprintTypeId,
+      runs,
       destinationLocationId,
+      maxRunsPerJob,
+      this.remainingBlueprintRunsByLotId,
+      this.blueprintDestinationByLotId,
     );
-    for (const lot of candidates) {
-      if (remainingRuns <= 0) break;
-      const remainingRunsBeforeLot = remainingRuns;
-      const availableRuns =
-        lot.kind === "bpo"
-          ? remainingRuns
-          : (this.remainingBlueprintRunsByLotId.get(lot.lotId) ?? 0);
-      let allocatedRuns = Math.min(remainingRuns, availableRuns);
-      while (allocatedRuns > 0) {
-        const nextRuns = Math.min(allocatedRuns, maxRunsPerAllocation);
-        const horizon = this.blueprintHorizon(lot, destinationLocationId);
-        allocations.push({
-          blueprintTypeId,
-          blueprintItemId: lot.itemId,
-          blueprintKind: lot.kind,
-          sourceLocationId: lot.locationId,
-          runs: nextRuns,
-          materialEfficiency: lot.materialEfficiency,
-          timeEfficiency: lot.timeEfficiency,
-          horizon,
-          lotId: lot.lotId,
-          ...(lot.activity ? { sourceActivity: lot.activity } : {}),
-          ...(lot.industryJobId !== undefined ? { sourceJobId: lot.industryJobId } : {}),
-          ...(lot.industryJobEndDate ? { sourceCompletionAt: lot.industryJobEndDate } : {}),
-        });
-        this.transactions.push({
-          id: this.nextTransactionId("blueprint"),
-          kind: "blueprint-run-reservation",
-          account,
-          blueprintLotId: lot.lotId,
-          quantity: nextRuns,
-          demandingJobId,
-          horizon,
-        });
-        allocatedRuns -= nextRuns;
-        remainingRuns -= nextRuns;
-      }
-      if (lot.kind === "bpc") {
-        const runsAllocatedFromLot = remainingRunsBeforeLot - remainingRuns;
-        this.remainingBlueprintRunsByLotId.set(lot.lotId, availableRuns - runsAllocatedFromLot);
-        if (runsAllocatedFromLot > 0) {
-          this.blueprintDestinationByLotId.set(lot.lotId, destinationLocationId);
-        }
-      }
-      this.recordBlueprintHaul(lot, destinationLocationId, demandingJobId);
-      this.recordBlueprintTransfer(
-        lot,
-        destinationLocationId,
-        remainingRunsBeforeLot - remainingRuns,
+    const allocations = plannedBatches.map(({ lot, runs: allocatedRuns }) => {
+      const horizon = this.blueprintHorizon(lot, destinationLocationId);
+      this.transactions.push({
+        id: this.nextTransactionId("blueprint"),
+        kind: "blueprint-run-reservation",
+        account,
+        blueprintLotId: lot.lotId,
+        quantity: allocatedRuns,
         demandingJobId,
-      );
-    }
+        horizon,
+      });
+      this.recordBlueprintHaul(lot, destinationLocationId, demandingJobId);
+      this.recordBlueprintTransfer(lot, destinationLocationId, allocatedRuns, demandingJobId);
+      return {
+        blueprintTypeId,
+        blueprintItemId: lot.itemId,
+        blueprintKind: lot.kind,
+        sourceLocationId: lot.locationId,
+        runs: allocatedRuns,
+        materialEfficiency: lot.materialEfficiency,
+        timeEfficiency: lot.timeEfficiency,
+        horizon,
+        lotId: lot.lotId,
+        ...(lot.activity ? { sourceActivity: lot.activity } : {}),
+        ...(lot.industryJobId !== undefined ? { sourceJobId: lot.industryJobId } : {}),
+        ...(lot.industryJobEndDate ? { sourceCompletionAt: lot.industryJobEndDate } : {}),
+      } satisfies BlueprintClaim;
+    });
     return allocations;
   }
 

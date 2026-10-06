@@ -35,6 +35,7 @@ import type {
 } from "@/lib/planning/simulator/types";
 import {
   createInFlightTimelineEvents,
+  timelineDependencyJobIds,
   type SimulationTimelineActivity,
   type SimulationTimelinePool,
 } from "@/lib/planning/simulator/timeline";
@@ -50,6 +51,7 @@ interface TimelineEvent {
   jobId: string;
   activity: TimelineActivity;
   pool: TimelinePool;
+  slotKey: string;
   typeId?: number;
   characterId: number;
   slotIndex: number;
@@ -117,21 +119,6 @@ const axisHeight = 44;
 const labelColumnWidth = "12rem";
 const maximumChartWidth = 80_000;
 
-/** Returns the upstream job IDs that contribute planned input supply. */
-function dependencyJobIds(inputs: readonly SimulationJobInput[]): string[] {
-  return [
-    ...new Set(
-      inputs.flatMap((input) =>
-        (input.upstreamReservations ?? [])
-          .filter((reservation) => reservation.state === "planned")
-          .flatMap((reservation) =>
-            reservation.sourceJobId === undefined ? [] : [String(reservation.sourceJobId)],
-          ),
-      ),
-    ),
-  ];
-}
-
 /** Converts scheduled manufacturing and reaction installs into timeline events. */
 function industryTimelineEvents(jobs: readonly SimulationIndustryJob[]): TimelineEvent[] {
   return jobs.flatMap((job) =>
@@ -140,6 +127,7 @@ function industryTimelineEvents(jobs: readonly SimulationIndustryJob[]): Timelin
       jobId: job.jobId,
       activity: job.activity,
       pool: job.activity,
+      slotKey: install.slotKey,
       typeId: job.productTypeId,
       characterId: install.characterId,
       slotIndex: install.slotIndex,
@@ -151,7 +139,7 @@ function industryTimelineEvents(jobs: readonly SimulationIndustryJob[]): Timelin
       durationSeconds: install.durationSeconds,
       isInFlight: false,
       readiness: install.readiness,
-      dependencyJobIds: dependencyJobIds(job.inputs),
+      dependencyJobIds: timelineDependencyJobIds(job.inputs),
     })),
   );
 }
@@ -205,6 +193,7 @@ function scienceTimelineEvent(
     jobId,
     activity,
     pool: "science",
+    slotKey: assignment.slotKey,
     typeId,
     characterId: assignment.characterId,
     slotIndex: assignment.slotIndex,
@@ -215,7 +204,8 @@ function scienceTimelineEvent(
     endOffsetSeconds: assignment.endOffsetSeconds,
     durationSeconds: assignment.durationSeconds,
     isInFlight: false,
-    dependencyJobIds: dependencyJobIds(inputs),
+    readiness: assignment.readiness,
+    dependencyJobIds: timelineDependencyJobIds(inputs),
   };
 }
 
@@ -299,7 +289,7 @@ function groupTimelineLanes(
 ): TimelineLane[] {
   const lanes = new Map<string, TimelineLane>();
   for (const event of events) {
-    const key = `${event.characterId}:${event.pool}:${event.slotIndex}`;
+    const key = event.slotKey;
     const lane = lanes.get(key);
     if (lane) {
       lane.events.push(event);
@@ -460,13 +450,11 @@ function SimulationScheduleDialog({
 export default function SimulationTimeline({
   result,
   industryJobs,
-  slotUsage,
   characterNamesById,
   locationNamesById,
 }: {
   result: SimulationResultV2;
   industryJobs?: ClientJobsResponse["jobs"];
-  slotUsage?: ClientJobsResponse["slotUsage"];
   characterNamesById: ReadonlyMap<number, string>;
   locationNamesById: ReadonlyMap<number, string>;
 }) {
@@ -491,9 +479,9 @@ export default function SimulationTimeline({
         industryJobs,
         result.metadata.generatedAt,
         collectionCharacterIds,
-        slotUsage,
+        result.scheduleSlots,
       ),
-    [collectionCharacterIds, industryJobs, result.metadata.generatedAt, slotUsage],
+    [collectionCharacterIds, industryJobs, result.metadata.generatedAt, result.scheduleSlots],
   );
   const allEvents = useMemo(
     () =>

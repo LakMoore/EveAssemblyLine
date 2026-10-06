@@ -77,6 +77,52 @@ void test("declares an exact SDE-backed manufacturing job without inventing avai
   );
   const projection = projectSimulationLedger(inventory.itemLots, result.transactions);
   assert.deepEqual(projection.invariantViolations, []);
+
+  const activeInput = rifterJob.inputs[0];
+  assert.ok(activeInput);
+  const activeOutputRequest = parseSimulatorRequest({
+    ...request,
+    assets: [
+      {
+        typeId: activeInput.typeId,
+        quantity: activeInput.requiredQuantity,
+        locationId: 20,
+        rootLocationId: 20,
+        industryOutput: {
+          activity: "reaction",
+          state: "active",
+          sourceJobId: 123,
+        },
+      },
+    ],
+  });
+  const activeOutputInventory = normalizeSimulatorInventory(activeOutputRequest, context);
+  const activeOutputResult = simulateIndustryDemand(
+    activeOutputRequest,
+    context,
+    activeOutputInventory,
+    graph,
+  );
+  const activeOutputJob = activeOutputResult.manufacturingJobs.find(
+    (job) => job.productTypeId === 587,
+  );
+  const activeOutputInput = activeOutputJob?.inputs.find(
+    (input) => input.typeId === activeInput.typeId,
+  );
+
+  assert.ok(activeOutputInput);
+  assert.deepEqual(
+    activeOutputInput.upstreamReservations,
+    [
+      {
+        activity: "reaction",
+        quantity: activeInput.requiredQuantity,
+        state: "in-production",
+        sourceJobId: 123,
+        sourceOutputQuantity: activeInput.requiredQuantity,
+      },
+    ],
+  );
 });
 
 void test("uses fallback blueprint ME and TE and schedules the modeled manufacturing job", async () => {
@@ -135,27 +181,43 @@ void test("uses fallback blueprint ME and TE and schedules the modeled manufactu
     normalizeSimulatorInventory(request, context),
     graph,
   );
-  const baselineRifter = baselineIndustry.manufacturingJobs.find(
+  const baselineRifters = baselineIndustry.manufacturingJobs.filter(
     (job) => job.productTypeId === 587,
   );
-  const configuredRifter = configuredIndustry.manufacturingJobs.find(
+  const configuredRifters = configuredIndustry.manufacturingJobs.filter(
     (job) => job.productTypeId === 587,
   );
 
-  assert.ok(baselineRifter);
-  assert.ok(configuredRifter);
-  assert.equal(configuredRifter.blueprint.blueprintKind, "fallback");
-  assert.equal(configuredRifter.blueprint.materialEfficiency, 8);
-  assert.equal(configuredRifter.blueprint.timeEfficiency, 10);
-  assert.ok(
-    configuredRifter.inputs.some((input) => {
-      const baselineInput = baselineRifter.inputs.find(
-        (candidate) => candidate.typeId === input.typeId,
+  assert.ok(baselineRifters.length > 0);
+  assert.ok(configuredRifters.length > 0);
+  assert.equal(configuredRifters[0]?.blueprint.blueprintKind, "fallback");
+  assert.equal(configuredRifters[0]?.blueprint.materialEfficiency, 8);
+  assert.equal(configuredRifters[0]?.blueprint.timeEfficiency, 10);
+  const totalInputQuantityByType = (jobs: typeof configuredRifters) =>
+    jobs
+      .flatMap((job) => job.inputs)
+      .reduce(
+        (quantities, input) =>
+          quantities.set(
+            input.typeId,
+            (quantities.get(input.typeId) ?? 0) + input.requiredQuantity,
+          ),
+        new Map<number, number>(),
       );
-      return baselineInput !== undefined && input.requiredQuantity < baselineInput.requiredQuantity;
-    }),
+  const baselineInputQuantities = totalInputQuantityByType(baselineRifters);
+  const configuredInputQuantities = totalInputQuantityByType(configuredRifters);
+  const baselineFirstRifter = baselineRifters[0];
+  const configuredFirstRifter = configuredRifters[0];
+  assert.ok(baselineFirstRifter);
+  assert.ok(configuredFirstRifter);
+  assert.ok(
+    [...configuredInputQuantities].some(
+      ([typeId, quantity]) => quantity < (baselineInputQuantities.get(typeId) ?? 0),
+    ),
   );
-  assert.ok(configuredRifter.durationPerRunSeconds < baselineRifter.durationPerRunSeconds);
+  assert.ok(
+    configuredFirstRifter.durationPerRunSeconds < baselineFirstRifter.durationPerRunSeconds,
+  );
 
   const scheduled = scheduleSimulationJobs(
     configuredIndustry.manufacturingJobs,
@@ -172,6 +234,19 @@ void test("uses fallback blueprint ME and TE and schedules the modeled manufactu
       },
     ],
     new Map([[20, 30_000_142]]),
+    undefined,
+    undefined,
+    undefined,
+    [
+      {
+        slotKey: "1:M:0",
+        activity: "manufacturing",
+        characterId: 1,
+        systemId: 30_000_142,
+        slotIndex: 0,
+        availableAtSeconds: 0,
+      },
+    ],
   );
   const scheduledRifter = scheduled.manufacturingJobs.find((job) => job.productTypeId === 587);
 
@@ -180,6 +255,191 @@ void test("uses fallback blueprint ME and TE and schedules the modeled manufactu
   assert.equal(
     scheduledRifter.installs[0].durationSeconds,
     Math.ceil(scheduledRifter.requiredRuns * scheduledRifter.durationPerRunSeconds),
+  );
+});
+
+void test("uses available T2 blueprint ME in descending order before T2 fallback ME", async () => {
+  const context = await loadSimulationContext();
+  const createRequest = (quantity: number, assets: unknown[]) =>
+    parseSimulatorRequest({
+      stockpiles: [
+        {
+          id: "t2-me",
+          name: "T2 ME",
+          locations: {
+            stock: 10,
+            manufacturing: 20,
+            reactions: 30,
+            reprocessing: 40,
+            copying: 50,
+            invention: 60,
+          },
+          items: [{ typeId: 482, quantity, me: 0, te: 0, fromCompression: false }],
+        },
+      ],
+      assets,
+      settings: {
+        includeCorporationAssets: true,
+        personalSellOrdersAsStock: false,
+        allCorporationSellOrdersAsStock: false,
+        myCorporationSellOrdersAsStock: false,
+        buildBlacklist: [],
+        buyBlacklist: [],
+        fallbackT2OrT3Me: 7,
+      },
+      simulation: { version: 1 },
+    });
+  const simulate = (quantity: number, assets: unknown[]) => {
+    const request = createRequest(quantity, assets);
+    const graph = buildDependencyGraph(
+      [482],
+      context,
+      {
+        buildBlacklist: new Set(),
+        buyBlacklist: new Set(),
+        maxNodes: request.simulation.policy.maxGraphNodes,
+        maxDepth: request.simulation.policy.maxGraphDepth,
+      },
+    );
+    const inventory = normalizeSimulatorInventory(request, context);
+    return simulateIndustryDemand(request, context, inventory, graph);
+  };
+
+  assert.equal(context.types.get(482)?.techLevel, 2);
+  const withBlueprints = simulate(
+    2,
+    [
+      {
+        typeId: 784,
+        quantity: 1,
+        locationId: 20,
+        rootLocationId: 20,
+        blueprintPrints: [{ itemId: 7001, runs: 1, type: "bpc", me: 4, te: 0 }],
+      },
+      {
+        typeId: 784,
+        quantity: 1,
+        locationId: 20,
+        rootLocationId: 20,
+        blueprintPrints: [{ itemId: 7002, runs: 1, type: "bpc", me: 10, te: 0 }],
+      },
+    ],
+  );
+  const blueprintJobs = withBlueprints.manufacturingJobs.filter((job) => job.productTypeId === 482);
+
+  assert.deepEqual(
+    blueprintJobs.map((job) => [job.blueprint.blueprintKind, job.blueprint.materialEfficiency]),
+    [
+      ["bpc", 10],
+      ["bpc", 4],
+    ],
+  );
+
+  const withoutBlueprint = simulate(1, []);
+  const fallbackJob = withoutBlueprint.manufacturingJobs.find((job) => job.productTypeId === 482);
+  assert.ok(fallbackJob);
+  assert.equal(fallbackJob.blueprint.blueprintKind, "fallback");
+  assert.equal(fallbackJob.blueprint.materialEfficiency, 7);
+});
+
+void test("splits physical and fallback Jackdaw blueprints by duration and remaining runs", async () => {
+  const context = await loadSimulationContext();
+  const createRequest = (assets: unknown[]) =>
+    parseSimulatorRequest({
+      stockpiles: [
+        {
+          id: "jackdaw-batches",
+          name: "Jackdaw batches",
+          locations: {
+            stock: 10,
+            manufacturing: 20,
+            reactions: 30,
+            reprocessing: 40,
+            copying: 50,
+            invention: 60,
+          },
+          items: [{ typeId: 34828, quantity: 10, me: 0, te: 0, fromCompression: false }],
+        },
+      ],
+      assets,
+      settings: {
+        includeCorporationAssets: true,
+        personalSellOrdersAsStock: false,
+        allCorporationSellOrdersAsStock: false,
+        myCorporationSellOrdersAsStock: false,
+        buildBlacklist: [],
+        buyBlacklist: [],
+        fallbackT2OrT3Me: 3,
+        fallbackT2OrT3Te: 20,
+      },
+      simulation: { version: 1, maxReactionJobDurationHours: 100 },
+    });
+  const simulate = (assets: unknown[]) => {
+    const request = createRequest(assets);
+    const graph = buildDependencyGraph(
+      [34828],
+      context,
+      {
+        buildBlacklist: new Set(),
+        buyBlacklist: new Set(),
+        maxNodes: request.simulation.policy.maxGraphNodes,
+        maxDepth: request.simulation.policy.maxGraphDepth,
+      },
+    );
+    return simulateIndustryDemand(
+      request,
+      context,
+      normalizeSimulatorInventory(request, context),
+      graph,
+    ).manufacturingJobs.filter((job) => job.productTypeId === 34828);
+  };
+  const physicalJobs = simulate([
+    {
+      typeId: 34829,
+      quantity: 1,
+      locationId: 20,
+      rootLocationId: 20,
+      blueprintPrints: [{ itemId: 9001, runs: 5, type: "bpc", me: 3, te: 20 }],
+    },
+    {
+      typeId: 34829,
+      quantity: 1,
+      locationId: 20,
+      rootLocationId: 20,
+      blueprintPrints: [{ itemId: 9002, runs: 5, type: "bpc", me: 3, te: 20 }],
+    },
+  ]);
+  const fallbackJobs = simulate([]);
+  const expectedPhysicalBatchRuns = [2, 2, 2, 2, 1, 1];
+  const expectedFallbackBatchRuns = [2, 2, 2, 2, 2];
+
+  assert.deepEqual(
+    physicalJobs.map((job) => job.requiredRuns),
+    expectedPhysicalBatchRuns,
+  );
+  assert.deepEqual(
+    fallbackJobs.map((job) => job.requiredRuns),
+    expectedFallbackBatchRuns,
+  );
+  assert.equal(
+    physicalJobs.reduce((total, job) => total + job.requiredRuns, 0),
+    10,
+  );
+  assert.equal(
+    fallbackJobs.reduce((total, job) => total + job.requiredRuns, 0),
+    10,
+  );
+  assert.ok(physicalJobs.every((job) => job.blueprint.blueprintKind === "bpc"));
+  assert.ok(fallbackJobs.every((job) => job.blueprint.blueprintKind === "fallback"));
+  assert.ok(
+    [...physicalJobs, ...fallbackJobs].every(
+      (job) => job.requiredRuns * job.durationPerRunSeconds <= 100 * 3600,
+    ),
+  );
+  assert.ok(
+    [...physicalJobs, ...fallbackJobs].every(
+      (job) => job.blueprint.materialEfficiency === 3 && job.blueprint.timeEfficiency === 20,
+    ),
   );
 });
 
@@ -315,17 +575,36 @@ void test("rounds reaction inputs per simulated maximum-duration install", async
     );
 
   const [oneHourResult, oneDayResult] = await Promise.all([createResult(1), createResult(24)]);
-  const getJob = (result: Awaited<ReturnType<typeof createResult>>) => {
-    const job = result.lists.reactionJobs.find((candidate) => candidate.productTypeId === 16680);
-    assert.ok(job);
-    assert.equal(job.requiredRuns, 7);
-    return job;
+  const getJobs = (result: Awaited<ReturnType<typeof createResult>>) => {
+    const jobs = result.lists.reactionJobs.filter((candidate) => candidate.productTypeId === 16680);
+    assert.ok(jobs.length > 0);
+    assert.equal(
+      jobs.reduce((total, job) => total + job.requiredRuns, 0),
+      7,
+    );
+    return jobs;
   };
 
-  const oneHourJob = getJob(oneHourResult);
-  const oneDayJob = getJob(oneDayResult);
-  assert.equal(oneHourJob.inputs.find((input) => input.typeId === 16663)?.requiredQuantity, 686);
-  assert.equal(oneDayJob.inputs.find((input) => input.typeId === 16663)?.requiredQuantity, 685);
+  const oneHourJobs = getJobs(oneHourResult);
+  const oneDayJobs = getJobs(oneDayResult);
+  const assertJobsFitDuration = (jobs: typeof oneHourJobs, maxDurationHours: number) => {
+    assert.ok(
+      jobs.every(
+        (job) =>
+          job.requiredRuns === 1
+          || job.requiredRuns * job.durationPerRunSeconds <= maxDurationHours * 3600,
+      ),
+    );
+  };
+  assertJobsFitDuration(oneHourJobs, 1);
+  assertJobsFitDuration(oneDayJobs, 24);
+  const totalMaterialQuantity = (jobs: typeof oneHourJobs) =>
+    jobs
+      .flatMap((job) => job.inputs)
+      .filter((input) => input.typeId === 16663)
+      .reduce((total, input) => total + input.requiredQuantity, 0);
+  assert.equal(totalMaterialQuantity(oneHourJobs), 686);
+  assert.equal(totalMaterialQuantity(oneDayJobs), 685);
 });
 
 void test("keeps upstream demand separate from a multi-unit job output", async () => {

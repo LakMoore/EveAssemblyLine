@@ -79,6 +79,7 @@ void test("uses scheduler installs starting at T+0 for schedule-mode suggestions
     installs: [
       {
         installId: "now",
+        slotKey: "42:M:3",
         characterId: 42,
         slotIndex: 3,
         runs: 5,
@@ -90,6 +91,7 @@ void test("uses scheduler installs starting at T+0 for schedule-mode suggestions
       },
       {
         installId: "later",
+        slotKey: "43:M:1",
         characterId: 43,
         slotIndex: 1,
         runs: 3,
@@ -132,6 +134,7 @@ void test("uses only canonical installs in Schedule mode", () => {
     installs: [
       {
         installId: "server-install",
+        slotKey: "42:M:3",
         characterId: 42,
         slotIndex: 3,
         runs: 5,
@@ -180,6 +183,7 @@ void test("appends unassigned local virtual installs in total and installable mo
     installs: [
       {
         installId: "server-install",
+        slotKey: "42:M:3",
         characterId: 42,
         slotIndex: 3,
         runs: 5,

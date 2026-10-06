@@ -1,7 +1,93 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { scheduleSimulationJobs } from "./scheduler";
-import type { SimulationCopyJob, SimulationIndustryJob, SimulationInventionJob } from "./types";
+import { scheduleSimulationJobs as scheduleWithSlotMap } from "./scheduler";
+import type {
+  SimulationCharacterProfile,
+  SimulationCopyJob,
+  SimulationIndustryJob,
+  SimulationInFlightJobActivity,
+  SimulationInventionJob,
+  SimulationSlot,
+  SimulationSlotActivity,
+} from "./types";
+
+type ScheduleParameters = Parameters<typeof scheduleWithSlotMap>;
+
+/** Converts pre-contract test fixtures into explicit slots; production never infers slot identity. */
+function fixtureSlotMap(characters: readonly SimulationCharacterProfile[]): SimulationSlot[] {
+  const pools: Array<{
+    activity: SimulationSlotActivity;
+    code: string;
+    freeSlotKey: "manufacturing" | "reactions" | "science";
+    jobs: SimulationInFlightJobActivity[];
+  }> = [
+    {
+      activity: "manufacturing",
+      code: "M",
+      freeSlotKey: "manufacturing",
+      jobs: ["manufacturing"],
+    },
+    { activity: "reaction", code: "R", freeSlotKey: "reactions", jobs: ["reaction"] },
+    {
+      activity: "science",
+      code: "S",
+      freeSlotKey: "science",
+      jobs: ["time-research", "material-research", "copying", "invention"],
+    },
+  ];
+  return characters.flatMap((character) =>
+    pools.flatMap((pool) => {
+      const activeJobs = (character.inFlightJobs ?? []).filter((job) =>
+        pool.jobs.includes(job.activity),
+      );
+      const totalSlots = Math.max(
+        character.freeSlots?.[pool.freeSlotKey] ?? 0,
+        ...activeJobs.map((job) => job.slotIndex + 1),
+      );
+      const jobsByIndex = new Map(activeJobs.map((job) => [job.slotIndex, job]));
+      return Array.from(
+        { length: totalSlots },
+        (_, slotIndex) => {
+          const installedJob = jobsByIndex.get(slotIndex);
+          return {
+            slotKey: `${character.characterId}:${pool.code}:${slotIndex}`,
+            activity: pool.activity,
+            characterId: character.characterId,
+            systemId: character.systemId,
+            slotIndex,
+            availableAtSeconds: installedJob?.remainingSeconds ?? 0,
+            ...(installedJob ? { installedJobId: installedJob.jobId } : {}),
+          };
+        },
+      );
+    }),
+  );
+}
+
+function scheduleSimulationJobs(
+  manufacturingJobs: ScheduleParameters[0],
+  reactionJobs: ScheduleParameters[1],
+  inventionJobs: ScheduleParameters[2],
+  copyJobs: ScheduleParameters[3],
+  characters: ScheduleParameters[4],
+  locationSystemIdsById: ScheduleParameters[5],
+  baselineTimeMultipliers?: ScheduleParameters[6],
+  jobSkillRequirements?: ScheduleParameters[7],
+  maxReactionJobDurationHours?: ScheduleParameters[8],
+) {
+  return scheduleWithSlotMap(
+    manufacturingJobs,
+    reactionJobs,
+    inventionJobs,
+    copyJobs,
+    characters,
+    locationSystemIdsById,
+    baselineTimeMultipliers,
+    jobSkillRequirements,
+    maxReactionJobDurationHours,
+    fixtureSlotMap(characters),
+  );
+}
 
 /** Creates a minimal manufacturing job for scheduler tests. */
 function job(
@@ -75,9 +161,44 @@ void test("assigns longest jobs first and serializes reuse of one blueprint", ()
   const reused = result.manufacturingJobs.find((candidate) => candidate.jobId === "same-blueprint");
   assert.ok(long);
   assert.ok(reused);
-  assert.equal(long.installs[0].installId, "install:long:7:0");
+  assert.equal(long.installs[0].installId, "install:long:7:M:0");
+  assert.equal(long.installs[0].slotKey, "7:M:0");
   assert.equal(reused.unscheduledRuns, 0);
   assert.ok(reused.installs[0].startOffsetSeconds >= long.installs[0].endOffsetSeconds);
+});
+
+void test("uses the submitted slot key without rebuilding its index", () => {
+  const result = scheduleWithSlotMap(
+    [job("authoritative-slot", 1, 100)],
+    [],
+    [],
+    [],
+    [
+      {
+        characterId: 7,
+        systemId: 30_000_142,
+        timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
+        skillLevels: {},
+      },
+    ],
+    systemIdsByLocation,
+    undefined,
+    undefined,
+    undefined,
+    [
+      {
+        slotKey: "7:M:17",
+        activity: "manufacturing",
+        characterId: 7,
+        systemId: 30_000_142,
+        slotIndex: 17,
+        availableAtSeconds: 0,
+      },
+    ],
+  );
+
+  assert.equal(result.manufacturingJobs[0].installs[0].slotKey, "7:M:17");
+  assert.equal(result.manufacturingJobs[0].installs[0].slotIndex, 17);
 });
 
 void test("applies character timing relative to the shared skill baseline", () => {
@@ -145,10 +266,12 @@ void test("schedules located reaction formulas without item IDs", () => {
     result.reactionJobs.find((candidate) => candidate.jobId === "local-formula")?.installs.length,
     1,
   );
-  assert.equal(
-    result.reactionJobs.find((candidate) => candidate.jobId === "remote-formula")?.installs.length,
-    0,
+  const remoteFormula = result.reactionJobs.find(
+    (candidate) => candidate.jobId === "remote-formula",
   );
+  assert.equal(remoteFormula?.installs.length, 1);
+  assert.equal(remoteFormula.installs[0].startOffsetSeconds, 24 * 60 * 60);
+  assert.equal(remoteFormula.installs[0].readiness, "after-hauling");
   assert.equal(
     result.reactionJobs.find((candidate) => candidate.jobId === "missing-formula")?.installs.length,
     0,
@@ -450,6 +573,31 @@ void test("prefers the earliest eligible slot start before projected finish", ()
   assert.equal(result.manufacturingJobs[1].installs[0].characterId, 2);
   assert.equal(result.manufacturingJobs[1].installs[0].startOffsetSeconds, 43_200);
   assert.equal(result.manufacturingJobs[1].installs[0].endOffsetSeconds, 61_200);
+});
+
+void test("selects an eligible slot whose active job has already finished", () => {
+  const result = scheduleSimulationJobs(
+    [job("slot-ready-at-origin", 1, 60)],
+    [],
+    [],
+    [],
+    [
+      {
+        characterId: 7,
+        systemId: 30_000_143,
+        freeSlots: { manufacturing: 0, reactions: 0, science: 0 },
+        inFlightJobs: [
+          { jobId: 901, activity: "manufacturing", remainingSeconds: 0, slotIndex: 0 },
+        ],
+        timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
+        skillLevels: {},
+      },
+    ],
+    new Map([[20, 30_000_142]]),
+  );
+
+  assert.equal(result.manufacturingJobs[0].installs[0]?.characterId, 7);
+  assert.equal(result.manufacturingJobs[0].installs[0]?.startOffsetSeconds, 0);
 });
 
 void test("preserves the slot index assigned to each in-flight job", () => {
@@ -842,7 +990,59 @@ void test("allows hauling planned upstream output when calculating downstream ti
   assert.ok(downstreamInstall.startOffsetSeconds >= upstreamInstall.endOffsetSeconds);
 });
 
-void test("blocks timing when existing input assets need hauling", () => {
+void test("waits for in-flight supply when the same input also needs hauling", () => {
+  const downstream: SimulationIndustryJob = {
+    ...job("mixed-supply", 2, 300),
+    readyNowRuns: 0,
+    readyAfterHaulingRuns: 0,
+    readyAfterUpstreamRuns: 1,
+    inputs: [
+      {
+        typeId: 4312,
+        typeName: "Component",
+        requiredQuantity: 10,
+        availableNow: 0,
+        availableFromHauling: 5,
+        availableAfterUpstream: 10,
+        unsatisfiedQuantity: 0,
+        upstreamReservations: [
+          {
+            activity: "reaction",
+            quantity: 5,
+            state: "in-production",
+            sourceJobId: 123,
+          },
+        ],
+      },
+    ],
+  };
+  const result = scheduleSimulationJobs(
+    [downstream],
+    [],
+    [],
+    [],
+    [
+      {
+        characterId: 7,
+        systemId: 30_000_142,
+        freeSlots: { manufacturing: 1, reactions: 0, science: 0 },
+        inFlightJobs: [
+          { jobId: 123, activity: "reaction", slotIndex: 0, remainingSeconds: 49 * 3600 },
+        ],
+        timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
+        skillLevels: {},
+      },
+    ],
+    systemIdsByLocation,
+  );
+
+  const install = result.manufacturingJobs[0].installs[0];
+  assert.ok(install.startOffsetSeconds >= 49 * 3600);
+  assert.equal(install.startOffsetSeconds, 60 * 3600);
+  assert.equal(install.startOffsetSeconds % (12 * 3600), 0);
+});
+
+void test("schedules existing input assets after hauling and tags the install", () => {
   const blocked = {
     ...job("remote-existing-input", 1, 60),
     readyNowRuns: 0,
@@ -876,11 +1076,12 @@ void test("blocks timing when existing input assets need hauling", () => {
     systemIdsByLocation,
   );
 
-  assert.equal(result.manufacturingJobs[0].installs.length, 0);
-  assert.match(
-    result.manufacturingJobs[0].noTimingReason ?? "",
-    /existing input assets must be hauled/i,
-  );
+  assert.equal(result.manufacturingJobs[0].installs.length, 1);
+  assert.equal(result.manufacturingJobs[0].installs[0].startOffsetSeconds, 24 * 60 * 60);
+  assert.equal(result.manufacturingJobs[0].installs[0].readiness, "after-hauling");
+  assert.equal(result.manufacturingJobs[0].noTimingReason, undefined);
+  assert.equal(result.manufacturingJobs[0].inputs[0].availableNow, 0);
+  assert.equal(result.manufacturingJobs[0].inputs[0].availableFromHauling, 10);
 });
 
 void test("allows planned industry output to be hauled when timing science work", () => {
@@ -946,7 +1147,7 @@ void test("allows planned industry output to be hauled when timing science work"
   assert.equal(result.inventionJobs[0].noTimingReason, undefined);
 });
 
-void test("reports why science timing is blocked by remote existing assets", () => {
+void test("schedules science work after hauling existing assets and tags the assignment", () => {
   const invention: SimulationInventionJob = {
     jobId: "remote-science-input",
     depth: 1,
@@ -996,8 +1197,10 @@ void test("reports why science timing is blocked by remote existing assets", () 
     systemIdsByLocation,
   );
 
-  assert.deepEqual(result.inventionJobs[0].assignments, []);
-  assert.match(result.inventionJobs[0].noTimingReason ?? "", /datacore assets must be hauled/i);
+  assert.equal(result.inventionJobs[0].assignments.length, 1);
+  assert.equal(result.inventionJobs[0].assignments[0].startOffsetSeconds, 24 * 60 * 60);
+  assert.equal(result.inventionJobs[0].assignments[0].readiness, "after-hauling");
+  assert.equal(result.inventionJobs[0].noTimingReason, undefined);
 });
 
 void test("schedules a reaction before manufacturing that consumes its output", () => {
@@ -1049,13 +1252,19 @@ void test("schedules a reaction before manufacturing that consumes its output", 
 });
 
 void test("enforces wormhole and K-space location rules for all scheduled activities", () => {
-  const profiles = [31_000_001, 31_000_002, 30_000_001, 30_000_002].map((systemId, index) => ({
-    characterId: index + 1,
-    systemId,
-    freeSlots: { manufacturing: 1, reactions: 1, science: 1 },
-    timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
-    skillLevels: {},
-  }));
+  const profiles = [31_000_001, 31_000_002, 30_000_001, 30_000_002]
+    .map((systemId, index) => ({
+      characterId: index + 1,
+      systemId,
+      freeSlots: { manufacturing: 1, reactions: 1, science: 1 },
+      timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
+      skillLevels: {},
+    }))
+    .map((profile) =>
+      profile.characterId === 3
+        ? { ...profile, freeSlots: { ...profile.freeSlots, manufacturing: 0 } }
+        : profile,
+    );
   const manufacturingJobs = [
     { ...job("manufacturing-wh-a", 1, 60), locationId: 101 },
     { ...job("manufacturing-kspace", 2, 60), locationId: 103 },
@@ -1119,11 +1328,36 @@ void test("enforces wormhole and K-space location rules for all scheduled activi
   );
 
   assert.equal(result.manufacturingJobs[0].installs[0]?.characterId, 1);
-  assert.ok([3, 4].includes(result.manufacturingJobs[1].installs[0]?.characterId ?? 0));
+  assert.equal(result.manufacturingJobs[1].installs[0]?.characterId, 4);
   assert.equal(result.reactionJobs[0].installs[0]?.characterId, 2);
   assert.ok([3, 4].includes(result.reactionJobs[1].installs[0]?.characterId ?? 0));
   assert.equal(result.copyJobs[0].assignments[0]?.characterId, 1);
   assert.ok([3, 4].includes(result.inventionJobs[0].assignments[0]?.characterId ?? 0));
+});
+
+void test("explains K-space eligibility without requiring a same-system character", () => {
+  const result = scheduleSimulationJobs(
+    [job("kspace-with-only-wormhole-character", 1, 60)],
+    [],
+    [],
+    [],
+    [
+      {
+        characterId: 7,
+        systemId: 31_000_001,
+        freeSlots: { manufacturing: 1, reactions: 0, science: 0 },
+        timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
+        skillLevels: {},
+      },
+    ],
+    new Map([[20, 30_000_142]]),
+  );
+
+  assert.equal(result.manufacturingJobs[0].installs.length, 0);
+  assert.equal(
+    result.manufacturingJobs[0].noTimingReason,
+    "No non-wormhole character has a free manufacturing slot.",
+  );
 });
 
 void test("schedules an invention attempt with missing materials at T+1d", () => {
@@ -1180,6 +1414,73 @@ void test("schedules an invention attempt with missing materials at T+1d", () =>
     result.warnings.some((warning) => warning.code === "missing-capacity"),
     false,
   );
+});
+
+void test("waits for in-flight material before invention when it also needs hauling", () => {
+  const invention: SimulationInventionJob = {
+    jobId: "invention-mixed-supply",
+    depth: 1,
+    stockpileId: "main",
+    locationId: 60,
+    sourceBlueprintTypeId: 11620,
+    outputBlueprintTypeId: 11808,
+    attempts: 1,
+    successProbability: 0.5,
+    runsPerSuccess: 1,
+    requiredOutputRuns: 1,
+    targetSuccessProbability: 0.95,
+    expectedOutputCopies: 1,
+    expectedOutputRuns: 1,
+    materialEfficiency: 0,
+    timeEfficiency: 0,
+    skillSource: "request",
+    durationSeconds: 600,
+    inputs: [
+      {
+        typeId: 20417,
+        typeName: "Datacore",
+        requiredQuantity: 10,
+        availableNow: 0,
+        availableFromHauling: 5,
+        availableAfterUpstream: 10,
+        unsatisfiedQuantity: 0,
+        upstreamReservations: [
+          {
+            activity: "reaction",
+            quantity: 5,
+            state: "in-production",
+            sourceJobId: 123,
+          },
+        ],
+      },
+    ],
+    assignments: [],
+    unscheduledAttempts: 1,
+  };
+  const result = scheduleSimulationJobs(
+    [],
+    [],
+    [invention],
+    [],
+    [
+      {
+        characterId: 7,
+        systemId: 30_000_142,
+        freeSlots: { manufacturing: 0, reactions: 0, science: 1 },
+        inFlightJobs: [
+          { jobId: 123, activity: "reaction", slotIndex: 0, remainingSeconds: 49 * 3600 },
+        ],
+        timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
+        skillLevels: {},
+      },
+    ],
+    systemIdsByLocation,
+  );
+
+  const assignment = result.inventionJobs[0].assignments[0];
+  assert.ok(assignment.startOffsetSeconds >= 49 * 3600);
+  assert.equal(assignment.startOffsetSeconds, 60 * 3600);
+  assert.equal(assignment.startOffsetSeconds % (12 * 3600), 0);
 });
 
 void test("reuses all activity slots after currently active jobs complete", () => {

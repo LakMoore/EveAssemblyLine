@@ -30,6 +30,7 @@ function simulationResult() {
       invariantViolationCount: 0,
       unresolvedAssetCount: 0,
     },
+    scheduleSlots: [],
     lists: Object.fromEntries(listNames.map((name) => [name, []])),
     ledgers: [],
   };
@@ -37,6 +38,12 @@ function simulationResult() {
 
 void test("accepts a complete cached native simulation result", () => {
   assert.equal(isSimulationResultV2(simulationResult()), true);
+});
+
+void test("rejects cached native results without their authoritative slot map", () => {
+  const result = { ...simulationResult() } as Record<string, unknown>;
+  delete result.scheduleSlots;
+  assert.equal(isSimulationResultV2(result), false);
 });
 
 void test("rejects cached native results from an older calculation version", () => {

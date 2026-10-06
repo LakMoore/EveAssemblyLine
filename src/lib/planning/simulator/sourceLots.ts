@@ -292,6 +292,7 @@ export function normalizeSimulatorInventory(
   const blueprintLots: SimulatorBlueprintLot[] = [];
 
   for (const [stockIndex, item] of stock.entries()) {
+    const industryJobId = item.industryOutput?.sourceJobId ?? item.jobId;
     if (
       isAncientRelicType(context.types.get(item.typeId), context.groups)
       && item.industryOutput?.activity === "copying"
@@ -341,7 +342,7 @@ export function normalizeSimulatorInventory(
               && (normalizedPrintActivity === "copying" || normalizedPrintActivity === "invention")
                 ? { activity: normalizedPrintActivity as "copying" | "invention" }
                 : {}),
-              ...(item.jobId !== undefined ? { industryJobId: item.jobId } : {}),
+              ...(industryJobId !== undefined ? { industryJobId } : {}),
               ...(item.industryOutput?.state === "active" || item.industryOutput?.state === "paused"
                 ? { industryJobStatus: item.industryOutput.state }
                 : {}),
@@ -391,6 +392,7 @@ export function normalizeSimulatorInventory(
       ...(item.industryOutput?.state === "active" || item.industryOutput?.state === "paused"
         ? { activity: item.industryOutput.activity }
         : {}),
+      ...(industryJobId !== undefined ? { industryJobId } : {}),
       industryJobStatus:
         item.industryOutput?.state === "active" || item.industryOutput?.state === "paused"
           ? item.industryOutput.state

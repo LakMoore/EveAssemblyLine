@@ -1,15 +1,8 @@
-import { getAvailableSlotCount } from "@/lib/client/slotUsage";
 import type { ClientCharacterStatus, ClientJobsResponse } from "@/lib/client/requestCache";
-import type { SimulationCharacterProfile, SimulationInFlightJob } from "./types";
+import type { SimulationCharacterProfile, SimulationSlot, SimulationSlotActivity } from "./types";
 
 type CharacterSkill = { skillId: number; activeSkillLevel: number };
 type InFlightSlotCategory = "Manufacturing" | "Reactions" | "Science";
-
-interface InFlightJobSlotGroup {
-  characterId: number;
-  slotCategory: InFlightSlotCategory;
-  jobs: Array<Omit<SimulationInFlightJob, "slotIndex">>;
-}
 
 /** Skill IDs and time bonuses used by the current planner's industry estimates. */
 export const simulationIndustrySkillIds = {
@@ -18,15 +11,27 @@ export const simulationIndustrySkillIds = {
   reactions: 45746,
 } as const;
 
-const simulationActivityByJobActivity = new Map<string, SimulationInFlightJob["activity"]>([
+const slotActivityByJobActivity = new Map<string, SimulationSlotActivity>([
   ["manufacturing", "manufacturing"],
   ["reaction", "reaction"],
   ["reactions", "reaction"],
-  ["time research", "time-research"],
-  ["material research", "material-research"],
-  ["copying", "copying"],
-  ["invention", "invention"],
+  ["time research", "science"],
+  ["material research", "science"],
+  ["copying", "science"],
+  ["invention", "science"],
 ]);
+
+const slotCategoryByActivity: Record<SimulationSlotActivity, InFlightSlotCategory> = {
+  manufacturing: "Manufacturing",
+  reaction: "Reactions",
+  science: "Science",
+};
+
+const slotCodeByActivity: Record<SimulationSlotActivity, string> = {
+  manufacturing: "M",
+  reaction: "R",
+  science: "S",
+};
 
 /** Calculates character-specific activity timing factors from the cached skill snapshot. */
 export function simulationTimeMultipliers(
@@ -50,104 +55,18 @@ export function simulationTimeMultipliers(
   };
 }
 
-/** Maps a cached ESI activity label to its simulator scheduling activity. */
-function simulationActivityForJob(activity: string): SimulationInFlightJob["activity"] | undefined {
-  return simulationActivityByJobActivity.get(activity.trim().toLowerCase());
-}
-
-/** Returns the ESI slot category used by one simulator activity. */
-function inFlightSlotCategory(activity: SimulationInFlightJob["activity"]): InFlightSlotCategory {
-  if (activity === "manufacturing") return "Manufacturing";
-  if (activity === "reaction") return "Reactions";
-  return "Science";
-}
-
-/** Groups active supported jobs by character and activity slot pool. */
-function inFlightJobsByCharacter(
-  jobs: ClientJobsResponse["jobs"],
-  slotUsage: ClientJobsResponse["slotUsage"],
-  nowMilliseconds: number,
-): ReadonlyMap<number, SimulationInFlightJob[]> {
-  const seenJobIds = new Set<number>();
-  const groupsByKey = new Map<string, InFlightJobSlotGroup>();
-  for (const job of jobs ?? []) {
-    const activity = simulationActivityForJob(job.activity);
-    const startTime = Date.parse(job.startDate);
-    const endTime = Date.parse(job.endDate);
-    if (
-      job.status.toLowerCase() !== "active"
-      || !activity
-      || seenJobIds.has(job.jobId)
-      || !Number.isFinite(startTime)
-      || !Number.isFinite(endTime)
-      || startTime > nowMilliseconds
-      || endTime <= nowMilliseconds
-    ) continue;
-    seenJobIds.add(job.jobId);
-    const slotCategory = inFlightSlotCategory(activity);
-    const groupKey = `${job.characterId}:${slotCategory}`;
-    const group = groupsByKey.get(groupKey) ?? {
-      characterId: job.characterId,
-      slotCategory,
-      jobs: [],
-    };
-    group.jobs.push({
-      jobId: job.jobId,
-      activity,
-      remainingSeconds: Math.ceil((endTime - nowMilliseconds) / 1000),
-    });
-    groupsByKey.set(groupKey, group);
-  }
-
-  const jobsByCharacter = new Map<number, SimulationInFlightJob[]>();
-  for (const group of groupsByKey.values()) {
-    group.jobs.sort(
-      (left, right) => left.remainingSeconds - right.remainingSeconds || left.jobId - right.jobId,
-    );
-    const firstSlotIndex = getAvailableSlotCount(
-      slotUsage?.[String(group.characterId)],
-      group.slotCategory,
-    );
-    const characterJobs = jobsByCharacter.get(group.characterId) ?? [];
-    characterJobs.push(
-      ...group.jobs.map((job, index) => ({ ...job, slotIndex: firstSlotIndex + index })),
-    );
-    jobsByCharacter.set(group.characterId, characterJobs);
-  }
-  for (const characterJobs of jobsByCharacter.values()) {
-    characterJobs.sort(
-      (left, right) => left.remainingSeconds - right.remainingSeconds || left.jobId - right.jobId,
-    );
-  }
-  return jobsByCharacter;
-}
-
-/** Builds simulator profiles from cached skills, job end dates, and industry slot usage. */
+/** Builds simulator character profiles from cached skills and locations. */
 export function createSimulationCharacterProfiles(
   characters: readonly ClientCharacterStatus[],
-  clientJobs: ClientJobsResponse | null | undefined,
-  nowMilliseconds = Date.now(),
 ): SimulationCharacterProfile[] {
-  const activeJobsByCharacter = inFlightJobsByCharacter(
-    clientJobs?.jobs,
-    clientJobs?.slotUsage,
-    nowMilliseconds,
-  );
   return characters.flatMap((character) => {
     const systemId = character.location?.systemId;
     if (systemId === undefined) return [];
     const skills = character.skills?.body ?? [];
-    const usage = clientJobs?.slotUsage?.[String(character.characterId)];
     return [
       {
         characterId: character.characterId,
         systemId,
-        freeSlots: {
-          manufacturing: getAvailableSlotCount(usage, "Manufacturing"),
-          reactions: getAvailableSlotCount(usage, "Reactions"),
-          science: getAvailableSlotCount(usage, "Science"),
-        },
-        inFlightJobs: activeJobsByCharacter.get(character.characterId) ?? [],
         timeMultipliers: simulationTimeMultipliers(skills),
         skillLevels: Object.fromEntries(
           skills.map((skill) => [String(skill.skillId), skill.activeSkillLevel]),
@@ -155,6 +74,79 @@ export function createSimulationCharacterProfiles(
       },
     ];
   });
+}
+
+/** Creates a keyed slot map anchored to the cached jobs snapshot when its timestamp is available. */
+export function createSimulationSlotMap(
+  characters: readonly ClientCharacterStatus[],
+  clientJobs: ClientJobsResponse | null | undefined,
+  nowMilliseconds?: number,
+): SimulationSlot[] {
+  const snapshotTime = clientJobs?.lastUpdated ? Date.parse(clientJobs.lastUpdated) : Number.NaN;
+  const referenceTime =
+    nowMilliseconds ?? (Number.isFinite(snapshotTime) ? snapshotTime : Date.now());
+  const seenJobIds = new Set<number>();
+  const jobsByCharacterAndActivity = new Map<string, NonNullable<ClientJobsResponse["jobs"]>>();
+  for (const job of clientJobs?.jobs ?? []) {
+    const activity = slotActivityByJobActivity.get(job.activity.trim().toLowerCase());
+    const startTime = Date.parse(job.startDate);
+    const endTime = Date.parse(job.endDate);
+    if (
+      job.status.toLowerCase() !== "active"
+      || activity === undefined
+      || seenJobIds.has(job.jobId)
+      || !Number.isFinite(startTime)
+      || !Number.isFinite(endTime)
+      || startTime > referenceTime
+    ) continue;
+    seenJobIds.add(job.jobId);
+    const groupKey = `${job.characterId}:${activity}`;
+    const group = jobsByCharacterAndActivity.get(groupKey) ?? [];
+    group.push(job);
+    jobsByCharacterAndActivity.set(groupKey, group);
+  }
+
+  return characters
+    .flatMap((character) => {
+      const systemId = character.location?.systemId;
+      if (systemId === undefined) return [];
+      return (Object.keys(slotCategoryByActivity) as SimulationSlotActivity[]).flatMap(
+        (activity) => {
+          const category = slotCategoryByActivity[activity];
+          const availableSlots = character.industrySlots?.[category] ?? 0;
+          const activeJobs = (
+            jobsByCharacterAndActivity.get(`${character.characterId}:${activity}`) ?? []
+          )
+            .slice()
+            .sort(
+              (left, right) =>
+                Date.parse(left.endDate) - Date.parse(right.endDate) || left.jobId - right.jobId,
+            );
+          const totalSlots = Math.max(availableSlots, activeJobs.length);
+          const firstOccupiedSlot = totalSlots - activeJobs.length;
+          return Array.from(
+            { length: totalSlots },
+            (_, slotIndex) => {
+              const activeJobIndex = slotIndex - firstOccupiedSlot;
+              const installedJob = activeJobIndex < 0 ? undefined : activeJobs.at(activeJobIndex);
+              const remainingSeconds = installedJob
+                ? Math.max(0, Math.ceil((Date.parse(installedJob.endDate) - referenceTime) / 1000))
+                : 0;
+              return {
+                slotKey: `${character.characterId}:${slotCodeByActivity[activity]}:${slotIndex}`,
+                activity,
+                characterId: character.characterId,
+                systemId,
+                slotIndex,
+                availableAtSeconds: remainingSeconds,
+                ...(installedJob ? { installedJobId: installedJob.jobId } : {}),
+              };
+            },
+          );
+        },
+      );
+    })
+    .sort((left, right) => left.slotKey.localeCompare(right.slotKey));
 }
 
 /** Returns whether every active character has usable skills, jobs, and slot-capacity snapshots. */

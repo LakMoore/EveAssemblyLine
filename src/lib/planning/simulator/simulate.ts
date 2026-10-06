@@ -598,6 +598,7 @@ export async function simulateIndustry(
         },
         industry.jobSkillRequirements,
         request.simulation.maxReactionJobDurationHours,
+        request.simulation.slots,
       ),
   );
   const producingJobs = [...schedules.manufacturingJobs, ...schedules.reactionJobs];
@@ -716,7 +717,7 @@ export async function simulateIndustry(
     ?? measureSyncProfiled(profiler, "hash-input", () => simulationInputHash(request));
   return {
     metadata: {
-      simulatorVersion: 15,
+      simulatorVersion: 16,
       policyVersion: 1,
       generatedAt,
       sdeRevision: context.sdeRevision,
@@ -725,6 +726,7 @@ export async function simulateIndustry(
       invariantViolationCount: projection.invariantViolations.length,
       unresolvedAssetCount: inventory.unresolvedLotCount,
     },
+    scheduleSlots: request.simulation.slots,
     lists,
     ledgers,
   };

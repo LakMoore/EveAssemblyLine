@@ -65,7 +65,7 @@ void test("validates the maximum reaction job duration", () => {
   );
 });
 
-void test("requires a current system ID for every simulation character", () => {
+void test("accepts keyed simulation slots and strips legacy per-character capacity", () => {
   const character = {
     characterId: 7,
     systemId: 31_000_001,
@@ -73,13 +73,48 @@ void test("requires a current system ID for every simulation character", () => {
     timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
     skillLevels: {},
   };
-  const withoutFlightJobs = simulatorRequestSchema.safeParse({
+  const slot = {
+    slotKey: "7:M:0",
+    activity: "manufacturing",
+    characterId: 7,
+    systemId: 31_000_001,
+    slotIndex: 0,
+    availableAtSeconds: 0,
+    installedJobId: 101,
+  };
+  const parsed = simulatorRequestSchema.safeParse({
     ...request(),
-    simulation: { version: 1, characters: [character] },
+    simulation: { version: 1, characters: [character], slots: [slot] },
   });
-  assert.equal(withoutFlightJobs.success, true);
-  assert.deepEqual(withoutFlightJobs.data.simulation.characters[0].inFlightJobs, []);
-  const withFlightJobs = simulatorRequestSchema.safeParse({
+  assert.equal(parsed.success, true);
+  assert.deepEqual(parsed.data.simulation.slots, [slot]);
+  assert.equal("freeSlots" in parsed.data.simulation.characters[0], false);
+  assert.equal(
+    simulatorRequestSchema.safeParse({
+      ...request(),
+      simulation: { version: 1, slots: [{ ...slot, slotKey: "7:R:0" }] },
+    }).success,
+    false,
+  );
+  assert.equal(
+    simulatorRequestSchema.safeParse({
+      ...request(),
+      simulation: { version: 1, characters: [character], slots: [slot, slot] },
+    }).success,
+    false,
+  );
+  assert.equal(
+    simulatorRequestSchema.safeParse({
+      ...request(),
+      simulation: {
+        version: 1,
+        characters: [character],
+        slots: [{ ...slot, systemId: 31_000_002 }],
+      },
+    }).success,
+    false,
+  );
+  const legacyCharacterShape = simulatorRequestSchema.safeParse({
     ...request(),
     simulation: {
       version: 1,
@@ -87,73 +122,14 @@ void test("requires a current system ID for every simulation character", () => {
         {
           ...character,
           inFlightJobs: [
-            { jobId: 101, activity: "manufacturing", remainingSeconds: 60, slotIndex: 1 },
-            { jobId: 102, activity: "time-research", remainingSeconds: 120, slotIndex: 1 },
+            { jobId: 101, activity: "manufacturing", remainingSeconds: 60, slotIndex: 0 },
           ],
         },
       ],
     },
   });
-  assert.equal(withFlightJobs.success, true);
-  assert.deepEqual(
-    withFlightJobs.data.simulation.characters[0].inFlightJobs,
-    [
-      { jobId: 101, activity: "manufacturing", remainingSeconds: 60, slotIndex: 1 },
-      { jobId: 102, activity: "time-research", remainingSeconds: 120, slotIndex: 1 },
-    ],
-  );
-  assert.equal(
-    simulatorRequestSchema.safeParse({
-      ...request(),
-      simulation: {
-        version: 1,
-        characters: [
-          {
-            ...character,
-            inFlightJobs: [
-              { jobId: 101, activity: "manufacturing", remainingSeconds: -1, slotIndex: 1 },
-            ],
-          },
-        ],
-      },
-    }).success,
-    false,
-  );
-  assert.equal(
-    simulatorRequestSchema.safeParse({
-      ...request(),
-      simulation: {
-        version: 1,
-        characters: [
-          {
-            ...character,
-            inFlightJobs: [
-              { jobId: 101, activity: "manufacturing", remainingSeconds: 60, slotIndex: 1 },
-              { jobId: 102, activity: "manufacturing", remainingSeconds: 120, slotIndex: 1 },
-            ],
-          },
-        ],
-      },
-    }).success,
-    false,
-  );
-  assert.equal(
-    simulatorRequestSchema.safeParse({
-      ...request(),
-      simulation: {
-        version: 1,
-        characters: [
-          {
-            ...character,
-            inFlightJobs: [
-              { jobId: 101, activity: "manufacturing", remainingSeconds: 60, slotIndex: 0 },
-            ],
-          },
-        ],
-      },
-    }).success,
-    false,
-  );
+  assert.equal(legacyCharacterShape.success, true);
+  assert.equal("inFlightJobs" in legacyCharacterShape.data.simulation.characters[0], false);
   assert.equal(
     simulatorRequestSchema.safeParse({
       ...request(),
@@ -314,14 +290,25 @@ void test("accepts only sanitized industry output provenance", () => {
         industryJobStatus: "active",
         industryJobEndDate: "2026-01-01T01:00:00.000Z",
         activityName: "manufacturing",
-        industryOutput: { activity: "manufacturing", state: "active" },
+        industryOutput: {
+          activity: "manufacturing",
+          state: "active",
+          sourceJobId: 123,
+        },
       },
     ],
   });
   assert.ok(Array.isArray(parsed.assets));
   const asset = parsed.assets[0];
   assert.ok(asset);
-  assert.deepEqual(asset.industryOutput, { activity: "manufacturing", state: "active" });
+  assert.deepEqual(
+    asset.industryOutput,
+    {
+      activity: "manufacturing",
+      state: "active",
+      sourceJobId: 123,
+    },
+  );
   for (const property of [
     "inBuild",
     "jobId",

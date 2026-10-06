@@ -105,6 +105,7 @@ void test("sums scheduled runs starting at T+0 across jobs", () => {
         installs: [
           {
             installId: "install-1",
+            slotKey: "1:M:0",
             characterId: 1,
             slotIndex: 0,
             runs: 3,
@@ -116,6 +117,7 @@ void test("sums scheduled runs starting at T+0 across jobs", () => {
           },
           {
             installId: "install-2",
+            slotKey: "1:M:1",
             characterId: 1,
             slotIndex: 1,
             runs: 2,
@@ -134,6 +136,7 @@ void test("sums scheduled runs starting at T+0 across jobs", () => {
         installs: [
           {
             installId: "install-3",
+            slotKey: "2:M:0",
             characterId: 2,
             slotIndex: 0,
             runs: 4,

@@ -112,6 +112,7 @@ interface ProductionDemandBucket {
 interface DeferredProductionSupply {
   input: SimulationJobInput;
   supply: ProductionSupply;
+  futureReservations: SimulationUpstreamReservation[];
   localQuantity: number;
   remoteQuantity: number;
   futureQuantity: number;
@@ -209,6 +210,7 @@ class IndustryDemandSimulation {
   private readonly reusableBlueprintShortages = new Set<string>();
   private readonly warnings: SimulationWarning[];
   private readonly blueprintShortages: BlueprintShortage[] = [];
+  private readonly blueprintShortagesByKey = new Map<string, BlueprintShortage>();
   private readonly skillRequirements = new Map<
     number,
     { requiredLevel: number; jobIds: Set<string> }
@@ -624,14 +626,17 @@ class IndustryDemandSimulation {
                 - deferred.futureQuantity
                 - deferred.supply.plannedQuantity,
             );
-            input.upstreamReservations = this.reservationRange(
-              deferred.supply.reservations,
-              0,
-              deferred.supply.reservations.reduce(
-                (total, reservation) => total + reservation.quantity,
+            input.upstreamReservations = [
+              ...deferred.futureReservations,
+              ...this.reservationRange(
+                deferred.supply.reservations,
                 0,
+                deferred.supply.reservations.reduce(
+                  (total, reservation) => total + reservation.quantity,
+                  0,
+                ),
               ),
-            );
+            ];
             if (deferred.job) {
               deferred.job.readyNowRuns = Math.min(
                 horizonRunLimit(deferred.blueprint, deferred.blueprint.runs).now,
@@ -891,25 +896,41 @@ class IndustryDemandSimulation {
     const requiredRuns = Math.ceil(quantity / details.product.quantity);
     const nextStack = new Set(stack);
     nextStack.add(productTypeId);
+    const maxRunsPerJob = (timeEfficiency: number) =>
+      this.maxRunsPerIndustryJob(
+        this.activityDurationPerRunSeconds(
+          production.activity,
+          details.activity.time,
+          profile,
+          timeEfficiency,
+        ),
+      );
     const allocations =
       production.activity === "manufacturing"
         ? this.allocator.previewManufacturingBlueprints(
             production.blueprint._key,
             requiredRuns,
             profile.locationId,
-            Math.max(1, production.blueprint.maxProductionLimit),
+            maxRunsPerJob,
           )
-        : [{ runs: requiredRuns, materialEfficiency: 0 }];
+        : [];
     const missingRuns =
       requiredRuns - allocations.reduce((total, allocation) => total + allocation.runs, 0);
     if (missingRuns > 0) {
       const fallback = this.fallbackBlueprint(
         production.blueprint._key,
         missingRuns,
-        "fallback",
+        production.activity === "reaction" ? "formula" : "fallback",
         productTypeId,
       );
-      allocations.push({ runs: missingRuns, materialEfficiency: fallback.materialEfficiency });
+      allocations.push(
+        ...this.splitActivityBlueprintClaim(
+          fallback,
+          production.activity,
+          details.activity.time,
+          profile,
+        ).map(({ runs, materialEfficiency }) => ({ runs, materialEfficiency })),
+      );
     }
     for (const allocation of allocations) {
       for (const material of details.activity.materials ?? []) {
@@ -1151,6 +1172,15 @@ class IndustryDemandSimulation {
       this.sequence,
     );
     let allocations: BlueprintClaim[];
+    const maxRunsPerJob = (timeEfficiency: number) =>
+      this.maxRunsPerIndustryJob(
+        this.activityDurationPerRunSeconds(
+          production.activity,
+          details.activity.time,
+          profile,
+          timeEfficiency,
+        ),
+      );
     if (production.activity === "reaction") {
       const formula = this.allocator.claimReactionFormula(
         production.blueprint._key,
@@ -1158,9 +1188,15 @@ class IndustryDemandSimulation {
         blueprintAccount,
         baseJobId,
       );
-      allocations = formula
-        ? [{ ...formula, runs: requiredRuns }]
-        : [this.fallbackBlueprint(production.blueprint._key, requiredRuns, "formula")];
+      const formulaClaim = formula
+        ? { ...formula, runs: requiredRuns }
+        : this.fallbackBlueprint(production.blueprint._key, requiredRuns, "formula");
+      allocations = this.splitActivityBlueprintClaim(
+        formulaClaim,
+        production.activity,
+        details.activity.time,
+        profile,
+      );
     }
     else {
       allocations = this.allocator.claimManufacturingBlueprints(
@@ -1169,16 +1205,21 @@ class IndustryDemandSimulation {
         profile.locationId,
         blueprintAccount,
         baseJobId,
-        Math.max(1, production.blueprint.maxProductionLimit),
+        maxRunsPerJob,
       );
       const allocatedRuns = allocations.reduce((total, allocation) => total + allocation.runs, 0);
       if (allocatedRuns < requiredRuns) {
         allocations.push(
-          this.fallbackBlueprint(
-            production.blueprint._key,
-            requiredRuns - allocatedRuns,
-            "fallback",
-            productTypeId,
+          ...this.splitActivityBlueprintClaim(
+            this.fallbackBlueprint(
+              production.blueprint._key,
+              requiredRuns - allocatedRuns,
+              "fallback",
+              productTypeId,
+            ),
+            production.activity,
+            details.activity.time,
+            profile,
           ),
         );
       }
@@ -1309,15 +1350,13 @@ class IndustryDemandSimulation {
       throw new Error(`Production ${production.blueprint._key} has no product ${productTypeId}.`);
     }
     const activity = production.activity;
-    const durationPerRunSeconds = Math.max(
-      1,
-      Math.ceil(
-        details.activity.time
-          * profile.timeMultiplier
-          * (activity === "manufacturing" ? 1 - blueprint.timeEfficiency / 100 : 1),
-      ),
+    const durationPerRunSeconds = this.activityDurationPerRunSeconds(
+      activity,
+      details.activity.time,
+      profile,
+      blueprint.timeEfficiency,
     );
-    const maxRunsPerBatch = this.maxRunsPerReactionBatch(activity, durationPerRunSeconds);
+    const maxRunsPerBatch = this.maxRunsPerIndustryJob(durationPerRunSeconds);
     const materialSpecifications: MaterialSpecification[] = (details.activity.materials ?? []).map(
       (material) => {
         const account: SimulationLedgerAccount = {
@@ -1456,6 +1495,7 @@ class IndustryDemandSimulation {
       deferredInputs.push({
         input,
         supply: productionSupply,
+        futureReservations: physicalClaim.futureReservations,
         localQuantity: physicalClaim.local,
         remoteQuantity: physicalClaim.remote,
         futureQuantity: physicalClaim.future,
@@ -1937,17 +1977,53 @@ class IndustryDemandSimulation {
     return lower;
   }
 
-  private maxRunsPerReactionBatch(
-    activity: ProductionActivity,
-    durationPerRunSeconds: number,
-  ): number {
-    if (activity !== "reaction") return Number.MAX_SAFE_INTEGER;
+  private maxRunsPerIndustryJob(durationPerRunSeconds: number): number {
     return Math.max(
       1,
       Math.floor(
         (this.request.simulation.maxReactionJobDurationHours * 3600) / durationPerRunSeconds,
       ),
     );
+  }
+
+  private activityDurationPerRunSeconds(
+    activity: ProductionActivity,
+    activityTimeSeconds: number,
+    profile: ActivityProfile,
+    timeEfficiency: number,
+  ): number {
+    return Math.max(
+      1,
+      Math.ceil(
+        activityTimeSeconds
+          * profile.timeMultiplier
+          * (activity === "manufacturing" ? 1 - timeEfficiency / 100 : 1),
+      ),
+    );
+  }
+
+  private splitActivityBlueprintClaim(
+    blueprint: BlueprintClaim,
+    activity: ProductionActivity,
+    activityTimeSeconds: number,
+    profile: ActivityProfile,
+  ): BlueprintClaim[] {
+    const maxRunsPerJob = this.maxRunsPerIndustryJob(
+      this.activityDurationPerRunSeconds(
+        activity,
+        activityTimeSeconds,
+        profile,
+        blueprint.timeEfficiency,
+      ),
+    );
+    const allocations: BlueprintClaim[] = [];
+    let remainingRuns = blueprint.runs;
+    while (remainingRuns > 0) {
+      const runs = Math.min(remainingRuns, maxRunsPerJob);
+      allocations.push({ ...blueprint, runs });
+      remainingRuns -= runs;
+    }
+    return allocations;
   }
 
   private requiredMaterialQuantityForInstall(
@@ -2033,13 +2109,26 @@ class IndustryDemandSimulation {
     if (
       (this.context.blueprints.byInventionProductId.get(production.blueprint._key) ?? []).length > 0
     ) {
-      this.blueprintShortages.push({
+      const inventionShortageKey = [
+        stockpile.id,
+        production.blueprint._key,
+        manufacturingLocationId,
+      ].join(":");
+      const existingShortage = this.blueprintShortagesByKey.get(inventionShortageKey);
+      if (existingShortage) {
+        existingShortage.requiredRuns += runs;
+        existingShortage.jobIds.push(jobId);
+        return;
+      }
+      const shortage: BlueprintShortage = {
         stockpile,
         outputBlueprintTypeId: production.blueprint._key,
         requiredRuns: runs,
         manufacturingLocationId,
         jobIds: [jobId],
-      });
+      };
+      this.blueprintShortages.push(shortage);
+      this.blueprintShortagesByKey.set(inventionShortageKey, shortage);
       return;
     }
     if (this.reusableBlueprintShortages.has(shortageKey)) return;

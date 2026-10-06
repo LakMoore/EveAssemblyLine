@@ -68,6 +68,7 @@ import {
 import { createSimulationEtag, simulationCalculationVersion } from "@/lib/planning/simulator/etag";
 import {
   createSimulationCharacterProfiles,
+  createSimulationSlotMap,
   hasUsableSimulationCharacterSnapshots,
   simulationIndustrySkillIds,
   simulationTimeMultipliers,
@@ -255,6 +256,7 @@ function toSimulationAsset(item: PlanStockItem): SimulationAsset {
               : item.industryJobStatus === "active" || item.industryJobStatus === "paused"
                 ? item.industryJobStatus
                 : "available",
+          ...(item.jobId !== undefined ? { sourceJobId: item.jobId } : {}),
         }
       : undefined;
   const {
@@ -1220,7 +1222,8 @@ function Planner() {
                     simulateSurplus,
                     blockInterStockpileHauling: !allowInterStockpileHauling,
                     maxReactionJobDurationHours: settings.maxReactionJobDurationHours,
-                    characters: createSimulationCharacterProfiles(characterStatuses, jobs),
+                    characters: createSimulationCharacterProfiles(characterStatuses),
+                    slots: createSimulationSlotMap(characterStatuses, jobs),
                   },
                 }
               : {}),

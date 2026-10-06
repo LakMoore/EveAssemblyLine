@@ -1,4 +1,9 @@
-import type { SimulationHaulTask, SimulationResultV2 } from "./simulator/types";
+import type {
+  SimulationHaulTask,
+  SimulationResultV2,
+  SimulationSlot,
+  SimulationSlotActivity,
+} from "./simulator/types";
 import { simulationCalculationVersion } from "./simulator/etag";
 import type { PlanHaulExclusion, PlanResponse } from "./types";
 import { getPlanningDatabase, plannerPreferencesStoreName } from "./planningDatabase";
@@ -26,6 +31,51 @@ function isPositiveInteger(value: unknown): value is number {
 /** Confirms the shared type identity fields used by result rows. */
 function hasTypeIdentity(value: unknown): value is Record<string, unknown> {
   return isRecord(value) && isPositiveInteger(value.typeId) && typeof value.typeName === "string";
+}
+
+/** Validates the stable identity and timing fields for one restored slot. */
+function isSimulationSlot(value: unknown): value is SimulationSlot {
+  if (!isRecord(value)) return false;
+  const slotCodeByActivity: Record<SimulationSlotActivity, string> = {
+    manufacturing: "M",
+    reaction: "R",
+    science: "S",
+  };
+  const slotCode =
+    value.activity === "manufacturing"
+    || value.activity === "reaction"
+    || value.activity === "science"
+      ? slotCodeByActivity[value.activity]
+      : undefined;
+  return (
+    slotCode !== undefined
+    && typeof value.slotKey === "string"
+    && isPositiveInteger(value.characterId)
+    && isPositiveInteger(value.systemId)
+    && Number.isSafeInteger(value.slotIndex)
+    && (value.slotIndex as number) >= 0
+    && Number.isSafeInteger(value.availableAtSeconds)
+    && (value.availableAtSeconds as number) >= 0
+    && (value.installedJobId === undefined || isPositiveInteger(value.installedJobId))
+    && value.slotKey === `${value.characterId}:${slotCode}:${value.slotIndex}`
+  );
+}
+
+/** Validates that a restored result contains a complete, uniquely keyed slot array. */
+function hasSimulationSlots(value: unknown): value is SimulationSlot[] {
+  if (!Array.isArray(value)) return false;
+  const seenSlotKeys = new Set<string>();
+  const seenInstalledJobs = new Set<number>();
+  for (const slot of value) {
+    if (
+      !isSimulationSlot(slot)
+      || seenSlotKeys.has(slot.slotKey)
+      || (slot.installedJobId !== undefined && seenInstalledJobs.has(slot.installedJobId))
+    ) return false;
+    seenSlotKeys.add(slot.slotKey);
+    if (slot.installedJobId !== undefined) seenInstalledJobs.add(slot.installedJobId);
+  }
+  return true;
 }
 
 /** Narrows archived legacy planner payloads for the admin replay screen only. */
@@ -277,6 +327,7 @@ export function isSimulationResultV2(value: unknown): value is SimulationResultV
     && isQuantity(metadata.warningCount)
     && isQuantity(metadata.invariantViolationCount)
     && isQuantity(metadata.unresolvedAssetCount)
+    && hasSimulationSlots(value.scheduleSlots)
     && hasSimulationRows(
       lists.warnings,
       (warning) =>

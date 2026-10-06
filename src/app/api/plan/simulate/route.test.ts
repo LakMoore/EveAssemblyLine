@@ -12,7 +12,7 @@ const testEnvironment = process.env as unknown as Record<string, string | undefi
 function diagnosticResult(): SimulationResultWithDiagnostics {
   return {
     metadata: {
-      simulatorVersion: 15,
+      simulatorVersion: 16,
       policyVersion: 1,
       generatedAt: "2026-09-20T00:00:00.000Z",
       sdeRevision: "test",
@@ -21,6 +21,7 @@ function diagnosticResult(): SimulationResultWithDiagnostics {
       invariantViolationCount: 0,
       unresolvedAssetCount: 0,
     },
+    scheduleSlots: [],
     lists: {
       warnings: [],
       planItems: [],
@@ -44,6 +45,7 @@ function diagnosticResult(): SimulationResultWithDiagnostics {
           assignments: [
             {
               assignmentId: "science:copy-job",
+              slotKey: "7:S:0",
               characterId: 7,
               slotIndex: 0,
               units: 1,
@@ -88,6 +90,7 @@ function diagnosticResult(): SimulationResultWithDiagnostics {
           installs: [
             {
               installId: "install:manufacturing-job",
+              slotKey: "7:M:0",
               characterId: 7,
               slotIndex: 0,
               runs: 1,

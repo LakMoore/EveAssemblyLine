@@ -10,6 +10,7 @@ import type {
 export interface SimulationIndustryOutputMarker {
   activity: "manufacturing" | "reaction" | "copying" | "invention";
   state: "active" | "paused" | "available" | "excluded";
+  sourceJobId?: number;
 }
 
 /** Unit represented by a simulator quantity. Blueprint quantities are licensed runs. */
@@ -64,6 +65,20 @@ export type SimulationInFlightJobActivity =
   | "copying"
   | "invention";
 
+/** Activity pool for one authoritative simulator slot. */
+export type SimulationSlotActivity = "manufacturing" | "reaction" | "science";
+
+/** Client-authoritative character slot and its next available simulation offset. */
+export interface SimulationSlot {
+  slotKey: string;
+  activity: SimulationSlotActivity;
+  characterId: number;
+  systemId: number;
+  slotIndex: number;
+  availableAtSeconds: number;
+  installedJobId?: number;
+}
+
 /** Scheduling-only view of an active industry job; it contributes no simulator inventory. */
 export interface SimulationInFlightJob {
   jobId: number;
@@ -76,12 +91,13 @@ export interface SimulationInFlightJob {
 export interface SimulationCharacterProfile {
   characterId: number;
   systemId: number;
-  freeSlots: {
+  /** Legacy test/profile fields; the request schema excludes these in favor of simulation.slots. */
+  freeSlots?: {
     manufacturing: number;
     reactions: number;
     science: number;
   };
-  /** Active jobs reserve their activity slots until their remaining time has elapsed. */
+  /** @deprecated Active slot timing is carried by SimulationOptionsV1.slots. */
   inFlightJobs?: SimulationInFlightJob[];
   timeMultipliers: {
     manufacturing: number;
@@ -122,6 +138,7 @@ export interface SimulationOptionsV1 {
   blockInterStockpileHauling: boolean;
   maxReactionJobDurationHours: number;
   characters: SimulationCharacterProfile[];
+  slots: SimulationSlot[];
   scienceProfiles: SimulationScienceProfile[];
   policy: SimulationPolicyV1;
 }
@@ -278,6 +295,7 @@ export interface SimulationBlueprintAllocation {
 /** One install assigned to a character slot. */
 export interface SimulationInstall {
   installId: string;
+  slotKey: string;
   characterId: number;
   slotIndex: number;
   runs: number;
@@ -363,12 +381,14 @@ export interface SimulationCopyJob {
 /** One copying or invention job assigned to a character science slot. */
 export interface SimulationScienceAssignment {
   assignmentId: string;
+  slotKey: string;
   characterId: number;
   slotIndex: number;
   units: number;
   startOffsetSeconds: number;
   endOffsetSeconds: number;
   durationSeconds: number;
+  readiness?: SupplyHorizon;
 }
 
 /** Selected reprocessing source and all resulting material yields. */
@@ -497,7 +517,7 @@ export interface SimulationLedgerView {
 export interface SimulationResultV2 {
   metadata: {
     simulationId?: string;
-    simulatorVersion: 15;
+    simulatorVersion: 16;
     policyVersion: 1;
     generatedAt: string;
     sdeRevision: string;
@@ -506,6 +526,8 @@ export interface SimulationResultV2 {
     invariantViolationCount: number;
     unresolvedAssetCount: number;
   };
+  /** Exact client slot map used to seed the schedule and draw occupied tracks. */
+  scheduleSlots: SimulationSlot[];
   lists: {
     warnings: SimulationWarning[];
     planItems: SimulationMaterialLocationBucket[];

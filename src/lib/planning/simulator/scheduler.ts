@@ -6,6 +6,7 @@ import type {
   SimulationInstall,
   SimulationJobSkillRequirement,
   SimulationScienceAssignment,
+  SimulationSlot,
   SimulationWarning,
   SupplyHorizon,
 } from "./types";
@@ -17,6 +18,7 @@ interface ScheduledInterval {
 }
 
 interface AvailableSlot {
+  slotKey: string;
   characterId: number;
   systemId: number;
   slotIndex: number;
@@ -25,6 +27,7 @@ interface AvailableSlot {
 }
 
 interface AvailableScienceSlot {
+  slotKey: string;
   characterId: number;
   systemId: number;
   slotIndex: number;
@@ -50,74 +53,65 @@ export interface SimulationScheduleResult {
 
 function industrySlots(
   characters: readonly SimulationCharacterProfile[],
+  slots: readonly SimulationSlot[],
   activity: "manufacturing" | "reaction",
 ): AvailableSlot[] {
-  return characters.flatMap((character) => {
-    const count =
-      activity === "manufacturing"
-        ? character.freeSlots.manufacturing
-        : character.freeSlots.reactions;
+  const charactersById = new Map(characters.map((character) => [character.characterId, character]));
+  return slots.flatMap((slot) => {
+    if (slot.activity !== activity) return [];
+    const character = charactersById.get(slot.characterId);
+    if (!character) return [];
     const timeMultiplier =
       activity === "manufacturing"
         ? character.timeMultipliers.manufacturing
         : character.timeMultipliers.reactions;
-    const slots = [
-      ...Array.from(
-        { length: count },
-        (_, slotIndex) => ({
-          slotIndex,
-          scheduledIntervals: [] as ScheduledInterval[],
-        }),
-      ),
-      ...(character.inFlightJobs ?? [])
-        .filter((job) => job.activity === activity)
-        .map((job) => ({
-          slotIndex: job.slotIndex,
-          scheduledIntervals: [{ startOffsetSeconds: 0, endOffsetSeconds: job.remainingSeconds }],
-        })),
-    ].sort((left, right) => left.slotIndex - right.slotIndex);
-    return slots.map(({ slotIndex, scheduledIntervals }) => ({
-      characterId: character.characterId,
-      systemId: character.systemId,
-      slotIndex,
-      timeMultiplier,
-      scheduledIntervals,
-    }));
+    return [
+      {
+        slotKey: slot.slotKey,
+        characterId: slot.characterId,
+        systemId: slot.systemId,
+        slotIndex: slot.slotIndex,
+        timeMultiplier,
+        scheduledIntervals:
+          slot.availableAtSeconds > 0
+            ? [{ startOffsetSeconds: 0, endOffsetSeconds: slot.availableAtSeconds }]
+            : [],
+      },
+    ];
   });
 }
 
-function scienceSlots(characters: readonly SimulationCharacterProfile[]): AvailableScienceSlot[] {
-  return characters.flatMap((character) => {
-    const slots = [
-      ...Array.from(
-        { length: character.freeSlots.science },
-        (_, slotIndex) => ({
-          slotIndex,
-          latestJobEndSeconds: 0,
-        }),
-      ),
-      ...(character.inFlightJobs ?? [])
-        .filter(
-          (job) =>
-            job.activity === "time-research"
-            || job.activity === "material-research"
-            || job.activity === "copying"
-            || job.activity === "invention",
-        )
-        .map((job) => ({
-          slotIndex: job.slotIndex,
-          latestJobEndSeconds: job.remainingSeconds,
-        })),
-    ].sort((left, right) => left.slotIndex - right.slotIndex);
-    return slots.map(({ slotIndex, latestJobEndSeconds }) => ({
-      characterId: character.characterId,
-      systemId: character.systemId,
-      slotIndex,
-      copyingTimeMultiplier: character.timeMultipliers.copying,
-      inventionTimeMultiplier: character.timeMultipliers.invention,
-      latestJobEndSeconds,
-    }));
+function scienceSlots(
+  characters: readonly SimulationCharacterProfile[],
+  slots: readonly SimulationSlot[],
+): AvailableScienceSlot[] {
+  const charactersById = new Map(characters.map((character) => [character.characterId, character]));
+  return slots.flatMap((slot) => {
+    if (slot.activity !== "science") return [];
+    const character = charactersById.get(slot.characterId);
+    if (!character) return [];
+    return [
+      {
+        slotKey: slot.slotKey,
+        characterId: slot.characterId,
+        systemId: slot.systemId,
+        slotIndex: slot.slotIndex,
+        copyingTimeMultiplier: character.timeMultipliers.copying,
+        inventionTimeMultiplier: character.timeMultipliers.invention,
+        latestJobEndSeconds: slot.availableAtSeconds,
+      },
+    ];
   });
+}
+
+function inFlightCompletionOffsets(slots: readonly SimulationSlot[]): Map<string, number> {
+  return new Map(
+    slots.flatMap((slot) =>
+      slot.installedJobId === undefined
+        ? []
+        : [[String(slot.installedJobId), slot.availableAtSeconds] as const],
+    ),
+  );
 }
 
 function characterCanScheduleAtSystem(characterSystemId: number, activitySystemId?: number) {
@@ -125,6 +119,17 @@ function characterCanScheduleAtSystem(characterSystemId: number, activitySystemI
   return isWormholeSystemId(activitySystemId)
     ? characterSystemId === activitySystemId
     : !isWormholeSystemId(characterSystemId);
+}
+
+/** Explains system eligibility failures without implying that K-space systems must match. */
+function noEligibleSystemSlotReason(activitySystemId: number | undefined, activity: string) {
+  if (activitySystemId === undefined) {
+    return "The facility's solar system is unavailable for character eligibility.";
+  }
+  if (isWormholeSystemId(activitySystemId)) {
+    return `No character in this wormhole system has a free ${activity} slot.`;
+  }
+  return `No non-wormhole character has a free ${activity} slot.`;
 }
 
 function nextValidActivityStart(earliestStartSeconds: number): number {
@@ -181,6 +186,13 @@ function groupSkillRequirementsByJob(
 }
 
 function readiness(job: SimulationIndustryJob): SupplyHorizon {
+  if (
+    existingAssetsNeedHauling(job.inputs)
+    || (
+      job.blueprint.sourceLocationId !== undefined
+      && job.blueprint.sourceLocationId !== job.locationId
+    )
+  ) return "after-hauling";
   if (job.readyNowRuns >= job.requiredRuns) return "now";
   if (job.readyAfterHaulingRuns >= job.requiredRuns) return "after-hauling";
   if (job.readyAfterUpstreamRuns >= job.requiredRuns) return "after-upstream";
@@ -316,28 +328,19 @@ function earliestIndustryStart(
   }
   let earliest = 0;
   if (blueprint.sourceLocationId !== undefined && blueprint.sourceLocationId !== job.locationId) {
-    if (blueprint.horizon === "after-hauling") {
-      earliest = Math.max(earliest, missingInputAvailabilityOffsetSeconds);
-    }
-    else if (blueprint.blueprintKind !== "fallback") {
-      return {
-        noTimingReason:
-          "The required blueprint or reaction formula is unavailable at this facility.",
-      };
-    }
+    earliest = Math.max(earliest, missingInputAvailabilityOffsetSeconds);
+  }
+  if (existingAssetsNeedHauling(job.inputs)) {
+    earliest = Math.max(earliest, missingInputAvailabilityOffsetSeconds);
   }
   if (job.readyNowRuns >= job.requiredRuns) return { startOffsetSeconds: earliest };
-  if (existingAssetsNeedHauling(job.inputs) || job.readyAfterHaulingRuns >= job.requiredRuns) {
-    return {
-      noTimingReason: "Existing input assets must be hauled to this facility before work starts.",
-    };
+  if (job.readyAfterHaulingRuns >= job.requiredRuns) {
+    earliest = Math.max(earliest, missingInputAvailabilityOffsetSeconds);
   }
   for (const input of job.inputs) {
     if (input.availableNow >= input.requiredQuantity) continue;
     if (input.availableFromHauling > 0) {
-      return {
-        noTimingReason: `Existing ${input.typeName} assets must be hauled to this facility before work starts.`,
-      };
+      earliest = Math.max(earliest, missingInputAvailabilityOffsetSeconds);
     }
     let accounted = input.availableNow;
     for (const reservation of input.upstreamReservations ?? []) {
@@ -364,6 +367,7 @@ function scheduleIndustryActivities(
   manufacturingJobs: readonly SimulationIndustryJob[],
   reactionJobs: readonly SimulationIndustryJob[],
   characters: readonly SimulationCharacterProfile[],
+  slots: readonly SimulationSlot[],
   locationSystemIdsById: ReadonlyMap<number, number>,
   baselineTimeMultipliers: BaselineIndustryTimeMultipliers,
   skillRequirementsByJob: ReadonlyMap<string, readonly SimulationJobSkillRequirement[]>,
@@ -376,15 +380,11 @@ function scheduleIndustryActivities(
 } {
   const jobs = [...manufacturingJobs, ...reactionJobs];
   const slotsByActivity = {
-    manufacturing: industrySlots(characters, "manufacturing"),
-    reaction: industrySlots(characters, "reaction"),
+    manufacturing: industrySlots(characters, slots, "manufacturing"),
+    reaction: industrySlots(characters, slots, "reaction"),
   };
   const scheduledJobIds = new Map<string, SimulationInstall[]>();
-  const completionOffsets = new Map<string, number>(
-    characters.flatMap((character) =>
-      (character.inFlightJobs ?? []).map((job) => [String(job.jobId), job.remainingSeconds]),
-    ),
-  );
+  const completionOffsets = inFlightCompletionOffsets(slots);
   const noTimingReasons = new Map<string, string>();
   const schedulableJobIds = new Set<string>();
   const jobsById = new Map(jobs.map((job) => [job.jobId, job]));
@@ -410,10 +410,7 @@ function scheduleIndustryActivities(
       characterCanScheduleAtSystem(slot.systemId, activitySystemId),
     );
     if (locationSlots.length === 0) {
-      noTimingReasons.set(
-        job.jobId,
-        `No eligible character has a ${job.activity} slot in this facility's system.`,
-      );
+      noTimingReasons.set(job.jobId, noEligibleSystemSlotReason(activitySystemId, job.activity));
       continue;
     }
     const jobSkillRequirements = skillRequirementsByJob.get(job.jobId) ?? [];
@@ -482,8 +479,9 @@ function scheduleIndustryActivities(
       installs.push({
         installId:
           installs.length === 0 && runs === job.requiredRuns
-            ? `install:${job.jobId}:${slot.candidate.characterId}:${slot.candidate.slotIndex}`
-            : `install:${job.jobId}:${installs.length}:${slot.candidate.characterId}:${slot.candidate.slotIndex}`,
+            ? `install:${job.jobId}:${slot.candidate.slotKey}`
+            : `install:${job.jobId}:${installs.length}:${slot.candidate.slotKey}`,
+        slotKey: slot.candidate.slotKey,
         characterId: slot.candidate.characterId,
         slotIndex: slot.candidate.slotIndex,
         runs,
@@ -553,6 +551,7 @@ function scheduleScienceJobs(
   inventionJobs: readonly SimulationInventionJob[],
   copyJobs: readonly SimulationCopyJob[],
   characters: readonly SimulationCharacterProfile[],
+  slotMap: readonly SimulationSlot[],
   locationSystemIdsById: ReadonlyMap<number, number>,
   industryJobs: readonly SimulationIndustryJob[],
   depths: ReadonlyMap<string, number>,
@@ -562,16 +561,12 @@ function scheduleScienceJobs(
   copyJobs: SimulationCopyJob[];
   warnings: SimulationWarning[];
 } {
-  const slots = scienceSlots(characters).sort(
+  const slots = scienceSlots(characters, slotMap).sort(
     (left, right) => left.characterId - right.characterId || left.slotIndex - right.slotIndex,
   );
   const assignments = new Map<string, SimulationScienceAssignment>();
   const completionOffsets = new Map([
-    ...characters.flatMap((character) =>
-      (character.inFlightJobs ?? []).map(
-        (job) => [String(job.jobId), job.remainingSeconds] as const,
-      ),
-    ),
+    ...inFlightCompletionOffsets(slotMap),
     ...industryJobs.flatMap((job) => {
       const completionOffset = job.installs.reduce<number | undefined>(
         (latestEnd, install) =>
@@ -598,28 +593,23 @@ function scheduleScienceJobs(
         || right.job.durationSeconds - left.job.durationSeconds
         || left.job.jobId.localeCompare(right.job.jobId),
     )) {
-    if (
-      entry.activity === "copying"
-      && (
-        entry.job.sourceBlueprintItemId === undefined
-        || (
-          entry.job.sourceBlueprintLocationId !== undefined
-          && entry.job.sourceBlueprintLocationId !== entry.job.locationId
-        )
-      )
-    ) {
+    if (entry.activity === "copying" && entry.job.sourceBlueprintItemId === undefined) {
       noTimingReasons.set(entry.job.jobId, "The source blueprint is unavailable at this facility.");
       continue;
     }
     let earliestFromSupply = 0;
-    let inputReady = true;
-    let noTimingReason: string | undefined;
+    let requiresHauling =
+      entry.activity === "copying"
+      && entry.job.sourceBlueprintLocationId !== undefined
+      && entry.job.sourceBlueprintLocationId !== entry.job.locationId;
+    if (requiresHauling) {
+      earliestFromSupply = Math.max(earliestFromSupply, missingInputAvailabilityOffsetSeconds);
+    }
     for (const input of entry.job.inputs) {
       if (input.availableNow >= input.requiredQuantity) continue;
       if (input.availableFromHauling > 0) {
-        inputReady = false;
-        noTimingReason = `Existing ${input.typeName} assets must be hauled to this facility before work starts.`;
-        break;
+        requiresHauling = true;
+        earliestFromSupply = Math.max(earliestFromSupply, missingInputAvailabilityOffsetSeconds);
       }
       let accounted = input.availableNow;
       for (const reservation of input.upstreamReservations ?? []) {
@@ -634,23 +624,13 @@ function scheduleScienceJobs(
         earliestFromSupply = Math.max(earliestFromSupply, missingInputAvailabilityOffsetSeconds);
       }
     }
-    if (!inputReady) {
-      noTimingReasons.set(
-        entry.job.jobId,
-        noTimingReason ?? "Required inputs are not available from scheduled jobs.",
-      );
-      continue;
-    }
     schedulableJobIds.add(entry.job.jobId);
     const activitySystemId = locationSystemIdsById.get(entry.job.locationId);
     const locationSlots = slots.filter((slot) =>
       characterCanScheduleAtSystem(slot.systemId, activitySystemId),
     );
     if (locationSlots.length === 0) {
-      noTimingReasons.set(
-        entry.job.jobId,
-        `No eligible character has a Science slot in this facility's system.`,
-      );
+      noTimingReasons.set(entry.job.jobId, noEligibleSystemSlotReason(activitySystemId, "Science"));
       continue;
     }
     const jobSkillRequirements = skillRequirementsByJob.get(entry.job.jobId) ?? [];
@@ -700,13 +680,15 @@ function scheduleScienceJobs(
     assignments.set(
       entry.job.jobId,
       {
-        assignmentId: `science:${entry.job.jobId}:${slot.candidate.characterId}:${slot.candidate.slotIndex}`,
+        assignmentId: `science:${entry.job.jobId}:${slot.candidate.slotKey}`,
+        slotKey: slot.candidate.slotKey,
         characterId: slot.candidate.characterId,
         slotIndex: slot.candidate.slotIndex,
         units,
         startOffsetSeconds,
         endOffsetSeconds,
         durationSeconds: slot.durationSeconds,
+        ...(requiresHauling ? { readiness: "after-hauling" as const } : {}),
       },
     );
     slot.candidate.latestJobEndSeconds = endOffsetSeconds;
@@ -775,6 +757,7 @@ export function scheduleSimulationJobs(
   baselineTimeMultipliers: BaselineIndustryTimeMultipliers = { manufacturing: 1, reactions: 1 },
   jobSkillRequirements: readonly SimulationJobSkillRequirement[] = [],
   maxReactionJobDurationHours = 24,
+  slots: readonly SimulationSlot[] = [],
 ): SimulationScheduleResult {
   const skillRequirementsByJob = groupSkillRequirementsByJob(jobSkillRequirements);
   const depths = scheduledJobDepths(
@@ -786,6 +769,7 @@ export function scheduleSimulationJobs(
     manufacturingJobs,
     reactionJobs,
     characters,
+    slots,
     locationSystemIdsById,
     baselineTimeMultipliers,
     skillRequirementsByJob,
@@ -796,6 +780,7 @@ export function scheduleSimulationJobs(
     inventionJobs,
     copyJobs,
     characters,
+    slots,
     locationSystemIdsById,
     [...industry.manufacturingJobs, ...industry.reactionJobs],
     depths,

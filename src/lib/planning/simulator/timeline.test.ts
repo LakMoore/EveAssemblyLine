@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ClientJobsResponse } from "@/lib/client/requestCache";
-import { createInFlightTimelineEvents } from "./timeline";
+import { createInFlightTimelineEvents, timelineDependencyJobIds } from "./timeline";
 
 type ClientIndustryJob = NonNullable<ClientJobsResponse["jobs"]>[number];
 
@@ -27,6 +27,29 @@ function clientIndustryJob(overrides: Partial<ClientIndustryJob> = {}): ClientIn
   };
 }
 
+void test("includes active in-flight source jobs in timeline dependencies", () => {
+  const dependencyIds = timelineDependencyJobIds([
+    {
+      typeId: 1,
+      typeName: "Test input",
+      requiredQuantity: 10,
+      availableNow: 0,
+      availableFromHauling: 0,
+      availableAfterUpstream: 10,
+      unsatisfiedQuantity: 0,
+      upstreamReservations: [
+        { activity: "reaction", quantity: 5, state: "in-production", sourceJobId: 101 },
+        { activity: "manufacturing", quantity: 5, state: "planned", sourceJobId: "planned-1" },
+        { activity: "reaction", quantity: 2, state: "paused", sourceJobId: 202 },
+        { activity: "reaction", quantity: 5, state: "in-production", sourceJobId: 101 },
+        { activity: "reaction", quantity: 1, state: "in-production" },
+      ],
+    },
+  ]);
+
+  assert.deepEqual(dependencyIds, ["101", "planned-1"]);
+});
+
 void test("overlays jobs active at T+0 on the character's occupied slots", () => {
   const events = createInFlightTimelineEvents(
     [
@@ -40,12 +63,44 @@ void test("overlays jobs active at T+0 on the character's occupied slots", () =>
     ],
     "2026-10-04T12:00:00.000Z",
     new Set([7]),
-    {
-      "7": {
-        slots: { Manufacturing: 2, Reactions: 0, Science: 0 },
-        availableSlots: { Manufacturing: 10, Reactions: 3, Science: 5 },
+    [
+      {
+        slotKey: "7:M:9",
+        activity: "manufacturing",
+        characterId: 7,
+        systemId: 30_000_142,
+        slotIndex: 9,
+        availableAtSeconds: 7200,
+        installedJobId: 101,
       },
-    },
+      {
+        slotKey: "7:M:8",
+        activity: "manufacturing",
+        characterId: 7,
+        systemId: 30_000_142,
+        slotIndex: 8,
+        availableAtSeconds: 3600,
+        installedJobId: 102,
+      },
+      {
+        slotKey: "7:M:7",
+        activity: "manufacturing",
+        characterId: 7,
+        systemId: 30_000_142,
+        slotIndex: 7,
+        availableAtSeconds: 0,
+        installedJobId: 103,
+      },
+      {
+        slotKey: "7:S:4",
+        activity: "science",
+        characterId: 7,
+        systemId: 30_000_142,
+        slotIndex: 4,
+        availableAtSeconds: 7200,
+        installedJobId: 105,
+      },
+    ],
   );
 
   assert.equal(events[0].typeId, 200);
@@ -76,7 +131,7 @@ void test("overlays jobs active at T+0 on the character's occupied slots", () =>
       {
         jobId: "105",
         activity: "invention",
-        slotIndex: 5,
+        slotIndex: 4,
         startOffsetSeconds: 0,
         endOffsetSeconds: 7200,
       },
@@ -89,15 +144,21 @@ void test("maps active science research into the science slot pool", () => {
     [clientIndustryJob({ activity: "Time research" })],
     "2026-10-04T12:00:00.000Z",
     new Set([7]),
-    {
-      "7": {
-        slots: { Manufacturing: 0, Reactions: 0, Science: 2 },
-        availableSlots: { Manufacturing: 10, Reactions: 3, Science: 5 },
+    [
+      {
+        slotKey: "7:S:1",
+        activity: "science",
+        characterId: 7,
+        systemId: 30_000_142,
+        slotIndex: 1,
+        availableAtSeconds: 7200,
+        installedJobId: 1,
       },
-    },
+    ],
   );
 
   assert.equal(event.activity, "time-research");
   assert.equal(event.pool, "science");
-  assert.equal(event.slotIndex, 3);
+  assert.equal(event.slotKey, "7:S:1");
+  assert.equal(event.slotIndex, 1);
 });

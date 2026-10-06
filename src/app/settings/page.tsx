@@ -322,9 +322,8 @@ export default function SettingsPage() {
               Simulate split-job rounding
             </FieldLabel>
             <FieldDescription id="max-reaction-job-duration-description">
-              Estimate reaction inputs as separate installs no longer than this many hours. Per-job
-              rounding may change required materials; the plan remains grouped into its existing job
-              rows.
+              Split manufacturing and reaction runs into jobs no longer than this many hours.
+              Material rounding is calculated per job; a single run may exceed the limit.
             </FieldDescription>
           </FieldContent>
           <div className="flex items-center gap-2">

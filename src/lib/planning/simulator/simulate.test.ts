@@ -176,7 +176,13 @@ void test("assembles a versioned invariant-safe result from the cached SDE", asy
         items: [{ typeId: 587, quantity: 1, me: 0, te: 0, fromCompression: false }],
       },
     ],
-    assets: [],
+    facilityProfiles: [{ locationId: 20, systemId: 30_000_142, sizeId: 0, buildTypeGroups: {} }],
+    assets: [
+      { typeId: 34, quantity: 32_000, locationId: 20 },
+      { typeId: 35, quantity: 6_000, locationId: 20 },
+      { typeId: 36, quantity: 2_500, locationId: 20 },
+      { typeId: 37, quantity: 500, locationId: 20 },
+    ],
     settings: {
       includeCorporationAssets: true,
       personalSellOrdersAsStock: false,
@@ -185,11 +191,32 @@ void test("assembles a versioned invariant-safe result from the cached SDE", asy
       buildBlacklist: [],
       buyBlacklist: [],
     },
-    simulation: { version: 1, simulateSurplus: true },
+    simulation: {
+      version: 1,
+      simulateSurplus: true,
+      characters: [
+        {
+          characterId: 7,
+          systemId: 30_000_142,
+          timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
+          skillLevels: { "3380": 5, "3387": 5, "3388": 5 },
+        },
+      ],
+      slots: [
+        {
+          slotKey: "7:M:0",
+          activity: "manufacturing",
+          characterId: 7,
+          systemId: 30_000_142,
+          slotIndex: 0,
+          availableAtSeconds: 0,
+        },
+      ],
+    },
   });
   const first = await simulateIndustry(request);
   const second = await simulateIndustry(request);
-  assert.equal(first.metadata.simulatorVersion, 15);
+  assert.equal(first.metadata.simulatorVersion, 16);
   assert.equal(first.metadata.normalizedInputHash, second.metadata.normalizedInputHash);
   assert.equal(first.metadata.invariantViolationCount, 0);
   assert.ok(first.lists.manufacturingJobs.some((job) => job.productTypeId === 587));
@@ -197,7 +224,11 @@ void test("assembles a versioned invariant-safe result from the cached SDE", asy
     .flatMap((bucket) => bucket.items)
     .find((item) => item.typeId === 587);
   assert.ok(manufacturedPlanItem);
-  assert.ok(manufacturedPlanItem.availableFromProduction > 0);
+  assert.ok(manufacturedPlanItem.availableFromHauling > 0);
+  assert.deepEqual(
+    first.scheduleSlots.map((slot) => slot.slotKey),
+    ["7:M:0"],
+  );
   assert.ok(
     first.lists.planItems.some((bucket) =>
       bucket.items.some((item) => item.requiredNow + item.reserved > 0),
@@ -947,11 +978,19 @@ void test("protects complete local reaction inputs when earlier demand consumes 
   });
 
   const result = await simulateIndustry(request);
-  const reaction = result.lists.reactionJobs.find((job) => job.productTypeId === 30304);
-  const pyerite = reaction?.inputs.find((input) => input.typeId === 35);
-  assert.ok(pyerite);
-  assert.equal(pyerite.requiredQuantity, 23475);
-  assert.equal(pyerite.availableNow, 23475);
+  const reactions = result.lists.reactionJobs.filter((job) => job.productTypeId === 30304);
+  const pyeriteInputs = reactions.flatMap((reaction) =>
+    reaction.inputs.filter((input) => input.typeId === 35),
+  );
+  assert.ok(pyeriteInputs.length > 0);
+  assert.equal(
+    pyeriteInputs.reduce((total, input) => total + input.requiredQuantity, 0),
+    23475,
+  );
+  assert.equal(
+    pyeriteInputs.reduce((total, input) => total + input.availableNow, 0),
+    23475,
+  );
   assert.equal(result.lists.haulingTasks.filter((task) => task.typeId === 35).length, 0);
   assert.equal(result.lists.materialsToBuy.find((buy) => buy.typeId === 35)?.quantity, 783);
   const balance = result.ledgers

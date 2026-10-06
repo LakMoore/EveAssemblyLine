@@ -47,7 +47,10 @@ This section is authoritative where the older design below differs from the runn
 - `/api/state/assets` is the boundary between ESI state and planning. It resolves and groups assets by root location, includes blueprint/job/market-order context, filters special ship and structure records as appropriate, and carries personal/corporation ownership into the planner input.
 - `/api/plan` is intentionally unauthenticated and makes no ESI calls. It accepts stockpiles with their per-stockpile locations, client-supplied assets, and settings. Do not reintroduce `characterIds` ownership checks or server-side refreshes into this endpoint; authenticated state preparation belongs in the state routes.
 - `/api/plan/simulate` is the version-one ledger-based simulator running alongside `/api/plan`. It
-  accepts the same asset-driven planner data plus character/science profiles and simulation policy,
+  accepts the same asset-driven planner data plus character/science profiles, a complete client-authored
+  manufacturing/reaction/science slot map, and simulation policy. Slot keys use
+  `{characterId}:M|R|S:{slotIndex}` and carry each slot's next-available offset; the scheduler and
+  timeline use those exact keys rather than reconstructing slot identities,
   makes no ESI calls, conserves physical lots and finite BPC runs, exposes four readiness horizons,
   schedules work with known dependencies, settles complete-portion reprocessing late, and creates
   buying requirements last. Planned and active outputs remain at their producing facility until a

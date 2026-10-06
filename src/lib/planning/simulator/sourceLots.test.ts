@@ -71,6 +71,7 @@ function request(): SimulationRequestV1 {
       blockInterStockpileHauling: false,
       maxReactionJobDurationHours: 24,
       characters: [],
+      slots: [],
       scienceProfiles: [],
       policy: {
         fallbackInventionSkillLevel: 3,
@@ -185,7 +186,11 @@ void test("preserves industry job status on future output lots", () => {
       typeId: 34,
       quantity: 4,
       rootLocationId: 20,
-      industryOutput: { activity: "manufacturing", state: "active" },
+      industryOutput: {
+        activity: "manufacturing",
+        state: "active",
+        sourceJobId: 123,
+      },
     },
     {
       typeId: 34,
@@ -204,7 +209,7 @@ void test("preserves industry job status on future output lots", () => {
   assert.equal(futureOutput.horizon, "after-upstream");
   assert.equal(futureOutput.industryJobStatus, "active");
   assert.equal(futureOutput.activity, "manufacturing");
-  assert.equal(futureOutput.industryJobId, undefined);
+  assert.equal(futureOutput.industryJobId, 123);
   assert.equal(futureOutput.industryJobEndDate, undefined);
   const pausedOutput = inventory.itemLots.find((lot) => lot.industryJobStatus === "paused");
   assert.ok(pausedOutput);

@@ -4806,7 +4806,6 @@ export default function SimulationResults({
           <SimulationTimeline
             result={result}
             industryJobs={industryJobs}
-            slotUsage={slotUsage}
             characterNamesById={characterNamesById}
             locationNamesById={locationNamesById}
           />

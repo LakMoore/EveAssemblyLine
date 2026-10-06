@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { SimulationInFlightJobActivity, SimulationRequestV1 } from "./types";
+import type { SimulationRequestV1, SimulationSlotActivity } from "./types";
 
 const positiveSafeInteger = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const plannerLocationId = z
@@ -23,86 +23,48 @@ const defaultSimulationOptions = {
   blockInterStockpileHauling: false,
   maxReactionJobDurationHours: 24,
   characters: [],
+  slots: [],
   scienceProfiles: [],
   policy: defaultSimulationPolicy,
 };
 
-function simulationInFlightSlotPool(
-  activity: SimulationInFlightJobActivity,
-): "manufacturing" | "reactions" | "science" {
-  if (activity === "manufacturing") return "manufacturing";
-  if (activity === "reaction") return "reactions";
-  return "science";
-}
+const simulationCharacterSchema = z.object({
+  characterId: positiveSafeInteger,
+  systemId: positiveSafeInteger,
+  timeMultipliers: z.object({
+    manufacturing: multiplier,
+    reactions: multiplier,
+    copying: multiplier,
+    invention: multiplier,
+  }),
+  skillLevels: z.record(z.string().regex(/^\d+$/), z.number().int().min(0).max(5)),
+});
 
-const simulationCharacterSchema = z
+const slotKeyCode: Record<SimulationSlotActivity, string> = {
+  manufacturing: "M",
+  reaction: "R",
+  science: "S",
+};
+
+const simulationSlotSchema = z
   .object({
+    slotKey: z.string().min(1).max(100),
+    activity: z.enum(["manufacturing", "reaction", "science"]),
     characterId: positiveSafeInteger,
     systemId: positiveSafeInteger,
-    freeSlots: z.object({
-      manufacturing: nonNegativeInteger,
-      reactions: nonNegativeInteger,
-      science: nonNegativeInteger,
-    }),
-    inFlightJobs: z
-      .array(
-        z.object({
-          jobId: positiveSafeInteger,
-          activity: z.enum([
-            "manufacturing",
-            "reaction",
-            "time-research",
-            "material-research",
-            "copying",
-            "invention",
-          ]),
-          remainingSeconds: nonNegativeInteger,
-          slotIndex: nonNegativeInteger,
-        }),
-      )
-      .max(100)
-      .default([]),
-    timeMultipliers: z.object({
-      manufacturing: multiplier,
-      reactions: multiplier,
-      copying: multiplier,
-      invention: multiplier,
-    }),
-    skillLevels: z.record(z.string().regex(/^\d+$/), z.number().int().min(0).max(5)),
+    slotIndex: nonNegativeInteger,
+    availableAtSeconds: nonNegativeInteger,
+    installedJobId: positiveSafeInteger.optional(),
   })
-  .superRefine((character, context) => {
-    const inFlightCountByPool = {
-      manufacturing: 0,
-      reactions: 0,
-      science: 0,
-    };
-    for (const job of character.inFlightJobs) {
-      inFlightCountByPool[simulationInFlightSlotPool(job.activity)] += 1;
+  .superRefine((slot, context) => {
+    const expectedSlotKey = `${slot.characterId}:${slotKeyCode[slot.activity]}:${slot.slotIndex}`;
+    if (slot.slotKey !== expectedSlotKey) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["slotKey"],
+        message: `Slot key must be ${expectedSlotKey}.`,
+      });
     }
-
-    const seenSlots = new Set<string>();
-    character.inFlightJobs.forEach((job, index) => {
-      const pool = simulationInFlightSlotPool(job.activity);
-      const firstSlotIndex = character.freeSlots[pool];
-      const lastSlotIndex = firstSlotIndex + inFlightCountByPool[pool];
-      if (job.slotIndex < firstSlotIndex || job.slotIndex >= lastSlotIndex) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["inFlightJobs", index, "slotIndex"],
-          message: "In-flight slot indices must follow free slots in their activity pool.",
-        });
-      }
-
-      const slotKey = `${pool}:${job.slotIndex}`;
-      if (seenSlots.has(slotKey)) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["inFlightJobs", index, "slotIndex"],
-          message: "In-flight jobs in the same activity pool must use distinct slots.",
-        });
-      }
-      seenSlots.add(slotKey);
-    });
   });
 
 const ownerSchema = z
@@ -122,6 +84,7 @@ const ownerSchema = z
 const industryOutputMarkerSchema = z.object({
   activity: z.enum(["manufacturing", "reaction", "copying", "invention"]),
   state: z.enum(["active", "paused", "available", "excluded"]),
+  sourceJobId: positiveSafeInteger.optional(),
 });
 
 const blueprintPrintSchema = z
@@ -242,6 +205,7 @@ const simulationSchema = z
     blockInterStockpileHauling: z.boolean().default(false),
     maxReactionJobDurationHours: z.number().int().min(1).max(8760).default(24),
     characters: z.array(simulationCharacterSchema).max(100).default([]),
+    slots: z.array(simulationSlotSchema).max(5000).default([]),
     scienceProfiles: z
       .array(
         z.object({
@@ -265,7 +229,51 @@ const simulationSchema = z
       })
       .default(defaultSimulationPolicy),
   })
-  .default(defaultSimulationOptions);
+  .default(defaultSimulationOptions)
+  .superRefine((simulation, context) => {
+    const charactersById = new Map(
+      simulation.characters.map((character) => [character.characterId, character]),
+    );
+    const seenSlotKeys = new Set<string>();
+    const seenInstalledJobIds = new Set<number>();
+    simulation.slots.forEach((slot, index) => {
+      if (seenSlotKeys.has(slot.slotKey)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["slots", index, "slotKey"],
+          message: "Slot keys must be unique.",
+        });
+      }
+      seenSlotKeys.add(slot.slotKey);
+
+      const character = charactersById.get(slot.characterId);
+      if (!character) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["slots", index, "characterId"],
+          message: "Every slot must belong to a declared simulation character.",
+        });
+      }
+      else if (character.systemId !== slot.systemId) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["slots", index, "systemId"],
+          message: "Slot system must match its simulation character system.",
+        });
+      }
+
+      if (slot.installedJobId !== undefined) {
+        if (seenInstalledJobIds.has(slot.installedJobId)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["slots", index, "installedJobId"],
+            message: "An in-flight job may occupy only one slot.",
+          });
+        }
+        seenInstalledJobIds.add(slot.installedJobId);
+      }
+    });
+  });
 
 /** Strict runtime schema for the version-one simulator request. */
 export const simulatorRequestSchema = z

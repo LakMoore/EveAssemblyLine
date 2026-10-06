@@ -25,6 +25,7 @@ const request = {
     blockInterStockpileHauling: false,
     maxReactionJobDurationHours: 24,
     characters: [],
+    slots: [],
     scienceProfiles: [],
     policy: {
       fallbackInventionSkillLevel: 3,
