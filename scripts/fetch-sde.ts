@@ -145,8 +145,28 @@ async function fetchRepackagedVolumes() {
   if (!fileMetadata) {
     throw new Error("HoboLeaks metadata does not describe repackagedvolumes.json.");
   }
-  if (fileMetadata.deprecated || fileMetadata.stale) {
-    throw new Error("HoboLeaks repackagedvolumes.json is marked deprecated or stale.");
+  if (fileMetadata.deprecated) {
+    writeFileSync(join(rawDir, "repackagedvolumes.json"), "{}");
+    writeFileSync(
+      join(rawDir, "hoboleaks-meta.json"),
+      JSON.stringify(
+        {
+          source: `${hoboLeaksBaseUrl}/repackagedvolumes.json`,
+          ...fileMetadata,
+          status: "skipped",
+          reason: "deprecated",
+        },
+        null,
+        2,
+      ),
+    );
+    console.warn("HoboLeaks repackaged volumes are deprecated; skipping packaged-volume data.");
+    return;
+  }
+  if (fileMetadata.stale) {
+    console.warn(
+      `HoboLeaks repackaged volumes are marked stale; using validated revision ${fileMetadata.revision ?? "unknown"}.`,
+    );
   }
 
   const response = await fetch(
@@ -173,7 +193,11 @@ async function fetchRepackagedVolumes() {
   writeFileSync(
     join(rawDir, "hoboleaks-meta.json"),
     JSON.stringify(
-      { source: `${hoboLeaksBaseUrl}/repackagedvolumes.json`, ...fileMetadata },
+      {
+        source: `${hoboLeaksBaseUrl}/repackagedvolumes.json`,
+        ...fileMetadata,
+        status: fileMetadata.stale ? "stale" : "current",
+      },
       null,
       2,
     ),
@@ -195,6 +219,7 @@ async function main() {
 
   const attempts = process.env.SDE_ARCHIVE ? 1 : 3;
   let lastError: unknown;
+  let downloaded = false;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const stagingDir = await mkdtemp(join(sdeCacheDir, ".assemblyline-sde-"));
     try {
@@ -215,17 +240,22 @@ async function main() {
           2,
         ),
       );
-      await fetchRepackagedVolumes();
-      console.log(`SDE build ${manifest.buildNumber} extracted to ${rawDir}`);
-      return;
+      downloaded = true;
+      break;
     }
     catch (error) {
       lastError = error;
       await rm(stagingDir, { recursive: true, force: true });
-      if (attempt < attempts) console.warn(`SDE download attempt ${attempt} failed; retrying.`);
+      if (attempt < attempts) {
+        const detail = error instanceof Error ? ` (${error.message})` : "";
+        console.warn(`SDE download attempt ${attempt} failed${detail}; retrying.`);
+      }
     }
   }
-  throw lastError;
+  if (!downloaded) throw lastError;
+
+  await fetchRepackagedVolumes();
+  console.log(`SDE build ${manifest.buildNumber} extracted to ${rawDir}`);
 }
 
 main().catch((error) => {

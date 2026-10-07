@@ -65,6 +65,12 @@ function isPublishedType(record: unknown) {
   );
 }
 
+function isPublishedBlueprint(record: unknown, publishedTypeIds: ReadonlySet<number>) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return false;
+  const blueprintTypeId = (record as { blueprintTypeID?: unknown }).blueprintTypeID;
+  return typeof blueprintTypeId === "number" && publishedTypeIds.has(blueprintTypeId);
+}
+
 async function main() {
   if (!existsSync(rawDir)) {
     throw new Error("SDE raw directory is missing. Run npm run fetch-sde first.");
@@ -76,13 +82,30 @@ async function main() {
       "No .jsonl files found in .next/cache/assemblyline-sde/raw. Run npm run fetch-sde first.",
     );
   }
-  for (const file of files) {
+  const orderedFiles = [
+    ...files.filter((file) => basename(file, ".jsonl") === "types"),
+    ...files.filter((file) => basename(file, ".jsonl") !== "types"),
+  ];
+  const publishedTypeIds = new Set<number>();
+  for (const file of orderedFiles) {
     const isTypesFile = basename(file, ".jsonl") === "types";
+    const isBlueprintsFile = basename(file, ".jsonl") === "blueprints";
     const records = await parseJsonl(
       join(rawDir, file),
       isTypesFile ? excludedTypeFields : undefined,
-      isTypesFile ? isPublishedType : undefined,
+      isTypesFile
+        ? isPublishedType
+        : isBlueprintsFile
+          ? (record) => isPublishedBlueprint(record, publishedTypeIds)
+          : undefined,
     );
+    if (isTypesFile) {
+      for (const record of records) {
+        if (!record || typeof record !== "object" || Array.isArray(record)) continue;
+        const typeId = (record as { _key?: unknown })._key;
+        if (typeof typeId === "number") publishedTypeIds.add(typeId);
+      }
+    }
     await writeFile(
       join(processedDir, `${basename(file, ".jsonl")}.json`),
       JSON.stringify(records),
