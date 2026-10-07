@@ -175,34 +175,6 @@ type CorporationPolicyCharacter = Pick<
 
 const characterCaches = new Map<string, OwnerCache>();
 const corporationCaches = new Map<string, OwnerCache>();
-const verifiedRootLocationIds = new WeakMap<object, ReadonlySet<number>>();
-
-function getVerifiedRootLocationIds(rawAssetsByItemId: ReadonlyMap<number, AssetRecord>) {
-  const cached = verifiedRootLocationIds.get(rawAssetsByItemId);
-  if (cached) return cached;
-  const roots = new Set(
-    [...rawAssetsByItemId.values()]
-      .filter((asset) => asset.locationType === "station" || asset.locationType === "structure")
-      .map((asset) => asset.locationId),
-  );
-  verifiedRootLocationIds.set(rawAssetsByItemId, roots);
-  return roots;
-}
-
-function isVerifiedRootLocation(
-  locationId: number,
-  locationType: AssetRecord["locationType"] | undefined,
-  rawAssetsByItemId: ReadonlyMap<number, AssetRecord>,
-  knownStructureIds: ReadonlySet<number> = new Set(),
-) {
-  return (
-    locationType === "station"
-    || locationType === "structure"
-    || knownStructureIds.has(locationId)
-    || getVerifiedRootLocationIds(rawAssetsByItemId).has(locationId)
-  );
-}
-
 function knownStructureIds(cache: OwnerCache) {
   return new Set((cache.structures?.lastBody ?? []).map((structure) => structure.structure_id));
 }
@@ -269,8 +241,8 @@ function corporationSourceRoot(
   locationId: number,
   locationFlag: string,
   rawAssetsByItemId: ReadonlyMap<number, AssetRecord>,
-  locationType?: AssetRecord["locationType"],
-  structureIds: ReadonlySet<number> = new Set(),
+  _locationType?: AssetRecord["locationType"],
+  _structureIds: ReadonlySet<number> = new Set(),
 ) {
   const visited = new Set<number>();
   const directParent = rawAssetsByItemId.get(locationId);
@@ -793,7 +765,7 @@ type CorporationProjection = {
 async function getCorporationProjection(
   characterIds: readonly number[],
   includeCorporationData: boolean,
-  sessionId: string,
+  _sessionId: string,
   policies?: readonly CorporationSourcePolicy[],
 ): Promise<CorporationProjection> {
   const characters = await getCharactersByIds(characterIds);
@@ -1196,7 +1168,7 @@ function getJobOutputQuantity(
       : job.activityId === 9
         ? blueprint.activities.reaction
         : undefined;
-  const product = activity?.products?.find((candidate) => candidate.typeID === job.productTypeId);
+  const product = activity?.products.find((candidate) => candidate.typeID === job.productTypeId);
   return (product?.quantity ?? 0) * installedRuns;
 }
 

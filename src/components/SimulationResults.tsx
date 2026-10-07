@@ -4965,7 +4965,6 @@ export default function SimulationResults({
       corporationNamesById={corporationNamesById}
       stockpileNamesById={stockpileNamesById}
       haulExclusions={haulExclusions}
-      preservedHaulTasks={preservedHaulTasks}
       isLoading={isLoading}
       onClearHaulExclusions={clearHaulExclusions}
       onExcludeLocation={onExcludeLocation}
@@ -5110,7 +5109,6 @@ function SimulationTabContent({
   stockpileNamesById,
   controls,
   haulExclusions,
-  preservedHaulTasks,
   isLoading,
   onClearHaulExclusions,
   onExcludeLocation,
@@ -5146,7 +5144,6 @@ function SimulationTabContent({
   stockpileNamesById: ReadonlyMap<string, string>;
   controls: SimulationRowControls;
   haulExclusions: readonly PlanHaulExclusion[];
-  preservedHaulTasks: readonly SimulationHaulTask[];
   isLoading: boolean;
   onClearHaulExclusions: () => Promise<boolean>;
   onExcludeLocation?: (locationId: number) => Promise<void>;

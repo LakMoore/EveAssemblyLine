@@ -41,6 +41,21 @@ const eslintConfig = defineConfig([
     rules: {
       ...strictTypeScriptRules,
       ...Object.fromEntries(enabledStrictTypeScriptRules.map((rule) => [rule, "error"])),
+      "no-unused-vars": "off",
+      "no-unused-expressions": "off",
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          args: "all",
+          argsIgnorePattern: "^_",
+          caughtErrors: "all",
+          caughtErrorsIgnorePattern: "^_",
+          destructuredArrayIgnorePattern: "^_",
+          ignoreRestSiblings: true,
+          varsIgnorePattern: "^_",
+        },
+      ],
+      "@typescript-eslint/no-unused-expressions": "error",
       ...tailwindcss.configs.recommended.rules,
       "tailwindcss/no-custom-classname": [
         "warn",

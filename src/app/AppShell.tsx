@@ -86,7 +86,6 @@ import { ThemeSelect } from "@/components/ThemeSelect";
 import { toast } from "@/components/ui/toast";
 import { Progress, ProgressLabel } from "@/components/ui/progress";
 import { buildRefreshUnits, runRefreshUnits } from "@/lib/esi/refreshOrchestration";
-import { CharacterTokenRecord } from "@/lib/auth/model";
 import { Label } from "@/components/ui/label";
 
 const languageStorageKey = "assembly-line-language";
@@ -282,7 +281,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const [isSidebarReady, setIsSidebarReady] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [characters, setCharacters] = useState<CharacterSummary[]>([]);
-  const [snapshotScope, setSnapshotScope] = useState<string>();
+  const [, setSnapshotScope] = useState<string>();
   const [isRefreshingData, setIsRefreshingData] = useState(false);
   const [refreshingOwnerKeys, setRefreshingOwnerKeys] = useState<ReadonlySet<string>>(
     () => new Set(),

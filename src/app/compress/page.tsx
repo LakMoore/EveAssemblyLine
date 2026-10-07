@@ -1,18 +1,9 @@
 "use client";
 
-import {
-  FormEvent,
-  KeyboardEvent,
-  Suspense,
-  useEffect,
-  useEffectEvent,
-  useRef,
-  useState,
-} from "react";
+import { FormEvent, Suspense, useEffect, useEffectEvent, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAppLanguage } from "../AppShell";
 import CalculateButton from "@/components/CalculateButton";
-import DialogBody from "@/components/DialogBody";
 import PasteListDialog from "@/components/PasteListDialog";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import TypeSearch from "@/components/TypeSearch";
@@ -29,33 +20,22 @@ import {
   ClipboardList,
   Copy,
   Gauge,
-  Info,
   Minimize2,
   PackageOpen,
   ShoppingCart,
   Trash2,
   Upload,
-  X,
 } from "lucide-react";
 import Image from "next/image";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import { trackAnalyticsEvent } from "@/lib/client/analyticsConsent";
 import { type CompressMaterial } from "@/lib/planning/compressSettingsStore";
-import { loadClientSession } from "@/lib/client/requestCache";
 import {
   loadPlannerStockpiles,
   savePlannerStockpiles,
 } from "@/lib/planning/plannerStockpilesStore";
 import type { ClientBuildItem, ClientPlanStockpile } from "@/lib/planning/types";
 import { refreshPlannerStockpileEfficiencies } from "@/lib/planning/reprocessingClient";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Empty, EmptyDescription } from "@/components/ui/empty";

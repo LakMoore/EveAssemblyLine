@@ -219,8 +219,8 @@ function industryOutputItem(
     ? blueprint.activities.reaction
     : blueprint.activities.manufacturing;
   const product =
-    activity?.products?.find((candidate) => candidate.typeID === job.typeId)
-    ?? activity?.products?.[0];
+    activity?.products.find((candidate) => candidate.typeID === job.typeId)
+    ?? activity?.products[0];
   if (!product) return undefined;
   const outputActivity = normalizedActivity.startsWith("reaction") ? "reaction" : "manufacturing";
   const outputState: SimulationIndustryOutputMarker["state"] =

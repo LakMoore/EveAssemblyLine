@@ -117,7 +117,7 @@ function outputQuantity(
       : job.activityId === 1
         ? blueprint.activities.manufacturing
         : undefined;
-  const product = activity?.products?.find((candidate) => candidate.typeID === job.productTypeId);
+  const product = activity?.products.find((candidate) => candidate.typeID === job.productTypeId);
   return (product?.quantity ?? 0) * installedRuns;
 }
 

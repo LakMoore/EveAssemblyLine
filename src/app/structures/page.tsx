@@ -201,7 +201,7 @@ export default function LocationsPage() {
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [esiStructures, setEsiStructures] = useState<EsiStructure[]>([]);
   const [esiConnected, setEsiConnected] = useState(false);
-  const [esiRateLimitedUntil, setEsiRateLimitedUntil] = useState<string | null>(null);
+  const [, setEsiRateLimitedUntil] = useState<string | null>(null);
   const [locationSort, setLocationSort] = useState<LocationSort>("alphabetical");
   const typeForName = (name: string): StructureType | undefined =>
     structureTypes.find((structure) => structure.name === name);

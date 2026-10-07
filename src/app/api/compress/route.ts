@@ -8,7 +8,7 @@ import {
   getTypeMaterials,
   getTypes,
 } from "@/cache/services/sdeCache";
-import { compressMaterials, type CompressionRequestItem } from "@/lib/planning/compressEngine";
+import { compressMaterials } from "@/lib/planning/compressEngine";
 import {
   calculateReprocessingProfile,
   efficiencyForType,

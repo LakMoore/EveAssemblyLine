@@ -15,11 +15,7 @@ import {
 } from "@/lib/client/industryJobs";
 import { createHaulItemExclusionKey, type HaulItemExclusion } from "@/lib/planning/planView";
 import { isHaulTaskPatched } from "@/lib/planning/haulPatches";
-import {
-  eveCharacterPortraitUrl,
-  eveCorporationLogoUrl,
-  eveTypeImageUrl,
-} from "@/lib/eve/imageServer";
+import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageServer";
 import styles from "@/app/page.module.css";
 import { ClipboardList, Factory, SquareX } from "lucide-react";
 

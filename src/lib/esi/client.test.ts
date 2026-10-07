@@ -240,7 +240,7 @@ void test("scopes structure metadata failures to the character token", async (t)
     personalAuth: { ...token, accessToken: "second-access-token" },
   };
   const requests: string[] = [];
-  globalThis.fetch = async (input, init) => {
+  globalThis.fetch = async (_input, init) => {
     requests.push(new Headers(init?.headers).get("authorization") ?? "");
     if (requests.length === 1) return new Response(null, { status: 403 });
     return Response.json({ name: "Accessible Structure", system_id: 30000142 });

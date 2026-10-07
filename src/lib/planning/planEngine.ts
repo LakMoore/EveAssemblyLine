@@ -17,7 +17,6 @@ import { getProductionGroupReferences, productionGroupForType } from "./producti
 import { requiredMaterialQuantity } from "./materialQuantities";
 import type { RequestProfiler } from "@/lib/server/profiling";
 import {
-  PlanBuildItem,
   PlanJobInput,
   PlanJobInputs,
   PlanJobInputStatus,
@@ -96,21 +95,6 @@ function summarizePlanJobInputs(
     completionPercent,
     status: completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked",
   };
-}
-
-/** Calculates the number of requested job runs covered by the supplied input quantities. */
-function getInstallableRunsFromInputs(inputs: PlanJobInputs, requestedRuns: number): number {
-  if (requestedRuns <= 0) return 0;
-  const requiredInputs = [inputs.blueprint, ...inputs.materials].filter(
-    (input) => input.requiredQuantity > 0,
-  );
-  if (requiredInputs.length === 0) return requestedRuns;
-  return Math.min(
-    requestedRuns,
-    ...requiredInputs.map((input) =>
-      Math.floor((input.availableQuantity * requestedRuns) / input.requiredQuantity),
-    ),
-  );
 }
 
 /** Adds a discovered demand contribution to a calculation row's provenance map. */
@@ -1188,13 +1172,7 @@ async function calculatePlanPass(
     return fallback;
   }
   const language = request.language ?? "en";
-  const {
-    types: typeRecords,
-    groups,
-    marketGroups,
-    targetFilters,
-    skillPrerequisites,
-  } = planningData;
+  const { types: typeRecords, groups, targetFilters, skillPrerequisites } = planningData;
   const productionGroups = getProductionGroupReferences(targetFilters, groups, language);
   const buildableTypeIds = new Set((await getBlueprintIndexes()).byBuildProductTypeId.keys());
   const facilityProfilesByLocationId = new Map(
@@ -1388,10 +1366,6 @@ async function calculatePlanPass(
       lot.quantity -= consumed;
       remaining -= consumed;
     }
-  }
-  function getInBuildStock(typeId: number, locationId: number | undefined) {
-    if (locationId === undefined) return 0;
-    return industryOutputByLocationAndType.get(locationId)?.get(typeId) ?? 0;
   }
   function getInstallableRuns(inputs: PlanJobInputs, requestedRuns: number) {
     if (requestedRuns <= 0) return 0;
@@ -2824,7 +2798,7 @@ async function calculatePlanPass(
         );
         if (!invention || !inventionProduct) continue;
 
-        const successProbability = inventionProduct.probability ?? 1;
+        const successProbability = inventionProduct.probability;
         const remainingBpcRuns = Math.max(0, bpc.neededQuantity - bpc.stockRuns);
         if (remainingBpcRuns <= 0) continue;
 

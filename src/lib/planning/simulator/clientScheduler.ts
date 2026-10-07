@@ -172,8 +172,7 @@ export function solveSimulationActivity(
     assignedSlots: [] as ClientSimulationSlot[],
   }));
   const enabledRows = rows.filter(
-    ({ job, runs, minimumRunsPerInstall }) =>
-      enabledJobIds.has(job.jobId) && runs > 0 && job.durationPerRunSeconds > 0,
+    ({ job, runs }) => enabledJobIds.has(job.jobId) && runs > 0 && job.durationPerRunSeconds > 0,
   );
 
   if (mode === "available-slots") {

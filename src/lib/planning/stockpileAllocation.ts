@@ -539,7 +539,7 @@ export async function allocateStockpileStock(
           );
         }
       }
-      for (const { stockpile, stockpileIndex } of stockpileEntries) {
+      for (const { stockpileIndex } of stockpileEntries) {
         let remaining = remainingDemand[stockpileIndex].get(demandTypeId) ?? 0;
         if (remaining <= 0) continue;
         for (const { index } of stockIndexes) {

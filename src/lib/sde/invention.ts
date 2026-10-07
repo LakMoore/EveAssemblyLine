@@ -40,7 +40,7 @@ export function getNoDecryptorInventionOutput(
   if (!product) return undefined;
   return {
     productTypeId,
-    probability: product.probability ?? 1,
+    probability: product.probability,
     runs: product.quantity,
     materialEfficiency: 2,
     timeEfficiency: 4,

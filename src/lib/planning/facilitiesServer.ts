@@ -135,16 +135,8 @@ export async function calculateFacilities(
   const requestedLanguage = new URL(request.url).searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
   const resolvedContext = context ?? (await loadFacilityCalculationContext(request));
-  const {
-    session,
-    characterIds,
-    corporationPolicies,
-    roots,
-    corporationSources,
-    stations,
-    systems,
-    groups,
-  } = resolvedContext;
+  const { session, characterIds, roots, corporationSources, stations, systems, groups } =
+    resolvedContext;
   markPhase("auth");
   const [
     types,

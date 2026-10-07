@@ -32,7 +32,7 @@ import {
   loadPlannerStockpiles,
   savePlannerStockpiles,
 } from "@/lib/planning/plannerStockpilesStore";
-import { assignPlannerLocationIds, loadStructures } from "@/lib/planning/structureStore";
+import { loadStructures } from "@/lib/planning/structureStore";
 import { facilitySettingsKey, facilitySettingsName } from "@/lib/planning/facilities";
 import {
   loadHaulItemExclusions,
@@ -568,7 +568,6 @@ function Planner() {
   const requirementsHeaderRef = useRef<HTMLParagraphElement>(null);
   const buildListHeaderRef = useRef<HTMLDivElement>(null);
   const { language } = useAppLanguage();
-  const [isBuildListLoaded, setIsBuildListLoaded] = useState(false);
   const [planStatus, setPlanStatus] = useState("Ready to calculate or simulate");
   const [isPlanLoading, setIsPlanLoading] = useState(false);
   const [activePlanRun, setActivePlanRun] = useState<PlanRunMode | null>(null);

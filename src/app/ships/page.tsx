@@ -6,7 +6,7 @@ import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { loadClientShips, type ClientShipsResponse } from "@/lib/client/requestCache";
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import styles from "../page.module.css";
-import { ArrowRight, X } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Empty, EmptyDescription } from "@/components/ui/empty";

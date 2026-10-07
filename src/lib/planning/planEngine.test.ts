@@ -2469,7 +2469,7 @@ void test("uses remote active output for a stockpile final product", async () =>
 });
 
 void test("rounds reaction production once across stockpiles", async () => {
-  const stockpileLocations = (id: string) => ({
+  const stockpileLocations = (_id: string) => ({
     stock: sourceLocationId,
     manufacturing: manufacturingLocationId,
     reactions: manufacturingLocationId,

@@ -68,11 +68,6 @@ function sourceQuantityLabel(
   return `${quantityLabel(quantity, quantityKind)} (${quantityLabel(claimedQuantity, quantityKind)} reserved)`;
 }
 
-/** Formats the simulator's authoritative required quantity. */
-function requiredQuantityLabel(input: SimulationJobInput): string {
-  return input.requiredQuantity.toLocaleString();
-}
-
 /** Converts a reservation completion timestamp or simulated offset into minutes remaining. */
 function reservationMinutesUntil(
   reservation: SimulationUpstreamReservation,

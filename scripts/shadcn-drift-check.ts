@@ -10,12 +10,11 @@ const COMPONENTS_JSON_PATH = join(CWD, "components.json");
 const UI_DIR = join(CWD, "src", "components", "ui");
 
 // Read components.json
-let componentsJson;
 try {
   const raw = readFileSync(COMPONENTS_JSON_PATH, "utf-8");
-  componentsJson = JSON.parse(raw);
+  JSON.parse(raw);
 }
-catch (err) {
+catch {
   console.error("❌ components.json not found or invalid");
   process.exit(1);
 }

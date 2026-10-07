@@ -145,7 +145,7 @@ function productionDetails(production: ProductionRecord, productTypeId: number) 
     production.activity === "manufacturing"
       ? production.blueprint.activities.manufacturing
       : production.blueprint.activities.reaction;
-  const product = activity?.products?.find((candidate) => candidate.typeID === productTypeId);
+  const product = activity?.products.find((candidate) => candidate.typeID === productTypeId);
   return product && activity ? { activity, product } : undefined;
 }
 
@@ -955,7 +955,6 @@ class IndustryDemandSimulation {
         production.blueprint._key,
         missingRuns,
         stockpile,
-        profile.locationId,
         nextStack,
       );
     }
@@ -982,7 +981,6 @@ class IndustryDemandSimulation {
     outputBlueprintTypeId: number,
     inventionRuns: number,
     stockpile: PlanStockpile,
-    manufacturingLocationId: number,
     stack: ReadonlySet<number>,
   ): void {
     if (inventionRuns <= 0) return;
@@ -1098,7 +1096,6 @@ class IndustryDemandSimulation {
     );
     const runsPerSuccess = Math.max(1, baseOutcome.runs + (decryptor?.maxRunModifier ?? 0));
     const requiredOutputCopies = Math.ceil(requiredRuns / runsPerSuccess);
-    const maximumOutputRuns = requiredOutputCopies * runsPerSuccess;
     const targetSuccessProbability = inventionSuccessConfidence;
     const attempts = minimumAttemptsForSuccesses(
       requiredOutputCopies,
@@ -1429,21 +1426,6 @@ class IndustryDemandSimulation {
         },
       ),
     );
-    const readyFromExistingSupplyRuns = Math.min(
-      blueprintLimits.afterUpstream,
-      this.installableRuns(
-        activity,
-        blueprint,
-        profile.materialMultiplier,
-        materialSpecifications,
-        maxRunsPerBatch,
-        (material) => {
-          const available = availabilityByTypeId.get(material.typeId);
-          return (available?.local ?? 0) + (available?.remote ?? 0) + (available?.future ?? 0);
-        },
-      ),
-    );
-
     const inputs: SimulationJobInput[] = [];
     const deferredInputs: DeferredProductionSupply[] = [];
     for (const material of materialSpecifications) {

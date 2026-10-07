@@ -875,7 +875,6 @@ export async function fetchCharacterIndustryJobs(
     etag,
     { paginated: false },
   );
-  const corporationId = record.corporationId;
   return {
     jobs:
       result.data === null

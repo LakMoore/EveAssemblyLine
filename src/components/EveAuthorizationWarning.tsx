@@ -3,7 +3,6 @@
 import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import {
   cloneElement,
-  useEffect,
   useState,
   useSyncExternalStore,
   type MouseEventHandler,

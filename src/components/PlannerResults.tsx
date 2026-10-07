@@ -3,13 +3,13 @@
 import { Fragment, Suspense, type RefObject, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type {
-  ClientPlanStockpile,
   ResponseLocationBucket,
   PlanResponse,
   PlanSourceCounts,
   PlanSourceCountsByLocation,
   PlanSourceIcon,
   PlanStockItem,
+  ClientPlanStockpile,
   HaulPatch,
   ResponsePlanItem,
   ResponsePlanDemandSource,
@@ -17,8 +17,8 @@ import type {
   ResponseMaterialBuy,
   ResponseBlueprintBuy,
 } from "@/lib/planning/types";
-import type { SdeLanguage } from "@/lib/reference/languages";
 import type { ClientCharacterStatus, ClientJobsResponse } from "@/lib/client/requestCache";
+import type { SdeLanguage } from "@/lib/reference/languages";
 import {
   getIndustryJobMinutesUntil,
   getNextIndustryJobEndTime,
@@ -27,7 +27,6 @@ import {
 import { getAvailableSlotCount, getSlotUsageTotals } from "@/lib/client/slotUsage";
 import { loadCompressSettings, saveCompressSettings } from "@/lib/planning/compressSettingsStore";
 import {
-  createHaulItemExclusionKey,
   parseHaulItemExclusionKey,
   splitReactionRunAllocations,
   type HaulItemExclusion,
@@ -77,7 +76,6 @@ import {
   Brain,
   Bug,
   ChartLine,
-  ChevronDown,
   ClipboardList,
   Copy as CopyIcon,
   Factory,
@@ -89,7 +87,6 @@ import {
   ListTree,
   Truck,
   type LucideIcon,
-  AlertCircleIcon,
 } from "lucide-react";
 
 export type PlannerTab =
@@ -120,6 +117,14 @@ const tabs: { value: PlannerTab; icon: LucideIcon }[] = [
 const plannerTabParam = "tab";
 const plannerTypeIdParam = "typeId";
 
+type ResultsLocations = {
+  manufacturing: number;
+  reactions: number;
+  reprocessing?: number;
+  copying?: number;
+  invention?: number;
+};
+
 function isPlannerTab(value: string | null): value is PlannerTab {
   return tabs.some((tab) => tab.value === value);
 }
@@ -144,15 +149,6 @@ type ResponseReactionJob = PlanResponse["lists"]["reactionJobs"][number]["items"
 };
 type ResponseManufacturingJob =
   PlanResponse["lists"]["manufacturingJobs"][number]["items"][number] & { locationId?: number };
-type ResponseReprocessingJob =
-  PlanResponse["lists"]["reprocessingJobs"][number]["items"][number] & { locationId?: number };
-type ResultsLocations = {
-  manufacturing: number;
-  reactions: number;
-  reprocessing?: number;
-  copying?: number;
-  invention?: number;
-};
 
 type PlanBuyEntry = ResponseMaterialBuy | ResponseBlueprintBuy;
 
@@ -593,7 +589,6 @@ export default function PlannerResults(props: React.ComponentProps<typeof Planne
 }
 
 function PlannerResultsContent({
-  language,
   plan,
   planStatus,
   characterStatuses,
@@ -603,8 +598,6 @@ function PlannerResultsContent({
   jobs,
   stock,
   marketBuyOrderQuantities,
-  locations,
-  stockpiles,
   stockpileLocations,
   locationOptions,
   onAddBuildItem,
@@ -616,7 +609,6 @@ function PlannerResultsContent({
   onToggleHaulPatches,
   readOnly = false,
 }: {
-  language: SdeLanguage;
   plan: PlanResponse | null;
   planStatus: string;
   characterStatuses: ClientCharacterStatus[];
@@ -626,9 +618,10 @@ function PlannerResultsContent({
   jobs: ClientJobsResponse | null;
   stock: PlanStockItem[];
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
+  stockpileLocations: ReadonlySet<number>;
+  language: SdeLanguage;
   locations: ResultsLocations;
   stockpiles: ClientPlanStockpile[];
-  stockpileLocations: ReadonlySet<number>;
   locationOptions: Array<{ locationId: number; name: string }>;
   onAddBuildItem: (item: { name: string; typeId: number; quantity: number }) => void;
   onExcludeHaulStockpile: (fromLocationId: number) => Promise<void>;
@@ -723,24 +716,6 @@ function PlannerResultsContent({
     "Manufacturing",
     slotCharacterIds,
   ).availableSlots;
-  const activityLocationIds = [
-    ...new Set(
-      [
-        locations.manufacturing,
-        locations.reactions,
-        locations.reprocessing,
-        locations.copying,
-        locations.invention,
-        ...stockpiles.flatMap((stockpile) => [
-          stockpile.locations.manufacturing,
-          stockpile.locations.reactions,
-          stockpile.locations.reprocessing,
-          stockpile.locations.copying,
-          stockpile.locations.invention,
-        ]),
-      ].filter((locationId): locationId is number => locationId !== undefined),
-    ),
-  ];
   const locationNamesById = new Map([
     ...stock.flatMap((item) =>
       item.rootLocationId !== undefined && item.sourceLocationName
@@ -857,7 +832,6 @@ function PlannerResultsContent({
           {plan ? (
             <PlanList
               activeTab={activeTab}
-              language={language}
               plan={plan}
               characterStatuses={characterStatuses}
               characterNamesById={characterNamesById}
@@ -865,7 +839,6 @@ function PlannerResultsContent({
               jobs={jobs}
               stock={stock}
               marketBuyOrderQuantities={marketBuyOrderQuantities}
-              activityLocationIds={activityLocationIds}
               availableReactionSlots={availableReactionSlots}
               availableManufacturingSlots={availableManufacturingSlots}
               reactionSlotCharacters={reactionSlotCharacters}
@@ -997,7 +970,6 @@ function PlannerWarningGroup({
 
 function PlanList({
   activeTab,
-  language,
   plan,
   characterStatuses,
   characterNamesById,
@@ -1005,7 +977,6 @@ function PlanList({
   jobs,
   stock,
   marketBuyOrderQuantities,
-  activityLocationIds,
   availableReactionSlots,
   availableManufacturingSlots,
   reactionSlotCharacters,
@@ -1025,7 +996,6 @@ function PlanList({
   resultsHeaderRef,
 }: {
   activeTab: PlannerTab;
-  language: SdeLanguage;
   plan: PlanResponse;
   characterStatuses: ClientCharacterStatus[];
   characterNamesById: Map<number, string>;
@@ -1033,7 +1003,6 @@ function PlanList({
   jobs: ClientJobsResponse | null;
   stock: PlanStockItem[];
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
-  activityLocationIds: number[];
   availableReactionSlots: number;
   availableManufacturingSlots: number;
   reactionSlotCharacters: ActivitySlotCharacter[];
@@ -1762,7 +1731,7 @@ function PlanList({
                 ({ entry }, index, rows) =>
                   rows.findIndex((row) => row.entry.typeId === entry.typeId) === index,
               )
-              .sort(({ entry: a }, { entry: b }) =>
+              .sort(({ entry: _a }, { entry: b }) =>
                 getEntryName(b).includes("Reaction Formula")
                 || getEntryName(b).includes("Blueprint")
                   ? -1

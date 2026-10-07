@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { initStorage } from "../src/lib/storage";
 import type {
   CharacterCollectionRecord,
