@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { groupSimulationActivityJobs, simulationRunsStartingAtT0 } from "./presentation";
+import {
+  adjustSimulationPurchaseQuantity,
+  groupSimulationActivityJobs,
+  shouldAdjustSimulationPurchaseQuantity,
+  simulationRunsStartingAtT0,
+} from "./presentation";
 import type { SimulationIndustryJob, SimulationJobInput } from "./types";
 
 /** Creates a minimal simulator input for presentation aggregation tests. */
@@ -152,4 +157,39 @@ void test("sums scheduled runs starting at T+0 across jobs", () => {
   ];
 
   assert.equal(simulationRunsStartingAtT0(jobs), 7);
+});
+
+void test("applies over-order percentage before optional tiered upward rounding", () => {
+  assert.equal(adjustSimulationPurchaseQuantity(100, 10, false), 110);
+  assert.equal(adjustSimulationPurchaseQuantity(30, 10, false), 33);
+  assert.equal(adjustSimulationPurchaseQuantity(1234, 10, false), 1358);
+  assert.equal(adjustSimulationPurchaseQuantity(1234, 10, true), 1360);
+  assert.equal(adjustSimulationPurchaseQuantity(1001, 0, true), 1010);
+  assert.equal(adjustSimulationPurchaseQuantity(7, 0, true), 10);
+  assert.equal(adjustSimulationPurchaseQuantity(14, 0, true), 20);
+  assert.equal(adjustSimulationPurchaseQuantity(9, 100, true), 20);
+  assert.equal(adjustSimulationPurchaseQuantity(105, 0, true), 110);
+  assert.equal(adjustSimulationPurchaseQuantity(1299, 0, true), 1300);
+  assert.equal(adjustSimulationPurchaseQuantity(2, 1e308, true), Number.MAX_SAFE_INTEGER);
+  assert.equal(adjustSimulationPurchaseQuantity(1000, 1e308, true), Number.MAX_SAFE_INTEGER);
+  assert.equal(
+    adjustSimulationPurchaseQuantity(Number.MAX_SAFE_INTEGER, 0, false),
+    Number.MAX_SAFE_INTEGER,
+  );
+  assert.equal(adjustSimulationPurchaseQuantity(100000000000000, 1.25e-14, false), 100000000000001);
+  assert.equal(adjustSimulationPurchaseQuantity(100000000000000, 1e-16, false), 100000000000001);
+  assert.equal(adjustSimulationPurchaseQuantity(5, Number.MIN_VALUE, false), 6);
+  assert.equal(
+    adjustSimulationPurchaseQuantity(Number.MAX_VALUE, 100, true),
+    Number.MAX_SAFE_INTEGER,
+  );
+});
+
+void test("excludes non-material and directly listed stockpile purchases from adjustments", () => {
+  const excludedTypeIds = new Set([34, 46207]);
+
+  assert.equal(shouldAdjustSimulationPurchaseQuantity(18, true, excludedTypeIds), true);
+  assert.equal(shouldAdjustSimulationPurchaseQuantity(34, true, excludedTypeIds), false);
+  assert.equal(shouldAdjustSimulationPurchaseQuantity(46207, true, excludedTypeIds), false);
+  assert.equal(shouldAdjustSimulationPurchaseQuantity(18, false, excludedTypeIds), false);
 });

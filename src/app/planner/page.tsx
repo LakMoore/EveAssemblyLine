@@ -1738,6 +1738,13 @@ function Planner() {
   );
   const stockLocationOptions: StockLocationOption[] = sharedLocationOptions;
   const stockpileLocations = getStockpileLocations(stockpiles);
+  const directStockpileItemTypeIds = new Set(
+    stockpiles
+      .filter((stockpile) => stockpile.isActive !== false)
+      .flatMap((stockpile) =>
+        stockpile.items.filter((item) => item.isIncluded !== false).map((item) => item.typeId),
+      ),
+  );
   const plannerLocationNames = new Map<number, string>([
     ...stockpiles.flatMap((stockpile) =>
       stockpile.stockLocationName
@@ -2605,6 +2612,7 @@ function Planner() {
       ) : (
         <SimulationResults
           result={simulationResult}
+          directStockpileItemTypeIds={directStockpileItemTypeIds}
           status={planStatus}
           stock={stock}
           visibleReactionFormulaStock={visibleReactionFormulaStock}

@@ -62,6 +62,7 @@ import {
   ComboboxList,
 } from "@/components/ui/combobox";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { FieldLegend, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
@@ -85,7 +86,9 @@ import { useAppLanguage } from "@/app/AppShell";
 import { fulleriteGasSites } from "@/lib/reference/fulleriteGasSites";
 import { fetchTypeMetadata, type TypeMetadata } from "@/lib/reference/types";
 import {
+  adjustSimulationPurchaseQuantity,
   groupSimulationActivityJobs,
+  shouldAdjustSimulationPurchaseQuantity,
   simulationRunsStartingAtT0,
   type SimulationIndustryJobGroup,
 } from "@/lib/planning/simulator/presentation";
@@ -166,8 +169,121 @@ const reactionFormulaBalanceColumns = ["Available", "Owned", "In Use", "Runs to 
 const typeIdChangedEvent = "assembly-line-planner-type-id-changed";
 const simulationTabParam = "simulationTab";
 const completedTypeDatesStoragePrefix = "assembly-line-simulation-completed-types:";
+const simulationBuySettingsStorageKey = "assembly-line-simulation-buy-settings-v1";
+const simulationBuySettingsChangedEvent = "assembly-line-simulation-buy-settings-changed";
 type SimulationActivityTab = "react" | "manufacture";
 type CompletedTypeDates = Record<SimulationActivityTab, Map<number, Date>>;
+type SimulationBuySettings = {
+  overOrderPercent: string;
+  roundUpQuantities: boolean;
+};
+
+const defaultSimulationBuySettings: SimulationBuySettings = {
+  overOrderPercent: "0",
+  roundUpQuantities: false,
+};
+const defaultSimulationBuySettingsSnapshot = JSON.stringify(defaultSimulationBuySettings);
+let simulationBuySettingsSnapshot = defaultSimulationBuySettingsSnapshot;
+
+/** Subscribes to same-tab and cross-tab changes to persisted Buy settings. */
+function subscribeToSimulationBuySettings(onStoreChange: () => void) {
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key !== null && event.key !== simulationBuySettingsStorageKey) return;
+    simulationBuySettingsSnapshot = event.newValue ?? defaultSimulationBuySettingsSnapshot;
+    onStoreChange();
+  };
+  window.addEventListener("storage", handleStorage);
+  window.addEventListener(simulationBuySettingsChangedEvent, onStoreChange);
+  return () => {
+    window.removeEventListener("storage", handleStorage);
+    window.removeEventListener(simulationBuySettingsChangedEvent, onStoreChange);
+  };
+}
+
+/** Reads the serialized Buy settings, retaining an in-memory fallback if storage is unavailable. */
+function getSimulationBuySettingsSnapshot(): string {
+  try {
+    const storedSettings = window.localStorage.getItem(simulationBuySettingsStorageKey);
+    if (storedSettings !== null) simulationBuySettingsSnapshot = storedSettings;
+  }
+  catch {
+    // Browser storage may be unavailable.
+  }
+  return simulationBuySettingsSnapshot;
+}
+
+/** Supplies stable default settings during server rendering and hydration. */
+function getServerSimulationBuySettingsSnapshot(): string {
+  return defaultSimulationBuySettingsSnapshot;
+}
+
+/** Parses the decimal percentage syntax accepted by the Buy numeric input. */
+function parseSimulationOverOrderPercent(value: string): number | undefined {
+  const normalized = value.trim();
+  if (normalized === "") return 0;
+  if (!/^(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(normalized)) return undefined;
+  const percent = Number(normalized);
+  return Number.isFinite(percent) && percent >= 0 ? percent : undefined;
+}
+
+/** Parses persisted Buy settings and falls back independently for invalid values. */
+function parseSimulationBuySettings(snapshot: string): SimulationBuySettings {
+  try {
+    const parsed: unknown = JSON.parse(snapshot);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return defaultSimulationBuySettings;
+    }
+    const settings = parsed as Record<string, unknown>;
+    const storedPercent = settings.overOrderPercent;
+    const parsedPercent =
+      typeof storedPercent === "string"
+        ? parseSimulationOverOrderPercent(storedPercent)
+        : undefined;
+    return {
+      overOrderPercent:
+        typeof storedPercent === "string" && parsedPercent !== undefined
+          ? storedPercent
+          : defaultSimulationBuySettings.overOrderPercent,
+      roundUpQuantities:
+        typeof settings.roundUpQuantities === "boolean"
+          ? settings.roundUpQuantities
+          : defaultSimulationBuySettings.roundUpQuantities,
+    };
+  }
+  catch {
+    return defaultSimulationBuySettings;
+  }
+}
+
+/** Persists a partial Buy setting update and notifies subscribers in this tab. */
+function updateSimulationBuySettings(update: Partial<SimulationBuySettings>): void {
+  const settings = { ...parseSimulationBuySettings(getSimulationBuySettingsSnapshot()), ...update };
+  simulationBuySettingsSnapshot = JSON.stringify(settings);
+  try {
+    window.localStorage.setItem(simulationBuySettingsStorageKey, simulationBuySettingsSnapshot);
+  }
+  catch {
+    // Browser storage may be unavailable or full; settings remain usable in memory.
+  }
+  window.dispatchEvent(new Event(simulationBuySettingsChangedEvent));
+}
+
+/** Exposes persisted Buy preferences through React's external-store subscription API. */
+function useSimulationBuySettings() {
+  const snapshot = useSyncExternalStore(
+    subscribeToSimulationBuySettings,
+    getSimulationBuySettingsSnapshot,
+    getServerSimulationBuySettingsSnapshot,
+  );
+  const settings = parseSimulationBuySettings(snapshot);
+  return {
+    ...settings,
+    setOverOrderPercent: (value: string) =>
+      updateSimulationBuySettings({ overOrderPercent: value }),
+    setRoundUpQuantities: (value: boolean) =>
+      updateSimulationBuySettings({ roundUpQuantities: value }),
+  };
+}
 
 /** Creates an empty completion map for each activity type. */
 function emptyCompletedTypeDates(): CompletedTypeDates {
@@ -4152,20 +4268,53 @@ function SimulationHaulRow({
 function SimulationBuyTab({
   result,
   marketBuyOrderQuantities,
+  directStockpileItemTypeIds,
+  overOrderPercent,
+  onOverOrderPercentChange,
+  roundUpQuantities,
+  onRoundUpQuantitiesChange,
   controls,
   openGroups,
   onOpenGroupChange,
 }: {
   result: SimulationResultV2;
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
+  directStockpileItemTypeIds: ReadonlySet<number>;
+  overOrderPercent: string;
+  onOverOrderPercentChange: (value: string) => void;
+  roundUpQuantities: boolean;
+  onRoundUpQuantitiesChange: (checked: boolean) => void;
   controls: SimulationRowControls;
   openGroups: Record<string, boolean>;
   onOpenGroupChange: (groupKey: string, open: boolean) => void;
 }) {
+  const parsedOverOrderPercent = parseSimulationOverOrderPercent(overOrderPercent);
+  const validOverOrderPercent = parsedOverOrderPercent ?? 0;
+  const reactionFormulaTypeIds = new Set(
+    result.lists.reactionFormulas?.flatMap((bucket) => bucket.items.map((item) => item.typeId))
+      ?? [],
+  );
+  const excludedTypeIds = new Set([...directStockpileItemTypeIds, ...reactionFormulaTypeIds]);
   const entries: SimulationBuyEntry[] = [
     ...result.lists.materialsToBuy.map((purchase) => ({ purchase, isMaterial: true })),
     ...result.lists.bpoToBuy.map((purchase) => ({ purchase, isMaterial: false })),
-  ];
+  ].map((entry) => ({
+    ...entry,
+    purchase: {
+      ...entry.purchase,
+      quantity: shouldAdjustSimulationPurchaseQuantity(
+        entry.purchase.typeId,
+        entry.isMaterial,
+        excludedTypeIds,
+      )
+        ? adjustSimulationPurchaseQuantity(
+            entry.purchase.quantity,
+            validOverOrderPercent,
+            roundUpQuantities,
+          )
+        : entry.purchase.quantity,
+    },
+  }));
   const metadataByTypeId = useSimulationTypeMetadata(entries.map((entry) => entry.purchase.typeId));
   const {
     groupsByTypeId,
@@ -4212,7 +4361,33 @@ function SimulationBuyTab({
       <SimulationResultsTab
         hasResults={entries.length > 0}
         settings={
-          <div className="flex justify-end">
+          <div className="flex flex-wrap items-center justify-between gap-3 max-[640px]:justify-end">
+            <FieldSet className="min-w-0 border p-3">
+              <FieldLegend className="mb-0 px-1">Raw Materials</FieldLegend>
+              <div className="flex flex-wrap items-center gap-4">
+                <Label className="flex items-center gap-2 whitespace-nowrap">
+                  Over-order %
+                  <Input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={overOrderPercent}
+                    onChange={(event) => onOverOrderPercentChange(event.target.value)}
+                    aria-label="Over-order percentage"
+                    aria-invalid={parsedOverOrderPercent === undefined}
+                    className="w-24"
+                  />
+                </Label>
+                <Label className="flex items-center gap-2 whitespace-nowrap">
+                  Round-up
+                  <Switch
+                    checked={roundUpQuantities}
+                    onCheckedChange={onRoundUpQuantitiesChange}
+                    aria-label="Round buy quantities up by quantity tier"
+                  />
+                </Label>
+              </div>
+            </FieldSet>
             <Button
               type="button"
               variant="outline"
@@ -4401,6 +4576,7 @@ function SimulationWarningsTab({
 /** Renders the native simulator response without converting it to legacy planner result shapes. */
 export default function SimulationResults({
   result,
+  directStockpileItemTypeIds,
   status,
   stock,
   visibleReactionFormulaStock = stock,
@@ -4428,6 +4604,7 @@ export default function SimulationResults({
   readOnly = false,
 }: {
   result: SimulationResultV2 | null;
+  directStockpileItemTypeIds: ReadonlySet<number>;
   status: string;
   stock: readonly PlanStockItem[];
   visibleReactionFormulaStock?: readonly PlanStockItem[];
@@ -4460,6 +4637,8 @@ export default function SimulationResults({
   const [activeTab, setActiveTab] = useState<SimulationTab>(() =>
     usePlannerUrlState ? readSimulationTabFromUrl() : "warnings",
   );
+  const { overOrderPercent, roundUpQuantities, setOverOrderPercent, setRoundUpQuantities } =
+    useSimulationBuySettings();
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [includedRows, setIncludedRows] = useState<Record<string, boolean>>({});
@@ -4770,6 +4949,11 @@ export default function SimulationResults({
       visibleReactionFormulaStock={visibleReactionFormulaStock}
       industryJobs={industryJobs}
       marketBuyOrderQuantities={marketBuyOrderQuantities}
+      directStockpileItemTypeIds={directStockpileItemTypeIds}
+      overOrderPercent={overOrderPercent}
+      onOverOrderPercentChange={setOverOrderPercent}
+      roundUpQuantities={roundUpQuantities}
+      onRoundUpQuantitiesChange={setRoundUpQuantities}
       locationNamesById={locationNamesById}
       locationSystemIdsById={locationSystemIdsById}
       systemNamesById={systemNamesById}
@@ -4904,11 +5088,16 @@ function SimulationTabContent({
   activeTab,
   result,
   includedRows,
+  directStockpileItemTypeIds,
   haulTasks,
   stock,
   visibleReactionFormulaStock,
   industryJobs,
   marketBuyOrderQuantities,
+  overOrderPercent,
+  onOverOrderPercentChange,
+  roundUpQuantities,
+  onRoundUpQuantitiesChange,
   locationNamesById,
   locationSystemIdsById,
   systemNamesById,
@@ -4935,11 +5124,16 @@ function SimulationTabContent({
   activeTab: SimulationTab;
   result: SimulationResultV2;
   includedRows: Readonly<Record<string, boolean>>;
+  directStockpileItemTypeIds: ReadonlySet<number>;
   haulTasks: readonly SimulationHaulTask[];
   stock: readonly PlanStockItem[];
   visibleReactionFormulaStock: readonly PlanStockItem[];
   industryJobs?: ClientJobsResponse["jobs"];
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
+  overOrderPercent: string;
+  onOverOrderPercentChange: (value: string) => void;
+  roundUpQuantities: boolean;
+  onRoundUpQuantitiesChange: (checked: boolean) => void;
   locationNamesById: ReadonlyMap<number, string>;
   locationSystemIdsById?: ReadonlyMap<number, number>;
   systemNamesById?: ReadonlyMap<number, string>;
@@ -5075,6 +5269,11 @@ function SimulationTabContent({
       <SimulationBuyTab
         result={result}
         marketBuyOrderQuantities={marketBuyOrderQuantities}
+        directStockpileItemTypeIds={directStockpileItemTypeIds}
+        overOrderPercent={overOrderPercent}
+        onOverOrderPercentChange={onOverOrderPercentChange}
+        roundUpQuantities={roundUpQuantities}
+        onRoundUpQuantitiesChange={onRoundUpQuantitiesChange}
         controls={controls}
         openGroups={openGroups}
         onOpenGroupChange={onOpenGroupChange}

@@ -52,6 +52,45 @@ export function aggregateSimulationInputs(
   );
 }
 
+/** Applies the Buy-tab over-order percentage and optional three-significant-figure ceiling. */
+export function adjustSimulationPurchaseQuantity(
+  quantity: number,
+  overOrderPercent: number,
+  roundUp: boolean,
+): number {
+  const validPercent = Number.isFinite(overOrderPercent) ? Math.max(0, overOrderPercent) : 0;
+  const proportionalIncrease = quantity * (validPercent / 100);
+  const increasedQuantity = quantity + proportionalIncrease;
+  if (!Number.isFinite(increasedQuantity)) return Number.MAX_SAFE_INTEGER;
+  const positiveIncreaseWasLost =
+    validPercent > 0 && quantity > 0 && Number.isInteger(quantity) && increasedQuantity <= quantity;
+  const percentageAdjustedQuantity = Math.min(
+    Number.MAX_SAFE_INTEGER,
+    positiveIncreaseWasLost ? quantity + 1 : Math.ceil(increasedQuantity),
+  );
+  if (!roundUp || percentageAdjustedQuantity <= 0) return percentageAdjustedQuantity;
+  if (percentageAdjustedQuantity < 10) return 10;
+
+  const significantFigures =
+    percentageAdjustedQuantity < 100 ? 1 : percentageAdjustedQuantity < 1000 ? 2 : 3;
+  const roundingStep =
+    10 ** (Math.floor(Math.log10(percentageAdjustedQuantity)) - significantFigures + 1);
+  const scaledQuantity = percentageAdjustedQuantity / roundingStep;
+  const roundedQuantity = Math.ceil(scaledQuantity) * roundingStep;
+  return Number.isFinite(roundedQuantity)
+    ? Math.min(Number.MAX_SAFE_INTEGER, roundedQuantity)
+    : Number.MAX_SAFE_INTEGER;
+}
+
+/** Returns whether a purchase row is eligible for Buy-tab quantity adjustments. */
+export function shouldAdjustSimulationPurchaseQuantity(
+  typeId: number,
+  isMaterial: boolean,
+  excludedTypeIds: ReadonlySet<number>,
+): boolean {
+  return isMaterial && !excludedTypeIds.has(typeId);
+}
+
 /** Groups activity jobs and sums installable runs and input quantities for presentation. */
 export function groupSimulationActivityJobs(
   jobs: readonly SimulationIndustryJob[],
