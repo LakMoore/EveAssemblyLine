@@ -17,6 +17,11 @@ export interface SimulationIndustryJobGroup {
   quantities: SimulationIndustryJobQuantities;
 }
 
+/** Identifies completion state for a product type at one activity location. */
+export function simulationCompletionKey(locationId: number, typeId: number): string {
+  return `${locationId}:${typeId}`;
+}
+
 /** Merges repeated simulator inputs while preserving aggregate availability and demand. */
 export function aggregateSimulationInputs(
   inputs: readonly SimulationJobInput[],

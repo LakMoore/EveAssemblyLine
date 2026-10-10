@@ -186,7 +186,7 @@ export interface MarketOrderRecord {
   issuedAt: string;
   volumeRemain: number;
   volumeTotal: number;
-  isBuyOrder: boolean;
+  isBuyOrder?: boolean;
   isCorporation?: boolean;
   issuedBy?: number;
   ownerType: "character" | "corporation";

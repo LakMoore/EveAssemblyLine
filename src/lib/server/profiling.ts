@@ -14,14 +14,14 @@ export type RequestProfile = {
 type ProfileGroup = Exclude<ProfileValue, number>;
 
 function profileCount(group: ProfileGroup): number {
-  return group.count === undefined ? 1 : group.count;
+  return group.count ?? 1;
 }
 
 export type RequestProfiler = {
   start(section: string): void;
   end(section: string): void;
   measureSync<T>(section: string, operation: () => T): T;
-  measure<T>(section: string, operation: () => Promise<T>): Promise<T>;
+  measure<T>(section: string, operation: () => T | Promise<T>): Promise<T>;
   finish(): RequestProfile | undefined;
 };
 
@@ -118,7 +118,7 @@ export function createRequestProfiler(
         }
       }
     },
-    async measure<T>(section: string, operation: () => Promise<T>) {
+    async measure<T>(section: string, operation: () => T | Promise<T>) {
       if (!enabled) return operation();
       activeSections.push({ name: section, startedAt: performance.now(), sections: new Map() });
       try {

@@ -63,10 +63,11 @@ function stockpileRoutePolicy(
   for (const stockpile of stockpiles) {
     const locationIds = [
       ...new Set([
-        ...Object
-          .entries(stockpile.locations)
-          .filter(([locationKind]) => locationKind !== "stock")
-          .map(([, locationId]) => locationId),
+        stockpile.locations.manufacturing,
+        stockpile.locations.reactions,
+        stockpile.locations.reprocessing,
+        stockpile.locations.copying,
+        stockpile.locations.invention,
         ...Object.values(stockpile.groupAssignments ?? {}),
       ]),
     ];
@@ -1330,7 +1331,7 @@ export class SimulationAllocator {
     destinationLocationId: number,
     quantity: number,
   ): void {
-    const reservations = this.activityReservationsByLotId.get(lotId) ?? new Map();
+    const reservations = this.activityReservationsByLotId.get(lotId) ?? new Map<number, number>();
     reservations.set(
       destinationLocationId,
       (reservations.get(destinationLocationId) ?? 0) + quantity,
@@ -1343,7 +1344,7 @@ export class SimulationAllocator {
     destinationLocationId: number,
     quantity: number,
   ): void {
-    const reservations = this.stockpileReservationsByLotId.get(lotId) ?? new Map();
+    const reservations = this.stockpileReservationsByLotId.get(lotId) ?? new Map<number, number>();
     reservations.set(
       destinationLocationId,
       (reservations.get(destinationLocationId) ?? 0) + quantity,

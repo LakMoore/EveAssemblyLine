@@ -132,7 +132,7 @@ function readCurrentCollection(value: unknown): CharacterCollectionRecord | null
     characterIds: [...new Set(value.characterIds as number[])],
     createdAt: value.createdAt,
     lastSeenAt: value.lastSeenAt,
-  } as CharacterCollectionRecord;
+  };
 }
 
 function addCollectionMember(collection: CharacterCollectionRecord, characterId: number) {
@@ -151,8 +151,8 @@ async function migrate() {
     ] = await Promise.all([
       transaction.getItem<unknown>(legacyCharactersKey),
       transaction.getItem<unknown>(legacyAccountsKey),
-      transaction.getItemsByPrefix<unknown>(characterRecordPrefix),
-      transaction.getItemsByPrefix<unknown>(characterTokenPrefix),
+      transaction.getItemsByPrefix(characterRecordPrefix),
+      transaction.getItemsByPrefix(characterTokenPrefix),
       transaction.getItem<unknown>("collections"),
     ]);
     const legacyCharacters = Array.isArray(legacyCharactersRaw) ? legacyCharactersRaw : [];

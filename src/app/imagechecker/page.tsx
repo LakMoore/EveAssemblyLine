@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { type SubmitEvent, useCallback, useEffect, useState } from "react";
 import { eveTypeImageUrl } from "@/lib/eve/imageServer";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -75,10 +75,12 @@ export default function ImageCheckerPage() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadBatch(requestedStartTypeId()), 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+    };
   }, [loadBatch]);
 
-  function submitStartId(event: FormEvent<HTMLFormElement>) {
+  function submitStartId(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const requestedStartId = Number(startTypeId);
     if (!Number.isSafeInteger(requestedStartId) || requestedStartId < 0) {
@@ -138,7 +140,9 @@ export default function ImageCheckerPage() {
           className={styles.pageButton}
           aria-label="Previous batch"
           disabled={isLoading || previousStartTypeId === null}
-          onClick={() => pageTo(previousStartTypeId)}
+          onClick={() => {
+            pageTo(previousStartTypeId);
+          }}
         >
           ←
         </Button>
@@ -151,7 +155,9 @@ export default function ImageCheckerPage() {
             step="1"
             type="number"
             value={startTypeId}
-            onChange={(event) => setStartTypeId(event.target.value)}
+            onChange={(event) => {
+              setStartTypeId(event.target.value);
+            }}
           />
         </Label>
         <Button type="submit" className={styles.loadButton} disabled={isLoading}>
@@ -162,7 +168,9 @@ export default function ImageCheckerPage() {
           className={styles.pageButton}
           aria-label="Next batch"
           disabled={isLoading || nextStartTypeId === null}
-          onClick={() => pageTo(nextStartTypeId)}
+          onClick={() => {
+            pageTo(nextStartTypeId);
+          }}
         >
           →
         </Button>
@@ -215,7 +223,9 @@ export default function ImageCheckerPage() {
                           typeId={item.typeId}
                           variation={variation}
                           status={results[item.typeId][variation]}
-                          onStatusChange={(status) => updateStatus(item.typeId, variation, status)}
+                          onStatusChange={(status) => {
+                            updateStatus(item.typeId, variation, status);
+                          }}
                         />
                       </td>
                     ))}
@@ -251,8 +261,12 @@ function ImageProbe({
         alt=""
         width={32}
         height={32}
-        onLoad={() => onStatusChange("ok")}
-        onError={() => onStatusChange("missing")}
+        onLoad={() => {
+          onStatusChange("ok");
+        }}
+        onError={() => {
+          onStatusChange("missing");
+        }}
       />
       <span>{status === "checking" ? "..." : status === "ok" ? "OK" : "MISS"}</span>
     </div>

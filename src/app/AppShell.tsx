@@ -1,14 +1,7 @@
 "use client";
 
-import {
-  createContext,
-  ReactNode,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import type { ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import EveAuthorizationWarning from "@/components/EveAuthorizationWarning";
@@ -79,7 +72,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import styles from "./page.module.css";
-import { PlanStockItem } from "@/lib/planning/types";
+import type { PlanStockItem } from "@/lib/planning/types";
 import { Avatar, AvatarBadge, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ThemeSelect } from "@/components/ThemeSelect";
@@ -106,7 +99,7 @@ type ActivePage =
   | "corpHangars"
   | "settings"
   | "imagechecker"
-  | "characters";
+  | "data";
 type LanguageContextValue = { language: SdeLanguage; setLanguage: (language: SdeLanguage) => void };
 const LanguageContext = createContext<LanguageContextValue | null>(null);
 const RefreshContext = createContext<boolean>(false);
@@ -158,7 +151,9 @@ function showRefreshError(details: string) {
     timeout: 0,
     actionProps: {
       children: "View details",
-      onClick: () => window.location.assign("/characters"),
+      onClick: () => {
+        window.location.assign("/data");
+      },
     },
   });
 }
@@ -332,8 +327,8 @@ export default function AppShell({ children }: { children: ReactNode }) {
                               ? "settings"
                               : pathname === "/imagechecker"
                                 ? "imagechecker"
-                                : pathname === "/characters"
-                                  ? "characters"
+                                : pathname === "/data"
+                                  ? "data"
                                   : [
                                         "/guides",
                                         "/about",
@@ -417,11 +412,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
       "assembly-line-corporation-settings-changed",
       handleCorporationSettingsChanged,
     );
-    return () =>
+    return () => {
       window.removeEventListener(
         "assembly-line-corporation-settings-changed",
         handleCorporationSettingsChanged,
       );
+    };
   }, []);
 
   useEffect(() => {
@@ -455,11 +451,16 @@ export default function AppShell({ children }: { children: ReactNode }) {
     };
     loadStatuses();
     const handleRefresh = (event: Event) => {
-      if (activePage === "imagechecker" || activePage === "characters") return;
+      if (activePage === "imagechecker" || activePage === "data") return;
       const detail = (event as CustomEvent<ClientRefreshEventDetail>).detail;
       loadStatuses(detail.state);
     };
-    const statusTimer = window.setInterval(() => setStatusCheckAt(Date.now()), 5_000);
+    const statusTimer = window.setInterval(
+      () => {
+        setStatusCheckAt(Date.now());
+      },
+      5_000,
+    );
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
     return () => {
       cancelled = true;
@@ -857,7 +858,12 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <LanguageContext.Provider
-      value={{ language, setLanguage: (nextLanguage) => changeLanguage(nextLanguage) }}
+      value={{
+        language,
+        setLanguage: (nextLanguage) => {
+          changeLanguage(nextLanguage);
+        },
+      }}
     >
       <RefreshContext.Provider value={isRefreshingData}>
         <RefreshOwnerContext.Provider value={refreshingOwnerKeys}>
@@ -1001,15 +1007,15 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   type="button"
                   className={styles.sidebarToggle}
                   aria-label={isSidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
-                  onClick={() =>
+                  onClick={() => {
                     setIsSidebarCollapsed((collapsed) => {
                       const nextState = !collapsed;
                       if (window.matchMedia("(min-width: 901px)").matches) {
                         window.localStorage.setItem(sidebarStorageKey, String(nextState));
                       }
                       return nextState;
-                    })
-                  }
+                    });
+                  }}
                 >
                   {isSidebarCollapsed ? (
                     <PanelLeftOpen size={16} strokeWidth={1.8} aria-hidden="true" />
@@ -1165,14 +1171,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 </NoPrefetchLink>
                 <NoPrefetchLink
                   prefetch={false}
-                  className={`${styles.navItem} ${activePage === "characters" ? styles.navActive : ""}`}
-                  href="/characters"
+                  className={`${styles.navItem} ${activePage === "data" ? styles.navActive : ""}`}
+                  href="/data"
                   onClick={closeSidebarOnNavigation}
                 >
                   <span>
                     <UsersRound size={17} strokeWidth={1.8} aria-hidden="true" />
                   </span>
-                  <span className={styles.navText}>Characters</span>
+                  <span className={styles.navText}>Data</span>
                   <b>{characters.length}</b>
                 </NoPrefetchLink>
                 <div className={styles.sectionLabel}>UTILITY</div>
@@ -1212,7 +1218,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                                 .toLocaleUpperCase()}
                             </AvatarFallback>
                             <AvatarBadge
-                              className={`${isNotAuthenticated ? styles.pilotNotOk : styles.pilotOk}`}
+                              className={isNotAuthenticated ? styles.pilotNotOk : styles.pilotOk}
                               aria-label={
                                 isNotAuthenticated ? "Authorization required" : "Authorized"
                               }
@@ -1277,14 +1283,14 @@ export default function AppShell({ children }: { children: ReactNode }) {
                         type="button"
                         variant="ghost"
                         className={`${styles.addButton} ${styles.navText} ${!authenticated ? styles.addButtonDisconnected : ""}`}
-                        onClick={() =>
+                        onClick={() => {
                           trackAnalyticsEvent(
                             "add_character",
                             {
                               source: "sidebar",
                             },
-                          )
-                        }
+                          );
+                        }}
                       >
                         <UserRoundPlus
                           data-icon="inline-start"

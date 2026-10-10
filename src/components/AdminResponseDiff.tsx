@@ -276,7 +276,9 @@ export default function AdminResponseDiff({
             variant={view === option ? "secondary" : "outline"}
             size="sm"
             aria-pressed={view === option}
-            onClick={() => setView(option)}
+            onClick={() => {
+              setView(option);
+            }}
           >
             {option === "full" ? "Full" : "Short"}
           </Button>

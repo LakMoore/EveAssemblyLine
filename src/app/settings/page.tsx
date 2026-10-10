@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { type SubmitEvent, useEffect, useState } from "react";
 import PasteListDialog from "@/components/PasteListDialog";
 import {
   setEveAuthorizationAcknowledgement,
@@ -91,7 +91,9 @@ export default function SettingsPage() {
   const isAuthorizationWarningAcknowledged = useEveAuthorizationAcknowledgement();
 
   useEffect(() => {
-    void Promise.resolve().then(() => setSettings(readPlannerSettings()));
+    void Promise.resolve().then(() => {
+      setSettings(readPlannerSettings());
+    });
     void loadBuildBlacklist().then((buildBlacklist) => {
       if (buildBlacklist) setSettings((current) => ({ ...current, buildBlacklist }));
     });
@@ -107,7 +109,7 @@ export default function SettingsPage() {
     );
   }
 
-  function save(event: FormEvent<HTMLFormElement>) {
+  function save(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     window.localStorage.setItem(settingsStorageKey, JSON.stringify(settings));
     void saveBuildBlacklist(settings.buildBlacklist);
@@ -176,9 +178,9 @@ export default function SettingsPage() {
             id="include-corporation-assets"
             aria-labelledby="include-corporation-assets-label"
             checked={settings.includeCorporationAssets}
-            onCheckedChange={(checked) =>
-              setSettings({ ...settings, includeCorporationAssets: checked })
-            }
+            onCheckedChange={(checked) => {
+              setSettings({ ...settings, includeCorporationAssets: checked });
+            }}
           />
         </Field>
         <Field className={styles.rule} orientation="horizontal">
@@ -197,7 +199,13 @@ export default function SettingsPage() {
                 ? "No locations selected"
                 : `${settings.marketStations.length} location${settings.marketStations.length === 1 ? "" : "s"}`}
             </span>
-            <Button type="button" variant="outline" onClick={() => setIsMarketStationsOpen(true)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setIsMarketStationsOpen(true);
+              }}
+            >
               Edit
             </Button>
           </div>
@@ -215,12 +223,12 @@ export default function SettingsPage() {
             max="100"
             step="0.1"
             value={settings.marketSalesTaxPercent}
-            onChange={(event) =>
+            onChange={(event) => {
               setSettings({
                 ...settings,
                 marketSalesTaxPercent: boundedNumber(event.target.value, 100),
-              })
-            }
+              });
+            }}
           />
         </Field>
         <Field className={styles.rule} orientation="horizontal">
@@ -241,7 +249,13 @@ export default function SettingsPage() {
               <Copy data-icon="inline-start" aria-hidden="true" />
               Copy BlackList
             </Button>
-            <Button type="button" variant="outline" onClick={() => setIsBlacklistOpen(true)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setIsBlacklistOpen(true);
+              }}
+            >
               Edit
             </Button>
           </div>
@@ -257,9 +271,9 @@ export default function SettingsPage() {
             id="personal-sell-orders-as-assets"
             aria-labelledby="personal-sell-orders-as-assets-label"
             checked={settings.personalSellOrdersAsStock}
-            onCheckedChange={(checked) =>
-              setSettings({ ...settings, personalSellOrdersAsStock: checked })
-            }
+            onCheckedChange={(checked) => {
+              setSettings({ ...settings, personalSellOrdersAsStock: checked });
+            }}
           />
         </Field>
         <Field className={styles.rule} orientation="horizontal">
@@ -275,15 +289,15 @@ export default function SettingsPage() {
             id="all-corporation-sell-orders-as-assets"
             aria-labelledby="all-corporation-sell-orders-as-assets-label"
             checked={settings.allCorporationSellOrdersAsStock}
-            onCheckedChange={(checked) =>
+            onCheckedChange={(checked) => {
               setSettings({
                 ...settings,
                 allCorporationSellOrdersAsStock: checked,
                 myCorporationSellOrdersAsStock: checked
                   ? true
                   : settings.myCorporationSellOrdersAsStock,
-              })
-            }
+              });
+            }}
           />
         </Field>
         <Field className={styles.rule} orientation="horizontal">
@@ -299,9 +313,9 @@ export default function SettingsPage() {
             id="my-corporation-sell-orders-as-assets"
             aria-labelledby="my-corporation-sell-orders-as-assets-label"
             checked={settings.myCorporationSellOrdersAsStock}
-            onCheckedChange={(checked) =>
-              setSettings({ ...settings, myCorporationSellOrdersAsStock: checked })
-            }
+            onCheckedChange={(checked) => {
+              setSettings({ ...settings, myCorporationSellOrdersAsStock: checked });
+            }}
           />
         </Field>
         <Field className={styles.rule} orientation="horizontal">
@@ -313,7 +327,9 @@ export default function SettingsPage() {
             id="respect-active-jobs"
             aria-labelledby="respect-active-jobs-label"
             checked={settings.respectActiveJobs}
-            onCheckedChange={(checked) => setSettings({ ...settings, respectActiveJobs: checked })}
+            onCheckedChange={(checked) => {
+              setSettings({ ...settings, respectActiveJobs: checked });
+            }}
           />
         </Field>
         <Field className={styles.rule} orientation="horizontal">
@@ -336,15 +352,15 @@ export default function SettingsPage() {
               step="1"
               aria-describedby="max-reaction-job-duration-description max-reaction-job-duration-unit"
               value={settings.maxReactionJobDurationHours}
-              onChange={(event) =>
+              onChange={(event) => {
                 setSettings({
                   ...settings,
                   maxReactionJobDurationHours: Math.max(
                     1,
                     Math.round(boundedNumber(event.target.value, 8760)),
                   ),
-                })
-              }
+                });
+              }}
             />
             <span id="max-reaction-job-duration-unit" className="text-sm text-muted-foreground">
               hours
@@ -366,9 +382,9 @@ export default function SettingsPage() {
               max="10"
               step="1"
               value={settings.fallbackT1Me}
-              onChange={(event) =>
-                setSettings({ ...settings, fallbackT1Me: boundedNumber(event.target.value, 10) })
-              }
+              onChange={(event) => {
+                setSettings({ ...settings, fallbackT1Me: boundedNumber(event.target.value, 10) });
+              }}
             />
             <FieldLabel htmlFor="fallback-t1-te">TE</FieldLabel>
             <Input
@@ -379,9 +395,9 @@ export default function SettingsPage() {
               max="20"
               step="1"
               value={settings.fallbackT1Te}
-              onChange={(event) =>
-                setSettings({ ...settings, fallbackT1Te: boundedNumber(event.target.value, 20) })
-              }
+              onChange={(event) => {
+                setSettings({ ...settings, fallbackT1Te: boundedNumber(event.target.value, 20) });
+              }}
             />
           </div>
         </Field>
@@ -400,12 +416,12 @@ export default function SettingsPage() {
               max="10"
               step="1"
               value={settings.fallbackT2OrT3Me}
-              onChange={(event) =>
+              onChange={(event) => {
                 setSettings({
                   ...settings,
                   fallbackT2OrT3Me: boundedNumber(event.target.value, 10),
-                })
-              }
+                });
+              }}
             />
             <FieldLabel htmlFor="fallback-t2-or-t3-te">TE</FieldLabel>
             <Input
@@ -416,12 +432,12 @@ export default function SettingsPage() {
               max="20"
               step="1"
               value={settings.fallbackT2OrT3Te}
-              onChange={(event) =>
+              onChange={(event) => {
                 setSettings({
                   ...settings,
                   fallbackT2OrT3Te: boundedNumber(event.target.value, 20),
-                })
-              }
+                });
+              }}
             />
           </div>
         </Field>
@@ -434,7 +450,9 @@ export default function SettingsPage() {
         <BuildBlacklistDialog
           language={language}
           items={settings.buildBlacklist}
-          onCancel={() => setIsBlacklistOpen(false)}
+          onCancel={() => {
+            setIsBlacklistOpen(false);
+          }}
           onSave={(buildBlacklist) => {
             const nextSettings = { ...settings, buildBlacklist };
             setSettings(nextSettings);
@@ -448,7 +466,9 @@ export default function SettingsPage() {
         <MarketStationsDialog
           language={language}
           stations={settings.marketStations}
-          onCancel={() => setIsMarketStationsOpen(false)}
+          onCancel={() => {
+            setIsMarketStationsOpen(false);
+          }}
           onSave={(marketStations) => {
             const nextSettings = { ...settings, marketStations };
             setSettings(nextSettings);
@@ -489,7 +509,12 @@ function MarketStationsDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onCancel();
+      }}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Signals market locations</DialogTitle>
@@ -525,11 +550,11 @@ function MarketStationsDialog({
                   variant="destructive"
                   size="icon-sm"
                   aria-label={`Remove ${station.name}`}
-                  onClick={() =>
+                  onClick={() => {
                     setDraft((current) =>
                       current.filter((entry) => entry.stationId !== station.stationId),
-                    )
-                  }
+                    );
+                  }}
                 >
                   <Trash2 aria-hidden="true" />
                 </Button>
@@ -541,7 +566,12 @@ function MarketStationsDialog({
           <Button type="button" variant="outline" onClick={onCancel}>
             Cancel
           </Button>
-          <Button type="button" onClick={() => onSave(draft)}>
+          <Button
+            type="button"
+            onClick={() => {
+              onSave(draft);
+            }}
+          >
             Save locations
           </Button>
         </DialogFooter>
@@ -585,7 +615,12 @@ function BuildBlacklistDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onCancel();
+      }}
+    >
       <DialogContent>
         <DialogTitle>Build blacklist</DialogTitle>
         <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto">
@@ -616,9 +651,11 @@ function BuildBlacklistDialog({
                     size="icon-sm"
                     title={`Remove ${item.name}`}
                     aria-label={`Remove ${item.name}`}
-                    onClick={() =>
-                      setDraft((current) => current.filter((entry) => entry.typeId !== item.typeId))
-                    }
+                    onClick={() => {
+                      setDraft((current) =>
+                        current.filter((entry) => entry.typeId !== item.typeId),
+                      );
+                    }}
                   >
                     <Trash2 aria-hidden="true" />
                   </Button>
@@ -627,7 +664,13 @@ function BuildBlacklistDialog({
             </div>
           )}
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="destructive" onClick={() => setDraft([])}>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                setDraft([]);
+              }}
+            >
               <Trash2 data-icon="inline-start" aria-hidden="true" />
               Delete all
             </Button>
@@ -647,7 +690,12 @@ function BuildBlacklistDialog({
           <Button type="button" variant="outline" onClick={onCancel}>
             Cancel
           </Button>
-          <Button type="button" onClick={() => onSave(draft)}>
+          <Button
+            type="button"
+            onClick={() => {
+              onSave(draft);
+            }}
+          >
             Save
           </Button>
         </DialogFooter>
@@ -659,9 +707,11 @@ function BuildBlacklistDialog({
           title="Build blacklist import"
           description="Paste one item per line. Quantities are ignored for the blacklist."
           ariaLabel="Blacklist items and quantities"
-          onCancel={() => setIsPasteOpen(false)}
-          onImport={(importedItems) =>
-            void importPastedItems(
+          onCancel={() => {
+            setIsPasteOpen(false);
+          }}
+          onImport={(importedItems) => {
+            importPastedItems(
               importedItems.map((item) => ({
                 typeId: item.typeId,
                 name: item.name,
@@ -673,8 +723,8 @@ function BuildBlacklistDialog({
                   : {}),
                 ...(item.assemblyLineGroup ? { assemblyLineGroup: item.assemblyLineGroup } : {}),
               })),
-            )
-          }
+            );
+          }}
         />
       )}
     </Dialog>

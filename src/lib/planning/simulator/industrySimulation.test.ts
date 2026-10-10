@@ -513,7 +513,7 @@ void test("hauls available Charon components to A while protecting A-local deman
     result.lists.haulingTasks
       .filter((task) => task.typeId === componentTypeId)
       .map((task) => [task.fromLocationId, task.toLocationId, task.quantity])
-      .sort((left, right) => Number(left[0]) - Number(right[0])),
+      .sort((left, right) => left[0] - right[0]),
     [
       [stationB, stationA, 1],
       [stationC, stationA, 2],

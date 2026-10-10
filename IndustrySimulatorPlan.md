@@ -1,6 +1,11 @@
 ## Plan: Ledger-Based Industry Simulator
 
-Build a new deterministic simulator beside the current planner at `/api/plan/simulate`. Preserve the ten-list product shape through a versioned response adapter, but implement a clean internal model: type-only dependency discovery, complete demand declaration, one conserved asset-lot registry, append-only ledger transactions, ordered settlement, and presentation-ready projections. Leave `/api/plan` and the visible UI unchanged during this project.
+> Historical implementation plan. It describes the original parallel rollout and legacy response
+> adapter. The shipped application has removed the legacy `/api/plan` calculation route and adapter;
+> `/api/plan/simulate` and `SimulationResults` are the active planning path. Use `CurrentPlan.md` and
+> `README.md` for the current contract.
+
+The original proposal was to build a deterministic simulator beside the current planner at `/api/plan/simulate`. It proposed preserving the ten-list product shape through a versioned response adapter, with type-only dependency discovery, complete demand declaration, one conserved asset-lot registry, append-only ledger transactions, ordered settlement, and presentation-ready projections.
 
 ### Assessment of the proposed approach
 

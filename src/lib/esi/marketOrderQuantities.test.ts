@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { MarketOrderRecord } from "@/lib/auth/model";
+import type { MarketOrderBuyQuantity } from "./marketOrderQuantities";
 import {
   addMarketBuyOrderQuantities,
   addMarketBuyOrderQuantitiesByLocation,
@@ -48,8 +49,20 @@ void test("keeps corporation orders out of the character-scoped quantity map", (
   assert.deepEqual([...quantities], []);
 });
 
+void test("ignores orders whose side is unknown", () => {
+  const quantities = new Map<number, number>();
+  const seenOrderIds = new Set<number>();
+  const unknownSideOrder = { ...order(107, 34, 10), isBuyOrder: undefined };
+
+  addMarketBuyOrderQuantities(quantities, [unknownSideOrder], seenOrderIds);
+  addMarketBuyOrderQuantitiesByLocation(new Map(), [unknownSideOrder], new Set());
+
+  assert.deepEqual([...quantities], []);
+  assert.deepEqual([...seenOrderIds], []);
+});
+
 void test("groups buy orders by type and location", () => {
-  const quantities = new Map();
+  const quantities = new Map<string, MarketOrderBuyQuantity>();
   const seenOrderIds = new Set<number>();
 
   addMarketBuyOrderQuantitiesByLocation(

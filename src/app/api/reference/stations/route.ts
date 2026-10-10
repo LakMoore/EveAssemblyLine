@@ -11,7 +11,7 @@ import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 
 const stationQuerySchema = z
   .object({
-    stationId: z.coerce.number().int().positive().safe().optional(),
+    stationId: z.coerce.number().int().positive().optional(),
     query: z.string().trim().min(2).max(100).optional(),
   })
   .refine((value) => (value.stationId === undefined) !== (value.query === undefined));

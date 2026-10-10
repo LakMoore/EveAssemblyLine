@@ -49,7 +49,9 @@ export function GoogleAnalytics() {
 
     handleConsentChange();
     window.addEventListener(analyticsConsentChangeEvent, handleConsentChange);
-    return () => window.removeEventListener(analyticsConsentChangeEvent, handleConsentChange);
+    return () => {
+      window.removeEventListener(analyticsConsentChangeEvent, handleConsentChange);
+    };
   }, []);
 
   useEffect(() => {
@@ -85,7 +87,9 @@ export function GoogleAnalytics() {
       <Script
         src={`https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}`}
         strategy="afterInteractive"
-        onLoad={() => setScriptLoaded(true)}
+        onLoad={() => {
+          setScriptLoaded(true);
+        }}
       />
       <Script id="google-analytics" strategy="afterInteractive">
         {`window.dataLayer = window.dataLayer || [];

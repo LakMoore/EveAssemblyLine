@@ -6,25 +6,24 @@ let firestorePromise: Promise<Firestore> | undefined;
 
 export interface Storage {
   getItem<T>(key: string): Promise<T | undefined>;
-  getItemsByPrefix<T>(prefix: string): Promise<Array<{ key: string; value: T | undefined }>>;
-  setItem<T>(key: string, value: T): Promise<void>;
+  getItemsByPrefix(prefix: string): Promise<Array<{ key: string; value: unknown }>>;
+  setItem(key: string, value: unknown): Promise<void>;
   deleteItem(key: string): Promise<void>;
   runTransaction<T>(callback: (transaction: StorageTransaction) => Promise<T>): Promise<T>;
 }
 
 export interface StorageTransaction {
   getItem<T>(key: string): Promise<T | undefined>;
-  getItemsByPrefix<T>(prefix: string): Promise<Array<{ key: string; value: T | undefined }>>;
-  setItem<T>(key: string, value: T): void;
+  getItemsByPrefix(prefix: string): Promise<Array<{ key: string; value: unknown }>>;
+  setItem(key: string, value: unknown): void;
   deleteItem(key: string): void;
 }
 
 function getFirestoreDatabase() {
-  if (!firestorePromise) {
-    firestorePromise = Promise.resolve().then(() => {
+  firestorePromise
+    ??= Promise.resolve().then(() => {
       return getFirestore(getFirebaseApp());
     });
-  }
   return firestorePromise;
 }
 
@@ -72,7 +71,7 @@ export async function initStorage() {
       const snapshot = await database.collection(storageCollection).doc(key).get();
       return snapshot.exists ? (snapshot.data()?.value as T) : undefined;
     },
-    async getItemsByPrefix<T>(prefix: string) {
+    async getItemsByPrefix(prefix: string) {
       const snapshots = await database
         .collection(storageCollection)
         .where(FieldPath.documentId(), ">=", prefix)
@@ -80,10 +79,10 @@ export async function initStorage() {
         .get();
       return snapshots.docs.map((snapshot) => ({
         key: snapshot.id,
-        value: snapshot.data().value as T | undefined,
+        value: snapshot.data().value as unknown,
       }));
     },
-    async setItem<T>(key: string, value: T) {
+    async setItem(key: string, value: unknown) {
       await database
         .collection(storageCollection)
         .doc(key)
@@ -102,7 +101,7 @@ export async function initStorage() {
             const snapshot = await transaction.get(database.collection(storageCollection).doc(key));
             return snapshot.exists ? (snapshot.data()?.value as K) : undefined;
           },
-          async getItemsByPrefix<K>(prefix: string) {
+          async getItemsByPrefix(prefix: string) {
             const snapshots = await transaction.get(
               database
                 .collection(storageCollection)
@@ -111,10 +110,10 @@ export async function initStorage() {
             );
             return snapshots.docs.map((snapshot) => ({
               key: snapshot.id,
-              value: snapshot.data().value as K | undefined,
+              value: snapshot.data().value as unknown,
             }));
           },
-          setItem<K>(key: string, value: K) {
+          setItem(key: string, value: unknown) {
             transaction.set(
               database.collection(storageCollection).doc(key),
               {

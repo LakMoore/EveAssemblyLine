@@ -5,8 +5,7 @@ import {
   normalizeFacilitySettings,
   type FacilitySettingsPayload,
 } from "../planning/facilities";
-import {
-  corporationHangarFlags,
+import type {
   CharacterCollectionRecord,
   CorporationCollectionSettings,
   CharacterTokenRecord,
@@ -14,6 +13,7 @@ import {
   SessionRecord,
   TokenSet,
 } from "./model";
+import { corporationHangarFlags } from "./model";
 import { hasCorporationRefreshScopes } from "../esi/corporationAccess";
 import { isCorpRefreshOptInEnabled } from "./corpRefreshOptIn";
 
@@ -29,6 +29,11 @@ type RawCorporationSettingsRecord = {
   containerItemIds?: unknown;
 };
 
+type StoredSessionRecord = SessionRecord & {
+  accountId?: string;
+  characterIds?: number[];
+};
+
 function characterTokenKey(characterId: number) {
   return `${characterTokenKeyPrefix}${characterId}`;
 }
@@ -37,14 +42,30 @@ function characterRecordKey(characterId: number) {
   return `${characterRecordKeyPrefix}${characterId}`;
 }
 
-function normalizeTokenSet(value: Partial<TokenSet> | undefined): TokenSet | null {
-  if (!value?.accessToken || !value.refreshToken || !value.accessTokenExpiresAt) return null;
+function normalizeTokenSet(value: unknown): TokenSet | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const tokenSet = value as Partial<TokenSet>;
+  if (
+    typeof tokenSet.accessToken !== "string"
+    || !tokenSet.accessToken
+    || typeof tokenSet.refreshToken !== "string"
+    || !tokenSet.refreshToken
+    || typeof tokenSet.accessTokenExpiresAt !== "string"
+    || !tokenSet.accessTokenExpiresAt
+  ) {
+    return null;
+  }
   return {
-    accessToken: value.accessToken,
-    refreshToken: value.refreshToken,
-    accessTokenExpiresAt: value.accessTokenExpiresAt,
-    scopes: Array.isArray(value.scopes) ? value.scopes : [],
-    lastUsedAt: value.lastUsedAt ?? 0,
+    accessToken: tokenSet.accessToken,
+    refreshToken: tokenSet.refreshToken,
+    accessTokenExpiresAt: tokenSet.accessTokenExpiresAt,
+    scopes: Array.isArray(tokenSet.scopes)
+      ? tokenSet.scopes.filter((scope): scope is string => typeof scope === "string")
+      : [],
+    lastUsedAt:
+      typeof tokenSet.lastUsedAt === "number" && Number.isFinite(tokenSet.lastUsedAt)
+        ? tokenSet.lastUsedAt
+        : 0,
   };
 }
 
@@ -121,8 +142,7 @@ export function normalizeCorporationSettings(value: unknown): CorporationCollect
             ? [
                 {
                   rootLocationId,
-                  locationFlag:
-                    candidateSource.locationFlag as CorporationCollectionSettings["directHangars"][number]["locationFlag"],
+                  locationFlag: candidateSource.locationFlag,
                 },
               ]
             : [];
@@ -190,7 +210,7 @@ export function mergeCorporationSettings(
 }
 
 async function getCharactersInTransaction(transaction: StorageTransaction) {
-  const characterEntries = await transaction.getItemsByPrefix<unknown>(characterRecordKeyPrefix);
+  const characterEntries = await transaction.getItemsByPrefix(characterRecordKeyPrefix);
   return characterEntries
     .map((entry) => normalizeCharacter(entry.value))
     .filter((record): record is CharacterTokenRecord => record !== null);
@@ -200,8 +220,8 @@ async function getCharactersInTransaction(transaction: StorageTransaction) {
 export async function getAllCharacters(): Promise<CharacterTokenRecord[]> {
   const storage = await initStorage();
   const [characterEntries, tokenEntries] = await Promise.all([
-    storage.getItemsByPrefix<unknown>(characterRecordKeyPrefix),
-    storage.getItemsByPrefix<Partial<TokenSet>>(characterTokenKeyPrefix),
+    storage.getItemsByPrefix(characterRecordKeyPrefix),
+    storage.getItemsByPrefix(characterTokenKeyPrefix),
   ]);
   const tokenSetsByCharacterId = new Map<number, TokenSet>();
   for (const entry of tokenEntries) {
@@ -280,9 +300,7 @@ export async function saveCharacter(record: CharacterTokenRecord): Promise<void>
   await storage.runTransaction(async (transaction) => {
     let collections: CharacterCollectionRecord[] | undefined;
     if (record.collectionId) {
-      collections =
-        ((await transaction.getItem("collections")) as CharacterCollectionRecord[] | undefined)
-        ?? [];
+      collections = (await transaction.getItem<CharacterCollectionRecord[]>("collections")) ?? [];
     }
     transaction.setItem(characterRecordKey(record.characterId), record);
     transaction.deleteItem(characterTokenKey(record.characterId));
@@ -355,9 +373,7 @@ export async function clearCharacterCorporationAuthorization(characterId: number
   );
 }
 
-export function normalizeSessions(
-  raw: Array<SessionRecord & { accountId?: string; characterIds?: number[] }> | undefined,
-): SessionRecord[] {
+export function normalizeSessions(raw: StoredSessionRecord[] | undefined): SessionRecord[] {
   return (raw ?? []).map((session) => ({
     sessionId: session.sessionId,
     collectionId: session.collectionId ?? session.accountId,
@@ -370,11 +386,7 @@ export function normalizeSessions(
 
 export async function getSessions(): Promise<SessionRecord[]> {
   const storage = await initStorage();
-  return normalizeSessions(
-    (await storage.getItem("sessions")) as
-      | Array<SessionRecord & { accountId?: string; characterIds?: number[] }>
-      | undefined,
-  );
+  return normalizeSessions(await storage.getItem<StoredSessionRecord[]>("sessions"));
 }
 export async function saveSessions(records: SessionRecord[]) {
   await (await initStorage()).setItem("sessions", records);
@@ -425,7 +437,7 @@ function normalizeCollections(
 export async function getCollections(): Promise<CharacterCollectionRecord[]> {
   const storage = await initStorage();
   const characters = await getAllCharacters();
-  const stored = (await storage.getItem("collections")) as CharacterCollectionRecord[] | undefined;
+  const stored = await storage.getItem<CharacterCollectionRecord[]>("collections");
   // Characters saved before collections existed are adopted into a new collection here.
   for (const character of characters) {
     if (character.collectionId) continue;
@@ -438,7 +450,7 @@ export async function getCollections(): Promise<CharacterCollectionRecord[]> {
 export async function getCollection(collectionId?: string) {
   if (!collectionId) return null;
   const storage = await initStorage();
-  const stored = (await storage.getItem("collections")) as CharacterCollectionRecord[] | undefined;
+  const stored = await storage.getItem<CharacterCollectionRecord[]>("collections");
   const collection = stored?.find((record) => record.collectionId === collectionId);
   if (collection) return collection;
   return (await getCollections()).find((record) => record.collectionId === collectionId) ?? null;
@@ -470,7 +482,7 @@ export async function saveCollection(record: CharacterCollectionRecord) {
   const storage = await initStorage();
   await storage.runTransaction(async (transaction) => {
     const collections =
-      ((await transaction.getItem("collections")) as CharacterCollectionRecord[] | undefined) ?? [];
+      (await transaction.getItem<CharacterCollectionRecord[]>("collections")) ?? [];
     const index = collections.findIndex(
       (collection) => collection.collectionId === record.collectionId,
     );
@@ -493,9 +505,7 @@ export async function deleteCharacter(characterId: number, collectionId: string)
       throw new Error("Character is not attached to this collection.");
     }
 
-    const storedCollections = (await transaction.getItem("collections")) as
-      | CharacterCollectionRecord[]
-      | undefined;
+    const storedCollections = await transaction.getItem<CharacterCollectionRecord[]>("collections");
     const collections = normalizeCollections(storedCollections, characters);
     for (const collection of collections) {
       collection.characterIds = collection.characterIds.filter((id) => id !== characterId);
@@ -511,9 +521,7 @@ export async function mergeCollections(targetId: string, sourceId: string) {
   const storage = await initStorage();
   await storage.runTransaction(async (transaction) => {
     const characters = await getCharactersInTransaction(transaction);
-    const storedCollections = (await transaction.getItem("collections")) as
-      | CharacterCollectionRecord[]
-      | undefined;
+    const storedCollections = await transaction.getItem<CharacterCollectionRecord[]>("collections");
     const collections = normalizeCollections(storedCollections, characters);
     const target = collections.find((collection) => collection.collectionId === targetId);
     const source = collections.find((collection) => collection.collectionId === sourceId);
@@ -531,9 +539,7 @@ export async function mergeCollections(targetId: string, sourceId: string) {
     for (const character of characters) {
       if (character.collectionId === sourceId) character.collectionId = targetId;
     }
-    const rawSessions = (await transaction.getItem("sessions")) as
-      | Array<SessionRecord & { accountId?: string }>
-      | undefined;
+    const rawSessions = await transaction.getItem<StoredSessionRecord[]>("sessions");
     const sessions = (rawSessions ?? []).map((session) => ({
       sessionId: session.sessionId,
       collectionId: session.collectionId ?? session.accountId,
@@ -599,7 +605,7 @@ export async function saveCollectionCorporationSettings(
   const storage = await initStorage();
   return storage.runTransaction(async (transaction) => {
     const collections =
-      ((await transaction.getItem("collections")) as CharacterCollectionRecord[] | undefined) ?? [];
+      (await transaction.getItem<CharacterCollectionRecord[]>("collections")) ?? [];
     const collection = collections.find((record) => record.collectionId === collectionId);
     if (!collection) throw new Error("Collection not found");
     const existing = normalizeCorporationSettings(collection.corporationSettings);
@@ -621,7 +627,7 @@ export async function saveCollectionFacilities(
   const storage = await initStorage();
   return storage.runTransaction(async (transaction) => {
     const collections =
-      ((await transaction.getItem("collections")) as CharacterCollectionRecord[] | undefined) ?? [];
+      (await transaction.getItem<CharacterCollectionRecord[]>("collections")) ?? [];
     let collection = collections.find((record) => record.collectionId === collectionId);
     if (!collection) {
       // The collection may exist only as a record derived from character membership.
@@ -728,9 +734,7 @@ export async function deleteSession(sessionId: string) {
   const storage = await initStorage();
   await storage.runTransaction(async (transaction) => {
     const sessions = normalizeSessions(
-      (await transaction.getItem("sessions")) as
-        | Array<SessionRecord & { accountId?: string }>
-        | undefined,
+      await transaction.getItem<StoredSessionRecord[]>("sessions"),
     );
     transaction.setItem(
       "sessions",
@@ -743,9 +747,7 @@ export async function saveSession(record: SessionRecord) {
   const storage = await initStorage();
   await storage.runTransaction(async (transaction) => {
     const sessions = normalizeSessions(
-      (await transaction.getItem("sessions")) as
-        | Array<SessionRecord & { accountId?: string }>
-        | undefined,
+      await transaction.getItem<StoredSessionRecord[]>("sessions"),
     );
     const index = sessions.findIndex((session) => session.sessionId === record.sessionId);
     if (index === -1) sessions.push(record);
@@ -757,12 +759,22 @@ export async function saveSession(record: SessionRecord) {
 export async function savePendingMerge(mergeId: string, record: PendingMergeRecord) {
   const storage = await initStorage();
   await storage.runTransaction(async (transaction) => {
-    const pendingMerges =
-      await transaction.getItemsByPrefix<Partial<PendingMergeRecord>>("pending-merge:");
+    const pendingMerges = await transaction.getItemsByPrefix("pending-merge:");
     const now = Date.now();
     for (const pendingMerge of pendingMerges) {
-      const expiresAt = pendingMerge.value?.expiresAt;
-      if (!expiresAt || !Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= now) {
+      const pendingMergeValue = pendingMerge.value;
+      const expiresAt =
+        pendingMergeValue
+        && typeof pendingMergeValue === "object"
+        && !Array.isArray(pendingMergeValue)
+        && "expiresAt" in pendingMergeValue
+          ? pendingMergeValue.expiresAt
+          : undefined;
+      if (
+        typeof expiresAt !== "string"
+        || !Number.isFinite(Date.parse(expiresAt))
+        || Date.parse(expiresAt) <= now
+      ) {
         transaction.deleteItem(pendingMerge.key);
       }
     }
@@ -771,9 +783,7 @@ export async function savePendingMerge(mergeId: string, record: PendingMergeReco
 }
 
 export async function getPendingMerge(mergeId: string) {
-  return (await (await initStorage()).getItem(`pending-merge:${mergeId}`)) as
-    | PendingMergeRecord
-    | undefined;
+  return (await initStorage()).getItem<PendingMergeRecord>(`pending-merge:${mergeId}`);
 }
 
 export async function deletePendingMerge(mergeId: string) {

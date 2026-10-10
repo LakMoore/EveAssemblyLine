@@ -3,23 +3,23 @@ import type { CacheEntry, CacheSetEntry, ICacheProvider } from "./CacheProvider"
 export class InMemoryCacheProvider implements ICacheProvider {
   private readonly store = new Map<string, CacheEntry<unknown>>();
 
-  async get<T>(key: string): Promise<T | null> {
+  get<T>(key: string): Promise<T | null> {
     const entry = this.store.get(key) as CacheEntry<T> | undefined;
-    if (!entry) return null;
+    if (!entry) return Promise.resolve(null);
 
     if (entry.ttlMs != null && entry.ttlMs > 0 && Date.now() - entry.createdAtMs >= entry.ttlMs) {
       this.store.delete(key);
-      return null;
+      return Promise.resolve(null);
     }
 
-    return entry.value;
+    return Promise.resolve(entry.value);
   }
 
   async getMany<T>(keys: readonly string[]): Promise<Array<T | null>> {
     return Promise.all(keys.map((key) => this.get<T>(key)));
   }
 
-  async set<T>(key: string, value: T, ttlMs?: number | null): Promise<void> {
+  set(key: string, value: unknown, ttlMs?: number | null): Promise<void> {
     this.store.set(
       key,
       {
@@ -28,6 +28,7 @@ export class InMemoryCacheProvider implements ICacheProvider {
         createdAtMs: Date.now(),
       },
     );
+    return Promise.resolve();
   }
 
   async setMany(entries: readonly CacheSetEntry[]): Promise<void> {
@@ -38,16 +39,17 @@ export class InMemoryCacheProvider implements ICacheProvider {
     return this.get<string>(key);
   }
 
-  async delete(key: string | string[]): Promise<void> {
+  delete(key: string | string[]): Promise<void> {
     if (Array.isArray(key)) {
       for (const entryKey of key) this.store.delete(entryKey);
-      return;
+      return Promise.resolve();
     }
 
     this.store.delete(key);
+    return Promise.resolve();
   }
 
-  async *scan(pattern = "*"): AsyncGenerator<string, void, undefined> {
+  *scan(pattern = "*"): Generator<string, void, undefined> {
     const matcher = new RegExp(
       `^${pattern
         .replace(/[.+^${}()|[\]\\]/g, "\\$&")
@@ -59,7 +61,8 @@ export class InMemoryCacheProvider implements ICacheProvider {
     }
   }
 
-  async clear(): Promise<void> {
+  clear(): Promise<void> {
     this.store.clear();
+    return Promise.resolve();
   }
 }

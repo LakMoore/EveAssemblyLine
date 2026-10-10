@@ -1,10 +1,12 @@
 import type {
+  PlanBuildItem,
   PlanFacilityProfile,
-  PlanRequest,
-  PlanStockItem,
+  IndustryJobStatus,
+  PlanStockpile,
   StockItem,
   StockOwnerType,
 } from "@/lib/planning/types";
+import type { SdeLanguage } from "@/lib/reference/languages";
 
 /** Sanitized provenance needed to model an already-installed industry output. */
 export interface SimulationIndustryOutputMarker {
@@ -41,7 +43,39 @@ export type SimulationAsset = Omit<
   industryOutput?: SimulationIndustryOutputMarker;
 };
 
-type CategorizedPlanAssets = Exclude<NonNullable<PlanRequest["assets"]>, PlanStockItem[]>;
+export type CategorizedSimulationItem = {
+  typeId: number;
+  quantity: number;
+  locationId: number;
+  rootLocationId: number;
+};
+
+export type CategorizedSimulationBlueprint = CategorizedSimulationItem & {
+  itemId?: number;
+  type: "bpc" | "bpo";
+  runs: number;
+  me?: number;
+  te?: number;
+};
+
+export type CategorizedSimulationIndustry = CategorizedSimulationItem & {
+  jobId: number;
+  blueprintId?: number;
+  runs: number;
+  activity: string;
+  status?: IndustryJobStatus;
+  blueprintTypeId?: number;
+  blueprintRunsAtInstall?: number;
+  licensedRuns?: number;
+  installedRuns?: number;
+};
+
+export type CategorizedSimulationAssets = {
+  items: CategorizedSimulationItem[];
+  blueprints: CategorizedSimulationBlueprint[];
+  industry: CategorizedSimulationIndustry[];
+  market: CategorizedSimulationItem[];
+};
 
 /** Activity kinds represented by simulator ledgers and schedules. */
 export type SimulationActivity =
@@ -131,7 +165,7 @@ export interface SimulationPolicyV1 {
   maxGraphDepth: number;
 }
 
-/** Additive simulator controls carried beside the current planning request. */
+/** Additive controls for the versioned simulator request. */
 export interface SimulationOptionsV1 {
   version: 1;
   simulateSurplus: boolean;
@@ -143,37 +177,34 @@ export interface SimulationOptionsV1 {
   policy: SimulationPolicyV1;
 }
 
-/** Public request accepted by the versioned simulator endpoint. */
+/** Haul route omitted from the versioned simulation request. */
 export interface SimulationHaulExclusion {
   typeId: number;
   fromLocationId: number;
   toLocationId: number;
 }
 
-/** Public request accepted by the versioned simulator endpoint. */
-export type SimulationRequestV1 = Omit<
-  PlanRequest,
-  "assets" | "facilityProfiles" | "haulExclusions" | "settings"
-> & {
-  assets?: SimulationAsset[] | CategorizedPlanAssets;
+/** Request accepted by the versioned simulator endpoint. */
+export interface SimulationRequestV1 {
+  language?: SdeLanguage;
+  stockpiles: Array<Omit<PlanStockpile, "items"> & { items: PlanBuildItem[] }>;
+  assets?: SimulationAsset[] | CategorizedSimulationAssets;
+  reprocessingEfficiencies?: Record<string, number>;
+  facilityTimeMultipliers?: { manufacturing: number; reactions: number };
   facilityProfiles?: SimulationFacilityProfile[];
   haulExclusions?: SimulationHaulExclusion[];
-  settings: Omit<
-    PlanRequest["settings"],
-    | "personalSellOrdersAsStock"
-    | "allCorporationSellOrdersAsStock"
-    | "myCorporationSellOrdersAsStock"
-  >
-    & Partial<
-      Pick<
-        PlanRequest["settings"],
-        | "personalSellOrdersAsStock"
-        | "allCorporationSellOrdersAsStock"
-        | "myCorporationSellOrdersAsStock"
-      >
-    >;
+  skillTimeMultipliers?: { manufacturing: number; reactions: number };
+  settings: {
+    includeCorporationAssets: boolean;
+    buildBlacklist: number[];
+    buyBlacklist: number[];
+    fallbackT1Me?: number;
+    fallbackT1Te?: number;
+    fallbackT2OrT3Me?: number;
+    fallbackT2OrT3Te?: number;
+  };
   simulation: SimulationOptionsV1;
-};
+}
 
 /** Stable local-versus-future provenance for one planned material requirement. */
 export interface SimulationDemandSource {

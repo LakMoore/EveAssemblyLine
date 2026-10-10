@@ -29,8 +29,8 @@ const compressionRequestSchema = z
       .array(
         z
           .object({
-            typeId: z.number().int().safe().describe("Type ID"),
-            quantity: z.number().int().safe().positive().describe("Positive quantity"),
+            typeId: z.number().int().describe("Type ID"),
+            quantity: z.number().int().positive().describe("Positive quantity"),
             name: z.string().describe("Type name"),
           })
           .strict(),
@@ -102,7 +102,7 @@ function getOreGroupCache(maps: OreGroupMaps): OreGroupCache {
 
 export async function POST(request: Request) {
   try {
-    const rawBody = await request.json();
+    const rawBody: unknown = await request.json();
 
     // Parse and validate the request body with Zod
     const validationResult = compressionRequestSchema.safeParse(rawBody);

@@ -322,7 +322,9 @@ export function useCompressSettings(language: SdeLanguage) {
       if (!detail.rateLimitedUntil) setOptionsRefreshVersion((version) => version + 1);
     };
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
-    return () => window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
+    return () => {
+      window.removeEventListener("assembly-line-esi-refreshed", handleRefresh);
+    };
   }, []);
 
   const updateSettings = (next: SettingsUpdate) => {
@@ -416,7 +418,9 @@ export function CompressSettingsPanel({
           <Select
             disabled={state.isLoading}
             value={settings.locationId}
-            onValueChange={(value) => value && state.updateSettings({ locationId: value })}
+            onValueChange={(value) => {
+              if (value) state.updateSettings({ locationId: value });
+            }}
             items={sortedLocationOptions.map((location) => ({
               value: location.id,
               label: `${location.name ?? `Location ${location.id}`}${location.canReprocess === false ? " [No Reprocessing]" : ""} · ${Math.round(location.baseYield ?? 50)}%`,
@@ -479,9 +483,9 @@ export function CompressSettingsPanel({
         <Select
           disabled={state.isLoading}
           value={settings.characterId}
-          onValueChange={(value) =>
-            value && state.updateSettings({ characterId: value, implantId: "none" })
-          }
+          onValueChange={(value) => {
+            if (value) state.updateSettings({ characterId: value, implantId: "none" });
+          }}
           items={[
             { value: "all-zero", label: "All zero" },
             { value: "all-iv", label: "All IV" },
@@ -518,7 +522,9 @@ export function CompressSettingsPanel({
               ? settings.implantId
               : "none"
           }
-          onValueChange={(value) => value && state.updateSettings({ implantId: value })}
+          onValueChange={(value) => {
+            if (value) state.updateSettings({ implantId: value });
+          }}
           items={implantOptions.map((implant) => ({ value: implant.id, label: implant.name }))}
         >
           <SelectTrigger className="w-full" aria-label="Reprocessing implant">
@@ -545,7 +551,9 @@ export function CompressSettingsPanel({
         <Select
           disabled={state.isLoading}
           value={settings.marketId}
-          onValueChange={(value) => value && state.updateSettings({ marketId: value })}
+          onValueChange={(value) => {
+            if (value) state.updateSettings({ marketId: value });
+          }}
           items={marketHubs.map((market) => ({ value: market.id, label: market.name }))}
         >
           <SelectTrigger className="w-full" aria-label="Market hub">
@@ -568,9 +576,9 @@ export function CompressSettingsPanel({
           <Select
             disabled={state.isLoading}
             value={settings.orderType}
-            onValueChange={(value) =>
-              value && state.updateSettings({ orderType: value as CompressSettings["orderType"] })
-            }
+            onValueChange={(value) => {
+              if (value) state.updateSettings({ orderType: value });
+            }}
             items={[
               { value: "buy-1-day", label: "Buy (1 Day)" },
               { value: "buy-5-day", label: "Buy (5 Day)" },

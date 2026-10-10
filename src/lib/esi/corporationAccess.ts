@@ -91,7 +91,8 @@ export function getCorporationHangarPermissions(
     if (character.corporationId !== corporationId) continue;
     const roles = rolesForLocation(character, rootLocationId, headquartersId);
     const isDirector =
-      character.hasDirectorRole || character.corporationRoles?.includes("Director");
+      character.hasDirectorRole === true
+      || character.corporationRoles?.includes("Director") === true;
     for (const flag of corporationHangarFlags) {
       const roleNames = roleNamesByFlag[flag];
       const permission = permissions.get(flag);

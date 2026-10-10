@@ -43,7 +43,7 @@ export class UpstashRedisCacheProvider implements ICacheProvider {
     });
   }
 
-  async set<T>(key: string, value: T, ttlMs?: number | null): Promise<void> {
+  async set(key: string, value: unknown, ttlMs?: number | null): Promise<void> {
     const serialized = JSON.stringify(value);
 
     if (ttlMs != null && ttlMs > 0) {

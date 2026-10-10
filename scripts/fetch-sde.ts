@@ -9,6 +9,7 @@ import {
 import { mkdtemp, readdir, rename, rm } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
+import type { ReadableStream } from "node:stream/web";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execFile } from "node:child_process";
@@ -78,10 +79,7 @@ async function downloadAndExtract(destination: string, localArchive?: string) {
       `Official EVE SDE archive failed: HTTP ${response.status} from ${process.env.SDE_URL ?? archiveUrl}${detail ? ` (${detail})` : ""}`,
     );
   }
-  await pipeline(
-    Readable.fromWeb(response.body as unknown as import("node:stream/web").ReadableStream),
-    createWriteStream(archivePath),
-  );
+  await pipeline(Readable.fromWeb(response.body as ReadableStream), createWriteStream(archivePath));
   await execFileAsync("unzip", ["-q", "-o", archivePath, "-d", destination]);
   await rm(archivePath, { force: true });
 }
@@ -111,7 +109,7 @@ async function validateJsonlFiles(directory: string) {
         }
         catch (error) {
           throw new Error(
-            `Downloaded SDE file is invalid: ${file} line ${startLine}: ${error instanceof Error ? error.message : error}`,
+            `Downloaded SDE file is invalid: ${file} line ${startLine}: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
       }
@@ -258,7 +256,7 @@ async function main() {
   console.log(`SDE build ${manifest.buildNumber} extracted to ${rawDir}`);
 }
 
-main().catch((error) => {
+main().catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;
 });

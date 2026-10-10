@@ -14,6 +14,7 @@ import { getCachedEsiResponse, setCachedEsiResponse } from "@/cache/services/esi
 import { refreshTokenSet } from "@/lib/auth/eveSso";
 import { getCharacter, saveCharacterTokens } from "@/lib/auth/tokensStore";
 import { logEsiRequest } from "@/lib/esi/logger";
+import { z } from "zod";
 
 const esiBaseUrl = process.env.ESI_BASE_URL ?? "https://esi.evetech.net/latest";
 const refreshLocks = new Map<string, Promise<TokenSet>>();
@@ -26,7 +27,7 @@ const runtime = globalThis as typeof globalThis & {
 const corporationStructureRuntime =
   runtime.__assemblyLineCorporationStructures
   ?? (runtime.__assemblyLineCorporationStructures = {
-    requests: new Map(),
+    requests: new Map<number, Promise<CorporationStructureResult>>(),
   });
 const corporationStructureRequests = corporationStructureRuntime.requests;
 const tokenContexts = new WeakMap<TokenSet, { characterId: number }>();
@@ -68,26 +69,7 @@ function getEsiRateLimitHeaders(headers: Headers): EsiRateLimitHeaders {
 
 export type EsiAssetLocation = {
   item_id: number;
-  name: string;
-  location_id?: number;
-  location_type?: string;
-};
-
-type EsiCharacterSkill = {
-  skill_id: number;
-  active_skill_level: number;
-};
-
-type EsiCharacterLocation = {
-  solar_system_id: number;
-  station_id?: number;
-  structure_id?: number;
-};
-
-type EsiCharacterShip = {
-  ship_item_id: number;
-  ship_name: string;
-  ship_type_id: number;
+  position: { x: number; y: number; z: number };
 };
 
 export type EsiCharacterClone = {
@@ -146,11 +128,6 @@ export type EsiAsset = {
   is_singleton: boolean;
 };
 
-type EsiAssetName = {
-  item_id: number;
-  name: string;
-};
-
 export type EsiBlueprint = {
   item_id: number;
   type_id: number;
@@ -191,7 +168,7 @@ type EsiMarketOrder = {
   issued: string;
   volume_remain: number;
   volume_total: number;
-  is_buy_order: boolean;
+  is_buy_order?: boolean;
   is_corporation?: boolean;
   issued_by?: number;
 };
@@ -230,12 +207,6 @@ export type EsiCorporationDivision = {
   name?: string;
 };
 
-type EsiUniverseName = {
-  id: number;
-  name: string;
-  category: string;
-};
-
 type LocationMetadata = {
   name: string;
   type_id?: number;
@@ -245,6 +216,260 @@ type LocationMetadata = {
   region_id?: number;
   services?: Array<string | { name: string; state: "online" | "offline" | "cleanup" }>;
 };
+
+const optionalIntegerSchema = z
+  .number()
+  .int()
+  .nullish()
+  .transform((value) => value ?? undefined);
+const optionalPositiveIntegerSchema = z
+  .number()
+  .int()
+  .positive()
+  .nullish()
+  .transform((value) => value ?? undefined);
+const optionalStringSchema = z
+  .string()
+  .nullish()
+  .transform((value) => value ?? undefined);
+
+const esiAssetNameSchema = z.looseObject({
+  item_id: z.number().int().positive(),
+  name: z.string(),
+});
+const esiBlueprintSchema = z.looseObject({
+  item_id: z.number().int().positive(),
+  type_id: z.number().int().positive(),
+  location_id: z.number().int().positive(),
+  location_flag: z.string(),
+  quantity: z.number().int(),
+  runs: z.number().int(),
+  material_efficiency: z.number().int(),
+  time_efficiency: z.number().int(),
+});
+const esiAssetSchema = z.looseObject({
+  item_id: z.number().int().positive(),
+  type_id: z.number().int().positive(),
+  quantity: z.number().int(),
+  location_id: z.number().int().positive(),
+  location_type: z.string(),
+  location_flag: z.string(),
+  is_singleton: z.boolean(),
+});
+const esiCharacterLocationSchema = z.looseObject({
+  solar_system_id: z.number().int().positive(),
+  station_id: optionalPositiveIntegerSchema,
+  structure_id: optionalPositiveIntegerSchema,
+});
+const esiCharacterShipSchema = z.looseObject({
+  ship_item_id: z.number().int().positive(),
+  ship_name: z.string(),
+  ship_type_id: z.number().int().positive(),
+});
+const esiIndustryJobSchema = z.looseObject({
+  job_id: z.number().int().positive(),
+  installer_id: z.number().int().positive(),
+  facility_id: z.number().int().positive(),
+  location_id: optionalPositiveIntegerSchema,
+  station_id: optionalPositiveIntegerSchema,
+  output_location_id: z.number().int().positive(),
+  activity_id: z.number().int().positive(),
+  blueprint_id: z.number().int().positive(),
+  blueprint_type_id: z.number().int().positive(),
+  blueprint_location_id: z.number().int().positive(),
+  runs: z.number().int().positive(),
+  probability: z
+    .number()
+    .min(0)
+    .max(1)
+    .nullish()
+    .transform((value) => value ?? undefined),
+  licensed_runs: optionalIntegerSchema,
+  product_type_id: optionalPositiveIntegerSchema,
+  status: z.string(),
+  successful_runs: optionalIntegerSchema,
+  start_date: z.string(),
+  end_date: z.string(),
+  completed_date: optionalStringSchema,
+});
+const esiMarketOrderSchema = z.looseObject({
+  order_id: z.number().int().positive(),
+  type_id: z.number().int().positive(),
+  location_id: z.number().int().positive(),
+  issued: z.string(),
+  volume_remain: z.number().int().nonnegative(),
+  volume_total: z.number().int().nonnegative(),
+  is_buy_order: z.boolean().optional(),
+  is_corporation: z
+    .boolean()
+    .nullish()
+    .transform((value) => value ?? undefined),
+  issued_by: optionalPositiveIntegerSchema,
+});
+const esiCorporationStructureSchema = z.looseObject({
+  structure_id: z.number().int().positive(),
+  type_id: z.number().int().positive(),
+  corporation_id: z.number().int().positive(),
+  system_id: z.number().int().positive(),
+  profile_id: z.number().int().positive(),
+  name: optionalStringSchema,
+  state: z.string(),
+  fuel_expires: optionalStringSchema,
+  state_timer_start: optionalStringSchema,
+  state_timer_end: optionalStringSchema,
+  unanchors_at: optionalStringSchema,
+  reinforce_hour: optionalIntegerSchema,
+  services: z
+    .array(
+      z.looseObject({
+        name: z.string(),
+        state: z.enum(["online", "offline", "cleanup"]),
+      }),
+    )
+    .nullish()
+    .transform((value) => value ?? undefined),
+});
+const esiCorporationPublicInfoSchema = z.looseObject({
+  corporation_id: z.number().int().positive(),
+  alliance_id: optionalPositiveIntegerSchema,
+  ceo_id: optionalPositiveIntegerSchema,
+  date_founded: optionalStringSchema,
+  description: optionalStringSchema,
+  home_station_id: optionalPositiveIntegerSchema,
+  member_count: z
+    .number()
+    .int()
+    .nonnegative()
+    .nullish()
+    .transform((value) => value ?? undefined),
+  name: z.string(),
+  ticker: z.string(),
+  url: optionalStringSchema,
+});
+const esiCorporationDivisionSchema = z.looseObject({
+  division: z.number().int().positive(),
+  name: optionalStringSchema,
+});
+const esiCharacterSkillSchema = z.looseObject({
+  skill_id: z.number().int().positive(),
+  active_skill_level: z.number().int().min(0).max(5),
+});
+const esiCharacterClonesSchema = z.looseObject({
+  jump_clones: z
+    .array(
+      z.looseObject({
+        jump_clone_id: optionalPositiveIntegerSchema,
+        implants: z
+          .array(z.number().int().positive())
+          .nullish()
+          .transform((value) => value ?? undefined),
+      }),
+    )
+    .nullish()
+    .transform((value) => value ?? undefined),
+});
+const esiNumberArraySchema = z.array(z.number().int().positive());
+const esiAssetLocationSchema = z.looseObject({
+  item_id: z.number().int().positive(),
+  position: z.looseObject({
+    x: z.number(),
+    y: z.number(),
+    z: z.number(),
+  }),
+});
+const esiCharacterPublicInfoSchema = z.looseObject({
+  alliance_id: optionalPositiveIntegerSchema,
+  ancestry_id: optionalPositiveIntegerSchema,
+  bloodline_id: optionalPositiveIntegerSchema,
+  birthday: z.string(),
+  character_id: optionalPositiveIntegerSchema,
+  corporation_id: z.number().int().positive(),
+  description: z.string(),
+  faction_id: optionalPositiveIntegerSchema,
+  gender: z.string(),
+  name: z.string(),
+  race_id: z.number().int().positive(),
+  security_status: z.number(),
+  title: optionalStringSchema,
+});
+const esiUniverseNameSchema = z.looseObject({
+  id: z.number().int().positive(),
+  name: z.string(),
+  category: z.string(),
+});
+const esiCharacterRolesResponseSchema = z.looseObject({
+  roles: z
+    .array(z.string())
+    .nullish()
+    .transform((value) => value ?? undefined),
+  roles_at_base: z
+    .array(z.string())
+    .nullish()
+    .transform((value) => value ?? undefined),
+  roles_at_hq: z
+    .array(z.string())
+    .nullish()
+    .transform((value) => value ?? undefined),
+  roles_at_other: z
+    .array(z.string())
+    .nullish()
+    .transform((value) => value ?? undefined),
+});
+const locationMetadataSchema = z.looseObject({
+  name: z.string(),
+  type_id: optionalPositiveIntegerSchema,
+  system_id: optionalPositiveIntegerSchema,
+  solar_system_id: optionalPositiveIntegerSchema,
+  constellation_id: optionalPositiveIntegerSchema,
+  region_id: optionalPositiveIntegerSchema,
+  services: z
+    .array(
+      z.union([
+        z.string(),
+        z.looseObject({
+          name: z.string(),
+          state: z.enum(["online", "offline", "cleanup"]),
+        }),
+      ]),
+    )
+    .nullish()
+    .transform((value) => value ?? undefined),
+});
+const esiIndustrySystemsSchema = z.array(
+  z.looseObject({
+    solar_system_id: z.number().int().positive(),
+    cost_indices: z
+      .array(
+        z.looseObject({
+          activity: z.string(),
+          cost_index: z.number(),
+        }),
+      )
+      .nullish()
+      .transform((value) => value ?? undefined),
+  }),
+);
+const esiCharacterSkillsResponseSchema = z.looseObject({
+  skills: z
+    .array(esiCharacterSkillSchema)
+    .nullish()
+    .transform((value) => value ?? undefined),
+});
+const esiCorporationDivisionsResponseSchema = z.looseObject({
+  hangar: z
+    .array(esiCorporationDivisionSchema)
+    .nullish()
+    .transform((value) => value ?? undefined),
+  wallet: z
+    .array(
+      z.looseObject({
+        division: z.number().int().positive(),
+        name: z.string().optional(),
+      }),
+    )
+    .nullish()
+    .transform((value) => value ?? undefined),
+});
 
 type LocationMetadataResponse = {
   data: LocationMetadata | null;
@@ -302,15 +527,21 @@ async function refreshTokenAfterAuthorizationFailure(characterId: number, tokenS
   return refresh;
 }
 
-async function requestEsi<T>(
+async function requestEsi<Schema extends z.ZodType>(
   path: string,
+  responseSchema: Schema,
   tokenSet?: TokenSet,
   init?: RequestInit,
   options: { skipCacheWrite?: boolean; retryAuthorization?: boolean } = {},
-): Promise<{ data: T | null; headers: Headers; status: number; fromCache: boolean }> {
+): Promise<{
+  data: z.output<Schema> | null;
+  headers: Headers;
+  status: number;
+  fromCache: boolean;
+}> {
   const startedAt = Date.now();
   try {
-    const result = await requestEsiAttempt<T>(path, tokenSet, init, options);
+    const result = await requestEsiAttempt(path, responseSchema, tokenSet, init, options);
     logEsiRequest({
       requestedAt: new Date(startedAt).toISOString(),
       method: init?.method ?? "GET",
@@ -356,12 +587,18 @@ async function requestEsi<T>(
   }
 }
 
-async function requestEsiAttempt<T>(
+async function requestEsiAttempt<Schema extends z.ZodType>(
   path: string,
+  responseSchema: Schema,
   tokenSet?: TokenSet,
   init?: RequestInit,
   options: { skipCacheWrite?: boolean; retryAuthorization?: boolean } = {},
-): Promise<{ data: T | null; headers: Headers; status: number; fromCache: boolean }> {
+): Promise<{
+  data: z.output<Schema> | null;
+  headers: Headers;
+  status: number;
+  fromCache: boolean;
+}> {
   if (esiRateLimitedUntil > Date.now()) {
     const error = new Error(
       `ESI requests paused until ${new Date(esiRateLimitedUntil).toISOString()}`,
@@ -394,8 +631,9 @@ async function requestEsiAttempt<T>(
         );
       if (tokenChanged && context) {
         tokenContexts.set(currentTokenSet, context);
-        return requestEsiAttempt<T>(
+        return requestEsiAttempt(
           path,
+          responseSchema,
           currentTokenSet,
           init,
           {
@@ -409,8 +647,9 @@ async function requestEsiAttempt<T>(
             context.characterId,
             tokenSet,
           );
-          return requestEsiAttempt<T>(
+          return await requestEsiAttempt(
             path,
+            responseSchema,
             refreshedTokenSet,
             init,
             {
@@ -452,7 +691,7 @@ async function requestEsiAttempt<T>(
       retryAfter ?? (response.status === 420 ? errorLimitReset : undefined) ?? undefined;
     throw error;
   }
-  const data = (await response.json()) as T;
+  const data = responseSchema.parse(await response.json());
   const remainingHeader = response.headers.get("x-esi-error-limit-remain");
   const resetHeader = response.headers.get("x-esi-error-limit-reset");
   const remaining = Number(remainingHeader);
@@ -466,8 +705,9 @@ async function requestEsiAttempt<T>(
   return { data, headers: response.headers, status: response.status, fromCache: false };
 }
 
-export async function requestCachedEsi<T>(
+export async function requestCachedEsi<Schema extends z.ZodType>(
   path: string,
+  responseSchema: Schema,
   tokenSet?: TokenSet,
   init?: RequestInit,
   options: {
@@ -475,24 +715,29 @@ export async function requestCachedEsi<T>(
     retryAuthorization?: boolean;
     cacheKey?: string;
   } = {},
-): Promise<{ data: T | null; headers: Headers; status: number; fromCache: boolean }> {
+): Promise<{
+  data: z.output<Schema> | null;
+  headers: Headers;
+  status: number;
+  fromCache: boolean;
+}> {
   const body = typeof init?.body === "string" ? init.body : "";
   const requestCachePath = body
     ? `${path}&body_hash=${createHash("sha256").update(body).digest("hex")}`
     : path;
   const cachePath = options.cacheKey ?? requestCachePath;
-  const cached = await getCachedEsiResponse<T>(cachePath);
+  const cached = await getCachedEsiResponse<unknown>(cachePath);
   if (cached) {
     const cachedHeaders = new Headers(cached.headers);
     cachedHeaders.delete("etag");
     return {
-      data: cached.data,
+      data: cached.data === null ? null : responseSchema.parse(cached.data),
       headers: cachedHeaders,
       status: cached.status,
       fromCache: true,
     };
   }
-  const result = await requestEsi<T>(path, tokenSet, init, options);
+  const result = await requestEsi(path, responseSchema, tokenSet, init, options);
   if (!options.skipCacheWrite && result.status !== 304) {
     const sharedHeaders = Object.fromEntries(
       [...result.headers.entries()].filter(([name]) => name.toLowerCase() !== "etag"),
@@ -523,9 +768,14 @@ function parseRetryAfterMs(value: string | null) {
   return Number.isFinite(timestamp) ? Math.max(1_000, timestamp - Date.now()) : 60_000;
 }
 
-export async function requestEsiConditional<T>(path: string, tokenSet: TokenSet, etag?: string) {
+export async function requestEsiConditional<Schema extends z.ZodType>(
+  path: string,
+  responseSchema: Schema,
+  tokenSet: TokenSet,
+  etag?: string,
+) {
   const headers = etag ? { "if-none-match": etag } : undefined;
-  return requestEsi<T>(path, tokenSet, { headers });
+  return requestEsi(path, responseSchema, tokenSet, { headers });
 }
 
 type EsiEndpointResult<T> = {
@@ -535,53 +785,60 @@ type EsiEndpointResult<T> = {
   fromCache: boolean;
 };
 
-export async function fetchEsiEndpoint<T>(
+export async function fetchEsiEndpoint<Schema extends z.ZodType>(
   path: string,
+  responseSchema: Schema,
   tokenSet: TokenSet,
   etag: string | undefined,
   options: { paginated: true },
-): Promise<EsiEndpointResult<T[]>>;
-export async function fetchEsiEndpoint<T>(
+): Promise<EsiEndpointResult<z.output<Schema>[]>>;
+export async function fetchEsiEndpoint<Schema extends z.ZodType>(
   path: string,
+  responseSchema: Schema,
   tokenSet: TokenSet,
   etag: string | undefined,
   options?: { paginated?: false },
-): Promise<EsiEndpointResult<T>>;
-export async function fetchEsiEndpoint<T>(
+): Promise<EsiEndpointResult<z.output<Schema>>>;
+export async function fetchEsiEndpoint<Schema extends z.ZodType>(
   path: string,
+  responseSchema: Schema,
   tokenSet: TokenSet,
   etag: string | undefined,
   options: { paginated?: boolean } = {},
-) {
+): Promise<EsiEndpointResult<z.output<Schema> | z.output<Schema>[]>> {
   const requestPath = options.paginated ? `${path}?page=1` : path;
-  const first = await requestEsiConditional<T | T[]>(requestPath, tokenSet, etag);
-  if (!options.paginated) {
+  if (options.paginated) {
+    const first = await requestEsiConditional(requestPath, z.array(responseSchema), tokenSet, etag);
+    if (first.status === 304) {
+      return { data: null, headers: first.headers, notModified: true, fromCache: false };
+    }
+    const pageCount = Number(first.headers.get("x-pages") ?? "1");
+    if (pageCount <= 1) {
+      return {
+        data: first.data ?? [],
+        headers: first.headers,
+        notModified: false,
+        fromCache: false,
+      };
+    }
+    const rest: z.output<Schema>[][] = [];
+    for (let page = 2; page <= pageCount; page += 1) {
+      const result = await requestEsi(`${path}?page=${page}`, z.array(responseSchema), tokenSet);
+      rest.push(result.data ?? []);
+    }
     return {
-      data: first.data as T | null,
-      headers: first.headers,
-      notModified: first.status === 304,
-    };
-  }
-  const pageCount = Number(first.headers.get("x-pages") ?? "1");
-  if (first.status === 304) {
-    return { data: null, headers: first.headers, notModified: true };
-  }
-  if (pageCount <= 1) {
-    return {
-      data: first.data ?? [],
+      data: [first.data ?? [], ...rest].flat(),
       headers: first.headers,
       notModified: false,
+      fromCache: false,
     };
   }
-  const rest: T[][] = [];
-  for (let page = 2; page <= pageCount; page += 1) {
-    const result = await requestEsi<T[]>(`${path}?page=${page}`, tokenSet);
-    rest.push(result.data ?? []);
-  }
+  const first = await requestEsiConditional(requestPath, responseSchema, tokenSet, etag);
   return {
-    data: [first.data ?? [], ...rest].flat().filter((item): item is T => item !== null),
+    data: first.data,
     headers: first.headers,
-    notModified: false,
+    notModified: first.status === 304,
+    fromCache: false,
   };
 }
 
@@ -640,8 +897,9 @@ function mapBlueprintInstance(
 
 export async function fetchCharacterBlueprints(record: CharacterTokenRecord, etag?: string) {
   const token = await getUsableToken(record);
-  const result = await fetchEsiEndpoint<EsiBlueprint>(
+  const result = await fetchEsiEndpoint(
     `/characters/${record.characterId}/blueprints/`,
+    esiBlueprintSchema,
     token,
     etag,
     { paginated: true },
@@ -661,8 +919,9 @@ export async function fetchCorporationBlueprints(record: CharacterTokenRecord, e
     throw new Error("Corporation authorization is incomplete");
   }
   const token = await getUsableToken(record);
-  const result = await fetchEsiEndpoint<EsiBlueprint>(
+  const result = await fetchEsiEndpoint(
     `/corporations/${record.corporationId}/blueprints/`,
+    esiBlueprintSchema,
     token,
     etag,
     { paginated: true },
@@ -681,8 +940,9 @@ export async function fetchCorporationBlueprints(record: CharacterTokenRecord, e
 export async function fetchAssetNames(path: string, token: TokenSet, itemIds: number[]) {
   const names = new Map<number, string>();
   for (let index = 0; index < itemIds.length; index += 1000) {
-    const result = await requestCachedEsi<EsiAssetName[]>(
+    const result = await requestCachedEsi(
       path,
+      z.array(esiAssetNameSchema),
       token,
       {
         method: "POST",
@@ -697,8 +957,9 @@ export async function fetchAssetNames(path: string, token: TokenSet, itemIds: nu
 
 export async function fetchCharacterAssets(record: CharacterTokenRecord, etag?: string) {
   const token = await getUsableToken(record);
-  const result = await fetchEsiEndpoint<EsiAsset>(
+  const result = await fetchEsiEndpoint(
     `/characters/${record.characterId}/assets/`,
+    esiAssetSchema,
     token,
     etag,
     { paginated: true },
@@ -716,8 +977,9 @@ export async function fetchCorporationAssets(record: CharacterTokenRecord, etag?
     throw new Error("Corporation authorization is incomplete");
   }
   const token = await getUsableToken(record);
-  const result = await fetchEsiEndpoint<EsiAsset>(
+  const result = await fetchEsiEndpoint(
     `/corporations/${record.corporationId}/assets/`,
+    esiAssetSchema,
     token,
     etag,
     { paginated: true },
@@ -738,8 +1000,9 @@ export async function fetchCorporationAssets(record: CharacterTokenRecord, etag?
 export async function fetchCharacterLocation(record: CharacterTokenRecord, etag?: string) {
   requireCharacterScope(record, "esi-location.read_location.v1");
   const token = await getUsableToken(record);
-  const result = await fetchEsiEndpoint<EsiCharacterLocation>(
+  const result = await fetchEsiEndpoint(
     `/characters/${record.characterId}/location/`,
+    esiCharacterLocationSchema,
     token,
     etag,
     { paginated: false },
@@ -767,8 +1030,9 @@ export async function fetchCharacterLocation(record: CharacterTokenRecord, etag?
 export async function fetchCharacterShip(record: CharacterTokenRecord, etag?: string) {
   requireCharacterScope(record, "esi-location.read_ship_type.v1");
   const token = await getUsableToken(record);
-  const result = await fetchEsiEndpoint<EsiCharacterShip>(
+  const result = await fetchEsiEndpoint(
     `/characters/${record.characterId}/ship/`,
+    esiCharacterShipSchema,
     token,
     etag,
     { paginated: false },
@@ -791,14 +1055,22 @@ export async function fetchCharacterShip(record: CharacterTokenRecord, etag?: st
 export async function fetchCharacterClones(record: CharacterTokenRecord) {
   requireCharacterScope(record, "esi-clones.read_clones.v1");
   const token = await getUsableToken(record);
-  return requestCachedEsi<EsiCharacterClones>(`/characters/${record.characterId}/clones/`, token);
+  return requestCachedEsi(
+    `/characters/${record.characterId}/clones/`,
+    esiCharacterClonesSchema,
+    token,
+  );
 }
 
 /** Fetches implant type IDs installed in the character's active clone. */
 export async function fetchCharacterImplants(record: CharacterTokenRecord) {
   requireCharacterScope(record, "esi-clones.read_implants.v1");
   const token = await getUsableToken(record);
-  return requestCachedEsi<number[]>(`/characters/${record.characterId}/implants/`, token);
+  return requestCachedEsi(
+    `/characters/${record.characterId}/implants/`,
+    esiNumberArraySchema,
+    token,
+  );
 }
 
 function mapIndustryJob(
@@ -868,9 +1140,10 @@ export async function fetchCharacterIndustryJobs(
   assetsLastModified?: string,
 ) {
   const token = await getUsableToken(record);
-  const result = await fetchEsiEndpoint<EsiIndustryJob[]>(
+  const result = await fetchEsiEndpoint(
     // Completed jobs are required to reconcile assets and blueprints after installation.
     `/characters/${record.characterId}/industry/jobs/?include_completed=true`,
+    z.array(esiIndustryJobSchema),
     token,
     etag,
     { paginated: false },
@@ -893,8 +1166,9 @@ export async function fetchCharacterIndustryJobs(
 
 export async function fetchCharacterSkills(record: CharacterTokenRecord, etag?: string) {
   const token = await getUsableToken(record);
-  const result = await fetchEsiEndpoint<{ skills?: EsiCharacterSkill[] }>(
+  const result = await fetchEsiEndpoint(
     `/characters/${record.characterId}/skills/`,
+    esiCharacterSkillsResponseSchema,
     token,
     etag,
     { paginated: false },
@@ -921,9 +1195,10 @@ export async function fetchCorporationIndustryJobs(
     throw new Error("Corporation authorization is incomplete");
   }
   const token = await getUsableToken(record);
-  const result = await fetchEsiEndpoint<EsiIndustryJob[]>(
+  const result = await fetchEsiEndpoint(
     // Completed jobs are required to reconcile assets and blueprints after installation.
     `/corporations/${record.corporationId}/industry/jobs/?include_completed=true`,
+    z.array(esiIndustryJobSchema),
     token,
     etag,
     { paginated: false },
@@ -959,7 +1234,7 @@ function mapMarketOrder(
     issuedAt: order.issued,
     volumeRemain: order.volume_remain,
     volumeTotal: order.volume_total,
-    isBuyOrder: order.is_buy_order,
+    ...(order.is_buy_order === undefined ? {} : { isBuyOrder: order.is_buy_order }),
     ...(order.is_corporation !== undefined ? { isCorporation: order.is_corporation } : {}),
     ...(order.issued_by !== undefined ? { issuedBy: order.issued_by } : {}),
     ownerType,
@@ -969,8 +1244,9 @@ function mapMarketOrder(
 
 export async function fetchCharacterMarketOrders(record: CharacterTokenRecord, etag?: string) {
   const token = await getUsableToken(record);
-  const result = await fetchEsiEndpoint<EsiMarketOrder>(
+  const result = await fetchEsiEndpoint(
     `/characters/${record.characterId}/orders`,
+    esiMarketOrderSchema,
     token,
     etag,
     { paginated: true },
@@ -991,8 +1267,9 @@ export async function fetchCorporationMarketOrders(record: CharacterTokenRecord,
     throw new Error("Corporation authorization is incomplete");
   }
   const token = await getUsableToken(record);
-  const result = await fetchEsiEndpoint<EsiMarketOrder>(
+  const result = await fetchEsiEndpoint(
     `/corporations/${record.corporationId}/orders`,
+    esiMarketOrderSchema,
     token,
     etag,
     { paginated: true },
@@ -1029,8 +1306,9 @@ export async function fetchCorporationStructures(
     .then(async () => {
       const path = `/corporations/${corporationId}/structures/`;
       const token = await getUsableToken(record);
-      const result = await fetchEsiEndpoint<EsiCorporationStructure[]>(
+      const result = await fetchEsiEndpoint(
         path,
+        z.array(esiCorporationStructureSchema),
         token,
         etag,
         { paginated: false },
@@ -1052,8 +1330,9 @@ export async function fetchCorporationPublicInfo(record: CharacterTokenRecord, e
     throw new Error("Corporation authorization is incomplete");
   }
   const token = await getUsableToken(record);
-  const result = await fetchEsiEndpoint<EsiCorporationPublicInfo>(
+  const result = await fetchEsiEndpoint(
     `/corporations/${record.corporationId}/`,
+    esiCorporationPublicInfoSchema,
     token,
     etag,
     { paginated: false },
@@ -1072,10 +1351,13 @@ export async function fetchCorporationDivisions(record: CharacterTokenRecord, et
   }
   requireCharacterScope(record, "esi-corporations.read_divisions.v1");
   const token = await getUsableToken(record);
-  const result = await fetchEsiEndpoint<{
-    hangar?: EsiCorporationDivision[];
-    wallet?: Array<{ division: number; name?: string }>;
-  }>(`/corporations/${record.corporationId}/divisions/`, token, etag, { paginated: false });
+  const result = await fetchEsiEndpoint(
+    `/corporations/${record.corporationId}/divisions/`,
+    esiCorporationDivisionsResponseSchema,
+    token,
+    etag,
+    { paginated: false },
+  );
   return {
     divisions: result.data?.hangar ?? null,
     headers: result.headers,
@@ -1103,8 +1385,9 @@ export async function fetchAssetLocations(
   const locations: EsiAssetLocation[] = [];
   for (const batch of batches) {
     try {
-      const result = await requestCachedEsi<EsiAssetLocation[]>(
+      const result = await requestCachedEsi(
         path,
+        z.array(esiAssetLocationSchema),
         token,
         {
           method: "POST",
@@ -1123,8 +1406,11 @@ export async function fetchAssetLocations(
 }
 
 export async function fetchCharacterPublicInfo(characterId: number) {
-  const result = await requestCachedEsi<EsiCharacterPublicInfo>(`/characters/${characterId}/`);
-  if (!result.data || !Number.isInteger(result.data.corporation_id)) {
+  const result = await requestCachedEsi(
+    `/characters/${characterId}/`,
+    esiCharacterPublicInfoSchema,
+  );
+  if (!result.data) {
     throw new Error("Missing character verification response");
   }
   return result.data;
@@ -1142,8 +1428,9 @@ export async function fetchUniverseNames(ids: number[]) {
     Array.from(
       { length: Math.ceil(uniqueIds.length / 1_000) },
       (_, index) =>
-        requestCachedEsi<EsiUniverseName[]>(
+        requestCachedEsi(
           "/universe/names/",
+          z.array(esiUniverseNameSchema),
           undefined,
           {
             method: "POST",
@@ -1159,12 +1446,11 @@ export async function fetchUniverseNames(ids: number[]) {
 }
 
 export async function fetchCharacterRoles(characterId: number, token: TokenSet) {
-  const result = await requestCachedEsi<{
-    roles?: string[];
-    roles_at_base?: string[];
-    roles_at_hq?: string[];
-    roles_at_other?: string[];
-  }>(`/characters/${characterId}/roles/`, token);
+  const result = await requestCachedEsi(
+    `/characters/${characterId}/roles/`,
+    esiCharacterRolesResponseSchema,
+    token,
+  );
   if (!result.data) throw new Error("Missing roles verification response");
   return {
     roles: result.data.roles ?? [],
@@ -1190,8 +1476,9 @@ export async function fetchCorporationMembers(
     characterId,
     personalAuth: token,
   });
-  const result = await requestCachedEsi<number[]>(
+  const result = await requestCachedEsi(
     `/corporations/${corporationId}/members/`,
+    esiNumberArraySchema,
     usableToken,
     undefined,
     { cacheKey: `/corporations/${corporationId}/members/?character_id=${characterId}` },
@@ -1257,7 +1544,7 @@ export async function fetchCharacterCorporationAuthorization(
 }
 
 function fetchPublicLocationMetadata(path: string, token?: TokenSet) {
-  return requestCachedEsi<LocationMetadata>(path, token);
+  return requestCachedEsi(path, locationMetadataSchema, token);
 }
 
 export function fetchStationMetadata(stationId: number, token?: TokenSet) {
@@ -1269,12 +1556,7 @@ export function fetchSolarSystemMetadata(solarSystemId: number, token?: TokenSet
 }
 
 export function fetchIndustrySystems() {
-  return requestCachedEsi<
-    Array<{
-      solar_system_id: number;
-      cost_indices?: Array<{ activity: string; cost_index: number }>;
-    }>
-  >("/industry/systems/");
+  return requestCachedEsi("/industry/systems/", esiIndustrySystemsSchema);
 }
 
 /**
@@ -1303,8 +1585,9 @@ export async function fetchStructureMetadataPerCharacter(structureId: number, to
   const cached = structureMetadataCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return { ...cached.response, fromCache: true };
   try {
-    const response = await requestEsi<LocationMetadata>(
+    const response = await requestEsi(
       `/universe/structures/${structureId}/`,
+      locationMetadataSchema,
       token,
     );
     if (response.data) {

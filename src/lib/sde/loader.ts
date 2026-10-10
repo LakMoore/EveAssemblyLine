@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import {
+import type {
   BlueprintsRecord,
   BlueprintsRecordActivitiesManufacturingMaterialsItem,
   BlueprintsRecordActivitiesManufacturingProductsItem,
@@ -102,7 +102,7 @@ function getOnce<T>(name: string, get: () => T) {
       requireProcessedSde();
       return get();
     })
-    .catch((error) => {
+    .catch((error: unknown) => {
       loadPromises.delete(name);
       throw error;
     });

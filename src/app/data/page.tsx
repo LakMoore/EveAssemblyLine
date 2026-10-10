@@ -6,6 +6,7 @@ import { GitMerge, LogOut, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { languageStorageKey, useAppRefreshingOwners } from "../AppShell";
 import DialogBody from "@/components/DialogBody";
 import EveAuthorizationWarning from "@/components/EveAuthorizationWarning";
+import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import { replaceEsiStock } from "@/lib/planning/stockStore";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageServer";
@@ -663,13 +664,15 @@ export default function CharactersPage() {
       <div className={styles.panelHeader}>
         <div>
           <p className={styles.panelKicker}>01 / CORPORATION ACCESS</p>
-          <h2>Eligibility</h2>
+          <h2>Corporation refresh</h2>
         </div>
       </div>
       <p className={styles.panelDescription}>
-        Turn this on to include the corporation when Refresh data updates its cached assets,
-        blueprints, jobs, and orders. Then choose which refreshed hangars and containers the
-        planner can use on the Assets page. A connected pilot still needs the required EVE access.
+        Opt corporations in to EVE data refreshes. Each refresh requires a connected Director with
+        the required EVE scopes. Choose which refreshed hangars and containers the planner can use
+        separately on the <NoPrefetchLink className={styles.dialogLink} href="/corp-hangars">
+        Configure Corp Hangers
+      </NoPrefetchLink> page.
       </p>
       {corporations.length === 0 ? (
         <Empty className={styles.emptyBuildList}>
@@ -686,33 +689,32 @@ export default function CharactersPage() {
                 className={`${styles.eligibilityRow} flex flex-col items-stretch gap-4`}
                 key={corporation.corporationId}
               >
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex w-full flex-col items-stretch gap-4 min-[641px]:flex-row min-[641px]:items-start min-[641px]:justify-between min-[641px]:gap-8">
                   <button
                     type="button"
-                    className="flex min-w-0 flex-1 flex-col items-start gap-1 text-left"
+                    className={`${styles.eligibilityIdentity} flex min-w-0 flex-1 flex-col items-start gap-1 text-left`}
                     onClick={() => {
                       setSelectedCorporationId(corporation.corporationId);
                     }}
                   >
-                    <span className="flex items-center gap-2">
+                    <span className="flex w-full min-w-0 items-center gap-2">
                       <Image
-                        className={styles.eligibilityCorporationLogo}
+                        className="shrink-0"
                         src={eveCorporationLogoUrl(corporation.corporationId)}
                         alt=""
                         width={32}
                         height={32}
                       />
-                      <strong>
-                        {corporation.corporationName
-                          ?? `Corporation ${corporation.corporationId}`}
+                      <strong className="min-w-0 flex-1">
+                        {corporation.corporationName ?? `Corporation ${corporation.corporationId}`}
                       </strong>
                     </span>
-                    <small>
+                    <small className="w-full min-w-0">
                       {corporation.pilots.map((pilot) => pilot.characterName).join(" · ")}
                     </small>
                   </button>
-                  <Label className="flex shrink-0 items-center gap-2 text-xs">
-                    <span>Include in Refresh</span>
+                  <Label className="flex w-full min-w-0 items-center justify-between gap-2 text-xs min-[641px]:w-auto min-[641px]:shrink-0">
+                    <span className="min-w-0 flex-1">Include in Refresh</span>
                     <Switch
                       checked={
                         corporationSettings.find(

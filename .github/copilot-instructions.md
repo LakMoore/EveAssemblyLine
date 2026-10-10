@@ -9,8 +9,7 @@ The repository root is the application root and contains `package.json`. Run pro
 The repository is currently an early prototype, not a completed implementation of CurrentPlan.md:
 
 - `src/app/page.tsx` is a client-side prototype with hard-coded characters, locations, and sample build items.
-- `src/lib/planning/planEngine.ts` uses two hard-coded recipes and does not yet use SDE or cached assets.
-- `src/app/api/plan/route.ts` validates only a small part of the request and does not yet validate a session or character ownership.
+- `src/app/api/plan/simulate/route.ts` is the only planning calculation endpoint. It validates simulator requests and does not call ESI.
 - `src/lib/storage.ts`, `src/lib/auth/model.ts`, and `src/lib/auth/tokensStore.ts` provide the initial Firestore-backed persistence primitives.
 - EVE SSO, app sessions, ESI clients/cache, SDE processing/loading, character/corporation routes, state refresh routes, reference routes, and automated planning tests are not yet implemented.
 
@@ -239,13 +238,13 @@ const allowed =
 
 ### Authentication and sessions
 
-Use HttpOnly, secure-in-production, same-site cookies for the app session. A session owns a list of attached character IDs; every character, corp, state, and plan operation must verify that requested IDs belong to the current session. Store character tokens only through the auth store and refresh/persist rotated refresh tokens.
+Use HttpOnly, secure-in-production, same-site cookies for the app session. A session owns a list of attached character IDs; every authenticated operation that reads server-owned character or corporation state must verify that requested IDs belong to the current session. Store character tokens only through the auth store and refresh/persist rotated refresh tokens.
 
 EVE SSO state and PKCE values must be unpredictable, bound to the initiating session/character, single-use, and checked on callback. Validate token issuer, audience, expiry, subject, and signature according to EVE documentation. Corp authorization will be implicit based primarily on the Director Role.  There is no separate Corp Auth.Verify the required corporation role before enabling corporation assets.
 
 ### ESI and state cache
 
-All ESI calls are server-side. Centralize token refresh and ESI request behavior in the ESI client. Respect access-token expiry, `304`, `429`, `Retry-After`, cache-control, and ESI rate-limit/error-limit headers.  ETag may be used in-memory only and should not be committed to the shared cache with tokens. `/api/plan` must use cached state only and must never call ESI synchronously.
+All ESI calls are server-side. Centralize token refresh and ESI request behavior in the ESI client. Respect access-token expiry, `304`, `429`, `Retry-After`, cache-control, and ESI rate-limit/error-limit headers.  ETag may be used in-memory only and should not be committed to the shared cache with tokens. `/api/plan/simulate` must never call ESI; refresh belongs in `/api/state/refresh`.
 
 When testing ESI features in a browser, never start a new browser session because it will not have the authenticated session access. Always use an existing authenticated browser session, or ask the human pilot to provide one if no suitable session can be found.
 
@@ -288,7 +287,7 @@ The current prototype's `quantity` equals runs only by accident. Do not preserve
 3. Implement EVE SSO character attach flow, token validation, refresh, and corp authorization.
 4. Implement the ESI client and ETag/rate-limit-aware cache plus state refresh/status routes.
 5. Add the SDE fetch/parse/type-generation pipeline, loader, normalization, and indices.
-6. Replace hard-coded recipes with deterministic SDE-backed planning and test BOM expansion, inventory merge, blacklists, runs, and all six outputs.
+6. Keep planning deterministic and SDE-backed; test BOM expansion, inventory allocation, blacklists, scheduling, and the simulator's native result contract.
 7. Add reference endpoints and connect the UI to real characters, item search, locations, refresh status, and plan results.
 8. Add deployment/build documentation and a Dockerfile only after the local pipeline is reproducible.
 
@@ -302,9 +301,9 @@ Keep each step independently testable. Avoid broad UI rewrites while server cont
 - Never create an asset endpoint that returns raw or unfiltered records based only on ordinary session authentication, an arbitrary item ID, or an arbitrary location ID. Asset reads must enforce explicit authorization and session or collection scope, and corporation assets must pass through the corporation-source visibility rules.
 - Persist and transmit stable numeric IDs rather than localized or display type names. Users may change language at any time, so names must never be the identifier used by a stored record or API request.
 - Do not expose internal token records. Map them to public character/session DTOs.
-- Keep `/api/plan` fast and side-effect free. Refresh belongs in `/api/state/refresh`.
+- Keep `/api/plan/simulate` deterministic and side-effect free. Refresh belongs in `/api/state/refresh`.
 - Include timestamps and cache status in plan/state metadata so stale data is visible to users.
-- Preserve the six-list response names in `CurrentPlan.md` unless a deliberate, documented contract change is required.
+- Preserve the simulator-native result contract documented in `CurrentPlan.md`; do not recreate the retired `/api/plan` response adapter.
 
 ## Validation commands
 

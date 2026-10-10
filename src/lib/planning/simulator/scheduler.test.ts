@@ -4,6 +4,7 @@ import { scheduleSimulationJobs as scheduleWithSlotMap } from "./scheduler";
 import type {
   SimulationCharacterProfile,
   SimulationCopyJob,
+  SimulationInFlightJob,
   SimulationIndustryJob,
   SimulationInFlightJobActivity,
   SimulationInventionJob,
@@ -12,9 +13,12 @@ import type {
 } from "./types";
 
 type ScheduleParameters = Parameters<typeof scheduleWithSlotMap>;
+type ScheduleTestCharacter = SimulationCharacterProfile & {
+  activeJobs?: SimulationInFlightJob[];
+};
 
 /** Converts pre-contract test fixtures into explicit slots; production never infers slot identity. */
-function fixtureSlotMap(characters: readonly SimulationCharacterProfile[]): SimulationSlot[] {
+function fixtureSlotMap(characters: readonly ScheduleTestCharacter[]): SimulationSlot[] {
   const pools: Array<{
     activity: SimulationSlotActivity;
     code: string;
@@ -37,7 +41,7 @@ function fixtureSlotMap(characters: readonly SimulationCharacterProfile[]): Simu
   ];
   return characters.flatMap((character) =>
     pools.flatMap((pool) => {
-      const activeJobs = (character.inFlightJobs ?? []).filter((job) =>
+      const activeJobs = (character.activeJobs ?? []).filter((job) =>
         pool.jobs.includes(job.activity),
       );
       const totalSlots = Math.max(
@@ -69,7 +73,7 @@ function scheduleSimulationJobs(
   reactionJobs: ScheduleParameters[1],
   inventionJobs: ScheduleParameters[2],
   copyJobs: ScheduleParameters[3],
-  characters: ScheduleParameters[4],
+  characters: ScheduleTestCharacter[],
   locationSystemIdsById: ScheduleParameters[5],
   baselineTimeMultipliers?: ScheduleParameters[6],
   jobSkillRequirements?: ScheduleParameters[7],
@@ -516,7 +520,7 @@ void test("aligns every activity start to the next 12-hour boundary", () => {
         characterId: 7,
         systemId: 30_000_142,
         freeSlots: { manufacturing: 1, reactions: 1, science: 1 },
-        inFlightJobs: [{ jobId: 99, activity: "invention", remainingSeconds: 120, slotIndex: 1 }],
+        activeJobs: [{ jobId: 99, activity: "invention", remainingSeconds: 120, slotIndex: 1 }],
         timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
         skillLevels: {},
       },
@@ -557,7 +561,7 @@ void test("prefers the earliest eligible slot start before projected finish", ()
         characterId: 2,
         systemId: 30_000_142,
         freeSlots: { manufacturing: 0, reactions: 0, science: 0 },
-        inFlightJobs: [
+        activeJobs: [
           { jobId: 900, activity: "manufacturing", remainingSeconds: 43_200, slotIndex: 0 },
         ],
         timeMultipliers: { manufacturing: 0.5, reactions: 1, copying: 1, invention: 1 },
@@ -586,9 +590,7 @@ void test("selects an eligible slot whose active job has already finished", () =
         characterId: 7,
         systemId: 30_000_143,
         freeSlots: { manufacturing: 0, reactions: 0, science: 0 },
-        inFlightJobs: [
-          { jobId: 901, activity: "manufacturing", remainingSeconds: 0, slotIndex: 0 },
-        ],
+        activeJobs: [{ jobId: 901, activity: "manufacturing", remainingSeconds: 0, slotIndex: 0 }],
         timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
         skillLevels: {},
       },
@@ -611,7 +613,7 @@ void test("preserves the slot index assigned to each in-flight job", () => {
         characterId: 7,
         systemId: 30_000_142,
         freeSlots: { manufacturing: 0, reactions: 0, science: 0 },
-        inFlightJobs: [
+        activeJobs: [
           { jobId: 901, activity: "manufacturing", remainingSeconds: 86_400, slotIndex: 0 },
           { jobId: 902, activity: "manufacturing", remainingSeconds: 120, slotIndex: 1 },
         ],
@@ -693,7 +695,7 @@ void test("backfills a ready-now job before a future booking on the same slot", 
         characterId: 7,
         systemId: 30_000_142,
         freeSlots: { manufacturing: 1, reactions: 0, science: 0 },
-        inFlightJobs: [
+        activeJobs: [
           {
             jobId: 900,
             activity: "manufacturing",
@@ -741,7 +743,7 @@ void test("prefers the earlier-open slot when shared blueprint timing equalizes 
         characterId: 2,
         systemId: 30_000_142,
         freeSlots: { manufacturing: 0, reactions: 0, science: 0 },
-        inFlightJobs: [
+        activeJobs: [
           { jobId: 900, activity: "manufacturing", remainingSeconds: 43_200, slotIndex: 0 },
         ],
         timeMultipliers: { manufacturing: 0.5, reactions: 1, copying: 1, invention: 1 },
@@ -1026,7 +1028,7 @@ void test("waits for in-flight supply when the same input also needs hauling", (
         characterId: 7,
         systemId: 30_000_142,
         freeSlots: { manufacturing: 1, reactions: 0, science: 0 },
-        inFlightJobs: [
+        activeJobs: [
           { jobId: 123, activity: "reaction", slotIndex: 0, remainingSeconds: 49 * 3600 },
         ],
         timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
@@ -1467,7 +1469,7 @@ void test("waits for in-flight material before invention when it also needs haul
         characterId: 7,
         systemId: 30_000_142,
         freeSlots: { manufacturing: 0, reactions: 0, science: 1 },
-        inFlightJobs: [
+        activeJobs: [
           { jobId: 123, activity: "reaction", slotIndex: 0, remainingSeconds: 49 * 3600 },
         ],
         timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
@@ -1517,7 +1519,7 @@ void test("reuses all activity slots after currently active jobs complete", () =
         characterId: 7,
         systemId: 30_000_142,
         freeSlots: { manufacturing: 0, reactions: 0, science: 0 },
-        inFlightJobs: [
+        activeJobs: [
           { jobId: 801, activity: "manufacturing", remainingSeconds: 120, slotIndex: 0 },
           { jobId: 802, activity: "reaction", remainingSeconds: 240, slotIndex: 0 },
           { jobId: 803, activity: "copying", remainingSeconds: 60, slotIndex: 0 },

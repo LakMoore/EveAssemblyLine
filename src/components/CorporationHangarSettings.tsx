@@ -70,7 +70,12 @@ function groupCorporations(characters: ClientCharacter[]): CorporationOption[] {
     const existing = corporations.get(character.corporationId);
     if (existing) {
       existing.hasDirectorAccess ||= character.hasDirectorRole;
-      existing.corporationName ||= character.corporationName;
+      if (existing.corporationName === "") {
+        existing.corporationName = character.corporationName;
+      }
+      else {
+        existing.corporationName ??= character.corporationName;
+      }
       continue;
     }
     corporations.set(
@@ -496,7 +501,9 @@ export default function CorporationHangarSettings() {
               size="sm"
               variant="destructive"
               disabled={!selectedCorporation || savingSourceKey !== null}
-              onClick={() => setPendingBulkAction("clear")}
+              onClick={() => {
+                setPendingBulkAction("clear");
+              }}
             >
               <ListX data-icon="inline-start" />
               Clear All
@@ -506,7 +513,9 @@ export default function CorporationHangarSettings() {
                 size="sm"
                 variant="outline"
                 disabled={selectedCorporationSources.length === 0 || savingSourceKey !== null}
-                onClick={() => setPendingBulkAction("select")}
+                onClick={() => {
+                  setPendingBulkAction("select");
+                }}
               >
                 <CheckCheck data-icon="inline-start" />
                 Select All
@@ -515,12 +524,14 @@ export default function CorporationHangarSettings() {
             <Input
               aria-label="Filter by structure, system, or container"
               className="w-56"
-              onChange={(event) => setFilterText(event.target.value)}
+              onChange={(event) => {
+                setFilterText(event.target.value);
+              }}
               placeholder="Filter..."
               type="search"
               value={filterText}
             />
-            <NoPrefetchLink className={styles.dialogLink} href="/characters">
+            <NoPrefetchLink className={styles.dialogLink} href="/data">
               Manage corporation access
             </NoPrefetchLink>
           </div>
@@ -535,8 +546,8 @@ export default function CorporationHangarSettings() {
         ) : selectedCorporationSources.length === 0 ? (
           <Empty className={styles.emptyBuildList}>
             <EmptyDescription>
-              Enable corporation support on Characters, then refresh data to discover hangars and
-              named containers.
+              Enable corporation support on Data, then refresh data to discover hangars and named
+              containers.
             </EmptyDescription>
           </Empty>
         ) : filteredCorporationSourceGroups.length === 0 ? (

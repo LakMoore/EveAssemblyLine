@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "planRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "summary.endpoint", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

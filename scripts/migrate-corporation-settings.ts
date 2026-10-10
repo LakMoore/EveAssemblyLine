@@ -98,7 +98,7 @@ async function migrate() {
       };
     }
 
-    const collections = [...raw];
+    const collections = raw.map((value: unknown) => value);
     let collectionsChanged = 0;
     let malformedCollections = 0;
     let malformedSettings = 0;

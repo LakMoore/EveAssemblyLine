@@ -131,7 +131,9 @@ export async function calculateFacilities(
   context?: FacilityCalculationContext,
 ): Promise<FacilityResponse> {
   const timingScope = timing ?? createTimingScope();
-  const markPhase = (name: string) => timingScope.mark(name);
+  const markPhase = (name: string) => {
+    timingScope.mark(name);
+  };
   const requestedLanguage = new URL(request.url).searchParams.get("language");
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
   const resolvedContext = context ?? (await loadFacilityCalculationContext(request));
@@ -354,7 +356,15 @@ export async function calculateFacilities(
       (facility.locationType === "structure" ? true : serviceIsOnline(services, "laboratory"))
       && requestActivities.invention.available;
     activities.copying.available = activities.meResearch.available;
-    for (const activity of Object.values(activities)) {
+    for (const activity of [
+      activities.reprocessing,
+      activities.manufacturing,
+      activities.reactions,
+      activities.meResearch,
+      activities.teResearch,
+      activities.invention,
+      activities.copying,
+    ]) {
       activity.materialConsumption = bonusResult.manufacturing.material.percentage;
       activity.jobDuration = bonusResult.manufacturing.time.percentage;
       activity.jobCost = bonusResult.manufacturing.cost.percentage;
@@ -419,22 +429,21 @@ export async function calculateFacilities(
     activities.invention.taxRate = requestActivities.invention.taxRate;
     activities.meResearch.taxRate = requestActivities.meResearch.taxRate;
     activities.teResearch.taxRate = requestActivities.teResearch.taxRate;
+    const facilityTypeName = types.get(facility.typeId ?? 0)?.name.en;
+    const fallbackFacilityName =
+      facility.name && facility.name.length > 0
+        ? facility.name
+        : facilityTypeName && facilityTypeName.length > 0
+          ? facilityTypeName
+          : facility.locationType === "structure"
+            ? "Structure details unavailable"
+            : "Station details unavailable";
     return {
       id: facility.id,
       name:
         facility.locationType === "structure"
-          ? formatLocationName(
-              systems.get(facility.systemId)?.name.en,
-              facility.name
-                || types.get(facility.typeId ?? 0)?.name.en
-                || "Structure details unavailable",
-            )
-          : normalizeLocationName(
-              systems.get(facility.systemId)?.name.en,
-              facility.name
-                || types.get(facility.typeId ?? 0)?.name.en
-                || "Station details unavailable",
-            ),
+          ? formatLocationName(systems.get(facility.systemId)?.name.en, fallbackFacilityName)
+          : normalizeLocationName(systems.get(facility.systemId)?.name.en, fallbackFacilityName),
       locationType: facility.locationType,
       typeId: facility.typeId ?? 0,
       systemId: facility.systemId,

@@ -1,16 +1,16 @@
 import { getStockRootLocationId } from "@/lib/planning/stockPolicies";
-import type {
-  PlanBlueprintInput,
-  PlanIndustryInput,
-  PlanItemInput,
-  PlanMarketInput,
-  PlanStockItem,
-  StockOwnerType,
-  IndustryJobStatus,
-} from "@/lib/planning/types";
+import type { PlanStockItem, StockOwnerType, IndustryJobStatus } from "@/lib/planning/types";
 import type { SimulationContext } from "./context";
 import type { SimulationSourceLot } from "./ledger";
-import type { SimulationAsset, SimulationIndustryOutputMarker, SimulationRequestV1 } from "./types";
+import type {
+  CategorizedSimulationAssets,
+  CategorizedSimulationBlueprint,
+  CategorizedSimulationIndustry,
+  CategorizedSimulationItem,
+  SimulationAsset,
+  SimulationIndustryOutputMarker,
+  SimulationRequestV1,
+} from "./types";
 import { isAncientRelicType } from "@/lib/reference/category";
 
 /** Physical or committed ordinary stock available to the simulator. */
@@ -54,7 +54,7 @@ export interface SimulatorInventory {
   unresolvedLotCount: number;
 }
 
-type CategorizedAssets = Exclude<SimulationRequestV1["assets"], SimulationAsset[] | undefined>;
+type CategorizedAssets = CategorizedSimulationAssets;
 type NormalizedSimulationAsset = PlanStockItem & {
   industryOutput?: SimulationIndustryOutputMarker;
 };
@@ -110,7 +110,7 @@ export function isSimulatorReprocessingType(
 }
 
 function categorizedStockItem(
-  item: PlanItemInput | PlanMarketInput,
+  item: CategorizedSimulationItem,
   context: SimulationContext,
   source?: "marketOrder",
 ): PlanStockItem {
@@ -126,7 +126,7 @@ function categorizedStockItem(
 }
 
 function categorizedBlueprintItem(
-  item: PlanBlueprintInput,
+  item: CategorizedSimulationBlueprint,
   context: SimulationContext,
 ): PlanStockItem {
   if (isAncientRelicType(context.types.get(item.typeId), context.groups)) {
@@ -162,7 +162,7 @@ function categorizedBlueprintItem(
 }
 
 function industryOutputItem(
-  job: PlanIndustryInput,
+  job: CategorizedSimulationIndustry,
   context: SimulationContext,
 ): NormalizedSimulationAsset | undefined {
   const blueprint =
@@ -340,7 +340,7 @@ export function normalizeSimulatorInventory(
               horizon: isUsableIndustryOutput(item) ? "now" : "after-upstream",
               ...(isInFlightOutput
               && (normalizedPrintActivity === "copying" || normalizedPrintActivity === "invention")
-                ? { activity: normalizedPrintActivity as "copying" | "invention" }
+                ? { activity: normalizedPrintActivity }
                 : {}),
               ...(industryJobId !== undefined ? { industryJobId } : {}),
               ...(item.industryOutput?.state === "active" || item.industryOutput?.state === "paused"

@@ -228,7 +228,9 @@ export default function InventionPage() {
   useEffect(() => {
     void loadClientSession()
       .then(setSession)
-      .catch(() => setSession(null));
+      .catch(() => {
+        setSession(null);
+      });
   }, []);
 
   useEffect(() => {
@@ -297,7 +299,9 @@ export default function InventionPage() {
         const payload = (await response.json()) as InventionResponse;
         if (!response.ok) throw new Error(payload.error ?? "Could not load invention data.");
         if (currentRequestId === requestId.current) {
-          startTransition(() => setResult(payload));
+          startTransition(() => {
+            setResult(payload);
+          });
           trackAnalyticsEvent("invention", { outcome: "success" });
         }
       })
@@ -313,7 +317,9 @@ export default function InventionPage() {
       .finally(() => {
         if (currentRequestId === requestId.current) setIsLoading(false);
       });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+    };
   }, [allSkillLevel, characterSkillsUnavailable, language, selectedType, serializedSkillLevels]);
 
   function selectType(type: TypeSearchResult) {
@@ -556,7 +562,9 @@ export default function InventionPage() {
                       size="xs"
                       className="w-full min-w-0 flex-wrap justify-start whitespace-normal"
                       aria-label="Sort by Decryptor, no decryptor first then alphabetically"
-                      onClick={() => selectSort("name")}
+                      onClick={() => {
+                        selectSort("name");
+                      }}
                     >
                       Decryptor <SortIndicator active={sortKey === "name"} direction="ascending" />
                     </Button>
@@ -571,7 +579,9 @@ export default function InventionPage() {
                         size="xs"
                         className="w-full min-w-0 flex-wrap justify-start whitespace-normal"
                         aria-label={`Sort by Relic alphabetically${sortKey === "sourceName" ? `, currently ${sortDirection}` : ""}`}
-                        onClick={() => selectSort("sourceName")}
+                        onClick={() => {
+                          selectSort("sourceName");
+                        }}
                       >
                         Relic{" "}
                         <SortIndicator
@@ -594,7 +604,9 @@ export default function InventionPage() {
                           size="xs"
                           className="w-full min-w-0 flex-wrap justify-end whitespace-normal"
                           aria-label={`Sort by ${abbreviationTitle ?? label}${active ? `, currently ${sortDirection}` : ""}`}
-                          onClick={() => selectSort(key)}
+                          onClick={() => {
+                            selectSort(key);
+                          }}
                         >
                           {abbreviationTitle ? (
                             <abbr title={abbreviationTitle}>{label}</abbr>

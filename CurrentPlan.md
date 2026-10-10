@@ -45,8 +45,7 @@ This section is authoritative where the older design below differs from the runn
 - ESI refresh is session-scoped in the in-process cache. It refreshes the selected collection's character data and eligible corporation data, including assets, blueprints, industry jobs, skills, market orders, and structure/location data. The refresh endpoint deduplicates concurrent refreshes and exposes endpoint status without exposing tokens.
 - Corporation support is opted in per corporation and stored on the collection. Corporation source selections are shared by that collection: direct hangar contents and named containers are selected independently, selected containers include nested contents, new sources default to excluded, and inaccessible roots are hidden. Query-only access contributes blueprints only; Take access contributes materials and blueprints. The Director used for a corporation refresh may be found across collections and is never returned as an attached character.
 - `/api/state/assets` is the boundary between ESI state and planning. It resolves and groups assets by root location, includes blueprint/job/market-order context, filters special ship and structure records as appropriate, and carries personal/corporation ownership into the planner input.
-- `/api/plan` is intentionally unauthenticated and makes no ESI calls. It accepts stockpiles with their per-stockpile locations, client-supplied assets, and settings. Do not reintroduce `characterIds` ownership checks or server-side refreshes into this endpoint; authenticated state preparation belongs in the state routes.
-- `/api/plan/simulate` is the version-one ledger-based simulator running alongside `/api/plan`. It
+- `/api/plan/simulate` is the sole planning calculation endpoint. It
   accepts the same asset-driven planner data plus character/science profiles, a complete client-authored
   manufacturing/reaction/science slot map, and simulation policy. Slot keys use
   `{characterId}:M|R|S:{slotIndex}` and carry each slot's next-available offset; the scheduler and
@@ -58,8 +57,9 @@ This section is authoritative where the older design below differs from the runn
   actionable hauling list. Undated prerequisites have no timed
   install. Its native response includes grouped display lists and invariant metadata; location/type
   diagnostic ledgers remain internal to the endpoint. The visible
-  planner offers both workflows: Calculate displays the legacy `/api/plan` response, while
-  Simulate displays the native simulator response. The browser stores each result independently.
+  planner posts only to this route and displays its native response in `SimulationResults`. The
+  retired `/api/plan` calculation endpoint, Calculate action, legacy result tabs, and `PlanResponse`
+  contract have been removed.
 - The planner is asset-aware and supports compressed/reprocessable material handling, blueprint print/run accounting, industry-in-progress output, market orders, localized SDE names, ME/TE settings, and source metadata. Its request model is not the original minimal `typeId + quantity` plus raw assets model.
 - The UI is a multi-page production-control application. The build planner is one workflow alongside assets, jobs, ships, compression, locations, characters, and settings. The original component-only single-page layout is descriptive history, not an implementation requirement.
 - The deployment target is Firebase App Hosting with a Cloud Run backend configuration and Firestore. The repository does not currently define a Dockerfile-based deployment contract; do not add container-specific storage assumptions without deciding whether App Hosting remains the target.
@@ -115,7 +115,6 @@ src/
       auth/session/route.ts         # Session/collection summary
       auth/logout/route.ts          # Clear session cookie
       characters/[id]/route.ts      # Remove attached character
-      plan/route.ts                 # Asset-driven plan calculation
       plan/simulate/route.ts        # Versioned ledger-based industry simulation
       state/refresh/route.ts        # Refresh active collection state
       state/assets/route.ts         # Planner asset projection
@@ -146,8 +145,7 @@ src/
       loader.ts          # Load sde/processed/*.json into in-memory maps
       indices.ts         # Precomputed lookup tables/graphs for planning
     planning/
-      types.ts           # Types for /plan inputs and outputs
-      planEngine.ts      # Main planning logic: compute 6 action lists
+      types.ts           # Shared stockpile, inventory, and industry input types
       simulator/         # Graph, ledgers, allocation, schedules, and settlement
       util.ts            # Helper functions (e.g., BOM expansion)
 
@@ -160,7 +158,7 @@ src/
     SettingsPanel.tsx
     RefreshStatusSummary.tsx
     DataStatusPage.tsx
-    PlanTabs.tsx         # Planner output navigation, including the future hauling view
+    SimulationResults.tsx # Native simulator result presentation
 ```
 
 ---
@@ -759,7 +757,11 @@ The canonical `/api/state/assets` endpoint and related state endpoints for jobs,
 
 The assets endpoint defaults to cached data. Refresh remains an explicit operation through `/api/state/refresh` and normal rate-limit controls. Assets must distinguish a container's immediate location from its effective hauling origin and expose unresolved records rather than guessing. A future dedicated asset-diagnostics endpoint may expose lower-level normalized asset records, but it is not a separate required API contract at present.
 
-## 8.5 `/api/plan` endpoint
+## 8.5 Retired `/api/plan` endpoint (historical design)
+
+> The following request and response description documents the retired Calculate flow. The route,
+> request/response types, and legacy planner UI have been removed. Do not implement this section;
+> `/api/plan/simulate` is the current calculation endpoint.
 
 ### 8.5.1 Request schema
 
@@ -920,9 +922,9 @@ Never create a hauling task with a guessed origin. If assets are unresolved, ret
 
 ## 9.2 Planner and production-control UI
 
-The original generic planner has evolved into a broader production-control application. In addition to the planner, the product includes first-class assets, jobs, ships, compression, locations, characters, and settings workflows. The planner still owns the six required outputs, including hauling; the hauling view may be temporarily hidden while that workflow is being completed, but it remains a planned capability.
+The original generic planner has evolved into a broader production-control application. In addition to the planner, the product includes first-class assets, jobs, ships, compression, locations, characters, and settings workflows. Planning results are produced by the native simulator response and displayed by `SimulationResults`.
 
-The current planner does not perform character selection or refresh orchestration itself. Authentication, character attachment, collection management, and state refresh are handled by the characters/auth/state workflows. The planner loads working assets, build-list preferences, per-stockpile locations, and settings, then sends the unauthenticated asset-driven request to `/api/plan`.
+The current planner does not perform character selection or refresh orchestration itself. Authentication, character attachment, collection management, and state refresh are handled by the characters/auth/state workflows. The planner loads working assets, build-list preferences, per-stockpile locations, simulation profiles, and settings, then sends the simulator request to `/api/plan/simulate`.
 
 Components:
 
@@ -950,16 +952,8 @@ Components:
   - Simple buy blacklist editor:
     - Same as above for `buyBlacklist`.
   - For now, no complex presets; just basic lists.
-- **PlanTabs**:
-  - Tabs or vertical navigation for the seven operational lists, plus a plan overview
-    - Plan Overview.
-    - Materials to buy.
-    - BPCs needed.
-    - Invention jobs.
-    - Reaction jobs.
-    - Manufacturing jobs.
-    - Hauling tasks.
-  - Displays only one list at a time, but keeps all loaded in memory.
+- **SimulationResults**:
+  - Displays the native simulator result lists and plan metadata without adapting to the retired `PlanResponse` contract.
 
 ### Planner workflow
 
@@ -979,13 +973,12 @@ Components:
 7. User clicks **“Refresh data”**:
    - Frontend sends `POST /api/state/refresh` for the active session collection.
    - Shows summary from response.
-8. User clicks **“Calculate plan”**:
+8. User clicks **“Simulate”**:
 
-- Frontend sends `POST /api/plan` with populated stockpiles, cached/working assets, and settings. Location facts are carried only by each stockpile.
-- On response:
-- Populates the planner output views with the seven operational lists.
+- Frontend sends the simulator request to `POST /api/plan/simulate` with stockpiles, working assets, simulation profiles, and settings.
+- `SimulationResults` displays the returned native simulator result.
 
-9. User navigates between tabs to inspect each resulting list.
+9. User navigates the simulator result views to inspect the returned lists.
 
 Optional UX enhancements:
 

@@ -13,10 +13,10 @@ import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 
 const signalsRequestSchema = z.object({
   language: z.string().optional(),
-  stationIds: z.array(z.number().int().positive().safe()).max(20),
+  stationIds: z.array(z.number().int().positive()).max(20),
   includeCorporationAssets: z.boolean().default(true),
   salesTaxPercent: z.number().min(0).max(100).default(3.6),
-  thresholdIsk: z.number().nonnegative().finite().default(5_000_000),
+  thresholdIsk: z.number().nonnegative().default(5_000_000),
 });
 
 /** Returns sale signals for cached stock held at the requested market locations. */

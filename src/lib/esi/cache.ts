@@ -30,6 +30,8 @@ import {
   getShipTypeIds,
   getBlueprintById,
   getSystems,
+  type SdeGroup,
+  type SdeType,
 } from "@/cache/services/sdeCache";
 import { createRequestProfiler, type RequestProfiler } from "@/lib/server/profiling";
 import {
@@ -602,7 +604,9 @@ export async function getCorporationSourceCatalog(
               : undefined;
           const station = await getStation(source.rootLocationId);
           if (station) {
-            const names = await fetchUniverseNames([source.rootLocationId]).catch(() => new Map());
+            const names = await fetchUniverseNames([source.rootLocationId]).catch(
+              () => new Map<number, string>(),
+            );
             rootLocation = {
               locationId: source.rootLocationId,
               kind: "station",
@@ -630,17 +634,16 @@ export async function getCorporationSourceCatalog(
               };
             }
           }
-          if (!rootLocation) {
-            rootLocation = {
+          rootLocation
+            ??= {
               locationId: source.rootLocationId,
               kind: "structure",
               name: "Structure details unavailable",
               resolved: false,
             };
-          }
           if (rootLocation.kind === "station" && !rootLocation.name) {
             const names = await fetchUniverseNames([rootLocation.locationId]).catch(
-              () => new Map(),
+              () => new Map<number, string>(),
             );
             const name = names.get(rootLocation.locationId);
             if (name) rootLocation = { ...rootLocation, name };
@@ -1267,8 +1270,8 @@ async function refreshJobAdjustments(
   );
   const productTypes = materialContext
     ? await getTypesByIds([...new Set(materialProductTypeIds)])
-    : new Map();
-  const groups = materialContext ? await getGroups() : new Map();
+    : new Map<number, SdeType>();
+  const groups = materialContext ? await getGroups() : new Map<number, SdeGroup>();
   const facilitiesByLocationId = new Map(
     materialContext?.facilities.flatMap((facility) => {
       const locationId = Number(facility.id);
@@ -1498,7 +1501,7 @@ export function getMarketOrderAssetDeductions(
   const deductions = new Map<string, number>();
   for (const order of orders) {
     if (
-      order.isBuyOrder
+      order.isBuyOrder !== false
       || order.volumeTotal <= 0
       || !marketOrderIssuedAfter(order, assetsLastModified)
     ) continue;
@@ -1511,7 +1514,7 @@ export function getMarketOrderAssetDeductions(
 function refreshMarketOrderAdjustments(cache: OwnerCache, assetsLastModified?: string) {
   cache.marketOrderAssetDeductions = hasUsableMarketOrders(cache)
     ? getMarketOrderAssetDeductions(cache.marketOrders?.lastBody ?? [], assetsLastModified)
-    : new Map();
+    : new Map<string, number>();
 }
 
 function effectiveBlueprints(cache: OwnerCache) {
@@ -2135,7 +2138,7 @@ async function rebuildResolvedAssets(
         : `/characters/${record.characterId}`;
     await cacheResolvedAssets(
       cache,
-      cache.allAssetsRaw.lastBody as AssetRecord[],
+      cache.allAssetsRaw.lastBody,
       resolution.token,
       undefined,
       cache.allAssetsRaw,
@@ -2272,7 +2275,7 @@ export async function refreshCharacterState(
         );
         await cacheResolvedAssets(
           cache,
-          cache.allAssetsRaw.lastBody as AssetRecord[],
+          cache.allAssetsRaw.lastBody,
           resolution.token,
           result.headers,
           cache.allAssetsRaw,
@@ -2525,7 +2528,7 @@ async function refreshCorporationCache(
         );
         await cacheResolvedAssets(
           corpCache,
-          corpCache.allAssetsRaw.lastBody as AssetRecord[],
+          corpCache.allAssetsRaw.lastBody,
           resolution.token,
           result.headers,
           corpCache.allAssetsRaw,
@@ -2740,7 +2743,7 @@ export async function getRunningIndustryJobs(
 ) {
   const jobs = characterIds.flatMap((id) => {
     const body = getCache(characterCaches, id, sessionId).jobs?.lastBody;
-    return Array.isArray(body) ? (body as IndustryJobRecord[]) : [];
+    return Array.isArray(body) ? body : [];
   });
   if (!includeCorporationJobs) return jobs.filter((job) => job.ownerType === "character");
   const projection = await getCorporationProjection(characterIds, true, sessionId, policies);
@@ -2748,7 +2751,7 @@ export async function getRunningIndustryJobs(
     ...jobs,
     ...projection.corporationIds.flatMap((corporationId) => {
       const body = getCache(corporationCaches, corporationId, sessionId).jobs?.lastBody;
-      const corporationJobs = Array.isArray(body) ? (body as IndustryJobRecord[]) : [];
+      const corporationJobs = Array.isArray(body) ? body : [];
       const policy = projection.policiesByCorporationId.get(corporationId);
       if (!policy) return corporationJobs;
       const rawAssets =
@@ -3000,10 +3003,10 @@ async function getStructureResolverCharacter(
       ? character.characterId === source.ownerId
       : character.corporationId === source.ownerId
         && (
-          character.hasDirectorRole
+          character.hasDirectorRole === true
           || (
             source.recordType === "order"
-            && (character.hasAccountantRole || character.hasTraderRole)
+            && (character.hasAccountantRole === true || character.hasTraderRole === true)
           )
         );
   if (preferredCharacterId !== undefined) {
@@ -3215,8 +3218,8 @@ export async function getMarketOrderStock(
       }
       hasUsableSource = true;
       const orders = cache.marketOrders?.lastBody ?? [];
-      for (const order of orders as MarketOrderRecord[]) {
-        if (order.isBuyOrder || order.isCorporation || order.volumeRemain <= 0) continue;
+      for (const order of orders) {
+        if (order.isBuyOrder !== false || order.isCorporation || order.volumeRemain <= 0) continue;
         typeIds.add(order.typeId);
         stock.push({
           typeId: order.typeId,
@@ -3249,8 +3252,8 @@ export async function getMarketOrderStock(
     const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
     const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
     const structureIds = knownStructureIds(cache);
-    for (const order of orders as MarketOrderRecord[]) {
-      if (order.isBuyOrder || order.volumeRemain <= 0) continue;
+    for (const order of orders) {
+      if (order.isBuyOrder !== false || order.volumeRemain <= 0) continue;
       if (
         policy
         && !isCorporationLocationAccessible(

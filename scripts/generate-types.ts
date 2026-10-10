@@ -11,7 +11,10 @@ type JsonObject = { [key: string]: JsonValue | undefined };
 function typeName(value: string) {
   const name = value
     .replace(/[^a-zA-Z0-9]+/g, " ")
-    .replace(/(^|\s)(\w)/g, (_, _space, letter) => letter.toUpperCase());
+    .replace(
+      /(^|\s)(\w)/g,
+      (_match: string, _space: string, letter: string) => letter.toUpperCase(),
+    );
   return /^[A-Za-z]/.test(name) ? name : `Sde${name}`;
 }
 
@@ -146,7 +149,7 @@ async function main() {
   );
 }
 
-main().catch((error) => {
+main().catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;
 });

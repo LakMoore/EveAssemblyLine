@@ -144,7 +144,9 @@ export async function savePlannerStockpiles(stockpiles: ClientPlanStockpile[]): 
       transaction
         .objectStore(buildStoreName)
         .put(stockpiles.map(normalizeStockpile), stockpilesKey);
-      transaction.oncomplete = () => resolve();
+      transaction.oncomplete = () => {
+        resolve();
+      };
       transaction.onerror = () => {
         reject(transaction.error ?? new Error("Could not save planner stockpiles."));
       };

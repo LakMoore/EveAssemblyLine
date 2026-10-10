@@ -45,10 +45,14 @@ function useIsMobile() {
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 640px)");
-    const updateIsMobile = () => setIsMobile(mediaQuery.matches);
+    const updateIsMobile = () => {
+      setIsMobile(mediaQuery.matches);
+    };
     updateIsMobile();
     mediaQuery.addEventListener("change", updateIsMobile);
-    return () => mediaQuery.removeEventListener("change", updateIsMobile);
+    return () => {
+      mediaQuery.removeEventListener("change", updateIsMobile);
+    };
   }, []);
 
   return isMobile;

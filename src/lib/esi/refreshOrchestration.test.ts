@@ -171,14 +171,16 @@ void test("allows a unit to run again after its previous refresh settles", async
 
   await coordinator.run(
     "corporation:20",
-    async () => {
+    () => {
       calls += 1;
+      return Promise.resolve();
     },
   );
   await coordinator.run(
     "corporation:20",
-    async () => {
+    () => {
       calls += 1;
+      return Promise.resolve();
     },
   );
 

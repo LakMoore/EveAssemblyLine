@@ -59,9 +59,6 @@ function request(): SimulationRequestV1 {
     ],
     settings: {
       includeCorporationAssets: true,
-      personalSellOrdersAsStock: false,
-      allCorporationSellOrdersAsStock: false,
-      myCorporationSellOrdersAsStock: false,
       buildBlacklist: [],
       buyBlacklist: [],
     },

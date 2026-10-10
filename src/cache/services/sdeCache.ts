@@ -176,7 +176,7 @@ export function getShipTypeIds(): Promise<Set<number>> {
               .map((type) => type._key),
           ),
       )
-      .catch((error) => {
+      .catch((error: unknown) => {
         shipTypeIdsPromise = undefined;
         throw error;
       });
@@ -211,7 +211,7 @@ export function getHaulerShipTypeIds(): Promise<Set<number>> {
             .map((type) => type._key),
         );
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         haulerShipTypeIdsPromise = undefined;
         throw error;
       });
@@ -230,7 +230,7 @@ export function getStructureTypeIds(): Promise<Set<number>> {
               .map((type) => type._key),
           ),
       )
-      .catch((error) => {
+      .catch((error: unknown) => {
         structureTypeIdsPromise = undefined;
         throw error;
       });

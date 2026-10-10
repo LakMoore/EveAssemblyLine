@@ -46,7 +46,8 @@ export function readAnalyticsConsent(): AnalyticsConsent | null {
  */
 export function readAnalyticsConsentEvent(event: Event): AnalyticsConsent | null {
   if (event instanceof CustomEvent) {
-    return event.detail === "granted" || event.detail === "denied" ? event.detail : null;
+    const detail: unknown = event.detail;
+    return detail === "granted" || detail === "denied" ? detail : null;
   }
 
   return readAnalyticsConsent();

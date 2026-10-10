@@ -303,7 +303,7 @@ type SimulationSchedulePartition = {
   slotGroups: readonly ClientSimulationSlotGroup[];
 };
 
-/** Splits reaction work into a shared K-space pool and isolated wormhole systems. */
+/** Splits production work into a shared K-space pool and isolated wormhole systems. */
 function simulationSchedulePartitions(
   rows: SimulationScheduleRow[],
   availableSlots: number,
@@ -311,7 +311,9 @@ function simulationSchedulePartitions(
   options: ClientSimulationScheduleOptions,
 ): SimulationSchedulePartition[] {
   const systemIdsByLocation = options.locationSystemIdsById;
-  if (!systemIdsByLocation || !rows.every(({ job }) => job.activity === "reaction")) {
+  const isManufacturing = rows.every(({ job }) => job.activity === "manufacturing");
+  const isReaction = rows.every(({ job }) => job.activity === "reaction");
+  if (!systemIdsByLocation || (!isManufacturing && !isReaction)) {
     return [{ rows, availableSlots, slotGroups }];
   }
 

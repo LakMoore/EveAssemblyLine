@@ -1234,11 +1234,6 @@
     gap: 4px;
   }
 
-  .jobsSlotGrid span {
-    min-width: 0;
-    padding-left: 5px;
-  }
-
   .jobsSlotGrid small {
     min-width: 0;
     gap: 2px;
@@ -4709,6 +4704,10 @@
   font-size: 12px;
 }
 
+.eligibilityRow strong {
+  overflow-wrap: anywhere;
+}
+
 .characterIdentity small,
 .statusCell small,
 .eligibilityRow small {
@@ -4935,7 +4934,7 @@
   display: flex;
   justify-content: space-between;
   gap: 20px;
-  align-items: center;
+  align-items: stretch;
   border-top: 1px solid #1e3740;
   padding: 16px 0;
   border-right: 0;
@@ -4945,10 +4944,9 @@
   color: inherit;
   font: inherit;
   text-align: left;
-  cursor: pointer;
 }
 
-.eligibilityRow:focus-visible {
+.eligibilityIdentity:focus-visible {
   outline: 1px solid var(--cyan);
   outline-offset: 4px;
 }
@@ -5151,7 +5149,7 @@
   }
 
   .eligibilityRow {
-    align-items: flex-start;
+    align-items: stretch;
     flex-direction: column;
     gap: 8px;
   }

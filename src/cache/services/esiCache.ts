@@ -13,9 +13,9 @@ export function getEsiResponse<T>(path: string, queryParams?: EsiQueryParams): P
   return cache.get<T>(esiKey(path, queryParams));
 }
 
-export function setEsiResponse<T>(
+export function setEsiResponse(
   path: string,
-  data: T,
+  data: unknown,
   expiresHeader: string | null,
   cacheControlHeader: string | null,
   queryParams?: EsiQueryParams,

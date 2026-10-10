@@ -133,14 +133,19 @@ void test("shares overlapping in-flight system name requests", async () => {
     releaseFirstRequest = resolve;
   });
   globalThis.fetch = async (_input, init) => {
-    const body = JSON.parse(String(init?.body)) as { systemIds: number[] };
+    const requestBody = init?.body;
+    if (typeof requestBody !== "string") {
+      throw new Error("Expected a serialized system-name request body.");
+    }
+    const body = JSON.parse(requestBody) as { systemIds: number[] };
     fetchBodies.push(body.systemIds);
     if (fetchBodies.length === 1) await firstRequestReleased;
     return {
       ok: true,
-      json: async () => ({
-        items: body.systemIds.map((systemId) => ({ systemId, name: `System ${systemId}` })),
-      }),
+      json: () =>
+        Promise.resolve({
+          items: body.systemIds.map((systemId) => ({ systemId, name: `System ${systemId}` })),
+        }),
     } as Response;
   };
 

@@ -3,7 +3,7 @@
 import { startTransition, useEffect, useRef, useState } from "react";
 import { BadgeDollarSign, ClipboardPaste, List, Trash2 } from "lucide-react";
 import { useAppLanguage } from "../AppShell";
-import CalculateButton from "@/components/CalculateButton";
+import ActionButton from "@/components/ActionButton";
 import PasteListDialog from "@/components/PasteListDialog";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
@@ -237,7 +237,13 @@ export default function AppraisePage() {
                 </SelectContent>
               </Select>
             </div>
-            <Button type="button" variant="outline" onClick={() => setIsPasteOpen(true)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setIsPasteOpen(true);
+              }}
+            >
               <ClipboardPaste data-icon="inline-start" aria-hidden="true" />
               Paste multibuy
             </Button>
@@ -291,9 +297,11 @@ export default function AppraisePage() {
             ))}
           </div>
         )}
-        <CalculateButton
+        <ActionButton
           type="submit"
-          onClick={appraiseItems}
+          onClick={() => {
+            void appraiseItems();
+          }}
           disabled={isLoading}
           icon={BadgeDollarSign}
           isLoading={isLoading}
@@ -317,7 +325,9 @@ Pyerite 60000`}
           ariaLabel="Multibuy list"
           allowSubtract
           currentItems={inputItems}
-          onCancel={() => setIsPasteOpen(false)}
+          onCancel={() => {
+            setIsPasteOpen(false);
+          }}
           onImport={(importedItems) => {
             setInputItems(
               importedItems.map((item) => ({

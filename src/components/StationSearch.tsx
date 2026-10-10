@@ -48,32 +48,36 @@ export default function StationSearch({
     const currentRequestId = ++requestId.current;
     const controller = new AbortController();
     const timeout = window.setTimeout(
-      async () => {
-        setIsSearching(true);
-        try {
-          const response = await fetch(
-            `/api/reference/stations?query=${encodeURIComponent(trimmedQuery)}&language=${language}`,
-            { signal: controller.signal },
-          );
-          const data = (await response.json()) as {
-            items?: StationSearchResult[];
-            error?: string;
-          };
-          if (!response.ok) throw new Error(data.error ?? "Could not search market locations.");
-          if (currentRequestId !== requestId.current) return;
-          const excludedIds = new Set(excludedStationIdsKey.split(",").filter(Boolean).map(Number));
-          setResults((data.items ?? []).filter((station) => !excludedIds.has(station.stationId)));
-          setIsOpen(true);
-        }
-        catch (error) {
-          if (error instanceof DOMException && error.name === "AbortError") return;
-          if (currentRequestId !== requestId.current) return;
-          setResults([]);
-          onError(error instanceof Error ? error.message : "Could not search market locations.");
-        }
-        finally {
-          if (currentRequestId === requestId.current) setIsSearching(false);
-        }
+      () => {
+        void (async () => {
+          setIsSearching(true);
+          try {
+            const response = await fetch(
+              `/api/reference/stations?query=${encodeURIComponent(trimmedQuery)}&language=${language}`,
+              { signal: controller.signal },
+            );
+            const data = (await response.json()) as {
+              items?: StationSearchResult[];
+              error?: string;
+            };
+            if (!response.ok) throw new Error(data.error ?? "Could not search market locations.");
+            if (currentRequestId !== requestId.current) return;
+            const excludedIds = new Set(
+              excludedStationIdsKey.split(",").filter(Boolean).map(Number),
+            );
+            setResults((data.items ?? []).filter((station) => !excludedIds.has(station.stationId)));
+            setIsOpen(true);
+          }
+          catch (error) {
+            if (error instanceof DOMException && error.name === "AbortError") return;
+            if (currentRequestId !== requestId.current) return;
+            setResults([]);
+            onError(error instanceof Error ? error.message : "Could not search market locations.");
+          }
+          finally {
+            if (currentRequestId === requestId.current) setIsSearching(false);
+          }
+        })();
       },
       300,
     );
@@ -129,7 +133,9 @@ export default function StationSearch({
           id="signals-station-search"
           className="w-full"
           showTrigger={false}
-          onFocus={() => results.length > 0 && setIsOpen(true)}
+          onFocus={() => {
+            if (results.length > 0) setIsOpen(true);
+          }}
           onKeyDown={onKeyDown}
           placeholder="Search by station or structure name"
           aria-label="Search market locations"

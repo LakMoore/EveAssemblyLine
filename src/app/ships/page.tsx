@@ -85,7 +85,9 @@ export default function ShipsPage() {
       setSelectedShipItemId(Number.isSafeInteger(value) && value > 0 ? value : null);
     };
     window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
   }, []);
 
   const typeNames = useMemo<TypeName>(
@@ -248,7 +250,9 @@ export default function ShipsPage() {
                     tabIndex={0}
                     className={styles.shipCard}
                     key={ship.itemId}
-                    onClick={() => selectShip(ship)}
+                    onClick={() => {
+                      selectShip(ship);
+                    }}
                     onKeyDown={(event) => {
                       if (event.target !== event.currentTarget) return;
                       if (event.key === "Enter" || event.key === " ") {
@@ -368,7 +372,9 @@ function ShipContentsModal({
   return (
     <ResponsiveDialogDrawer
       open
-      onOpenChange={(open) => !open && onClose()}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
       dialogClassName={styles.shipModal}
       drawerClassName={styles.shipModal}
       title={

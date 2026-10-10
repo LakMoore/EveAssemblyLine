@@ -409,10 +409,14 @@ export default function SimulationJobInputsResponsive({
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!open) return;
-    const updateNow = () => setNow(Date.now());
+    const updateNow = () => {
+      setNow(Date.now());
+    };
     updateNow();
     const intervalId = window.setInterval(updateNow, 60_000);
-    return () => window.clearInterval(intervalId);
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, [open]);
   const navigateToPlan = () => {
     setOpen(false);
@@ -571,10 +575,14 @@ export function SimulationInventionInputsResponsive({
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!open) return;
-    const updateNow = () => setNow(Date.now());
+    const updateNow = () => {
+      setNow(Date.now());
+    };
     updateNow();
     const intervalId = window.setInterval(updateNow, 60_000);
-    return () => window.clearInterval(intervalId);
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, [open]);
 
   const inputs = aggregateSimulationInputs(job.inputs);
@@ -605,7 +613,9 @@ export function SimulationInventionInputsResponsive({
             "inline-flex h-6 items-center justify-center gap-1 border px-2 text-[10px] font-semibold tracking-[0.08em] uppercase transition-colors hover:brightness-125",
             statusClassName(status),
           )}
-          onClick={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+          }}
         >
           <span>{completionPercent}%</span>
         </Button>

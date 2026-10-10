@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   adjustSimulationPurchaseQuantity,
   groupSimulationActivityJobs,
+  simulationCompletionKey,
   shouldAdjustSimulationPurchaseQuantity,
   simulationRunsStartingAtT0,
 } from "./presentation";
@@ -93,13 +94,19 @@ void test("keeps activity locations and activity kinds as separate groups", () =
     job("job-1"),
     job("job-2", { activity: "reaction" }),
     job("job-3", { locationId: 30 }),
+    job("job-4", { activity: "reaction", locationId: 30 }),
   ]);
 
-  assert.equal(groups.length, 3);
+  assert.equal(groups.length, 4);
   assert.deepEqual(
     groups.map(({ groupKey }) => groupKey),
-    ["manufacturing:20:20185", "reaction:20:20185", "manufacturing:30:20185"],
+    ["manufacturing:20:20185", "reaction:20:20185", "manufacturing:30:20185", "reaction:30:20185"],
   );
+});
+
+void test("keeps completion state separate for the same type at different locations", () => {
+  assert.notEqual(simulationCompletionKey(20, 20185), simulationCompletionKey(30, 20185));
+  assert.equal(simulationCompletionKey(20, 20185), simulationCompletionKey(20, 20185));
 });
 
 void test("sums scheduled runs starting at T+0 across jobs", () => {

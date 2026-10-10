@@ -6,7 +6,7 @@ export function isPlanRequestLog(value: unknown): value is PlanRequestLog {
   const candidate = value as Record<string, unknown>;
   return (
     typeof candidate.id === "string"
-    && (candidate.endpoint === "plan" || candidate.endpoint === "simulate")
+    && candidate.endpoint === "simulate"
     && typeof candidate.requestedAt === "string"
     && typeof candidate.storagePath === "string"
     && typeof candidate.sizeBytes === "number"

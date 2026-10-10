@@ -99,6 +99,8 @@ export function createInFlightTimelineEvents(
 
     seenJobIds.add(job.jobId);
     const durationSeconds = slot.availableAtSeconds;
+    const productTypeName = job.productTypeName?.trim();
+    const blueprintTypeName = job.blueprintTypeName?.trim();
     events.push({
       eventId: `in-flight:${job.jobId}`,
       jobId: String(job.jobId),
@@ -109,7 +111,12 @@ export function createInFlightTimelineEvents(
       characterId: job.characterId,
       slotIndex: slot.slotIndex,
       locationId: job.facilityId,
-      label: job.productTypeName?.trim() || job.blueprintTypeName?.trim() || `Job ${job.jobId}`,
+      label:
+        productTypeName && productTypeName.length > 0
+          ? productTypeName
+          : blueprintTypeName && blueprintTypeName.length > 0
+            ? blueprintTypeName
+            : `Job ${job.jobId}`,
       quantityLabel: `${job.runs.toLocaleString()} ${job.runs === 1 ? "run" : "runs"}`,
       startOffsetSeconds: 0,
       endOffsetSeconds: durationSeconds,

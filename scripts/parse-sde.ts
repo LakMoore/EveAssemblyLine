@@ -37,7 +37,7 @@ async function parseJsonl(
       }
       catch (error) {
         throw new Error(
-          `Invalid JSONL in ${filePath} line ${startLine}: ${error instanceof Error ? error.message : error}`,
+          `Invalid JSONL in ${filePath} line ${startLine}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
@@ -129,7 +129,7 @@ async function main() {
   console.log("Parsed HoboLeaks repackaged volumes.");
 }
 
-main().catch((error) => {
+main().catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;
 });

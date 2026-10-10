@@ -252,12 +252,16 @@ class IndustryDemandSimulation {
     measureSyncProfiled(
       this.profiler,
       "reserve-activity-demand",
-      () => this.reserveRecursiveActivityDemand(),
+      () => {
+        this.reserveRecursiveActivityDemand();
+      },
     );
     measureSyncProfiled(
       this.profiler,
       "reserve-local-stockpile-demand",
-      () => this.reserveLocalStockpileDemand(),
+      () => {
+        this.reserveLocalStockpileDemand();
+      },
     );
     this.allocator.reserveRemoteActivityDemand();
     this.allocator.reserveRemoteStockpileDemand();
@@ -357,7 +361,9 @@ class IndustryDemandSimulation {
     measureSyncProfiled(
       this.profiler,
       "finalize-deferred-production-supplies",
-      () => this.finalizeDeferredProductionSupplies(),
+      () => {
+        this.finalizeDeferredProductionSupplies();
+      },
     );
 
     measureSyncProfiled(
@@ -373,7 +379,9 @@ class IndustryDemandSimulation {
     measureSyncProfiled(
       this.profiler,
       "finalize-deferred-production-supplies",
-      () => this.finalizeDeferredProductionSupplies(),
+      () => {
+        this.finalizeDeferredProductionSupplies();
+      },
     );
     this.reconcileUnmetDemands();
     this.finalizeDeferredProductionSupplies();

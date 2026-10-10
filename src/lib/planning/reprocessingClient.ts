@@ -13,7 +13,7 @@ import type { FacilityResponse } from "./facilities";
 import { loadPlannerStockpiles, savePlannerStockpiles } from "./plannerStockpilesStore";
 
 const reprocessingEfficiencyResponseSchema = z.object({
-  efficiencies: z.record(z.string().regex(/^\d+$/), z.number().finite().min(0).max(150)).optional(),
+  efficiencies: z.record(z.string().regex(/^\d+$/), z.number().min(0).max(150)).optional(),
   error: z.string().optional(),
 });
 

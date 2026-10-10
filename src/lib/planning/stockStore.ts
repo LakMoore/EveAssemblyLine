@@ -37,7 +37,7 @@ export async function loadStock(location: StockLocation) {
       .objectStore(stockStoreName)
       .get(locationKey(location));
     request.onsuccess = () => {
-      const value = request.result;
+      const value: unknown = request.result;
       resolve(isStockRecord(value) ? value : null);
     };
     request.onerror = () => {
@@ -108,8 +108,12 @@ export async function loadStockSnapshotTime() {
       .transaction(stockMetadataStoreName, "readonly")
       .objectStore(stockMetadataStoreName)
       .get(stockSnapshotKey);
-    request.onsuccess = () => resolve(typeof request.result === "number" ? request.result : null);
-    request.onerror = () => reject(request.error ?? new Error("Could not load stock metadata."));
+    request.onsuccess = () => {
+      resolve(typeof request.result === "number" ? request.result : null);
+    };
+    request.onerror = () => {
+      reject(request.error ?? new Error("Could not load stock metadata."));
+    };
   });
 }
 
@@ -118,9 +122,12 @@ async function saveStockSnapshotTime() {
   return new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(stockMetadataStoreName, "readwrite");
     transaction.objectStore(stockMetadataStoreName).put(Date.now(), stockSnapshotKey);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () =>
+    transaction.oncomplete = () => {
+      resolve();
+    };
+    transaction.onerror = () => {
       reject(transaction.error ?? new Error("Could not save stock metadata."));
+    };
   });
 }
 

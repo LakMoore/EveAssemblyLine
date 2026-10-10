@@ -236,9 +236,15 @@ function connectedAccountKeys(transactions: readonly SimulationTransaction[]): R
 function configuredLocationIds(request: SimulationRequestV1): ReadonlySet<number> {
   const locationIds = new Set<number>();
   for (const stockpile of request.stockpiles) {
-    for (const locationId of Object.values(stockpile.locations)) locationIds.add(locationId);
+    for (const locationId of Object.values(stockpile.locations)) {
+      if (typeof locationId === "number" && Number.isSafeInteger(locationId)) {
+        locationIds.add(locationId);
+      }
+    }
     for (const locationId of Object.values(stockpile.groupAssignments ?? {})) {
-      locationIds.add(locationId);
+      if (typeof locationId === "number" && Number.isSafeInteger(locationId)) {
+        locationIds.add(locationId);
+      }
     }
   }
   return locationIds;

@@ -14,7 +14,7 @@ function isRecord(value: unknown): value is RawRecord {
 async function migrate() {
   const storage = await initStorage();
   return storage.runTransaction(async (transaction) => {
-    const entries = await transaction.getItemsByPrefix<unknown>(characterRecordPrefix);
+    const entries = await transaction.getItemsByPrefix(characterRecordPrefix);
     let changed = 0;
     let malformed = 0;
     for (const entry of entries) {
@@ -35,8 +35,8 @@ async function migrate() {
             ? entry.value[legacyOptInField]
             : false,
       };
-      delete nextRecord[legacyOptInField];
-      transaction.setItem(entry.key, nextRecord);
+      const { [legacyOptInField]: _legacyOptInValue, ...recordWithoutLegacyOptIn } = nextRecord;
+      transaction.setItem(entry.key, recordWithoutLegacyOptIn);
     }
     return { found: entries.length, changed, malformed };
   });

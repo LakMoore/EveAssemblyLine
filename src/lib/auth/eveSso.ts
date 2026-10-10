@@ -1,4 +1,5 @@
 import { createHash, createPublicKey, randomBytes, timingSafeEqual, verify } from "node:crypto";
+import type { JsonWebKey } from "node:crypto";
 import type { TokenSet } from "./model";
 import { initStorage } from "../storage";
 
@@ -107,7 +108,7 @@ export async function savePendingAuth(state: string, pending: PendingAuth) {
 export async function consumePendingAuth(state: string) {
   const storage = await initStorage();
   const key = `${pendingAuthPrefix}${state}`;
-  const pending = (await storage.getItem(key)) as PendingAuth | null | undefined;
+  const pending = await storage.getItem<PendingAuth | null>(key);
   await storage.setItem(key, null);
   if (!pending || Date.parse(pending.expiresAt) < Date.now()) return null;
   return pending;
@@ -201,7 +202,7 @@ async function verifyJwt(token: string) {
   const jwk = jwks.keys?.find((key) => key.kid === header.kid);
   if (!jwk) throw new Error("Unknown EVE token key");
   const publicKey = createPublicKey({
-    key: jwk as unknown as import("node:crypto").JsonWebKey,
+    key: jwk as unknown as JsonWebKey,
     format: "jwk",
   });
   const valid = verify(

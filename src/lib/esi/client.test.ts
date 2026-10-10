@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import type { CharacterTokenRecord, TokenSet } from "@/lib/auth/model";
+import { z } from "zod";
 import { clearEsiRequestLogTimer } from "./logger";
 import {
   fetchCharacterCorporationAuthorization,
@@ -8,19 +9,40 @@ import {
   fetchCharacterImplants,
   fetchCharacterIndustryJobs,
   fetchCharacterLocation,
+  fetchCharacterMarketOrders,
   fetchCharacterRoles,
   fetchCharacterShip,
   fetchCorporationIndustryJobs,
+  fetchCorporationMarketOrders,
   fetchCorporationStructures,
   fetchEsiEndpoint,
   fetchStructureMetadataPerCharacter,
   getCharacterCloneImplantIds,
   getUsableToken,
+  requestCachedEsi,
 } from "./client";
 
 after(() => {
   clearEsiRequestLogTimer();
 });
+
+function fetchInputUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  return input instanceof URL ? input.href : input.url;
+}
+
+function promiseFetchMock(
+  handler: (input: RequestInfo | URL, init?: RequestInit) => Response,
+): typeof fetch {
+  return (input, init) => {
+    try {
+      return Promise.resolve(handler(input, init));
+    }
+    catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  };
+}
 
 const token: TokenSet = {
   refreshToken: "refresh-token",
@@ -42,13 +64,14 @@ void test("maps character role locations from the ESI response", async (t) => {
     globalThis.fetch = originalFetch;
   });
 
-  globalThis.fetch = async () =>
+  globalThis.fetch = promiseFetchMock(() =>
     Response.json({
       roles: ["Factory_Manager"],
       roles_at_base: ["Container_Take_2"],
       roles_at_hq: ["Hangar_Query_6"],
       roles_at_other: ["Hangar_Take_2"],
-    });
+    }),
+  );
 
   const result = await fetchCharacterRoles(42, token);
 
@@ -77,8 +100,8 @@ void test("checks corporation membership before fetching roles and reuses cached
     ],
   };
   const requests: string[] = [];
-  globalThis.fetch = async (input) => {
-    const url = String(input);
+  globalThis.fetch = promiseFetchMock((input) => {
+    const url = fetchInputUrl(input);
     requests.push(url);
     if (url.endsWith("/characters/4201/")) {
       return Response.json({
@@ -102,7 +125,7 @@ void test("checks corporation membership before fetching roles and reuses cached
       });
     }
     throw new Error(`Unexpected ESI request: ${url}`);
-  };
+  });
 
   const first = await fetchCharacterCorporationAuthorization(4201, scopedToken, 777);
   const second = await fetchCharacterCorporationAuthorization(4201, scopedToken, 777);
@@ -126,10 +149,11 @@ void test("treats a corporation member-list authorization failure as no access",
     ...token,
     scopes: ["esi-corporations.read_corporation_membership.v1"],
   };
-  globalThis.fetch = async (input) => {
-    const url = String(input);
+  globalThis.fetch = promiseFetchMock((input) => {
+    const url = fetchInputUrl(input);
     if (url.endsWith("/characters/4202/")) {
       return Response.json({
+        alliance_id: null,
         birthday: "2020-01-01T00:00:00Z",
         corporation_id: 778,
         description: "",
@@ -137,16 +161,74 @@ void test("treats a corporation member-list authorization failure as no access",
         name: "Test Pilot",
         race_id: 1,
         security_status: 0,
+        title: null,
       });
     }
     if (url.endsWith("/corporations/778/members/")) return new Response(null, { status: 403 });
     throw new Error(`Unexpected ESI request: ${url}`);
-  };
+  });
 
   const result = await fetchCharacterCorporationAuthorization(4202, scopedToken, 778);
 
   assert.equal(result.authorized, false);
+  assert.equal(result.characterInfo.alliance_id, undefined);
   assert.equal(result.roles, null);
+});
+
+void test("keeps character orders with unknown sides without classifying them", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = promiseFetchMock(() =>
+    Response.json([
+      {
+        order_id: 900,
+        type_id: 34,
+        location_id: 60000001,
+        issued: "2026-10-09T00:00:00Z",
+        volume_remain: 10,
+        volume_total: 10,
+      },
+    ]),
+  );
+
+  const result = await fetchCharacterMarketOrders(character);
+
+  assert.ok(result.orders);
+  assert.equal(result.orders.length, 1);
+  assert.equal(result.orders[0].isBuyOrder, undefined);
+});
+
+void test("keeps corporation orders with unknown sides without classifying them", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = promiseFetchMock(() =>
+    Response.json([
+      {
+        order_id: 901,
+        type_id: 34,
+        location_id: 60000001,
+        issued: "2026-10-09T00:00:00Z",
+        volume_remain: 10,
+        volume_total: 10,
+      },
+    ]),
+  );
+
+  const result = await fetchCorporationMarketOrders({
+    ...character,
+    corporationId: 777,
+    hasDirectorRole: true,
+  });
+
+  assert.ok(result.orders);
+  assert.equal(result.orders.length, 1);
+  assert.equal(result.orders[0].isBuyOrder, undefined);
 });
 
 void test("sends the cached ETag for a non-paginated endpoint", async (t) => {
@@ -156,9 +238,9 @@ void test("sends the cached ETag for a non-paginated endpoint", async (t) => {
   });
 
   let request = { url: "", headers: new Headers() };
-  globalThis.fetch = async (input, init) => {
+  globalThis.fetch = promiseFetchMock((input, init) => {
     request = {
-      url: String(input),
+      url: fetchInputUrl(input),
       headers: new Headers(init?.headers),
     };
     return new Response(
@@ -172,10 +254,11 @@ void test("sends the cached ETag for a non-paginated endpoint", async (t) => {
         },
       },
     );
-  };
+  });
 
-  const result = await fetchEsiEndpoint<{ skills: unknown[] }>(
+  const result = await fetchEsiEndpoint(
     "/characters/42/skills/",
+    z.object({ skills: z.array(z.unknown()) }),
     token,
     "old-etag",
     { paginated: false },
@@ -189,6 +272,17 @@ void test("sends the cached ETag for a non-paginated endpoint", async (t) => {
   assert.equal(result.headers.get("expires"), "Wed, 26 Aug 2026 17:00:00 GMT");
 });
 
+void test("rejects ESI responses that do not match their schema", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  globalThis.fetch = promiseFetchMock(() => Response.json({ id: "not-a-number" }));
+
+  await assert.rejects(requestCachedEsi("/test/schema-validation/", z.object({ id: z.number() })));
+});
+
 void test("sends the cached ETag for corporation structures", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
@@ -196,7 +290,7 @@ void test("sends the cached ETag for corporation structures", async (t) => {
   });
 
   let request = { headers: new Headers() };
-  globalThis.fetch = async (_input, init) => {
+  globalThis.fetch = promiseFetchMock((_input, init) => {
     request = { headers: new Headers(init?.headers) };
     return Response.json(
       [],
@@ -207,7 +301,7 @@ void test("sends the cached ETag for corporation structures", async (t) => {
         },
       },
     );
-  };
+  });
 
   const result = await fetchCorporationStructures(
     {
@@ -240,11 +334,11 @@ void test("scopes structure metadata failures to the character token", async (t)
     personalAuth: { ...token, accessToken: "second-access-token" },
   };
   const requests: string[] = [];
-  globalThis.fetch = async (_input, init) => {
+  globalThis.fetch = promiseFetchMock((_input, init) => {
     requests.push(new Headers(init?.headers).get("authorization") ?? "");
     if (requests.length === 1) return new Response(null, { status: 403 });
     return Response.json({ name: "Accessible Structure", system_id: 30000142 });
-  };
+  });
 
   const firstToken = await getUsableToken(firstCharacter);
   const secondToken = await getUsableToken(secondCharacter);
@@ -264,10 +358,10 @@ void test("does not request sub-billion IDs as structures", async (t) => {
   });
 
   let requestCount = 0;
-  globalThis.fetch = async () => {
+  globalThis.fetch = promiseFetchMock(() => {
     requestCount += 1;
     return Response.json({ name: "Unexpected structure" });
-  };
+  });
 
   const result = await fetchStructureMetadataPerCharacter(3007, token);
 
@@ -283,8 +377,8 @@ void test("fetches active industry jobs and excludes unusable terminal jobs", as
   });
 
   let requestUrl = "";
-  globalThis.fetch = async (input) => {
-    requestUrl = String(input);
+  globalThis.fetch = promiseFetchMock((input) => {
+    requestUrl = fetchInputUrl(input);
     return Response.json([
       {
         job_id: 1,
@@ -353,7 +447,7 @@ void test("fetches active industry jobs and excludes unusable terminal jobs", as
         completed_date: "2026-09-02T01:00:00Z",
       },
     ]);
-  };
+  });
 
   const result = await fetchCharacterIndustryJobs(character, undefined, "2026-09-01T00:00:00Z");
 
@@ -381,10 +475,10 @@ void test("fetches completed corporation industry jobs", async (t) => {
   });
 
   let requestUrl = "";
-  globalThis.fetch = async (input) => {
-    requestUrl = String(input);
+  globalThis.fetch = promiseFetchMock((input) => {
+    requestUrl = fetchInputUrl(input);
     return Response.json([]);
-  };
+  });
 
   await fetchCorporationIndustryJobs({
     ...character,
@@ -405,8 +499,8 @@ void test("returns response metadata for a 304 without fetching another page", a
   });
 
   const requests: string[] = [];
-  globalThis.fetch = async (input) => {
-    requests.push(String(input));
+  globalThis.fetch = promiseFetchMock((input) => {
+    requests.push(fetchInputUrl(input));
     return new Response(
       null,
       {
@@ -419,10 +513,11 @@ void test("returns response metadata for a 304 without fetching another page", a
         },
       },
     );
-  };
+  });
 
-  const result = await fetchEsiEndpoint<number>(
+  const result = await fetchEsiEndpoint(
     "/characters/42/assets/",
+    z.number(),
     token,
     "same-etag",
     { paginated: true },
@@ -441,8 +536,8 @@ void test("aggregates all pages while preserving first-page metadata", async (t)
   });
 
   const requests: string[] = [];
-  globalThis.fetch = async (input) => {
-    const url = String(input);
+  globalThis.fetch = promiseFetchMock((input) => {
+    const url = fetchInputUrl(input);
     requests.push(url);
     const page = new URL(url).searchParams.get("page");
     return new Response(
@@ -456,10 +551,11 @@ void test("aggregates all pages while preserving first-page metadata", async (t)
         },
       },
     );
-  };
+  });
 
-  const result = await fetchEsiEndpoint<number>(
+  const result = await fetchEsiEndpoint(
     "/characters/42/assets/",
+    z.number(),
     token,
     undefined,
     { paginated: true },
@@ -491,15 +587,15 @@ void test("maps current ship and location responses", async (t) => {
     },
   };
   const requests: string[] = [];
-  globalThis.fetch = async (input) => {
-    const url = String(input);
+  globalThis.fetch = promiseFetchMock((input) => {
+    const url = fetchInputUrl(input);
     requests.push(url);
     return Response.json(
       url.endsWith("/location/")
         ? { solar_system_id: 30_000_142 }
         : { ship_item_id: 9_001, ship_name: "Active ship", ship_type_id: 587 },
     );
-  };
+  });
 
   const location = await fetchCharacterLocation(scopedCharacter);
   const ship = await fetchCharacterShip(scopedCharacter);
@@ -536,10 +632,11 @@ void test("preserves ESI jump clone implant records", async (t) => {
       scopes: ["esi-clones.read_clones.v1", "esi-clones.read_implants.v1"],
     },
   };
-  globalThis.fetch = async () =>
+  globalThis.fetch = promiseFetchMock(() =>
     Response.json({
       jump_clones: [{ jump_clone_id: 77, implants: [27175] }],
-    });
+    }),
+  );
 
   const result = await fetchCharacterClones(scopedCharacter);
 
@@ -565,10 +662,10 @@ void test("fetches active-clone implants from the documented ESI endpoint", asyn
     },
   };
   let requestUrl = "";
-  globalThis.fetch = async (input) => {
-    requestUrl = String(input);
+  globalThis.fetch = promiseFetchMock((input) => {
+    requestUrl = fetchInputUrl(input);
     return Response.json([27174]);
-  };
+  });
 
   const result = await fetchCharacterImplants(scopedCharacter);
 
@@ -596,19 +693,29 @@ void test("treats a 420 error-limit response as rate limited", async (t) => {
     globalThis.fetch = originalFetch;
   });
 
-  globalThis.fetch = async () =>
-    new Response(
-      null,
-      {
-        status: 420,
-        headers: {
-          "x-esi-error-limit-reset": "30",
+  globalThis.fetch = promiseFetchMock(
+    () =>
+      new Response(
+        null,
+        {
+          status: 420,
+          headers: {
+            "x-esi-error-limit-reset": "30",
+          },
         },
-      },
-    );
+      ),
+  );
 
   await assert.rejects(
-    fetchEsiEndpoint("/characters/42/assets/", token, undefined, { paginated: false }),
+    fetchEsiEndpoint(
+      "/characters/42/assets/",
+      z.unknown(),
+      token,
+      undefined,
+      {
+        paginated: false,
+      },
+    ),
     (error: Error & { status?: number; retryAfter?: string }) => {
       assert.equal(error.status, 420);
       assert.equal(error.retryAfter, "30");
@@ -624,10 +731,10 @@ void test("requires current-location scopes before making an ESI request", async
   });
 
   let requestCount = 0;
-  globalThis.fetch = async () => {
+  globalThis.fetch = promiseFetchMock(() => {
     requestCount += 1;
     return new Response(null, { status: 500 });
-  };
+  });
 
   await assert.rejects(
     fetchCharacterLocation(character),

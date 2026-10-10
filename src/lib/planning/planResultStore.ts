@@ -5,10 +5,9 @@ import type {
   SimulationSlotActivity,
 } from "./simulator/types";
 import { simulationCalculationVersion } from "./simulator/etag";
-import type { PlanHaulExclusion, PlanResponse } from "./types";
+import type { PlanHaulExclusion } from "./types";
 import { getPlanningDatabase, plannerPreferencesStoreName } from "./planningDatabase";
 
-const planResponseKey = "latest-plan-response";
 const simulationResultKey = "latest-simulation-result-v2";
 const simulationHaulExclusionsKey = "simulation-haul-exclusions";
 const simulationPreservedHaulTasksKey = "simulation-preserved-haul-tasks";
@@ -36,6 +35,12 @@ function hasTypeIdentity(value: unknown): value is Record<string, unknown> {
 /** Validates the stable identity and timing fields for one restored slot. */
 function isSimulationSlot(value: unknown): value is SimulationSlot {
   if (!isRecord(value)) return false;
+  const slotKey = value.slotKey;
+  const characterId = value.characterId;
+  const systemId = value.systemId;
+  const slotIndex = value.slotIndex;
+  const availableAtSeconds = value.availableAtSeconds;
+  const installedJobId = value.installedJobId;
   const slotCodeByActivity: Record<SimulationSlotActivity, string> = {
     manufacturing: "M",
     reaction: "R",
@@ -49,15 +54,17 @@ function isSimulationSlot(value: unknown): value is SimulationSlot {
       : undefined;
   return (
     slotCode !== undefined
-    && typeof value.slotKey === "string"
-    && isPositiveInteger(value.characterId)
-    && isPositiveInteger(value.systemId)
-    && Number.isSafeInteger(value.slotIndex)
-    && (value.slotIndex as number) >= 0
-    && Number.isSafeInteger(value.availableAtSeconds)
-    && (value.availableAtSeconds as number) >= 0
-    && (value.installedJobId === undefined || isPositiveInteger(value.installedJobId))
-    && value.slotKey === `${value.characterId}:${slotCode}:${value.slotIndex}`
+    && typeof slotKey === "string"
+    && isPositiveInteger(characterId)
+    && isPositiveInteger(systemId)
+    && typeof slotIndex === "number"
+    && Number.isSafeInteger(slotIndex)
+    && slotIndex >= 0
+    && typeof availableAtSeconds === "number"
+    && Number.isSafeInteger(availableAtSeconds)
+    && availableAtSeconds >= 0
+    && (installedJobId === undefined || isPositiveInteger(installedJobId))
+    && slotKey === `${characterId}:${slotCode}:${slotIndex}`
   );
 }
 
@@ -76,94 +83,6 @@ function hasSimulationSlots(value: unknown): value is SimulationSlot[] {
     if (slot.installedJobId !== undefined) seenInstalledJobs.add(slot.installedJobId);
   }
   return true;
-}
-
-/** Narrows archived legacy planner payloads for the admin replay screen only. */
-export function isPlanResponse(value: unknown): value is PlanResponse {
-  if (!isRecord(value) || !isRecord(value.metadata) || !isRecord(value.lists)) return false;
-  const metadata = value.metadata;
-  const lists = value.lists;
-  const hasLocationBuckets = (buckets: unknown) =>
-    Array.isArray(buckets)
-    && buckets.every(
-      (bucket) =>
-        isRecord(bucket)
-        && (bucket.locationId === undefined || isPositiveInteger(bucket.locationId))
-        && Array.isArray(bucket.items)
-        && bucket.items.every(isRecord),
-    );
-  const planItems = lists.planItems;
-  const hasPlanItems =
-    isRecord(planItems)
-    && Array.isArray(planItems.all)
-    && planItems.all.every(hasTypeIdentity)
-    && hasLocationBuckets(planItems.byActivityLocation);
-  const hasPurchaseGroups = (groups: unknown) =>
-    Array.isArray(groups)
-    && groups.every(
-      (group) =>
-        isRecord(group)
-        && typeof group.assemblyLineGroup === "string"
-        && Array.isArray(group.items)
-        && group.items.every((item) => hasTypeIdentity(item) && isQuantity(item.neededQuantity)),
-    );
-  const hasHaulBuckets =
-    Array.isArray(lists.haulingTasks)
-    && lists.haulingTasks.every(
-      (bucket) =>
-        isRecord(bucket)
-        && isPositiveInteger(bucket.fromLocationId)
-        && isPositiveInteger(bucket.toLocationId)
-        && Array.isArray(bucket.items)
-        && bucket.items.every((item) => hasTypeIdentity(item) && isQuantity(item.neededQuantity)),
-    );
-  return (
-    typeof metadata.generatedAt === "string"
-    && hasPlanItems
-    && hasPurchaseGroups(lists.materialsToBuy)
-    && hasPurchaseGroups(lists.bpoToBuy)
-    && hasLocationBuckets(lists.bpcToCopy)
-    && hasLocationBuckets(lists.inventionJobs)
-    && hasLocationBuckets(lists.reactionJobs)
-    && hasLocationBuckets(lists.manufacturingJobs)
-    && hasLocationBuckets(lists.reprocessingJobs)
-    && Array.isArray(lists.skillsRequired)
-    && lists.skillsRequired.every(isRecord)
-    && hasHaulBuckets
-  );
-}
-
-/** Loads the most recent legacy calculation result from IndexedDB. */
-export async function loadPlanResponse(): Promise<PlanResponse | null> {
-  try {
-    const database = await getPlanningDatabase();
-    return await new Promise<PlanResponse | null>((resolve, reject) => {
-      const request = database
-        .transaction(plannerPreferencesStoreName, "readonly")
-        .objectStore(plannerPreferencesStoreName)
-        .get(planResponseKey);
-      request.onsuccess = () => resolve(isPlanResponse(request.result) ? request.result : null);
-      request.onerror = () => reject(request.error ?? new Error("Could not load the latest plan."));
-    });
-  }
-  catch {
-    return null;
-  }
-}
-
-/** Saves a legacy calculation result for browser-local restoration. */
-export async function savePlanResponse(plan: PlanResponse): Promise<void> {
-  try {
-    const database = await getPlanningDatabase();
-    await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(plannerPreferencesStoreName, "readwrite");
-      transaction.objectStore(plannerPreferencesStoreName).put(plan, planResponseKey);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () =>
-        reject(transaction.error ?? new Error("Could not save the plan."));
-    });
-  }
-  catch {}
 }
 
 /** Validates the durable browser representation of a native simulator result. */
@@ -232,7 +151,10 @@ export function isSimulationResultV2(value: unknown): value is SimulationResultV
         isRecord(bucket)
         && isPositiveInteger(bucket.locationId)
         && Array.isArray(bucket.items)
-        && bucket.items.every((item) => hasBalance(item) && item.locationId === bucket.locationId),
+        && bucket.items.every(
+          (item: unknown) =>
+            isRecord(item) && hasBalance(item) && item.locationId === bucket.locationId,
+        ),
     );
   const hasReactionFormulaBalances = (items: unknown) =>
     items === undefined
@@ -418,8 +340,9 @@ export async function loadSimulationResult(): Promise<SimulationResultV2 | null>
       request.onsuccess = () => {
         resolve(isSimulationResultV2(request.result) ? request.result : null);
       };
-      request.onerror = () =>
+      request.onerror = () => {
         reject(request.error ?? new Error("Could not load the latest simulation result."));
+      };
     });
   }
   catch {
@@ -491,8 +414,9 @@ export async function loadSimulationHaulExclusions(): Promise<PlanHaulExclusion[
         const stored = Array.isArray(request.result) ? request.result : [];
         resolve(stored.filter(isStoredSimulationHaulExclusion));
       };
-      request.onerror = () =>
+      request.onerror = () => {
         reject(request.error ?? new Error("Could not load simulator haul exclusions."));
+      };
     });
   }
   catch {
@@ -513,8 +437,9 @@ export async function loadSimulationPreservedHaulTasks(): Promise<SimulationHaul
         const stored = Array.isArray(request.result) ? request.result : [];
         resolve(stored.filter(isStoredSimulationHaulTask));
       };
-      request.onerror = () =>
+      request.onerror = () => {
         reject(request.error ?? new Error("Could not load preserved simulator haul tasks."));
+      };
     });
   }
   catch {
@@ -536,11 +461,15 @@ export async function saveSimulationState(
       store.put(result, simulationResultKey);
       store.put([...haulExclusions], simulationHaulExclusionsKey);
       store.put([...preservedHaulTasks], simulationPreservedHaulTasksKey);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () =>
+      transaction.oncomplete = () => {
+        resolve();
+      };
+      transaction.onerror = () => {
         reject(transaction.error ?? new Error("Could not save simulator state."));
-      transaction.onabort = () =>
+      };
+      transaction.onabort = () => {
         reject(transaction.error ?? new Error("Could not save simulator state."));
+      };
     });
     return true;
   }

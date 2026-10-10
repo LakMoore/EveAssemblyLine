@@ -25,7 +25,7 @@ import {
 } from "./cache";
 import { getGroups, getMarketGroups, getTypesByIds } from "@/cache/services/sdeCache";
 import { normalizeCorporationSettings } from "@/lib/auth/tokensStore";
-import { getCorporationHangarPermissions } from "./corporationAccess";
+import type { getCorporationHangarPermissions } from "./corporationAccess";
 import type {
   AssetRecord,
   CorporationCollectionSettings,

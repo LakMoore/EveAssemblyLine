@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type SubmitEvent, useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw, TrendingUp } from "lucide-react";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -119,7 +119,7 @@ export default function SignalsPage() {
     [language],
   );
 
-  function applyThreshold(event: FormEvent<HTMLFormElement>) {
+  function applyThreshold(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const parsedThreshold = Number(thresholdInput);
     const thresholdIsk = Number.isFinite(parsedThreshold) ? Math.max(0, parsedThreshold) : 0;
@@ -176,7 +176,9 @@ export default function SignalsPage() {
               min="0"
               step="100000"
               value={thresholdInput}
-              onChange={(event) => setThresholdInput(event.target.value)}
+              onChange={(event) => {
+                setThresholdInput(event.target.value);
+              }}
             />
           </Field>
           <Field orientation="horizontal" className="items-center gap-2 pb-2">

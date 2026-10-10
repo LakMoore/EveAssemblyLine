@@ -45,7 +45,7 @@ export async function getSessionCharacterIds(
 
 export async function getSessionFromRequest(request: Request) {
   const value = getRequestCookie(request, sessionCookieName);
-  return value ? await getSession(decodeURIComponent(value)) : null;
+  return value ? getSession(decodeURIComponent(value)) : null;
 }
 
 export function setSessionCookie(response: NextResponse, sessionId: string) {

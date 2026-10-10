@@ -31,10 +31,9 @@ Without SDE data the application still builds, but SDE-backed routes should call
 
 ## Industry simulator
 
-`POST /api/plan/simulate` runs the version-one ledger-based industry simulator alongside the
-legacy `/api/plan` endpoint. It accepts the current planner request plus a `simulation` object,
-uses only client-supplied state and the cached SDE, and never authenticates or calls ESI. Responses
-use `Cache-Control: no-store`.
+`POST /api/plan/simulate` is the application's only planning calculation endpoint. It accepts
+client-supplied planning state and a `simulation` object, uses the cached SDE, and never authenticates
+or calls ESI. Responses use `Cache-Control: no-store`.
 
 The simulator reports availability at `now`, `after-hauling`, `after-upstream`, and
 `after-purchase` horizons. Physical item lots and finite BPC runs are conserved once across all
@@ -57,7 +56,7 @@ views are diagnostic and are not required for the planner to display the native 
 
 ## Firebase persistence
 
-Durable server-side accounts, sessions, EVE tokens, and pending SSO state are stored in Cloud Firestore through the Firebase Admin SDK. The application uses one document per storage key in the `assemblyLineStorage` collection. Plan request logs use the dedicated `planRequests/{requestId}` collection for metadata and store their compressed request/response JSON in Cloud Storage at `plan-logs/{requestId}.json.gz`. SDE data remains a build/runtime input loaded into process memory; it is not stored in Firestore.
+Durable server-side accounts, sessions, EVE tokens, and pending SSO state are stored in Cloud Firestore through the Firebase Admin SDK. The application uses one document per storage key in the `assemblyLineStorage` collection. Simulator request logs use the dedicated `planRequests/{requestId}` collection for metadata and store their compressed request/response JSON in Cloud Storage at `plan-logs/{requestId}.json.gz`. The migration leaves historic Calculate and malformed records in place rather than exposing or relabeling them as simulator logs. SDE data remains a build/runtime input loaded into process memory; it is not stored in Firestore.
 
 For Firebase App Hosting, no Firebase-specific `.env` variables are required. App Hosting provides `FIREBASE_CONFIG` automatically and the Firebase Admin SDK uses Application Default Credentials from the backend's runtime service account. The backend service account must have permission to access Firestore.
 
@@ -100,7 +99,7 @@ session can always refresh that Director's corporation when the required scopes 
 4. Select a database location close to the App Hosting backend and confirm **Create**. The default `(default)` database is sufficient.
 5. Open **Project settings > Service accounts** and identify the service account used by the App Hosting backend. Grant it a Firestore role such as **Cloud Datastore User** (`roles/datastore.user`) at the project level if it does not already have access.
 6. Confirm the App Hosting backend service account can create, read, and delete objects in the default Firebase Storage bucket.
-7. Roll out the App Hosting backend. The build runs the idempotent plan-log migration before the new `planRequests` shape is used; no manual collection or object creation is needed.
+7. Roll out the App Hosting backend. The normal build runs `next build` and does not run the plan-log migration; use the migration commands below when existing request logs need migration.
 
 For local ADC setup, install the Google Cloud CLI, run `gcloud auth application-default login`, set `FIREBASE_PROJECT_ID` in `.env.local`, and run the app from the application root. Do not use production credentials for local experiments; use a separate Firebase project or the Firestore emulator.
 

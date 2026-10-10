@@ -9,8 +9,8 @@ const plannerLocationId = z
   .max(Number.MAX_SAFE_INTEGER)
   .refine((locationId) => locationId !== 0);
 const nonNegativeInteger = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
-const percentage = z.number().finite().min(0).max(100);
-const multiplier = z.number().finite().positive().max(10);
+const percentage = z.number().min(0).max(100);
+const multiplier = z.number().positive().max(10);
 const defaultSimulationPolicy = {
   fallbackInventionSkillLevel: 3,
   decryptorTypeIdByProductBlueprintTypeId: {},
@@ -60,7 +60,7 @@ const simulationSlotSchema = z
     const expectedSlotKey = `${slot.characterId}:${slotKeyCode[slot.activity]}:${slot.slotIndex}`;
     if (slot.slotKey !== expectedSlotKey) {
       context.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["slotKey"],
         message: `Slot key must be ${expectedSlotKey}.`,
       });
@@ -75,7 +75,7 @@ const ownerSchema = z
   .superRefine((owner, context) => {
     if ((owner.ownerType === undefined) !== (owner.ownerId === undefined)) {
       context.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         message: "Owner type and owner ID must be provided together.",
       });
     }
@@ -99,7 +99,7 @@ const blueprintPrintSchema = z
   .superRefine((blueprint, context) => {
     if (blueprint.type === "bpc" && blueprint.runs < 0) {
       context.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["runs"],
         message: "BPC runs must be a nonnegative integer.",
       });
@@ -188,14 +188,14 @@ const stockpileSchema = z.object({
 });
 
 const facilityBonusSchema = z.object({
-  manufacturingMaterialMultiplier: z.number().finite().min(0).max(2),
-  manufacturingMaterialPercentage: z.number().finite().min(-100).max(100),
-  manufacturingTimeMultiplier: z.number().finite().min(0).max(2),
-  manufacturingTimePercentage: z.number().finite().min(-100).max(100),
-  reactionMaterialMultiplier: z.number().finite().min(0).max(2),
-  reactionMaterialPercentage: z.number().finite().min(-100).max(100),
-  reactionTimeMultiplier: z.number().finite().min(0).max(2),
-  reactionTimePercentage: z.number().finite().min(-100).max(100),
+  manufacturingMaterialMultiplier: z.number().min(0).max(2),
+  manufacturingMaterialPercentage: z.number().min(-100).max(100),
+  manufacturingTimeMultiplier: z.number().min(0).max(2),
+  manufacturingTimePercentage: z.number().min(-100).max(100),
+  reactionMaterialMultiplier: z.number().min(0).max(2),
+  reactionMaterialPercentage: z.number().min(-100).max(100),
+  reactionTimeMultiplier: z.number().min(0).max(2),
+  reactionTimePercentage: z.number().min(-100).max(100),
 });
 
 const simulationSchema = z
@@ -239,7 +239,7 @@ const simulationSchema = z
     simulation.slots.forEach((slot, index) => {
       if (seenSlotKeys.has(slot.slotKey)) {
         context.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           path: ["slots", index, "slotKey"],
           message: "Slot keys must be unique.",
         });
@@ -249,14 +249,14 @@ const simulationSchema = z
       const character = charactersById.get(slot.characterId);
       if (!character) {
         context.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           path: ["slots", index, "characterId"],
           message: "Every slot must belong to a declared simulation character.",
         });
       }
       else if (character.systemId !== slot.systemId) {
         context.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           path: ["slots", index, "systemId"],
           message: "Slot system must match its simulation character system.",
         });
@@ -265,7 +265,7 @@ const simulationSchema = z
       if (slot.installedJobId !== undefined) {
         if (seenInstalledJobIds.has(slot.installedJobId)) {
           context.addIssue({
-            code: z.ZodIssueCode.custom,
+            code: "custom",
             path: ["slots", index, "installedJobId"],
             message: "An in-flight job may occupy only one slot.",
           });
@@ -300,7 +300,7 @@ export const simulatorRequestSchema = z
         z.object({
           locationId: plannerLocationId,
           systemId: positiveSafeInteger,
-          sizeId: z.number().finite().nonnegative(),
+          sizeId: z.number().nonnegative(),
           buildTypeGroups: z.record(z.string(), facilityBonusSchema),
         }),
       )
@@ -333,7 +333,7 @@ export const simulatorRequestSchema = z
     for (const typeId of request.settings.buildBlacklist) {
       if (buyBlacklist.has(typeId)) {
         context.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           path: ["settings", "buildBlacklist"],
           message: `Type ${typeId} cannot be present in both build and buy blacklists.`,
         });
@@ -343,5 +343,5 @@ export const simulatorRequestSchema = z
 
 /** Validates and defaults an unknown simulator request. */
 export function parseSimulatorRequest(input: unknown): SimulationRequestV1 {
-  return simulatorRequestSchema.parse(input) as SimulationRequestV1;
+  return simulatorRequestSchema.parse(input);
 }

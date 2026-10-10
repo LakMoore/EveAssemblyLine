@@ -192,7 +192,9 @@ function SortHeader({
         align === "left" ? "mr-auto justify-start" : "ml-auto justify-end",
       )}
       aria-label={`Sort by ${label}${active ? `, ${direction}ending` : ""}`}
-      onClick={() => onSort(sortKey)}
+      onClick={() => {
+        onSort(sortKey);
+      }}
     >
       {label}
       <SortIcon data-icon="inline-end" aria-hidden="true" />
@@ -389,7 +391,9 @@ export default function OrePricesPage() {
             id="ore-price-filter"
             type="search"
             value={filter}
-            onChange={(event) => setFilter(event.target.value)}
+            onChange={(event) => {
+              setFilter(event.target.value);
+            }}
             placeholder="Ore or material name"
           />
         </Field>
@@ -564,7 +568,9 @@ export default function OrePricesPage() {
                   <Collapsible
                     key={item.typeId}
                     open={openTypeId === item.typeId}
-                    onOpenChange={(open) => setOpenTypeId(open ? item.typeId : null)}
+                    onOpenChange={(open) => {
+                      setOpenTypeId(open ? item.typeId : null);
+                    }}
                     className="contents"
                   >
                     <div

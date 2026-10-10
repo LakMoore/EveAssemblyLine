@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { simulationCalculationVersion } from "./simulator/etag";
-import { isPlanResponse, isSimulationResultV2 } from "./planResultStore";
+import { isSimulationResultV2 } from "./planResultStore";
 
 const listNames = [
   "warnings",
@@ -102,58 +102,6 @@ void test("accepts canonical location ledgers and rejects ledgers without a loca
     ledgers: [{ ledgerId: "location:10", balances: [] }],
   };
   assert.equal(isSimulationResultV2(invalid), false);
-});
-
-void test("accepts a complete cached legacy plan response", () => {
-  assert.equal(
-    isPlanResponse({
-      metadata: { generatedAt: "2026-09-19T00:00:00.000Z" },
-      lists: {
-        planItems: { all: [], byActivityLocation: [] },
-        materialsToBuy: [],
-        bpcToCopy: [],
-        bpoToBuy: [],
-        inventionJobs: [],
-        reactionJobs: [],
-        manufacturingJobs: [],
-        reprocessingJobs: [],
-        skillsRequired: [],
-        haulingTasks: [],
-      },
-    }),
-    true,
-  );
-});
-
-void test("rejects a cached legacy planner response", () => {
-  assert.equal(
-    isSimulationResultV2({
-      metadata: { generatedAt: "2026-09-19T00:00:00.000Z" },
-      lists: { planItems: { all: [], byActivityLocation: [] } },
-    }),
-    false,
-  );
-});
-
-void test("rejects cached plan items without the required result arrays", () => {
-  assert.equal(
-    isPlanResponse({
-      metadata: { generatedAt: "2026-09-19T00:00:00.000Z" },
-      lists: {
-        planItems: { all: {} },
-        materialsToBuy: [],
-        bpcToCopy: [],
-        bpoToBuy: [],
-        inventionJobs: [],
-        reactionJobs: [],
-        manufacturingJobs: [],
-        reprocessingJobs: [],
-        skillsRequired: [],
-        haulingTasks: [],
-      },
-    }),
-    false,
-  );
 });
 
 void test("rejects a native result with a missing list", () => {

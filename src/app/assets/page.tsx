@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { type SubmitEvent, useEffect, useRef, useState } from "react";
 import { NoPrefetchLink } from "@/components/NoPrefetchLink";
 import { useAppLanguage } from "../AppShell";
 import {
@@ -37,6 +37,7 @@ import DialogBody from "@/components/DialogBody";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/toast";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
@@ -195,7 +196,9 @@ export default function StockPage() {
     };
     handlePopState();
     window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
   }, []);
 
   useEffect(() => {
@@ -225,9 +228,9 @@ export default function StockPage() {
           loadEsiStock
             ? loadClientAssets(language, reloadEsiStock).then((data) => ({
                 ok: true,
-                json: async () => data,
+                json: () => Promise.resolve(data),
               }))
-            : Promise.resolve({ ok: false, json: async () => ({}) }),
+            : Promise.resolve({ ok: false, json: () => Promise.resolve({}) }),
           loadClientJobs().catch((): ClientJobsResponse => ({ jobs: [] })),
         ]);
         setJobs(jobsResponse);
@@ -475,7 +478,13 @@ export default function StockPage() {
           <h1>Assets</h1>
           <p className={styles.subtitle}>Track available materials and components by location.</p>
         </div>
-        <button type="button" className={styles.importButton} onClick={() => setIsAddOpen(true)}>
+        <button
+          type="button"
+          className={styles.importButton}
+          onClick={() => {
+            setIsAddOpen(true);
+          }}
+        >
           <Plus aria-hidden="true" />
           Add location
         </button>
@@ -509,7 +518,7 @@ export default function StockPage() {
                     <ComboboxEmpty>No matching asset types.</ComboboxEmpty>
                     <ComboboxList>
                       <ComboboxCollection>
-                        {(option) => (
+                        {(option: string) => (
                           <ComboboxItem key={option} value={option}>
                             {option}
                           </ComboboxItem>
@@ -525,7 +534,7 @@ export default function StockPage() {
               <Select
                 value={stockSort}
                 onValueChange={(value) => {
-                  if (value !== null) setStockSort(value as StockSort);
+                  if (value !== null) setStockSort(value);
                 }}
                 items={stockSortOptions}
               >
@@ -571,8 +580,17 @@ export default function StockPage() {
                   isVolumesLoading={isHydratingVolumes}
                   isIncluded={!excludedLocationIds.includes(stockLocationId(location))}
                   onView={openItems}
-                  onPaste={() => setPasting(location)}
-                  onRemove={() => removeLocation(location)}
+                  onPaste={() => {
+                    setPasting(location);
+                  }}
+                  onRemove={() => {
+                    void removeLocation(location).catch(() => {
+                      toast.add({
+                        description: "Could not remove this asset location.",
+                        type: "error",
+                      });
+                    });
+                  }}
                   onIncludeChange={(included) => void setLocationIncluded(location, included)}
                 />
               );
@@ -585,8 +603,14 @@ export default function StockPage() {
           language={language}
           knownStructures={knownStructures}
           existingLocations={locations}
-          onCancel={() => setIsAddOpen(false)}
-          onAdd={addLocation}
+          onCancel={() => {
+            setIsAddOpen(false);
+          }}
+          onAdd={(location) => {
+            void addLocation(location).catch(() => {
+              toast.add({ description: "Could not add this asset location.", type: "error" });
+            });
+          }}
         />
       )}
       {viewing && (
@@ -600,15 +624,23 @@ export default function StockPage() {
             setSelectedAssetTypeId(null);
             updateAssetTypeUrl(null);
           }}
-          onCancel={() => setViewing(null)}
+          onCancel={() => {
+            setViewing(null);
+          }}
         />
       )}
       {pasting && (
         <StockPasteModal
           language={language}
           location={pasting}
-          onCancel={() => setPasting(null)}
-          onImport={(items) => updateLocation({ ...pasting, items })}
+          onCancel={() => {
+            setPasting(null);
+          }}
+          onImport={(items) => {
+            void updateLocation({ ...pasting, items }).catch(() => {
+              toast.add({ description: "Could not save pasted assets.", type: "error" });
+            });
+          }}
         />
       )}
     </>
@@ -668,7 +700,9 @@ function AddLocationModal({
           setStructures(localStructures);
         }
       });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+    };
   }, [knownStructures, language, system.id]);
 
   useEffect(() => {
@@ -688,11 +722,11 @@ function AddLocationModal({
                 items?: Array<{ systemId: number; name: string }>;
               }>,
           )
-          .then((data) =>
+          .then((data) => {
             setSuggestions(
               (data.items ?? []).map((entry) => ({ id: entry.systemId, name: entry.name })),
-            ),
-          )
+            );
+          })
           .catch((error: unknown) => {
             if (!(error instanceof DOMException && error.name === "AbortError")) setSuggestions([]);
           });
@@ -712,7 +746,7 @@ function AddLocationModal({
     setIsOpen(false);
   }
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const structure = structures.find((entry) => entry.id === structureId) ?? null;
     const location = emptyLocation(system, structure);
@@ -721,7 +755,12 @@ function AddLocationModal({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onCancel();
+      }}
+    >
       <DialogContent className={styles.importModal} render={<form onSubmit={submit} />}>
         <DialogHeader>
           <DialogTitle>Add location</DialogTitle>
@@ -752,7 +791,9 @@ function AddLocationModal({
                   <ComboboxInput
                     id="asset-system-search"
                     showTrigger={false}
-                    onFocus={() => suggestions.length > 0 && setIsOpen(true)}
+                    onFocus={() => {
+                      if (suggestions.length > 0) setIsOpen(true);
+                    }}
                     placeholder="Type a system name"
                     aria-label="Search systems"
                   />
@@ -777,11 +818,13 @@ function AddLocationModal({
               <Label>Structure</Label>
               <Select
                 value={structureId}
-                onValueChange={(value) => value && setStructureId(value)}
+                onValueChange={(value) => {
+                  if (value) setStructureId(value);
+                }}
                 items={[
                   { value: "system", label: "System assets (no specific structure)" },
                   ...uniqueById(structures).map((entry) => ({
-                    value: String(entry.id),
+                    value: entry.id,
                     label: entry.name,
                   })),
                 ]}
@@ -793,7 +836,7 @@ function AddLocationModal({
                   <SelectGroup>
                     <SelectItem value="system">System assets (no specific structure)</SelectItem>
                     {uniqueById(structures).map((entry) => (
-                      <SelectItem key={entry.id} value={String(entry.id)}>
+                      <SelectItem key={entry.id} value={entry.id}>
                         {entry.name}
                       </SelectItem>
                     ))}
@@ -944,7 +987,9 @@ function StockLocationCard({
                 aria-label={`View ${metric.label.toLowerCase()}`}
                 className="w-fit max-w-28 min-w-0 flex-[0_1_auto] hover:bg-muted"
                 key={metric.id}
-                onClick={() => onView(location, metric.filter)}
+                onClick={() => {
+                  onView(location, metric.filter);
+                }}
                 render={<button type="button" />}
                 size="sm"
                 variant="outline"
@@ -974,14 +1019,22 @@ function StockLocationCard({
             <button
               type="button"
               key={category}
-              onClick={() => onView(location, { kind: "market", value: category })}
+              onClick={() => {
+                onView(location, { kind: "market", value: category });
+              }}
             >
               {category}
             </button>
           ))
         )}
       </div>
-      <button type="button" className={styles.stockCardViewAll} onClick={() => onView(location)}>
+      <button
+        type="button"
+        className={styles.stockCardViewAll}
+        onClick={() => {
+          onView(location);
+        }}
+      >
         <span>View all items</span>
         <b>→</b>
       </button>
@@ -1026,7 +1079,7 @@ function ViewItemsModal({
 }) {
   const jobTypeIds = new Set(
     location.items
-      .filter((item) => item.inBuild || item.jobId !== undefined)
+      .filter((item) => item.inBuild === true || item.jobId !== undefined)
       .map((item) => item.typeId),
   );
   const filteredItems = location.items.filter((item) => {
@@ -1110,7 +1163,9 @@ function ViewItemsModal({
   return (
     <ResponsiveDialogDrawer
       open
-      onOpenChange={(open) => !open && onCancel()}
+      onOpenChange={(open) => {
+        if (!open) onCancel();
+      }}
       title={location.structureName}
       description={`${location.systemName} · ${title} · ${buckets.length} item types`}
       headerContent={
@@ -1126,21 +1181,27 @@ function ViewItemsModal({
         <button
           type="button"
           className={filter.kind === "all" ? styles.stockFilterActive : ""}
-          onClick={() => onFilterChange({ kind: "all" })}
+          onClick={() => {
+            onFilterChange({ kind: "all" });
+          }}
         >
           All
         </button>
         <button
           type="button"
           className={filter.kind === "orders" ? styles.stockFilterActive : ""}
-          onClick={() => onFilterChange({ kind: "orders" })}
+          onClick={() => {
+            onFilterChange({ kind: "orders" });
+          }}
         >
           Orders
         </button>
         <button
           type="button"
           className={filter.kind === "jobs" ? styles.stockFilterActive : ""}
-          onClick={() => onFilterChange({ kind: "jobs" })}
+          onClick={() => {
+            onFilterChange({ kind: "jobs" });
+          }}
         >
           Jobs
         </button>
@@ -1153,7 +1214,9 @@ function ViewItemsModal({
                 : ""
             }
             key={category.id}
-            onClick={() => onFilterChange({ kind: "category", value: category.id })}
+            onClick={() => {
+              onFilterChange({ kind: "category", value: category.id });
+            }}
           >
             {category.label}
           </button>
@@ -1316,7 +1379,7 @@ function StockPasteModal({
   const [isResolving, setIsResolving] = useState(false);
   const [error, setError] = useState("");
 
-  async function resolveItems(event: FormEvent<HTMLFormElement>) {
+  async function resolveItems(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const parsed = text
       .split(/\r?\n/)
@@ -1377,8 +1440,16 @@ function StockPasteModal({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onCancel()}>
-      <DialogContent className={styles.importModal} render={<form onSubmit={resolveItems} />}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onCancel();
+      }}
+    >
+      <DialogContent
+        className={styles.importModal}
+        render={<form onSubmit={(event) => void resolveItems(event)} />}
+      >
         <DialogHeader>
           <DialogTitle>Paste items</DialogTitle>
           <DialogDescription>
@@ -1390,7 +1461,9 @@ function StockPasteModal({
           <RadioGroup
             className={styles.stockMode}
             value={mode}
-            onValueChange={(value) => setMode(value as "add" | "replace")}
+            onValueChange={(value) => {
+              setMode(value as "add" | "replace");
+            }}
             aria-label="Paste mode"
           >
             <Label>
@@ -1483,7 +1556,7 @@ async function hydrateVolumes(records: StockRecord[], language: SdeLanguage) {
       .filter(
         (item) =>
           item.assembledVolume === undefined
-          || (item.isPackaged && item.packagedVolume === undefined)
+          || (item.isPackaged === true && item.packagedVolume === undefined)
           || item.techLevel === undefined
           || item.category === undefined
           || item.assemblyLineGroup === undefined,
@@ -1499,25 +1572,23 @@ async function hydrateVolumes(records: StockRecord[], language: SdeLanguage) {
     return records;
   }
   const metadataByTypeId = new Map(metadata.map((item) => [item.typeId, item]));
-  const hydrated = await Promise.all(
-    records.map(async (record) => {
-      const items = record.items.map((item) => {
-        const itemMetadata = metadataByTypeId.get(item.typeId);
-        return itemMetadata
-          ? {
-              ...item,
-              assembledVolume: itemMetadata.assembledVolume ?? 0,
-              packagedVolume: itemMetadata.packagedVolume,
-              techLevel: itemMetadata.techLevel,
-              category: itemMetadata.category ?? item.category ?? "item",
-              assemblyLineGroup: itemMetadata.assemblyLineGroup,
-            }
-          : item;
-      });
-      return items.every((item, index) => item === record.items[index])
-        ? record
-        : { ...record, items };
-    }),
-  );
+  const hydrated = records.map((record) => {
+    const items = record.items.map((item) => {
+      const itemMetadata = metadataByTypeId.get(item.typeId);
+      return itemMetadata
+        ? {
+            ...item,
+            assembledVolume: itemMetadata.assembledVolume ?? 0,
+            packagedVolume: itemMetadata.packagedVolume,
+            techLevel: itemMetadata.techLevel,
+            category: itemMetadata.category ?? item.category ?? "item",
+            assemblyLineGroup: itemMetadata.assemblyLineGroup,
+          }
+        : item;
+    });
+    return items.every((item, index) => item === record.items[index])
+      ? record
+      : { ...record, items };
+  });
   return hydrated;
 }

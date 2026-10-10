@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useId, useRef, useState } from "react";
+import { type SubmitEvent, useId, useRef, useState } from "react";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -32,7 +32,7 @@ export default function PasteFittingDialog({
     onCancel();
   }
 
-  async function importFitting(event: FormEvent<HTMLFormElement>) {
+  async function importFitting(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
     setIsResolving(true);
@@ -76,13 +76,19 @@ export default function PasteFittingDialog({
   return (
     <ResponsiveDialogDrawer
       open
-      onOpenChange={(open) => !open && cancelDialog()}
+      onOpenChange={(open) => {
+        if (!open) cancelDialog();
+      }}
       title="Paste fitting"
       description="Paste an EFT fitting from the EVE client to populate this structure."
       dialogFooterContent={footer}
       drawerFooterContent={footer}
     >
-      <form id={formId} onSubmit={importFitting} className="flex flex-col gap-3">
+      <form
+        id={formId}
+        onSubmit={(event) => void importFitting(event)}
+        className="flex flex-col gap-3"
+      >
         <Textarea
           className="min-h-56"
           value={text}

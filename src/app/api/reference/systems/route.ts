@@ -6,7 +6,7 @@ import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 const resultLimit = 12;
 const systemIdsRequestSchema = z.object({
   language: z.string().optional(),
-  systemIds: z.array(z.number().int().safe().positive()).min(1).max(2_000),
+  systemIds: z.array(z.number().int().positive()).min(1).max(2_000),
 });
 
 export async function GET(request: Request) {

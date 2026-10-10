@@ -49,7 +49,7 @@ async function main() {
 
   const blueprints = await getBlueprints();
   for (const [namespace, values] of Object.entries(blueprints)) {
-    entries.push(...entriesForMap(namespace, version, values as Map<number, unknown>, sdeKey));
+    entries.push(...entriesForMap(namespace, version, values, sdeKey));
   }
 
   entries.push({ key: SDE_VERSION_KEY, value: version });

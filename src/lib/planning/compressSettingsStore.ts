@@ -35,10 +35,12 @@ export async function loadCompressSettings(): Promise<CompressSettings> {
         .transaction(compressSettingsStoreName, "readonly")
         .objectStore(compressSettingsStoreName)
         .get(settingsKey);
-      request.onsuccess = () =>
+      request.onsuccess = () => {
         resolve({ ...defaults, ...(request.result as Partial<CompressSettings> | undefined) });
-      request.onerror = () =>
+      };
+      request.onerror = () => {
         reject(request.error ?? new Error("Could not load compression settings."));
+      };
     });
   }
   catch {
@@ -52,9 +54,12 @@ export async function saveCompressSettings(settings: CompressSettings) {
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(compressSettingsStoreName, "readwrite");
       transaction.objectStore(compressSettingsStoreName).put(settings, settingsKey);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () =>
+      transaction.oncomplete = () => {
+        resolve();
+      };
+      transaction.onerror = () => {
         reject(transaction.error ?? new Error("Could not save compression settings."));
+      };
     });
   }
   catch {}

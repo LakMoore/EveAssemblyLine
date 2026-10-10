@@ -13,9 +13,6 @@ const request = {
   assets: [],
   settings: {
     includeCorporationAssets: true,
-    personalSellOrdersAsStock: false,
-    allCorporationSellOrdersAsStock: false,
-    myCorporationSellOrdersAsStock: false,
     buildBlacklist: [],
     buyBlacklist: [35],
   },

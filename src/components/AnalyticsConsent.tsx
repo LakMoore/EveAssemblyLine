@@ -23,11 +23,14 @@ export function AnalyticsConsent() {
   const [consent, setConsent] = useState<AnalyticsConsent | null>(null);
 
   useEffect(() => {
-    const handleConsentChange = (event?: Event) =>
+    const handleConsentChange = (event?: Event) => {
       setConsent(event ? readAnalyticsConsentEvent(event) : readAnalyticsConsent());
+    };
     handleConsentChange();
     window.addEventListener(analyticsConsentChangeEvent, handleConsentChange);
-    return () => window.removeEventListener(analyticsConsentChangeEvent, handleConsentChange);
+    return () => {
+      window.removeEventListener(analyticsConsentChangeEvent, handleConsentChange);
+    };
   }, []);
 
   if (!analyticsConfigured || consent) return null;
@@ -48,10 +51,21 @@ export function AnalyticsConsent() {
         <NoPrefetchLink className="mr-auto text-muted-foreground underline" href="/cookies">
           Details
         </NoPrefetchLink>
-        <Button variant="outline" onClick={() => setAnalyticsConsent("denied")}>
+        <Button
+          variant="outline"
+          onClick={() => {
+            setAnalyticsConsent("denied");
+          }}
+        >
           Decline
         </Button>
-        <Button onClick={() => setAnalyticsConsent("granted")}>Allow analytics</Button>
+        <Button
+          onClick={() => {
+            setAnalyticsConsent("granted");
+          }}
+        >
+          Allow analytics
+        </Button>
       </div>
     </aside>
   );
@@ -66,11 +80,14 @@ export function AnalyticsConsentSettings() {
   const [consent, setConsent] = useState<AnalyticsConsent | null>(null);
 
   useEffect(() => {
-    const handleConsentChange = (event?: Event) =>
+    const handleConsentChange = (event?: Event) => {
       setConsent(event ? readAnalyticsConsentEvent(event) : readAnalyticsConsent());
+    };
     handleConsentChange();
     window.addEventListener(analyticsConsentChangeEvent, handleConsentChange);
-    return () => window.removeEventListener(analyticsConsentChangeEvent, handleConsentChange);
+    return () => {
+      window.removeEventListener(analyticsConsentChangeEvent, handleConsentChange);
+    };
   }, []);
 
   if (!analyticsConfigured) {

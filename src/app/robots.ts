@@ -16,7 +16,7 @@ export default function robots(): MetadataRoute.Robots {
         "/api/",
         "/admin/",
         "/appraise",
-        "/characters",
+        "/data",
         "/compress",
         "/imagechecker",
         "/jobs",

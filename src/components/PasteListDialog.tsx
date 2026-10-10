@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useId, useLayoutEffect, useRef, useState } from "react";
+import { type SubmitEvent, useId, useLayoutEffect, useRef, useState } from "react";
 import type { TypeMetadata } from "@/lib/reference/types";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
@@ -94,7 +94,7 @@ export default function PasteListDialog({
   const visibleItemErrors = itemErrors.slice(0, 3);
   const hiddenItemErrorCount = itemErrors.length - visibleItemErrors.length;
 
-  async function resolveItems(event: FormEvent<HTMLFormElement>) {
+  async function resolveItems(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const parsed = parsePasteList(text);
     if (parsed.length === 0) {
@@ -179,13 +179,19 @@ export default function PasteListDialog({
   return (
     <ResponsiveDialogDrawer
       open
-      onOpenChange={(open) => !open && cancelDialog()}
+      onOpenChange={(open) => {
+        if (!open) cancelDialog();
+      }}
       title={title}
       description={description}
       dialogFooterContent={footer}
       drawerFooterContent={footer}
     >
-      <form id={formId} onSubmit={resolveItems} className="flex flex-col gap-3">
+      <form
+        id={formId}
+        onSubmit={(event) => void resolveItems(event)}
+        className="flex flex-col gap-3"
+      >
         <Textarea
           className="min-h-48"
           value={text}

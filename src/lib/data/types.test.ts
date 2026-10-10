@@ -21,13 +21,21 @@ const context = {
 } satisfies OwnerDataContext;
 
 void test("accepts owners present in the authorized provider context", () => {
-  assert.doesNotThrow(() => assertCharacterOwner(101, context));
-  assert.doesNotThrow(() => assertCorporationOwner(900, context));
+  assert.doesNotThrow(() => {
+    assertCharacterOwner(101, context);
+  });
+  assert.doesNotThrow(() => {
+    assertCorporationOwner(900, context);
+  });
   assert.equal(getCorporationPolicy(900, context)?.corporationId, 900);
 });
 
 void test("rejects owners outside the authorized provider context", () => {
-  assert.throws(() => assertCharacterOwner(102, context));
-  assert.throws(() => assertCorporationOwner(901, context));
+  assert.throws(() => {
+    assertCharacterOwner(102, context);
+  });
+  assert.throws(() => {
+    assertCorporationOwner(901, context);
+  });
   assert.equal(getCorporationPolicy(901, context), undefined);
 });

@@ -130,7 +130,7 @@ async function handleRefreshRequestInternal(
   const ownerId = parsedId.data;
   let previousETags: Parameters<typeof getOwnerSnapshot>[3] = {};
   try {
-    const body = await request.json();
+    const body: unknown = await request.json();
     const parsedBody = refreshRequestSchema.safeParse(body);
     if (!parsedBody.success) return json({ error: "Invalid refresh request." }, 400);
     previousETags = parsedBody.data.eTags;

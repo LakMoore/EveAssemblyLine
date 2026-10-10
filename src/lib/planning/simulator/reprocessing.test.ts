@@ -57,9 +57,6 @@ const request: SimulationRequestV1 = {
   assets: [],
   settings: {
     includeCorporationAssets: true,
-    personalSellOrdersAsStock: false,
-    allCorporationSellOrdersAsStock: false,
-    myCorporationSellOrdersAsStock: false,
     buildBlacklist: [],
     buyBlacklist: [],
   },

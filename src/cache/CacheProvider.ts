@@ -13,11 +13,11 @@ export type CacheSetEntry = {
 export interface ICacheProvider {
   get<T>(key: string): Promise<T | null>;
   getMany<T>(keys: readonly string[]): Promise<Array<T | null>>;
-  set<T>(key: string, value: T, ttlMs?: number | null): Promise<void>;
+  set(key: string, value: unknown, ttlMs?: number | null): Promise<void>;
   setMany(entries: readonly CacheSetEntry[]): Promise<void>;
   getVersion(key: string): Promise<string | null>;
   delete(key: string | string[]): Promise<void>;
   /** Enumerate keys matching a Redis-style glob pattern. */
-  scan(pattern?: string): AsyncGenerator<string, void, undefined>;
+  scan(pattern?: string): Iterable<string> | AsyncIterable<string>;
   clear?(): Promise<void>;
 }

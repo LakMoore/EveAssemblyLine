@@ -685,9 +685,12 @@ function readRecord(key: string) {
           .transaction(ownerSnapshotStoreName, "readonly")
           .objectStore(ownerSnapshotStoreName)
           .get(key);
-        request.onsuccess = () => resolve(request.result as OwnerSnapshotRecord | undefined);
-        request.onerror = () =>
+        request.onsuccess = () => {
+          resolve(request.result as OwnerSnapshotRecord | undefined);
+        };
+        request.onerror = () => {
           reject(request.error ?? new Error("Could not read owner snapshot cache."));
+        };
       }),
   );
 }
@@ -730,8 +733,11 @@ export async function saveOwnerSnapshot(snapshot: ClientOwnerSnapshot, scope: st
   return new Promise<void>((resolve, reject) => {
     const transaction = database.transaction(ownerSnapshotStoreName, "readwrite");
     transaction.objectStore(ownerSnapshotStoreName).put(record, record.key);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () =>
+    transaction.oncomplete = () => {
+      resolve();
+    };
+    transaction.onerror = () => {
       reject(transaction.error ?? new Error("Could not save owner snapshot cache."));
+    };
   });
 }

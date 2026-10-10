@@ -157,7 +157,9 @@ export default function SwitchedResultRow({
                     aria-label={switchTooltip}
                     checked={switchChecked ?? false}
                     disabled={effectiveSwitchDisabled}
-                    onClick={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                    }}
                     onCheckedChange={onSwitchChange}
                   />
                 }
@@ -234,7 +236,9 @@ export default function SwitchedResultRow({
                       checkboxIndeterminate
                         && "before:absolute before:h-px before:w-2 before:bg-current before:content-[''] data-indeterminate:[&>span>svg]:hidden",
                     )}
-                    onClick={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                    }}
                     onCheckedChange={onCheckboxChange}
                   />
                 }

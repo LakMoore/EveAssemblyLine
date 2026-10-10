@@ -6,17 +6,16 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 
-type CalculateButtonProps = Omit<ComponentProps<typeof Button>, "children"> & {
+/** Props for the reusable page-level operation button. */
+type ActionButtonProps = Omit<ComponentProps<typeof Button>, "children"> & {
   icon: LucideIcon;
   isLoading?: boolean;
   label: string;
   loadingLabel: string;
 };
 
-/**
- * Renders the shared full-width action used to start a calculation workflow.
- */
-export default function CalculateButton({
+/** Renders the full-width action used to start a page-level operation. */
+export default function ActionButton({
   className,
   icon: Icon,
   isLoading = false,
@@ -24,7 +23,7 @@ export default function CalculateButton({
   loadingLabel,
   disabled,
   ...props
-}: CalculateButtonProps) {
+}: ActionButtonProps) {
   return (
     <Button
       {...props}
@@ -32,7 +31,7 @@ export default function CalculateButton({
         "h-auto min-h-14 w-full justify-between px-4 has-data-[icon=inline-end]:pr-4 has-data-[icon=inline-start]:pl-4",
         className,
       )}
-      disabled={disabled || isLoading}
+      disabled={disabled === true || isLoading}
     >
       <span className="flex min-w-0 items-center gap-2 text-left">
         {isLoading ? (

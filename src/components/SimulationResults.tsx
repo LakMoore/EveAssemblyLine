@@ -88,6 +88,7 @@ import { fetchTypeMetadata, type TypeMetadata } from "@/lib/reference/types";
 import {
   adjustSimulationPurchaseQuantity,
   groupSimulationActivityJobs,
+  simulationCompletionKey,
   shouldAdjustSimulationPurchaseQuantity,
   simulationRunsStartingAtT0,
   type SimulationIndustryJobGroup,
@@ -168,11 +169,12 @@ const materialBalanceColumns = [
 const reactionFormulaBalanceColumns = ["Available", "Owned", "In Use", "Runs to Install"] as const;
 const typeIdChangedEvent = "assembly-line-planner-type-id-changed";
 const simulationTabParam = "simulationTab";
-const completedTypeDatesStoragePrefix = "assembly-line-simulation-completed-types:";
+// V2 avoids reusing legacy type-only completion marks that do not identify a location.
+const completedTypeDatesStoragePrefix = "assembly-line-simulation-completed-types:v2:";
 const simulationBuySettingsStorageKey = "assembly-line-simulation-buy-settings-v1";
 const simulationBuySettingsChangedEvent = "assembly-line-simulation-buy-settings-changed";
 type SimulationActivityTab = "react" | "manufacture";
-type CompletedTypeDates = Record<SimulationActivityTab, Map<number, Date>>;
+type CompletedTypeDates = Record<SimulationActivityTab, Map<string, Date>>;
 type SimulationBuySettings = {
   overOrderPercent: string;
   roundUpQuantities: boolean;
@@ -278,10 +280,12 @@ function useSimulationBuySettings() {
   const settings = parseSimulationBuySettings(snapshot);
   return {
     ...settings,
-    setOverOrderPercent: (value: string) =>
-      updateSimulationBuySettings({ overOrderPercent: value }),
-    setRoundUpQuantities: (value: boolean) =>
-      updateSimulationBuySettings({ roundUpQuantities: value }),
+    setOverOrderPercent: (value: string) => {
+      updateSimulationBuySettings({ overOrderPercent: value });
+    },
+    setRoundUpQuantities: (value: boolean) => {
+      updateSimulationBuySettings({ roundUpQuantities: value });
+    },
   };
 }
 
@@ -296,14 +300,24 @@ function completedTypeDatesStorageKey(simulationRevision: string): string {
 }
 
 /** Parses persisted type completion timestamps while rejecting malformed entries. */
-function parseCompletedTypeDates(value: unknown): Map<number, Date> {
+function parseCompletedTypeDates(value: unknown): Map<string, Date> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return new Map();
-  const dates = new Map<number, Date>();
-  for (const [typeIdText, timestamp] of Object.entries(value)) {
+  const dates = new Map<string, Date>();
+  for (const [completionKey, timestamp] of Object.entries(value)) {
+    const [locationIdText, typeIdText, ...extraParts] = completionKey.split(":");
+    const locationId = Number(locationIdText);
     const typeId = Number(typeIdText);
     const date = typeof timestamp === "string" ? new Date(timestamp) : undefined;
-    if (Number.isSafeInteger(typeId) && typeId > 0 && date && Number.isFinite(date.getTime())) {
-      dates.set(typeId, date);
+    if (
+      extraParts.length === 0
+      && Number.isSafeInteger(locationId)
+      && locationId > 0
+      && Number.isSafeInteger(typeId)
+      && typeId > 0
+      && date
+      && Number.isFinite(date.getTime())
+    ) {
+      dates.set(simulationCompletionKey(locationId, typeId), date);
     }
   }
   return dates;
@@ -341,8 +355,8 @@ function saveCompletedTypeDates(
       window.localStorage.removeItem(key);
       return;
     }
-    const serialize = (dates: Map<number, Date>) =>
-      Object.fromEntries([...dates].map(([typeId, date]) => [String(typeId), date.toISOString()]));
+    const serialize = (dates: Map<string, Date>) =>
+      Object.fromEntries([...dates].map(([key, date]) => [key, date.toISOString()]));
     window.localStorage.setItem(
       key,
       JSON.stringify({
@@ -405,10 +419,14 @@ function useIsMobileSimulationView(): boolean {
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 640px)");
-    const updateIsMobile = () => setIsMobile(mediaQuery.matches);
+    const updateIsMobile = () => {
+      setIsMobile(mediaQuery.matches);
+    };
     updateIsMobile();
     mediaQuery.addEventListener("change", updateIsMobile);
-    return () => mediaQuery.removeEventListener("change", updateIsMobile);
+    return () => {
+      mediaQuery.removeEventListener("change", updateIsMobile);
+    };
   }, []);
 
   return isMobile;
@@ -456,8 +474,13 @@ type SimulationRowControls = {
   isIncluded: (rowKey: string) => boolean;
   onIncludedChange: (rowKey: string, included: boolean) => void;
   onHaulIncludedChange: (rowKeys: readonly string[], included: boolean) => void;
-  isTypeCompleted: (tab: "react" | "manufacture", typeId: number) => boolean;
-  onTypeCompletedChange: (tab: "react" | "manufacture", typeId: number, completed: boolean) => void;
+  isTypeCompleted: (tab: "react" | "manufacture", locationId: number, typeId: number) => boolean;
+  onTypeCompletedChange: (
+    tab: "react" | "manufacture",
+    locationId: number,
+    typeId: number,
+    completed: boolean,
+  ) => void;
   isCompleted: (
     rowKey: string,
     scheduleIdentity?: string,
@@ -1493,7 +1516,7 @@ function SimulationInstallPlanDialogLayout({
     const totalEntryRuns = detail.entry.schedule?.runs ?? 0;
     return (
       (totalEntryRuns > 0 && detail.entry.installedRuns >= totalEntryRuns)
-      || detail.entry.completedInstallIds[detail.install.installId] === true
+      || detail.entry.completedInstallIds[detail.install.installId]
     );
   };
   const setInstallCompleted = (details: readonly SimulationInstallDetail[], checked: boolean) => {
@@ -1549,7 +1572,9 @@ function SimulationInstallPlanDialogLayout({
             size="icon-xs"
             aria-label={`View ${productName} install plan`}
             className="size-6 text-muted-foreground transition-colors hover:text-foreground"
-            onClick={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
           >
             <ListChecks aria-hidden="true" />
           </Button>
@@ -1599,7 +1624,9 @@ function SimulationInstallPlanDialogLayout({
               <Switch
                 aria-label="Show full install plan"
                 checked={view === "full"}
-                onCheckedChange={(checked) => setView(checked ? "full" : "compact")}
+                onCheckedChange={(checked) => {
+                  setView(checked ? "full" : "compact");
+                }}
               />
               <span>Detailed</span>
             </Label>
@@ -1645,7 +1672,9 @@ function SimulationInstallPlanDialogLayout({
                   }
                   installed={allCompleted(completionDetails)}
                   checkboxTooltip="Mark install complete"
-                  onCheckboxChange={(checked) => setInstallCompleted(completionDetails, checked)}
+                  onCheckboxChange={(checked) => {
+                    setInstallCompleted(completionDetails, checked);
+                  }}
                   contentClassName="w-full justify-between gap-3 self-end text-right font-mono text-xs sm:grid sm:min-w-[11rem] sm:grid-cols-[minmax(0,1fr)_max-content] sm:gap-x-4 sm:justify-normal sm:self-auto"
                 >
                   {install.characterId !== undefined ? (
@@ -1710,9 +1739,9 @@ function SimulationInstallPlanDialogLayout({
                   }
                   installed={allCompleted(group.completionDetails)}
                   checkboxTooltip="Mark grouped installs complete"
-                  onCheckboxChange={(checked) =>
-                    setInstallCompleted(group.completionDetails, checked)
-                  }
+                  onCheckboxChange={(checked) => {
+                    setInstallCompleted(group.completionDetails, checked);
+                  }}
                   contentClassName="w-full justify-between gap-3 self-end text-right font-mono text-xs sm:grid sm:min-w-[11rem] sm:grid-cols-[minmax(0,1fr)_max-content] sm:gap-x-4 sm:justify-normal sm:self-auto"
                 >
                   <span className="flex flex-col items-end">
@@ -1852,7 +1881,9 @@ function useSimulationTypeNames(typeIds: readonly number[]) {
     };
   }, [language, requestKey, typeIdKey]);
 
-  return loadedNames.requestKey === requestKey ? loadedNames.namesByTypeId : new Map();
+  return loadedNames.requestKey === requestKey
+    ? loadedNames.namesByTypeId
+    : new Map<number, string>();
 }
 
 /** Loads localized SDE assembly groups for purchase rows without response metadata. */
@@ -1864,7 +1895,7 @@ function useSimulationAssemblyLineGroups(typeIds: readonly number[]) {
     requestKey: string;
     groupsByTypeId: ReadonlyMap<number, string>;
     error: string | null;
-  }>({ requestKey: "", groupsByTypeId: new Map(), error: null });
+  }>({ requestKey: "", groupsByTypeId: new Map<number, string>(), error: null });
   const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
@@ -1876,7 +1907,7 @@ function useSimulationAssemblyLineGroups(typeIds: readonly number[]) {
         if (cancelled) return;
         setLoadedGroups({
           requestKey,
-          groupsByTypeId: new Map(
+          groupsByTypeId: new Map<number, string>(
             metadata.map((item) => [item.typeId, item.assemblyLineGroup ?? "Unknown"]),
           ),
           error: null,
@@ -1886,7 +1917,7 @@ function useSimulationAssemblyLineGroups(typeIds: readonly number[]) {
         if (!cancelled) {
           setLoadedGroups({
             requestKey,
-            groupsByTypeId: new Map(),
+            groupsByTypeId: new Map<number, string>(),
             error: "Type metadata could not be loaded.",
           });
         }
@@ -1898,10 +1929,14 @@ function useSimulationAssemblyLineGroups(typeIds: readonly number[]) {
 
   return {
     groupsByTypeId:
-      loadedGroups.requestKey === requestKey ? loadedGroups.groupsByTypeId : new Map(),
+      loadedGroups.requestKey === requestKey
+        ? loadedGroups.groupsByTypeId
+        : new Map<number, string>(),
     error: loadedGroups.requestKey === requestKey ? loadedGroups.error : null,
     isLoading: typeIdKey.length > 0 && loadedGroups.requestKey !== requestKey,
-    retry: () => setRetryCount((current) => current + 1),
+    retry: () => {
+      setRetryCount((current) => current + 1);
+    },
   };
 }
 
@@ -1980,7 +2015,9 @@ function SimulationLocationResultGroups<T extends { locationId: number }>({
               </span>
             }
             isOpen={openGroups[groupKey] ?? true}
-            onOpenChange={(open) => onOpenGroupChange(groupKey, open)}
+            onOpenChange={(open) => {
+              onOpenGroupChange(groupKey, open);
+            }}
             avatarRows={avatars}
             remainingCount={groupItems.length - avatars.length}
             onCopyGroup={groupAction?.onCopyGroup}
@@ -2073,7 +2110,9 @@ function SimulationPlanLocationGroups({
             ariaLabel={groupLabel}
             label={groupLabel}
             isOpen={openGroups[groupKey] ?? true}
-            onOpenChange={(open) => onOpenGroupChange(groupKey, open)}
+            onOpenChange={(open) => {
+              onOpenGroupChange(groupKey, open);
+            }}
             avatarRows={avatars}
             remainingCount={
               locationItems.length + locationReactionFormulaItems.length - avatars.length
@@ -2098,7 +2137,9 @@ function SimulationPlanLocationGroups({
                           subline={demandStockpiles(item, stockpileNamesById)}
                           linkPath="assets"
                           selected={controls.selectedRowKey === rowKey}
-                          onClick={() => controls.onSelectRow(rowKey)}
+                          onClick={() => {
+                            controls.onSelectRow(rowKey);
+                          }}
                           variation={materialImageVariation(item, stock, metadataByTypeId)}
                           wideBreakpoint="md"
                           contentClassName="self-end text-right font-mono text-xs md:w-full md:self-auto"
@@ -2152,7 +2193,9 @@ function SimulationPlanLocationGroups({
                           subline={demandStockpiles(item, stockpileNamesById)}
                           linkPath="assets"
                           selected={controls.selectedRowKey === rowKey}
-                          onClick={() => controls.onSelectRow(rowKey)}
+                          onClick={() => {
+                            controls.onSelectRow(rowKey);
+                          }}
                           variation={materialImageVariation(item, stock, metadataByTypeId)}
                           wideBreakpoint="md"
                           contentClassName="self-end text-right font-mono text-xs md:w-full md:self-auto"
@@ -2271,8 +2314,8 @@ function SimulationMaterialsTab({
     if (rawTypeId !== null && selectedTypeId === null) updateTypeIdInUrl(null);
   }, [selectedTypeId, usePlannerUrlState]);
   const typeOptions = [
-    ...new Map(
-      [...items, ...reactionFormulaItems].map((item) => [item.typeId, item.typeName]),
+    ...new Map<number, string>(
+      [...items, ...reactionFormulaItems].map((item) => [item.typeId, item.typeName] as const),
     ).entries(),
   ]
     .map(([id, name]) => ({ id, name }))
@@ -2319,7 +2362,12 @@ function SimulationMaterialsTab({
       await navigator.clipboard.writeText(lines.join("\n"));
       setCopyStatus("Copied");
       toast.add({ description: "Material table copied to clipboard" });
-      window.setTimeout(() => setCopyStatus(""), 1600);
+      window.setTimeout(
+        () => {
+          setCopyStatus("");
+        },
+        1600,
+      );
     }
     catch {
       setCopyStatus("Copy failed");
@@ -2362,7 +2410,7 @@ function SimulationMaterialsTab({
                     <ComboboxEmpty>No matching types.</ComboboxEmpty>
                     <ComboboxList>
                       <ComboboxCollection>
-                        {(option) => (
+                        {(option: (typeof typeOptions)[number]) => (
                           <ComboboxItem key={option.id} value={option}>
                             {option.name}
                           </ComboboxItem>
@@ -2605,7 +2653,9 @@ function SimulationDemandSourcesDrawer({
           className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
           aria-label={triggerLabel}
           title={triggerLabel}
-          onClick={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+          }}
         >
           <ListTree aria-hidden="true" />
         </Button>
@@ -3049,13 +3099,17 @@ function SimulationInventionTab({
               navigateInPlace
               onNavigate={controls.onNavigateToPlan}
               selected={controls.selectedRowKey === rowKey}
-              onClick={() => controls.onSelectRow(rowKey)}
+              onClick={() => {
+                controls.onSelectRow(rowKey);
+              }}
               showSwitch={false}
               showCheckbox
               checkboxChecked={completed}
               checkboxTooltip="Mark invention complete"
               checkboxClassName="row-start-4 self-center sm:row-auto"
-              onCheckboxChange={(checked) => controls.onCompletedChange(rowKey, checked)}
+              onCheckboxChange={(checked) => {
+                controls.onCompletedChange(rowKey, checked);
+              }}
               subline={`${Math.round(job.successProbability * 100)}% success probability`}
               variation={sourceBlueprintVariation}
               contentClassName="contents sm:col-span-1 sm:col-start-2 sm:row-auto sm:grid sm:w-full sm:min-w-96 sm:grid-cols-[1.5rem_minmax(0,1fr)_3rem_8rem] sm:items-center sm:gap-x-4 sm:self-auto sm:text-right sm:font-mono sm:text-xs md:grid-cols-[1.5rem_minmax(0,1fr)_3rem_5rem]"
@@ -3148,7 +3202,9 @@ function SimulationSimpleJobRow({
         }),
     wideBreakpoint,
     selected: controls.selectedRowKey === rowKey,
-    onClick: () => controls.onSelectRow(rowKey),
+    onClick: () => {
+      controls.onSelectRow(rowKey);
+    },
     contentClassName: "self-end text-right font-mono text-xs sm:self-auto",
   };
   const checkboxChecked = showCheckbox && controls.isCompleted(rowKey);
@@ -3161,7 +3217,9 @@ function SimulationSimpleJobRow({
       checkboxChecked={checkboxChecked}
       installed={checkboxChecked}
       checkboxTooltip="Mark purchase complete"
-      onCheckboxChange={(checked) => controls.onCompletedChange(rowKey, checked)}
+      onCheckboxChange={(checked) => {
+        controls.onCompletedChange(rowKey, checked);
+      }}
     >
       {summary}
     </SwitchedResultRow>
@@ -3310,13 +3368,11 @@ function SimulationActivityTab({
       ),
     [allSlotCharacters],
   );
-  const slotCharacters =
-    tab === "react" && locationSystemIdsById
-      ? allSlotCharacters.filter(
-          (character) =>
-            character.systemId !== undefined && !isWormholeSystemId(character.systemId),
-        )
-      : allSlotCharacters;
+  const slotCharacters = locationSystemIdsById
+    ? allSlotCharacters.filter(
+        (character) => character.systemId !== undefined && !isWormholeSystemId(character.systemId),
+      )
+    : allSlotCharacters;
   const availableSlots = slotCharacters.reduce(
     (total, character) => total + character.availableSlots,
     0,
@@ -3380,7 +3436,7 @@ function SimulationActivityTab({
                 : {}),
               protectReactionMaterialBonus: tab === "react" && protectReactionMaterialBonus,
               reactionMaterialBonusesByLocation,
-              ...(tab === "react" && locationSystemIdsById ? { locationSystemIdsById } : {}),
+              ...(locationSystemIdsById ? { locationSystemIdsById } : {}),
             },
           ),
     [
@@ -3397,13 +3453,12 @@ function SimulationActivityTab({
       targetTime,
     ],
   );
-  const metricJobs =
-    tab === "react" && locationSystemIdsById
-      ? jobs.filter((job) => {
-          const systemId = locationSystemIdsById.get(job.locationId);
-          return systemId !== undefined && !isWormholeSystemId(systemId);
-        })
-      : jobs;
+  const metricJobs = locationSystemIdsById
+    ? jobs.filter((job) => {
+        const systemId = locationSystemIdsById.get(job.locationId);
+        return systemId !== undefined && !isWormholeSystemId(systemId);
+      })
+    : jobs;
   const scheduledRuns = metricJobs.reduce(
     (total, job) => total + (schedules.get(job.jobId)?.runs ?? 0),
     0,
@@ -3553,7 +3608,9 @@ function SimulationActivityTab({
                     min="1"
                     step="1"
                     value={targetTime}
-                    onChange={(event) => setTargetTime(event.target.value)}
+                    onChange={(event) => {
+                      setTargetTime(event.target.value);
+                    }}
                     aria-label={`Target ${activityLabel} run time`}
                     className="w-28"
                   />
@@ -3592,7 +3649,7 @@ function SimulationActivityTab({
             scheduledRuns={scheduledRuns}
             installableRuns={installableRuns}
             totalRuns={totalRuns}
-            poolLabel={tab === "react" && locationSystemIdsById ? "K-Space" : undefined}
+            poolLabel={locationSystemIdsById ? "K-Space" : undefined}
           />
         </div>
       }
@@ -3604,7 +3661,7 @@ function SimulationActivityTab({
         groupHeader={tab === "react" ? <SimulationActivityColumnsHeader /> : undefined}
         getGroupHeader={(locationId, groupItems) => {
           const systemId = locationSystemIdsById?.get(locationId);
-          if (tab !== "react" || !isWormholeSystemId(systemId)) return undefined;
+          if (!isWormholeSystemId(systemId)) return undefined;
 
           const groupJobIds = new Set(
             groupItems.flatMap((group) => group.jobs.map((job) => job.jobId)),
@@ -3732,7 +3789,7 @@ function SimulationActivityTab({
             0,
           );
           const groupCompleted =
-            controls.isTypeCompleted(tab, group.productTypeId)
+            controls.isTypeCompleted(tab, group.locationId, group.productTypeId)
             || (groupInstallableRuns > 0 && groupInstalledRuns >= groupInstallableRuns);
           const groupPartiallyInstalled = groupInstalledRuns > 0 && !groupCompleted;
           const groupIncluded = groupEntries.every((entry) => entry.included);
@@ -3753,7 +3810,7 @@ function SimulationActivityTab({
             reactionFormulaCounts,
           );
           const updateGroupCompletion = (checked: boolean) => {
-            controls.onTypeCompletedChange(tab, group.productTypeId, checked);
+            controls.onTypeCompletedChange(tab, group.locationId, group.productTypeId, checked);
             for (const entry of groupEntries) {
               controls.onInstalledRunsChange(
                 entry.rowKey,
@@ -3776,7 +3833,7 @@ function SimulationActivityTab({
             completedInstallIds: entry.completedInstallIds,
             scheduleRevision: entry.scheduleRevision,
             blueprintCounts: entry.blueprintCounts,
-            onInstalledRunsChange: (runs, dialogScheduleIdentity, installIds, schedule) =>
+            onInstalledRunsChange: (runs, dialogScheduleIdentity, installIds, schedule) => {
               controls.onInstalledRunsChange(
                 entry.rowKey,
                 runs,
@@ -3784,7 +3841,8 @@ function SimulationActivityTab({
                 dialogScheduleIdentity,
                 installIds,
                 schedule,
-              ),
+              );
+            },
           }));
           return (
             <SwitchedResultRow
@@ -3805,19 +3863,25 @@ function SimulationActivityTab({
               wideBreakpoint="lg"
               selected={!groupCompleted && controls.selectedRowKey === group.groupKey}
               installed={groupCompleted}
-              onClick={groupCompleted ? undefined : () => controls.onSelectRow(group.groupKey)}
+              onClick={
+                groupCompleted
+                  ? undefined
+                  : () => {
+                      controls.onSelectRow(group.groupKey);
+                    }
+              }
               switchChecked={groupIncluded}
               switchDisabled={readOnly}
               switchTooltip={`Include in ${activityLabel} schedule`}
-              onSwitchChange={(checked) =>
-                groupEntries.forEach((entry) => controls.onIncludedChange(entry.rowKey, checked))
-              }
+              onSwitchChange={(checked) => {
+                groupEntries.forEach((entry) => {
+                  controls.onIncludedChange(entry.rowKey, checked);
+                });
+              }}
               checkboxChecked={groupCompleted}
               checkboxIndeterminate={groupPartiallyInstalled}
               checkboxDisabled={readOnly || (!groupIncluded && !groupCompleted)}
-              checkboxTooltip={
-                tab === "react" ? "Mark reaction installed" : "Mark manufacturing job installed"
-              }
+              checkboxTooltip={`${tab === "react" ? "Mark reaction installed" : "Mark manufacturing job installed"}: ${group.productName} at ${locationName(locationNamesById, group.locationId)}`}
               onCheckboxChange={updateGroupCompletion}
               contentClassName={
                 tab === "react"
@@ -3980,7 +4044,9 @@ function SimulationHaulTab({
           type="button"
           variant="outline"
           disabled={readOnly || isLoading || haulExclusions.length === 0}
-          onClick={onClearHaulExclusions}
+          onClick={() => {
+            void onClearHaulExclusions();
+          }}
         >
           {haulExclusions.length > 0
             ? `Clear ${haulExclusions.length} haul ${haulExclusions.length === 1 ? "exclusion" : "exclusions"}`
@@ -4064,7 +4130,9 @@ function SimulationHaulTab({
                   ) : undefined
                 }
                 isOpen={openGroups[sourceKey] ?? true}
-                onOpenChange={(open) => onOpenGroupChange(sourceKey, open)}
+                onOpenChange={(open) => {
+                  onOpenGroupChange(sourceKey, open);
+                }}
                 avatarRows={sourceAvatars}
                 remainingCount={sourceTasks.length - sourceAvatars.length}
               >
@@ -4119,13 +4187,15 @@ function SimulationHaulTab({
                           switchLabel={`Include haul group from ${locationName(locationNamesById, fromLocationId)} to ${locationName(locationNamesById, toLocationId)}`}
                           switchPending={isLoading}
                           switchDisabled={readOnly || isLoading}
-                          onSwitchChange={(checked) =>
-                            controls.onHaulIncludedChange(destinationRowKeys, checked)
-                          }
+                          onSwitchChange={(checked) => {
+                            controls.onHaulIncludedChange(destinationRowKeys, checked);
+                          }}
                           variant="nested"
                           stickyHeader="parent"
                           isOpen={openGroups[destinationKey] ?? true}
-                          onOpenChange={(open) => onOpenGroupChange(destinationKey, open)}
+                          onOpenChange={(open) => {
+                            onOpenGroupChange(destinationKey, open);
+                          }}
                           avatarRows={destinationAvatars}
                           remainingCount={sortedDestinationTasks.length - destinationAvatars.length}
                         >
@@ -4195,16 +4265,26 @@ function SimulationHaulRow({
       onNavigate={controls.onNavigateToPlan}
       selected={!completed && controls.selectedRowKey === rowKey}
       installed={completed}
-      onClick={completed || isLoading || readOnly ? undefined : () => controls.onSelectRow(rowKey)}
+      onClick={
+        completed || isLoading || readOnly
+          ? undefined
+          : () => {
+              controls.onSelectRow(rowKey);
+            }
+      }
       switchChecked={included}
       switchTooltip={switchLabel}
       switchPending={isLoading}
       switchDisabled={readOnly || isLoading}
-      onSwitchChange={(checked) => controls.onHaulIncludedChange([rowKey], checked)}
+      onSwitchChange={(checked) => {
+        controls.onHaulIncludedChange([rowKey], checked);
+      }}
       checkboxChecked={completed}
       checkboxDisabled={!included || readOnly || isLoading}
       checkboxTooltip="Mark as moved"
-      onCheckboxChange={(checked) => controls.onCompletedChange(rowKey, checked)}
+      onCheckboxChange={(checked) => {
+        controls.onCompletedChange(rowKey, checked);
+      }}
       contentClassName="self-end text-right font-mono text-xs sm:self-auto"
     >
       <span
@@ -4372,7 +4452,9 @@ function SimulationBuyTab({
                     min="0"
                     step="any"
                     value={overOrderPercent}
-                    onChange={(event) => onOverOrderPercentChange(event.target.value)}
+                    onChange={(event) => {
+                      onOverOrderPercentChange(event.target.value);
+                    }}
                     aria-label="Over-order percentage"
                     aria-invalid={parsedOverOrderPercent === undefined}
                     className="w-24"
@@ -4419,7 +4501,9 @@ function SimulationBuyTab({
                 label={group.assemblyLineGroup}
                 ariaLabel={group.assemblyLineGroup}
                 isOpen={openGroups[groupKey] ?? true}
-                onOpenChange={(open) => onOpenGroupChange(groupKey, open)}
+                onOpenChange={(open) => {
+                  onOpenGroupChange(groupKey, open);
+                }}
                 avatarRows={groupAvatars}
                 remainingCount={group.items.length - groupAvatars.length}
                 onCopyGroup={
@@ -4552,7 +4636,9 @@ function SimulationWarningsTab({
               groupKey={groupKey}
               label={label}
               isOpen={openGroups[groupKey] ?? true}
-              onOpenChange={(open) => onOpenGroupChange(groupKey, open)}
+              onOpenChange={(open) => {
+                onOpenGroupChange(groupKey, open);
+              }}
               avatarRows={[]}
               remainingCount={0}
             >
@@ -4748,15 +4834,18 @@ export default function SimulationResults({
   );
   const controls: SimulationRowControls = {
     selectedRowKey,
-    onSelectRow: (rowKey) => setSelectedRowKey((current) => (current === rowKey ? null : rowKey)),
+    onSelectRow: (rowKey) => {
+      setSelectedRowKey((current) => (current === rowKey ? null : rowKey));
+    },
     isIncluded: (rowKey) => includedRows[rowKey] ?? !excludedHaulRowKeys.has(rowKey),
-    onIncludedChange: (rowKey, included) =>
-      setIncludedRows((current) => ({ ...current, [rowKey]: included })),
+    onIncludedChange: (rowKey, included) => {
+      setIncludedRows((current) => ({ ...current, [rowKey]: included }));
+    },
     onHaulIncludedChange: (rowKeys, included) => {
       const previousIncludedRows = includedRows;
       const previousLocalPreservedHaulTasks = localPreservedHaulTasks;
       const nextIncludedRows = { ...includedRows };
-      const nextPreservedHaulTasks = Object.fromEntries(allPreservedHaulTasks);
+      let nextPreservedHaulTasks = Object.fromEntries(allPreservedHaulTasks);
       const tasksByRowKey = new Map(
         visibleHaulTasks.map((task) => [`haul:${task.transferId}`, task]),
       );
@@ -4766,7 +4855,10 @@ export default function SimulationResults({
         if (!task) continue;
         const key = simulationHaulExclusionKey(task);
         if (!included) nextPreservedHaulTasks[key] = task;
-        else delete nextPreservedHaulTasks[key];
+        else {
+          const { [key]: _preservedTask, ...remainingTasks } = nextPreservedHaulTasks;
+          nextPreservedHaulTasks = remainingTasks;
+        }
       }
       const nextExclusions = simulationHaulExclusions(
         result,
@@ -4790,14 +4882,17 @@ export default function SimulationResults({
         setLocalPreservedHaulTasks(previousLocalPreservedHaulTasks);
       });
     },
-    isTypeCompleted: (tab, typeId) => completedTypeDates[tab].has(typeId),
-    onTypeCompletedChange: (tab, typeId, completed) =>
+    isTypeCompleted: (tab, locationId, typeId) =>
+      completedTypeDates[tab].has(simulationCompletionKey(locationId, typeId)),
+    onTypeCompletedChange: (tab, locationId, typeId, completed) => {
       setCompletedTypeDates((current) => {
         const next = new Map(current[tab]);
-        if (completed) next.set(typeId, new Date());
-        else next.delete(typeId);
+        const key = simulationCompletionKey(locationId, typeId);
+        if (completed) next.set(key, new Date());
+        else next.delete(key);
         return { ...current, [tab]: next };
-      }),
+      });
+    },
     isCompleted: (rowKey, scheduleIdentity, matchScheduleRevision = false) => {
       const completion = completionByRow[rowKey];
       if (!completion) return false;
@@ -4816,11 +4911,12 @@ export default function SimulationResults({
         ? completion.installedRuns > 0
         : completion.installableRuns > 0 && completion.installedRuns >= completion.installableRuns;
     },
-    onCompletedChange: (rowKey, completed) =>
+    onCompletedChange: (rowKey, completed) => {
       setCompletionByRow((current) => ({
         ...current,
         [rowKey]: { installedRuns: completed ? 1 : 0, completedInstallIds: {} },
-      })),
+      }));
+    },
     getInstalledRuns: (rowKey, scheduleIdentity, matchScheduleRevision = false) => {
       const completion = completionByRow[rowKey];
       return scheduleIdentity !== undefined
@@ -4877,12 +4973,19 @@ export default function SimulationResults({
         },
       }));
     },
-    onOpenPlan: () => selectTab("plan"),
-    onNavigateToPlan: () => setActiveTab("plan"),
-    onOpenBuy: () => selectTab("buy"),
+    onOpenPlan: () => {
+      selectTab("plan");
+    },
+    onNavigateToPlan: () => {
+      setActiveTab("plan");
+    },
+    onOpenBuy: () => {
+      selectTab("buy");
+    },
   };
-  const onOpenGroupChange = (groupKey: string, open: boolean) =>
+  const onOpenGroupChange = (groupKey: string, open: boolean) => {
     setOpenGroups((current) => ({ ...current, [groupKey]: open }));
+  };
 
   function selectTab(value: string) {
     if (!isSimulationTab(value) || (value === "surplus" && !hasSurplusTab)) return;
@@ -4902,7 +5005,9 @@ export default function SimulationResults({
     };
     applyUrlState();
     window.addEventListener("popstate", applyUrlState);
-    return () => window.removeEventListener("popstate", applyUrlState);
+    return () => {
+      window.removeEventListener("popstate", applyUrlState);
+    };
   }, [hasSurplusTab, usePlannerUrlState]);
 
   if (!result) {
@@ -4999,7 +5104,9 @@ export default function SimulationResults({
               variant="outline"
               size="sm"
               className="max-[640px]:w-full"
-              onClick={() => setIsBugReportOpen(true)}
+              onClick={() => {
+                setIsBugReportOpen(true);
+              }}
             >
               <Bug aria-hidden="true" />
               Found a bug in this simulation?

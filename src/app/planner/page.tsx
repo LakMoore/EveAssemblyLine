@@ -16,9 +16,7 @@ import type {
   ClientPlanStockpile,
   PlanHaulExclusion,
   PlanStockpileLocations,
-  PlanResponse,
   PlanStockItem,
-  ResponseHaulTask,
 } from "@/lib/planning/types";
 import type {
   SimulationAsset,
@@ -35,8 +33,6 @@ import {
 import { loadStructures } from "@/lib/planning/structureStore";
 import { facilitySettingsKey, facilitySettingsName } from "@/lib/planning/facilities";
 import {
-  loadHaulItemExclusions,
-  saveHaulItemExclusions,
   loadBuildBlacklist,
   loadExcludedLocationIds,
   loadPlannerLocations,
@@ -58,9 +54,7 @@ import {
   type ClientJobsResponse,
 } from "@/lib/client/requestCache";
 import {
-  loadPlanResponse,
   loadSimulationResult,
-  savePlanResponse,
   loadSimulationHaulExclusions,
   loadSimulationPreservedHaulTasks,
   saveSimulationState,
@@ -73,21 +67,6 @@ import {
   simulationIndustrySkillIds,
   simulationTimeMultipliers,
 } from "@/lib/planning/simulator/requestProfiles";
-import {
-  applyHaulItemExclusionsToPlan,
-  createHaulItemExclusionKey,
-  parseHaulItemExclusionKey,
-  toPlanHaulExclusions,
-  type HaulItemExclusion,
-} from "@/lib/planning/planView";
-import { loadHaulPatches, saveHaulPatches } from "@/lib/planning/haulPatchStore";
-import {
-  applyHaulPatches,
-  createHaulPatchesForTask,
-  invalidateHaulPatches,
-  isHaulPatchForTask,
-} from "@/lib/planning/haulPatches";
-import type { HaulPatch } from "@/lib/planning/types";
 import { refreshPlannerStockpileEfficiencies } from "@/lib/planning/reprocessingClient";
 import {
   defaultLocations,
@@ -102,9 +81,8 @@ import { fetchTypeMetadata } from "@/lib/reference/types";
 import { reconcilePasteListItems } from "@/lib/reference/pasteListOperations";
 import { useAppLanguage } from "../AppShell";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
-import PlannerResults from "@/components/PlannerResults";
 import SimulationResults from "@/components/SimulationResults";
-import CalculateButton from "@/components/CalculateButton";
+import ActionButton from "@/components/ActionButton";
 import TypeSearch from "@/components/TypeSearch";
 import { toast } from "@/components/ui/toast";
 import { trackAnalyticsEvent } from "@/lib/client/analyticsConsent";
@@ -174,7 +152,6 @@ import { fetchProductionGroups } from "@/lib/reference/productionGroups";
 import type { SimulationResultV2 } from "@/lib/planning/simulator/types";
 
 type StockpileEditorMode = "details" | "items";
-type PlanRunMode = "calculate" | "simulate";
 type PlanLocationOption = {
   id: string;
   locationId: number;
@@ -329,10 +306,14 @@ function getStockpileLocations(stockpiles: readonly ClientPlanStockpile[]): Set<
   const locations = new Set<number>();
   for (const stockpile of stockpiles) {
     for (const locationId of Object.values(stockpile.locations)) {
-      if (Number.isInteger(locationId)) locations.add(locationId);
+      if (typeof locationId === "number" && Number.isSafeInteger(locationId)) {
+        locations.add(locationId);
+      }
     }
     for (const locationId of Object.values(stockpile.groupAssignments ?? {})) {
-      if (Number.isInteger(locationId)) locations.add(locationId);
+      if (typeof locationId === "number" && Number.isSafeInteger(locationId)) {
+        locations.add(locationId);
+      }
     }
   }
   return locations;
@@ -354,50 +335,11 @@ function getReconciledExcludedLocationIds(
 function waitForNextPaint(): Promise<void> {
   return new Promise((resolve) => {
     window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => resolve());
+      window.requestAnimationFrame(() => {
+        resolve();
+      });
     });
   });
-}
-
-function retainCurrentHaulItemExclusions(
-  assets: ClientAssetsResponse,
-  exclusions: HaulItemExclusion,
-): HaulItemExclusion {
-  const receivedAssets = assets.assets ?? [];
-  if (receivedAssets.length === 0 || exclusions.size === 0) {
-    return new Map(exclusions);
-  }
-  return new Map(
-    [...exclusions].filter(([key]) => {
-      const parsed = parseHaulItemExclusionKey(key);
-      return (
-        parsed !== null
-        && receivedAssets.some(
-          (item) =>
-            item.rootLocationId === parsed.sourceRootLocationId
-            && item.typeId === parsed.itemTypeId
-            && (
-              parsed.ownerType === undefined
-              || (item.ownerType === parsed.ownerType && item.ownerId === parsed.ownerId)
-            ),
-        )
-      );
-    }),
-  );
-}
-
-/** Combines route exclusions while removing duplicate item, route, and owner entries. */
-function mergePlanHaulExclusions(
-  ...exclusionLists: readonly (readonly PlanHaulExclusion[])[]
-): PlanHaulExclusion[] {
-  const exclusions = new Map<string, PlanHaulExclusion>();
-  for (const exclusionList of exclusionLists) {
-    for (const exclusion of exclusionList) {
-      const key = `${exclusion.typeId}:${exclusion.fromLocationId}:${exclusion.toLocationId}:${exclusion.ownerType ?? ""}:${exclusion.ownerId ?? ""}`;
-      exclusions.set(key, exclusion);
-    }
-  }
-  return [...exclusions.values()];
 }
 
 /** Converts local owner-aware exclusions into the simulator's route-only contract. */
@@ -568,15 +510,12 @@ function Planner() {
   const requirementsHeaderRef = useRef<HTMLParagraphElement>(null);
   const buildListHeaderRef = useRef<HTMLDivElement>(null);
   const { language } = useAppLanguage();
-  const [planStatus, setPlanStatus] = useState("Ready to calculate or simulate");
+  const [planStatus, setPlanStatus] = useState("Ready to simulate");
   const [isPlanLoading, setIsPlanLoading] = useState(false);
-  const [activePlanRun, setActivePlanRun] = useState<PlanRunMode | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
   const [isExcludedLocationsModalOpen, setIsExcludedLocationsModalOpen] = useState(false);
-  const [plan, setPlan] = useState<PlanResponse | null>(null);
   const [simulationResult, setSimulationResult] = useState<SimulationResultV2 | null>(null);
-  const [displayedResult, setDisplayedResult] = useState<PlanRunMode | null>(null);
   const [isDeleteAllDialogOpen, setIsDeleteAllDialogOpen] = useState(false);
   const [isClearExcludedLocationsDialogOpen, setIsClearExcludedLocationsDialogOpen] =
     useState(false);
@@ -608,7 +547,6 @@ function Planner() {
   const [includeStock, setIncludeStock] = useState(true);
   const [simulateSurplus, setSimulateSurplus] = useState(false);
   const [allowInterStockpileHauling, setAllowInterStockpileHauling] = useState(false);
-  const [haulItemExclusion, setHaulItemExclusion] = useState<HaulItemExclusion>(() => new Map());
   const [simulationHaulExclusions, setSimulationHaulExclusions] = useState<PlanHaulExclusion[]>([]);
   const [simulationPreservedHaulTasks, setSimulationPreservedHaulTasks] = useState<
     SimulationHaulTask[]
@@ -625,8 +563,6 @@ function Planner() {
     simulationCharactersLoadedKey === simulationCharactersLoadKey
     && simulationCharactersLoadError?.key !== simulationCharactersLoadKey;
   const planRunStartedRef = useRef(false);
-  const [haulPatches, setHaulPatches] = useState<Map<string, HaulPatch>>(() => new Map());
-  const [haulPatchesLoaded, setHaulPatchesLoaded] = useState(false);
   const [corporationSources, setCorporationSources] = useState<ClientCorporationSource[]>([]);
   const [locations, setLocations] = useState<PlannerLocations>(defaultLocations);
   const [settings, setSettings] = useState<PlannerSettings>(() => {
@@ -645,68 +581,35 @@ function Planner() {
   useEffect(() => {
     if (previousPathnameRef.current === pathname) return;
     previousPathnameRef.current = pathname;
-    startTransition(() => setSimulateSurplus(false));
+    startTransition(() => {
+      setSimulateSurplus(false);
+    });
   }, [pathname]);
 
   useEffect(() => {
     void Promise
       .all([
-        loadPlanResponse(),
         loadSimulationResult(),
-        loadHaulItemExclusions(),
         loadSimulationHaulExclusions(),
         loadSimulationPreservedHaulTasks(),
       ])
-      .then(
-        ([
-          savedPlan,
-          savedSimulation,
-          savedExclusions,
-          savedSimulationExclusions,
-          savedPreservedHaulTasks,
-        ]) => {
-          if (planRunStartedRef.current) {
-            setSimulationStateLoaded(true);
-            return;
-          }
-          setHaulItemExclusion(savedExclusions);
-          setSimulationHaulExclusions(savedSimulationExclusions);
-          setSimulationPreservedHaulTasks(savedPreservedHaulTasks);
-          if (savedPlan) setPlan(applyHaulItemExclusionsToPlan(savedPlan, savedExclusions));
-          if (savedSimulation) setSimulationResult(savedSimulation);
-          if (
-            savedPlan
-            && (
-              !savedSimulation
-              || savedPlan.metadata.generatedAt >= savedSimulation.metadata.generatedAt
-            )
-          ) {
-            setDisplayedResult("calculate");
-            setPlanStatus("Plan loaded from this browser");
-          }
-          else if (savedSimulation) {
-            setDisplayedResult("simulate");
-            setPlanStatus("Simulation loaded from this browser");
-          }
+      .then(([savedSimulation, savedSimulationExclusions, savedPreservedHaulTasks]) => {
+        if (planRunStartedRef.current) {
           setSimulationStateLoaded(true);
-        },
-      )
-      .catch(() => setSimulationStateLoaded(true));
+          return;
+        }
+        setSimulationHaulExclusions(savedSimulationExclusions);
+        setSimulationPreservedHaulTasks(savedPreservedHaulTasks);
+        if (savedSimulation) setSimulationResult(savedSimulation);
+        if (savedSimulation) {
+          setPlanStatus("Simulation loaded from this browser");
+        }
+        setSimulationStateLoaded(true);
+      })
+      .catch(() => {
+        setSimulationStateLoaded(true);
+      });
   }, []);
-
-  useEffect(() => {
-    void loadHaulPatches().then((patches) => {
-      setHaulPatches(new Map(patches.map((patch) => [patch.key, patch])));
-      setHaulPatchesLoaded(true);
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!haulPatchesLoaded || characterStatuses.length === 0) return;
-    const retainedPatches = invalidateHaulPatches([...haulPatches.values()], characterStatuses);
-    if (retainedPatches.length === haulPatches.size) return;
-    void saveHaulPatches(retainedPatches);
-  }, [characterStatuses, haulPatches, haulPatchesLoaded]);
 
   useEffect(() => {
     let cancelled = false;
@@ -728,7 +631,6 @@ function Planner() {
           loadClientJobs(),
         ]);
         setClientAssets(assets);
-        setHaulItemExclusion((current) => retainCurrentHaulItemExclusions(assets, current));
         setJobs(loadedJobs);
         setCorporationSources(assets.corporationSources ?? []);
         const activeCharacters = (session.characters ?? []).filter(
@@ -794,7 +696,6 @@ function Planner() {
         .then(([state, assets, loadedJobs]) => {
           if (cancelled) return;
           setClientAssets(assets);
-          setHaulItemExclusion((current) => retainCurrentHaulItemExclusions(assets, current));
           setJobs(loadedJobs);
           setCorporationSources(assets.corporationSources ?? []);
           const activeStatuses = (state.characters ?? []).filter((character) =>
@@ -842,16 +743,6 @@ function Planner() {
     includeStock,
     excludedStockLocationIds,
   );
-  const activeHaulPatches =
-    haulPatchesLoaded && characterStatuses.length > 0
-      ? new Map(
-          invalidateHaulPatches([...haulPatches.values()], characterStatuses).map((patch) => [
-            patch.key,
-            patch,
-          ]),
-        )
-      : haulPatches;
-
   function updateLocations(next: Partial<Pick<PlannerLocations, "manufacturing" | "reactions">>) {
     const updatedLocations = { ...locations, ...next };
     setLocations(updatedLocations);
@@ -921,7 +812,9 @@ function Planner() {
         setItems([]);
         setStockpiles([]);
       })
-      .finally(() => setAreStockpilesLoaded(true));
+      .finally(() => {
+        setAreStockpilesLoaded(true);
+      });
   }, [language]);
 
   useEffect(() => {
@@ -938,7 +831,6 @@ function Planner() {
       ]);
       if (cancelled) return;
       if (data) {
-        setHaulItemExclusion((current) => retainCurrentHaulItemExclusions(data, current));
         const assetLocations = groupClientAssetsByLocation(filterClientAssetsForPlanning(data));
         setCachedAssetLocations(
           assetLocations
@@ -1060,9 +952,6 @@ function Planner() {
 
   async function submitPlan(
     exclusions: Set<number>,
-    itemExclusions: HaulItemExclusion = haulItemExclusion,
-    patches: ReadonlyMap<string, HaulPatch> = activeHaulPatches,
-    mode: PlanRunMode = "calculate",
     simulationExclusions: readonly PlanHaulExclusion[] = simulationHaulExclusions,
     preservedHaulTasks: readonly SimulationHaulTask[] = simulationPreservedHaulTasks,
   ): Promise<boolean> {
@@ -1077,15 +966,13 @@ function Planner() {
     if (
       plannerItems.length === 0
       || isPlanLoading
-      || (mode === "simulate" && !simulationStateLoaded)
-      || (mode === "simulate" && !simulationCharactersLoaded)
+      || !simulationStateLoaded
+      || !simulationCharactersLoaded
     ) return false;
     planRunStartedRef.current = true;
     flushSync(() => {
       setIsPlanLoading(true);
-      setActivePlanRun(mode);
-      setDisplayedResult(mode);
-      setPlanStatus(mode === "simulate" ? "Simulating..." : "Calculating...");
+      setPlanStatus("Simulating...");
     });
     await waitForNextPaint();
     let simulationSucceeded = false;
@@ -1116,22 +1003,19 @@ function Planner() {
       const selectedReactionFacility = locationOptions.find(
         (location) => location.locationId === primaryStockpileLocations.reactions,
       );
-      const requestStock = prepareSimulationAssets(
-        applyHaulPatches(workingAssets, [...patches.values()]),
-      );
+      const requestStock = prepareSimulationAssets(workingAssets);
       const planningCharacter = characterStatuses.find(
         (character) => character.characterId === planningCharacterId,
       );
       const planningSkills = planningCharacter?.skills?.body ?? undefined;
       const planningTimeMultipliers = simulationTimeMultipliers(planningSkills);
       const response = await fetch(
-        mode === "simulate" ? "/api/plan/simulate" : "/api/plan",
+        "/api/plan/simulate",
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(mode === "simulate"
-            && simulationResult?.metadata.simulatorVersion === simulationCalculationVersion
+            ...(simulationResult?.metadata.simulatorVersion === simulationCalculationVersion
               ? {
                   "If-None-Match": createSimulationEtag(
                     simulationResult.metadata.normalizedInputHash,
@@ -1156,40 +1040,22 @@ function Planner() {
                     })),
                   }))
                 : undefined,
-            facilityProfiles:
-              mode === "simulate"
-                ? sharedLocationOptions.flatMap((location) => {
-                    if (location.systemId === undefined) return [];
-                    const facility = locationOptions.find(
-                      (candidate) => candidate.locationId === location.locationId,
-                    );
-                    return [
-                      {
-                        locationId: location.locationId,
-                        systemId: location.systemId,
-                        sizeId: facility?.sizeId ?? 0,
-                        buildTypeGroups: facility?.buildTypeGroups ?? {},
-                      },
-                    ];
-                  })
-                : locationOptions.map((location) => ({
-                    locationId: location.locationId,
-                    sizeId: location.sizeId,
-                    buildTypeGroups: location.buildTypeGroups,
-                  })),
-            haulExclusions:
-              mode === "simulate"
-                ? toSimulationHaulExclusions(
-                    mergePlanHaulExclusions(
-                      toPlanHaulExclusions(itemExclusions),
-                      simulationExclusions,
-                    ),
-                  )
-                : mergePlanHaulExclusions(toPlanHaulExclusions(itemExclusions)),
-            assets:
-              mode === "simulate"
-                ? requestStock.map(toSimulationAsset)
-                : requestStock.map(({ sourceLocationName: _sourceLocationName, ...item }) => item),
+            facilityProfiles: sharedLocationOptions.flatMap((location) => {
+              if (location.systemId === undefined) return [];
+              const facility = locationOptions.find(
+                (candidate) => candidate.locationId === location.locationId,
+              );
+              return [
+                {
+                  locationId: location.locationId,
+                  systemId: location.systemId,
+                  sizeId: facility?.sizeId ?? 0,
+                  buildTypeGroups: facility?.buildTypeGroups ?? {},
+                },
+              ];
+            }),
+            haulExclusions: toSimulationHaulExclusions(simulationExclusions),
+            assets: requestStock.map(toSimulationAsset),
             facilityTimeMultipliers: {
               manufacturing: selectedManufacturingFacility?.manufacturingTimeMultiplier ?? 1,
               reactions: selectedReactionFacility?.reactionTimeMultiplier ?? 1,
@@ -1199,14 +1065,7 @@ function Planner() {
               reactions: planningTimeMultipliers.reactions,
             },
             settings: {
-              ...(mode === "calculate"
-                ? {
-                    includeCorporationAssets: settings.includeCorporationAssets,
-                    personalSellOrdersAsStock: settings.personalSellOrdersAsStock,
-                    allCorporationSellOrdersAsStock: settings.allCorporationSellOrdersAsStock,
-                    myCorporationSellOrdersAsStock: settings.myCorporationSellOrdersAsStock,
-                  }
-                : { includeCorporationAssets: settings.includeCorporationAssets }),
+              includeCorporationAssets: settings.includeCorporationAssets,
               buildBlacklist: settings.buildBlacklist.map((item) => item.typeId),
               buyBlacklist: [],
               fallbackT1Me: settings.fallbackT1Me,
@@ -1214,82 +1073,58 @@ function Planner() {
               fallbackT2OrT3Me: settings.fallbackT2OrT3Me,
               fallbackT2OrT3Te: settings.fallbackT2OrT3Te,
             },
-            ...(mode === "simulate"
-              ? {
-                  simulation: {
-                    version: 1,
-                    simulateSurplus,
-                    blockInterStockpileHauling: !allowInterStockpileHauling,
-                    maxReactionJobDurationHours: settings.maxReactionJobDurationHours,
-                    characters: createSimulationCharacterProfiles(characterStatuses),
-                    slots: createSimulationSlotMap(characterStatuses, jobs),
-                  },
-                }
-              : {}),
+            simulation: {
+              version: 1,
+              simulateSurplus,
+              blockInterStockpileHauling: !allowInterStockpileHauling,
+              maxReactionJobDurationHours: settings.maxReactionJobDurationHours,
+              characters: createSimulationCharacterProfiles(characterStatuses),
+              slots: createSimulationSlotMap(characterStatuses, jobs),
+            },
           }),
         },
       );
-      if (mode === "simulate" && response.status === 304) {
+      if (response.status === 304) {
         if (!simulationResult) {
           setPlanStatus("Error: The unchanged simulation result is no longer available");
           return false;
         }
-        flushSync(() => {
-          setDisplayedResult("simulate");
-        });
       }
       const data =
         response.status === 304
           ? null
-          : ((await response.json()) as PlanResponse | SimulationResultV2 | { error?: string });
+          : ((await response.json()) as SimulationResultV2 | { error?: string });
       if (!response.ok && response.status !== 304) {
         setPlanStatus(
           `Error: ${
             data && typeof data === "object" && "error" in data && data.error
               ? data.error
-              : mode === "simulate"
-                ? "Could not simulate plan"
-                : "Could not calculate plan"
+              : "Could not simulate plan"
           }`,
         );
         return false;
       }
-      if (mode === "simulate") {
-        const nextSimulationResult = (data as SimulationResultV2 | null) ?? simulationResult;
-        if (!nextSimulationResult) {
-          setPlanStatus("Error: The simulator returned no result");
-          return false;
-        }
-        const simulationStateSaved = await saveSimulationState(
-          nextSimulationResult,
-          simulationExclusions,
-          preservedHaulTasks,
-        );
-        if (!simulationStateSaved) {
-          setPlanStatus("Simulation updated, but could not save it in this browser");
-          return false;
-        }
-        flushSync(() => {
-          setSimulationResult(nextSimulationResult);
-          setDisplayedResult("simulate");
-          setSimulationHaulExclusions([...simulationExclusions]);
-          setSimulationPreservedHaulTasks([...preservedHaulTasks]);
-          setHaulItemExclusion(new Map(itemExclusions));
-          setHaulPatches(new Map(patches));
-        });
+      const nextSimulationResult = (data as SimulationResultV2 | null) ?? simulationResult;
+      if (!nextSimulationResult) {
+        setPlanStatus("Error: The simulator returned no result");
+        return false;
       }
-      else {
-        const calculatedPlan = applyHaulItemExclusionsToPlan(data as PlanResponse, itemExclusions);
-        await savePlanResponse(calculatedPlan);
-        flushSync(() => {
-          setPlan(calculatedPlan);
-          setDisplayedResult("calculate");
-          setHaulItemExclusion(new Map(itemExclusions));
-          setHaulPatches(new Map(patches));
-        });
+      const simulationStateSaved = await saveSimulationState(
+        nextSimulationResult,
+        simulationExclusions,
+        preservedHaulTasks,
+      );
+      if (!simulationStateSaved) {
+        setPlanStatus("Simulation updated, but could not save it in this browser");
+        return false;
       }
+      flushSync(() => {
+        setSimulationResult(nextSimulationResult);
+        setSimulationHaulExclusions([...simulationExclusions]);
+        setSimulationPreservedHaulTasks([...preservedHaulTasks]);
+      });
       await savePlannerLocations(locations);
-      setPlanStatus(mode === "simulate" ? "Simulation updated just now" : "Plan updated just now");
+      setPlanStatus("Simulation updated just now");
       simulationSucceeded = true;
       return true;
     }
@@ -1298,16 +1133,8 @@ function Planner() {
       return false;
     }
     finally {
-      if (mode === "simulate") {
-        trackAnalyticsEvent(
-          "simulate",
-          {
-            outcome: simulationSucceeded ? "success" : "failure",
-          },
-        );
-      }
+      trackAnalyticsEvent("simulate", { outcome: simulationSucceeded ? "success" : "failure" });
       setIsPlanLoading(false);
-      setActivePlanRun(null);
     }
   }
 
@@ -1316,37 +1143,13 @@ function Planner() {
     exclusions: readonly PlanHaulExclusion[],
     preservedHaulTasks: readonly SimulationHaulTask[] = simulationPreservedHaulTasks,
   ): Promise<boolean> {
-    return submitPlan(
-      new Set(excludedLocationIds),
-      haulItemExclusion,
-      activeHaulPatches,
-      "simulate",
-      exclusions,
-      preservedHaulTasks,
-    );
+    return submitPlan(new Set(excludedLocationIds), exclusions, preservedHaulTasks);
   }
 
   /** Clears haul-tab exclusions and refreshes the simulator with every route enabled. */
   async function clearSimulationHaulExclusions(): Promise<boolean> {
-    const succeeded = await submitPlan(
-      new Set(excludedLocationIds),
-      haulItemExclusion,
-      activeHaulPatches,
-      "simulate",
-      [],
-      [],
-    );
+    const succeeded = await submitPlan(new Set(excludedLocationIds), [], []);
     return succeeded;
-  }
-
-  async function excludeHaulStockpile(fromLocationId: number) {
-    const nextExcludedLocationIds = new Set(excludedLocationIds);
-    nextExcludedLocationIds.add(fromLocationId);
-    const nextIds = [...nextExcludedLocationIds];
-    setExcludedLocationIds(nextIds);
-    const savePromise = saveExcludedLocationIds(nextIds);
-    await submitPlan(nextExcludedLocationIds);
-    await savePromise;
   }
 
   /** Excludes a simulator haul source location and recalculates the simulator result. */
@@ -1356,7 +1159,7 @@ function Planner() {
     const nextIds = [...nextExcludedLocationIds];
     setExcludedLocationIds(nextIds);
     const savePromise = saveExcludedLocationIds(nextIds);
-    await submitPlan(nextExcludedLocationIds, haulItemExclusion, activeHaulPatches, "simulate");
+    await submitPlan(nextExcludedLocationIds);
     await savePromise;
   }
 
@@ -1374,113 +1177,6 @@ function Planner() {
     const savePromise = saveExcludedLocationIds([]);
     await submitPlan(new Set());
     await savePromise;
-  }
-
-  async function toggleHaulItemExclusion(key: string, excluded: boolean) {
-    const nextExclusions = new Map(haulItemExclusion);
-    if (excluded) {
-      const task = plan?.lists.haulingTasks
-        .flatMap((bucket) =>
-          bucket.items.map((item) => ({
-            ...item,
-            fromLocationId: bucket.fromLocationId,
-            toLocationId: bucket.toLocationId,
-            ...(bucket.ownerType ? { ownerType: bucket.ownerType } : {}),
-            ...(bucket.ownerId !== undefined ? { ownerId: bucket.ownerId } : {}),
-          })),
-        )
-        .find(
-          (entry) =>
-            createHaulItemExclusionKey(
-              entry.fromLocationId,
-              entry.typeId,
-              entry.toLocationId,
-              entry.ownerType,
-              entry.ownerId,
-            ) === key,
-        );
-      if (!task) return;
-      nextExclusions.set(
-        key,
-        {
-          neededQuantity: task.neededQuantity,
-          ...(task.ownerType ? { ownerType: task.ownerType } : {}),
-          ...(task.ownerId !== undefined ? { ownerId: task.ownerId } : {}),
-        },
-      );
-    }
-    else nextExclusions.delete(key);
-    if (await submitPlan(new Set(excludedLocationIds), nextExclusions)) {
-      setHaulItemExclusion(nextExclusions);
-      await saveHaulItemExclusions(nextExclusions);
-    }
-  }
-
-  async function toggleHaulItemExclusions(tasks: ResponseHaulTask[], excluded: boolean) {
-    const nextExclusions = new Map(haulItemExclusion);
-    for (const task of tasks) {
-      const key = createHaulItemExclusionKey(
-        task.fromLocationId,
-        task.typeId,
-        task.toLocationId,
-        task.ownerType,
-        task.ownerId,
-      );
-      if (excluded) {
-        nextExclusions.set(
-          key,
-          {
-            neededQuantity: task.neededQuantity,
-            ...(task.ownerType ? { ownerType: task.ownerType } : {}),
-            ...(task.ownerId !== undefined ? { ownerId: task.ownerId } : {}),
-          },
-        );
-      }
-      else nextExclusions.delete(key);
-    }
-    if (await submitPlan(new Set(excludedLocationIds), nextExclusions)) {
-      setHaulItemExclusion(nextExclusions);
-      await saveHaulItemExclusions(nextExclusions);
-    }
-  }
-
-  async function toggleHaulPatches(tasks: ResponseHaulTask[], patched: boolean) {
-    const nextPatches = new Map(activeHaulPatches);
-    const currentStock = getPlannerStock(
-      clientAssets,
-      includeStock,
-      new Set(excludedLocationIds),
-      settings,
-      characterStatuses.map((character) => character.characterId),
-    );
-    for (const task of tasks) {
-      if (
-        haulItemExclusion.has(
-          createHaulItemExclusionKey(
-            task.fromLocationId,
-            task.typeId,
-            task.toLocationId,
-            task.ownerType,
-            task.ownerId,
-          ),
-        )
-      ) {
-        continue;
-      }
-      const taskPatches = createHaulPatchesForTask(task, currentStock, characterStatuses);
-      if (patched) {
-        for (const patch of taskPatches) nextPatches.set(patch.key, patch);
-      }
-      else {
-        for (const [key, patch] of nextPatches) {
-          if (isHaulPatchForTask(task, patch)) nextPatches.delete(key);
-        }
-      }
-    }
-    if (await submitPlan(new Set(excludedLocationIds), haulItemExclusion, nextPatches)) {
-      setHaulPatches(nextPatches);
-      await saveHaulPatches([...nextPatches.values()]);
-    }
   }
 
   function saveStockpile(stockpile: ClientPlanStockpile): boolean {
@@ -1547,7 +1243,6 @@ function Planner() {
       return;
     }
     setStockpiles((current) => current.filter((stockpile) => stockpile.id !== stockpileId));
-    setPlan(null);
   }
 
   function requestStockpileRemoval(stockpile: ClientPlanStockpile) {
@@ -1620,7 +1315,6 @@ function Planner() {
         setExcludedLocationIds(importedExcludedLocationIds);
         await saveExcludedLocationIds(importedExcludedLocationIds);
       }
-      setPlan(null);
       toast.add({ description: "Plan imported" });
     }
     catch (error) {
@@ -1630,31 +1324,6 @@ function Planner() {
       });
     }
     setPlanImportInputKey((key) => key + 1);
-  }
-
-  function importItems(
-    importedItems: Array<{
-      name: string;
-      categoryName: string;
-      typeId: number;
-      quantity: number;
-      iconCategory?: ClientBuildItem["iconCategory"];
-    }>,
-  ) {
-    setItems((current) => {
-      const next = [...current];
-      for (const imported of importedItems) {
-        const existing = next.find(
-          (item) => item.typeId === imported.typeId && !item.fromCompression,
-        );
-        if (existing) existing.quantity += imported.quantity;
-        else {
-          next.push({ ...imported, me: 0, te: 0, fromCompression: false, isIncluded: true });
-        }
-      }
-      return next;
-    });
-    setIsPasteModalOpen(false);
   }
 
   async function copyBuildList() {
@@ -1908,16 +1577,22 @@ function Planner() {
                   key={stockpile.id}
                   stockpile={stockpile}
                   locationNamesById={plannerLocationNames}
-                  onEditDetails={() => openStockpileDetails(stockpile)}
-                  onEditItems={() => openStockpileItems(stockpile)}
-                  onRemove={() => requestStockpileRemoval(stockpile)}
-                  onActiveChange={(isActive) =>
+                  onEditDetails={() => {
+                    openStockpileDetails(stockpile);
+                  }}
+                  onEditItems={() => {
+                    openStockpileItems(stockpile);
+                  }}
+                  onRemove={() => {
+                    requestStockpileRemoval(stockpile);
+                  }}
+                  onActiveChange={(isActive) => {
                     setStockpiles((current) =>
                       current.map((existing) =>
                         existing.id === stockpile.id ? { ...existing, isActive } : existing,
                       ),
-                    )
-                  }
+                    );
+                  }}
                 />
               ))
             )}
@@ -1963,7 +1638,9 @@ function Planner() {
               type="button"
               variant="outline"
               disabled={excludedLocationIds.length === 0}
-              onClick={() => setIsExcludedLocationsModalOpen(true)}
+              onClick={() => {
+                setIsExcludedLocationsModalOpen(true);
+              }}
             >
               Excluded asset locations ({excludedLocationIds.length})
             </Button>
@@ -1976,31 +1653,17 @@ function Planner() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => setSimulationCharactersLoadAttempt((attempt) => attempt + 1)}
+                    onClick={() => {
+                      setSimulationCharactersLoadAttempt((attempt) => attempt + 1);
+                    }}
                   >
                     Retry
                   </Button>
                 </AlertDescription>
               </Alert>
             )}
-            <div className="ml-auto grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-2">
-              <CalculateButton
-                type="button"
-                disabled={
-                  isPlanLoading
-                  || stockpiles.every(
-                    (stockpile) =>
-                      stockpile.isActive === false
-                      || !stockpile.items.some((item) => item.isIncluded !== false),
-                  )
-                }
-                icon={ClipboardList}
-                isLoading={activePlanRun === "calculate"}
-                label="Calculate production plan"
-                loadingLabel="Calculating..."
-                onClick={() => void submitPlan(new Set(excludedLocationIds))}
-              />
-              <CalculateButton
+            <div className="ml-auto grid w-full grid-cols-1 gap-2 sm:w-auto">
+              <ActionButton
                 type="button"
                 disabled={
                   isPlanLoading
@@ -2013,17 +1676,10 @@ function Planner() {
                   )
                 }
                 icon={FlaskConical}
-                isLoading={activePlanRun === "simulate"}
+                isLoading={isPlanLoading}
                 label="Simulate"
                 loadingLabel="Simulating..."
-                onClick={() =>
-                  void submitPlan(
-                    new Set(excludedLocationIds),
-                    haulItemExclusion,
-                    activeHaulPatches,
-                    "simulate",
-                  )
-                }
+                onClick={() => void submitPlan(new Set(excludedLocationIds))}
               />
             </div>
           </div>
@@ -2037,7 +1693,9 @@ function Planner() {
         stockLocations={stockLocationOptions}
         productionGroups={productionGroupOptions}
         onAutoAssign={autoAssignGroupFacilities}
-        onOpenChange={(open) => !open && closeStockpileEditor()}
+        onOpenChange={(open) => {
+          if (!open) closeStockpileEditor();
+        }}
         onSave={saveStockpile}
       />
       <PlannerStockpileItemsDialog
@@ -2045,7 +1703,9 @@ function Planner() {
         stockpile={editingStockpile}
         open={stockpileEditorMode === "items"}
         language={language}
-        onOpenChange={(open) => !open && closeStockpileEditor()}
+        onOpenChange={(open) => {
+          if (!open) closeStockpileEditor();
+        }}
         onSave={saveStockpile}
       />
       <form
@@ -2064,7 +1724,12 @@ function Planner() {
                 </p>
                 <h2>Build list</h2>
               </div>
-              <Button variant="outline" onClick={() => setIsPasteModalOpen(true)}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsPasteModalOpen(true);
+                }}
+              >
                 <Clipboard data-icon="inline-start" aria-hidden="true" />
                 <span>Paste list</span>
               </Button>
@@ -2092,7 +1757,7 @@ function Planner() {
               language={language}
               placeholder="Search items by name or type ID"
               ariaLabel="Search items by name or type ID"
-              onSelect={(item) =>
+              onSelect={(item) => {
                 setItems((current) => {
                   const existingIndex = current.findIndex(
                     (entry) => entry.typeId === item.typeId && !entry.fromCompression,
@@ -2109,8 +1774,8 @@ function Planner() {
                           fromCompression: false,
                         };
                   return [nextItem, ...current.filter((_, index) => index !== existingIndex)];
-                })
-              }
+                });
+              }}
             />
             <div className={styles.tableHead} ref={buildListHeaderRef}>
               <ScrollTopButton targetRef={requirementsHeaderRef} headerRef={buildListHeaderRef} />
@@ -2168,15 +1833,15 @@ function Planner() {
                       min="1"
                       step="1"
                       value={item.quantity}
-                      onChange={(event) =>
+                      onChange={(event) => {
                         setItems(
                           items.map((entry, itemIndex) =>
                             itemIndex === index
                               ? { ...entry, quantity: Math.max(1, Number(event.target.value) || 1) }
                               : entry,
                           ),
-                        )
-                      }
+                        );
+                      }}
                     />
                   </Label>
                   <Label className={`${styles.itemField} ${styles.meField}`}>
@@ -2189,7 +1854,7 @@ function Planner() {
                       max="10"
                       step="1"
                       value={item.me}
-                      onChange={(event) =>
+                      onChange={(event) => {
                         setItems(
                           items.map((entry, itemIndex) =>
                             itemIndex === index
@@ -2199,8 +1864,8 @@ function Planner() {
                                 }
                               : entry,
                           ),
-                        )
-                      }
+                        );
+                      }}
                     />
                   </Label>
                   <Label className={`${styles.itemField} ${styles.teField}`}>
@@ -2213,7 +1878,7 @@ function Planner() {
                       max="20"
                       step="1"
                       value={item.te}
-                      onChange={(event) =>
+                      onChange={(event) => {
                         setItems(
                           items.map((entry, itemIndex) =>
                             itemIndex === index
@@ -2223,15 +1888,17 @@ function Planner() {
                                 }
                               : entry,
                           ),
-                        )
-                      }
+                        );
+                      }}
                     />
                   </Label>
                   <Button
                     variant="destructive"
                     size="icon-sm"
                     aria-label={`Remove ${item.name}`}
-                    onClick={() => setItems(items.filter((_, itemIndex) => itemIndex !== index))}
+                    onClick={() => {
+                      setItems(items.filter((_, itemIndex) => itemIndex !== index));
+                    }}
                   >
                     <Trash2 aria-hidden="true" />
                   </Button>
@@ -2253,9 +1920,9 @@ function Planner() {
                     </div>
                     <Select
                       value={String(locations.manufacturing)}
-                      onValueChange={(value) =>
-                        value && updateLocations({ manufacturing: Number(value) })
-                      }
+                      onValueChange={(value) => {
+                        if (value) updateLocations({ manufacturing: Number(value) });
+                      }}
                       items={sharedLocationOptions.map((location) => ({
                         value: String(location.locationId),
                         label: `${location.name} (${location.baseManufacturingMe.toFixed(1)}%)`,
@@ -2307,9 +1974,9 @@ function Planner() {
                     </div>
                     <Select
                       value={String(locations.reactions)}
-                      onValueChange={(value) =>
-                        value && updateLocations({ reactions: Number(value) })
-                      }
+                      onValueChange={(value) => {
+                        if (value) updateLocations({ reactions: Number(value) });
+                      }}
                       items={sharedLocationOptions.map((location) => ({
                         value: String(location.locationId),
                         label: location.name,
@@ -2377,7 +2044,9 @@ function Planner() {
                   </div>
                   <Select
                     value={planningCharacterId === undefined ? "" : String(planningCharacterId)}
-                    onValueChange={(value) => value && setPlanningCharacterId(Number(value))}
+                    onValueChange={(value) => {
+                      if (value) setPlanningCharacterId(Number(value));
+                    }}
                   >
                     <SelectTrigger
                       className={styles.locationSelectTrigger}
@@ -2436,20 +2105,26 @@ function Planner() {
                 <div className={styles.excludedLocationsActions}>
                   <Button
                     disabled={excludedLocationIds.length === 0}
-                    onClick={() => setIsExcludedLocationsModalOpen(true)}
+                    onClick={() => {
+                      setIsExcludedLocationsModalOpen(true);
+                    }}
                   >
                     {excludedLocationIds.length}
                   </Button>
                   <div className="ml-auto flex gap-2">
                     <Button
                       disabled={excludedLocationIds.length === 0}
-                      onClick={() => setIsExcludedLocationsModalOpen(true)}
+                      onClick={() => {
+                        setIsExcludedLocationsModalOpen(true);
+                      }}
                     >
                       View
                     </Button>
                     <Button
                       disabled={excludedLocationIds.length === 0 || isPlanLoading}
-                      onClick={() => setIsClearExcludedLocationsDialogOpen(true)}
+                      onClick={() => {
+                        setIsClearExcludedLocationsDialogOpen(true);
+                      }}
                     >
                       Clear all
                     </Button>
@@ -2464,7 +2139,9 @@ function Planner() {
         <PasteListDialog
           language={language}
           currentItems={items}
-          onCancel={() => setIsPasteModalOpen(false)}
+          onCancel={() => {
+            setIsPasteModalOpen(false);
+          }}
           onImport={(pastedItems) => {
             setItems((current) =>
               reconcilePasteListItems(
@@ -2504,9 +2181,15 @@ function Planner() {
           }
           isLoading={isPlanLoading}
           onRemove={(locationId) => void removeExcludedLocation(locationId)}
-          onClearAll={() => setIsClearExcludedLocationsDialogOpen(true)}
-          onSave={() => setIsExcludedLocationsModalOpen(false)}
-          onCancel={() => setIsExcludedLocationsModalOpen(false)}
+          onClearAll={() => {
+            setIsClearExcludedLocationsDialogOpen(true);
+          }}
+          onSave={() => {
+            setIsExcludedLocationsModalOpen(false);
+          }}
+          onCancel={() => {
+            setIsExcludedLocationsModalOpen(false);
+          }}
         />
       )}
       <AlertDialog open={isDeleteAllDialogOpen} onOpenChange={setIsDeleteAllDialogOpen}>
@@ -2538,7 +2221,11 @@ function Planner() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setIsClearExcludedLocationsDialogOpen(false)}>
+            <AlertDialogCancel
+              onClick={() => {
+                setIsClearExcludedLocationsDialogOpen(false);
+              }}
+            >
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
@@ -2576,68 +2263,32 @@ function Planner() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      {displayedResult === "calculate" ? (
-        <PlannerResults
-          language={language}
-          plan={plan}
-          planStatus={planStatus}
-          characterStatuses={characterStatuses}
-          characterNamesById={characterNamesById}
-          slotCharacterNamesById={activeCharacterNamesById}
-          corporationNamesById={corporationNamesById}
-          jobs={jobs}
-          stock={stock}
-          marketBuyOrderQuantities={clientAssets?.marketBuyOrderQuantities}
-          locations={locations}
-          stockpiles={stockpiles}
-          stockpileLocations={stockpileLocations}
-          locationOptions={locationOptions}
-          onAddBuildItem={(item) =>
-            importItems([
-              {
-                ...item,
-                categoryName: "Reaction Formula",
-                iconCategory: "reactionformula",
-              },
-            ])
-          }
-          onExcludeHaulStockpile={excludeHaulStockpile}
-          haulItemExclusion={haulItemExclusion}
-          onToggleHaulItemExclusion={toggleHaulItemExclusion}
-          onToggleHaulItemExclusions={toggleHaulItemExclusions}
-          haulPatches={activeHaulPatches}
-          onToggleHaulPatches={toggleHaulPatches}
-        />
-      ) : (
-        <SimulationResults
-          result={simulationResult}
-          directStockpileItemTypeIds={directStockpileItemTypeIds}
-          status={planStatus}
-          stock={stock}
-          visibleReactionFormulaStock={visibleReactionFormulaStock}
-          industryJobs={jobs?.jobs}
-          marketBuyOrderQuantities={clientAssets?.marketBuyOrderQuantities}
-          locationNamesById={plannerLocationNames}
-          locationSystemIdsById={plannerLocationSystemIds}
-          systemNamesById={plannerSystemNames}
-          reactionMaterialBonusesByLocation={simulationReactionMaterialBonuses(locationOptions)}
-          characterNamesById={characterNamesById}
-          characterStatuses={characterStatuses}
-          slotUsage={jobs?.slotUsage}
-          jobsLastUpdated={jobs?.lastUpdated}
-          corporationNamesById={corporationNamesById}
-          stockpileNamesById={
-            new Map(stockpiles.map((stockpile) => [stockpile.id, stockpile.name]))
-          }
-          stockpileLocations={stockpileLocations}
-          haulExclusions={simulationHaulExclusions}
-          preservedHaulTasks={simulationPreservedHaulTasks}
-          isLoading={isPlanLoading}
-          onClearHaulExclusions={clearSimulationHaulExclusions}
-          onExcludeLocation={excludeSimulationLocation}
-          onHaulExclusionsChange={updateSimulationHaulExclusions}
-        />
-      )}
+      <SimulationResults
+        result={simulationResult}
+        directStockpileItemTypeIds={directStockpileItemTypeIds}
+        status={planStatus}
+        stock={stock}
+        visibleReactionFormulaStock={visibleReactionFormulaStock}
+        industryJobs={jobs?.jobs}
+        marketBuyOrderQuantities={clientAssets?.marketBuyOrderQuantities}
+        locationNamesById={plannerLocationNames}
+        locationSystemIdsById={plannerLocationSystemIds}
+        systemNamesById={plannerSystemNames}
+        reactionMaterialBonusesByLocation={simulationReactionMaterialBonuses(locationOptions)}
+        characterNamesById={characterNamesById}
+        characterStatuses={characterStatuses}
+        slotUsage={jobs?.slotUsage}
+        jobsLastUpdated={jobs?.lastUpdated}
+        corporationNamesById={corporationNamesById}
+        stockpileNamesById={new Map(stockpiles.map((stockpile) => [stockpile.id, stockpile.name]))}
+        stockpileLocations={stockpileLocations}
+        haulExclusions={simulationHaulExclusions}
+        preservedHaulTasks={simulationPreservedHaulTasks}
+        isLoading={isPlanLoading}
+        onClearHaulExclusions={clearSimulationHaulExclusions}
+        onExcludeLocation={excludeSimulationLocation}
+        onHaulExclusionsChange={updateSimulationHaulExclusions}
+      />
     </>
   );
 }
@@ -2808,7 +2459,12 @@ function ExcludedLocationsModal({
   });
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onCancel()}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onCancel();
+      }}
+    >
       <DialogContent className={styles.importModal}>
         <div className={styles.panelHeader}>
           <div>
@@ -2825,7 +2481,9 @@ function ExcludedLocationsModal({
                   type="button"
                   className={styles.clearExcludedButton}
                   disabled={isLoading}
-                  onClick={() => onRemove(locationId)}
+                  onClick={() => {
+                    onRemove(locationId);
+                  }}
                 >
                   Remove
                 </button>

@@ -104,7 +104,7 @@ export async function GET(request: Request) {
         },
       );
       const response = NextResponse.redirect(
-        `${getPublicOrigin(request, pending.redirectUri)}${pending.returnPath ?? "/characters"}`
+        `${getPublicOrigin(request, pending.redirectUri)}${pending.returnPath ?? "/data"}`
           + `${pending.returnPath?.includes("?") ? "&" : "?"}merge=1`,
       );
       response.cookies.set(
@@ -169,7 +169,7 @@ export async function GET(request: Request) {
       hasTraderRole: roles.roles.includes("Trader"),
       hasStationManagerRole: roles.roles.includes("Station_Manager"),
     });
-    if (!session.collectionId) session.collectionId = resolvedCollectionId;
+    session.collectionId ??= resolvedCollectionId;
     await saveSession(session);
     const gainedEligibleDirector =
       corporationId !== undefined

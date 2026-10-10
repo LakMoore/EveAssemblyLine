@@ -58,7 +58,7 @@ function percentageFromMultiplier(multiplier: number) {
 }
 
 function multiplier(value: number | undefined) {
-  return value === undefined ? 1 : value;
+  return value ?? 1;
 }
 
 function addPercentageModifier(multiplierValue: number, modifier: number) {

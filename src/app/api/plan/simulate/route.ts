@@ -72,7 +72,7 @@ export async function POST(request: Request) {
     let body: unknown;
     try {
       rawRequestBody = await profiler.measure("read-body", () => request.text());
-      body = await profiler.measure("parse-json", () => JSON.parse(rawRequestBody));
+      body = await profiler.measure("parse-json", () => JSON.parse(rawRequestBody) as unknown);
     }
     catch {
       const responseBody = withSimulationId(
@@ -111,16 +111,15 @@ export async function POST(request: Request) {
       sdeRevision,
       simulationCalculationVersion,
     );
+    const responseHeaders = new Headers(noStoreResponseInit.headers);
+    responseHeaders.set("ETag", etag);
     if (matchesIfNoneMatch(request.headers.get("if-none-match"), etag)) {
       logResponse("", 304);
       return new Response(
         null,
         {
           status: 304,
-          headers: {
-            ...noStoreResponseInit.headers,
-            ETag: etag,
-          },
+          headers: responseHeaders,
         },
       );
     }
@@ -134,10 +133,7 @@ export async function POST(request: Request) {
       responseBody,
       {
         ...noStoreResponseInit,
-        headers: {
-          ...noStoreResponseInit.headers,
-          ETag: etag,
-        },
+        headers: responseHeaders,
       },
     );
   }

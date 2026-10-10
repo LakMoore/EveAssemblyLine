@@ -3,12 +3,18 @@
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import {
+  loadClientCharacterState,
   loadClientJobs,
   loadClientSession,
+  loadClientSystemNames,
   type ClientCharacter,
+  type ClientCharacterStatus,
+  type ClientRefreshEventDetail,
   type ClientJobsResponse,
 } from "@/lib/client/requestCache";
+import { useAppLanguage } from "@/app/AppShell";
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
+import { isWormholeSystemId } from "@/lib/planning/simulator/clientScheduler";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import styles from "../page.module.css";
 import { Atom, Factory, FlaskConical } from "lucide-react";
@@ -29,6 +35,13 @@ const scienceJobActivities = new Set([
   "Copying",
   "Invention",
 ]);
+
+type CharacterLocationGroup = {
+  key: string;
+  name: string;
+  order: number;
+  characters: ClientCharacter[];
+};
 
 function isScienceJob(activity: string) {
   return scienceJobActivities.has(activity);
@@ -92,31 +105,34 @@ function JobRow({ job, characterName }: { job: ClientJob; characterName: string 
 }
 
 export default function JobsPage() {
+  const { language } = useAppLanguage();
   const [data, setData] = useState<ClientJobsResponse | null>(null);
   const [characters, setCharacters] = useState<ClientCharacter[]>([]);
+  const [characterStatuses, setCharacterStatuses] = useState<ClientCharacterStatus[]>([]);
+  const [systemNamesById, setSystemNamesById] = useState<Map<number, string>>(new Map());
   const [error, setError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    const load = (refreshedJobs?: ClientJobsResponse | null) => {
-      if (refreshedJobs) {
-        setData(refreshedJobs);
-        return;
-      }
+    const load = (refresh?: ClientRefreshEventDetail) => {
       void Promise
-        .all([loadClientSession(), loadClientJobs()])
-        .then(([session, response]) => {
+        .all([
+          refresh ? Promise.resolve(undefined) : loadClientSession(),
+          refresh?.jobs ? Promise.resolve(refresh.jobs) : loadClientJobs(),
+          refresh?.state ? Promise.resolve(refresh.state) : loadClientCharacterState(),
+        ])
+        .then(([session, response, state]) => {
           if (cancelled) return;
-          setCharacters(session.characters ?? []);
+          if (session) setCharacters(session.characters ?? []);
           setData(response);
+          setCharacterStatuses(state.characters ?? []);
         })
         .catch(() => {
           if (!cancelled) setError(true);
         });
     };
     const handleRefresh = (event: Event) => {
-      const jobs = (event as CustomEvent<{ jobs?: ClientJobsResponse | null }>).detail.jobs;
-      load(jobs);
+      load((event as CustomEvent<ClientRefreshEventDetail>).detail);
     };
     window.addEventListener("assembly-line-esi-refreshed", handleRefresh);
     load();
@@ -126,9 +142,38 @@ export default function JobsPage() {
     };
   }, []);
 
+  const characterSystemIds = useMemo(
+    () => [
+      ...new Set(
+        characterStatuses.flatMap((character) => {
+          const systemId = character.location?.systemId;
+          return typeof systemId === "number" && systemId > 0 ? [systemId] : [];
+        }),
+      ),
+    ],
+    [characterStatuses],
+  );
+
   useEffect(() => {
-    const timer = window.setInterval(() => setData((current) => current && { ...current }), 60_000);
-    return () => window.clearInterval(timer);
+    let cancelled = false;
+    void loadClientSystemNames(characterSystemIds, language).then((names) => {
+      if (!cancelled) setSystemNamesById(names);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [characterSystemIds, language]);
+
+  useEffect(() => {
+    const timer = window.setInterval(
+      () => {
+        setData((current) => current && { ...current });
+      },
+      60_000,
+    );
+    return () => {
+      window.clearInterval(timer);
+    };
   }, []);
 
   const jobs = useMemo(() => data?.jobs ?? [], [data?.jobs]);
@@ -184,6 +229,35 @@ export default function JobsPage() {
     type,
     ...getSlotUsageTotals(slotUsage, type, slotCharacterIds),
   }));
+  const characterLocationGroups = useMemo(() => {
+    const statusesByCharacterId = new Map(
+      characterStatuses.map((character) => [character.characterId, character]),
+    );
+    const groups = new Map<string, CharacterLocationGroup>();
+    for (const character of characters) {
+      const systemId = statusesByCharacterId.get(character.characterId)?.location?.systemId;
+      const hasSystemId = typeof systemId === "number" && systemId > 0;
+      const isWormhole = hasSystemId && isWormholeSystemId(systemId);
+      const key = !hasSystemId ? "unknown" : isWormhole ? `wormhole:${systemId}` : "k-space";
+      const name = !hasSystemId
+        ? "Location unavailable"
+        : isWormhole
+          ? (systemNamesById.get(systemId) ?? `Wormhole ${systemId}`)
+          : "K-Space";
+      const order = !hasSystemId ? 2 : isWormhole ? 1 : 0;
+      const group = groups.get(key) ?? { key, name, order, characters: [] };
+      group.characters.push(character);
+      groups.set(key, group);
+    }
+    return [...groups.values()]
+      .map((group) => ({
+        ...group,
+        characters: group.characters.toSorted((left, right) =>
+          left.characterName.localeCompare(right.characterName),
+        ),
+      }))
+      .sort((left, right) => left.order - right.order || left.name.localeCompare(right.name));
+  }, [characterStatuses, characters, systemNamesById]);
 
   return (
     <>
@@ -258,43 +332,89 @@ export default function JobsPage() {
             <h2>Connected characters</h2>
           </div>
         </div>
-        <div className={styles.jobsCharacters}>
-          {characters.map((character) => {
-            const usage = slotUsage[String(character.characterId)] ?? {
-              slots: {},
-              availableSlots: {},
-            };
+        <div className="grid gap-5">
+          {characterLocationGroups.map((group) => {
+            const eligibleCharacterIds = group.characters
+              .filter((character) => !character.onDeployment)
+              .map((character) => character.characterId);
             return (
-              <div className={styles.jobsCharacter} key={character.characterId}>
-                <div className={styles.jobsCharacterIdentity}>
-                  <Image
-                    src={eveCharacterPortraitUrl(character.characterId, 64)}
-                    alt=""
-                    width={32}
-                    height={32}
-                  />
-                  <strong>{character.characterName}</strong>
+              <section className="grid gap-3" key={group.key}>
+                <div className="flex flex-col items-start justify-between gap-4 border-b border-border pb-2.5 md:flex-row md:items-center">
+                  <div>
+                    <p className={styles.panelKicker}>LOCATION</p>
+                    <h3 className="text-[15px] font-bold text-foreground">{group.name}</h3>
+                  </div>
+                  <div className="flex flex-wrap justify-start gap-x-4 gap-y-2 md:justify-end">
+                    {slotOrder.map((type) => {
+                      const totals = getSlotUsageTotals(slotUsage, type, eligibleCharacterIds);
+                      return (
+                        <span
+                          className="grid grid-cols-[26px_auto_auto] items-center gap-2 font-mono text-[11px] text-muted-foreground"
+                          key={type}
+                          aria-label={`${type}: ${totals.availableSlots} available, ${totals.inUseSlots} in use of ${totals.totalSlots}`}
+                        >
+                          {type === "Manufacturing" ? (
+                            <Factory className="size-[26px]" aria-hidden="true" />
+                          ) : type === "Reactions" ? (
+                            <Atom className="size-[26px]" aria-hidden="true" />
+                          ) : (
+                            <FlaskConical className="size-[26px]" aria-hidden="true" />
+                          )}
+                          <strong className="text-[28px] font-bold text-(--theme-info)">
+                            {totals.availableSlots}
+                          </strong>
+                          <small className="grid gap-0.5 text-[9px] text-foreground uppercase">
+                            {type}
+                            <span className="text-muted-foreground normal-case">
+                              {totals.inUseSlots} / {totals.totalSlots} in use
+                            </span>
+                          </small>
+                        </span>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div className={styles.jobsSlotGrid}>
-                  {slotTypes.map((type) => (
-                    <div key={type}>
-                      <small>
-                        {type === "Manufacturing" ? (
-                          <Factory aria-hidden="true" />
-                        ) : type === "Reactions" ? (
-                          <Atom aria-hidden="true" />
-                        ) : type === "Science" ? (
-                          <FlaskConical aria-hidden="true" />
-                        ) : null}
-                        {type}
-                      </small>
-                      <b>
-                        {usage.slots[type] ?? 0} / {usage.availableSlots[type] ?? 0}
-                      </b>
-                    </div>
-                  ))}
+                <div className={styles.jobsCharacters}>
+                  {group.characters.map((character) => {
+                    const usage = slotUsage[String(character.characterId)] ?? {
+                      slots: {},
+                      availableSlots: {},
+                    };
+                    return (
+                      <div className={styles.jobsCharacter} key={character.characterId}>
+                        <div className={styles.jobsCharacterIdentity}>
+                          <Image
+                            src={eveCharacterPortraitUrl(character.characterId, 64)}
+                            alt=""
+                            width={32}
+                            height={32}
+                          />
+                          <strong>{character.characterName}</strong>
+                        </div>
+                        <div className={styles.jobsSlotGrid}>
+                          {slotTypes.map((slotType) => (
+                            <div key={slotType}>
+                              <small>
+                                {slotType === "Manufacturing" ? (
+                                  <Factory aria-hidden="true" />
+                                ) : slotType === "Reactions" ? (
+                                  <Atom aria-hidden="true" />
+                                ) : slotType === "Science" ? (
+                                  <FlaskConical aria-hidden="true" />
+                                ) : null}
+                                {slotType}
+                              </small>
+                              <b>
+                                {usage.slots[slotType] ?? 0} / {usage.availableSlots[slotType] ?? 0}
+                              </b>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              </div>
+              </section>
             );
           })}
         </div>

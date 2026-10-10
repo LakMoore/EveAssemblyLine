@@ -82,7 +82,9 @@ export default function EveAuthorizationWarning({ href, children }: EveAuthoriza
     setIsSavingAcknowledgement(true);
     void fetch("/api/auth/session/authorization-warning", { method: "POST" })
       .catch(() => undefined)
-      .finally(() => setIsSavingAcknowledgement(false));
+      .finally(() => {
+        setIsSavingAcknowledgement(false);
+      });
   }
 
   const directTrigger = cloneElement(
@@ -130,7 +132,9 @@ export default function EveAuthorizationWarning({ href, children }: EveAuthoriza
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
             disabled={isSavingAcknowledgement}
-            onClick={() => window.location.assign(href)}
+            onClick={() => {
+              window.location.assign(href);
+            }}
           >
             Continue to EVE SSO
           </AlertDialogAction>

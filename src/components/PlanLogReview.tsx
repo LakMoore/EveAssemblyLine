@@ -66,7 +66,7 @@ export default function PlanLogReview() {
             Planning request log
           </h2>
           <p className="text-sm text-muted-foreground">
-            Retained request and response bodies for reproducing planner and simulator runs.
+            Retained request and response bodies for reproducing simulator runs.
           </p>
         </div>
         <Button
@@ -113,17 +113,11 @@ export default function PlanLogReview() {
                   <td className="px-4 py-3 whitespace-nowrap">
                     {new Date(log.requestedAt).toLocaleString()}
                   </td>
-                  <td className="px-4 py-3">
-                    /{log.endpoint === "simulate" ? "simulate" : "plan"}
-                  </td>
+                  <td className="px-4 py-3">/simulate</td>
                   <td className="px-4 py-3 font-mono text-xs">
                     <NoPrefetchLink
                       className="underline decoration-muted-foreground/50 underline-offset-2 hover:decoration-foreground"
-                      href={
-                        log.endpoint === "simulate"
-                          ? `/admin/simulations/${log.id}`
-                          : `/admin/plans/${log.id}`
-                      }
+                      href={`/admin/simulations/${log.id}`}
                     >
                       {log.id}
                     </NoPrefetchLink>
@@ -158,7 +152,7 @@ export default function PlanLogReview() {
         </div>
       ) : (
         <Empty>
-          <EmptyDescription>No plan requests have been logged.</EmptyDescription>
+          <EmptyDescription>No simulator requests have been logged.</EmptyDescription>
         </Empty>
       )}
       {page && page.totalPages > 1 && (

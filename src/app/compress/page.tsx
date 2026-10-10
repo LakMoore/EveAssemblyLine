@@ -1,9 +1,9 @@
 "use client";
 
-import { FormEvent, Suspense, useEffect, useEffectEvent, useRef, useState } from "react";
+import { Suspense, type SubmitEvent, useEffect, useEffectEvent, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAppLanguage } from "../AppShell";
-import CalculateButton from "@/components/CalculateButton";
+import ActionButton from "@/components/ActionButton";
 import PasteListDialog from "@/components/PasteListDialog";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
 import TypeSearch from "@/components/TypeSearch";
@@ -194,9 +194,9 @@ function CompressContent() {
         setResult(null);
         setError("");
       })
-      .catch((error) =>
-        setError(error instanceof Error ? error.message : "Could not load the Buy list."),
-      );
+      .catch((error: unknown) => {
+        setError(error instanceof Error ? error.message : "Could not load the Buy list.");
+      });
   }, [compressionSettings.isLoading, importedMultibuy, language]);
 
   function addItem(item: TypeResult) {
@@ -212,7 +212,7 @@ function CompressContent() {
     setError("");
   }
 
-  async function compress(event: FormEvent<HTMLFormElement>) {
+  async function compress(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (
       compressionSettings.isLoading
@@ -280,7 +280,7 @@ function CompressContent() {
         </div>
       </div>
 
-      <form onSubmit={compress}>
+      <form onSubmit={(event) => void compress(event)}>
         <section className={styles.inputPanel}>
           <div className={styles.panelHeader}>
             <div>
@@ -291,7 +291,9 @@ function CompressContent() {
               type="button"
               variant="outline"
               disabled={compressionSettings.isLoading}
-              onClick={() => setPasteDialogLoadKey(compressionSettings.loadKey)}
+              onClick={() => {
+                setPasteDialogLoadKey(compressionSettings.loadKey);
+              }}
             >
               <Clipboard aria-hidden="true" />
               <span>Paste multibuy</span>
@@ -305,12 +307,12 @@ function CompressContent() {
             disabled={compressionSettings.isLoading}
             placeholder="Search material by name or type ID"
             ariaLabel="Search minerals"
-            onSelect={(item) =>
+            onSelect={(item) => {
               addItem({
                 ...item,
                 category: item.category === "reactionformula" ? "item" : item.category,
-              })
-            }
+              });
+            }}
           />
           <CompressSettingsPanel state={compressionSettings} className={styles.compressOptions} />
           <div className={styles.listHeader}>
@@ -340,15 +342,15 @@ function CompressContent() {
                   min="1"
                   step="1"
                   value={item.quantity}
-                  onChange={(event) =>
+                  onChange={(event) => {
                     updateItems((current) =>
                       current.map((entry, itemIndex) =>
                         itemIndex === index
                           ? { ...entry, quantity: Math.max(1, Number(event.target.value) || 1) }
                           : entry,
                       ),
-                    )
-                  }
+                    );
+                  }}
                 />
                 <Button
                   type="button"
@@ -356,9 +358,9 @@ function CompressContent() {
                   size="icon-sm"
                   aria-label={`Remove ${item.name}`}
                   disabled={compressionSettings.isLoading}
-                  onClick={() =>
-                    updateItems((current) => current.filter((_, itemIndex) => itemIndex !== index))
-                  }
+                  onClick={() => {
+                    updateItems((current) => current.filter((_, itemIndex) => itemIndex !== index));
+                  }}
                 >
                   <Trash2 aria-hidden="true" />
                 </Button>
@@ -371,7 +373,7 @@ function CompressContent() {
             </Alert>
           )}
           <div className={styles.actionBar}>
-            <CalculateButton
+            <ActionButton
               type="submit"
               disabled={
                 compressionSettings.isLoading
@@ -406,7 +408,9 @@ function CompressContent() {
 Pyerite 60000`}
           ariaLabel="Multibuy list"
           currentItems={items}
-          onCancel={() => setPasteDialogLoadKey(null)}
+          onCancel={() => {
+            setPasteDialogLoadKey(null);
+          }}
           onImport={(next) => {
             if (
               compressionSettings.isLoading
@@ -579,7 +583,9 @@ function Results({
       </div>
       <Tabs
         value={activeTab}
-        onValueChange={(value) => setActiveTab(value as (typeof tabs)[number]["key"])}
+        onValueChange={(value) => {
+          setActiveTab(value as (typeof tabs)[number]["key"]);
+        }}
       >
         <TabsList className={styles.resultTabs} variant="line">
           {tabs.map((tab) => (
@@ -595,7 +601,9 @@ function Results({
           </Label>
           <Select
             value={activeTab}
-            onValueChange={(value) => setActiveTab(value as (typeof tabs)[number]["key"])}
+            onValueChange={(value) => {
+              setActiveTab(value as (typeof tabs)[number]["key"]);
+            }}
           >
             <SelectTrigger
               id="compress-result-view"

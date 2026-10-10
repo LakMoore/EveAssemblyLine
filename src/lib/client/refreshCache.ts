@@ -30,7 +30,7 @@ export const refreshDependentEndpoints = {
   ships: ["owner-ships"],
   structures: ["owner-assets"],
   corpHangars: ["owner-assets"],
-  characters: [],
+  data: [],
   settings: [],
   imagechecker: [],
 } as const satisfies Record<string, readonly string[]>;
@@ -40,9 +40,12 @@ function read<T>(storeName: string, key: string) {
     (database) =>
       new Promise<T | undefined>((resolve, reject) => {
         const request = database.transaction(storeName, "readonly").objectStore(storeName).get(key);
-        request.onsuccess = () => resolve(request.result as T | undefined);
-        request.onerror = () =>
+        request.onsuccess = () => {
+          resolve(request.result as T | undefined);
+        };
+        request.onerror = () => {
           reject(request.error ?? new Error("Could not read endpoint cache."));
+        };
       }),
   );
 }
@@ -57,9 +60,12 @@ export function saveLastRefreshAt(refreshAt: string) {
       new Promise<void>((resolve, reject) => {
         const transaction = database.transaction(endpointCacheStoreName, "readwrite");
         transaction.objectStore(endpointCacheStoreName).put(refreshAt, refreshTimestampKey);
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () =>
+        transaction.oncomplete = () => {
+          resolve();
+        };
+        transaction.onerror = () => {
           reject(transaction.error ?? new Error("Could not save refresh timestamp."));
+        };
       }),
   );
 }
@@ -70,17 +76,17 @@ export function loadEndpointRecord<T>(key: string) {
   );
 }
 
-export async function saveEndpointResponse<T>(
+export async function saveEndpointResponse(
   key: string,
   url: string,
-  data: T,
+  data: unknown,
   etag?: string,
   scope?: string,
   generation?: { epoch: string; value: number },
 ) {
   const returnedAt = new Date().toISOString();
   const refreshAt = await loadLastRefreshAt();
-  const record: ClientEndpointRecord<T> = {
+  const record: ClientEndpointRecord = {
     key,
     url,
     data,
@@ -106,10 +112,15 @@ export async function saveEndpointResponse<T>(
       }
       store.put(record, `endpoint:${key}`);
     };
-    existingRequest.onerror = () => transaction.abort();
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () =>
+    existingRequest.onerror = () => {
+      transaction.abort();
+    };
+    transaction.oncomplete = () => {
+      resolve();
+    };
+    transaction.onerror = () => {
       reject(transaction.error ?? new Error("Could not save endpoint response."));
+    };
   });
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useId, useState } from "react";
+import { type SubmitEvent, useEffect, useId, useState } from "react";
 import { useAppLanguage } from "../AppShell";
 import { ArrowRight, ClipboardPaste, Pencil, Plus, Trash2 } from "lucide-react";
 import PasteFittingDialog from "@/components/PasteFittingDialog";
@@ -208,7 +208,9 @@ export default function LocationsPage() {
   useEffect(() => {
     fetchStructureTypes(language)
       .then(setStructureTypes)
-      .catch(() => setStructureTypes([]));
+      .catch(() => {
+        setStructureTypes([]);
+      });
   }, [language]);
   useEffect(() => {
     let cancelled = false;
@@ -350,7 +352,9 @@ export default function LocationsPage() {
         setRigTypeIdsByName(Object.fromEntries(rigs.map((rig) => [rig.name, rig.typeId])));
         setRigNamesByTypeId(Object.fromEntries(rigs.map((rig) => [rig.typeId, rig.name])));
       })
-      .catch(() => setRigOptionsBySize({ Small: [], Medium: [], Large: [], "Extra Large": [] }));
+      .catch(() => {
+        setRigOptionsBySize({ Small: [], Medium: [], Large: [], "Extra Large": [] });
+      });
   }, [language]);
 
   function sharedRigEntry(
@@ -475,11 +479,21 @@ export default function LocationsPage() {
     const localOverride = findLocalOverride(esiStructure);
     const type = typeForName(localOverride?.type ?? esiStructure.type ?? "");
     if (!type) return;
+    const localSystemName = localOverride?.systemName;
+    const localSystemId = localOverride?.systemId;
+    const systemName =
+      localSystemName && localSystemName.length > 0
+        ? localSystemName
+        : (esiStructure.systemName ?? "");
+    const systemId =
+      localSystemId !== undefined && localSystemId !== 0
+        ? localSystemId
+        : (esiStructure.systemId ?? 0);
     setEditingStructure({
       id: localOverride?.id ?? `esi:${esiStructure.structureId}`,
       esiStructureId: esiStructure.structureId,
-      systemId: localOverride?.systemId || esiStructure.systemId || 0,
-      systemName: localOverride?.systemName || esiStructure.systemName || "",
+      systemId,
+      systemName,
       securityStatus: localOverride?.securityStatus ?? esiStructure.securityStatus,
       type: type.name,
       typeId: type.typeId,
@@ -537,7 +551,7 @@ export default function LocationsPage() {
                 aria-label="Sort structures"
                 value={locationSort}
                 onValueChange={(value) => {
-                  if (value !== null) setLocationSort(value as LocationSort);
+                  if (value !== null) setLocationSort(value);
                 }}
                 items={locationSortOptions}
               >
@@ -636,7 +650,9 @@ export default function LocationsPage() {
                       type="button"
                       className={`actionButton ${styles.remove}`}
                       aria-label={`Remove ${knownStructure.name}`}
-                      onClick={() => removeStructure(knownStructure.id)}
+                      onClick={() => {
+                        removeStructure(knownStructure.id);
+                      }}
                     >
                       <Trash2 aria-hidden="true" />
                       <span className={styles.structureActionLabel}>Delete</span>
@@ -656,7 +672,9 @@ export default function LocationsPage() {
           rigOptionsBySize={rigOptionsBySize}
           rigTypeIdsByName={rigTypeIdsByName}
           rigNamesByTypeId={rigNamesByTypeId}
-          onCancel={() => setIsDialogOpen(false)}
+          onCancel={() => {
+            setIsDialogOpen(false);
+          }}
           onSave={(structure) => {
             const previous = knownStructures.find((current) => current.id === structure.id);
             const rigConfigurationChanged =
@@ -856,16 +874,19 @@ function StructureDialog({
     if (systemName.trim().length < 2 || !isOpen) return;
     const controller = new AbortController();
     const timer = window.setTimeout(
-      () =>
-        fetch(
+      () => {
+        void fetch(
           `/api/reference/systems?query=${encodeURIComponent(systemName)}&language=${language}`,
           { signal: controller.signal },
         )
           .then((response) => response.json() as Promise<{ items?: SystemMatch[] }>)
-          .then((data) => setSuggestions(data.items ?? []))
+          .then((data) => {
+            setSuggestions(data.items ?? []);
+          })
           .catch((error: unknown) => {
             if (!(error instanceof DOMException && error.name === "AbortError")) setSuggestions([]);
-          }),
+          });
+      },
       180,
     );
     return () => {
@@ -874,7 +895,7 @@ function StructureDialog({
     };
   }, [isOpen, language, systemName]);
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!system || !name.trim() || !selectedType) return;
     const savedJobTypes = {
@@ -953,7 +974,9 @@ function StructureDialog({
     <>
       <ResponsiveDialogDrawer
         open
-        onOpenChange={(open) => !open && onCancel()}
+        onOpenChange={(open) => {
+          if (!open) onCancel();
+        }}
         title={structure ? "Edit structure" : "Add structure"}
         description="Use the options below to manually define this location. Alternatively, paste the fitting from the game client to automatically set the Rigs and Services."
         headerContent={
@@ -961,7 +984,9 @@ function StructureDialog({
             type="button"
             variant="outline"
             className="mt-2 self-start"
-            onClick={() => setIsFittingDialogOpen(true)}
+            onClick={() => {
+              setIsFittingDialogOpen(true);
+            }}
           >
             <ClipboardPaste data-icon="inline-start" />
             Paste fitting
@@ -1000,7 +1025,9 @@ function StructureDialog({
                   >
                     <ComboboxInput
                       showTrigger={false}
-                      onFocus={() => suggestions.length > 0 && setIsOpen(true)}
+                      onFocus={() => {
+                        if (suggestions.length > 0) setIsOpen(true);
+                      }}
                       placeholder="Type a system name"
                       aria-label="Search systems"
                     />
@@ -1053,7 +1080,9 @@ function StructureDialog({
                     id="structure-name"
                     required
                     value={name}
-                    onChange={(event) => setName(event.target.value)}
+                    onChange={(event) => {
+                      setName(event.target.value);
+                    }}
                     placeholder="e.g. Assembly Bay Alpha"
                     aria-label="Structure name"
                   />
@@ -1072,13 +1101,13 @@ function StructureDialog({
                     label={`RIG ${index + 1}`}
                     value={rig}
                     options={[{ value: "No Rig", label: "No Rig" }, ...options]}
-                    onChange={(value) =>
+                    onChange={(value) => {
                       setRigs((current) =>
                         current.map((currentRig, rigIndex) =>
                           rigIndex === index ? value : currentRig,
                         ),
-                      )
-                    }
+                      );
+                    }}
                   />
                 );
               })}
@@ -1099,7 +1128,9 @@ function StructureDialog({
                 <TaxRateInput
                   label="Reprocessing"
                   value={taxRate("reprocessing")}
-                  onChange={(value) => setTaxRate("reprocessing", value)}
+                  onChange={(value) => {
+                    setTaxRate("reprocessing", value);
+                  }}
                 />
               </div>
               <div className={styles.constructionGridRow}>
@@ -1112,7 +1143,9 @@ function StructureDialog({
                 <TaxRateInput
                   label="Standard manufacturing"
                   value={taxRate("standard")}
-                  onChange={(value) => setTaxRate("standard", value)}
+                  onChange={(value) => {
+                    setTaxRate("standard", value);
+                  }}
                 />
               </div>
               <div className={styles.constructionGridRow}>
@@ -1125,7 +1158,9 @@ function StructureDialog({
                 <TaxRateInput
                   label="Capital manufacturing"
                   value={taxRate("capital")}
-                  onChange={(value) => setTaxRate("capital", value)}
+                  onChange={(value) => {
+                    setTaxRate("capital", value);
+                  }}
                 />
               </div>
               <div className={styles.constructionGridRow}>
@@ -1138,7 +1173,9 @@ function StructureDialog({
                 <TaxRateInput
                   label="Supercapital manufacturing"
                   value={taxRate("supercapital")}
-                  onChange={(value) => setTaxRate("supercapital", value)}
+                  onChange={(value) => {
+                    setTaxRate("supercapital", value);
+                  }}
                 />
               </div>
               <div
@@ -1157,7 +1194,9 @@ function StructureDialog({
                   label="Biochemical reaction"
                   value={reactionsAllowed ? taxRate("biochemical") : "0.0"}
                   disabled={!reactionsAllowed}
-                  onChange={(value) => setTaxRate("biochemical", value)}
+                  onChange={(value) => {
+                    setTaxRate("biochemical", value);
+                  }}
                 />
               </div>
               <div
@@ -1176,7 +1215,9 @@ function StructureDialog({
                   label="Composite reaction"
                   value={reactionsAllowed ? taxRate("composite") : "0.0"}
                   disabled={!reactionsAllowed}
-                  onChange={(value) => setTaxRate("composite", value)}
+                  onChange={(value) => {
+                    setTaxRate("composite", value);
+                  }}
                 />
               </div>
               <div
@@ -1195,7 +1236,9 @@ function StructureDialog({
                   label="Hybrid reaction"
                   value={reactionsAllowed ? taxRate("hybrid") : "0.0"}
                   disabled={!reactionsAllowed}
-                  onChange={(value) => setTaxRate("hybrid", value)}
+                  onChange={(value) => {
+                    setTaxRate("hybrid", value);
+                  }}
                 />
               </div>
               <div className={styles.constructionGridRow}>
@@ -1208,7 +1251,9 @@ function StructureDialog({
                 <TaxRateInput
                   label="Invention"
                   value={taxRate("invention")}
-                  onChange={(value) => setTaxRate("invention", value)}
+                  onChange={(value) => {
+                    setTaxRate("invention", value);
+                  }}
                 />
               </div>
               <div className={styles.constructionGridRow}>
@@ -1221,7 +1266,9 @@ function StructureDialog({
                 <TaxRateInput
                   label="Research"
                   value={taxRate("research")}
-                  onChange={(value) => setTaxRate("research", value)}
+                  onChange={(value) => {
+                    setTaxRate("research", value);
+                  }}
                 />
               </div>
             </div>
@@ -1231,7 +1278,9 @@ function StructureDialog({
       {isFittingDialogOpen && (
         <PasteFittingDialog
           language={language}
-          onCancel={() => setIsFittingDialogOpen(false)}
+          onCancel={() => {
+            setIsFittingDialogOpen(false);
+          }}
           onImport={applyFitting}
         />
       )}
@@ -1255,7 +1304,12 @@ function StructureSelect({
   return (
     <Field>
       <FieldLabel htmlFor={selectId}>{label}</FieldLabel>
-      <Select value={value} onValueChange={(nextValue) => nextValue && onChange(nextValue)}>
+      <Select
+        value={value}
+        onValueChange={(nextValue) => {
+          if (nextValue) onChange(nextValue);
+        }}
+      >
         <SelectTrigger id={selectId}>
           <SelectValue />
         </SelectTrigger>
@@ -1315,7 +1369,9 @@ function TaxRateInput({
         step="0.1"
         value={value}
         disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => {
+          onChange(event.target.value);
+        }}
       />
       <span>%</span>
     </div>

@@ -206,7 +206,7 @@ type PlannerStockpileDialogProps = {
   stockpile: ClientPlanStockpile | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSave: (stockpile: ClientPlanStockpile) => boolean | void;
+  onSave: (stockpile: ClientPlanStockpile) => boolean | undefined;
 };
 
 type PlannerStockpileDetailsDialogProps = PlannerStockpileDialogProps & {
@@ -299,9 +299,12 @@ function StockpileDetailsContent({
   }
 
   function selectGroupFacility(key: ProductionGroupKey, value: string | null) {
-    const assignments = { ...(draft.groupAssignments ?? {}) };
-    if (!value || value === "default") delete assignments[key];
-    else assignments[key] = Number(value);
+    const currentAssignments = draft.groupAssignments ?? {};
+    const { [key]: _previousAssignment, ...remainingAssignments } = currentAssignments;
+    const assignments =
+      !value || value === "default"
+        ? remainingAssignments
+        : { ...currentAssignments, [key]: Number(value) };
     onChange({
       ...draft,
       groupAssignments: Object.keys(assignments).length > 0 ? assignments : undefined,
@@ -315,7 +318,9 @@ function StockpileDetailsContent({
           <span className="text-xs font-medium uppercase">Stockpile name</span>
           <Input
             value={draft.name}
-            onChange={(event) => onChange({ ...draft, name: event.target.value })}
+            onChange={(event) => {
+              onChange({ ...draft, name: event.target.value });
+            }}
             placeholder="e.g. Jita staging"
             aria-label="Stockpile name"
           />
@@ -356,12 +361,12 @@ function StockpileDetailsContent({
                 options={activityLocations}
                 selected={selected}
                 bonus={bonus}
-                onSelect={(locationId) =>
+                onSelect={(locationId) => {
                   onChange({
                     ...draft,
                     locations: { ...draft.locations, [key]: locationId },
-                  })
-                }
+                  });
+                }}
               />
             </Label>
           );
@@ -421,7 +426,9 @@ function StockpileDetailsContent({
                   </span>
                   <Select
                     value={selectedId === undefined ? "default" : String(selectedId)}
-                    onValueChange={(value) => selectGroupFacility(group.key, value)}
+                    onValueChange={(value) => {
+                      selectGroupFacility(group.key, value);
+                    }}
                     disabled={group.facilities.length === 0}
                     items={[
                       { value: "default", label: "Use manufacturing default" },
@@ -516,7 +523,13 @@ function StockpileItemsContent({
               This list is planned only for this destination.
             </p>
           </div>
-          <Button type="button" variant="outline" onClick={() => setIsPasteOpen(true)}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setIsPasteOpen(true);
+            }}
+          >
             <Clipboard data-icon="inline-start" aria-hidden="true" />
             Paste list
           </Button>
@@ -607,9 +620,9 @@ function StockpileItemsContent({
                   variant="destructive"
                   size="icon-sm"
                   aria-label={`Remove ${item.name}`}
-                  onClick={() =>
-                    updateItems(draft.items.filter((_, itemIndex) => itemIndex !== index))
-                  }
+                  onClick={() => {
+                    updateItems(draft.items.filter((_, itemIndex) => itemIndex !== index));
+                  }}
                 >
                   <Trash2 aria-hidden="true" />
                 </Button>
@@ -628,7 +641,9 @@ function StockpileItemsContent({
         <PasteListDialog
           language={language}
           currentItems={draft.items}
-          onCancel={() => setIsPasteOpen(false)}
+          onCancel={() => {
+            setIsPasteOpen(false);
+          }}
           onImport={(items) => {
             updateItems(
               reconcilePasteListItems(
@@ -686,13 +701,25 @@ function PlannerStockpileDialogLayout({
   const actionButtons = (
     <div className="flex gap-2">
       {onAuto && (
-        <Button type="button" variant="outline" onClick={() => setPendingAction("auto")}>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => {
+            setPendingAction("auto");
+          }}
+        >
           <WandSparkles data-icon="inline-start" aria-hidden="true" />
           Auto Assign
         </Button>
       )}
       {onDefaultAll && (
-        <Button type="button" variant="outline" onClick={() => setPendingAction("defaultAll")}>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => {
+            setPendingAction("defaultAll");
+          }}
+        >
           <ListRestart data-icon="inline-start" aria-hidden="true" />
           Default All
         </Button>
@@ -702,7 +729,13 @@ function PlannerStockpileDialogLayout({
 
   const standardFooterActions = (
     <div className="flex gap-2">
-      <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => {
+          onOpenChange(false);
+        }}
+      >
         <X data-icon="inline-start" aria-hidden="true" />
         Cancel
       </Button>
@@ -730,7 +763,13 @@ function PlannerStockpileDialogLayout({
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => setPendingAction(null)}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setPendingAction(null);
+            }}
+          >
             Cancel
           </Button>
           <Button type="button" onClick={confirmAction}>
@@ -811,14 +850,14 @@ export function PlannerStockpileDetailsDialog({
       title={stockpile ? "Edit stockpile details" : "Add stockpile details"}
       description="Set the name and stations for this stockpile."
       content={content}
-      onAuto={() =>
+      onAuto={() => {
         setDraft((current) =>
           current ? { ...current, groupAssignments: onAutoAssign(current) } : current,
-        )
-      }
-      onDefaultAll={() =>
-        setDraft((current) => (current ? { ...current, groupAssignments: undefined } : current))
-      }
+        );
+      }}
+      onDefaultAll={() => {
+        setDraft((current) => (current ? { ...current, groupAssignments: undefined } : current));
+      }}
       onSave={saveDraft}
     />
   );

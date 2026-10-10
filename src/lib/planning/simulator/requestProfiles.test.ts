@@ -82,7 +82,7 @@ void test("builds character skill profiles separately from authoritative slots",
   );
   assert.equal(profiles[0].skillLevels["3406"], 2);
   assert.equal(profiles[0].freeSlots, undefined);
-  assert.equal(profiles[0].inFlightJobs, undefined);
+  assert.equal("inFlightJobs" in profiles[0], false);
   assert.equal(slots.length, 18);
   assert.deepEqual(
     slots

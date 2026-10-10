@@ -612,7 +612,7 @@ function createClientSessionRequest() {
           }),
         };
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         if (sessionRequest === request) sessionRequest = undefined;
         throw error;
       });
@@ -806,7 +806,9 @@ function collectSnapshotSystemIds(snapshots: readonly ClientOwnerSnapshot[]) {
     if (systemId !== undefined) systemIds.add(systemId);
   };
   for (const snapshot of snapshots) {
-    snapshot.rootLocations.data.forEach(({ location }) => addLocation(location));
+    snapshot.rootLocations.data.forEach(({ location }) => {
+      addLocation(location);
+    });
     snapshot.corporationSources.data.forEach((source) => {
       if (source.rootLocation) addLocation(source.rootLocation);
     });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { TypeDogmaRecord, TypesRecord } from "@/lib/sde/generated";
-import { calculateReprocessingProfile, type ReprocessingSdeMaps } from "./reprocessingEfficiency";
+import { calculateReprocessingProfile } from "./reprocessingEfficiency";
 import { createReprocessingProfile, reprocessingProfileSchema } from "./reprocessingProfile";
 
 void test("calculates efficiency from the selected rig type ID", () => {
@@ -28,7 +28,7 @@ void test("calculates efficiency from the selected rig type ID", () => {
     dogmaAttributes: new Map([
       [1000, { _key: 1000, name: "refiningYieldNormalOres", defaultValue: 0.5 }],
     ]),
-  } as unknown as ReprocessingSdeMaps;
+  };
 
   assert.deepEqual(profile.rigTypeIds, [900, 901]);
   assert.equal(calculateReprocessingProfile(maps, [500], profile).efficiencies["500"], 65);

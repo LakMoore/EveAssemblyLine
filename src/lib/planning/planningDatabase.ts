@@ -1,5 +1,5 @@
 const databaseName = "assembly-line";
-const databaseVersion = 11;
+const databaseVersion = 12;
 
 export const buildStoreName = "build-lists";
 export const stockStoreName = "stock";
@@ -8,7 +8,6 @@ export const compressSettingsStoreName = "compress-settings";
 export const plannerPreferencesStoreName = "planner-preferences";
 export const stockMetadataStoreName = "stock-metadata";
 export const endpointCacheStoreName = "endpoint-cache";
-export const haulPatchesStoreName = "haul-patches";
 export const ownerSnapshotStoreName = "owner-snapshots";
 
 let databasePromise: Promise<IDBDatabase> | null = null;
@@ -18,6 +17,7 @@ function openDatabase() {
     const request = indexedDB.open(databaseName, databaseVersion);
     request.onupgradeneeded = () => {
       const database = request.result;
+      const transaction = request.transaction;
       for (const storeName of [
         buildStoreName,
         stockStoreName,
@@ -26,29 +26,38 @@ function openDatabase() {
         plannerPreferencesStoreName,
         stockMetadataStoreName,
         endpointCacheStoreName,
-        haulPatchesStoreName,
         ownerSnapshotStoreName,
       ]) {
         if (!database.objectStoreNames.contains(storeName)) database.createObjectStore(storeName);
       }
+      if (database.objectStoreNames.contains("haul-patches")) {
+        database.deleteObjectStore("haul-patches");
+      }
+      const preferences = transaction?.objectStore(plannerPreferencesStoreName);
+      preferences?.delete("latest-plan-response");
+      preferences?.delete("haul-item-exclusions");
     };
     request.onsuccess = () => {
       const database = request.result;
-      database.onversionchange = () => database.close();
+      database.onversionchange = () => {
+        database.close();
+      };
       resolve(database);
     };
-    request.onerror = () =>
+    request.onerror = () => {
       reject(request.error ?? new Error("Could not open the browser database."));
-    request.onblocked = () => reject(new Error("The browser database upgrade is blocked."));
+    };
+    request.onblocked = () => {
+      reject(new Error("The browser database upgrade is blocked."));
+    };
   });
 }
 
 export function getPlanningDatabase() {
-  if (!databasePromise) {
-    databasePromise = openDatabase().catch((error: unknown) => {
+  databasePromise
+    ??= openDatabase().catch((error: unknown) => {
       databasePromise = null;
       throw error;
     });
-  }
   return databasePromise;
 }

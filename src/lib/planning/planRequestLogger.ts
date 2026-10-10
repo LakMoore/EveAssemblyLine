@@ -10,12 +10,10 @@ const planRequestsCollection = "planRequests";
 const planLogStoragePrefix = "plan-logs";
 const maximumMemoryEntries = 100;
 
-export type PlanRequestLogEndpoint = "plan" | "simulate";
-
 /** The raw request and response retained for one plan calculation. */
 export type PlanRequestLog = {
   id: string;
-  endpoint: PlanRequestLogEndpoint;
+  endpoint: "simulate";
   requestedAt: string;
   storagePath: string;
   sizeBytes: number;
@@ -53,7 +51,10 @@ const runtime = globalThis as typeof globalThis & {
   __assemblyLinePlanLogger?: PlanLoggerRuntime;
 };
 const loggerRuntime =
-  runtime.__assemblyLinePlanLogger ?? (runtime.__assemblyLinePlanLogger = { entries: new Map() });
+  runtime.__assemblyLinePlanLogger
+  ?? (runtime.__assemblyLinePlanLogger = {
+    entries: new Map<string, PlanRequestLog>(),
+  });
 
 function storagePath(id: string) {
   return `${planLogStoragePrefix}/${id}.json.gz`;
@@ -105,7 +106,7 @@ function parseStoredBlob(value: Buffer, id: string): PlanRequestLog | undefined 
     }
     return {
       id,
-      endpoint: "plan",
+      endpoint: "simulate",
       requestedAt: "",
       storagePath: storagePath(id),
       sizeBytes: value.byteLength,
@@ -202,11 +203,6 @@ function logRequest(entry: PlanRequestLogInput): string {
   return id;
 }
 
-/** Retains one legacy planner request and response. */
-export function logPlanRequest(entry: Omit<PlanRequestLogInput, "endpoint">): string {
-  return logRequest({ ...entry, endpoint: "plan" });
-}
-
 /** Retains one simulator request and response in the shared administrator log. */
 export function logSimulationRequest(entry: Omit<PlanRequestLogInput, "endpoint">): string {
   return logRequest({ ...entry, endpoint: "simulate" });
@@ -230,7 +226,11 @@ export async function getPlanRequestLog(id: string): Promise<PlanRequestLog | un
         sessionCollectionId?: string;
       };
     };
-    if (metadata.requestId === id && metadata.storagePath) {
+    if (
+      metadata.requestId === id
+      && metadata.storagePath
+      && metadata.summary?.endpoint === "simulate"
+    ) {
       const [contents] = await getStorageBucket().file(metadata.storagePath).download();
       const blob = parseStoredBlob(contents, id);
       if (blob) {
@@ -239,9 +239,9 @@ export async function getPlanRequestLog(id: string): Promise<PlanRequestLog | un
           requestedAt: metadata.createdAt?.toDate().toISOString() ?? "",
           storagePath: metadata.storagePath,
           sizeBytes: metadata.sizeBytes ?? contents.byteLength,
-          responseStatus: metadata.summary?.responseStatus ?? 0,
-          sessionCollectionId: metadata.summary?.sessionCollectionId,
-          endpoint: metadata.summary?.endpoint === "simulate" ? "simulate" : "plan",
+          responseStatus: metadata.summary.responseStatus ?? 0,
+          sessionCollectionId: metadata.summary.sessionCollectionId,
+          endpoint: "simulate",
         };
       }
     }
@@ -260,11 +260,12 @@ export async function getPlanRequestLogPage(
 
   const [snapshot, countSnapshot] = await Promise.all([
     collection
+      .where("summary.endpoint", "==", "simulate")
       .orderBy("createdAt", "desc")
       .offset((page - 1) * pageSize)
       .limit(pageSize)
       .get(),
-    collection.count().get(),
+    collection.where("summary.endpoint", "==", "simulate").count().get(),
   ]);
   const entries = new Map<string, PlanRequestLogMetadata>();
   for (const document of snapshot.docs) {
@@ -284,7 +285,7 @@ export async function getPlanRequestLogPage(
       value.requestId,
       {
         id: value.requestId,
-        endpoint: value.summary?.endpoint === "simulate" ? "simulate" : "plan",
+        endpoint: "simulate",
         requestedAt: value.createdAt?.toDate().toISOString() ?? "",
         storagePath: value.storagePath,
         sizeBytes: value.sizeBytes ?? 0,
@@ -295,7 +296,9 @@ export async function getPlanRequestLogPage(
   }
 
   if (page === 1) {
-    for (const entry of loggerRuntime.entries.values()) entries.set(entry.id, toMetadata(entry));
+    for (const entry of loggerRuntime.entries.values()) {
+      entries.set(entry.id, toMetadata(entry));
+    }
   }
   const orderedEntries = [...entries.values()].sort((left, right) =>
     right.requestedAt.localeCompare(left.requestedAt),

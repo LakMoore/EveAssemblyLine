@@ -34,7 +34,7 @@ export async function loadBuildList(): Promise<ClientBuildItem[]> {
                   ...buildItem,
                   me: typeof item.me === "number" ? item.me : 0,
                   te: typeof item.te === "number" ? item.te : 0,
-                  fromCompression: item.fromCompression === true,
+                  fromCompression: item.fromCompression,
                 };
               })
           : [],

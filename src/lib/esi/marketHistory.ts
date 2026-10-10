@@ -1,6 +1,12 @@
 import { requestCachedEsi } from "./client";
+import { z } from "zod";
 
 type MarketHistoryEntry = { date: string; average: number; volume: number };
+const marketHistoryEntrySchema = z.looseObject({
+  date: z.string(),
+  average: z.number(),
+  volume: z.number().nonnegative(),
+});
 export type SevenDayMarketMetrics = {
   averagePrice: number | null;
   dailyVolume: number;
@@ -30,14 +36,14 @@ export type RegionalMarketOrder = {
   isBuyOrder: boolean;
   locationId?: number;
 };
-type EsiMarketOrder = {
-  order_id: number;
-  type_id: number;
-  price: number;
-  volume_remain: number;
-  is_buy_order: boolean;
-  location_id: number;
-};
+const esiMarketOrderSchema = z.looseObject({
+  order_id: z.number().int().positive(),
+  type_id: z.number().int().positive(),
+  price: z.number().nonnegative(),
+  volume_remain: z.number().int().nonnegative(),
+  is_buy_order: z.boolean(),
+  location_id: z.number().int().positive(),
+});
 
 /** Calculates recent market metrics across the latest seven UTC calendar days. */
 export function calculateSevenDayMarketMetrics(
@@ -127,8 +133,9 @@ export async function getSevenDayMarketMetrics(
   regionId: number,
   typeId: number,
 ): Promise<SevenDayMarketMetrics> {
-  const response = await requestCachedEsi<MarketHistoryEntry[]>(
+  const response = await requestCachedEsi(
     `/markets/${regionId}/history/?type_id=${typeId}`,
+    z.array(marketHistoryEntrySchema),
   );
   return calculateSevenDayMarketMetrics(response.data ?? []);
 }
@@ -153,14 +160,16 @@ async function getRegionalMarketOrders(
   regionId: number,
   typeId: number,
 ): Promise<RegionalMarketOrder[]> {
-  const first = await requestCachedEsi<EsiMarketOrder[]>(
+  const first = await requestCachedEsi(
     `/markets/${regionId}/orders/?order_type=all&type_id=${typeId}&page=1`,
+    z.array(esiMarketOrderSchema),
   );
   const pages = Number(first.headers.get("x-pages") ?? "1");
   const orders = [...(first.data ?? [])];
   for (let page = 2; page <= pages; page += 1) {
-    const response = await requestCachedEsi<EsiMarketOrder[]>(
+    const response = await requestCachedEsi(
       `/markets/${regionId}/orders/?order_type=all&type_id=${typeId}&page=${page}`,
+      z.array(esiMarketOrderSchema),
     );
     orders.push(...(response.data ?? []));
   }
@@ -188,14 +197,16 @@ export async function getMarketSellOrders(
   regionId: number,
   typeId: number,
 ): Promise<MarketSellOrder[]> {
-  const first = await requestCachedEsi<EsiMarketOrder[]>(
+  const first = await requestCachedEsi(
     `/markets/${regionId}/orders/?order_type=all&type_id=${typeId}&page=1`,
+    z.array(esiMarketOrderSchema),
   );
   const pages = Number(first.headers.get("x-pages") ?? "1");
   const orders = [...(first.data ?? [])];
   for (let page = 2; page <= pages; page += 1) {
-    const response = await requestCachedEsi<EsiMarketOrder[]>(
+    const response = await requestCachedEsi(
       `/markets/${regionId}/orders/?order_type=all&type_id=${typeId}&page=${page}`,
+      z.array(esiMarketOrderSchema),
     );
     orders.push(...(response.data ?? []));
   }

@@ -1,5 +1,6 @@
 import type { TypeMetadata } from "@/lib/reference/types";
 import { defaultMarketStations, type ConfiguredMarketStation } from "@/lib/market/stations";
+import type { FacilityJobTypes } from "./facilities";
 
 export type PlannerLocations = {
   manufacturing: number;
@@ -34,7 +35,7 @@ export type KnownStructure = {
   allowHybridReactions?: boolean;
   allowInvention?: boolean;
   allowResearch?: boolean;
-  jobTypes?: import("./facilities").FacilityJobTypes;
+  jobTypes?: FacilityJobTypes;
   settingsLastModified?: string;
 };
 
@@ -110,7 +111,7 @@ export function parsePlannerSettings(value: unknown): PlannerSettings {
           item
           && typeof item === "object"
           && Number.isSafeInteger((item as { stationId?: unknown }).stationId)
-          && Number((item as { stationId: number }).stationId) > 0
+          && (item as { stationId: number }).stationId > 0
           && typeof (item as { name?: unknown }).name === "string"
         ) {
           return [item as ConfiguredMarketStation];

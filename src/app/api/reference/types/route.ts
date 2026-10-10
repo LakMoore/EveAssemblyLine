@@ -11,7 +11,7 @@ import {
 
 const typeMetadataRequestSchema = z.object({
   language: z.string().optional(),
-  typeIds: z.array(z.number().int().safe().positive()),
+  typeIds: z.array(z.number().int().positive()),
 });
 const itemNameRequestSchema = z.object({
   language: z.string().optional(),
@@ -67,7 +67,11 @@ export async function GET(request: Request) {
         if (numericQuery !== null) return item._key.toString().startsWith(query);
         return Object
           .values(item.name)
-          .some((name) => name?.toLocaleLowerCase(language).includes(normalizedQuery));
+          .some(
+            (name: unknown) =>
+              typeof name === "string"
+              && name.toLocaleLowerCase(language).includes(normalizedQuery),
+          );
       })
       .sort((left, right) => {
         if (numericQuery !== null) return left._key - right._key;

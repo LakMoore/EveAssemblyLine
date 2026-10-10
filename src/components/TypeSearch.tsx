@@ -60,27 +60,29 @@ export default function TypeSearch({
     if (disabled || trimmedQuery.length < minimumQueryLength) return;
     const controller = new AbortController();
     const timeout = window.setTimeout(
-      async () => {
-        try {
-          const response = await fetch(
-            `${searchEndpoint}?query=${encodeURIComponent(trimmedQuery)}&language=${language}`,
-            { signal: controller.signal },
-          );
-          const data = (await response.json()) as { error?: string; items?: TypeSearchResult[] };
-          if (!response.ok) throw new Error(data.error ?? "Search data is unavailable.");
-          if (currentRequestId === requestId.current) {
-            setResults(data.items ?? []);
-            setSearchError("");
+      () => {
+        void (async () => {
+          try {
+            const response = await fetch(
+              `${searchEndpoint}?query=${encodeURIComponent(trimmedQuery)}&language=${language}`,
+              { signal: controller.signal },
+            );
+            const data = (await response.json()) as { error?: string; items?: TypeSearchResult[] };
+            if (!response.ok) throw new Error(data.error ?? "Search data is unavailable.");
+            if (currentRequestId === requestId.current) {
+              setResults(data.items ?? []);
+              setSearchError("");
+              setIsOpen(true);
+            }
+          }
+          catch (error) {
+            if (error instanceof DOMException && error.name === "AbortError") return;
+            if (currentRequestId !== requestId.current) return;
+            setResults([]);
+            setSearchError(error instanceof Error ? error.message : "Search data is unavailable.");
             setIsOpen(true);
           }
-        }
-        catch (error) {
-          if (error instanceof DOMException && error.name === "AbortError") return;
-          if (currentRequestId !== requestId.current) return;
-          setResults([]);
-          setSearchError(error instanceof Error ? error.message : "Search data is unavailable.");
-          setIsOpen(true);
-        }
+        })();
       },
       180,
     );
@@ -137,9 +139,11 @@ export default function TypeSearch({
           className="w-full"
           disabled={disabled}
           showTrigger={false}
-          onFocus={() =>
-            results.length > 0 && query.trim().length >= minimumQueryLength && setIsOpen(true)
-          }
+          onFocus={() => {
+            if (results.length > 0 && query.trim().length >= minimumQueryLength) {
+              setIsOpen(true);
+            }
+          }}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
           aria-label={ariaLabel}
