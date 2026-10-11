@@ -96,19 +96,16 @@ import {
 import { AssemblyLineGroups } from "@/lib/reference/assemblyLineGroups";
 import {
   convertSimulationTargetTime,
-  getSimulationMinimumRunsPerInstall,
   getSimulationInstallableRuns,
   simulationReactionFormulaKey,
   summarizeClientSimulationInstalls,
   scheduledSimulationActivity,
   simulationManufacturingInstallPlan,
   solveSimulationActivity,
-  splitSimulationRuns,
   isWormholeSystemId,
   type ClientSimulationInstall,
   type ClientSimulationInstallBatch,
   type ClientSimulationManufacturingDisplayMode,
-  type ClientSimulationScheduleOptions,
   type ClientSimulationSolveMode,
   type ClientSimulationSlotGroup,
   type ClientSimulationSchedule,
@@ -1030,7 +1027,7 @@ function SimulationReactionRowFacts({
   const displayInstallBatches =
     suggestedInstallBatches.length > 0
       ? suggestedInstallBatches
-      : [{ runsPerInstall: 0, installCount: 0, estimatedDurationSecondsPerInstall: 0 }];
+      : [{ runsPerInstall: 0, installCount: 0, durationSeconds: 0 }];
 
   return (
     <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 text-right font-mono text-xs lg:grid-cols-[3rem_3rem_6rem_7rem_6rem_4rem] lg:gap-x-3">
@@ -1099,7 +1096,7 @@ function SimulationReactionRowFacts({
       <span className="flex min-w-0 flex-col items-end gap-y-1 justify-self-end lg:col-start-5 lg:row-start-1">
         {displayInstallBatches.map((batch) => (
           <span
-            key={`${batch.runsPerInstall}:${batch.installCount}`}
+            key={`${batch.runsPerInstall}:${batch.durationSeconds}:${batch.installCount}`}
             className="flex flex-col items-end"
           >
             <CopyableNumber
@@ -1107,7 +1104,7 @@ function SimulationReactionRowFacts({
               copyLabel={`${batch.runsPerInstall} runs per install`}
             />
             <small className="text-muted-foreground">
-              {simulationReactionRowDuration(batch.estimatedDurationSecondsPerInstall)}
+              {simulationReactionRowDuration(batch.durationSeconds)}
             </small>
           </span>
         ))}
@@ -1116,7 +1113,7 @@ function SimulationReactionRowFacts({
       <span className="flex flex-col items-end gap-y-1 justify-self-end lg:col-start-6 lg:row-start-1">
         {displayInstallBatches.map((batch) => (
           <span
-            key={`${batch.runsPerInstall}:${batch.installCount}`}
+            key={`${batch.runsPerInstall}:${batch.durationSeconds}:${batch.installCount}`}
             className="flex flex-col items-end"
           >
             <CopyableNumber
@@ -1228,18 +1225,11 @@ function simulationCompletionMatchesSchedule(
   );
 }
 
-/** Groups installs by product type and runs per install for compact display. */
-function compactInstallGroups(
-  installs: readonly SimulationInstallDetail[],
-  aggregateReactionRuntime: boolean,
-  scheduleOptions: ClientSimulationScheduleOptions,
-): CompactInstallGroup[] {
-  if (aggregateReactionRuntime) {
-    return compactReactionRuntimeGroups(installs, scheduleOptions);
-  }
+/** Groups identical solver installs for compact display without changing their values. */
+function compactInstallGroups(installs: readonly SimulationInstallDetail[]): CompactInstallGroup[] {
   const groups = new Map<string, SimulationInstallDetail[]>();
   for (const detail of installs) {
-    const key = `${detail.entry.job.productTypeId}:${detail.install.runs}`;
+    const key = `${detail.entry.job.productTypeId}:${detail.install.runs}:${detail.install.durationSeconds}`;
     const group = groups.get(key) ?? [];
     group.push(detail);
     groups.set(key, group);
@@ -1251,107 +1241,19 @@ function compactInstallGroups(
     )
     .map(([, groupedInstalls]) => ({
       runs: groupedInstalls[0].install.runs,
-      durationSeconds: Math.max(
-        ...groupedInstalls.map((detail) => detail.install.durationSeconds),
-        0,
-      ),
+      durationSeconds: groupedInstalls[0].install.durationSeconds,
       installs: groupedInstalls,
       displayInstallCount: groupedInstalls.length,
       completionDetails: groupedInstalls,
     }));
 }
 
-/** Groups runtime reaction installs by product type and exact floor/ceiling run count. */
-function compactReactionRuntimeGroups(
-  installs: readonly SimulationInstallDetail[],
-  scheduleOptions: ClientSimulationScheduleOptions,
-): CompactInstallGroup[] {
-  const byProductType = new Map<number, SimulationInstallDetail[]>();
-  for (const detail of installs) {
-    const group = byProductType.get(detail.entry.job.productTypeId) ?? [];
-    group.push(detail);
-    byProductType.set(detail.entry.job.productTypeId, group);
-  }
-
-  return [...byProductType.values()].flatMap((productInstalls) => {
-    const totalRuns = productInstalls.reduce((total, detail) => total + detail.install.runs, 0);
-    const maximumRunsPerInstall = Math.max(
-      ...productInstalls.map((detail) => detail.install.runs),
-      0,
-    );
-    if (totalRuns <= 0 || maximumRunsPerInstall <= 0) return [];
-    const minimumRuns = scheduleOptions.protectReactionMaterialBonus
-      ? Math.max(
-          ...productInstalls.map((detail) =>
-            getSimulationMinimumRunsPerInstall(detail.entry.job, scheduleOptions),
-          ),
-          1,
-        )
-      : 1;
-    const installCount =
-      minimumRuns > 1
-        ? Math.min(productInstalls.length, Math.max(1, Math.ceil(totalRuns / minimumRuns)))
-        : Math.ceil(totalRuns / maximumRunsPerInstall);
-    const allocations = splitSimulationRuns(totalRuns, installCount, minimumRuns);
-    const groups: CompactInstallGroup[] = [];
-    let detailOffset = 0;
-    let completionOffset = 0;
-    for (const runs of [...new Set(allocations)]) {
-      const displayInstallCount = allocations.filter((allocation) => allocation === runs).length;
-      const details = installDetailsWithRuns(
-        productInstalls.slice(detailOffset, detailOffset + displayInstallCount),
-        runs,
-      );
-      detailOffset += displayInstallCount;
-      const remainingGroups = [...new Set(allocations)].length - groups.length;
-      const remainingDetails = productInstalls.length - completionOffset;
-      const completionCount =
-        remainingGroups === 1
-          ? remainingDetails
-          : Math.max(1, Math.ceil(remainingDetails / remainingGroups));
-      const completionDetails = productInstalls.slice(
-        completionOffset,
-        completionOffset + completionCount,
-      );
-      completionOffset += completionDetails.length;
-      groups.push({
-        runs,
-        durationSeconds: Math.max(...details.map((detail) => detail.install.durationSeconds), 0),
-        installs: details,
-        displayInstallCount,
-        completionDetails,
-      });
-    }
-    return groups;
-  });
-}
-
-/** Copies install details with the normalized run count shown by a compact group. */
-function installDetailsWithRuns(
-  details: readonly SimulationInstallDetail[],
-  runs: number,
-): SimulationInstallDetail[] {
-  return details.map((detail) => ({
-    ...detail,
-    install: {
-      ...detail.install,
-      runs,
-      durationSeconds: Math.ceil(runs * detail.entry.job.durationPerRunSeconds),
-    },
-  }));
-}
-
-/** Expands compact groups into one normalized detail per displayed install. */
+/** Expands compact groups into their original solver installs. */
 function detailedInstallDetailsFromGroups(
   groups: readonly CompactInstallGroup[],
 ): DetailedInstallDisplay[] {
   return groups.flatMap((group) =>
-    group.installs
-      .slice(0, group.displayInstallCount)
-      .map((detail) => ({
-        detail,
-        completionDetails: group.completionDetails,
-      })),
+    group.installs.map((detail) => ({ detail, completionDetails: [detail] })),
   );
 }
 
@@ -1377,6 +1279,7 @@ type SimulationInstallPlanDialogLayoutProps = {
   installDetails: SimulationInstallDetail[];
   compactGroups: CompactInstallGroup[];
   activityLabel: "reaction" | "manufacturing";
+  displayedRunsLabel: string;
   blueprintCounts?: SimulationBlueprintCountSummary;
   characterNamesById: ReadonlyMap<number, string>;
   onOpenPlan: () => void;
@@ -1385,7 +1288,6 @@ type SimulationInstallPlanDialogLayoutProps = {
 
 type SimulationInstallPlanDialogModelProps = {
   entries: readonly SimulationInstallPlanEntry[];
-  scheduleOptions: ClientSimulationScheduleOptions;
   blueprintCounts?: SimulationBlueprintCountSummary;
   characterNamesById: ReadonlyMap<number, string>;
   onOpenPlan: () => void;
@@ -1417,25 +1319,20 @@ function simulationInstallDetails(
 /** Renders the reaction-specific install plan and runtime grouping behavior. */
 function SimulationReactionInstallPlanDialog({
   entries,
-  solveMode,
-  scheduleOptions,
   blueprintCounts,
   characterNamesById,
   onOpenPlan,
   readOnly,
-}: SimulationInstallPlanDialogModelProps & { solveMode: ClientSimulationSolveMode }) {
+}: SimulationInstallPlanDialogModelProps) {
   const installDetails = simulationInstallDetails(entries, "reaction");
-  const compactGroups = compactInstallGroups(
-    installDetails,
-    solveMode === "run-time-hours" || solveMode === "run-time-days",
-    scheduleOptions,
-  );
+  const compactGroups = compactInstallGroups(installDetails);
   return (
     <SimulationInstallPlanDialogLayout
       entries={entries}
       installDetails={installDetails}
       compactGroups={compactGroups}
       activityLabel="reaction"
+      displayedRunsLabel="Suggested runs"
       blueprintCounts={blueprintCounts}
       characterNamesById={characterNamesById}
       onOpenPlan={onOpenPlan}
@@ -1448,7 +1345,6 @@ function SimulationReactionInstallPlanDialog({
 function SimulationManufacturingInstallPlanDialog({
   entries,
   displayMode,
-  scheduleOptions,
   characterNamesById,
   onOpenPlan,
   readOnly,
@@ -1456,13 +1352,20 @@ function SimulationManufacturingInstallPlanDialog({
   displayMode: ClientSimulationManufacturingDisplayMode;
 }) {
   const installDetails = simulationInstallDetails(entries, "manufacturing", displayMode);
-  const compactGroups = compactInstallGroups(installDetails, false, scheduleOptions);
+  const compactGroups = compactInstallGroups(installDetails);
   return (
     <SimulationInstallPlanDialogLayout
       entries={entries}
       installDetails={installDetails}
       compactGroups={compactGroups}
       activityLabel="manufacturing"
+      displayedRunsLabel={
+        displayMode === "total"
+          ? "Planned runs"
+          : displayMode === "installable"
+            ? "Installable runs"
+            : "T+0 scheduled runs"
+      }
       characterNamesById={characterNamesById}
       onOpenPlan={onOpenPlan}
       readOnly={readOnly}
@@ -1476,6 +1379,7 @@ function SimulationInstallPlanDialogLayout({
   installDetails,
   compactGroups,
   activityLabel,
+  displayedRunsLabel,
   blueprintCounts: blueprintCountsOverride,
   characterNamesById,
   onOpenPlan,
@@ -1485,9 +1389,10 @@ function SimulationInstallPlanDialogLayout({
   const [view, setView] = useState<SimulationInstallPlanView>("compact");
   const detailedInstallDetails = detailedInstallDetailsFromGroups(compactGroups);
   const installableRuns = entries.reduce((total, entry) => total + entry.job.readyNowRuns, 0);
+  const displayedRuns = installDetails.reduce((total, detail) => total + detail.install.runs, 0);
   const totalRuns = entries.reduce((total, entry) => total + entry.job.requiredRuns, 0);
-  const installableRuntimeSeconds = entries.reduce(
-    (total, entry) => total + entry.job.readyNowRuns * entry.job.durationPerRunSeconds,
+  const displayedRuntimeSeconds = installDetails.reduce(
+    (total, detail) => total + detail.install.durationSeconds,
     0,
   );
   const totalRuntimeSeconds = entries.reduce(
@@ -1505,6 +1410,8 @@ function SimulationInstallPlanDialogLayout({
     { owned: 0, available: 0 },
   );
   const blueprintCounts = blueprintCountsOverride ?? entryBlueprintCounts;
+  const hasInstallPlan =
+    activityLabel === "reaction" ? installableRuns > 0 : installDetails.length > 0;
   const hasInsufficientInputs = entries.some(
     (entry) =>
       entry.job.inputs.length > 0
@@ -1565,7 +1472,7 @@ function SimulationInstallPlanDialogLayout({
       open={open}
       onOpenChange={setOpen}
       trigger={
-        installableRuns > 0 ? (
+        hasInstallPlan ? (
           <Button
             type="button"
             variant="outline"
@@ -1587,11 +1494,11 @@ function SimulationInstallPlanDialogLayout({
         <div className="flex flex-col gap-3">
           <div className="grid grid-cols-2 gap-3 font-mono text-xs sm:grid-cols-4">
             <div className="flex flex-col">
-              <strong>{installableRuns.toLocaleString()}</strong>
+              <strong>{displayedRuns.toLocaleString()}</strong>
               <small className="text-[10px] text-muted-foreground uppercase">
-                Installable runs
+                {displayedRunsLabel}
                 {activityLabel === "reaction"
-                  ? ` · ${simulationDuration(installableRuntimeSeconds)}`
+                  ? ` · ${simulationDuration(displayedRuntimeSeconds)}`
                   : ""}
               </small>
             </div>
@@ -1719,7 +1626,7 @@ function SimulationInstallPlanDialogLayout({
               const firstDetail = group.installs[0];
               return (
                 <SwitchedResultRow
-                  key={`${firstDetail.entry.job.productTypeId}:${group.runs}`}
+                  key={`${firstDetail.entry.job.productTypeId}:${group.runs}:${group.durationSeconds}`}
                   name={firstDetail.entry.job.productName}
                   typeId={firstDetail.entry.job.productTypeId}
                   linkPath="planner"
@@ -3482,7 +3389,7 @@ function SimulationActivityTab({
       ? presentationGroups
       : presentationGroups.filter((group) =>
           manufacturingRunDisplay === "installable"
-            ? group.quantities.installableRuns > 0
+            ? group.jobs.some((job) => (schedules.get(job.jobId)?.runs ?? 0) > 0)
             : simulationRunsStartingAtT0(group.jobs) > 0,
         );
   async function copyEntries(entries: readonly SimulationIndustryJob[], status: "list" | number) {
@@ -3752,9 +3659,11 @@ function SimulationActivityTab({
               generatedScheduleIdentity,
             );
             const schedule =
-              generatedSchedule && generatedSchedule.installs.length > 0
+              tab === "react"
                 ? generatedSchedule
-                : completedSchedule;
+                : generatedSchedule && generatedSchedule.installs.length > 0
+                  ? generatedSchedule
+                  : completedSchedule;
             const included = controls.isIncluded(rowKey);
             const installableRuns =
               schedule && schedule.runs > 0 ? schedule.runs : getSimulationInstallableRuns(job);
@@ -3794,7 +3703,7 @@ function SimulationActivityTab({
           const groupPartiallyInstalled = groupInstalledRuns > 0 && !groupCompleted;
           const groupIncluded = groupEntries.every((entry) => entry.included);
           const suggestedInstallSummary = summarizeClientSimulationInstalls(
-            groupEntries.flatMap((entry) => entry.generatedSchedule?.installs ?? []),
+            groupEntries.flatMap((entry) => entry.schedule?.installs ?? []),
           );
           const installableRuntimeSeconds = group.jobs.reduce(
             (total, job) => total + getSimulationInstallableRuns(job) * job.durationPerRunSeconds,
@@ -3805,6 +3714,15 @@ function SimulationActivityTab({
             0,
           );
           const scheduledAtT0Runs = simulationRunsStartingAtT0(group.jobs);
+          const plannedRuns = group.jobs.reduce(
+            (total, job) =>
+              total + job.installs.reduce((jobTotal, install) => jobTotal + install.runs, 0),
+            0,
+          );
+          const suggestedInstallableRuns = groupEntries.reduce(
+            (total, entry) => total + (entry.generatedSchedule?.runs ?? 0),
+            0,
+          );
           const formulaCounts = simulationReactionFormulaCountsForGroup(
             group,
             reactionFormulaCounts,
@@ -3828,7 +3746,7 @@ function SimulationActivityTab({
           };
           const installPlanEntries: SimulationInstallPlanEntry[] = groupEntries.map((entry) => ({
             job: entry.job,
-            schedule: entry.schedule,
+            schedule: entry.generatedSchedule,
             installedRuns: entry.installedRuns,
             completedInstallIds: entry.completedInstallIds,
             scheduleRevision: entry.scheduleRevision,
@@ -3894,14 +3812,9 @@ function SimulationActivityTab({
                   installPlan={
                     <SimulationReactionInstallPlanDialog
                       entries={installPlanEntries}
-                      solveMode={solveMode}
                       blueprintCounts={{
                         owned: formulaCounts.owned,
                         available: formulaCounts.available,
-                      }}
-                      scheduleOptions={{
-                        protectReactionMaterialBonus,
-                        reactionMaterialBonusesByLocation,
                       }}
                       characterNamesById={characterNamesById}
                       onOpenPlan={controls.onOpenPlan}
@@ -3934,10 +3847,6 @@ function SimulationActivityTab({
                     <SimulationManufacturingInstallPlanDialog
                       entries={installPlanEntries}
                       displayMode={manufacturingRunDisplay}
-                      scheduleOptions={{
-                        protectReactionMaterialBonus: false,
-                        reactionMaterialBonusesByLocation,
-                      }}
                       characterNamesById={characterNamesById}
                       onOpenPlan={controls.onOpenPlan}
                       readOnly={readOnly}
@@ -3962,13 +3871,17 @@ function SimulationActivityTab({
                       value={
                         manufacturingRunDisplay === "schedule"
                           ? scheduledAtT0Runs
-                          : group.quantities.installableRuns
+                          : manufacturingRunDisplay === "installable"
+                            ? suggestedInstallableRuns
+                            : plannedRuns
                       }
                       suffix=" / "
                       copyLabel={
                         manufacturingRunDisplay === "schedule"
                           ? "T+0 scheduled runs"
-                          : "Installable runs"
+                          : manufacturingRunDisplay === "installable"
+                            ? "Suggested install runs"
+                            : "Planned runs"
                       }
                     />
                     <CopyableNumber

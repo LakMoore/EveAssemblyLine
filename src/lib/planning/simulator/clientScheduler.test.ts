@@ -144,6 +144,18 @@ void test("uses only canonical installs in Schedule mode", () => {
         readiness: "now" as const,
         inputs: [],
       },
+      {
+        installId: "later-server-install",
+        slotKey: "42:M:4",
+        characterId: 42,
+        slotIndex: 4,
+        runs: 3,
+        startOffsetSeconds: 300,
+        endOffsetSeconds: 480,
+        durationSeconds: 180,
+        readiness: "now" as const,
+        inputs: [],
+      },
     ],
   };
   const localSchedule = {
@@ -177,7 +189,7 @@ void test("uses only canonical installs in Schedule mode", () => {
   );
 });
 
-void test("appends unassigned local virtual installs in total and installable modes", () => {
+void test("uses canonical full installs in total mode", () => {
   const scheduledJob = {
     ...job("A", 8, 8, 60),
     installs: [
@@ -199,8 +211,8 @@ void test("appends unassigned local virtual installs in total and installable mo
     installs: [
       {
         installId: "client-install:A:0",
-        runs: 8,
-        durationSeconds: 480,
+        runs: 2,
+        durationSeconds: 120,
         characterId: 42,
         slotIndex: 0,
       },
@@ -209,17 +221,94 @@ void test("appends unassigned local virtual installs in total and installable mo
     timeSeconds: 480,
   };
 
-  for (const displayMode of ["total", "installable"] as const) {
-    const details = simulationManufacturingInstallPlan(scheduledJob, localSchedule, displayMode);
+  const details = simulationManufacturingInstallPlan(scheduledJob, localSchedule, "total");
 
-    assert.equal(details.length, 2);
-    assert.equal(details[0].install.characterId, 42);
-    assert.equal(details[0].trackCompletion, false);
-    assert.equal(details[1].install.installId, "client-install:A:0");
-    assert.equal(details[1].install.characterId, undefined);
-    assert.equal(details[1].install.slotIndex, undefined);
-    assert.equal(details[1].trackCompletion, true);
-  }
+  assert.deepEqual(
+    details.map(({ install, trackCompletion }) => ({ install, trackCompletion })),
+    scheduledJob.installs.map((install) => ({
+      install: {
+        installId: install.installId,
+        runs: install.runs,
+        durationSeconds: install.durationSeconds,
+        characterId: install.characterId,
+        slotIndex: install.slotIndex,
+      },
+      trackCompletion: false,
+    })),
+  );
+});
+
+void test("uses only client solver installs in installable mode", () => {
+  const scheduledJob = {
+    ...job("A", 8, 8, 60),
+    installs: [
+      {
+        installId: "server-install",
+        slotKey: "42:M:3",
+        characterId: 42,
+        slotIndex: 3,
+        runs: 5,
+        startOffsetSeconds: 0,
+        endOffsetSeconds: 300,
+        durationSeconds: 300,
+        readiness: "now" as const,
+        inputs: [],
+      },
+    ],
+  };
+  const localInstall = {
+    installId: "client-install:A:0",
+    runs: 2,
+    durationSeconds: 120,
+    characterId: 43,
+    slotIndex: 1,
+  };
+  const details = simulationManufacturingInstallPlan(
+    scheduledJob,
+    { installs: [localInstall], runs: 2, timeSeconds: 120 },
+    "installable",
+  );
+
+  assert.deepEqual(details, [{ install: localInstall, trackCompletion: true }]);
+});
+
+void test("uses only T+0 canonical installs in schedule mode", () => {
+  const scheduledJob = {
+    ...job("A", 8, 8, 60),
+    installs: [
+      {
+        installId: "now",
+        slotKey: "42:M:3",
+        characterId: 42,
+        slotIndex: 3,
+        runs: 5,
+        startOffsetSeconds: 0,
+        endOffsetSeconds: 300,
+        durationSeconds: 300,
+        readiness: "now" as const,
+        inputs: [],
+      },
+      {
+        installId: "later",
+        slotKey: "42:M:4",
+        characterId: 42,
+        slotIndex: 4,
+        runs: 3,
+        startOffsetSeconds: 300,
+        endOffsetSeconds: 480,
+        durationSeconds: 180,
+        readiness: "now" as const,
+        inputs: [],
+      },
+    ],
+  };
+
+  assert.deepEqual(
+    simulationManufacturingInstallPlan(scheduledJob, undefined, "schedule").map(
+      ({ install }) => install.installId,
+    ),
+    ["now"],
+  );
 });
 
 void test("keeps short reactions in one install and uses spare slots for long reactions", () => {
@@ -306,34 +395,41 @@ void test("caps local reaction installs at visible formulas minus in-use formula
   );
 });
 
-void test("splits a fractional per-install average into exact integer-run batches", () => {
+void test("groups only installs with identical runs and durations", () => {
   const summary = summarizeClientSimulationInstalls([
     { installId: "first", runs: 10, durationSeconds: 3600 },
     { installId: "second", runs: 11, durationSeconds: 7200 },
+    { installId: "third", runs: 10, durationSeconds: 7200 },
+    { installId: "fourth", runs: 10, durationSeconds: 3600 },
   ]);
 
   assert.deepEqual(
     summary,
     {
-      count: 2,
-      totalRuns: 21,
+      count: 4,
+      totalRuns: 41,
       batches: [
         {
           runsPerInstall: 11,
           installCount: 1,
-          estimatedDurationSecondsPerInstall: 5657.142857142858,
+          durationSeconds: 7200,
         },
         {
           runsPerInstall: 10,
           installCount: 1,
-          estimatedDurationSecondsPerInstall: 5142.857142857143,
+          durationSeconds: 7200,
+        },
+        {
+          runsPerInstall: 10,
+          installCount: 2,
+          durationSeconds: 3600,
         },
       ],
     },
   );
 });
 
-void test("keeps an integer per-install average in one batch", () => {
+void test("groups identical per-install runs and durations together", () => {
   const summary = summarizeClientSimulationInstalls([
     { installId: "first", runs: 10, durationSeconds: 3600 },
     { installId: "second", runs: 10, durationSeconds: 3600 },
@@ -341,7 +437,7 @@ void test("keeps an integer per-install average in one batch", () => {
 
   assert.deepEqual(
     summary.batches,
-    [{ runsPerInstall: 10, installCount: 2, estimatedDurationSecondsPerInstall: 3600 }],
+    [{ runsPerInstall: 10, installCount: 2, durationSeconds: 3600 }],
   );
 });
 

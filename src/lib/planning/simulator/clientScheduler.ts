@@ -55,21 +55,21 @@ export type ClientSimulationInstallPlanDetail = {
   trackCompletion: boolean;
 };
 
-/** One integer-sized batch of generated installs and its per-install duration. */
+/** A lossless display group of solver installs with matching runs and duration. */
 export type ClientSimulationInstallBatch = {
   runsPerInstall: number;
   installCount: number;
-  estimatedDurationSecondsPerInstall: number;
+  durationSeconds: number;
 };
 
-/** Exact install counts and integer-run batches derived from current solver output. */
+/** Exact install counts and display groups derived from current solver output. */
 export type ClientSimulationInstallSummary = {
   count: number;
   totalRuns: number;
   batches: ClientSimulationInstallBatch[];
 };
 
-/** Splits generated installs into floor/ceiling run batches without changing totals. */
+/** Groups only solver installs with identical run counts and durations. */
 export function summarizeClientSimulationInstalls(
   installs: readonly ClientSimulationInstall[],
 ): ClientSimulationInstallSummary {
@@ -77,35 +77,32 @@ export function summarizeClientSimulationInstalls(
   if (count === 0) return { count: 0, totalRuns: 0, batches: [] };
 
   const totalRuns = installs.reduce((total, install) => total + install.runs, 0);
-  const totalDurationSeconds = installs.reduce(
-    (total, install) => total + install.durationSeconds,
-    0,
-  );
-  const floorRuns = Math.floor(totalRuns / count);
-  const ceilInstallCount = totalRuns % count;
-  const floorInstallCount = count - ceilInstallCount;
-  const averageSecondsPerRun = totalRuns > 0 ? totalDurationSeconds / totalRuns : 0;
-  const batches: ClientSimulationInstallBatch[] = [];
-
-  if (ceilInstallCount > 0) {
-    batches.push({
-      runsPerInstall: floorRuns + 1,
-      installCount: ceilInstallCount,
-      estimatedDurationSecondsPerInstall: (floorRuns + 1) * averageSecondsPerRun,
-    });
-  }
-  if (floorInstallCount > 0) {
-    batches.push({
-      runsPerInstall: floorRuns,
-      installCount: floorInstallCount,
-      estimatedDurationSecondsPerInstall: floorRuns * averageSecondsPerRun,
-    });
+  const batchesByInstall = new Map<string, ClientSimulationInstallBatch>();
+  for (const install of installs) {
+    const key = `${install.runs}:${install.durationSeconds}`;
+    const batch = batchesByInstall.get(key);
+    if (batch) {
+      batch.installCount += 1;
+    }
+    else {
+      batchesByInstall.set(
+        key,
+        {
+          runsPerInstall: install.runs,
+          installCount: 1,
+          durationSeconds: install.durationSeconds,
+        },
+      );
+    }
   }
 
   return {
     count,
     totalRuns,
-    batches,
+    batches: [...batchesByInstall.values()].sort(
+      (left, right) =>
+        right.runsPerInstall - left.runsPerInstall || right.durationSeconds - left.durationSeconds,
+    ),
   };
 }
 
@@ -264,37 +261,34 @@ export function scheduledSimulationActivity(
   );
 }
 
-/** Uses scheduled installs as the base and adds unassigned local suggestions outside Schedule mode. */
+/** Returns the exact server or client installs selected by the manufacturing display mode. */
 export function simulationManufacturingInstallPlan(
   job: SimulationIndustryJob,
   localSchedule: ClientSimulationSchedule | undefined,
   displayMode: ClientSimulationManufacturingDisplayMode,
 ): ClientSimulationInstallPlanDetail[] {
-  const scheduledInstalls = job.installs.map(
-    (install): ClientSimulationInstallPlanDetail => ({
-      install: {
-        installId: install.installId,
-        runs: install.runs,
-        durationSeconds: install.durationSeconds,
-        characterId: install.characterId,
-        slotIndex: install.slotIndex,
-      },
-      trackCompletion: false,
-    }),
-  );
-  if (displayMode === "schedule") return scheduledInstalls;
+  const scheduledInstalls = job.installs
+    .filter((install) => displayMode !== "schedule" || install.startOffsetSeconds === 0)
+    .map(
+      (install): ClientSimulationInstallPlanDetail => ({
+        install: {
+          installId: install.installId,
+          runs: install.runs,
+          durationSeconds: install.durationSeconds,
+          characterId: install.characterId,
+          slotIndex: install.slotIndex,
+        },
+        trackCompletion: false,
+      }),
+    );
+  if (displayMode !== "installable") return scheduledInstalls;
 
-  const virtualInstalls = (localSchedule?.installs ?? []).map(
+  return (localSchedule?.installs ?? []).map(
     (install): ClientSimulationInstallPlanDetail => ({
-      install: {
-        ...install,
-        characterId: undefined,
-        slotIndex: undefined,
-      },
+      install,
       trackCompletion: true,
     }),
   );
-  return [...scheduledInstalls, ...virtualInstalls];
 }
 
 type SimulationSchedulePartition = {
