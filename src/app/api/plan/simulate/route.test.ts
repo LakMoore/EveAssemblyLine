@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { simulationCalculationVersion } from "@/lib/planning/simulator/etag";
 import { presentationResult, shouldRetainSimulationLog, withSimulationId } from "./route";
 import type {
   SimulationResultV2,
@@ -12,7 +13,7 @@ const testEnvironment = process.env as unknown as Record<string, string | undefi
 function diagnosticResult(): SimulationResultWithDiagnostics {
   return {
     metadata: {
-      simulatorVersion: 16,
+      simulatorVersion: simulationCalculationVersion,
       policyVersion: 1,
       generatedAt: "2026-09-20T00:00:00.000Z",
       sdeRevision: "test",

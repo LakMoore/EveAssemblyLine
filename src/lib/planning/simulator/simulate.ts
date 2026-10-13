@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { settleBuying } from "./buying";
 import { loadSimulationContext, type SimulationContext } from "./context";
 import { buildDependencyGraph } from "./dependencyGraph";
+import { simulationCalculationVersion } from "./etag";
 import { simulateIndustryDemand, type IndustrySimulationResult } from "./industrySimulation";
 import {
   projectSimulationLedger,
@@ -96,6 +97,9 @@ export function aggregateHaulingTasks(tasks: readonly SimulationHaulTask[]): Sim
       continue;
     }
     existingTask.quantity += task.quantity;
+    if (task.runsNeeded !== undefined) {
+      existingTask.runsNeeded = (existingTask.runsNeeded ?? 0) + task.runsNeeded;
+    }
     existingTask.demands.push(...task.demands);
     existingTask.sourceLots?.push(...(task.sourceLots ?? []));
     if (task.lotId) {
@@ -128,11 +132,12 @@ export function aggregateHaulingTasks(tasks: readonly SimulationHaulTask[]): Sim
     );
 }
 
-/** Posts visible or plan-used physical item lots to their canonical ledgers. */
+/** Posts visible or plan-used item and blueprint lots to their canonical ledgers. */
 function sourceAvailabilityTransactions(
   inventory: SimulatorInventory,
   visibleLocationIds: ReadonlySet<number>,
   usedLotIds: ReadonlySet<string>,
+  usedBlueprintAccountKeys: ReadonlySet<string>,
 ): SimulationTransaction[] {
   const blueprintLots = inventory.blueprintLots
     .filter((lot) => lot.kind === "bpc" && lot.runs > 0)
@@ -146,7 +151,7 @@ function sourceAvailabilityTransactions(
       horizon: lot.horizon,
       source: "asset" as const,
     }));
-  return [...inventory.itemLots, ...blueprintLots].flatMap((lot) => {
+  const itemTransactions: SimulationTransaction[] = inventory.itemLots.flatMap((lot) => {
     if (
       lot.horizon !== "now"
       || lot.locationId === undefined
@@ -161,15 +166,41 @@ function sourceAvailabilityTransactions(
         account: { locationId: lot.locationId, typeId: lot.typeId },
         lotId: lot.lotId,
         quantity: lot.quantity,
-        quantityKind: "blueprint-run" as const,
         horizon: "now" as const,
-        source: lot.source === "market-order" ? "market-order" : "asset",
+        source: lot.source === "market-order" ? ("market-order" as const) : ("asset" as const),
       },
     ];
   });
+  const blueprintTransactions: SimulationTransaction[] = blueprintLots.flatMap((lot) => {
+    if (
+      lot.horizon !== "now"
+      || lot.locationId === undefined
+      || (
+        !visibleLocationIds.has(lot.locationId)
+        && !usedLotIds.has(lot.lotId)
+        && !usedBlueprintAccountKeys.has(
+          simulationAccountKey({ locationId: lot.locationId, typeId: lot.typeId }),
+        )
+      )
+    ) {
+      return [];
+    }
+    return [
+      {
+        id: `availability:${lot.lotId}`,
+        kind: "source-availability" as const,
+        account: { locationId: lot.locationId, typeId: lot.typeId },
+        lotId: lot.lotId,
+        quantity: lot.quantity,
+        horizon: "now" as const,
+        source: "asset" as const,
+      },
+    ];
+  });
+  return [...itemTransactions, ...blueprintTransactions];
 }
 
-/** Converts finite blueprint lots into ledger source lots measured in licensed runs. */
+/** Converts finite BPC lots into ledger source lots measured in available runs. */
 function blueprintSourceLots(inventory: SimulatorInventory): SimulationSourceLot[] {
   return inventory.blueprintLots
     .filter((lot) => lot.kind === "bpc" && lot.runs > 0)
@@ -196,6 +227,19 @@ function usedSourceLotIds(transactions: readonly SimulationTransaction[]): Reado
   return lotIds;
 }
 
+/** Returns blueprint ledger accounts touched by plan-used BPC lots. */
+function usedBlueprintAccountKeys(
+  inventory: SimulatorInventory,
+  usedLotIds: ReadonlySet<string>,
+): ReadonlySet<string> {
+  return new Set(
+    inventory.blueprintLots.flatMap((lot) => {
+      if (lot.locationId === undefined || !usedLotIds.has(lot.lotId)) return [];
+      return [simulationAccountKey({ locationId: lot.locationId, typeId: lot.typeId })];
+    }),
+  );
+}
+
 /** Returns accounts participating in the requested plan, excluding unrelated source availability. */
 function connectedAccountKeys(transactions: readonly SimulationTransaction[]): ReadonlySet<string> {
   const keys = new Set<string>();
@@ -205,7 +249,10 @@ function connectedAccountKeys(transactions: readonly SimulationTransaction[]): R
     if (transaction.kind === "production-commitment") {
       return transaction.quantityKind ?? "item";
     }
-    if (transaction.kind === "blueprint-run-reservation") return "blueprint-run";
+    if (
+      transaction.kind === "blueprint-run-reservation"
+      || transaction.kind === "blueprint-run-supply"
+    ) return "blueprint-run";
     return "item";
   };
   for (const transaction of transactions) {
@@ -654,14 +701,29 @@ export async function simulateIndustry(
   );
   const visibleLocationIds = configuredLocationIds(request);
   const usedLotIds = usedSourceLotIds(baseTransactions);
+  const planUsedBlueprintAccountKeys = usedBlueprintAccountKeys(inventory, usedLotIds);
   const transactions = uniqueTransactions([
     ...baseTransactions,
-    ...sourceAvailabilityTransactions(inventory, visibleLocationIds, usedLotIds),
+    ...sourceAvailabilityTransactions(
+      inventory,
+      visibleLocationIds,
+      usedLotIds,
+      planUsedBlueprintAccountKeys,
+    ),
   ]);
   const ledgerSourceLots = sourceLots.filter(
     (lot) =>
       lot.locationId !== undefined
-      && (visibleLocationIds.has(lot.locationId) || usedLotIds.has(lot.lotId)),
+      && (
+        visibleLocationIds.has(lot.locationId)
+        || usedLotIds.has(lot.lotId)
+        || (
+          lot.quantityKind === "blueprint-run"
+          && planUsedBlueprintAccountKeys.has(
+            simulationAccountKey({ locationId: lot.locationId, typeId: lot.typeId }),
+          )
+        )
+      ),
   );
   const { names, volumes } = measureSyncProfiled(
     profiler,
@@ -723,7 +785,7 @@ export async function simulateIndustry(
     ?? measureSyncProfiled(profiler, "hash-input", () => simulationInputHash(request));
   return {
     metadata: {
-      simulatorVersion: 16,
+      simulatorVersion: simulationCalculationVersion,
       policyVersion: 1,
       generatedAt,
       sdeRevision: context.sdeRevision,

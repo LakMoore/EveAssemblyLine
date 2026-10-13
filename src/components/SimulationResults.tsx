@@ -598,17 +598,21 @@ function CopyableNumber({
   value,
   suffix = "",
   copyLabel = "Number",
+  copyWithSuffix = false,
+  copySuffix,
 }: {
   value: number;
   suffix?: string;
   copyLabel?: string;
+  copyWithSuffix?: boolean;
+  copySuffix?: string;
 }) {
   return (
     <CopyableText
       aria-label={`${copyLabel}: ${quantity(value)}${suffix}. Copy to clipboard.`}
       className="font-[inherit] text-inherit"
       textToRender={`${quantity(value)}${suffix}`}
-      textToCopy={String(value)}
+      textToCopy={`${quantity(value)}${copySuffix ?? (copyWithSuffix ? suffix : "")}`}
       copyLabel={copyLabel}
     />
   );
@@ -937,20 +941,49 @@ function SimulationActivitySummary({
   );
 }
 
-/** Renders reaction fact headers aligned to the wide activity-row columns. */
-function SimulationActivityColumnsHeader() {
+const manufacturingActivityFactColumnClasses = "lg:grid-cols-[2rem_5rem_5rem_5rem_9rem]";
+
+/** Renders activity-specific fact headers aligned to the wide activity-row columns. */
+function SimulationActivityColumnsHeader({
+  tab,
+  manufacturingRunDisplay = "total",
+}: {
+  tab: "react" | "manufacture";
+  manufacturingRunDisplay?: "total" | "installable" | "schedule";
+}) {
   return (
     <div className="sticky top-0 z-10 hidden items-center gap-x-[13px] bg-card px-2 pb-1 font-mono text-[10px] text-muted-foreground uppercase lg:grid lg:grid-cols-[auto_minmax(0,1fr)_minmax(0,auto)_auto]">
       <span aria-hidden="true" />
       <span aria-hidden="true" />
-      <div className="grid grid-cols-[3rem_3rem_6rem_7rem_6rem_4rem] gap-x-3 text-right">
-        <span aria-hidden="true" />
-        <span className="text-center">Inputs</span>
-        <span className="leading-tight">Reaction Formulas</span>
-        <span>Installable / Total Runs</span>
-        <span>Suggested Runs Per Install</span>
-        <span className="leading-tight">Suggested Installs</span>
-      </div>
+      {tab === "react" ? (
+        <div className="grid grid-cols-[3rem_3rem_6rem_7rem_6rem_4rem] gap-x-3 text-right">
+          <span aria-hidden="true" />
+          <span className="text-center">Inputs</span>
+          <span className="leading-tight">Reaction Formulas</span>
+          <span>Installable / Total Runs</span>
+          <span>Suggested Runs Per Install</span>
+          <span className="leading-tight">Suggested Installs</span>
+        </div>
+      ) : (
+        <div className={cn("grid gap-x-2 text-right", manufacturingActivityFactColumnClasses)}>
+          <span aria-hidden="true" />
+          <span className="text-center">Inputs</span>
+          <span className="leading-tight">
+            Available / Total <span className="block">BPO</span>
+          </span>
+          <span className="leading-tight">
+            BPC <span className="block">Runs</span>
+          </span>
+          <span className="leading-tight">
+            {manufacturingRunDisplay === "total"
+              ? "Installable / Total"
+              : manufacturingRunDisplay === "installable"
+                ? "Suggested / Total"
+                : "T+0 Scheduled / Total"}
+            <span className="block">Runs</span>
+          </span>
+        </div>
+      )}
       <span aria-hidden="true" className="w-4" />
     </div>
   );
@@ -1081,11 +1114,11 @@ function SimulationReactionRowFacts({
       <span className="text-muted-foreground lg:hidden">Installable / Total Runs</span>
       <span className="flex min-w-0 flex-col items-end justify-self-end lg:col-start-4 lg:row-start-1">
         <span className="flex items-center justify-end">
-          <CopyableNumber value={installableRuns} copyLabel="Installable runs" />
+          <CopyableNumber value={installableRuns} copyLabel="Installable runs" copySuffix=" runs" />
           <span aria-hidden="true" className="whitespace-pre">
             {" / "}
           </span>
-          <CopyableNumber value={totalRuns} copyLabel="Total runs" />
+          <CopyableNumber value={totalRuns} copyLabel="Total runs" copySuffix=" runs" />
         </span>
         <small className="text-muted-foreground">
           {simulationReactionRowDuration(installableRuntimeSeconds)} /{" "}
@@ -1102,6 +1135,7 @@ function SimulationReactionRowFacts({
             <CopyableNumber
               value={batch.runsPerInstall}
               copyLabel={`${batch.runsPerInstall} runs per install`}
+              copySuffix=" runs"
             />
             <small className="text-muted-foreground">
               {simulationReactionRowDuration(batch.durationSeconds)}
@@ -1137,6 +1171,136 @@ type SimulationBlueprintCountSummary = {
   owned: number;
   available: number | undefined;
 };
+
+type SimulationManufacturingBlueprintCounts = {
+  visibleBpos: number;
+  ownedBpos: number;
+  inUseBpos: number;
+  availableBpos: number;
+  visibleBpcRuns: number;
+  ownedBpcRuns: number;
+  inUseBpcRuns: number;
+  availableBpcRuns: number;
+};
+
+/** Counts location-scoped blueprint visibility, ownership, use, and availability. */
+function simulationManufacturingBlueprintCounts(
+  group: SimulationIndustryJobGroup,
+  stock: readonly PlanStockItem[],
+  visibleStock: readonly PlanStockItem[] = stock,
+): SimulationManufacturingBlueprintCounts {
+  const blueprintTypeIds = new Set(group.jobs.map((job) => job.blueprint.blueprintTypeId));
+  const isRelevantBlueprint = (item: PlanStockItem) =>
+    blueprintTypeIds.has(item.typeId)
+    && item.category === "blueprint"
+    && (item.rootLocationId ?? item.sourceLocationId ?? item.locationId) === group.locationId;
+  const visibleCounts = visibleStock
+    .filter(isRelevantBlueprint)
+    .reduce(
+      (counts, item) => {
+        const prints = item.blueprintPrints ?? [];
+        const isBpo = item.blueprintType === "bpo" || prints.some((print) => print.type === "bpo");
+        const isVisible =
+          item.ownerType !== "corporation" || item.corporationSource?.canQuery === true;
+        if (!isVisible) return counts;
+        const quantity = Math.max(0, item.quantity);
+        const runs = prints
+          .filter((print) => print.type === "bpc")
+          .reduce((total, print) => total + Math.max(0, print.runs) * quantity, 0);
+        if (isBpo) counts.visibleBpos += quantity;
+        else counts.visibleBpcRuns += runs;
+        if (item.inUse) {
+          if (isBpo) counts.inUseBpos += quantity;
+          else counts.inUseBpcRuns += runs;
+        }
+        else if (!item.inBuild) {
+          if (isBpo) counts.availableBpos += quantity;
+          else counts.availableBpcRuns += runs;
+        }
+        return counts;
+      },
+      {
+        visibleBpos: 0,
+        inUseBpos: 0,
+        availableBpos: 0,
+        visibleBpcRuns: 0,
+        inUseBpcRuns: 0,
+        availableBpcRuns: 0,
+      },
+    );
+  const ownedCounts = stock
+    .filter(isRelevantBlueprint)
+    .reduce(
+      (counts, item) => {
+        const isBpo =
+          item.blueprintType === "bpo"
+          || (item.blueprintPrints ?? []).some((print) => print.type === "bpo");
+        if (item.ownerType === "corporation" && item.corporationSource?.canTake !== true) {
+          return counts;
+        }
+        if (item.inBuild && !item.inUse) return counts;
+        const quantity = Math.max(0, item.quantity);
+        const bpcRuns = (item.blueprintPrints ?? [])
+          .filter((print) => print.type === "bpc")
+          .reduce((total, print) => total + Math.max(0, print.runs) * quantity, 0);
+        if (isBpo) counts.ownedBpos += quantity;
+        else counts.ownedBpcRuns += bpcRuns;
+        return counts;
+      },
+      { ownedBpos: 0, ownedBpcRuns: 0 },
+    );
+  return {
+    ...visibleCounts,
+    ...ownedCounts,
+  };
+}
+
+/** Shows an inventory count with an accessible tooltip breakdown. */
+function SimulationManufacturingBlueprintCountTooltip({
+  name,
+  visible,
+  owned,
+  inUse,
+  available,
+  children,
+}: {
+  name: string;
+  visible: number;
+  owned: number;
+  inUse: number;
+  available: number;
+  children: ReactNode;
+}) {
+  const tooltipLabel =
+    `${name}. Visible: ${quantity(visible)}. Owned: ${quantity(owned)}. `
+    + `In Use: ${quantity(inUse)}. Available: ${quantity(available)}.`;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            aria-label={tooltipLabel}
+            className="flex items-center justify-end"
+            role="group"
+            tabIndex={0}
+          >
+            {children}
+          </span>
+        }
+      />
+      <TooltipContent>
+        <div className="flex flex-col items-start gap-1">
+          <strong>{name}</strong>
+          <span>Visible: {quantity(visible)}</span>
+          <span>Owned: {quantity(owned)}</span>
+          <span>In Use: {quantity(inUse)}</span>
+          <span>Available: {quantity(available)}</span>
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 /** Counts owned and currently available blueprint assets for one simulator job. */
 function simulationBlueprintCounts(
@@ -1617,6 +1781,7 @@ function SimulationInstallPlanDialogLayout({
                   <CopyableNumber
                     value={install.runs}
                     suffix={` run${install.runs === 1 ? "" : "s"}${activityLabel === "reaction" ? ` · ${simulationDuration(install.durationSeconds)}` : ""}`}
+                    copySuffix={` run${install.runs === 1 ? "" : "s"}`}
                     copyLabel={`Install run${install.runs === 1 ? "" : "s"}`}
                   />
                 </SwitchedResultRow>
@@ -1656,6 +1821,7 @@ function SimulationInstallPlanDialogLayout({
                       value={group.runs}
                       suffix={` run${group.runs === 1 ? "" : "s"} each`}
                       copyLabel="Runs per install"
+                      copyWithSuffix
                     />
                     <small className="text-muted-foreground">
                       {simulationDuration(group.durationSeconds)}
@@ -2253,17 +2419,18 @@ function SimulationMaterialsTab({
   async function copyTable() {
     const lines = [
       ["Type", ...materialBalanceColumns].join("\t"),
-      ...filteredItems.map((item) =>
-        [
+      ...filteredItems.map((item) => {
+        const suffix = item.quantityKind === "blueprint-run" ? " runs" : "";
+        return [
           item.typeName,
-          (item.availableNow + item.availableFromSellOrders).toLocaleString(),
-          item.requiredNow.toLocaleString(),
-          item.futureSupply.toLocaleString(),
-          item.futureDemand.toLocaleString(),
-          item.transferredOut.toLocaleString(),
-          item.surplus.toLocaleString(),
-        ].join("\t"),
-      ),
+          `${(item.availableNow + item.availableFromSellOrders).toLocaleString()}${suffix}`,
+          `${item.requiredNow.toLocaleString()}${suffix}`,
+          `${item.futureSupply.toLocaleString()}${suffix}`,
+          `${item.futureDemand.toLocaleString()}${suffix}`,
+          `${item.transferredOut.toLocaleString()}${suffix}`,
+          `${item.surplus.toLocaleString()}${suffix}`,
+        ].join("\t");
+      }),
     ];
     try {
       await navigator.clipboard.writeText(lines.join("\n"));
@@ -2415,6 +2582,7 @@ function SimulationReactionFormulaRow({
             <CopyableNumber
               value={item.requiredRuns}
               copyLabel="Reaction formula runs to install"
+              copySuffix=" runs"
             />
           </span>
         </div>
@@ -2673,6 +2841,7 @@ function MaterialBalanceSummary({
   const supplySources = futureSupplySources(item);
   const immediateSources = immediateSupplySources(item);
   const marketBuyOrderQuantity = marketBuyOrderQuantities?.[String(item.typeId)] ?? 0;
+  const quantitySuffix = item.quantityKind === "blueprint-run" ? " runs" : "";
   return (
     <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_minmax(5rem,auto)] items-center gap-x-3 gap-y-1 text-right md:grid-cols-6 md:gap-x-3">
       <span className="text-muted-foreground md:hidden">Available</span>
@@ -2682,7 +2851,7 @@ function MaterialBalanceSummary({
             <TooltipTrigger
               render={
                 <span
-                  aria-label={`${label}: ${sourceQuantity.toLocaleString()}`}
+                  aria-label={`${label}: ${sourceQuantity.toLocaleString()}${quantitySuffix}`}
                   className={cn(
                     styles.simulationSourceIcon,
                     "inline-flex size-5 items-center justify-center",
@@ -2697,17 +2866,25 @@ function MaterialBalanceSummary({
             />
             <TooltipContent>
               {label}: {sourceQuantity.toLocaleString()}
+              {quantitySuffix}
             </TooltipContent>
           </Tooltip>
         ))}
         <CopyableNumber
           value={item.availableNow + item.availableFromSellOrders}
+          suffix={quantitySuffix}
           copyLabel="Available quantity"
+          copyWithSuffix={item.quantityKind === "blueprint-run"}
         />
       </span>
       <span className="text-muted-foreground md:hidden">Immediate Demand</span>
       <span>
-        <CopyableNumber value={item.requiredNow} copyLabel="Immediate demand" />
+        <CopyableNumber
+          value={item.requiredNow}
+          suffix={quantitySuffix}
+          copyLabel="Immediate demand"
+          copyWithSuffix={item.quantityKind === "blueprint-run"}
+        />
       </span>
       <span className="text-muted-foreground md:hidden">Future Supply</span>
       <span className="flex min-w-0 flex-wrap items-center justify-end gap-2">
@@ -2721,7 +2898,7 @@ function MaterialBalanceSummary({
               <TooltipTrigger
                 render={
                   <span
-                    aria-label={`${label}: ${quantity.toLocaleString()}`}
+                    aria-label={`${label}: ${quantity.toLocaleString()}${quantitySuffix}`}
                     className={cn(
                       colored ? styles.simulationSourceIcon : "text-muted-foreground",
                       "inline-flex size-5 items-center justify-center",
@@ -2736,25 +2913,46 @@ function MaterialBalanceSummary({
               />
               <TooltipContent>
                 {label}: {quantity.toLocaleString()}
+                {quantitySuffix}
               </TooltipContent>
             </Tooltip>
           ))}
         </span>
         <span className="shrink-0">
-          <CopyableNumber value={item.futureSupply} copyLabel="Future supply" />
+          <CopyableNumber
+            value={item.futureSupply}
+            suffix={quantitySuffix}
+            copyLabel="Future supply"
+            copyWithSuffix={item.quantityKind === "blueprint-run"}
+          />
         </span>
       </span>
       <span className="text-muted-foreground md:hidden">Future Demand</span>
       <span className="flex min-w-0 items-center justify-end gap-2">
-        <CopyableNumber value={item.futureDemand} copyLabel="Future demand" />
+        <CopyableNumber
+          value={item.futureDemand}
+          suffix={quantitySuffix}
+          copyLabel="Future demand"
+          copyWithSuffix={item.quantityKind === "blueprint-run"}
+        />
       </span>
       <span className="text-muted-foreground md:hidden">Transferred Out</span>
       <span>
-        <CopyableNumber value={item.transferredOut} copyLabel="Transferred quantity" />
+        <CopyableNumber
+          value={item.transferredOut}
+          suffix={quantitySuffix}
+          copyLabel="Transferred quantity"
+          copyWithSuffix={item.quantityKind === "blueprint-run"}
+        />
       </span>
       <span className="text-muted-foreground md:hidden">Surplus</span>
       <span>
-        <CopyableNumber value={item.surplus} copyLabel="Surplus quantity" />
+        <CopyableNumber
+          value={item.surplus}
+          suffix={quantitySuffix}
+          copyLabel="Surplus quantity"
+          copyWithSuffix={item.quantityKind === "blueprint-run"}
+        />
       </span>
     </div>
   );
@@ -2921,6 +3119,7 @@ function SimulationCopyTab({
                 value={job.totalLicensedRuns}
                 suffix=" licensed runs"
                 copyLabel="Licensed runs"
+                copyWithSuffix
               />
             }
             summary={<CopyableNumber value={job.copies} suffix=" copies" copyLabel="Copies" />}
@@ -3217,6 +3416,7 @@ function SimulationActivityTab({
   simulationInputRevision,
   stock,
   visibleReactionFormulaStock,
+  visibleBlueprintStock,
   locationNamesById,
   locationSystemIdsById,
   systemNamesById,
@@ -3238,6 +3438,7 @@ function SimulationActivityTab({
   simulationInputRevision: string;
   stock: readonly PlanStockItem[];
   visibleReactionFormulaStock: readonly PlanStockItem[];
+  visibleBlueprintStock: readonly PlanStockItem[];
   locationNamesById: ReadonlyMap<number, string>;
   locationSystemIdsById?: ReadonlyMap<number, number>;
   systemNamesById?: ReadonlyMap<number, string>;
@@ -3565,7 +3766,12 @@ function SimulationActivityTab({
         tab={tab}
         items={visiblePresentationGroups}
         locationNamesById={locationNamesById}
-        groupHeader={tab === "react" ? <SimulationActivityColumnsHeader /> : undefined}
+        groupHeader={
+          <SimulationActivityColumnsHeader
+            tab={tab}
+            manufacturingRunDisplay={manufacturingRunDisplay}
+          />
+        }
         getGroupHeader={(locationId, groupItems) => {
           const systemId = locationSystemIdsById?.get(locationId);
           if (!isWormholeSystemId(systemId)) return undefined;
@@ -3618,7 +3824,10 @@ function SimulationActivityTab({
                   }
                 />
               </div>
-              <SimulationActivityColumnsHeader />
+              <SimulationActivityColumnsHeader
+                tab={tab}
+                manufacturingRunDisplay={manufacturingRunDisplay}
+              />
             </>
           );
         }}
@@ -3714,15 +3923,14 @@ function SimulationActivityTab({
             0,
           );
           const scheduledAtT0Runs = simulationRunsStartingAtT0(group.jobs);
-          const plannedRuns = group.jobs.reduce(
-            (total, job) =>
-              total + job.installs.reduce((jobTotal, install) => jobTotal + install.runs, 0),
-            0,
-          );
           const suggestedInstallableRuns = groupEntries.reduce(
             (total, entry) => total + (entry.generatedSchedule?.runs ?? 0),
             0,
           );
+          const manufacturingBlueprintCounts =
+            tab === "manufacture"
+              ? simulationManufacturingBlueprintCounts(group, stock, visibleBlueprintStock)
+              : undefined;
           const formulaCounts = simulationReactionFormulaCountsForGroup(
             group,
             reactionFormulaCounts,
@@ -3804,7 +4012,11 @@ function SimulationActivityTab({
               contentClassName={
                 tab === "react"
                   ? "w-full self-end text-right font-mono text-xs lg:w-auto lg:self-auto"
-                  : "grid w-full grid-cols-[1fr_auto_1fr] items-center gap-3 self-end text-right font-mono text-xs lg:w-auto lg:grid-cols-[3rem_9rem_minmax(11rem,max-content)] lg:justify-end lg:gap-x-5 lg:self-auto"
+                  : cn(
+                      "grid w-full grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] items-center gap-2 self-end text-right font-mono text-xs",
+                      "lg:w-auto lg:justify-end lg:gap-x-2 lg:self-auto",
+                      manufacturingActivityFactColumnClasses,
+                    )
               }
             >
               {tab === "react" ? (
@@ -3861,34 +4073,74 @@ function SimulationActivityTab({
                       onOpenBuy={controls.onOpenBuy}
                     />
                   </span>
+                  <span className="flex flex-col items-end justify-center font-mono text-xs">
+                    <small className="text-muted-foreground lg:hidden">
+                      Available / Total <span className="block">BPO</span>
+                    </small>
+                    <SimulationManufacturingBlueprintCountTooltip
+                      name="Blueprint Originals"
+                      visible={manufacturingBlueprintCounts?.visibleBpos ?? 0}
+                      owned={manufacturingBlueprintCounts?.ownedBpos ?? 0}
+                      inUse={manufacturingBlueprintCounts?.inUseBpos ?? 0}
+                      available={manufacturingBlueprintCounts?.availableBpos ?? 0}
+                    >
+                      {quantity(manufacturingBlueprintCounts?.availableBpos ?? 0)} /{" "}
+                      {quantity(manufacturingBlueprintCounts?.visibleBpos ?? 0)}
+                    </SimulationManufacturingBlueprintCountTooltip>
+                  </span>
+                  <span className="flex flex-col items-end justify-center font-mono text-xs">
+                    <small className="text-muted-foreground lg:hidden">
+                      BPC <span className="block">Runs</span>
+                    </small>
+                    <SimulationManufacturingBlueprintCountTooltip
+                      name="Blueprint Copy Runs"
+                      visible={manufacturingBlueprintCounts?.visibleBpcRuns ?? 0}
+                      owned={manufacturingBlueprintCounts?.ownedBpcRuns ?? 0}
+                      inUse={manufacturingBlueprintCounts?.inUseBpcRuns ?? 0}
+                      available={manufacturingBlueprintCounts?.availableBpcRuns ?? 0}
+                    >
+                      {quantity(manufacturingBlueprintCounts?.availableBpcRuns ?? 0)}
+                    </SimulationManufacturingBlueprintCountTooltip>
+                  </span>
                   <span
                     className={cn(
-                      "flex min-w-0 items-center gap-1 justify-self-end whitespace-normal",
+                      "flex min-w-0 flex-col items-end justify-self-end whitespace-normal",
                       "lg:whitespace-nowrap",
                     )}
                   >
-                    <CopyableNumber
-                      value={
-                        manufacturingRunDisplay === "schedule"
-                          ? scheduledAtT0Runs
-                          : manufacturingRunDisplay === "installable"
-                            ? suggestedInstallableRuns
-                            : plannedRuns
-                      }
-                      suffix=" / "
-                      copyLabel={
-                        manufacturingRunDisplay === "schedule"
-                          ? "T+0 scheduled runs"
-                          : manufacturingRunDisplay === "installable"
-                            ? "Suggested install runs"
-                            : "Planned runs"
-                      }
-                    />
-                    <CopyableNumber
-                      value={group.quantities.totalRuns}
-                      suffix=" runs"
-                      copyLabel="Total runs"
-                    />
+                    <small className="text-muted-foreground lg:hidden">
+                      {manufacturingRunDisplay === "schedule"
+                        ? "T+0 Scheduled / Total"
+                        : manufacturingRunDisplay === "installable"
+                          ? "Suggested / Total"
+                          : "Installable / Total"}
+                      <span className="block">Runs</span>
+                    </small>
+                    <span className="flex items-center gap-1">
+                      <CopyableNumber
+                        value={
+                          manufacturingRunDisplay === "schedule"
+                            ? scheduledAtT0Runs
+                            : manufacturingRunDisplay === "installable"
+                              ? suggestedInstallableRuns
+                              : group.quantities.installableRuns
+                        }
+                        suffix=" / "
+                        copyLabel={
+                          manufacturingRunDisplay === "schedule"
+                            ? "T+0 scheduled runs"
+                            : manufacturingRunDisplay === "installable"
+                              ? "Suggested install runs"
+                              : "Installable runs"
+                        }
+                        copySuffix=" runs"
+                      />
+                      <CopyableNumber
+                        value={group.quantities.totalRuns}
+                        copyLabel="Total runs"
+                        copySuffix=" runs"
+                      />
+                    </span>
                   </span>
                 </>
               )}
@@ -4243,7 +4495,16 @@ function SimulationHaulRow({
             owner !== null ? "flex flex-col items-end justify-self-end" : "flex flex-col items-end"
           }
         >
-          <CopyableNumber value={task.quantity} suffix=" units" copyLabel="Haul quantity" />
+          {task.runsNeeded !== undefined ? (
+            <CopyableNumber
+              value={task.runsNeeded}
+              suffix=" runs"
+              copyLabel="Blueprint runs needed for haul"
+              copyWithSuffix
+            />
+          ) : (
+            <CopyableNumber value={task.quantity} suffix=" units" copyLabel="Haul quantity" />
+          )}
           <span className="text-muted-foreground">
             <CopyableNumber
               value={Math.ceil(task.quantity * task.unitVolume)}
@@ -4579,6 +4840,7 @@ export default function SimulationResults({
   status,
   stock,
   visibleReactionFormulaStock = stock,
+  visibleBlueprintStock = stock,
   industryJobs,
   marketBuyOrderQuantities,
   locationNamesById,
@@ -4607,6 +4869,7 @@ export default function SimulationResults({
   status: string;
   stock: readonly PlanStockItem[];
   visibleReactionFormulaStock?: readonly PlanStockItem[];
+  visibleBlueprintStock?: readonly PlanStockItem[];
   industryJobs?: ClientJobsResponse["jobs"];
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
   locationNamesById: ReadonlyMap<number, string>;
@@ -4965,6 +5228,7 @@ export default function SimulationResults({
       haulTasks={visibleHaulTasks}
       stock={stock}
       visibleReactionFormulaStock={visibleReactionFormulaStock}
+      visibleBlueprintStock={visibleBlueprintStock}
       industryJobs={industryJobs}
       marketBuyOrderQuantities={marketBuyOrderQuantities}
       directStockpileItemTypeIds={directStockpileItemTypeIds}
@@ -5111,6 +5375,7 @@ function SimulationTabContent({
   haulTasks,
   stock,
   visibleReactionFormulaStock,
+  visibleBlueprintStock,
   industryJobs,
   marketBuyOrderQuantities,
   overOrderPercent,
@@ -5146,6 +5411,7 @@ function SimulationTabContent({
   haulTasks: readonly SimulationHaulTask[];
   stock: readonly PlanStockItem[];
   visibleReactionFormulaStock: readonly PlanStockItem[];
+  visibleBlueprintStock: readonly PlanStockItem[];
   industryJobs?: ClientJobsResponse["jobs"];
   marketBuyOrderQuantities?: Readonly<Record<string, number>>;
   overOrderPercent: string;
@@ -5247,6 +5513,7 @@ function SimulationTabContent({
         simulationInputRevision={`${result.metadata.simulationId ?? ""}|${result.metadata.normalizedInputHash}|${result.metadata.sdeRevision}`}
         stock={stock}
         visibleReactionFormulaStock={visibleReactionFormulaStock}
+        visibleBlueprintStock={visibleBlueprintStock}
         locationNamesById={locationNamesById}
         locationSystemIdsById={locationSystemIdsById}
         systemNamesById={systemNamesById}

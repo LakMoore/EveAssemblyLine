@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { simulationCalculationVersion } from "./etag";
 import { parseSimulatorRequest } from "./schema";
 import { aggregateHaulingTasks, simulateIndustry } from "./simulate";
 
@@ -115,6 +116,71 @@ void test("groups source lots by haul route while retaining purpose and lot quan
   );
 });
 
+void test("sums required BPC runs when haul tasks share a route", () => {
+  const sharedBpcHaul = {
+    typeId: 33823,
+    typeName: "Omnidirectional Tracking Enhancer I Blueprint",
+    blueprintKind: "bpc" as const,
+    unitVolume: 0.01,
+    fromLocationId: 10,
+    toLocationId: 20,
+    purpose: "industry-input" as const,
+    demands: [],
+  };
+  const tasks = aggregateHaulingTasks([
+    {
+      ...sharedBpcHaul,
+      transferId: "copy-a",
+      lotId: "lot-a",
+      quantity: 1,
+      runsNeeded: 5,
+    },
+    {
+      ...sharedBpcHaul,
+      transferId: "copy-b",
+      lotId: "lot-b",
+      quantity: 1,
+      runsNeeded: 7,
+    },
+  ]);
+
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].quantity, 2);
+  assert.equal(tasks[0].runsNeeded, 12);
+});
+
+void test("retains known BPO runs when grouped with a runless blueprint haul", () => {
+  const sharedBpoHaul = {
+    typeId: 100,
+    typeName: "Test Blueprint",
+    blueprintKind: "bpo" as const,
+    unitVolume: 0.01,
+    fromLocationId: 10,
+    toLocationId: 20,
+    purpose: "industry-input" as const,
+    demands: [],
+  };
+  const tasks = aggregateHaulingTasks([
+    {
+      ...sharedBpoHaul,
+      transferId: "manufacturing-use",
+      lotId: "bpo-manufacturing",
+      quantity: 1,
+      runsNeeded: 9,
+    },
+    {
+      ...sharedBpoHaul,
+      transferId: "copying-use",
+      lotId: "bpo-copying",
+      quantity: 1,
+    },
+  ]);
+
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].quantity, 2);
+  assert.equal(tasks[0].runsNeeded, 9);
+});
+
 void test("keeps haul horizons and blueprint kinds distinct with stable grouped identities", () => {
   const common = {
     typeId: 57457,
@@ -216,7 +282,7 @@ void test("assembles a versioned invariant-safe result from the cached SDE", asy
   });
   const first = await simulateIndustry(request);
   const second = await simulateIndustry(request);
-  assert.equal(first.metadata.simulatorVersion, 16);
+  assert.equal(first.metadata.simulatorVersion, simulationCalculationVersion);
   assert.equal(first.metadata.normalizedInputHash, second.metadata.normalizedInputHash);
   assert.equal(first.metadata.invariantViolationCount, 0);
   assert.ok(first.lists.manufacturingJobs.some((job) => job.productTypeId === 587));
@@ -680,6 +746,100 @@ void test("shows configured-location stock only on the surplus tab when requeste
   );
   assert.ok(
     !result.lists.planItems.some((bucket) => bucket.items.some((item) => item.typeId === 4393)),
+  );
+});
+
+void test("shows all BPC runs at a plan-used unconfigured source location", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "main",
+        name: "Main",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 33824, quantity: 29, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [
+      {
+        typeId: 33823,
+        name: "Omnidirectional Tracking Enhancer I Blueprint",
+        quantity: 5,
+        locationId: 70,
+        blueprintPrints: [1, 2, 3, 4, 5].map((itemId) => ({
+          itemId,
+          runs: 40,
+          type: "bpc" as const,
+          me: 0,
+          te: 0,
+        })),
+      },
+      {
+        typeId: 33823,
+        name: "Omnidirectional Tracking Enhancer I Blueprint",
+        quantity: 1,
+        locationId: 70,
+        blueprintPrints: [{ itemId: 7, runs: -1, type: "bpo" as const, me: 0, te: 0 }],
+      },
+      {
+        typeId: 33823,
+        name: "Omnidirectional Tracking Enhancer I Blueprint",
+        quantity: 1,
+        locationId: 71,
+        blueprintPrints: [{ itemId: 6, runs: 40, type: "bpc" as const, me: 0, te: 0 }],
+      },
+    ],
+    settings: {
+      includeCorporationAssets: true,
+      personalSellOrdersAsStock: false,
+      allCorporationSellOrdersAsStock: false,
+      myCorporationSellOrdersAsStock: false,
+      buildBlacklist: [],
+      buyBlacklist: [],
+    },
+    simulation: { version: 1 },
+  });
+
+  const result = await simulateIndustry(request);
+  const blueprintLedger = result.ledgers.find((ledger) => ledger.locationId === 70);
+  const blueprintBalance = blueprintLedger?.balances.find((balance) => balance.typeId === 33823);
+
+  assert.ok(blueprintBalance);
+  assert.equal(blueprintBalance.quantityKind, "blueprint-run");
+  assert.equal(blueprintBalance.availableNow, 200);
+  assert.equal(blueprintBalance.surplus, 200 - blueprintBalance.transferredOut);
+  const manufacturingBlueprintBalance = result.ledgers
+    .find((ledger) => ledger.locationId === 20)
+    ?.balances.find((balance) => balance.typeId === 33823);
+  const requiredManufacturingRuns = result.lists.manufacturingJobs
+    .filter((job) => job.productTypeId === 33824)
+    .reduce((total, job) => total + job.requiredRuns, 0);
+  const bpcHauls = result.lists.haulingTasks.filter(
+    (task) => task.typeId === 33823 && task.blueprintKind === "bpc",
+  );
+  assert.ok(manufacturingBlueprintBalance);
+  assert.equal(
+    blueprintBalance.transferredOut,
+    bpcHauls
+      .filter((task) => task.fromLocationId === 70)
+      .reduce((total, task) => total + (task.runsNeeded ?? 0), 0),
+  );
+  assert.equal(manufacturingBlueprintBalance.availableFromHauling, requiredManufacturingRuns);
+  assert.deepEqual(
+    result.lists.haulingTasks.filter(
+      (task) => task.typeId === 33823 && task.blueprintKind === "bpo",
+    ),
+    [],
+  );
+  assert.deepEqual(
+    result.ledgers.filter((ledger) => ledger.locationId === 71),
+    [],
   );
 });
 

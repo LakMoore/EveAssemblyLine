@@ -1052,10 +1052,16 @@ class IndustryDemandSimulation {
       Math.max(0, availableCopyRuns - previouslyReservedCopyRuns),
     );
     this.reservedPrepassCopyRuns.set(copyKey, previouslyReservedCopyRuns + coveredCopyRuns);
+    this.allocator.reserveBlueprintCopyRuns(
+      sourceBlueprint._key,
+      coveredCopyRuns,
+      inventionLocationId,
+    );
     const copyRuns = inventionPlan.attempts - coveredCopyRuns;
     if (copyRuns <= 0) return;
 
     const copyingLocationId = stockpile.locations.copying;
+    this.allocator.reserveReusableBlueprintOriginal(sourceBlueprint._key, copyingLocationId);
     const copyingProfile = this.request.simulation.scienceProfiles.find(
       (profile) => profile.locationId === copyingLocationId,
     );

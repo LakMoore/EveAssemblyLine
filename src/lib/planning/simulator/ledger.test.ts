@@ -143,6 +143,57 @@ void test("keeps deferred demand independent from immediately available stock", 
   assert.equal(balance.surplus, 0);
 });
 
+void test("projects only allocated BPO runs as future haul supply", () => {
+  const blueprintAccount = { locationId: 20, typeId: 100 };
+  const projection = projectSimulationLedger(
+    [],
+    [
+      {
+        id: "blueprint-demand",
+        kind: "demand",
+        account: blueprintAccount,
+        quantity: 128,
+        source: {
+          demandId: "blueprint-demand",
+          stockpileId: "main",
+          materialTypeId: 100,
+          productTypeId: 200,
+          productQuantity: 128,
+          plannedQuantity: 128,
+          requiredNow: 0,
+          reserved: 128,
+          destinationLocationId: 20,
+          activity: "manufacturing",
+          quantityKind: "blueprint-run",
+        },
+      },
+      {
+        id: "bpo-runs-after-hauling",
+        kind: "blueprint-run-supply",
+        account: blueprintAccount,
+        quantity: 99,
+        horizon: "after-hauling",
+        demandingJobId: "manufacturing-job",
+      },
+      {
+        id: "bpc-runs-after-hauling",
+        kind: "blueprint-run-supply",
+        account: blueprintAccount,
+        quantity: 29,
+        horizon: "after-hauling",
+        demandingJobId: "manufacturing-job",
+      },
+    ],
+  );
+
+  const balance = projection.balances.get("20:100:blueprint-run");
+  assert.ok(balance);
+  assert.equal(balance.futureDemand, 128);
+  assert.equal(balance.futureSupply, 128);
+  assert.equal(balance.unsatisfied, 0);
+  assert.deepEqual(projection.invariantViolations, []);
+});
+
 void test("projects additive readiness without changing the demand declaration", () => {
   const declaration: Extract<SimulationTransaction, { kind: "demand" }> = {
     id: "demand-1",

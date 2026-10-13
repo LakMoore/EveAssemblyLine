@@ -90,6 +90,7 @@ export class SimulationAllocator {
   private readonly previewItemQuantityByLotId: Map<string, number>;
   private readonly remainingBlueprintRunsByLotId: Map<string, number>;
   private readonly previewBlueprintRunsByLotId: Map<string, number>;
+  private readonly reservedBlueprintRunsByLotId = new Map<string, number>();
   private readonly blueprintDestinationByLotId = new Map<string, number>();
   private readonly previewBlueprintDestinationByLotId = new Map<string, number>();
   private readonly stockpileLocationIds: ReadonlySet<number>;
@@ -491,8 +492,7 @@ export class SimulationAllocator {
         || lot.kind === "formula"
         || lot.inUse
         || (
-          lot.kind === "bpc"
-          && this.blueprintDestinationByLotId.has(lot.lotId)
+          this.blueprintDestinationByLotId.has(lot.lotId)
           && this.blueprintDestinationByLotId.get(lot.lotId) !== destinationLocationId
         )
         || (lot.locationId !== destinationLocationId && this.isExcluded(lot, destinationLocationId))
@@ -541,7 +541,13 @@ export class SimulationAllocator {
         destinations,
       ).flatMap((lot) => {
         const availableRuns =
-          lot.kind === "bpo" ? remainingRuns : (remainingRunsByLotId.get(lot.lotId) ?? 0);
+          lot.kind === "bpo"
+            ? remainingRuns
+            : Math.max(
+                0,
+                (remainingRunsByLotId.get(lot.lotId) ?? 0)
+                  - (this.reservedBlueprintRunsByLotId.get(lot.lotId) ?? 0),
+              );
         if (availableRuns <= 0) return [];
         const batchLimit = Math.max(1, Math.floor(maxRunsPerJob(lot.timeEfficiency)));
         const preferredBatchRuns = Math.min(remainingRuns, batchLimit);
@@ -556,18 +562,25 @@ export class SimulationAllocator {
       });
       if (candidates.length === 0) break;
 
+      const finiteCandidates = candidates.filter((candidate) => candidate.lot.kind === "bpc");
+      const preferredCandidates = finiteCandidates.length > 0 ? finiteCandidates : candidates;
       const selected =
-        candidates.find((candidate) => candidate.availableRuns >= candidate.preferredBatchRuns)
-        ?? candidates.reduce((best, candidate) =>
+        preferredCandidates.find(
+          (candidate) => candidate.availableRuns >= candidate.preferredBatchRuns,
+        )
+        ?? preferredCandidates.reduce((best, candidate) =>
           candidate.possibleBatchRuns > best.possibleBatchRuns ? candidate : best,
         );
       const allocatedRuns = selected.possibleBatchRuns;
       allocations.push({ lot: selected.lot, runs: allocatedRuns });
       remainingRuns -= allocatedRuns;
       if (selected.lot.kind === "bpc") {
-        remainingRunsByLotId.set(selected.lot.lotId, selected.availableRuns - allocatedRuns);
-        destinations.set(selected.lot.lotId, destinationLocationId);
+        remainingRunsByLotId.set(
+          selected.lot.lotId,
+          (remainingRunsByLotId.get(selected.lot.lotId) ?? 0) - allocatedRuns,
+        );
       }
+      destinations.set(selected.lot.lotId, destinationLocationId);
     }
     return allocations;
   }
@@ -583,11 +596,7 @@ export class SimulationAllocator {
           lot.typeId === blueprintTypeId
           && lot.kind !== "formula"
           && !lot.inUse
-          && (
-            lot.kind !== "bpc"
-            || !destinations.has(lot.lotId)
-            || destinations.get(lot.lotId) === destinationLocationId
-          )
+          && (!destinations.has(lot.lotId) || destinations.get(lot.lotId) === destinationLocationId)
           && (
             lot.locationId === destinationLocationId
             || !this.isExcluded(lot, destinationLocationId)
@@ -624,10 +633,62 @@ export class SimulationAllocator {
         )
         || (lot.locationId !== destinationLocationId && this.isExcluded(lot, destinationLocationId))
       ) continue;
-      availableRuns += this.remainingBlueprintRunsByLotId.get(lot.lotId) ?? 0;
+      availableRuns
+        += Math.max(
+          0,
+          (this.remainingBlueprintRunsByLotId.get(lot.lotId) ?? 0)
+            - (this.reservedBlueprintRunsByLotId.get(lot.lotId) ?? 0),
+        );
       if (availableRuns >= maximumRuns) return maximumRuns;
     }
     return Math.min(availableRuns, maximumRuns);
+  }
+
+  /** Reserves existing finite BPC runs so manufacturing cannot consume invention inputs. */
+  reserveBlueprintCopyRuns(
+    blueprintTypeId: number,
+    runs: number,
+    destinationLocationId: number,
+  ): number {
+    let remainingRuns = runs;
+    const copies = this.inventory.blueprintLots
+      .filter(
+        (lot) =>
+          lot.typeId === blueprintTypeId
+          && lot.kind === "bpc"
+          && !lot.inUse
+          && (
+            !this.blueprintDestinationByLotId.has(lot.lotId)
+            || this.blueprintDestinationByLotId.get(lot.lotId) === destinationLocationId
+          )
+          && (
+            lot.locationId === destinationLocationId
+            || !this.isExcluded(lot, destinationLocationId)
+          ),
+      )
+      .slice()
+      .sort((left, right) => {
+        const leftRank = left.locationId === destinationLocationId ? 0 : 1;
+        const rightRank = right.locationId === destinationLocationId ? 0 : 1;
+        return leftRank - rightRank || left.lotId.localeCompare(right.lotId);
+      });
+    for (const copy of copies) {
+      if (remainingRuns <= 0) break;
+      const available = Math.max(
+        0,
+        (this.remainingBlueprintRunsByLotId.get(copy.lotId) ?? 0)
+          - (this.reservedBlueprintRunsByLotId.get(copy.lotId) ?? 0),
+      );
+      const reservedRuns = Math.min(remainingRuns, available);
+      if (reservedRuns <= 0) continue;
+      this.reservedBlueprintRunsByLotId.set(
+        copy.lotId,
+        (this.reservedBlueprintRunsByLotId.get(copy.lotId) ?? 0) + reservedRuns,
+      );
+      this.blueprintDestinationByLotId.set(copy.lotId, destinationLocationId);
+      remainingRuns -= reservedRuns;
+    }
+    return runs - remainingRuns;
   }
 
   /** Claims existing active-job output without treating it as physical stock. */
@@ -872,7 +933,7 @@ export class SimulationAllocator {
         demandingJobId,
         horizon,
       });
-      this.recordBlueprintHaul(lot, destinationLocationId, demandingJobId);
+      this.recordBlueprintHaul(lot, destinationLocationId, demandingJobId, allocatedRuns);
       this.recordBlueprintTransfer(lot, destinationLocationId, allocatedRuns, demandingJobId);
       return {
         blueprintTypeId,
@@ -991,6 +1052,10 @@ export class SimulationAllocator {
       const claimedRuns = Math.min(remainingRuns, available);
       if (claimedRuns <= 0) continue;
       this.remainingBlueprintRunsByLotId.set(copy.lotId, available - claimedRuns);
+      const reservedRuns = this.reservedBlueprintRunsByLotId.get(copy.lotId) ?? 0;
+      if (reservedRuns > 0) {
+        this.reservedBlueprintRunsByLotId.set(copy.lotId, Math.max(0, reservedRuns - claimedRuns));
+      }
       this.blueprintDestinationByLotId.set(copy.lotId, destinationLocationId);
       claims.push({
         blueprintTypeId,
@@ -1016,7 +1081,7 @@ export class SimulationAllocator {
         demandingJobId,
         horizon,
       });
-      this.recordBlueprintHaul(copy, destinationLocationId, demandingJobId);
+      this.recordBlueprintHaul(copy, destinationLocationId, demandingJobId, claimedRuns);
       this.recordBlueprintTransfer(copy, destinationLocationId, claimedRuns, demandingJobId);
       remainingRuns -= claimedRuns;
     }
@@ -1030,25 +1095,9 @@ export class SimulationAllocator {
     account: SimulationLedgerAccount,
     demandingJobId: string,
   ): BlueprintClaim | undefined {
-    const original = this.inventory.blueprintLots
-      .filter(
-        (lot) =>
-          lot.typeId === blueprintTypeId
-          && lot.kind === "bpo"
-          && !lot.inUse
-          && (
-            lot.locationId === destinationLocationId
-            || !this.isExcluded(lot, destinationLocationId)
-          ),
-      )
-      .slice()
-      .sort((left, right) => {
-        const leftRank = left.locationId === destinationLocationId ? 0 : 1;
-        const rightRank = right.locationId === destinationLocationId ? 0 : 1;
-        return leftRank - rightRank || left.lotId.localeCompare(right.lotId);
-      })
-      .at(0);
+    const original = this.reusableBlueprintOriginal(blueprintTypeId, destinationLocationId);
     if (!original) return undefined;
+    this.blueprintDestinationByLotId.set(original.lotId, destinationLocationId);
     this.transactions.push({
       id: this.nextTransactionId("blueprint-original"),
       kind: "blueprint-run-reservation",
@@ -1069,6 +1118,41 @@ export class SimulationAllocator {
       horizon: this.blueprintHorizon(original, destinationLocationId),
       lotId: original.lotId,
     };
+  }
+
+  /** Reserves one reusable original for a facility before activity allocation begins. */
+  reserveReusableBlueprintOriginal(blueprintTypeId: number, destinationLocationId: number): void {
+    const original = this.reusableBlueprintOriginal(blueprintTypeId, destinationLocationId);
+    if (original) this.blueprintDestinationByLotId.set(original.lotId, destinationLocationId);
+  }
+
+  /** Selects an eligible reusable original, preferring one already at the destination. */
+  private reusableBlueprintOriginal(
+    blueprintTypeId: number,
+    destinationLocationId: number,
+  ): SimulatorBlueprintLot | undefined {
+    return this.inventory.blueprintLots
+      .filter(
+        (lot) =>
+          lot.typeId === blueprintTypeId
+          && lot.kind === "bpo"
+          && !lot.inUse
+          && (
+            !this.blueprintDestinationByLotId.has(lot.lotId)
+            || this.blueprintDestinationByLotId.get(lot.lotId) === destinationLocationId
+          )
+          && (
+            lot.locationId === destinationLocationId
+            || !this.isExcluded(lot, destinationLocationId)
+          ),
+      )
+      .slice()
+      .sort((left, right) => {
+        const leftRank = left.locationId === destinationLocationId ? 0 : 1;
+        const rightRank = right.locationId === destinationLocationId ? 0 : 1;
+        return leftRank - rightRank || left.lotId.localeCompare(right.lotId);
+      })
+      .at(0);
   }
 
   /** Returns remaining unreserved ordinary quantity for a lot. */
@@ -1425,13 +1509,42 @@ export class SimulationAllocator {
     lot: SimulatorBlueprintLot,
     destinationLocationId: number,
     demandingJobId: string,
+    runsNeeded?: number,
   ): void {
+    if (
+      lot.kind === "bpo"
+      && runsNeeded !== undefined
+      && runsNeeded > 0
+      && lot.locationId !== undefined
+      && lot.horizon === "now"
+    ) {
+      this.transactions.push({
+        id: this.nextTransactionId("blueprint-run-supply"),
+        kind: "blueprint-run-supply",
+        account: { locationId: destinationLocationId, typeId: lot.typeId },
+        quantity: runsNeeded,
+        horizon: lot.locationId === destinationLocationId ? "now" : "after-hauling",
+        demandingJobId,
+      });
+    }
     if (
       lot.horizon !== "now"
       || lot.locationId === undefined
       || lot.locationId === destinationLocationId
-      || this.transferredBlueprintLotIds.has(lot.lotId)
     ) return;
+    const existingTask = this.haulingTasks.find(
+      (task) =>
+        task.lotId === lot.lotId
+        && task.toLocationId === destinationLocationId
+        && task.purpose === "industry-input",
+    );
+    if (existingTask) {
+      if ((lot.kind === "bpc" || lot.kind === "bpo") && runsNeeded !== undefined) {
+        existingTask.runsNeeded = (existingTask.runsNeeded ?? 0) + runsNeeded;
+      }
+      return;
+    }
+    if (this.transferredBlueprintLotIds.has(lot.lotId)) return;
     const pseudoItem: SimulationItemLot = {
       lotId: lot.lotId,
       typeId: lot.typeId,
@@ -1454,6 +1567,9 @@ export class SimulationAllocator {
       typeName: lot.name,
       blueprintKind: lot.kind,
       quantity: 1,
+      ...((lot.kind === "bpc" || lot.kind === "bpo") && runsNeeded !== undefined
+        ? { runsNeeded }
+        : {}),
       unitVolume: 0.01,
       fromLocationId: lot.locationId,
       toLocationId: destinationLocationId,
@@ -1465,7 +1581,7 @@ export class SimulationAllocator {
     });
   }
 
-  /** Posts a finite BPC transfer in licensed-run units, including future output. */
+  /** Posts allocated finite BPC runs to the destination, including future output. */
   private recordBlueprintTransfer(
     lot: SimulatorBlueprintLot,
     destinationLocationId: number,
@@ -1505,7 +1621,16 @@ export class SimulationAllocator {
         outputSource: lot.activity,
         demandingJobId,
       });
-      if (!this.transferredBlueprintLotIds.has(lot.lotId)) {
+      const existingTask = this.haulingTasks.find(
+        (task) =>
+          task.lotId === lot.lotId
+          && task.toLocationId === destinationLocationId
+          && task.purpose === "completion",
+      );
+      if (existingTask) {
+        existingTask.runsNeeded = (existingTask.runsNeeded ?? 0) + quantity;
+      }
+      else if (!this.transferredBlueprintLotIds.has(lot.lotId)) {
         this.transferredBlueprintLotIds.add(lot.lotId);
         this.haulingTasks.push({
           transferId: `completion:${lot.lotId}:${destinationLocationId}`,
@@ -1514,6 +1639,7 @@ export class SimulationAllocator {
           typeName: lot.name,
           blueprintKind: "bpc",
           quantity: 1,
+          runsNeeded: quantity,
           unitVolume: 0.01,
           fromLocationId: lot.locationId,
           toLocationId: destinationLocationId,

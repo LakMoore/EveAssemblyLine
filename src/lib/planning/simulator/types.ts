@@ -7,6 +7,7 @@ import type {
   StockOwnerType,
 } from "@/lib/planning/types";
 import type { SdeLanguage } from "@/lib/reference/languages";
+import type { simulationCalculationVersion } from "./etag";
 
 /** Sanitized provenance needed to model an already-installed industry output. */
 export interface SimulationIndustryOutputMarker {
@@ -15,7 +16,7 @@ export interface SimulationIndustryOutputMarker {
   sourceJobId?: number;
 }
 
-/** Unit represented by a simulator quantity. Blueprint quantities are licensed runs. */
+/** Unit represented by a simulator quantity. Blueprint quantities are run counts. */
 export type SimulationQuantityKind = "item" | "blueprint-run";
 
 /** Asset fields required by simulation; display metadata is resolved from SDE context. */
@@ -475,6 +476,7 @@ export interface SimulationHaulTask {
   blueprintKind?: "bpo" | "bpc" | "formula";
   horizon?: "now" | "after-hauling" | "after-upstream";
   quantity: number;
+  runsNeeded?: number;
   unitVolume: number;
   fromLocationId: number;
   toLocationId: number;
@@ -548,7 +550,7 @@ export interface SimulationLedgerView {
 export interface SimulationResultV2 {
   metadata: {
     simulationId?: string;
-    simulatorVersion: 16;
+    simulatorVersion: typeof simulationCalculationVersion;
     policyVersion: 1;
     generatedAt: string;
     sdeRevision: string;

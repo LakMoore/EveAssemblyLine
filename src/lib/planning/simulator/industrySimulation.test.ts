@@ -1334,6 +1334,99 @@ void test("rounds invention output to the whole copies needed for demand", async
   }
 });
 
+void test("hauls a BPO to copying when invention needs additional source BPC runs", async () => {
+  const baseRequest = {
+    stockpiles: [
+      {
+        id: "main",
+        name: "Main",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 1952, quantity: 10, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [
+      {
+        typeId: 11620,
+        name: "Invention Source Blueprint",
+        quantity: 1,
+        locationId: 80,
+        blueprintPrints: [{ itemId: 31, runs: -1, type: "bpo" as const, me: 0, te: 0 }],
+      },
+    ],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: {
+      version: 1,
+      characters: [
+        {
+          characterId: 1,
+          systemId: 30_000_142,
+          freeSlots: { manufacturing: 100, reactions: 100, science: 100 },
+          timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
+          skillLevels: { "11448": 4, "11453": 4, "21790": 4 },
+        },
+      ],
+    },
+  };
+
+  const baselineResult = await simulateIndustry(parseSimulatorRequest(baseRequest));
+  const baselineInventionJob = baselineResult.lists.inventionJobs.find(
+    (job) => job.sourceBlueprintTypeId === 11620,
+  );
+  assert.ok(baselineInventionJob);
+
+  const oneRunShortResult = await simulateIndustry(
+    parseSimulatorRequest({
+      ...baseRequest,
+      assets: [
+        ...baseRequest.assets,
+        {
+          typeId: 11620,
+          name: "Invention Source Blueprint",
+          quantity: 1,
+          locationId: 60,
+          blueprintPrints: [
+            {
+              itemId: 32,
+              runs: baselineInventionJob.attempts - 1,
+              type: "bpc" as const,
+              me: 0,
+              te: 0,
+            },
+          ],
+        },
+      ],
+    }),
+  );
+  const inventionJob = oneRunShortResult.lists.inventionJobs.find(
+    (job) => job.sourceBlueprintTypeId === 11620,
+  );
+  const sourceInput = inventionJob?.inputs.find((input) => input.typeId === 11620);
+  const copyingJob = oneRunShortResult.lists.bpcToCopy.find((job) => job.blueprintTypeId === 11620);
+  const bpoHaul = oneRunShortResult.lists.haulingTasks.find(
+    (task) => task.typeId === 11620 && task.blueprintKind === "bpo",
+  );
+
+  assert.ok(inventionJob);
+  assert.equal(inventionJob.attempts, baselineInventionJob.attempts);
+  assert.ok(sourceInput);
+  assert.ok(copyingJob);
+  assert.ok(bpoHaul);
+  assert.equal(copyingJob.totalLicensedRuns, 1);
+  assert.equal(sourceInput.requiredQuantity - (baselineInventionJob.attempts - 1), 1);
+  assert.equal(sourceInput.requiredQuantity, inventionJob.attempts);
+  assert.equal(sourceInput.unsatisfiedQuantity, 0);
+  assert.equal(bpoHaul.fromLocationId, 80);
+  assert.equal(bpoHaul.toLocationId, 50);
+  assert.equal(oneRunShortResult.metadata.invariantViolationCount, 0);
+});
+
 void test("buys one relic per T3 invention attempt after remote relic stock is hauled", async () => {
   const baseRequest = {
     stockpiles: [

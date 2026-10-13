@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { simulationCalculationVersion } from "./simulator/etag";
-import { isSimulationResultV2 } from "./planResultStore";
+import { isSimulationResultV2, isStoredSimulationHaulTask } from "./planResultStore";
 
 const listNames = [
   "warnings",
@@ -38,6 +38,43 @@ function simulationResult() {
 
 void test("accepts a complete cached native simulation result", () => {
   assert.equal(isSimulationResultV2(simulationResult()), true);
+});
+
+void test("accepts grouped BPC haul tasks and rejects invalid required runs", () => {
+  const groupedBpcHaul = {
+    transferId: "haul-group:10:33823:20:character:7:now:industry-input:bpc",
+    sourceLots: [
+      { lotId: "copy-a", quantity: 1 },
+      { lotId: "copy-b", quantity: 1 },
+    ],
+    typeId: 33823,
+    typeName: "Omnidirectional Tracking Enhancer I Blueprint",
+    blueprintKind: "bpc",
+    quantity: 2,
+    runsNeeded: 8,
+    unitVolume: 0.01,
+    fromLocationId: 10,
+    toLocationId: 20,
+    ownerType: "character",
+    ownerId: 7,
+    purpose: "industry-input",
+    demands: [],
+  };
+
+  assert.equal(isStoredSimulationHaulTask(groupedBpcHaul), true);
+  assert.equal(isStoredSimulationHaulTask({ ...groupedBpcHaul, runsNeeded: 1.5 }), false);
+  assert.equal(isStoredSimulationHaulTask({ ...groupedBpcHaul, blueprintKind: "formula" }), false);
+  assert.equal(isStoredSimulationHaulTask({ ...groupedBpcHaul, sourceLots: [] }), false);
+  assert.equal(isStoredSimulationHaulTask({ ...groupedBpcHaul, blueprintKind: "bpo" }), true);
+
+  const cachedResult = simulationResult();
+  (cachedResult.lists as Record<string, unknown>).haulingTasks = [groupedBpcHaul];
+  assert.equal(isSimulationResultV2(cachedResult), true);
+
+  (cachedResult.lists as Record<string, unknown>).haulingTasks = [
+    { ...groupedBpcHaul, runsNeeded: 1.5 },
+  ];
+  assert.equal(isSimulationResultV2(cachedResult), false);
 });
 
 void test("rejects cached native results without their authoritative slot map", () => {

@@ -111,6 +111,14 @@ export type SimulationTransaction =
     }
   | {
       id: string;
+      kind: "blueprint-run-supply";
+      account: SimulationLedgerAccount;
+      quantity: number;
+      horizon: Extract<SupplyHorizon, "now" | "after-hauling">;
+      demandingJobId: string;
+    }
+  | {
+      id: string;
       kind: "transfer-commitment";
       sourceAccount: SimulationLedgerAccount;
       destinationAccount: SimulationLedgerAccount;
@@ -327,6 +335,7 @@ export function projectSimulationLedger(
           : transaction.kind === "production-commitment"
             ? (transaction.quantityKind ?? "item")
             : transaction.kind === "blueprint-run-reservation"
+                || transaction.kind === "blueprint-run-supply"
               ? "blueprint-run"
               : "item";
     const key = quantityLedgerKey(transaction.account, transactionQuantityKind);
@@ -526,6 +535,10 @@ export function projectSimulationLedger(
     }
     else if (transaction.kind === "purchase-requirement") {
       balance.availableFromMarket += transaction.quantity;
+    }
+    else if (transaction.kind === "blueprint-run-supply") {
+      if (transaction.horizon === "now") balance.availableNow += transaction.quantity;
+      else balance.availableFromHauling += transaction.quantity;
     }
     else {
       const blueprintLot = sourceLotsById.get(transaction.blueprintLotId);

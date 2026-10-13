@@ -726,6 +726,7 @@ void test("reserves future blueprint runs with a completion haul for the print",
   assert.equal(claims[0]?.runs, 3);
   assert.equal(claims[0]?.horizon, "after-upstream");
   assert.equal(allocator.haulingTasks[0]?.quantity, 1);
+  assert.equal(allocator.haulingTasks[0]?.runsNeeded, 3);
   assert.equal(allocator.haulingTasks[0]?.purpose, "completion");
   assert.equal(
     allocator.transactions.some((transaction) => transaction.kind === "transfer-commitment"),
@@ -793,6 +794,164 @@ void test("does not split one physical BPC across different facilities", () => {
   );
 });
 
+void test("sums allocated BPC runs when one copy serves multiple jobs", () => {
+  const allocator = new SimulationAllocator(
+    {
+      ...inventory,
+      blueprintLots: [{ ...inventory.blueprintLots[0], locationId: 30 }],
+    },
+    [],
+  );
+  allocator.claimManufacturingBlueprints(100, 2, 20, account, "job-1", () => 10);
+  allocator.claimManufacturingBlueprints(100, 3, 20, account, "job-2", () => 10);
+
+  assert.equal(allocator.haulingTasks.length, 1);
+  assert.equal(allocator.haulingTasks[0]?.quantity, 1);
+  assert.equal(allocator.haulingTasks[0]?.runsNeeded, 5);
+});
+
+void test("records only allocated runs for a BPO haul", () => {
+  const bpo = {
+    ...inventory.blueprintLots[0],
+    lotId: "remote-bpo",
+    kind: "bpo" as const,
+    runs: Number.MAX_SAFE_INTEGER,
+    locationId: 30,
+  };
+  const allocator = new SimulationAllocator({ ...inventory, blueprintLots: [bpo] }, []);
+
+  allocator.claimManufacturingBlueprints(100, 99, 20, account, "job", () => 100);
+
+  assert.equal(allocator.haulingTasks.length, 1);
+  assert.equal(allocator.haulingTasks[0]?.quantity, 1);
+  assert.equal(allocator.haulingTasks[0]?.runsNeeded, 99);
+  assert.deepEqual(
+    allocator.transactions.find((transaction) => transaction.kind === "blueprint-run-supply"),
+    {
+      id: "blueprint-run-supply:2",
+      kind: "blueprint-run-supply",
+      account: { locationId: 20, typeId: 100 },
+      quantity: 99,
+      horizon: "after-hauling",
+      demandingJobId: "job",
+    },
+  );
+});
+
+void test("uses BPCs for manufacturing before a reusable BPO when copies cover demand", () => {
+  const copy = { ...inventory.blueprintLots[0], runs: 8 };
+  const bpo = {
+    ...inventory.blueprintLots[0],
+    lotId: "local-bpo",
+    kind: "bpo" as const,
+    locationId: 20,
+  };
+  const allocator = new SimulationAllocator({ ...inventory, blueprintLots: [copy, bpo] }, []);
+
+  assert.equal(allocator.reserveBlueprintCopyRuns(100, 3, 20), 3);
+  const allocations = allocator.claimManufacturingBlueprints(100, 5, 20, account, "job", () => 10);
+  const invention = allocator.claimBlueprintCopyRuns(100, 3, 20, account, "invention-job");
+
+  assert.deepEqual(
+    allocations.map((allocation) => [allocation.blueprintKind, allocation.runs]),
+    [["bpc", 5]],
+  );
+  assert.equal(
+    invention.reduce((total, allocation) => total + allocation.runs, 0),
+    3,
+  );
+  assert.equal(allocator.haulingTasks.length, 0);
+  assert.equal(
+    allocator.transactions.some((transaction) => transaction.kind === "blueprint-run-supply"),
+    false,
+  );
+});
+
+void test("hauls all 128 demanded runs from available BPC lots instead of a remote BPO", () => {
+  const copies = Array.from(
+    { length: 5 },
+    (_, index) => ({
+      ...inventory.blueprintLots[0],
+      lotId: `copy-${index}`,
+      itemId: 100 + index,
+      runs: 40,
+      locationId: 30,
+    }),
+  );
+  const bpo = {
+    ...inventory.blueprintLots[0],
+    lotId: "remote-bpo",
+    kind: "bpo" as const,
+    runs: Number.MAX_SAFE_INTEGER,
+    locationId: 30,
+  };
+  const allocator = new SimulationAllocator({ ...inventory, blueprintLots: [...copies, bpo] }, []);
+
+  const allocations = allocator.claimManufacturingBlueprints(
+    100,
+    128,
+    20,
+    account,
+    "job",
+    () => 200,
+  );
+
+  assert.equal(
+    allocations.reduce((total, allocation) => total + allocation.runs, 0),
+    128,
+  );
+  assert.equal(
+    allocations.every((allocation) => allocation.blueprintKind === "bpc"),
+    true,
+  );
+  assert.equal(
+    allocator.haulingTasks.reduce((total, task) => total + (task.runsNeeded ?? 0), 0),
+    128,
+  );
+  assert.equal(
+    allocator.haulingTasks.some((task) => task.blueprintKind === "bpo"),
+    false,
+  );
+});
+
+void test("protects invention BPC runs from manufacturing allocation", () => {
+  const bpo = {
+    ...inventory.blueprintLots[0],
+    lotId: "local-bpo",
+    kind: "bpo" as const,
+    locationId: 20,
+  };
+  const allocator = new SimulationAllocator(
+    { ...inventory, blueprintLots: [inventory.blueprintLots[0], bpo] },
+    [],
+  );
+
+  assert.equal(allocator.reserveBlueprintCopyRuns(100, 3, 20), 3);
+  const manufacturing = allocator.claimManufacturingBlueprints(
+    100,
+    5,
+    20,
+    account,
+    "manufacturing-job",
+    () => 10,
+  );
+  const invention = allocator.claimBlueprintCopyRuns(100, 3, 20, account, "invention-job");
+
+  assert.deepEqual(
+    manufacturing.map((allocation) => [allocation.blueprintKind, allocation.runs]),
+    [
+      ["bpc", 2],
+      ["bpo", 3],
+    ],
+  );
+  assert.equal(
+    invention.reduce((total, allocation) => total + allocation.runs, 0),
+    3,
+  );
+  assert.equal(allocator.remainingBlueprintRuns("bpc"), 0);
+  assert.equal(allocator.haulingTasks.length, 0);
+});
+
 void test("prefers a blueprint with enough runs for the full batch", () => {
   const allocator = new SimulationAllocator(
     {
@@ -825,4 +984,5 @@ void test("preserves blueprint names on blueprint hauls", () => {
   allocator.claimManufacturingBlueprints(100, 1, 20, account, "job", () => 10);
   assert.equal(allocator.haulingTasks[0].typeName, "Test Blueprint");
   assert.equal(allocator.haulingTasks[0].blueprintKind, "bpc");
+  assert.equal(allocator.haulingTasks[0].runsNeeded, 1);
 });

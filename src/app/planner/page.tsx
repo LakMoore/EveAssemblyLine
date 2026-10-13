@@ -302,6 +302,20 @@ function getVisibleReactionFormulaStock(
   });
 }
 
+/** Returns blueprint stock before corporation source selections for visibility counts. */
+function getVisibleBlueprintStock(
+  assets: ClientAssetsResponse | null,
+  includeStock: boolean,
+  excludedLocationIds: ReadonlySet<number>,
+): PlanStockItem[] {
+  if (!includeStock || !assets) return [];
+  return (assets.assets ?? []).filter((item) => {
+    if (item.category !== "blueprint") return false;
+    const locationId = getStockLocationId(item);
+    return locationId === undefined || !excludedLocationIds.has(locationId);
+  });
+}
+
 function getStockpileLocations(stockpiles: readonly ClientPlanStockpile[]): Set<number> {
   const locations = new Set<number>();
   for (const stockpile of stockpiles) {
@@ -739,6 +753,11 @@ function Planner() {
     characterStatuses.map((character) => character.characterId),
   );
   const visibleReactionFormulaStock = getVisibleReactionFormulaStock(
+    clientAssets,
+    includeStock,
+    excludedStockLocationIds,
+  );
+  const visibleBlueprintStock = getVisibleBlueprintStock(
     clientAssets,
     includeStock,
     excludedStockLocationIds,
@@ -2269,6 +2288,7 @@ function Planner() {
         status={planStatus}
         stock={stock}
         visibleReactionFormulaStock={visibleReactionFormulaStock}
+        visibleBlueprintStock={visibleBlueprintStock}
         industryJobs={jobs?.jobs}
         marketBuyOrderQuantities={clientAssets?.marketBuyOrderQuantities}
         locationNamesById={plannerLocationNames}

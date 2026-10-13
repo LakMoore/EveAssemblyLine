@@ -261,15 +261,7 @@ export function isSimulationResultV2(value: unknown): value is SimulationResultV
     && hasReactionFormulaPresentation
     && hasSurplusBalances
     && hasLedgers
-    && hasSimulationRows(
-      lists.haulingTasks,
-      (task) =>
-        hasTypeIdentity(task)
-        && typeof task.transferId === "string"
-        && isQuantity(task.quantity)
-        && isPositiveInteger(task.fromLocationId)
-        && isPositiveInteger(task.toLocationId),
-    )
+    && hasSimulationRows(lists.haulingTasks, (task) => isStoredSimulationHaulTask(task))
     && hasPurchases(lists.materialsToBuy)
     && hasPurchases(lists.bpoToBuy)
     && hasReprocessingGroups
@@ -364,13 +356,20 @@ function isStoredSimulationHaulExclusion(value: unknown): value is PlanHaulExclu
   );
 }
 
-function isStoredSimulationHaulTask(value: unknown): value is SimulationHaulTask {
+export function isStoredSimulationHaulTask(value: unknown): value is SimulationHaulTask {
   if (!isRecord(value)) return false;
   const ownerType = value.ownerType;
   const ownerId = value.ownerId;
+  const hasLotId = typeof value.lotId === "string";
+  const hasSourceLots =
+    Array.isArray(value.sourceLots)
+    && value.sourceLots.length > 0
+    && value.sourceLots.every(
+      (lot) => isRecord(lot) && typeof lot.lotId === "string" && isQuantity(lot.quantity),
+    );
   return (
     typeof value.transferId === "string"
-    && typeof value.lotId === "string"
+    && (hasLotId || hasSourceLots)
     && isPositiveInteger(value.typeId)
     && typeof value.typeName === "string"
     && (
@@ -380,6 +379,14 @@ function isStoredSimulationHaulTask(value: unknown): value is SimulationHaulTask
       || value.blueprintKind === "formula"
     )
     && isQuantity(value.quantity)
+    && (
+      value.runsNeeded === undefined
+      || (
+        (value.blueprintKind === "bpc" || value.blueprintKind === "bpo")
+        && Number.isSafeInteger(value.runsNeeded)
+        && isQuantity(value.runsNeeded)
+      )
+    )
     && isQuantity(value.unitVolume)
     && isPositiveInteger(value.fromLocationId)
     && isPositiveInteger(value.toLocationId)
