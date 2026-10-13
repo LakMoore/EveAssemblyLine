@@ -670,9 +670,11 @@ export default function CharactersPage() {
       <p className={styles.panelDescription}>
         Opt corporations in to EVE data refreshes. Each refresh requires a connected Director with
         the required EVE scopes. Choose which refreshed hangars and containers the planner can use
-        separately on the <NoPrefetchLink className={styles.dialogLink} href="/corp-hangars">
-        Configure Corp Hangers
-      </NoPrefetchLink> page.
+        separately on the{" "}
+        <NoPrefetchLink className={styles.dialogLink} href="/corp-hangars">
+          Configure Corp Hangers
+        </NoPrefetchLink>{" "}
+        page.
       </p>
       {corporations.length === 0 ? (
         <Empty className={styles.emptyBuildList}>

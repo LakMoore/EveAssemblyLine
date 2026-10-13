@@ -668,8 +668,8 @@ export default function CharactersPage() {
       </div>
       <p className={styles.panelDescription}>
         Turn this on to include the corporation when Refresh data updates its cached assets,
-        blueprints, jobs, and orders. Then choose which refreshed hangars and containers the
-        planner can use on the Assets page. A connected pilot still needs the required EVE access.
+        blueprints, jobs, and orders. Then choose which refreshed hangars and containers the planner
+        can use on the Assets page. A connected pilot still needs the required EVE access.
       </p>
       {corporations.length === 0 ? (
         <Empty className={styles.emptyBuildList}>
@@ -703,8 +703,7 @@ export default function CharactersPage() {
                         height={32}
                       />
                       <strong>
-                        {corporation.corporationName
-                          ?? `Corporation ${corporation.corporationId}`}
+                        {corporation.corporationName ?? `Corporation ${corporation.corporationId}`}
                       </strong>
                     </span>
                     <small>
