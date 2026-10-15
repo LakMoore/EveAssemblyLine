@@ -13,6 +13,7 @@ import {
 import { settleReprocessing } from "./reprocessing";
 import { scheduleSimulationJobs, type SimulationScheduleResult } from "./scheduler";
 import { normalizeSimulatorInventory, type SimulatorInventory } from "./sourceLots";
+import { serializeStableSimulationRequest } from "./stableRequest";
 import type { RequestProfiler } from "@/lib/server/profiling";
 import type {
   SimulationHaulTask,
@@ -30,27 +31,9 @@ import type {
   SimulationQuantityKind,
 } from "./types";
 
-/** Converts an input into a recursively key-sorted JSON-compatible value. */
-function canonicalize(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value
-      .map(canonicalize)
-      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
-  }
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(
-    Object
-      .entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, nestedValue]) => [key, canonicalize(nestedValue)]),
-  );
-}
-
 /** Creates a stable content hash without retaining request data in the response. */
 export function simulationInputHash(request: SimulationRequestV1): string {
-  return createHash("sha256")
-    .update(JSON.stringify(canonicalize(request)))
-    .digest("hex");
+  return createHash("sha256").update(serializeStableSimulationRequest(request)).digest("hex");
 }
 
 /** Resolves a localized SDE type name with a stable fallback. */

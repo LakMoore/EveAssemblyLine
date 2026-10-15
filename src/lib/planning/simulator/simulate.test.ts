@@ -2,7 +2,46 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { simulationCalculationVersion } from "./etag";
 import { parseSimulatorRequest } from "./schema";
-import { aggregateHaulingTasks, simulateIndustry } from "./simulate";
+import { simulationRequestFingerprint } from "./requestFingerprint";
+import { aggregateHaulingTasks, simulationInputHash, simulateIndustry } from "./simulate";
+
+void test("browser request fingerprint matches the simulator input hash", async () => {
+  const request = {
+    stockpiles: [
+      {
+        id: "stockpile-1",
+        name: "Stockpile",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 34, quantity: 100, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1 },
+  };
+  const parsedRequest = parseSimulatorRequest(request);
+
+  assert.equal(await simulationRequestFingerprint(request), simulationInputHash(parsedRequest));
+  const changedRequest = {
+    ...request,
+    stockpiles: [
+      {
+        ...request.stockpiles[0],
+        items: [{ ...request.stockpiles[0].items[0], quantity: 101 }],
+      },
+    ],
+  };
+  assert.notEqual(
+    await simulationRequestFingerprint(changedRequest),
+    simulationInputHash(parsedRequest),
+  );
+});
 
 void test("aggregates hauling tasks by route and owner with demand provenance", () => {
   const tasks = aggregateHaulingTasks([

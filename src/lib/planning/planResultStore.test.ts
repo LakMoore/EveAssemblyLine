@@ -40,6 +40,28 @@ void test("accepts a complete cached native simulation result", () => {
   assert.equal(isSimulationResultV2(simulationResult()), true);
 });
 
+void test("accepts cached stockpile-demand haul tasks", () => {
+  const result = simulationResult();
+  const stockpileDemandHaul = {
+    transferId: "haul:10:34:20:character:7:stockpile-demand",
+    lotId: "asset-1",
+    typeId: 34,
+    typeName: "Tritanium",
+    quantity: 100,
+    unitVolume: 0.01,
+    fromLocationId: 10,
+    toLocationId: 20,
+    ownerType: "character",
+    ownerId: 7,
+    purpose: "stockpile-demand",
+    demands: [{ quantity: 100 }],
+  };
+  (result.lists as Record<string, unknown>).haulingTasks = [stockpileDemandHaul];
+
+  assert.equal(isStoredSimulationHaulTask(stockpileDemandHaul), true);
+  assert.equal(isSimulationResultV2(result), true);
+});
+
 void test("accepts grouped BPC haul tasks and rejects invalid required runs", () => {
   const groupedBpcHaul = {
     transferId: "haul-group:10:33823:20:character:7:now:industry-input:bpc",

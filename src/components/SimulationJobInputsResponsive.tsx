@@ -40,6 +40,11 @@ function inputStatus(input: SimulationJobInput): InputStatus {
   return percent >= 100 ? "ready" : percent > 0 ? "partial" : "blocked";
 }
 
+/** Returns the readiness status for an aggregate completion percentage. */
+function completionStatus(percent: number): InputStatus {
+  return percent >= 100 ? "ready" : percent > 0 ? "partial" : "blocked";
+}
+
 /** Returns the semantic classes used for simulator input readiness. */
 function statusClassName(status: InputStatus): string {
   return status === "ready"
@@ -448,11 +453,22 @@ export default function SimulationJobInputsResponsive({
     0,
   );
   const inputs = aggregateSimulationInputs(displayedJobs.flatMap((job) => job.inputs));
-  const completionPercent =
-    totalRuns > 0 ? Math.min(100, Math.round((installableRuns / totalRuns) * 100)) : 100;
-  const status: InputStatus =
-    completionPercent >= 100 ? "ready" : completionPercent > 0 ? "partial" : "blocked";
-  const description: ReactNode = "Material availability for this simulation job.";
+  const materialCompletionPercent =
+    inputs.length > 0 ? Math.min(...inputs.map(inputCompletionPercent)) : 100;
+  const materialStatus = completionStatus(materialCompletionPercent);
+  const blueprintReadyRuns = displayedJobs.reduce(
+    (total, inputJob) =>
+      total
+      + (inputJob.blueprint.horizon === "now"
+        ? Math.min(inputJob.requiredRuns, Math.max(0, inputJob.blueprint.runs))
+        : 0),
+    0,
+  );
+  const blueprintCompletionPercent =
+    totalRuns > 0 ? Math.min(100, Math.round((blueprintReadyRuns / totalRuns) * 100)) : 100;
+  const blueprintStatus = completionStatus(blueprintCompletionPercent);
+  const blueprintLabel = isReaction ? "Formulas" : "Blueprints";
+  const description: ReactNode = "Material and blueprint availability for this simulation job.";
   const displayedJob = displayedJobs[0] ?? job;
   const openJobInputs = (sourceJobs: readonly SimulationIndustryJob[]) => {
     if (sourceJobs.length === 0) return;
@@ -472,24 +488,24 @@ export default function SimulationJobInputsResponsive({
         <Button
           type="button"
           variant="outline"
-          aria-label={showLabel ? undefined : `${completionPercent}% inputs`}
+          aria-label={showLabel ? undefined : `${materialCompletionPercent}% inputs`}
           className={cn(
             "inline-flex h-6 items-center justify-center gap-1 border px-2 text-[10px] font-semibold tracking-[0.08em] uppercase transition-colors hover:brightness-125",
-            statusClassName(status),
+            statusClassName(materialStatus),
           )}
           onClick={(event) => {
             event.stopPropagation();
             setSelectedJobs(null);
           }}
         >
-          <span>{completionPercent}%</span>
+          <span>{materialCompletionPercent}%</span>
           {showLabel ? "Inputs" : null}
         </Button>
       }
       title={displayedJobs.length > 1 ? "Grouped job inputs" : "Job inputs"}
       description={
         displayedJobs.length > 1
-          ? "Material availability for the grouped simulation jobs."
+          ? "Material and blueprint availability for the grouped simulation jobs."
           : description
       }
       headerContent={
@@ -524,11 +540,19 @@ export default function SimulationJobInputsResponsive({
               </div>
             </div>
           </div>
-          <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
-            <p className="font-semibold">{completionPercent}% ready now</p>
-            <Badge variant="outline" className={statusClassName(status)}>
-              {status}
-            </Badge>
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border pt-3">
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Materials</span>
+              <Badge variant="outline" className={statusClassName(materialStatus)}>
+                {materialCompletionPercent}% {materialStatus}
+              </Badge>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">{blueprintLabel}</span>
+              <Badge variant="outline" className={statusClassName(blueprintStatus)}>
+                {blueprintCompletionPercent}% {blueprintStatus}
+              </Badge>
+            </div>
           </div>
         </div>
       }

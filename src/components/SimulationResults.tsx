@@ -4838,6 +4838,7 @@ export default function SimulationResults({
   result,
   directStockpileItemTypeIds,
   status,
+  isOutOfDate = false,
   stock,
   visibleReactionFormulaStock = stock,
   visibleBlueprintStock = stock,
@@ -4867,6 +4868,7 @@ export default function SimulationResults({
   result: SimulationResultV2 | null;
   directStockpileItemTypeIds: ReadonlySet<number>;
   status: string;
+  isOutOfDate?: boolean;
   stock: readonly PlanStockItem[];
   visibleReactionFormulaStock?: readonly PlanStockItem[];
   visibleBlueprintStock?: readonly PlanStockItem[];
@@ -5289,9 +5291,31 @@ export default function SimulationResults({
               Found a bug in this simulation?
             </Button>
           )}
-          <span aria-live="polite" className="text-xs text-muted-foreground" role="status">
-            {status}
-          </span>
+          {isOutOfDate && (
+            <Badge
+              aria-live="polite"
+              role="status"
+              title="This result does not reflect the current planner request."
+              variant="destructive"
+            >
+              <TriangleAlert aria-hidden="true" />
+              Simulation out of date
+            </Badge>
+          )}
+          {(!isOutOfDate || statusIsError || isLoading) && (
+            <span
+              aria-live="polite"
+              className={cn(
+                "text-xs",
+                status === "Simulation updated just now"
+                  ? "text-(--theme-info) drop-shadow-[0_0_8px_color-mix(in_srgb,var(--theme-info)_60%,transparent)]"
+                  : "text-muted-foreground",
+              )}
+              role="status"
+            >
+              {status}
+            </span>
+          )}
         </div>
       </div>
       <Dialog open={isBugReportOpen} onOpenChange={setIsBugReportOpen}>

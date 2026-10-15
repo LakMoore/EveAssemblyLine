@@ -395,6 +395,7 @@ export function isStoredSimulationHaulTask(value: unknown): value is SimulationH
     && (ownerType === undefined) === (ownerId === undefined)
     && (
       value.purpose === "industry-input"
+      || value.purpose === "stockpile-demand"
       || value.purpose === "completion"
       || value.purpose === "reprocessing-input"
     )

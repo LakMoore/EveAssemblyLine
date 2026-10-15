@@ -60,6 +60,7 @@ import {
   saveSimulationState,
 } from "@/lib/planning/planResultStore";
 import { createSimulationEtag, simulationCalculationVersion } from "@/lib/planning/simulator/etag";
+import { simulationRequestFingerprint } from "@/lib/planning/simulator/requestFingerprint";
 import {
   createSimulationCharacterProfiles,
   createSimulationSlotMap,
@@ -286,6 +287,153 @@ function getPlannerStock(
     const locationId = getStockLocationId(item);
     return locationId === undefined || !excludedLocationIds.has(locationId);
   });
+}
+
+/** Combines planner, cached asset, and saved structure facilities without duplicate locations. */
+function getSharedLocationOptions(
+  locationOptions: readonly PlanLocationOption[],
+  cachedAssetLocations: readonly StockLocationOption[],
+  knownStructures: Awaited<ReturnType<typeof loadStructures>>,
+): ActivityLocationOption[] {
+  return [
+    ...locationOptions.map((location) => ({
+      locationId: location.locationId,
+      systemId: location.systemId,
+      systemName: location.systemName,
+      name: location.name,
+      kind: location.locationType,
+      baseYield: location.baseYield,
+      baseManufacturingMe: location.baseManufacturingMe,
+    })),
+    ...cachedAssetLocations,
+    ...knownStructures.flatMap((structure) => {
+      const locationId = structure.esiStructureId ?? structure.plannerLocationId;
+      return locationId === undefined
+        ? []
+        : [
+            {
+              locationId,
+              systemId: structure.systemId,
+              systemName: structure.systemName,
+              name: facilitySettingsName(structure.systemName, structure.name),
+              kind: "structure" as const,
+              baseYield: 0,
+              baseManufacturingMe: 0,
+            },
+          ];
+    }),
+  ].filter(
+    (location, index, allLocations) =>
+      allLocations.findIndex((candidate) => candidate.locationId === location.locationId) === index,
+  );
+}
+
+type PlannerSimulationRequestInputs = {
+  stockpiles: readonly ClientPlanStockpile[];
+  excludedLocationIds: ReadonlySet<number>;
+  includeStock: boolean;
+  isAuthenticated: boolean;
+  clientAssets: ClientAssetsResponse | null;
+  settings: PlannerSettings;
+  characterStatuses: readonly ClientCharacterStatus[];
+  language: SdeLanguage;
+  sharedLocationOptions: readonly ActivityLocationOption[];
+  locationOptions: readonly PlanLocationOption[];
+  haulExclusions: readonly PlanHaulExclusion[];
+  planningCharacterId?: number;
+  jobs: ClientJobsResponse | null;
+  simulateSurplus: boolean;
+  allowInterStockpileHauling: boolean;
+};
+
+/** Builds the exact validated request sent to the simulator from current planner state. */
+function createPlannerSimulationRequest(input: PlannerSimulationRequestInputs) {
+  const populatedStockpiles = input.stockpiles
+    .filter((stockpile) => stockpile.isActive !== false)
+    .map((stockpile) => ({
+      ...stockpile,
+      items: stockpile.items.filter((item) => item.isIncluded !== false),
+    }))
+    .filter((stockpile) => stockpile.items.length > 0);
+  if (populatedStockpiles.length === 0) return null;
+  if (input.includeStock && input.isAuthenticated && !input.clientAssets) return null;
+
+  const workingAssets = getPlannerStock(
+    input.clientAssets,
+    input.includeStock,
+    input.excludedLocationIds,
+    input.settings,
+    input.characterStatuses.map((character) => character.characterId),
+  );
+  const requestStock = prepareSimulationAssets(workingAssets);
+  const primaryStockpileLocations = populatedStockpiles[0].locations;
+  const selectedManufacturingFacility = input.locationOptions.find(
+    (location) => location.locationId === primaryStockpileLocations.manufacturing,
+  );
+  const selectedReactionFacility = input.locationOptions.find(
+    (location) => location.locationId === primaryStockpileLocations.reactions,
+  );
+  const planningCharacter = input.characterStatuses.find(
+    (character) => character.characterId === input.planningCharacterId,
+  );
+  const planningTimeMultipliers = simulationTimeMultipliers(
+    planningCharacter?.skills?.body ?? undefined,
+  );
+
+  return {
+    language: input.language,
+    stockpiles: populatedStockpiles.map((stockpile) => ({
+      ...stockpile,
+      items: stockpile.items.map(({ typeId, quantity, me, te, fromCompression }) => ({
+        typeId,
+        quantity,
+        me,
+        te,
+        fromCompression,
+      })),
+    })),
+    facilityProfiles: input.sharedLocationOptions.flatMap((location) => {
+      if (location.systemId === undefined) return [];
+      const facility = input.locationOptions.find(
+        (candidate) => candidate.locationId === location.locationId,
+      );
+      return [
+        {
+          locationId: location.locationId,
+          systemId: location.systemId,
+          sizeId: facility?.sizeId ?? 0,
+          buildTypeGroups: facility?.buildTypeGroups ?? {},
+        },
+      ];
+    }),
+    haulExclusions: toSimulationHaulExclusions(input.haulExclusions),
+    assets: requestStock.map(toSimulationAsset),
+    facilityTimeMultipliers: {
+      manufacturing: selectedManufacturingFacility?.manufacturingTimeMultiplier ?? 1,
+      reactions: selectedReactionFacility?.reactionTimeMultiplier ?? 1,
+    },
+    skillTimeMultipliers: {
+      manufacturing: planningTimeMultipliers.manufacturing,
+      reactions: planningTimeMultipliers.reactions,
+    },
+    settings: {
+      includeCorporationAssets: input.settings.includeCorporationAssets,
+      buildBlacklist: input.settings.buildBlacklist.map((item) => item.typeId),
+      buyBlacklist: [],
+      fallbackT1Me: input.settings.fallbackT1Me,
+      fallbackT1Te: input.settings.fallbackT1Te,
+      fallbackT2OrT3Me: input.settings.fallbackT2OrT3Me,
+      fallbackT2OrT3Te: input.settings.fallbackT2OrT3Te,
+    },
+    simulation: {
+      version: 1,
+      simulateSurplus: input.simulateSurplus,
+      blockInterStockpileHauling: !input.allowInterStockpileHauling,
+      maxReactionJobDurationHours: input.settings.maxReactionJobDurationHours,
+      characters: createSimulationCharacterProfiles(input.characterStatuses),
+      slots: createSimulationSlotMap(input.characterStatuses, input.jobs),
+    },
+  };
 }
 
 /** Returns formula stock before corporation hangar selections for visibility counts. */
@@ -546,11 +694,14 @@ function Planner() {
   const [planningCharacterId, setPlanningCharacterId] = useState<number | undefined>();
   const [stockpiles, setStockpiles] = useState<ClientPlanStockpile[]>([]);
   const [areStockpilesLoaded, setAreStockpilesLoaded] = useState(false);
+  const [areBuildBlacklistLoaded, setAreBuildBlacklistLoaded] = useState(false);
   const [editingStockpile, setEditingStockpile] = useState<ClientPlanStockpile | null>(null);
   const [stockpileEditorMode, setStockpileEditorMode] = useState<StockpileEditorMode | null>(null);
   const [knownStructures, setKnownStructures] = useState<
     Awaited<ReturnType<typeof loadStructures>>
   >([]);
+  const [areStructuresLoaded, setAreStructuresLoaded] = useState(false);
+  const [areLocationOptionsLoaded, setAreLocationOptionsLoaded] = useState(false);
   const [planImportInputKey, setPlanImportInputKey] = useState(0);
   const [excludedLocationIds, setExcludedLocationIds] = useState<number[]>([]);
   const [locationOptions, setLocationOptions] = useState<PlanLocationOption[]>([]);
@@ -566,6 +717,9 @@ function Planner() {
     SimulationHaulTask[]
   >([]);
   const [simulationStateLoaded, setSimulationStateLoaded] = useState(false);
+  const [currentSimulationFingerprint, setCurrentSimulationFingerprint] = useState<
+    string | null | undefined
+  >();
   const [simulationCharactersLoadAttempt, setSimulationCharactersLoadAttempt] = useState(0);
   const simulationCharactersLoadKey = `${language}:${simulationCharactersLoadAttempt}`;
   const [simulationCharactersLoadedKey, setSimulationCharactersLoadedKey] = useState<string>();
@@ -777,9 +931,15 @@ function Planner() {
   }
 
   useEffect(() => {
-    void loadBuildBlacklist().then((buildBlacklist) => {
-      if (buildBlacklist) setSettings((current) => ({ ...current, buildBlacklist }));
-    });
+    void loadBuildBlacklist().then(
+      (buildBlacklist) => {
+        if (buildBlacklist) setSettings((current) => ({ ...current, buildBlacklist }));
+        setAreBuildBlacklistLoaded(true);
+      },
+      () => {
+        setAreBuildBlacklistLoaded(true);
+      },
+    );
     Promise
       .all([loadExcludedLocationIds(), loadPlannerStockpiles()])
       .then(async ([loadedExcludedLocationIds, savedStockpiles]) => {
@@ -837,12 +997,24 @@ function Planner() {
   }, [language]);
 
   useEffect(() => {
-    void loadStructures().then(setKnownStructures);
+    void loadStructures()
+      .then(
+        (structures) => {
+          setKnownStructures(structures);
+        },
+        () => {
+          setKnownStructures([]);
+        },
+      )
+      .finally(() => {
+        setAreStructuresLoaded(true);
+      });
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     async function loadLocationOptions(reload = false) {
+      setAreLocationOptionsLoaded(false);
       const [data, storedLocations, productionGroups] = await Promise.all([
         loadClientAssets(language, reload).catch(() => null),
         loadPlannerLocations(),
@@ -948,14 +1120,21 @@ function Planner() {
       setProductionGroupReferences(productionGroups);
       setLocations(nextLocations);
       void savePlannerLocations(nextLocations);
+      setAreLocationOptionsLoaded(true);
     }
 
     void loadLocationOptions().catch(() => {
-      if (!cancelled) setLocationOptions([]);
+      if (!cancelled) {
+        setLocationOptions([]);
+        setAreLocationOptionsLoaded(true);
+      }
     });
     function handleFacilitiesRefresh() {
       void loadLocationOptions(false).catch(() => {
-        if (!cancelled) setLocationOptions([]);
+        if (!cancelled) {
+          setLocationOptions([]);
+          setAreLocationOptionsLoaded(true);
+        }
       });
     }
     window.addEventListener("assembly-line-esi-refreshed", handleFacilitiesRefresh);
@@ -1003,31 +1182,28 @@ function Planner() {
         setPlanStatus("Compression efficiencies are still loading");
         return false;
       }
-      let workingAssets: PlanStockItem[] = [];
       if (includeStock && isAuthenticated && !clientAssets) {
         setPlanStatus("Account assets are still loading");
         return false;
       }
-      workingAssets = getPlannerStock(
-        clientAssets,
+      const requestBody = createPlannerSimulationRequest({
+        stockpiles,
+        excludedLocationIds: exclusions,
         includeStock,
-        exclusions,
+        isAuthenticated,
+        clientAssets,
         settings,
-        characterStatuses.map((character) => character.characterId),
-      );
-      const primaryStockpileLocations = populatedStockpiles[0].locations;
-      const selectedManufacturingFacility = locationOptions.find(
-        (location) => location.locationId === primaryStockpileLocations.manufacturing,
-      );
-      const selectedReactionFacility = locationOptions.find(
-        (location) => location.locationId === primaryStockpileLocations.reactions,
-      );
-      const requestStock = prepareSimulationAssets(workingAssets);
-      const planningCharacter = characterStatuses.find(
-        (character) => character.characterId === planningCharacterId,
-      );
-      const planningSkills = planningCharacter?.skills?.body ?? undefined;
-      const planningTimeMultipliers = simulationTimeMultipliers(planningSkills);
+        characterStatuses,
+        language,
+        sharedLocationOptions,
+        locationOptions,
+        haulExclusions: simulationExclusions,
+        planningCharacterId,
+        jobs,
+        simulateSurplus,
+        allowInterStockpileHauling,
+      });
+      if (!requestBody) return false;
       const response = await fetch(
         "/api/plan/simulate",
         {
@@ -1044,63 +1220,7 @@ function Planner() {
                 }
               : {}),
           },
-          body: JSON.stringify({
-            language,
-            stockpiles:
-              populatedStockpiles.length > 0
-                ? populatedStockpiles.map((stockpile) => ({
-                    ...stockpile,
-                    items: stockpile.items.map(({ typeId, quantity, me, te, fromCompression }) => ({
-                      typeId,
-                      quantity,
-                      me,
-                      te,
-                      fromCompression,
-                    })),
-                  }))
-                : undefined,
-            facilityProfiles: sharedLocationOptions.flatMap((location) => {
-              if (location.systemId === undefined) return [];
-              const facility = locationOptions.find(
-                (candidate) => candidate.locationId === location.locationId,
-              );
-              return [
-                {
-                  locationId: location.locationId,
-                  systemId: location.systemId,
-                  sizeId: facility?.sizeId ?? 0,
-                  buildTypeGroups: facility?.buildTypeGroups ?? {},
-                },
-              ];
-            }),
-            haulExclusions: toSimulationHaulExclusions(simulationExclusions),
-            assets: requestStock.map(toSimulationAsset),
-            facilityTimeMultipliers: {
-              manufacturing: selectedManufacturingFacility?.manufacturingTimeMultiplier ?? 1,
-              reactions: selectedReactionFacility?.reactionTimeMultiplier ?? 1,
-            },
-            skillTimeMultipliers: {
-              manufacturing: planningTimeMultipliers.manufacturing,
-              reactions: planningTimeMultipliers.reactions,
-            },
-            settings: {
-              includeCorporationAssets: settings.includeCorporationAssets,
-              buildBlacklist: settings.buildBlacklist.map((item) => item.typeId),
-              buyBlacklist: [],
-              fallbackT1Me: settings.fallbackT1Me,
-              fallbackT1Te: settings.fallbackT1Te,
-              fallbackT2OrT3Me: settings.fallbackT2OrT3Me,
-              fallbackT2OrT3Te: settings.fallbackT2OrT3Te,
-            },
-            simulation: {
-              version: 1,
-              simulateSurplus,
-              blockInterStockpileHauling: !allowInterStockpileHauling,
-              maxReactionJobDurationHours: settings.maxReactionJobDurationHours,
-              characters: createSimulationCharacterProfiles(characterStatuses),
-              slots: createSimulationSlotMap(characterStatuses, jobs),
-            },
-          }),
+          body: JSON.stringify(requestBody),
         },
       );
       if (response.status === 304) {
@@ -1373,36 +1493,10 @@ function Planner() {
     setIsDeleteAllDialogOpen(false);
   }
 
-  const sharedLocationOptions: ActivityLocationOption[] = [
-    ...locationOptions.map((location) => ({
-      locationId: location.locationId,
-      systemId: location.systemId,
-      systemName: location.systemName,
-      name: location.name,
-      kind: location.locationType,
-      baseYield: location.baseYield,
-      baseManufacturingMe: location.baseManufacturingMe,
-    })),
-    ...cachedAssetLocations,
-    ...knownStructures.flatMap((structure) => {
-      const locationId = structure.esiStructureId ?? structure.plannerLocationId;
-      return locationId === undefined
-        ? []
-        : [
-            {
-              locationId,
-              systemId: structure.systemId,
-              systemName: structure.systemName,
-              name: facilitySettingsName(structure.systemName, structure.name),
-              kind: "structure" as const,
-              baseYield: 0,
-              baseManufacturingMe: 0,
-            },
-          ];
-    }),
-  ].filter(
-    (location, index, allLocations) =>
-      allLocations.findIndex((candidate) => candidate.locationId === location.locationId) === index,
+  const sharedLocationOptions: ActivityLocationOption[] = getSharedLocationOptions(
+    locationOptions,
+    cachedAssetLocations,
+    knownStructures,
   );
   const selectedManufacturingLocation = sharedLocationOptions.find(
     (location) => location.locationId === locations.manufacturing,
@@ -1424,6 +1518,71 @@ function Planner() {
     ),
   );
   const stockLocationOptions: StockLocationOption[] = sharedLocationOptions;
+  useEffect(() => {
+    let cancelled = false;
+    if (
+      !simulationStateLoaded
+      || !areStockpilesLoaded
+      || !areBuildBlacklistLoaded
+      || !areStructuresLoaded
+      || !areLocationOptionsLoaded
+      || !simulationCharactersLoaded
+    ) return;
+    const request = createPlannerSimulationRequest({
+      stockpiles,
+      excludedLocationIds: new Set(excludedLocationIds),
+      includeStock,
+      isAuthenticated,
+      clientAssets,
+      settings,
+      characterStatuses,
+      language,
+      sharedLocationOptions: getSharedLocationOptions(
+        locationOptions,
+        cachedAssetLocations,
+        knownStructures,
+      ),
+      locationOptions,
+      haulExclusions: simulationHaulExclusions,
+      planningCharacterId,
+      jobs,
+      simulateSurplus,
+      allowInterStockpileHauling,
+    });
+    void simulationRequestFingerprint(request).then((fingerprint) => {
+      if (!cancelled) setCurrentSimulationFingerprint(fingerprint);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    allowInterStockpileHauling,
+    areBuildBlacklistLoaded,
+    areLocationOptionsLoaded,
+    areStockpilesLoaded,
+    areStructuresLoaded,
+    cachedAssetLocations,
+    characterStatuses,
+    clientAssets,
+    excludedLocationIds,
+    includeStock,
+    isAuthenticated,
+    jobs,
+    knownStructures,
+    language,
+    locationOptions,
+    planningCharacterId,
+    settings,
+    simulateSurplus,
+    simulationCharactersLoaded,
+    simulationHaulExclusions,
+    simulationStateLoaded,
+    stockpiles,
+  ]);
+  const isSimulationOutOfDate =
+    simulationResult !== null
+    && currentSimulationFingerprint !== undefined
+    && currentSimulationFingerprint !== simulationResult.metadata.normalizedInputHash;
   const stockpileLocations = getStockpileLocations(stockpiles);
   const directStockpileItemTypeIds = new Set(
     stockpiles
@@ -2286,6 +2445,7 @@ function Planner() {
         result={simulationResult}
         directStockpileItemTypeIds={directStockpileItemTypeIds}
         status={planStatus}
+        isOutOfDate={isSimulationOutOfDate}
         stock={stock}
         visibleReactionFormulaStock={visibleReactionFormulaStock}
         visibleBlueprintStock={visibleBlueprintStock}
