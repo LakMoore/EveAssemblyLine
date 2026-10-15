@@ -2,15 +2,94 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareSimulationAssets } from "./requestAssets";
 
-void test("filters non-packaged ordinary assets and preserves packaged assets", () => {
+void test("filters packaged ordinary assets and preserves unpackaged assets", () => {
   const prepared = prepareSimulationAssets([
-    { typeId: 1, name: "Unpackaged", quantity: 1, isPackaged: false },
-    { typeId: 2, name: "Packaged", quantity: 2, isPackaged: true },
+    { typeId: 1, name: "Packaged", quantity: 1, isPackaged: true },
+    { typeId: 2, name: "Unpackaged", quantity: 2, isPackaged: false },
   ]);
   assert.deepEqual(
     prepared.map((item) => item.typeId),
     [2],
   );
+});
+
+void test("includes unpackaged ship contents only from approved holds", () => {
+  const prepared = prepareSimulationAssets([
+    {
+      typeId: 1,
+      name: "Cargo item",
+      quantity: 1,
+      isPackaged: false,
+      isContainedByShip: true,
+      locationFlag: "Cargo",
+    },
+    {
+      typeId: 2,
+      name: "Infrastructure hangar item",
+      quantity: 1,
+      isPackaged: false,
+      isContainedByShip: true,
+      locationFlag: "InfrastructureHangar",
+    },
+    {
+      typeId: 3,
+      name: "Fitted module",
+      quantity: 1,
+      isPackaged: false,
+      isContainedByShip: true,
+      locationFlag: "HiSlot0",
+    },
+    {
+      typeId: 4,
+      name: "Packaged cargo item",
+      quantity: 1,
+      isPackaged: true,
+      isContainedByShip: true,
+      locationFlag: "Cargo",
+    },
+  ]);
+
+  assert.deepEqual(
+    prepared.map((item) => item.typeId),
+    [1, 2],
+  );
+});
+
+void test("accepts unpackaged assets from every approved ship hold", () => {
+  const allowedHoldFlags = [
+    "Cargo",
+    "ExpeditionHold",
+    "FleetHangar",
+    "InfrastructureHangar",
+    "MoonMaterialBay",
+    "SpecializedAmmoHold",
+    "SpecializedAsteroidHold",
+    "SpecializedFuelBay",
+    "SpecializedGasHold",
+    "SpecializedIceHold",
+    "SpecializedIndustrialShipHold",
+    "SpecializedLargeShipHold",
+    "SpecializedMaterialBay",
+    "SpecializedMediumShipHold",
+    "SpecializedMineralHold",
+    "SpecializedOreHold",
+    "SpecializedPlanetaryCommoditiesHold",
+    "SpecializedSalvageHold",
+    "SpecializedShipHold",
+    "SpecializedSmallShipHold",
+  ];
+  const prepared = prepareSimulationAssets(
+    allowedHoldFlags.map((locationFlag, index) => ({
+      typeId: index + 1,
+      name: locationFlag,
+      quantity: 1,
+      isPackaged: false,
+      isContainedByShip: true,
+      locationFlag,
+    })),
+  );
+
+  assert.equal(prepared.length, allowedHoldFlags.length);
 });
 
 void test("preserves packaged market orders", () => {

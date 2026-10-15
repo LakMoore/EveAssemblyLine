@@ -36,6 +36,8 @@ export type SimulationAsset = Omit<
   | "industryJobStatus"
   | "industryJobEndDate"
   | "activityName"
+  | "locationFlag"
+  | "isContainedByShip"
   | "techLevel"
   | "isCargoContainer"
   | "isPackaged"

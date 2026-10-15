@@ -73,6 +73,7 @@ import {
 } from "./corporationAccess";
 import { formatLocationName, normalizeLocationName } from "@/lib/reference/locationName";
 import { retainAssetAncestors } from "./assetGraph";
+import { isShipHoldLocationFlag } from "@/lib/planning/shipHoldFlags";
 import {
   addMarketBuyOrderQuantitiesByLocation,
   type MarketOrderBuyQuantity,
@@ -1416,30 +1417,9 @@ function reconcileMissingJobBlueprints(
   }
 }
 
-const haulableShipHoldFlags = new Set([
-  "Cargo",
-  "ExpeditionHold",
-  "FleetHangar",
-  "MoonMaterialBay",
-  "SpecializedAmmoHold",
-  "SpecializedAsteroidHold",
-  "SpecializedGasHold",
-  "SpecializedIceHold",
-  "SpecializedIndustrialShipHold",
-  "SpecializedLargeShipHold",
-  "SpecializedMaterialBay",
-  "SpecializedMediumShipHold",
-  "SpecializedMineralHold",
-  "SpecializedOreHold",
-  "SpecializedPlanetaryCommoditiesHold",
-  "SpecializedSalvageHold",
-  "SpecializedShipHold",
-  "SpecializedSmallShipHold",
-]);
-
 /** Returns whether a ship-held asset can be used as haulable planning stock. */
 export function isHaulableShipHoldAsset(asset: Pick<AssetRecord, "locationFlag">) {
-  return haulableShipHoldFlags.has(asset.locationFlag);
+  return isShipHoldLocationFlag(asset.locationFlag);
 }
 
 function effectiveAssets(cache: OwnerCache) {

@@ -222,7 +222,9 @@ function projectAsset(
     ownerType: asset.ownerType,
     ownerId: asset.ownerId,
     inUse: asset.inUse,
+    locationFlag: asset.locationFlag,
     isPackaged: !asset.isSingleton,
+    isContainedByShip: containingShip !== undefined,
     ...(metadata?.isShip !== undefined ? { isShip: metadata.isShip } : {}),
     ...(metadata?.isCargoContainer !== undefined
       ? { isCargoContainer: metadata.isCargoContainer }

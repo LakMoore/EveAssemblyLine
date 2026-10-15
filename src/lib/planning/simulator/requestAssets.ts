@@ -1,13 +1,17 @@
 import type { StockItem } from "@/lib/planning/types";
+import { isShipHoldLocationFlag } from "@/lib/planning/shipHoldFlags";
 
 /** Returns whether an inventory item can contribute to a simulation request. */
 function isSimulationAssetEligible(item: StockItem): boolean {
-  return (
-    item.isPackaged === true
+  if (
+    item.source === "marketOrder"
+    || item.inBuild === true
     || item.blueprintPrints !== undefined
     || item.category === "blueprint"
     || item.category === "reactionformula"
-  );
+  ) return true;
+  if (item.isPackaged !== false) return false;
+  return item.isContainedByShip !== true || isShipHoldLocationFlag(item.locationFlag ?? "");
 }
 
 function blueprintAssetKey(item: StockItem): string {

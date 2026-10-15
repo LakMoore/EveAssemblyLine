@@ -256,7 +256,9 @@ function toSimulationAsset(item: PlanStockItem): SimulationAsset {
     activityName: _activityName,
     isCargoContainer: _isCargoContainer,
     isPackaged: _isPackaged,
+    isContainedByShip: _isContainedByShip,
     isShip: _isShip,
+    locationFlag: _locationFlag,
     ...simulationAsset
   } = item as PlannerAssetWithPresentation;
   return {

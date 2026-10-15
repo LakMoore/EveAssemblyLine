@@ -217,7 +217,9 @@ void test("projects stable owner assets into enriched client assets", () => {
         ownerType: "corporation",
         ownerId: 900,
         inUse: undefined,
+        locationFlag: "CorpSAG1",
         isPackaged: true,
+        isContainedByShip: false,
         me: undefined,
         te: undefined,
         category: "item",
@@ -361,6 +363,8 @@ void test("labels assets in an undocked ship with its solar system", () => {
   assert.equal(projectedAsset.sourceLocationName, "Jita \u00abUndocked\u00bb");
   assert.equal(projectedAsset.sourceLocationKind, "anchored");
   assert.equal(projectedAsset.sourceSystemId, 30000142);
+  assert.equal(projectedAsset.isContainedByShip, true);
+  assert.equal(projectedAsset.locationFlag, "CorpSAG1");
 
   const dockedResult = projectOwnerSnapshotsToClientAssets(
     [
@@ -387,6 +391,37 @@ void test("labels assets in an undocked ship with its solar system", () => {
   assert.ok(dockedAsset);
   assert.equal(dockedAsset.sourceLocationName, "Structure details unavailable");
   assert.equal(dockedAsset.sourceLocationKind, "structure");
+});
+
+void test("projects packaging and ship-hold eligibility metadata", () => {
+  const shipContainedSnapshot: ClientOwnerSnapshot = {
+    ...snapshot,
+    assets: slice([
+      {
+        ...snapshot.assets.data[0],
+        itemId: 45,
+        locationId: 900,
+        locationFlag: "Cargo",
+        isSingleton: true,
+      },
+    ]),
+    ships: slice([
+      {
+        itemId: 900,
+        typeId: 200,
+        ownerType: "corporation",
+        ownerId: 900,
+        items: [],
+      },
+    ]),
+  };
+  const result = projectOwnerSnapshotsToClientAssets([shipContainedSnapshot], { metadata: [] });
+  const projectedAsset = result.assets?.[0];
+
+  assert.ok(projectedAsset);
+  assert.equal(projectedAsset.isPackaged, false);
+  assert.equal(projectedAsset.isContainedByShip, true);
+  assert.equal(projectedAsset.locationFlag, "Cargo");
 });
 
 void test("falls back to legacy container IDs when needed", () => {

@@ -70,7 +70,9 @@ export interface StockItemBase {
   quantity: number; // this is the number of items in the stack (not the number of runs)
   locationId?: number;
   rootLocationId?: number;
+  locationFlag?: string;
   isPackaged?: boolean;
+  isContainedByShip?: boolean;
   isShip?: boolean;
   isCargoContainer?: boolean;
   ownerType?: StockOwnerType;
