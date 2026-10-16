@@ -346,7 +346,9 @@ export function normalizeSimulatorInventory(
               ...(item.industryOutput?.state === "active" || item.industryOutput?.state === "paused"
                 ? { industryJobStatus: item.industryOutput.state }
                 : {}),
-              ...(item.industryJobEndDate ? { industryJobEndDate: item.industryJobEndDate } : {}),
+              ...(item.industryOutput?.completionAt
+                ? { industryJobEndDate: item.industryOutput.completionAt }
+                : {}),
             });
           }
         }
@@ -397,6 +399,9 @@ export function normalizeSimulatorInventory(
         item.industryOutput?.state === "active" || item.industryOutput?.state === "paused"
           ? item.industryOutput.state
           : undefined,
+      ...(item.industryOutput?.completionAt
+        ? { industryJobEndDate: item.industryOutput.completionAt }
+        : {}),
       eligibleForReprocessing: eligibleTypeIds.has(item.typeId),
     });
   }

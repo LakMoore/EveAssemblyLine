@@ -294,6 +294,7 @@ void test("accepts only sanitized industry output provenance", () => {
           activity: "manufacturing",
           state: "active",
           sourceJobId: 123,
+          completionAt: "2026-01-01T01:00:00.000Z",
         },
       },
     ],
@@ -307,6 +308,7 @@ void test("accepts only sanitized industry output provenance", () => {
       activity: "manufacturing",
       state: "active",
       sourceJobId: 123,
+      completionAt: "2026-01-01T01:00:00.000Z",
     },
   );
   for (const property of [

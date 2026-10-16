@@ -160,6 +160,7 @@ function toSimulationAsset(item: PlanStockItem): SimulationAsset {
                 ? item.industryJobStatus
                 : "available",
           ...(item.jobId !== undefined ? { sourceJobId: item.jobId } : {}),
+          ...(item.industryJobEndDate ? { completionAt: item.industryJobEndDate } : {}),
         }
       : undefined;
   const {

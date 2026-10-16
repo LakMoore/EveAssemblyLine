@@ -218,7 +218,6 @@ void test("projects stable owner assets into enriched client assets", () => {
         ownerId: 900,
         inUse: undefined,
         locationFlag: "CorpSAG1",
-        isPackaged: true,
         isContainedByShip: false,
         me: undefined,
         te: undefined,
@@ -393,6 +392,19 @@ void test("labels assets in an undocked ship with its solar system", () => {
   assert.equal(dockedAsset.sourceLocationKind, "structure");
 });
 
+void test("does not infer ordinary item packaging from the ESI singleton flag", () => {
+  const ordinaryAsset = snapshot.assets.data[0];
+  assert.ok(ordinaryAsset);
+  const ordinaryAssetSnapshot: ClientOwnerSnapshot = {
+    ...snapshot,
+    assets: slice([{ ...ordinaryAsset, isSingleton: false }]),
+  };
+
+  const result = projectOwnerSnapshotsToClientAssets([ordinaryAssetSnapshot], { metadata: [] });
+
+  assert.equal(result.assets?.[0]?.isPackaged, undefined);
+});
+
 void test("projects packaging and ship-hold eligibility metadata", () => {
   const shipContainedSnapshot: ClientOwnerSnapshot = {
     ...snapshot,
@@ -419,7 +431,7 @@ void test("projects packaging and ship-hold eligibility metadata", () => {
   const projectedAsset = result.assets?.[0];
 
   assert.ok(projectedAsset);
-  assert.equal(projectedAsset.isPackaged, false);
+  assert.equal(projectedAsset.isPackaged, undefined);
   assert.equal(projectedAsset.isContainedByShip, true);
   assert.equal(projectedAsset.locationFlag, "Cargo");
 });

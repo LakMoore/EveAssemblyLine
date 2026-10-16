@@ -187,6 +187,7 @@ void test("preserves industry job status on future output lots", () => {
         activity: "manufacturing",
         state: "active",
         sourceJobId: 123,
+        completionAt: "2026-01-01T01:00:00.000Z",
       },
     },
     {
@@ -207,7 +208,7 @@ void test("preserves industry job status on future output lots", () => {
   assert.equal(futureOutput.industryJobStatus, "active");
   assert.equal(futureOutput.activity, "manufacturing");
   assert.equal(futureOutput.industryJobId, 123);
-  assert.equal(futureOutput.industryJobEndDate, undefined);
+  assert.equal(futureOutput.industryJobEndDate, "2026-01-01T01:00:00.000Z");
   const pausedOutput = inventory.itemLots.find((lot) => lot.industryJobStatus === "paused");
   assert.ok(pausedOutput);
   assert.equal(pausedOutput.activity, "reaction");

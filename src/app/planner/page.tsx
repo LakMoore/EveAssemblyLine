@@ -793,19 +793,30 @@ function Planner() {
     [characterStatuses, clientAssets, excludedStockLocationIds, settings],
   );
   const stock = includeStock ? eligibleStock : [];
-  const visibleReactionFormulaStock = useMemo(
-    () => getVisibleReactionFormulaStock(clientAssets, includeStock, excludedStockLocationIds),
-    [clientAssets, excludedStockLocationIds, includeStock],
-  );
   const takeAccessStock = useMemo(
     () => filterSimulationAssetsByTakeAccess(eligibleStock),
     [eligibleStock],
   );
   const blueprintCountStock = onlyIncludeTakeAccessAssets
     ? includeStock
-      ? takeAccessStock
+      ? takeAccessStock.filter((item) => !item.inBuild || item.inUse)
       : []
     : stock;
+  const visibleReactionFormulaStock = useMemo(
+    () =>
+      onlyIncludeTakeAccessAssets
+        ? includeStock
+          ? takeAccessStock.filter((item) => item.category === "reactionformula")
+          : []
+        : getVisibleReactionFormulaStock(clientAssets, includeStock, excludedStockLocationIds),
+    [
+      clientAssets,
+      excludedStockLocationIds,
+      includeStock,
+      onlyIncludeTakeAccessAssets,
+      takeAccessStock,
+    ],
+  );
   function updateLocations(next: Partial<Pick<PlannerLocations, "manufacturing" | "reactions">>) {
     const updatedLocations = { ...locations, ...next };
     setLocations(updatedLocations);

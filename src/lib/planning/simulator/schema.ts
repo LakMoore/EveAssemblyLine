@@ -85,6 +85,7 @@ const industryOutputMarkerSchema = z.object({
   activity: z.enum(["manufacturing", "reaction", "copying", "invention"]),
   state: z.enum(["active", "paused", "available", "excluded"]),
   sourceJobId: positiveSafeInteger.optional(),
+  completionAt: z.iso.datetime({ offset: true }).optional(),
 });
 
 const blueprintPrintSchema = z

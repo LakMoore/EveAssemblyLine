@@ -52,14 +52,62 @@ void test("filters corporation assets without TAKE access and preserves personal
   );
 });
 
-void test("filters packaged ordinary assets and preserves unpackaged assets", () => {
+void test("excludes every non-TAKE corporation hangar source regardless of asset type", () => {
+  const queryOnlySource = (containerItemIds: number[]) => ({
+    rootLocationId: 10,
+    locationFlag: "CorpSAG1",
+    containerItemIds,
+    canTake: false,
+    canQuery: true,
+  });
+  const filtered = filterSimulationAssetsByTakeAccess([
+    {
+      typeId: 10,
+      name: "Direct hangar item without owner metadata",
+      quantity: 1,
+      corporationSource: queryOnlySource([]),
+    },
+    {
+      typeId: 11,
+      name: "Nested blueprint",
+      quantity: 1,
+      category: "blueprint",
+      corporationSource: queryOnlySource([100]),
+    },
+    {
+      typeId: 12,
+      name: "Nested reaction formula",
+      quantity: 1,
+      category: "reactionformula",
+      ownerType: "corporation",
+      corporationSource: queryOnlySource([100]),
+    },
+    {
+      typeId: 13,
+      name: "TAKE hangar formula",
+      quantity: 1,
+      category: "reactionformula",
+      ownerType: "corporation",
+      corporationSource: { ...queryOnlySource([]), canTake: true },
+    },
+    { typeId: 14, name: "Personal asset", quantity: 1, ownerType: "character" },
+  ]);
+
+  assert.deepEqual(
+    filtered.map((item) => item.typeId),
+    [13, 14],
+  );
+});
+
+void test("preserves packaged ordinary assets and excludes packaged ships", () => {
   const prepared = prepareSimulationAssets([
-    { typeId: 1, name: "Packaged", quantity: 1, isPackaged: true },
+    { typeId: 1, name: "Packaged ordinary item", quantity: 1, isPackaged: true },
     { typeId: 2, name: "Unpackaged", quantity: 2, isPackaged: false },
+    { typeId: 3, name: "Packaged ship", quantity: 1, isPackaged: true, isShip: true },
   ]);
   assert.deepEqual(
     prepared.map((item) => item.typeId),
-    [2],
+    [1, 2],
   );
 });
 

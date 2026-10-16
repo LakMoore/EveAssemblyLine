@@ -14,6 +14,7 @@ export interface SimulationIndustryOutputMarker {
   activity: "manufacturing" | "reaction" | "copying" | "invention";
   state: "active" | "paused" | "available" | "excluded";
   sourceJobId?: number;
+  completionAt?: string;
 }
 
 /** Unit represented by a simulator quantity. Blueprint quantities are run counts. */

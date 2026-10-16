@@ -514,6 +514,7 @@ type SimulationRowControls = {
   onOpenPlan: () => void;
   onNavigateToPlan: () => void;
   onOpenBuy: () => void;
+  onOpenReprocessing: () => void;
 };
 
 type SimulationCompletionState = {
@@ -945,7 +946,7 @@ function SimulationActivitySummary({
   );
 }
 
-const manufacturingActivityFactColumnClasses = "lg:grid-cols-[2rem_5rem_5rem_5rem_9rem]";
+const manufacturingActivityFactColumnClasses = "lg:grid-cols-[2rem_8rem_5rem_5rem_9rem]";
 
 /** Renders activity-specific fact headers aligned to the wide activity-row columns. */
 function SimulationActivityColumnsHeader({
@@ -960,7 +961,7 @@ function SimulationActivityColumnsHeader({
       <span aria-hidden="true" />
       <span aria-hidden="true" />
       {tab === "react" ? (
-        <div className="grid grid-cols-[3rem_3rem_6rem_7rem_6rem_4rem] gap-x-3 text-right">
+        <div className="grid grid-cols-[3rem_8rem_6rem_7rem_6rem_4rem] gap-x-3 text-right">
           <span aria-hidden="true" />
           <span className="text-center">Inputs</span>
           <span className="leading-tight">Reaction Formulas</span>
@@ -1067,12 +1068,12 @@ function SimulationReactionRowFacts({
       : [{ runsPerInstall: 0, installCount: 0, durationSeconds: 0 }];
 
   return (
-    <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 text-right font-mono text-xs lg:grid-cols-[3rem_3rem_6rem_7rem_6rem_4rem] lg:gap-x-3">
+    <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 text-right font-mono text-xs lg:grid-cols-[3rem_8rem_6rem_7rem_6rem_4rem] lg:gap-x-3">
       <span className="col-span-2 flex items-center justify-self-start lg:col-span-1 lg:col-start-1">
         {installPlan}
       </span>
       <span className="text-muted-foreground lg:hidden">Inputs</span>
-      <span className="flex justify-self-center lg:col-start-2 lg:row-start-1">{inputs}</span>
+      <div className="flex justify-self-center lg:col-start-2 lg:row-start-1">{inputs}</div>
       <span className="text-muted-foreground lg:hidden">Reaction Formulas</span>
       <span className="flex items-center justify-end lg:col-start-3 lg:row-start-1">
         <Tooltip>
@@ -1266,6 +1267,7 @@ function SimulationManufacturingBlueprintCountTooltip({
   owned,
   inUse,
   available,
+  className,
   children,
 }: {
   name: string;
@@ -1273,6 +1275,7 @@ function SimulationManufacturingBlueprintCountTooltip({
   owned: number;
   inUse: number;
   available: number;
+  className?: string;
   children: ReactNode;
 }) {
   const tooltipLabel =
@@ -1285,7 +1288,7 @@ function SimulationManufacturingBlueprintCountTooltip({
         render={
           <span
             aria-label={tooltipLabel}
-            className="flex items-center justify-end"
+            className={cn("flex items-center justify-end", className)}
             role="group"
             tabIndex={0}
           >
@@ -3425,6 +3428,7 @@ function SimulationActivityTab({
   locationSystemIdsById,
   systemNamesById,
   reactionMaterialBonusesByLocation,
+  reprocessingSourceKeys,
   characterNamesById,
   characterStatuses,
   slotUsage,
@@ -3447,6 +3451,7 @@ function SimulationActivityTab({
   locationSystemIdsById?: ReadonlyMap<number, number>;
   systemNamesById?: ReadonlyMap<number, string>;
   reactionMaterialBonusesByLocation: ReadonlyMap<number, number>;
+  reprocessingSourceKeys: ReadonlySet<string>;
   characterNamesById: ReadonlyMap<number, string>;
   characterStatuses: readonly ClientCharacterStatus[];
   slotUsage: ClientJobsResponse["slotUsage"];
@@ -3935,6 +3940,9 @@ function SimulationActivityTab({
             tab === "manufacture"
               ? simulationManufacturingBlueprintCounts(group, stock, visibleBlueprintStock)
               : undefined;
+          const noAvailableBlueprints =
+            manufacturingBlueprintCounts?.availableBpos === 0
+            && manufacturingBlueprintCounts.availableBpcRuns === 0;
           const formulaCounts = simulationReactionFormulaCountsForGroup(
             group,
             reactionFormulaCounts,
@@ -4017,7 +4025,7 @@ function SimulationActivityTab({
                 tab === "react"
                   ? "w-full self-end text-right font-mono text-xs lg:w-auto lg:self-auto"
                   : cn(
-                      "grid w-full grid-cols-[auto_minmax(0,1fr)_auto_auto_auto] items-center gap-2 self-end text-right font-mono text-xs",
+                      "col-span-3 col-start-1 grid w-full grid-cols-1 items-center gap-y-1 self-end font-mono text-xs",
                       "lg:w-auto lg:justify-end lg:gap-x-2 lg:self-auto",
                       manufacturingActivityFactColumnClasses,
                     )
@@ -4042,8 +4050,10 @@ function SimulationActivityTab({
                       job={group.jobs[0]}
                       jobs={group.jobs}
                       allJobs={allJobs}
+                      reprocessingSourceKeys={reprocessingSourceKeys}
                       onOpenPlan={controls.onOpenPlan}
                       onOpenBuy={controls.onOpenBuy}
+                      onOpenReprocessing={controls.onOpenReprocessing}
                       showLabel={false}
                     />
                   }
@@ -4059,7 +4069,8 @@ function SimulationActivityTab({
                 />
               ) : (
                 <>
-                  <span className="flex items-center justify-self-start">
+                  <div className="flex w-full items-center justify-between gap-2 text-left lg:w-auto lg:justify-self-start">
+                    <small className="text-muted-foreground lg:hidden">Install Plan</small>
                     <SimulationManufacturingInstallPlanDialog
                       entries={installPlanEntries}
                       displayMode={manufacturingRunDisplay}
@@ -4067,49 +4078,51 @@ function SimulationActivityTab({
                       onOpenPlan={controls.onOpenPlan}
                       readOnly={readOnly}
                     />
-                  </span>
-                  <span className="flex items-center justify-self-center">
+                  </div>
+                  <div className="flex w-full items-center justify-between gap-2 text-left lg:col-start-2 lg:row-start-1 lg:w-auto lg:justify-self-center">
+                    <small className="text-muted-foreground lg:hidden">Inputs</small>
                     <SimulationJobInputsResponsive
                       job={group.jobs[0]}
                       jobs={group.jobs}
                       allJobs={allJobs}
+                      reprocessingSourceKeys={reprocessingSourceKeys}
                       onOpenPlan={controls.onOpenPlan}
                       onOpenBuy={controls.onOpenBuy}
+                      onOpenReprocessing={controls.onOpenReprocessing}
+                      showLabel={false}
                     />
-                  </span>
-                  <span className="flex flex-col items-end justify-center font-mono text-xs">
-                    <small className="text-muted-foreground lg:hidden">
-                      Available / Total <span className="block">BPO</span>
-                    </small>
+                  </div>
+                  <div className="flex w-full items-center justify-between gap-2 text-left lg:col-start-3 lg:row-start-1 lg:w-auto lg:flex-col lg:items-end lg:justify-center lg:text-right">
+                    <small className="text-muted-foreground lg:hidden">Available / Total BPO</small>
                     <SimulationManufacturingBlueprintCountTooltip
                       name="Blueprint Originals"
                       visible={manufacturingBlueprintCounts?.visibleBpos ?? 0}
                       owned={manufacturingBlueprintCounts?.ownedBpos ?? 0}
                       inUse={manufacturingBlueprintCounts?.inUseBpos ?? 0}
                       available={manufacturingBlueprintCounts?.availableBpos ?? 0}
+                      className={noAvailableBlueprints ? "text-destructive" : undefined}
                     >
                       {quantity(manufacturingBlueprintCounts?.availableBpos ?? 0)} /{" "}
                       {quantity(manufacturingBlueprintCounts?.visibleBpos ?? 0)}
                     </SimulationManufacturingBlueprintCountTooltip>
-                  </span>
-                  <span className="flex flex-col items-end justify-center font-mono text-xs">
-                    <small className="text-muted-foreground lg:hidden">
-                      BPC <span className="block">Runs</span>
-                    </small>
+                  </div>
+                  <div className="flex w-full items-center justify-between gap-2 text-left lg:col-start-4 lg:row-start-1 lg:w-auto lg:flex-col lg:items-end lg:justify-center lg:text-right">
+                    <small className="text-muted-foreground lg:hidden">BPC Runs</small>
                     <SimulationManufacturingBlueprintCountTooltip
                       name="Blueprint Copy Runs"
                       visible={manufacturingBlueprintCounts?.visibleBpcRuns ?? 0}
                       owned={manufacturingBlueprintCounts?.ownedBpcRuns ?? 0}
                       inUse={manufacturingBlueprintCounts?.inUseBpcRuns ?? 0}
                       available={manufacturingBlueprintCounts?.availableBpcRuns ?? 0}
+                      className={noAvailableBlueprints ? "text-destructive" : undefined}
                     >
                       {quantity(manufacturingBlueprintCounts?.availableBpcRuns ?? 0)}
                     </SimulationManufacturingBlueprintCountTooltip>
-                  </span>
-                  <span
+                  </div>
+                  <div
                     className={cn(
-                      "flex min-w-0 flex-col items-end justify-self-end whitespace-normal",
-                      "lg:whitespace-nowrap",
+                      "flex w-full min-w-0 items-center justify-between gap-2 text-left whitespace-normal",
+                      "lg:col-start-5 lg:row-start-1 lg:w-auto lg:flex-col lg:items-end lg:justify-center lg:justify-self-end lg:text-right lg:whitespace-nowrap",
                     )}
                   >
                     <small className="text-muted-foreground lg:hidden">
@@ -4118,9 +4131,9 @@ function SimulationActivityTab({
                         : manufacturingRunDisplay === "installable"
                           ? "Suggested / Total"
                           : "Installable / Total"}
-                      <span className="block">Runs</span>
+                      <span className="lg:hidden"> Runs</span>
                     </small>
-                    <span className="flex items-center gap-1">
+                    <span className="flex shrink-0 items-center gap-1 whitespace-nowrap">
                       <CopyableNumber
                         value={
                           manufacturingRunDisplay === "schedule"
@@ -4145,7 +4158,7 @@ function SimulationActivityTab({
                         copySuffix=" runs"
                       />
                     </span>
-                  </span>
+                  </div>
                 </>
               )}
             </SwitchedResultRow>
@@ -5246,6 +5259,9 @@ export default function SimulationResults({
     onOpenBuy: () => {
       selectTab("buy");
     },
+    onOpenReprocessing: () => {
+      selectTab("reprocess");
+    },
   };
   const onOpenGroupChange = (groupKey: string, open: boolean) => {
     setOpenGroups((current) => ({ ...current, [groupKey]: open }));
@@ -5600,6 +5616,13 @@ function SimulationTabContent({
     );
   }
   if (activeTab === "react" || activeTab === "manufacture") {
+    const reprocessingSourceKeys = new Set(
+      result.lists.planItems.flatMap(({ items }) =>
+        items
+          .filter((item) => item.availableFromReprocessing > 0)
+          .map((item) => simulationCompletionKey(item.locationId, item.typeId)),
+      ),
+    );
     return (
       <SimulationActivityTab
         tab={activeTab}
@@ -5615,6 +5638,7 @@ function SimulationTabContent({
         locationSystemIdsById={locationSystemIdsById}
         systemNamesById={systemNamesById}
         reactionMaterialBonusesByLocation={reactionMaterialBonusesByLocation}
+        reprocessingSourceKeys={reprocessingSourceKeys}
         characterNamesById={characterNamesById}
         characterStatuses={characterStatuses}
         slotUsage={slotUsage}

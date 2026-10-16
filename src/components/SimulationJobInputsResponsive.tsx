@@ -7,7 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import styles from "@/app/page.module.css";
-import { aggregateSimulationInputs } from "@/lib/planning/simulator/presentation";
+import {
+  aggregateSimulationInputs,
+  simulationCompletionKey,
+} from "@/lib/planning/simulator/presentation";
+import { simulationCompletionBuckets } from "@/lib/planning/simulator/completionBuckets";
 import { cn } from "@/lib/utils";
 import type {
   SimulationIndustryJob,
@@ -21,6 +25,7 @@ import {
   ClipboardList,
   Factory,
   FlaskConical,
+  Minimize2,
   ShoppingCart,
   Truck,
   type LucideIcon,
@@ -62,6 +67,17 @@ function quantityLabel(quantity: number, quantityKind: SimulationQuantityKind = 
   return `${quantity.toLocaleString()} ${quantity === 1 ? "unit" : "units"}`;
 }
 
+/** Describes the quantity becoming available in one completion bucket. */
+function completionRowLabel(
+  quantity: number,
+  days: number,
+  quantityKind: SimulationQuantityKind,
+): string {
+  const readyQuantity = quantityLabel(quantity, quantityKind);
+  if (days === 0) return `${readyQuantity} ready now`;
+  return `${readyQuantity} ready in ${days} ${days === 1 ? "day" : "days"}`;
+}
+
 /** Formats a source's full job output while preserving the quantity reserved here. */
 function sourceQuantityLabel(
   quantity: number,
@@ -69,40 +85,9 @@ function sourceQuantityLabel(
   showJobOutput: boolean,
   quantityKind: SimulationQuantityKind = "item",
 ): string {
-  if (!showJobOutput) return quantityLabel(quantity, quantityKind);
-  return `${quantityLabel(quantity, quantityKind)} (${quantityLabel(claimedQuantity, quantityKind)} reserved)`;
-}
-
-/** Converts a reservation completion timestamp or simulated offset into minutes remaining. */
-function reservationMinutesUntil(
-  reservation: SimulationUpstreamReservation,
-  now = Date.now(),
-): number | undefined {
-  if (reservation.sourceCompletionAt) {
-    const completionTime = Date.parse(reservation.sourceCompletionAt);
-    if (Number.isFinite(completionTime)) {
-      return Math.max(0, Math.ceil((completionTime - now) / 60_000));
-    }
-  }
-  if (reservation.sourceCompletionOffsetSeconds !== undefined) {
-    return Math.max(0, Math.ceil(reservation.sourceCompletionOffsetSeconds / 60));
-  }
-  return undefined;
-}
-
-/** Formats the remaining time before a producing industry job completes. */
-function completionDetail(minutes: number | undefined): string {
-  if (minutes === undefined) return "";
-  if (minutes === 0) return "; next job ready for delivery";
-  if (minutes < 60) {
-    return `; next job completes in ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
-  }
-  const hours = Math.ceil(minutes / 60);
-  if (hours < 24) {
-    return `; next job completes in ${hours} ${hours === 1 ? "hour" : "hours"}`;
-  }
-  const days = Math.ceil(hours / 24);
-  return `; next job completes in ${days} ${days === 1 ? "day" : "days"}`;
+  const outputLabel = quantityLabel(quantity, quantityKind);
+  if (!showJobOutput || quantity === claimedQuantity) return outputLabel;
+  return `${outputLabel} total · ${quantityLabel(claimedQuantity, quantityKind)} reserved`;
 }
 
 /** Formats reaction run durations using the simulator's compact day/hour/minute style. */
@@ -121,16 +106,55 @@ function reactionRunDuration(totalSeconds: number): string {
 type InputSupplySource = {
   key: string;
   label: string;
-  source: "industry" | "reaction" | "copying" | "invention" | "market" | "haul";
+  source: "industry" | "reaction" | "copying" | "invention" | "market" | "haul" | "reprocessing";
   sourceJobIds: readonly string[];
   inBuild: boolean;
   quantityKind: SimulationQuantityKind;
   quantity: number;
   claimedQuantity: number;
   showJobOutput: boolean;
-  completion?: string;
+  showQuantity?: boolean;
+  completionRows?: Array<{ days: number; quantity: number }>;
   Icon: LucideIcon;
 };
+
+type MainRowBlockageSource = {
+  key: "market" | "reaction" | "manufacturing" | "haul" | "reprocessing";
+  label: string;
+  Icon: LucideIcon;
+};
+
+const mainRowBlockageSourceOrder: readonly MainRowBlockageSource[] = [
+  { key: "market", label: "Purchase required", Icon: ShoppingCart },
+  { key: "reaction", label: "Reaction required", Icon: Atom },
+  { key: "manufacturing", label: "Manufacturing required", Icon: Factory },
+  { key: "haul", label: "Hauling required", Icon: Truck },
+  { key: "reprocessing", label: "Reprocessing required", Icon: Minimize2 },
+];
+
+/** Returns the distinct supply sources for incomplete grouped job inputs. */
+function mainRowBlockageSources(
+  jobs: readonly SimulationIndustryJob[],
+  reprocessingSourceKeys: ReadonlySet<string>,
+): MainRowBlockageSource[] {
+  const blockedSources = new Set<MainRowBlockageSource["key"]>();
+  const locationId = jobs[0]?.locationId;
+  const inputs = aggregateSimulationInputs(jobs.flatMap((job) => job.inputs));
+  for (const input of inputs) {
+    if (inputCompletionPercent(input) >= 100) continue;
+    if ((input.purchaseQuantity ?? 0) > 0) blockedSources.add("market");
+    if (input.availableFromHauling > 0) blockedSources.add("haul");
+    for (const reservation of input.upstreamReservations ?? []) {
+      if (reservation.quantity <= 0) continue;
+      if (reservation.activity === "reaction") blockedSources.add("reaction");
+      if (reservation.activity === "manufacturing") blockedSources.add("manufacturing");
+    }
+    if (reprocessingSourceKeys.has(simulationCompletionKey(locationId, input.typeId))) {
+      blockedSources.add("reprocessing");
+    }
+  }
+  return mainRowBlockageSourceOrder.filter(({ key }) => blockedSources.has(key));
+}
 
 /** Combines reservations from the same upstream activity and execution state for source tooltips. */
 function reservationSources(
@@ -144,8 +168,8 @@ function reservationSources(
       claimedQuantity: number;
       hasJobOutput: boolean;
       hasIncompleteOutput: boolean;
-      completionMinutes?: number;
       sourceJobIds: Set<string>;
+      reservations: SimulationUpstreamReservation[];
     }
   >();
   for (const reservation of reservations) {
@@ -156,6 +180,7 @@ function reservationSources(
       hasJobOutput: false,
       hasIncompleteOutput: false,
       sourceJobIds: new Set<string>(),
+      reservations: [],
     };
     const sourceJobKey =
       reservation.sourceJobId === undefined ? undefined : String(reservation.sourceJobId);
@@ -171,11 +196,7 @@ function reservationSources(
     if (isNewSourceJob) {
       source.quantity += reservation.sourceOutputQuantity ?? reservation.quantity;
     }
-    const completionMinutes = reservationMinutesUntil(reservation, now);
-    if (
-      completionMinutes !== undefined
-      && (source.completionMinutes === undefined || completionMinutes < source.completionMinutes)
-    ) source.completionMinutes = completionMinutes;
+    source.reservations.push(reservation);
     sourcesByKey.set(key, source);
   }
   return (["manufacturing", "reaction", "copying", "invention"] as const).flatMap((activity) =>
@@ -214,7 +235,10 @@ function reservationSources(
           inBuild: state !== "planned",
           quantityKind:
             activity === "copying" || activity === "invention" ? "blueprint-run" : "item",
-          completion: completionDetail(source.completionMinutes),
+          completionRows:
+            state === "in-production" || state === "paused"
+              ? simulationCompletionBuckets(source.reservations, now)
+              : undefined,
           Icon:
             activity === "manufacturing"
               ? Factory
@@ -230,7 +254,11 @@ function reservationSources(
 }
 
 /** Returns the upstream sources that supply an input's missing quantity. */
-function inputSupplySources(input: SimulationJobInput, now: number): InputSupplySource[] {
+function inputSupplySources(
+  input: SimulationJobInput,
+  now: number,
+  reprocessingRequired: boolean,
+): InputSupplySource[] {
   if (input.availableNow >= input.requiredQuantity) return [];
   return [
     ...(input.availableFromHauling > 0
@@ -250,6 +278,23 @@ function inputSupplySources(input: SimulationJobInput, now: number): InputSupply
         ]
       : []),
     ...reservationSources(input.upstreamReservations ?? [], now),
+    ...(reprocessingRequired
+      ? [
+          {
+            key: "reprocessing",
+            label: "Reprocessing required",
+            source: "reprocessing" as const,
+            inBuild: false,
+            quantity: 0,
+            claimedQuantity: 0,
+            showJobOutput: false,
+            showQuantity: false,
+            quantityKind: input.quantityKind ?? "item",
+            sourceJobIds: [],
+            Icon: Minimize2,
+          },
+        ]
+      : []),
     ...(input.purchaseQuantity && input.purchaseQuantity > 0
       ? [
           {
@@ -273,23 +318,27 @@ function inputSupplySources(input: SimulationJobInput, now: number): InputSupply
 function SimulationInputRow({
   input,
   now,
+  reprocessingRequired = false,
   onNavigate,
   onOpenBuy,
+  onOpenReprocessing,
   onOpenJobInputs,
   jobsById,
   blueprintVariation,
 }: {
   input: SimulationJobInput;
   now: number;
+  reprocessingRequired?: boolean;
   onNavigate: () => void;
   onOpenBuy: () => void;
+  onOpenReprocessing?: () => void;
   onOpenJobInputs: (jobs: readonly SimulationIndustryJob[]) => void;
   jobsById: ReadonlyMap<string, SimulationIndustryJob>;
   blueprintVariation?: "bpc" | "relic";
 }) {
   const percent = inputCompletionPercent(input);
   const status = inputStatus(input);
-  const supplySources = inputSupplySources(input, now);
+  const supplySources = inputSupplySources(input, now, reprocessingRequired);
   return (
     <div className="grid grid-cols-1 gap-x-3 gap-y-2 border-t border-border/60 py-2 first:border-t-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
       <TypeIdentity
@@ -316,11 +365,12 @@ function SimulationInputRow({
               quantity,
               claimedQuantity,
               showJobOutput,
+              showQuantity = true,
               quantityKind,
-              completion = "",
+              completionRows = [],
               Icon,
             }) => {
-              const isColored = source === "market" || inBuild;
+              const isColored = source === "market" || source === "reprocessing" || inBuild;
               const iconClassName = isColored
                 ? styles.simulationSourceIcon
                 : "text-muted-foreground";
@@ -328,24 +378,64 @@ function SimulationInputRow({
                 const sourceJob = jobsById.get(sourceJobId);
                 return sourceJob ? [sourceJob] : [];
               });
-              const opensJobInputs = label === "To Be Manufactured";
-              const sourceDescription = `${label}: ${sourceQuantityLabel(quantity, claimedQuantity, showJobOutput, quantityKind)}${completion}`;
+              const opensJobInputs =
+                label === "To Be Manufactured"
+                || (source === "reaction" && label === "To Be Reacted");
+              const opensReprocessing =
+                source === "reprocessing" && onOpenReprocessing !== undefined;
+              const jobInputsUnavailable = opensJobInputs && sourceJobs.length === 0;
+              const completionDetails = completionRows.map(({ days, quantity: readyQuantity }) =>
+                completionRowLabel(readyQuantity, days, quantityKind),
+              );
+              const sourceDescription = `${label}${showQuantity ? `: ${sourceQuantityLabel(quantity, claimedQuantity, showJobOutput, quantityKind)}` : ""}${completionDetails.length > 0 ? `; ${completionDetails.join("; ")}` : ""}`;
+              const sourceActionDescription = opensReprocessing
+                ? `${sourceDescription}. Open reprocessing results.`
+                : jobInputsUnavailable
+                  ? `${sourceDescription}. Job inputs unavailable because no producer jobs are available.`
+                  : `${sourceDescription}. ${opensJobInputs ? "View job input" : "View buy list"}`;
               return (
                 <Tooltip key={key}>
                   <TooltipTrigger
                     render={
-                      label === "Buy" || opensJobInputs ? (
+                      jobInputsUnavailable ? (
+                        <span
+                          aria-label={sourceActionDescription}
+                          className="inline-flex size-5 items-center justify-center"
+                          data-source={source}
+                          role="group"
+                          tabIndex={0}
+                        >
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-hidden="true"
+                            className={cn("size-5 p-0", iconClassName)}
+                            data-source={source}
+                            disabled
+                            tabIndex={-1}
+                          >
+                            <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
+                          </Button>
+                        </span>
+                      ) : label === "Buy" || opensJobInputs || opensReprocessing ? (
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon-xs"
-                          aria-label={`${sourceDescription}. ${opensJobInputs ? "View job inputs" : "View buy list"}`}
-                          className={cn("size-5 p-0", iconClassName)}
+                          aria-label={sourceActionDescription}
+                          className={cn(
+                            "p-0",
+                            opensReprocessing ? "size-6 hover:text-(--lime)" : "size-5",
+                            iconClassName,
+                          )}
                           data-source={source}
-                          disabled={opensJobInputs && sourceJobs.length === 0}
                           onClick={(event) => {
                             event.stopPropagation();
-                            if (opensJobInputs) onOpenJobInputs(sourceJobs);
+                            if (source === "reprocessing" && onOpenReprocessing) {
+                              onOpenReprocessing();
+                            }
+                            else if (opensJobInputs) onOpenJobInputs(sourceJobs);
                             else onOpenBuy();
                           }}
                         >
@@ -353,7 +443,7 @@ function SimulationInputRow({
                         </Button>
                       ) : (
                         <span
-                          aria-label={`${label}: ${sourceQuantityLabel(quantity, claimedQuantity, showJobOutput, quantityKind)}${completion}`}
+                          aria-label={sourceDescription}
                           className={cn(
                             "inline-flex size-5 items-center justify-center",
                             iconClassName,
@@ -367,9 +457,37 @@ function SimulationInputRow({
                       )
                     }
                   />
-                  <TooltipContent>
-                    {sourceDescription}
-                    {opensJobInputs && " View job inputs"}
+                  <TooltipContent className="items-start">
+                    <div className="flex flex-col gap-1.5">
+                      <span className="font-semibold">{label}</span>
+                      {opensReprocessing && <span>Open reprocessing results</span>}
+                      {showQuantity && (
+                        <span>
+                          {sourceQuantityLabel(
+                            quantity,
+                            claimedQuantity,
+                            showJobOutput,
+                            quantityKind,
+                          )}
+                        </span>
+                      )}
+                      {completionRows.length > 0 && (
+                        <div className="flex flex-col gap-1 border-t border-background/20 pt-1.5">
+                          {completionRows.map(({ days, quantity: readyQuantity }) => (
+                            <span key={days}>
+                              {completionRowLabel(readyQuantity, days, quantityKind)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {opensJobInputs && (
+                        <span>
+                          {jobInputsUnavailable
+                            ? "Job inputs unavailable: no producer jobs are available."
+                            : "View job input"}
+                        </span>
+                      )}
+                    </div>
                   </TooltipContent>
                 </Tooltip>
               );
@@ -398,6 +516,8 @@ export default function SimulationJobInputsResponsive({
   allJobs,
   onOpenPlan,
   onOpenBuy,
+  onOpenReprocessing,
+  reprocessingSourceKeys,
   variation = "icon",
   showLabel = true,
 }: {
@@ -406,6 +526,8 @@ export default function SimulationJobInputsResponsive({
   allJobs?: readonly SimulationIndustryJob[];
   onOpenPlan: () => void;
   onOpenBuy: () => void;
+  onOpenReprocessing: () => void;
+  reprocessingSourceKeys: ReadonlySet<string>;
   variation?: "icon" | "render" | "bp" | "bpc";
   showLabel?: boolean;
 }) {
@@ -432,6 +554,7 @@ export default function SimulationJobInputsResponsive({
     onOpenBuy();
   };
   const inputJobs = jobs && jobs.length > 0 ? jobs : [job];
+  const blockageSources = mainRowBlockageSources(inputJobs, reprocessingSourceKeys);
   const jobsById = new Map((allJobs ?? inputJobs).map((inputJob) => [inputJob.jobId, inputJob]));
   const displayedJobs = selectedJobs ?? inputJobs;
   const installableRuns = displayedJobs.reduce(
@@ -456,6 +579,12 @@ export default function SimulationJobInputsResponsive({
   const materialCompletionPercent =
     inputs.length > 0 ? Math.min(...inputs.map(inputCompletionPercent)) : 100;
   const materialStatus = completionStatus(materialCompletionPercent);
+  const inputTriggerStatusClassName = {
+    ready: "border-success/40 text-success hover:text-success aria-expanded:text-success",
+    partial: "border-warning/40 text-warning hover:text-warning aria-expanded:text-warning",
+    blocked:
+      "border-destructive text-destructive hover:text-destructive aria-expanded:text-destructive",
+  }[materialStatus];
   const blueprintReadyRuns = displayedJobs.reduce(
     (total, inputJob) =>
       total
@@ -481,103 +610,161 @@ export default function SimulationJobInputsResponsive({
   };
 
   return (
-    <ResponsiveDialogDrawer
-      open={open}
-      onOpenChange={handleOpenChange}
-      trigger={
-        <Button
-          type="button"
-          variant="outline"
-          aria-label={showLabel ? undefined : `${materialCompletionPercent}% inputs`}
-          className={cn(
-            "inline-flex h-6 items-center justify-center gap-1 border px-2 text-[10px] font-semibold tracking-[0.08em] uppercase transition-colors hover:brightness-125",
-            statusClassName(materialStatus),
-          )}
-          onClick={(event) => {
-            event.stopPropagation();
-            setSelectedJobs(null);
-          }}
+    <div className="flex flex-nowrap items-center gap-1 lg:grid lg:w-full lg:grid-cols-[5rem_3rem] lg:justify-items-center lg:gap-0">
+      {blockageSources.length > 0 && (
+        <span
+          aria-label="Input blockage sources"
+          className="flex shrink-0 flex-row flex-nowrap items-center gap-0.5 lg:col-start-1"
+          role="group"
         >
-          <span>{materialCompletionPercent}%</span>
-          {showLabel ? "Inputs" : null}
-        </Button>
-      }
-      title={displayedJobs.length > 1 ? "Grouped job inputs" : "Job inputs"}
-      description={
-        displayedJobs.length > 1
-          ? "Material and blueprint availability for the grouped simulation jobs."
-          : description
-      }
-      headerContent={
-        <div className="flex flex-col gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <TypeIdentity
-              name={displayedJob.productName}
-              typeId={displayedJob.productTypeId}
-              variation={variation}
-              imageSize={40}
-              linkPath="planner"
-              linkIcon={ClipboardList}
-              linkSearchParams={{ simulationTab: "plan" }}
-              linkHash="plan-breakdown"
-              navigateInPlace
-              onNavigate={navigateToPlan}
-              className="min-w-0 flex-1"
-            />
-            <div className="grid shrink-0 grid-cols-2 gap-x-4 font-mono text-xs">
-              <div className="flex flex-col items-end">
-                <strong>{installableRuns.toLocaleString()}</strong>
-                <small className="text-[9px] text-muted-foreground uppercase">
-                  Installable
-                  {isReaction ? ` · ${reactionRunDuration(installableRuntimeSeconds)}` : ""}
-                </small>
+          {blockageSources.map(({ key, label, Icon }) => (
+            <Tooltip key={key}>
+              <TooltipTrigger
+                render={
+                  key === "reprocessing" ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={`${label}. Open reprocessing results`}
+                      className="size-6 p-0 text-destructive hover:text-destructive"
+                      data-source={key}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenReprocessing();
+                      }}
+                    >
+                      <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
+                    </Button>
+                  ) : (
+                    <span
+                      aria-label={label}
+                      className="inline-flex size-3.5 items-center justify-center text-destructive"
+                      data-source={key}
+                      role="img"
+                      tabIndex={0}
+                    >
+                      <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
+                    </span>
+                  )
+                }
+              />
+              <TooltipContent>
+                {key === "reprocessing" ? (
+                  <span className="flex flex-col gap-1">
+                    <span>{label}</span>
+                    <span>Open reprocessing results</span>
+                  </span>
+                ) : (
+                  label
+                )}
+              </TooltipContent>
+            </Tooltip>
+          ))}
+        </span>
+      )}
+      <ResponsiveDialogDrawer
+        open={open}
+        onOpenChange={handleOpenChange}
+        trigger={
+          <Button
+            type="button"
+            variant="outline"
+            aria-label={showLabel ? undefined : `${materialCompletionPercent}% inputs`}
+            className={cn(
+              "inline-flex h-6 items-center justify-center gap-1 border px-2 text-[10px] font-semibold tracking-[0.08em] uppercase transition-colors hover:brightness-125 lg:col-start-2",
+              inputTriggerStatusClassName,
+            )}
+            onClick={(event) => {
+              event.stopPropagation();
+              setSelectedJobs(null);
+            }}
+          >
+            <span>{materialCompletionPercent}%</span>
+            {showLabel ? "Inputs" : null}
+          </Button>
+        }
+        title={displayedJobs.length > 1 ? "Grouped job inputs" : "Job inputs"}
+        description={
+          displayedJobs.length > 1
+            ? "Material and blueprint availability for the grouped simulation jobs."
+            : description
+        }
+        headerContent={
+          <div className="flex flex-col gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <TypeIdentity
+                name={displayedJob.productName}
+                typeId={displayedJob.productTypeId}
+                variation={variation}
+                imageSize={40}
+                linkPath="planner"
+                linkIcon={ClipboardList}
+                linkSearchParams={{ simulationTab: "plan" }}
+                linkHash="plan-breakdown"
+                navigateInPlace
+                onNavigate={navigateToPlan}
+                className="min-w-0 flex-1"
+              />
+              <div className="grid shrink-0 grid-cols-2 gap-x-4 font-mono text-xs">
+                <div className="flex flex-col items-end">
+                  <strong>{installableRuns.toLocaleString()}</strong>
+                  <small className="text-[9px] text-muted-foreground uppercase">
+                    Installable
+                    {isReaction ? ` · ${reactionRunDuration(installableRuntimeSeconds)}` : ""}
+                  </small>
+                </div>
+                <div className="flex flex-col items-end">
+                  <strong>{totalRuns.toLocaleString()}</strong>
+                  <small className="text-[9px] text-muted-foreground uppercase">
+                    Total{isReaction ? ` · ${reactionRunDuration(totalRuntimeSeconds)}` : ""}
+                  </small>
+                </div>
               </div>
-              <div className="flex flex-col items-end">
-                <strong>{totalRuns.toLocaleString()}</strong>
-                <small className="text-[9px] text-muted-foreground uppercase">
-                  Total{isReaction ? ` · ${reactionRunDuration(totalRuntimeSeconds)}` : ""}
-                </small>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border pt-3">
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Materials</span>
+                <Badge variant="outline" className={statusClassName(materialStatus)}>
+                  {materialCompletionPercent}% {materialStatus}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">{blueprintLabel}</span>
+                <Badge variant="outline" className={statusClassName(blueprintStatus)}>
+                  {blueprintCompletionPercent}% {blueprintStatus}
+                </Badge>
               </div>
             </div>
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border pt-3">
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">Materials</span>
-              <Badge variant="outline" className={statusClassName(materialStatus)}>
-                {materialCompletionPercent}% {materialStatus}
-              </Badge>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground">{blueprintLabel}</span>
-              <Badge variant="outline" className={statusClassName(blueprintStatus)}>
-                {blueprintCompletionPercent}% {blueprintStatus}
-              </Badge>
-            </div>
-          </div>
+        }
+      >
+        <div>
+          <p className="pt-2 text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+            Materials
+          </p>
+          {inputs.length > 0 ? (
+            inputs.map((input) => (
+              <SimulationInputRow
+                input={input}
+                key={input.typeId}
+                now={now}
+                reprocessingRequired={reprocessingSourceKeys.has(
+                  simulationCompletionKey(displayedJob.locationId, input.typeId),
+                )}
+                onNavigate={navigateToPlan}
+                onOpenBuy={navigateToBuy}
+                onOpenReprocessing={onOpenReprocessing}
+                onOpenJobInputs={openJobInputs}
+                jobsById={jobsById}
+              />
+            ))
+          ) : (
+            <p className="py-2 text-muted-foreground">No material inputs</p>
+          )}
         </div>
-      }
-    >
-      <div>
-        <p className="pt-2 text-[10px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-          Materials
-        </p>
-        {inputs.length > 0 ? (
-          inputs.map((input) => (
-            <SimulationInputRow
-              input={input}
-              key={input.typeId}
-              now={now}
-              onNavigate={navigateToPlan}
-              onOpenBuy={navigateToBuy}
-              onOpenJobInputs={openJobInputs}
-              jobsById={jobsById}
-            />
-          ))
-        ) : (
-          <p className="py-2 text-muted-foreground">No material inputs</p>
-        )}
-      </div>
-    </ResponsiveDialogDrawer>
+      </ResponsiveDialogDrawer>
+    </div>
   );
 }
 

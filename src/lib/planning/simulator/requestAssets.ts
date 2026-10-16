@@ -10,7 +10,8 @@ function isSimulationAssetEligible(item: StockItem): boolean {
     || item.category === "blueprint"
     || item.category === "reactionformula"
   ) return true;
-  if (item.isPackaged !== false) return false;
+  if (item.isShip === true && item.isPackaged === true) return false;
+  if (item.isContainedByShip === true && item.isPackaged === true) return false;
   return item.isContainedByShip !== true || isShipHoldLocationFlag(item.locationFlag ?? "");
 }
 
@@ -67,7 +68,8 @@ export function filterSimulationAssetsByTakeAccess(items: readonly StockItem[]):
   return items.filter(
     (item) =>
       item.source === "marketOrder"
-      || item.ownerType !== "corporation"
-      || item.corporationSource?.canTake === true,
+      || (item.corporationSource === undefined
+        ? item.ownerType !== "corporation"
+        : item.corporationSource.canTake === true),
   );
 }
