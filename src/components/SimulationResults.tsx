@@ -93,6 +93,7 @@ import {
   adjustSimulationPurchaseQuantity,
   groupSimulationActivityJobs,
   simulationCompletionKey,
+  simulationGroupsWithSuggestedInstalls,
   shouldAdjustSimulationPurchaseQuantity,
   simulationRunsStartingAtT0,
   type SimulationIndustryJobGroup,
@@ -3595,13 +3596,15 @@ function SimulationActivityTab({
   );
   const presentationGroups: SimulationIndustryJobGroup[] = groupSimulationActivityJobs(jobs);
   const visiblePresentationGroups =
-    tab !== "manufacture" || manufacturingRunDisplay === "total"
-      ? presentationGroups
-      : presentationGroups.filter((group) =>
-          manufacturingRunDisplay === "installable"
-            ? group.jobs.some((job) => (schedules.get(job.jobId)?.runs ?? 0) > 0)
-            : simulationRunsStartingAtT0(group.jobs) > 0,
-        );
+    tab === "react" && effectiveSolveMode === "schedule"
+      ? simulationGroupsWithSuggestedInstalls(presentationGroups, schedules)
+      : tab !== "manufacture" || manufacturingRunDisplay === "total"
+        ? presentationGroups
+        : presentationGroups.filter((group) =>
+            manufacturingRunDisplay === "installable"
+              ? group.jobs.some((job) => (schedules.get(job.jobId)?.runs ?? 0) > 0)
+              : simulationRunsStartingAtT0(group.jobs) > 0,
+          );
   async function copyEntries(entries: readonly SimulationIndustryJob[], status: "list" | number) {
     const text = installableRunsText(entries);
     try {

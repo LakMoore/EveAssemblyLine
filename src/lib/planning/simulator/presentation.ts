@@ -130,6 +130,16 @@ export function groupSimulationActivityJobs(
   return [...groups.values()];
 }
 
+/** Keeps result groups containing at least one suggested install run. */
+export function simulationGroupsWithSuggestedInstalls(
+  groups: readonly SimulationIndustryJobGroup[],
+  schedules: ReadonlyMap<string, { runs: number }>,
+): SimulationIndustryJobGroup[] {
+  return groups.filter((group) =>
+    group.jobs.some((job) => (schedules.get(job.jobId)?.runs ?? 0) > 0),
+  );
+}
+
 /** Sums scheduled runs across jobs that begin at exactly T+0. */
 export function simulationRunsStartingAtT0(jobs: readonly SimulationIndustryJob[]): number {
   return jobs.reduce(

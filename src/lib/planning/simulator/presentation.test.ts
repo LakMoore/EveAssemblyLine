@@ -4,6 +4,7 @@ import {
   adjustSimulationPurchaseQuantity,
   groupSimulationActivityJobs,
   simulationCompletionKey,
+  simulationGroupsWithSuggestedInstalls,
   shouldAdjustSimulationPurchaseQuantity,
   simulationRunsStartingAtT0,
 } from "./presentation";
@@ -101,6 +102,19 @@ void test("keeps activity locations and activity kinds as separate groups", () =
   assert.deepEqual(
     groups.map(({ groupKey }) => groupKey),
     ["manufacturing:20:20185", "reaction:20:20185", "manufacturing:30:20185", "reaction:30:20185"],
+  );
+});
+
+void test("keeps only groups with suggested install runs", () => {
+  const groups = groupSimulationActivityJobs([job("job-1"), job("job-2", { locationId: 30 })]);
+  const schedules = new Map([
+    ["job-1", { runs: 0 }],
+    ["job-2", { runs: 3 }],
+  ]);
+
+  assert.deepEqual(
+    simulationGroupsWithSuggestedInstalls(groups, schedules).map(({ groupKey }) => groupKey),
+    ["manufacturing:30:20185"],
   );
 });
 
