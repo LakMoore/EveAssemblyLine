@@ -1,6 +1,56 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { prepareSimulationAssets } from "./requestAssets";
+import { filterSimulationAssetsByTakeAccess, prepareSimulationAssets } from "./requestAssets";
+
+void test("filters corporation assets without TAKE access and preserves personal assets", () => {
+  const filtered = filterSimulationAssetsByTakeAccess([
+    { typeId: 1, name: "Personal blueprint", quantity: 1, ownerType: "character" },
+    {
+      typeId: 2,
+      name: "TAKE hangar asset",
+      quantity: 1,
+      ownerType: "corporation",
+      corporationSource: {
+        rootLocationId: 10,
+        locationFlag: "CorpSAG1",
+        containerItemIds: [],
+        canTake: true,
+        canQuery: true,
+      },
+    },
+    {
+      typeId: 3,
+      name: "QUERY-only blueprint",
+      quantity: 1,
+      ownerType: "corporation",
+      corporationSource: {
+        rootLocationId: 11,
+        locationFlag: "CorpSAG2",
+        containerItemIds: [],
+        canTake: false,
+        canQuery: true,
+      },
+    },
+    {
+      typeId: 4,
+      name: "Corporation blueprint without source permissions",
+      quantity: 1,
+      ownerType: "corporation",
+    },
+    {
+      typeId: 5,
+      name: "Corporation market order",
+      quantity: 1,
+      ownerType: "corporation",
+      source: "marketOrder",
+    },
+  ]);
+
+  assert.deepEqual(
+    filtered.map((item) => item.typeId),
+    [1, 2, 5],
+  );
+});
 
 void test("filters packaged ordinary assets and preserves unpackaged assets", () => {
   const prepared = prepareSimulationAssets([

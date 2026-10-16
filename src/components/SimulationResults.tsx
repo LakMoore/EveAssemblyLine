@@ -80,6 +80,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { toast } from "@/components/ui/toast";
 import type { ClientCharacterStatus, ClientJobsResponse } from "@/lib/client/requestCache";
 import { getAvailableSlotCount } from "@/lib/client/slotUsage";
+import {
+  getSimulationFingerprintStatus,
+  subscribeToSimulationFingerprintStatus,
+} from "@/lib/client/simulationFingerprintStatus";
 import { eveCharacterPortraitUrl, eveCorporationLogoUrl } from "@/lib/eve/imageServer";
 import { cn } from "@/lib/utils";
 import { useAppLanguage } from "@/app/AppShell";
@@ -4769,6 +4773,90 @@ function SimulationSkillsTab({
   );
 }
 
+/** Renders fingerprint status without rerendering the complete simulation output. */
+function SimulationFingerprintStatus({
+  result,
+  instanceId,
+}: {
+  result: SimulationResultV2 | null;
+  instanceId: string;
+}) {
+  const { fingerprint, working } = useSyncExternalStore(
+    (listener) => subscribeToSimulationFingerprintStatus(instanceId, listener),
+    () => getSimulationFingerprintStatus(instanceId),
+    () => getSimulationFingerprintStatus(instanceId),
+  );
+  const isOutOfDate =
+    result !== null
+    && typeof fingerprint === "string"
+    && fingerprint !== result.metadata.normalizedInputHash;
+
+  return (
+    <>
+      {isOutOfDate && (
+        <Badge
+          aria-live="polite"
+          role="status"
+          title="This result does not reflect the current planner request."
+          variant="destructive"
+        >
+          <TriangleAlert aria-hidden="true" />
+          Simulation out of date
+        </Badge>
+      )}
+      {working && (
+        <Badge aria-live="polite" role="status" variant="outline">
+          <Spinner aria-hidden="true" className="size-3" />
+          Working
+        </Badge>
+      )}
+    </>
+  );
+}
+
+/** Hides the ordinary status message when a completed result is out of date. */
+function SimulationStatusMessage({
+  result,
+  instanceId,
+  status,
+  statusIsError,
+  isLoading,
+  readOnly,
+}: {
+  result: SimulationResultV2;
+  instanceId: string;
+  status: string;
+  statusIsError: boolean;
+  isLoading: boolean;
+  readOnly: boolean;
+}) {
+  const { fingerprint } = useSyncExternalStore(
+    (listener) => subscribeToSimulationFingerprintStatus(instanceId, listener),
+    () => getSimulationFingerprintStatus(instanceId),
+    () => getSimulationFingerprintStatus(instanceId),
+  );
+  const isOutOfDate =
+    !readOnly
+    && typeof fingerprint === "string"
+    && fingerprint !== result.metadata.normalizedInputHash;
+  if (isOutOfDate && !statusIsError && !isLoading) return null;
+
+  return (
+    <span
+      aria-live="polite"
+      className={cn(
+        "text-xs",
+        status === "Simulation updated just now"
+          ? "text-(--theme-info) drop-shadow-[0_0_8px_color-mix(in_srgb,var(--theme-info)_60%,transparent)]"
+          : "text-muted-foreground",
+      )}
+      role="status"
+    >
+      {status}
+    </span>
+  );
+}
+
 /** Renders simulator warnings as the first output tab. */
 function SimulationWarningsTab({
   result,
@@ -4838,7 +4926,6 @@ export default function SimulationResults({
   result,
   directStockpileItemTypeIds,
   status,
-  isOutOfDate = false,
   stock,
   visibleReactionFormulaStock = stock,
   visibleBlueprintStock = stock,
@@ -4868,7 +4955,6 @@ export default function SimulationResults({
   result: SimulationResultV2 | null;
   directStockpileItemTypeIds: ReadonlySet<number>;
   status: string;
-  isOutOfDate?: boolean;
   stock: readonly PlanStockItem[];
   visibleReactionFormulaStock?: readonly PlanStockItem[];
   visibleBlueprintStock?: readonly PlanStockItem[];
@@ -5191,8 +5277,11 @@ export default function SimulationResults({
   if (!result) {
     return (
       <section className="flex min-w-0 flex-col gap-4">
-        <p aria-live="polite" className="text-xs text-muted-foreground" role="status">
-          {status}
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          {!readOnly && <SimulationFingerprintStatus result={null} instanceId={instanceId} />}
+          <span aria-live="polite" role="status">
+            {status}
+          </span>
         </p>
         {statusIsError ? (
           <Alert variant="destructive">
@@ -5291,31 +5380,15 @@ export default function SimulationResults({
               Found a bug in this simulation?
             </Button>
           )}
-          {isOutOfDate && (
-            <Badge
-              aria-live="polite"
-              role="status"
-              title="This result does not reflect the current planner request."
-              variant="destructive"
-            >
-              <TriangleAlert aria-hidden="true" />
-              Simulation out of date
-            </Badge>
-          )}
-          {(!isOutOfDate || statusIsError || isLoading) && (
-            <span
-              aria-live="polite"
-              className={cn(
-                "text-xs",
-                status === "Simulation updated just now"
-                  ? "text-(--theme-info) drop-shadow-[0_0_8px_color-mix(in_srgb,var(--theme-info)_60%,transparent)]"
-                  : "text-muted-foreground",
-              )}
-              role="status"
-            >
-              {status}
-            </span>
-          )}
+          {!readOnly && <SimulationFingerprintStatus result={result} instanceId={instanceId} />}
+          <SimulationStatusMessage
+            result={result}
+            instanceId={instanceId}
+            status={status}
+            statusIsError={statusIsError}
+            isLoading={isLoading}
+            readOnly={readOnly}
+          />
         </div>
       </div>
       <Dialog open={isBugReportOpen} onOpenChange={setIsBugReportOpen}>

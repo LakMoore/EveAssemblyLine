@@ -3,10 +3,13 @@
 import {
   startTransition,
   type ChangeEvent,
+  type ReactNode,
   type RefObject,
   useEffect,
+  useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { flushSync } from "react-dom";
 import { usePathname } from "next/navigation";
@@ -18,12 +21,31 @@ import type {
   PlanStockpileLocations,
   PlanStockItem,
 } from "@/lib/planning/types";
+import type { SimulationHaulTask } from "@/lib/planning/simulator/types";
+import { filterSimulationAssetsByTakeAccess } from "@/lib/planning/simulator/requestAssets";
+import {
+  resetSimulationFingerprintStatus,
+  setSimulationFingerprint,
+  setSimulationFingerprintWorking,
+} from "@/lib/client/simulationFingerprintStatus";
+import {
+  applyPendingStockpileActiveStates,
+  clearCommittedStockpileActiveStates,
+  getPendingStockpileActiveStates,
+  resetPendingStockpileActiveStates,
+  setPendingStockpileActiveState,
+  subscribeToPendingStockpileActiveStates,
+} from "@/lib/client/plannerStockpileActiveState";
+import {
+  createPlannerSimulationRequest,
+  type PlanLocationOption,
+  type PlannerSimulationRequestBase,
+  type PlannerSimulationRequestOptions,
+} from "@/lib/planning/simulator/plannerRequest";
 import type {
-  SimulationAsset,
-  SimulationHaulTask,
-  SimulationIndustryOutputMarker,
-} from "@/lib/planning/simulator/types";
-import { prepareSimulationAssets } from "@/lib/planning/simulator/requestAssets";
+  PlannerFingerprintWorkerMessage,
+  PlannerFingerprintWorkerResult,
+} from "@/lib/planning/simulator/requestFingerprint.worker";
 import { loadBuildList } from "@/lib/planning/buildListStore";
 import EveAuthorizationWarning from "@/components/EveAuthorizationWarning";
 import {
@@ -60,13 +82,9 @@ import {
   saveSimulationState,
 } from "@/lib/planning/planResultStore";
 import { createSimulationEtag, simulationCalculationVersion } from "@/lib/planning/simulator/etag";
-import { simulationRequestFingerprint } from "@/lib/planning/simulator/requestFingerprint";
 import {
-  createSimulationCharacterProfiles,
-  createSimulationSlotMap,
   hasUsableSimulationCharacterSnapshots,
   simulationIndustrySkillIds,
-  simulationTimeMultipliers,
 } from "@/lib/planning/simulator/requestProfiles";
 import { refreshPlannerStockpileEfficiencies } from "@/lib/planning/reprocessingClient";
 import {
@@ -147,30 +165,87 @@ import {
   type ProductionGroupOption,
   type StockLocationOption,
 } from "@/components/PlannerStockpileEditor";
-import type { FacilityGroupBonus } from "@/lib/planning/facilityBonuses";
-import type { ProductionGroupKey, ProductionGroupReference } from "@/lib/planning/productionGroups";
+import type { ProductionGroupReference } from "@/lib/planning/productionGroups";
 import { fetchProductionGroups } from "@/lib/reference/productionGroups";
 import type { SimulationResultV2 } from "@/lib/planning/simulator/types";
 
 type StockpileEditorMode = "details" | "items";
-type PlanLocationOption = {
-  id: string;
-  locationId: number;
-  systemId: number;
-  systemName?: string;
-  name: string;
-  locationType: "station" | "structure";
-  baseYield: number;
-  baseManufacturingMe: number;
-  manufacturingTimeMultiplier: number;
-  reactionTimeMultiplier: number;
-  sizeId: number;
-  activities: {
-    manufacturing: boolean;
-    reactions: boolean;
-  };
-  buildTypeGroups: Partial<Record<ProductionGroupKey, FacilityGroupBonus>>;
-};
+
+/** Keeps the switch responsive while deferring the planner-wide state update. */
+function PlannerOptionSwitch({
+  ariaLabel,
+  checked,
+  onCheckedChange,
+  onPending,
+  className,
+  switchAfterChildren = false,
+  children,
+}: {
+  ariaLabel: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  onPending: (checked: boolean) => void;
+  className?: string;
+  switchAfterChildren?: boolean;
+  children: ReactNode;
+}) {
+  const [pendingChange, setPendingChange] = useState<{ from: boolean; to: boolean } | null>(null);
+  const displayedChecked = pendingChange?.from === checked ? pendingChange.to : checked;
+
+  return (
+    <Label className={className ?? "flex items-center gap-2 text-sm"}>
+      {!switchAfterChildren && children}
+      <Switch
+        aria-label={ariaLabel}
+        checked={displayedChecked}
+        onCheckedChange={(nextChecked) => {
+          setPendingChange({ from: displayedChecked, to: nextChecked });
+          onPending(nextChecked);
+          startTransition(() => {
+            onCheckedChange(nextChecked);
+          });
+        }}
+      />
+      {switchAfterChildren && children}
+    </Label>
+  );
+}
+
+/** Keeps simulation availability aligned with optimistic stockpile inclusion switches. */
+function PlannerSimulateButton({
+  stockpiles,
+  disabled,
+  isLoading,
+  onClick,
+}: {
+  stockpiles: readonly ClientPlanStockpile[];
+  disabled: boolean;
+  isLoading: boolean;
+  onClick: () => void;
+}) {
+  const pendingActiveStates = useSyncExternalStore(
+    subscribeToPendingStockpileActiveStates,
+    getPendingStockpileActiveStates,
+    getPendingStockpileActiveStates,
+  );
+  const effectiveStockpiles = applyPendingStockpileActiveStates(stockpiles, pendingActiveStates);
+  const hasActiveStockpileItems = effectiveStockpiles.some(
+    (stockpile) =>
+      stockpile.isActive !== false && stockpile.items.some((item) => item.isIncluded !== false),
+  );
+
+  return (
+    <ActionButton
+      type="button"
+      disabled={disabled || !hasActiveStockpileItems}
+      icon={FlaskConical}
+      isLoading={isLoading}
+      label="Simulate"
+      loadingLabel="Simulating..."
+      onClick={onClick}
+    />
+  );
+}
 
 /** Returns the strongest reaction material saving configured for a facility's reaction groups. */
 function reactionMaterialPercentage(location: Pick<PlanLocationOption, "buildTypeGroups">): number {
@@ -193,78 +268,22 @@ function simulationReactionMaterialBonuses(
   return bonuses;
 }
 
-function getStockLocationId(item: PlanStockItem) {
-  return item.rootLocationId ?? item.sourceLocationId ?? item.locationId;
+/** Compares the request switches without relying on object identity. */
+function plannerSimulationOptionsMatch(
+  left: PlannerSimulationRequestOptions | undefined,
+  right: PlannerSimulationRequestOptions,
+): boolean {
+  return (
+    left !== undefined
+    && left.includeStock === right.includeStock
+    && left.simulateSurplus === right.simulateSurplus
+    && left.allowInterStockpileHauling === right.allowInterStockpileHauling
+    && left.onlyIncludeTakeAccessAssets === right.onlyIncludeTakeAccessAssets
+  );
 }
 
-type PlannerAssetWithPresentation = PlanStockItem & {
-  assembledVolume?: number;
-  assemblyLineGroup?: string;
-  packagedVolume?: number;
-  techLevel?: number;
-};
-
-/** Removes SDE and display metadata before sending assets to the simulator. */
-function toSimulationAsset(item: PlanStockItem): SimulationAsset {
-  const normalizedActivity = item.activityName?.toLowerCase();
-  const isBlueprintOutput =
-    item.category === "blueprint"
-    && item.inUse !== true
-    && (normalizedActivity === "copying" || normalizedActivity === "invention");
-  const industryOutput: SimulationIndustryOutputMarker | undefined =
-    item.inBuild === true
-    && (item.category === "item" || isBlueprintOutput)
-    && (
-      normalizedActivity === "manufacturing"
-      || normalizedActivity === "reaction"
-      || normalizedActivity === "reactions"
-      || normalizedActivity === "copying"
-      || normalizedActivity === "invention"
-    )
-      ? {
-          activity:
-            normalizedActivity === "manufacturing"
-              ? "manufacturing"
-              : normalizedActivity === "reaction" || normalizedActivity === "reactions"
-                ? "reaction"
-                : normalizedActivity,
-          state:
-            item.industryJobStatus === "cancelled" || item.industryJobStatus === "reverted"
-              ? "excluded"
-              : item.industryJobStatus === "active" || item.industryJobStatus === "paused"
-                ? item.industryJobStatus
-                : "available",
-          ...(item.jobId !== undefined ? { sourceJobId: item.jobId } : {}),
-        }
-      : undefined;
-  const {
-    assembledVolume: _assembledVolume,
-    assemblyLineGroup: _assemblyLineGroup,
-    category: _category,
-    name: _name,
-    packagedVolume: _packagedVolume,
-    blueprintType: _blueprintType,
-    sourceLocationName: _sourceLocationName,
-    sourceLocationKind: _sourceLocationKind,
-    sourceSystemName: _sourceSystemName,
-    techLevel: _techLevel,
-    marketOrderIssuerId: _marketOrderIssuerId,
-    inBuild: _inBuild,
-    jobId: _jobId,
-    industryJobStatus: _industryJobStatus,
-    industryJobEndDate: _industryJobEndDate,
-    activityName: _activityName,
-    isCargoContainer: _isCargoContainer,
-    isPackaged: _isPackaged,
-    isContainedByShip: _isContainedByShip,
-    isShip: _isShip,
-    locationFlag: _locationFlag,
-    ...simulationAsset
-  } = item as PlannerAssetWithPresentation;
-  return {
-    ...simulationAsset,
-    ...(industryOutput ? { industryOutput } : {}),
-  };
+function getStockLocationId(item: PlanStockItem) {
+  return item.rootLocationId ?? item.sourceLocationId ?? item.locationId;
 }
 
 function getPlannerStock(
@@ -330,114 +349,6 @@ function getSharedLocationOptions(
   );
 }
 
-type PlannerSimulationRequestInputs = {
-  stockpiles: readonly ClientPlanStockpile[];
-  excludedLocationIds: ReadonlySet<number>;
-  includeStock: boolean;
-  isAuthenticated: boolean;
-  clientAssets: ClientAssetsResponse | null;
-  settings: PlannerSettings;
-  characterStatuses: readonly ClientCharacterStatus[];
-  language: SdeLanguage;
-  sharedLocationOptions: readonly ActivityLocationOption[];
-  locationOptions: readonly PlanLocationOption[];
-  haulExclusions: readonly PlanHaulExclusion[];
-  planningCharacterId?: number;
-  jobs: ClientJobsResponse | null;
-  simulateSurplus: boolean;
-  allowInterStockpileHauling: boolean;
-};
-
-/** Builds the exact validated request sent to the simulator from current planner state. */
-function createPlannerSimulationRequest(input: PlannerSimulationRequestInputs) {
-  const populatedStockpiles = input.stockpiles
-    .filter((stockpile) => stockpile.isActive !== false)
-    .map((stockpile) => ({
-      ...stockpile,
-      items: stockpile.items.filter((item) => item.isIncluded !== false),
-    }))
-    .filter((stockpile) => stockpile.items.length > 0);
-  if (populatedStockpiles.length === 0) return null;
-  if (input.includeStock && input.isAuthenticated && !input.clientAssets) return null;
-
-  const workingAssets = getPlannerStock(
-    input.clientAssets,
-    input.includeStock,
-    input.excludedLocationIds,
-    input.settings,
-    input.characterStatuses.map((character) => character.characterId),
-  );
-  const requestStock = prepareSimulationAssets(workingAssets);
-  const primaryStockpileLocations = populatedStockpiles[0].locations;
-  const selectedManufacturingFacility = input.locationOptions.find(
-    (location) => location.locationId === primaryStockpileLocations.manufacturing,
-  );
-  const selectedReactionFacility = input.locationOptions.find(
-    (location) => location.locationId === primaryStockpileLocations.reactions,
-  );
-  const planningCharacter = input.characterStatuses.find(
-    (character) => character.characterId === input.planningCharacterId,
-  );
-  const planningTimeMultipliers = simulationTimeMultipliers(
-    planningCharacter?.skills?.body ?? undefined,
-  );
-
-  return {
-    language: input.language,
-    stockpiles: populatedStockpiles.map((stockpile) => ({
-      ...stockpile,
-      items: stockpile.items.map(({ typeId, quantity, me, te, fromCompression }) => ({
-        typeId,
-        quantity,
-        me,
-        te,
-        fromCompression,
-      })),
-    })),
-    facilityProfiles: input.sharedLocationOptions.flatMap((location) => {
-      if (location.systemId === undefined) return [];
-      const facility = input.locationOptions.find(
-        (candidate) => candidate.locationId === location.locationId,
-      );
-      return [
-        {
-          locationId: location.locationId,
-          systemId: location.systemId,
-          sizeId: facility?.sizeId ?? 0,
-          buildTypeGroups: facility?.buildTypeGroups ?? {},
-        },
-      ];
-    }),
-    haulExclusions: toSimulationHaulExclusions(input.haulExclusions),
-    assets: requestStock.map(toSimulationAsset),
-    facilityTimeMultipliers: {
-      manufacturing: selectedManufacturingFacility?.manufacturingTimeMultiplier ?? 1,
-      reactions: selectedReactionFacility?.reactionTimeMultiplier ?? 1,
-    },
-    skillTimeMultipliers: {
-      manufacturing: planningTimeMultipliers.manufacturing,
-      reactions: planningTimeMultipliers.reactions,
-    },
-    settings: {
-      includeCorporationAssets: input.settings.includeCorporationAssets,
-      buildBlacklist: input.settings.buildBlacklist.map((item) => item.typeId),
-      buyBlacklist: [],
-      fallbackT1Me: input.settings.fallbackT1Me,
-      fallbackT1Te: input.settings.fallbackT1Te,
-      fallbackT2OrT3Me: input.settings.fallbackT2OrT3Me,
-      fallbackT2OrT3Te: input.settings.fallbackT2OrT3Te,
-    },
-    simulation: {
-      version: 1,
-      simulateSurplus: input.simulateSurplus,
-      blockInterStockpileHauling: !input.allowInterStockpileHauling,
-      maxReactionJobDurationHours: input.settings.maxReactionJobDurationHours,
-      characters: createSimulationCharacterProfiles(input.characterStatuses),
-      slots: createSimulationSlotMap(input.characterStatuses, input.jobs),
-    },
-  };
-}
-
 /** Returns formula stock before corporation hangar selections for visibility counts. */
 function getVisibleReactionFormulaStock(
   assets: ClientAssetsResponse | null,
@@ -447,20 +358,6 @@ function getVisibleReactionFormulaStock(
   if (!includeStock || !assets) return [];
   return (assets.assets ?? []).filter((item) => {
     if (item.category !== "reactionformula") return false;
-    const locationId = getStockLocationId(item);
-    return locationId === undefined || !excludedLocationIds.has(locationId);
-  });
-}
-
-/** Returns blueprint stock before corporation source selections for visibility counts. */
-function getVisibleBlueprintStock(
-  assets: ClientAssetsResponse | null,
-  includeStock: boolean,
-  excludedLocationIds: ReadonlySet<number>,
-): PlanStockItem[] {
-  if (!includeStock || !assets) return [];
-  return (assets.assets ?? []).filter((item) => {
-    if (item.category !== "blueprint") return false;
     const locationId = getStockLocationId(item);
     return locationId === undefined || !excludedLocationIds.has(locationId);
   });
@@ -504,28 +401,6 @@ function waitForNextPaint(): Promise<void> {
       });
     });
   });
-}
-
-/** Converts local owner-aware exclusions into the simulator's route-only contract. */
-function toSimulationHaulExclusions(
-  exclusions: readonly PlanHaulExclusion[],
-): Array<Pick<PlanHaulExclusion, "typeId" | "fromLocationId" | "toLocationId">> {
-  const routeExclusions = new Map<
-    string,
-    Pick<PlanHaulExclusion, "typeId" | "fromLocationId" | "toLocationId">
-  >();
-  for (const exclusion of exclusions) {
-    const routeOnly = {
-      typeId: exclusion.typeId,
-      fromLocationId: exclusion.fromLocationId,
-      toLocationId: exclusion.toLocationId,
-    };
-    routeExclusions.set(
-      `${routeOnly.typeId}:${routeOnly.fromLocationId}:${routeOnly.toLocationId}`,
-      routeOnly,
-    );
-  }
-  return [...routeExclusions.values()];
 }
 
 function selectSavedLocation(
@@ -695,6 +570,7 @@ function Planner() {
   );
   const [planningCharacterId, setPlanningCharacterId] = useState<number | undefined>();
   const [stockpiles, setStockpiles] = useState<ClientPlanStockpile[]>([]);
+  const [stockpileImportRevision, setStockpileImportRevision] = useState(0);
   const [areStockpilesLoaded, setAreStockpilesLoaded] = useState(false);
   const [areBuildBlacklistLoaded, setAreBuildBlacklistLoaded] = useState(false);
   const [editingStockpile, setEditingStockpile] = useState<ClientPlanStockpile | null>(null);
@@ -714,14 +590,15 @@ function Planner() {
   const [includeStock, setIncludeStock] = useState(true);
   const [simulateSurplus, setSimulateSurplus] = useState(false);
   const [allowInterStockpileHauling, setAllowInterStockpileHauling] = useState(false);
+  const [onlyIncludeTakeAccessAssets, setOnlyIncludeTakeAccessAssets] = useState(false);
   const [simulationHaulExclusions, setSimulationHaulExclusions] = useState<PlanHaulExclusion[]>([]);
   const [simulationPreservedHaulTasks, setSimulationPreservedHaulTasks] = useState<
     SimulationHaulTask[]
   >([]);
   const [simulationStateLoaded, setSimulationStateLoaded] = useState(false);
-  const [currentSimulationFingerprint, setCurrentSimulationFingerprint] = useState<
-    string | null | undefined
-  >();
+  const fingerprintWorkerRef = useRef<Worker | null>(null);
+  const fingerprintRevisionRef = useRef(0);
+  const fingerprintTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [simulationCharactersLoadAttempt, setSimulationCharactersLoadAttempt] = useState(0);
   const simulationCharactersLoadKey = `${language}:${simulationCharactersLoadAttempt}`;
   const [simulationCharactersLoadedKey, setSimulationCharactersLoadedKey] = useState<string>();
@@ -900,24 +777,35 @@ function Planner() {
     };
   }, [language, simulationCharactersLoadAttempt]);
 
-  const excludedStockLocationIds = new Set(excludedLocationIds);
-  const stock = getPlannerStock(
-    clientAssets,
-    includeStock,
-    excludedStockLocationIds,
-    settings,
-    characterStatuses.map((character) => character.characterId),
+  const excludedStockLocationIds = useMemo(
+    () => new Set(excludedLocationIds),
+    [excludedLocationIds],
   );
-  const visibleReactionFormulaStock = getVisibleReactionFormulaStock(
-    clientAssets,
-    includeStock,
-    excludedStockLocationIds,
+  const eligibleStock = useMemo(
+    () =>
+      getPlannerStock(
+        clientAssets,
+        true,
+        excludedStockLocationIds,
+        settings,
+        characterStatuses.map((character) => character.characterId),
+      ),
+    [characterStatuses, clientAssets, excludedStockLocationIds, settings],
   );
-  const visibleBlueprintStock = getVisibleBlueprintStock(
-    clientAssets,
-    includeStock,
-    excludedStockLocationIds,
+  const stock = includeStock ? eligibleStock : [];
+  const visibleReactionFormulaStock = useMemo(
+    () => getVisibleReactionFormulaStock(clientAssets, includeStock, excludedStockLocationIds),
+    [clientAssets, excludedStockLocationIds, includeStock],
   );
+  const takeAccessStock = useMemo(
+    () => filterSimulationAssetsByTakeAccess(eligibleStock),
+    [eligibleStock],
+  );
+  const blueprintCountStock = onlyIncludeTakeAccessAssets
+    ? includeStock
+      ? takeAccessStock
+      : []
+    : stock;
   function updateLocations(next: Partial<Pick<PlannerLocations, "manufacturing" | "reactions">>) {
     const updatedLocations = { ...locations, ...next };
     setLocations(updatedLocations);
@@ -1149,13 +1037,19 @@ function Planner() {
   useEffect(() => {
     if (areStockpilesLoaded) void savePlannerStockpiles(stockpiles);
   }, [areStockpilesLoaded, stockpiles]);
+  useEffect(() => {
+    clearCommittedStockpileActiveStates(stockpiles);
+  }, [stockpiles]);
 
   async function submitPlan(
     exclusions: Set<number>,
     simulationExclusions: readonly PlanHaulExclusion[] = simulationHaulExclusions,
     preservedHaulTasks: readonly SimulationHaulTask[] = simulationPreservedHaulTasks,
   ): Promise<boolean> {
-    const activeStockpiles = stockpiles.filter((stockpile) => stockpile.isActive !== false);
+    const effectiveStockpiles = applyPendingStockpileActiveStates(stockpiles);
+    const activeStockpiles = effectiveStockpiles.filter(
+      (stockpile) => stockpile.isActive !== false,
+    );
     const populatedStockpiles = activeStockpiles
       .map((stockpile) => ({
         ...stockpile,
@@ -1189,21 +1083,28 @@ function Planner() {
         return false;
       }
       const requestBody = createPlannerSimulationRequest({
-        stockpiles,
-        excludedLocationIds: exclusions,
-        includeStock,
-        isAuthenticated,
-        clientAssets,
+        stockpiles: effectiveStockpiles,
+        stock: getPlannerStock(
+          clientAssets,
+          includeStock,
+          exclusions,
+          settings,
+          characterStatuses.map((character) => character.characterId),
+        ),
+        requestReady: !(includeStock && isAuthenticated && !clientAssets),
         settings,
         characterStatuses,
         language,
-        sharedLocationOptions,
         locationOptions,
+        cachedAssetLocations,
+        knownStructures,
         haulExclusions: simulationExclusions,
         planningCharacterId,
         jobs,
+        includeStock,
         simulateSurplus,
         allowInterStockpileHauling,
+        onlyIncludeTakeAccessAssets,
       });
       if (!requestBody) return false;
       const response = await fetch(
@@ -1441,6 +1342,8 @@ function Planner() {
         localizedStockpiles,
         true,
       );
+      resetPendingStockpileActiveStates();
+      setStockpileImportRevision((revision) => revision + 1);
       setStockpiles(enrichedStockpiles);
       if (typeof parsed.settings === "object" && parsed.settings !== null) {
         setSettings(parsePlannerSettings(parsed.settings));
@@ -1495,10 +1398,9 @@ function Planner() {
     setIsDeleteAllDialogOpen(false);
   }
 
-  const sharedLocationOptions: ActivityLocationOption[] = getSharedLocationOptions(
-    locationOptions,
-    cachedAssetLocations,
-    knownStructures,
+  const sharedLocationOptions = useMemo<ActivityLocationOption[]>(
+    () => getSharedLocationOptions(locationOptions, cachedAssetLocations, knownStructures),
+    [cachedAssetLocations, knownStructures, locationOptions],
   );
   const selectedManufacturingLocation = sharedLocationOptions.find(
     (location) => location.locationId === locations.manufacturing,
@@ -1520,71 +1422,149 @@ function Planner() {
     ),
   );
   const stockLocationOptions: StockLocationOption[] = sharedLocationOptions;
-  useEffect(() => {
-    let cancelled = false;
-    if (
-      !simulationStateLoaded
-      || !areStockpilesLoaded
-      || !areBuildBlacklistLoaded
-      || !areStructuresLoaded
-      || !areLocationOptionsLoaded
-      || !simulationCharactersLoaded
-    ) return;
-    const request = createPlannerSimulationRequest({
+  const fingerprintBaseInput = useMemo<PlannerSimulationRequestBase>(
+    () => ({
       stockpiles,
-      excludedLocationIds: new Set(excludedLocationIds),
-      includeStock,
-      isAuthenticated,
-      clientAssets,
+      stock: eligibleStock,
+      requestReady: !isAuthenticated || clientAssets !== null,
       settings,
       characterStatuses,
       language,
-      sharedLocationOptions: getSharedLocationOptions(
-        locationOptions,
-        cachedAssetLocations,
-        knownStructures,
-      ),
       locationOptions,
+      cachedAssetLocations,
+      knownStructures,
       haulExclusions: simulationHaulExclusions,
       planningCharacterId,
       jobs,
+    }),
+    [
+      characterStatuses,
+      clientAssets,
+      isAuthenticated,
+      jobs,
+      language,
+      locationOptions,
+      planningCharacterId,
+      settings,
+      cachedAssetLocations,
+      eligibleStock,
+      knownStructures,
+      stockpiles,
+      simulationHaulExclusions,
+    ],
+  );
+  const fingerprintOptions = useMemo<PlannerSimulationRequestOptions>(
+    () => ({
+      includeStock,
       simulateSurplus,
       allowInterStockpileHauling,
-    });
-    void simulationRequestFingerprint(request).then((fingerprint) => {
-      if (!cancelled) setCurrentSimulationFingerprint(fingerprint);
-    });
-    return () => {
-      cancelled = true;
+      onlyIncludeTakeAccessAssets,
+    }),
+    [allowInterStockpileHauling, includeStock, onlyIncludeTakeAccessAssets, simulateSurplus],
+  );
+  const fingerprintOptionsRef = useRef(fingerprintOptions);
+  const fingerprintOptionsSentRef = useRef<PlannerSimulationRequestOptions | undefined>(undefined);
+  const fingerprintInputsReady =
+    simulationStateLoaded
+    && areStockpilesLoaded
+    && areBuildBlacklistLoaded
+    && areStructuresLoaded
+    && areLocationOptionsLoaded
+    && simulationCharactersLoaded;
+  useEffect(() => {
+    const worker = new Worker(
+      new URL("../../lib/planning/simulator/requestFingerprint.worker.ts", import.meta.url),
+      { type: "module" },
+    );
+    fingerprintWorkerRef.current = worker;
+    worker.onmessage = (event: MessageEvent<PlannerFingerprintWorkerResult>) => {
+      if (event.data.revision !== fingerprintRevisionRef.current) return;
+      if (fingerprintTimeoutRef.current !== undefined) {
+        clearTimeout(fingerprintTimeoutRef.current);
+        fingerprintTimeoutRef.current = undefined;
+      }
+      setSimulationFingerprint("planner", event.data.fingerprint);
     };
-  }, [
-    allowInterStockpileHauling,
-    areBuildBlacklistLoaded,
-    areLocationOptionsLoaded,
-    areStockpilesLoaded,
-    areStructuresLoaded,
-    cachedAssetLocations,
-    characterStatuses,
-    clientAssets,
-    excludedLocationIds,
-    includeStock,
-    isAuthenticated,
-    jobs,
-    knownStructures,
-    language,
-    locationOptions,
-    planningCharacterId,
-    settings,
-    simulateSurplus,
-    simulationCharactersLoaded,
-    simulationHaulExclusions,
-    simulationStateLoaded,
-    stockpiles,
-  ]);
-  const isSimulationOutOfDate =
-    simulationResult !== null
-    && currentSimulationFingerprint !== undefined
-    && currentSimulationFingerprint !== simulationResult.metadata.normalizedInputHash;
+    worker.onerror = () => {
+      fingerprintRevisionRef.current += 1;
+      if (fingerprintTimeoutRef.current !== undefined) {
+        clearTimeout(fingerprintTimeoutRef.current);
+        fingerprintTimeoutRef.current = undefined;
+      }
+      setSimulationFingerprint("planner", null);
+    };
+    return () => {
+      if (fingerprintTimeoutRef.current !== undefined) {
+        clearTimeout(fingerprintTimeoutRef.current);
+      }
+      resetSimulationFingerprintStatus("planner");
+      resetPendingStockpileActiveStates();
+      worker.terminate();
+      fingerprintWorkerRef.current = null;
+    };
+  }, []);
+  function scheduleFingerprintTimeout(revision: number) {
+    if (fingerprintTimeoutRef.current !== undefined) {
+      clearTimeout(fingerprintTimeoutRef.current);
+    }
+    fingerprintTimeoutRef.current = setTimeout(
+      () => {
+        if (fingerprintRevisionRef.current !== revision) return;
+        fingerprintRevisionRef.current += 1;
+        fingerprintTimeoutRef.current = undefined;
+        setSimulationFingerprint("planner", null);
+      },
+      10_000,
+    );
+  }
+
+  function queueFingerprintOptions(options: PlannerSimulationRequestOptions) {
+    const worker = fingerprintWorkerRef.current;
+    if (!worker || !fingerprintInputsReady) return;
+    fingerprintOptionsRef.current = options;
+    fingerprintOptionsSentRef.current = options;
+    const revision = ++fingerprintRevisionRef.current;
+    setSimulationFingerprintWorking("planner", true);
+    worker.postMessage({ type: "options", revision, options });
+    scheduleFingerprintTimeout(revision);
+  }
+
+  useEffect(() => {
+    const worker = fingerprintWorkerRef.current;
+    if (!worker || !fingerprintInputsReady) return;
+    const revision = ++fingerprintRevisionRef.current;
+    setSimulationFingerprintWorking("planner", true);
+    const message: PlannerFingerprintWorkerMessage = {
+      type: "base",
+      revision,
+      input: fingerprintBaseInput,
+    };
+    worker.postMessage(message);
+    scheduleFingerprintTimeout(revision);
+  }, [fingerprintBaseInput, fingerprintInputsReady]);
+  useEffect(() => {
+    const worker = fingerprintWorkerRef.current;
+    if (!worker || !fingerprintInputsReady) return;
+    if (plannerSimulationOptionsMatch(fingerprintOptionsSentRef.current, fingerprintOptions)) {
+      return;
+    }
+    fingerprintOptionsRef.current = fingerprintOptions;
+    fingerprintOptionsSentRef.current = fingerprintOptions;
+    const revision = ++fingerprintRevisionRef.current;
+    setSimulationFingerprintWorking("planner", true);
+    worker.postMessage({ type: "options", revision, options: fingerprintOptions });
+    scheduleFingerprintTimeout(revision);
+  }, [fingerprintInputsReady, fingerprintOptions]);
+
+  function markFingerprintPending(key: keyof PlannerSimulationRequestOptions, checked: boolean) {
+    queueFingerprintOptions({ ...fingerprintOptionsRef.current, [key]: checked });
+  }
+
+  function markPlannerRequestPending() {
+    if (!fingerprintInputsReady || !fingerprintWorkerRef.current) return;
+    fingerprintRevisionRef.current += 1;
+    setSimulationFingerprintWorking("planner", true);
+  }
   const stockpileLocations = getStockpileLocations(stockpiles);
   const directStockpileItemTypeIds = new Set(
     stockpiles
@@ -1754,7 +1734,7 @@ function Planner() {
             ) : (
               stockpiles.map((stockpile) => (
                 <PlannerStockpileSummary
-                  key={stockpile.id}
+                  key={`${stockpile.id}:${stockpileImportRevision}`}
                   stockpile={stockpile}
                   locationNamesById={plannerLocationNames}
                   onEditDetails={() => {
@@ -1767,41 +1747,61 @@ function Planner() {
                     requestStockpileRemoval(stockpile);
                   }}
                   onActiveChange={(isActive) => {
-                    setStockpiles((current) =>
-                      current.map((existing) =>
-                        existing.id === stockpile.id ? { ...existing, isActive } : existing,
-                      ),
-                    );
+                    setPendingStockpileActiveState(stockpile.id, isActive);
+                    markPlannerRequestPending();
+                    startTransition(() => {
+                      setStockpiles((current) =>
+                        current.map((existing) =>
+                          existing.id === stockpile.id ? { ...existing, isActive } : existing,
+                        ),
+                      );
+                    });
                   }}
                 />
               ))
             )}
           </div>
           <div className="flex flex-wrap items-center gap-4 border-t pt-4 sm:justify-between">
-            <Label className="flex items-center gap-2 text-sm">
-              <Switch
-                aria-label="Include assets"
-                checked={includeStock}
-                onCheckedChange={setIncludeStock}
-              />
+            <PlannerOptionSwitch
+              ariaLabel="Include assets"
+              checked={includeStock}
+              onCheckedChange={setIncludeStock}
+              onPending={(checked) => {
+                markFingerprintPending("includeStock", checked);
+              }}
+            >
               Include selected assets
-            </Label>
-            <Label className="flex items-center gap-2 text-sm">
-              <Switch
-                aria-label="Simulate surplus items"
-                checked={simulateSurplus}
-                onCheckedChange={setSimulateSurplus}
-              />
+            </PlannerOptionSwitch>
+            <PlannerOptionSwitch
+              ariaLabel="Simulate surplus items"
+              checked={simulateSurplus}
+              onCheckedChange={setSimulateSurplus}
+              onPending={(checked) => {
+                markFingerprintPending("simulateSurplus", checked);
+              }}
+            >
               Simulate surplus items
-            </Label>
-            <Label className="flex items-center gap-2 text-sm">
-              <Switch
-                aria-label="Allow inter-stockpile hauling"
-                checked={allowInterStockpileHauling}
-                onCheckedChange={setAllowInterStockpileHauling}
-              />
+            </PlannerOptionSwitch>
+            <PlannerOptionSwitch
+              ariaLabel="Allow inter-stockpile hauling"
+              checked={allowInterStockpileHauling}
+              onCheckedChange={setAllowInterStockpileHauling}
+              onPending={(checked) => {
+                markFingerprintPending("allowInterStockpileHauling", checked);
+              }}
+            >
               Allow inter-stockpile hauling
-            </Label>
+            </PlannerOptionSwitch>
+            <PlannerOptionSwitch
+              ariaLabel="Only include BPs I own"
+              checked={onlyIncludeTakeAccessAssets}
+              onCheckedChange={setOnlyIncludeTakeAccessAssets}
+              onPending={(checked) => {
+                markFingerprintPending("onlyIncludeTakeAccessAssets", checked);
+              }}
+            >
+              Only include BPs I own
+            </PlannerOptionSwitch>
             <span className="text-sm text-muted-foreground">{selectedSourceLabel}</span>
             <Button
               className="flex-1 sm:flex-0"
@@ -1843,23 +1843,13 @@ function Planner() {
               </Alert>
             )}
             <div className="ml-auto grid w-full grid-cols-1 gap-2 sm:w-auto">
-              <ActionButton
-                type="button"
-                disabled={
-                  isPlanLoading
-                  || !simulationStateLoaded
-                  || !simulationCharactersLoaded
-                  || stockpiles.every(
-                    (stockpile) =>
-                      stockpile.isActive === false
-                      || !stockpile.items.some((item) => item.isIncluded !== false),
-                  )
-                }
-                icon={FlaskConical}
+              <PlannerSimulateButton
+                stockpiles={stockpiles}
+                disabled={isPlanLoading || !simulationStateLoaded || !simulationCharactersLoaded}
                 isLoading={isPlanLoading}
-                label="Simulate"
-                loadingLabel="Simulating..."
-                onClick={() => void submitPlan(new Set(excludedLocationIds))}
+                onClick={() => {
+                  void submitPlan(new Set(excludedLocationIds));
+                }}
               />
             </div>
           </div>
@@ -2259,16 +2249,20 @@ function Planner() {
                   </Select>
                 </Label>
               )}
-              <Label className={styles.checkboxOption}>
+              <PlannerOptionSwitch
+                ariaLabel="Include assets"
+                checked={includeStock}
+                onCheckedChange={setIncludeStock}
+                onPending={(checked) => {
+                  markFingerprintPending("includeStock", checked);
+                }}
+                className={styles.checkboxOption}
+                switchAfterChildren
+              >
                 <div className={`${styles.planOptionHeader} text-xs`}>
                   <span>INCLUDE SELECTED ASSETS</span>
                 </div>
-                <Switch
-                  aria-label="Include assets"
-                  checked={includeStock}
-                  onCheckedChange={setIncludeStock}
-                />
-              </Label>
+              </PlannerOptionSwitch>
               <div className={styles.checkboxOption}>
                 <div className={`${styles.planOptionHeader} text-xs`}>
                   <span>PLANNING SOURCES</span>
@@ -2447,10 +2441,9 @@ function Planner() {
         result={simulationResult}
         directStockpileItemTypeIds={directStockpileItemTypeIds}
         status={planStatus}
-        isOutOfDate={isSimulationOutOfDate}
         stock={stock}
         visibleReactionFormulaStock={visibleReactionFormulaStock}
-        visibleBlueprintStock={visibleBlueprintStock}
+        visibleBlueprintStock={blueprintCountStock}
         industryJobs={jobs?.jobs}
         marketBuyOrderQuantities={clientAssets?.marketBuyOrderQuantities}
         locationNamesById={plannerLocationNames}
@@ -2492,8 +2485,15 @@ function PlannerStockpileSummary({
   onRemove: () => void;
   onActiveChange: (isActive: boolean) => void;
 }) {
+  const [pendingActiveChange, setPendingActiveChange] = useState<{
+    from: boolean;
+    to: boolean;
+  } | null>(null);
   const locationName = (locationId: number) =>
     locationNamesById.get(locationId) ?? String(locationId);
+  const isActive = stockpile.isActive !== false;
+  const displayedActive =
+    pendingActiveChange?.from === isActive ? pendingActiveChange.to : isActive;
   const productAvatarItems = stockpile.items.slice(0, 5);
   const remainingProductCount = stockpile.items.length - productAvatarItems.length;
   const disabledItemTypeCount = stockpile.items.filter((item) => item.isIncluded === false).length;
@@ -2509,8 +2509,11 @@ function PlannerStockpileSummary({
               render={
                 <Switch
                   aria-label={`Toggle ${stockpile.name}`}
-                  checked={stockpile.isActive !== false}
-                  onCheckedChange={onActiveChange}
+                  checked={displayedActive}
+                  onCheckedChange={(nextActive) => {
+                    setPendingActiveChange({ from: displayedActive, to: nextActive });
+                    onActiveChange(nextActive);
+                  }}
                 />
               }
             />

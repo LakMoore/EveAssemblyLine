@@ -61,3 +61,13 @@ export function prepareSimulationAssets(items: readonly StockItem[]): StockItem[
   }
   return prepared;
 }
+
+/** Excludes corporation hangar assets that are visible only through QUERY access. */
+export function filterSimulationAssetsByTakeAccess(items: readonly StockItem[]): StockItem[] {
+  return items.filter(
+    (item) =>
+      item.source === "marketOrder"
+      || item.ownerType !== "corporation"
+      || item.corporationSource?.canTake === true,
+  );
+}
