@@ -10,8 +10,6 @@ function isSimulationAssetEligible(item: StockItem): boolean {
     || item.category === "blueprint"
     || item.category === "reactionformula"
   ) return true;
-  if (item.isShip === true && item.isPackaged === true) return false;
-  if (item.isContainedByShip === true && item.isPackaged === true) return false;
   return item.isContainedByShip !== true || isShipHoldLocationFlag(item.locationFlag ?? "");
 }
 

@@ -6,6 +6,7 @@ import { simulationCalculationVersion } from "./etag";
 import { simulateIndustryDemand, type IndustrySimulationResult } from "./industrySimulation";
 import {
   projectSimulationLedger,
+  quantityLedgerKey,
   simulationAccountKey,
   type SimulationSourceLot,
   type SimulationTransaction,
@@ -242,21 +243,13 @@ function connectedAccountKeys(transactions: readonly SimulationTransaction[]): R
     if (transaction.kind === "source-availability") continue;
     const quantityKind = transactionQuantityKind(transaction);
     if (transaction.kind === "transfer-commitment") {
-      keys.add(`${simulationAccountKey(transaction.sourceAccount)}:${quantityKind}`);
-      keys.add(`${simulationAccountKey(transaction.destinationAccount)}:${quantityKind}`);
+      keys.add(quantityLedgerKey(transaction.sourceAccount, quantityKind));
+      keys.add(quantityLedgerKey(transaction.destinationAccount, quantityKind));
       continue;
     }
-    keys.add(
-      quantityKind === "item"
-        ? simulationAccountKey(transaction.account)
-        : `${simulationAccountKey(transaction.account)}:${quantityKind}`,
-    );
+    keys.add(quantityLedgerKey(transaction.account, quantityKind));
     if ("destinationAccount" in transaction && transaction.destinationAccount) {
-      keys.add(
-        quantityKind === "item"
-          ? simulationAccountKey(transaction.destinationAccount)
-          : `${simulationAccountKey(transaction.destinationAccount)}:${quantityKind}`,
-      );
+      keys.add(quantityLedgerKey(transaction.destinationAccount, quantityKind));
     }
   }
   return keys;
@@ -327,11 +320,7 @@ function presentationItems(
   >();
   for (const ledger of ledgers) {
     const items = ledger.balances.filter((balance) => {
-      const connected = connectedKeys.has(
-        balance.quantityKind === "item"
-          ? simulationAccountKey({ locationId: balance.locationId, typeId: balance.typeId })
-          : `${simulationAccountKey({ locationId: balance.locationId, typeId: balance.typeId })}:${balance.quantityKind}`,
-      );
+      const connected = connectedKeys.has(quantityLedgerKey(balance, balance.quantityKind));
       if (kind === "plan") {
         return (
           connected

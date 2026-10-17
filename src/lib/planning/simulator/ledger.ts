@@ -144,7 +144,10 @@ export function simulationAccountKey(account: SimulationLedgerAccount): string {
 }
 
 /** Produces a ledger key that keeps physical items separate from licensed blueprint runs. */
-function quantityLedgerKey(account: SimulationLedgerAccount, quantityKind: SimulationQuantityKind) {
+export function quantityLedgerKey(
+  account: SimulationLedgerAccount,
+  quantityKind: SimulationQuantityKind,
+): string {
   return quantityKind === "item"
     ? simulationAccountKey(account)
     : `${simulationAccountKey(account)}:${quantityKind}`;
@@ -209,7 +212,6 @@ export function projectSimulationLedger(
   const sourceLotsById = new Map(sourceLots.map((lot) => [lot.lotId, lot]));
   const reservedByLotId = new Map<string, number>();
   const claimedOutputByLotId = new Map<string, number>();
-  const committedFutureOutputBySourceKey = new Map<string, number>();
   const exposedByLotId = new Map<string, number>();
   const mutableBalances = new Map<string, SimulationMaterialBalance>();
   const demandEntries = new Map<
@@ -278,14 +280,8 @@ export function projectSimulationLedger(
         );
         continue;
       }
+      source.transferredOut += transaction.quantity;
       if (transaction.horizon === "after-upstream") {
-        if (sourceLot?.activity) {
-          committedFutureOutputBySourceKey.set(
-            sourceKey,
-            (committedFutureOutputBySourceKey.get(sourceKey) ?? 0) + transaction.quantity,
-          );
-        }
-        else source.transferredOut += transaction.quantity;
         if (transaction.outputSource === "production") {
           // Upstream production is recorded at the source; the receiver gets its output by haul.
           destination.availableFromHauling += transaction.quantity;
@@ -301,7 +297,6 @@ export function projectSimulationLedger(
         }
       }
       else {
-        source.transferredOut += transaction.quantity;
         destination.availableFromHauling += transaction.quantity;
       }
       mutableBalances.set(sourceKey, source);
@@ -476,12 +471,6 @@ export function projectSimulationLedger(
         continue;
       }
       const persistSourceBalance = !isRemoteOutput || hadBalance;
-      if (transaction.sourceLotId !== undefined && isRemoteOutput) {
-        committedFutureOutputBySourceKey.set(
-          key,
-          (committedFutureOutputBySourceKey.get(key) ?? 0) + transaction.quantity,
-        );
-      }
       if (
         transaction.source === "production"
         && (transaction.sourceLotId === undefined || isRemoteOutput)
@@ -587,13 +576,9 @@ export function projectSimulationLedger(
     [...mutableBalances].map(([key, balance]) => {
       const plannedRequirement = balance.requiredNow + balance.reserved;
       const physicalAvailable = balance.availableNow + balance.availableFromHauling;
-      const uncommittedInFlight = Math.max(
-        0,
-        balance.inFlightQuantity - (committedFutureOutputBySourceKey.get(key) ?? 0),
-      );
       const futureSupply =
         balance.availableFromHauling
-        + uncommittedInFlight
+        + balance.inFlightQuantity
         + balance.availableFromProduction
         + balance.availableFromCopying
         + balance.availableFromInvention
@@ -602,7 +587,7 @@ export function projectSimulationLedger(
       const plannedSupply =
         physicalAvailable
         + balance.availableFromSellOrders
-        + uncommittedInFlight
+        + balance.inFlightQuantity
         + balance.availableFromProduction
         + balance.availableFromCopying
         + balance.availableFromInvention

@@ -1828,7 +1828,8 @@ void test("uses every active invention BPC copy and exposes manufacturing bluepr
   assert.equal(blueprintBalance.futureSupply, 95);
   assert.equal(blueprintBalance.unsatisfied, 0);
   assert.equal(sourceBalance.inFlightQuantity, 110);
-  assert.equal(sourceBalance.futureSupply, 15);
-  assert.equal(sourceBalance.transferredOut, 0);
+  assert.equal(sourceBalance.futureSupply, 110);
+  assert.equal(sourceBalance.transferredOut, 95);
+  assert.equal(sourceBalance.surplus, 15);
   assert.equal(result.metadata.invariantViolationCount, 0);
 });

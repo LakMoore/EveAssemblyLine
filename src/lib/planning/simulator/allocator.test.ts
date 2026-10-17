@@ -258,7 +258,7 @@ void test("blocks a haul route for every owner", () => {
   assert.equal(allocator.haulingTasks.length, 0);
 });
 
-void test("blocks cross-stockpile activity hauls but allows end-destination hauls", () => {
+void test("blocks cross-stockpile hauls including stock destinations", () => {
   const stockpiles = [
     {
       locations: {
@@ -346,7 +346,7 @@ void test("blocks cross-stockpile activity hauls but allows end-destination haul
   assert.equal(
     endDestinationSource.claimOrdinarySupply(34, 2, 10, { ...account, locationId: 10 }, "job")
       .remote,
-    2,
+    0,
   );
 
   const endDestinationTarget = new SimulationAllocator(
@@ -358,7 +358,7 @@ void test("blocks cross-stockpile activity hauls but allows end-destination haul
     stockpiles,
     true,
   );
-  assert.equal(endDestinationTarget.claimOrdinarySupply(34, 2, 20, account, "job").remote, 2);
+  assert.equal(endDestinationTarget.claimOrdinarySupply(34, 2, 20, account, "job").remote, 0);
 });
 void test("includes assigned facilities in inter-stockpile haul restrictions", () => {
   const stockpiles = [

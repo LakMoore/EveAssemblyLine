@@ -357,6 +357,226 @@ void test("assembles a versioned invariant-safe result from the cached SDE", asy
   );
 });
 
+void test("retains owned and planned Charon supply at a transfer-only source", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "naboo",
+        name: "Naboo",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 20185, quantity: 2, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [{ typeId: 20185, quantity: 1, locationId: 200, rootLocationId: 20 }],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1, simulateSurplus: true },
+  });
+
+  const result = await simulateIndustry(request);
+  const source = result.lists.planItems
+    .find((bucket) => bucket.locationId === 20)
+    ?.items.find((item) => item.typeId === 20185);
+  const destination = result.lists.planItems
+    .find((bucket) => bucket.locationId === 10)
+    ?.items.find((item) => item.typeId === 20185);
+
+  assert.ok(source);
+  assert.equal(source.availableNow, 1);
+  assert.equal(source.availableFromProduction, 1);
+  assert.equal(source.transferredOut, 2);
+  assert.equal(source.surplus, 0);
+  assert.equal(destination?.availableFromHauling, 2);
+  assert.equal(
+    result.lists.manufacturingJobs
+      .filter((job) => job.productTypeId === 20185)
+      .reduce((total, job) => total + job.requiredRuns, 0),
+    1,
+  );
+  assert.equal(
+    result.lists.haulingTasks
+      .filter((task) => task.typeId === 20185)
+      .reduce((total, task) => total + task.quantity, 0),
+    1,
+  );
+  assert.equal(
+    result.lists.surplusItems?.some((bucket) => bucket.items.some((item) => item.typeId === 20185)),
+    false,
+  );
+  assert.equal(result.metadata.invariantViolationCount, 0);
+});
+
+void test("shows Guru Forge active Charon supply separately from both Jita transfers", async () => {
+  const productionLocations = {
+    manufacturing: 20,
+    reactions: 30,
+    reprocessing: 40,
+    copying: 50,
+    invention: 60,
+  };
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "guru-forge",
+        name: "Guru Forge",
+        locations: { ...productionLocations, stock: 20 },
+        items: [{ typeId: 20185, quantity: 10, me: 0, te: 0, fromCompression: false }],
+      },
+      {
+        id: "jita",
+        name: "Jita",
+        locations: { ...productionLocations, stock: 10 },
+        items: [{ typeId: 20185, quantity: 2, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [
+      { typeId: 20185, quantity: 11, locationId: 20 },
+      {
+        typeId: 20185,
+        quantity: 1,
+        locationId: 20,
+        industryOutput: { activity: "manufacturing", state: "active", sourceJobId: 123 },
+      },
+    ],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1, blockInterStockpileHauling: true },
+  });
+
+  const result = await simulateIndustry(request);
+  const source = result.lists.planItems
+    .find((bucket) => bucket.locationId === 20)
+    ?.items.find((item) => item.typeId === 20185);
+  const destination = result.lists.planItems
+    .find((bucket) => bucket.locationId === 10)
+    ?.items.find((item) => item.typeId === 20185);
+
+  assert.ok(source);
+  assert.equal(source.availableNow, 11);
+  assert.equal(source.requiredNow, 10);
+  assert.equal(source.inFlightQuantity, 1);
+  assert.equal(source.futureSupply, 1);
+  assert.equal(source.transferredOut, 2);
+  assert.equal(source.surplus, 0);
+  assert.ok(destination);
+  assert.equal(destination.availableNow, 0);
+  assert.equal(destination.futureDemand, 2);
+  assert.equal(destination.availableFromHauling, 2);
+  assert.equal(destination.futureSupply, 2);
+  assert.equal(destination.unsatisfied, 0);
+  assert.equal(result.lists.manufacturingJobs.length, 0);
+  assert.equal(result.lists.haulingTasks.length, 1);
+  assert.equal(result.lists.haulingTasks[0].quantity, 1);
+  assert.equal(result.metadata.invariantViolationCount, 0);
+});
+
+void test("excludes another stockpile's Charon before planning replacement production", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "naboo",
+        name: "Naboo",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 20185, quantity: 2, me: 0, te: 0, fromCompression: false }],
+      },
+      {
+        id: "auner",
+        name: "Auner",
+        locations: {
+          stock: 70,
+          manufacturing: 80,
+          reactions: 80,
+          reprocessing: 80,
+          copying: 80,
+          invention: 80,
+        },
+        items: [{ typeId: 34, quantity: 1, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [
+      { typeId: 20185, quantity: 1, locationId: 20 },
+      { typeId: 20185, quantity: 1, locationId: 70 },
+      { typeId: 34, quantity: 1, locationId: 70 },
+    ],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1, blockInterStockpileHauling: true },
+  });
+
+  for (const blockInterStockpileHauling of [true, false]) {
+    const result = await simulateIndustry({
+      ...request,
+      simulation: { ...request.simulation, blockInterStockpileHauling },
+    });
+    const charonHauls = result.lists.haulingTasks.filter((task) => task.typeId === 20185);
+    const charonJobs = result.lists.manufacturingJobs.filter((job) => job.productTypeId === 20185);
+
+    assert.equal(
+      charonHauls.some((task) => task.fromLocationId === 70),
+      !blockInterStockpileHauling,
+    );
+    assert.equal(charonHauls.find((task) => task.fromLocationId === 20)?.quantity, 1);
+    assert.equal(
+      charonJobs.reduce((total, job) => total + job.requiredRuns, 0),
+      blockInterStockpileHauling ? 1 : 0,
+    );
+    assert.ok(charonJobs.every((job) => job.locationId === 20));
+    assert.equal(result.metadata.invariantViolationCount, 0);
+  }
+});
+
+void test("keeps fully stocked transfer-only sources on the Plan rather than Surplus", async () => {
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "naboo",
+        name: "Naboo",
+        locations: {
+          stock: 10,
+          manufacturing: 20,
+          reactions: 30,
+          reprocessing: 40,
+          copying: 50,
+          invention: 60,
+        },
+        items: [{ typeId: 20185, quantity: 2, me: 0, te: 0, fromCompression: false }],
+      },
+    ],
+    assets: [{ typeId: 20185, quantity: 3, locationId: 200, rootLocationId: 70 }],
+    settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+    simulation: { version: 1, simulateSurplus: true },
+  });
+
+  const result = await simulateIndustry(request);
+  const source = result.lists.planItems
+    .find((bucket) => bucket.locationId === 70)
+    ?.items.find((item) => item.typeId === 20185);
+
+  assert.ok(source);
+  assert.equal(source.availableNow, 3);
+  assert.equal(source.transferredOut, 2);
+  assert.equal(source.surplus, 1);
+  assert.equal(source.availableFromProduction, 0);
+  assert.equal(result.lists.manufacturingJobs.length, 0);
+  assert.equal(result.lists.haulingTasks[0]?.quantity, 2);
+  assert.equal(
+    result.lists.surplusItems?.some((bucket) => bucket.locationId === 70),
+    false,
+  );
+  assert.equal(result.metadata.invariantViolationCount, 0);
+});
+
 void test("keeps sell-order availability in the Plan presentation", async () => {
   const request = parseSimulatorRequest({
     stockpiles: [

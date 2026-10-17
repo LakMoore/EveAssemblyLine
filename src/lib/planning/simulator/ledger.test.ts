@@ -348,7 +348,7 @@ void test("combines stockpile demand sources in one activity and location accoun
   );
 });
 
-void test("posts remote production directly at its destination ledger", () => {
+void test("retains gross active output at its source and posts its future transfer separately", () => {
   const destinationAccount: SimulationLedgerAccount = {
     locationId: 10,
     typeId: 34,
@@ -359,7 +359,7 @@ void test("posts remote production directly at its destination ledger", () => {
         lotId: "in-flight-output",
         typeId: 34,
         quantity: 8,
-        locationId: 10,
+        locationId: 20,
         activity: "manufacturing",
       },
     ],
@@ -386,25 +386,41 @@ void test("posts remote production directly at its destination ledger", () => {
         id: "manufacture",
         kind: "production-commitment",
         account,
-        destinationAccount,
+        destinationAccount: account,
         quantity: 8,
         source: "production",
         activity: "manufacturing",
         sourceLotId: "in-flight-output",
         producingJobId: "job-1",
       },
+      {
+        id: "future-transfer",
+        kind: "transfer-commitment",
+        sourceAccount: account,
+        destinationAccount,
+        lotId: "in-flight-output",
+        quantity: 8,
+        horizon: "after-upstream",
+        outputSource: "production",
+        activity: "manufacturing",
+      },
     ],
   );
   const sourceBalance = projection.balances.get("20:34");
   const destinationBalance = projection.balances.get("10:34");
-  assert.equal(sourceBalance, undefined);
+  assert.ok(sourceBalance);
+  assert.equal(sourceBalance.inFlightQuantity, 8);
+  assert.equal(sourceBalance.futureSupply, 8);
+  assert.equal(sourceBalance.transferredOut, 8);
+  assert.equal(sourceBalance.surplus, 0);
   assert.ok(destinationBalance);
-  assert.equal(destinationBalance.inFlightQuantity, 8);
+  assert.equal(destinationBalance.inFlightQuantity, 0);
+  assert.equal(destinationBalance.availableFromHauling, 8);
   assert.equal(destinationBalance.availableFromProduction, 0);
-  assert.equal(destinationBalance.activityType, "manufacturing");
+  assert.equal(destinationBalance.futureSupply, 8);
   assert.equal(destinationBalance.futureDemand, 0);
   assert.equal(destinationBalance.unsatisfied, 0);
-  assert.equal(projection.balances.get("20:34"), undefined);
+  assert.deepEqual(projection.invariantViolations, []);
 });
 
 void test("retains total in-flight output after claiming only the required quantity", () => {

@@ -63,6 +63,7 @@ function stockpileRoutePolicy(
   for (const stockpile of stockpiles) {
     const locationIds = [
       ...new Set([
+        stockpile.locations.stock,
         stockpile.locations.manufacturing,
         stockpile.locations.reactions,
         stockpile.locations.reprocessing,

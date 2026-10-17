@@ -99,7 +99,7 @@ void test("excludes every non-TAKE corporation hangar source regardless of asset
   );
 });
 
-void test("preserves packaged ordinary assets and excludes packaged ships", () => {
+void test("preserves packaged ordinary assets and ships as available stock", () => {
   const prepared = prepareSimulationAssets([
     { typeId: 1, name: "Packaged ordinary item", quantity: 1, isPackaged: true },
     { typeId: 2, name: "Unpackaged", quantity: 2, isPackaged: false },
@@ -107,11 +107,11 @@ void test("preserves packaged ordinary assets and excludes packaged ships", () =
   ]);
   assert.deepEqual(
     prepared.map((item) => item.typeId),
-    [1, 2],
+    [1, 2, 3],
   );
 });
 
-void test("includes unpackaged ship contents only from approved holds", () => {
+void test("includes packaged and unpackaged ship contents only from approved holds", () => {
   const prepared = prepareSimulationAssets([
     {
       typeId: 1,
@@ -145,11 +145,19 @@ void test("includes unpackaged ship contents only from approved holds", () => {
       isContainedByShip: true,
       locationFlag: "Cargo",
     },
+    {
+      typeId: 5,
+      name: "Packaged fitted module",
+      quantity: 1,
+      isPackaged: true,
+      isContainedByShip: true,
+      locationFlag: "HiSlot0",
+    },
   ]);
 
   assert.deepEqual(
     prepared.map((item) => item.typeId),
-    [1, 2],
+    [1, 2, 4],
   );
 });
 
