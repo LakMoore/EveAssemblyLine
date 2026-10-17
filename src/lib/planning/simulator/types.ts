@@ -271,13 +271,13 @@ export interface SimulationReactionFormulaBalance {
   demandSources: SimulationReactionFormulaDemandSource[];
 }
 
-/** Reaction runs that contribute to a location's formula demand. */
+/** Product quantity from one stockpile that contributes to a location's formula demand. */
 export interface SimulationReactionFormulaDemandSource {
   jobId: string;
   stockpileId: string;
   productTypeId: number;
   productName: string;
-  runs: number;
+  quantity: number;
 }
 
 /** Location bucket containing reaction-formula demand and counts. */
@@ -348,7 +348,6 @@ export interface SimulationIndustryJob {
   depth: number;
   activity: "manufacturing" | "reaction";
   noTimingReason?: string;
-  stockpileId: string;
   locationId: number;
   productTypeId: number;
   productName: string;
@@ -366,8 +365,16 @@ export interface SimulationIndustryJob {
   inputs: SimulationJobInput[];
   installs: SimulationInstall[];
   demandSources: SimulationDemandSource[];
+  demandContributions: SimulationIndustryDemandContribution[];
 }
 
+/** One stockpile's product quantity contribution to a shared industry activity. */
+export interface SimulationIndustryDemandContribution {
+  demandId: string;
+  stockpileId: string;
+  destinationLocationId: number;
+  quantity: number;
+}
 /** Fully calculated invention work required for an output blueprint. */
 export interface SimulationInventionJob {
   jobId: string;

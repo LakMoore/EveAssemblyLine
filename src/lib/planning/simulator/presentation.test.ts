@@ -34,7 +34,6 @@ function job(jobId: string, overrides: Partial<SimulationIndustryJob> = {}): Sim
     jobId,
     depth: 1,
     activity: "manufacturing",
-    stockpileId: "main",
     locationId: 20,
     productTypeId: 20185,
     productName: "Charon",
@@ -58,6 +57,7 @@ function job(jobId: string, overrides: Partial<SimulationIndustryJob> = {}): Sim
     inputs: [input(10, 10)],
     installs: [],
     demandSources: [],
+    demandContributions: [],
     ...overrides,
   };
 }

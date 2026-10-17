@@ -40,6 +40,43 @@ void test("accepts a complete cached native simulation result", () => {
   assert.equal(isSimulationResultV2(simulationResult()), true);
 });
 
+void test("accepts reaction formula demand sources with product quantities", () => {
+  const result = simulationResult();
+  (result.lists as Record<string, unknown>).reactionFormulas = [
+    {
+      locationId: 20,
+      items: [
+        {
+          typeId: 46207,
+          typeName: "Test formula",
+          locationId: 20,
+          ownedQuantity: 1,
+          availableQuantity: 1,
+          inUseQuantity: 0,
+          requiredRuns: 7,
+          demandSources: [
+            {
+              jobId: "reaction-job",
+              stockpileId: "main",
+              productTypeId: 16680,
+              productName: "Test reaction",
+              quantity: 6_600,
+            },
+          ],
+        },
+      ],
+    },
+  ];
+
+  assert.equal(isSimulationResultV2(result), true);
+  const balance = (result.lists as Record<string, unknown>).reactionFormulas as Array<{
+    items: Array<{ demandSources: Array<Record<string, unknown>> }>;
+  }>;
+  delete balance[0].items[0].demandSources[0].quantity;
+  balance[0].items[0].demandSources[0].runs = 3;
+  assert.equal(isSimulationResultV2(result), false);
+});
+
 void test("accepts cached stockpile-demand haul tasks", () => {
   const result = simulationResult();
   const stockpileDemandHaul = {

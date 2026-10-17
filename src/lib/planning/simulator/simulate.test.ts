@@ -1184,14 +1184,14 @@ void test("protects complete local reaction inputs when earlier demand consumes 
   assert.ok(pyeriteInputs.length > 0);
   assert.equal(
     pyeriteInputs.reduce((total, input) => total + input.requiredQuantity, 0),
-    23475,
+    23476,
   );
   assert.equal(
     pyeriteInputs.reduce((total, input) => total + input.availableNow, 0),
     23475,
   );
   assert.equal(result.lists.haulingTasks.filter((task) => task.typeId === 35).length, 0);
-  assert.equal(result.lists.materialsToBuy.find((buy) => buy.typeId === 35)?.quantity, 783);
+  assert.equal(result.lists.materialsToBuy.find((buy) => buy.typeId === 35)?.quantity, 784);
   const balance = result.ledgers
     .find((ledger) => ledger.locationId === 20)
     ?.balances.find((row) => row.typeId === 35);

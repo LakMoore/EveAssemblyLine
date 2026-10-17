@@ -180,7 +180,7 @@ export function isSimulationResultV2(value: unknown): value is SimulationResultV
                   && typeof source.stockpileId === "string"
                   && isPositiveInteger(source.productTypeId)
                   && typeof source.productName === "string"
-                  && isQuantity(source.runs),
+                  && isQuantity(source.quantity),
               ),
           ),
       )

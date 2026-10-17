@@ -103,7 +103,6 @@ function job(
     jobId: id,
     depth: 1,
     activity: "manufacturing",
-    stockpileId: "main",
     locationId: 20,
     productTypeId: 587,
     productName: "Rifter",
@@ -128,6 +127,7 @@ function job(
     inputs: [],
     installs: [],
     demandSources: [],
+    demandContributions: [],
   };
 }
 

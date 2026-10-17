@@ -94,7 +94,10 @@ interface ProductionSupply {
 
 interface ProductionDemandRequest {
   quantity: number;
+  stockpile: PlanStockpile;
+  destinationAccount: SimulationLedgerAccount;
   demandSource: SimulationDemandSource;
+  stack: ReadonlySet<number>;
   supply: ProductionSupply;
   aggregateSupply?: ProductionSupply;
   allocationOffset: number;
@@ -102,11 +105,22 @@ interface ProductionDemandRequest {
 
 interface ProductionDemandBucket {
   productTypeId: number;
-  stockpile: PlanStockpile;
-  destinationAccount: SimulationLedgerAccount;
+  activity: ProductionActivity;
   stack: ReadonlySet<number>;
   quantity: number;
   requests: ProductionDemandRequest[];
+}
+
+interface ReactionInputDemandShare {
+  stockpile: PlanStockpile;
+  quantity: number;
+  stack: ReadonlySet<number>;
+}
+
+interface ReactionInputDemandBucket {
+  productTypeId: number;
+  profile: ActivityProfile;
+  shares: ReactionInputDemandShare[];
 }
 
 interface DeferredProductionSupply {
@@ -147,6 +161,54 @@ function productionDetails(production: ProductionRecord, productTypeId: number) 
       : production.blueprint.activities.reaction;
   const product = activity?.products.find((candidate) => candidate.typeID === productTypeId);
   return product && activity ? { activity, product } : undefined;
+}
+
+/** Splits reaction runs into the fewest duration-safe, evenly sized batches. */
+export function splitReactionRuns(requiredRuns: number, maxRunsPerJob: number): number[] {
+  if (requiredRuns <= 0 || maxRunsPerJob <= 0) return [];
+  const jobCount = Math.ceil(requiredRuns / maxRunsPerJob);
+  const runsPerJob = Math.floor(requiredRuns / jobCount);
+  const largerJobCount = requiredRuns % jobCount;
+  return Array.from(
+    { length: jobCount },
+    (_, index) => runsPerJob + Number(index < largerJobCount),
+  );
+}
+
+/** Distributes an integer quantity by weights while conserving every unit. */
+function distributeQuantityByWeight<T extends { weight: number }>(
+  quantity: number,
+  shares: readonly T[],
+): Array<T & { quantity: number }> {
+  const totalWeight = shares.reduce((total, share) => total + share.weight, 0);
+  if (quantity <= 0 || totalWeight <= 0) return [];
+  const denominator = BigInt(totalWeight);
+  const allocations = shares.map((share, index) => {
+    const numerator = BigInt(quantity) * BigInt(share.weight);
+    return {
+      share,
+      index,
+      quantity: Number(numerator / denominator),
+      remainder: numerator % denominator,
+    };
+  });
+  let remainder = quantity - allocations.reduce((total, share) => total + share.quantity, 0);
+  for (const allocation of allocations
+    .slice()
+    .sort((left, right) =>
+      left.remainder === right.remainder
+        ? left.index - right.index
+        : left.remainder > right.remainder
+          ? -1
+          : 1,
+    )) {
+    if (remainder <= 0) break;
+    allocation.quantity += 1;
+    remainder -= 1;
+  }
+  return allocations
+    .filter((allocation) => allocation.quantity > 0)
+    .map(({ share, quantity: shareQuantity }) => ({ ...share, quantity: shareQuantity }));
 }
 
 function horizonRunLimit(claim: BlueprintClaim, requiredRuns: number) {
@@ -217,6 +279,7 @@ class IndustryDemandSimulation {
   >();
   private readonly jobSkillRequirements = new Map<string, Map<number, number>>();
   private pendingProductionDemands = new Map<string, ProductionDemandBucket>();
+  private pendingReactionInputDemands = new Map<string, ReactionInputDemandBucket>();
   private readonly deferredProductionSupplies: DeferredProductionSupply[] = [];
   private readonly productionDemandRequests: ProductionDemandRequest[] = [];
   private readonly productionSupplies = new Set<ProductionSupply>();
@@ -357,7 +420,7 @@ class IndustryDemandSimulation {
         }
       },
     );
-    this.drainProductionDemands();
+    this.drainProductionDemands(true);
     measureSyncProfiled(
       this.profiler,
       "finalize-deferred-production-supplies",
@@ -457,20 +520,22 @@ class IndustryDemandSimulation {
       return this.emptyProductionSupply();
     }
     const profile = this.activityProfile(stockpile, productTypeId, production.activity);
-    const key = [
-      this.productionLocationScope(stockpile),
-      productTypeId,
-      production.activity,
-      profile.locationId,
-      destinationAccount.locationId,
-      destinationAccount.typeId,
-    ].join(":");
+    const key =
+      production.activity === "reaction"
+        ? `reaction:${productTypeId}:${profile.locationId}`
+        : [
+            this.productionLocationScope(stockpile),
+            productTypeId,
+            production.activity,
+            profile.locationId,
+            destinationAccount.locationId,
+            destinationAccount.typeId,
+          ].join(":");
     let bucket = this.pendingProductionDemands.get(key);
     if (!bucket) {
       bucket = {
         productTypeId,
-        stockpile,
-        destinationAccount,
+        activity: production.activity,
         stack,
         quantity: 0,
         requests: [],
@@ -483,7 +548,10 @@ class IndustryDemandSimulation {
     const supply = this.emptyProductionSupply();
     const request: ProductionDemandRequest = {
       quantity,
+      stockpile,
+      destinationAccount,
       demandSource,
+      stack,
       supply,
       allocationOffset: bucket.quantity,
     };
@@ -515,13 +583,16 @@ class IndustryDemandSimulation {
   }
 
   /** Defers shared material buckets until their parent paths can contribute demand. */
-  private drainProductionDemands(): void {
+  private drainProductionDemands(deferReactions = false): void {
     while (this.pendingProductionDemands.size > 0) {
-      let [key, bucket] = this.pendingProductionDemands.entries().next().value as [
-        string,
-        ProductionDemandBucket,
-      ];
-      for (const [candidateKey, candidate] of this.pendingProductionDemands) {
+      const pendingDemands = [...this.pendingProductionDemands.entries()];
+      const nonReactionDemands = pendingDemands.filter(
+        ([, candidate]) => candidate.activity !== "reaction",
+      );
+      const candidates = deferReactions ? nonReactionDemands : pendingDemands;
+      if (candidates.length === 0) return;
+      let [key, bucket] = candidates[0];
+      for (const [candidateKey, candidate] of candidates) {
         if (candidate.stack.size >= bucket.stack.size) continue;
         key = candidateKey;
         bucket = candidate;
@@ -530,19 +601,8 @@ class IndustryDemandSimulation {
       const aggregate = measureSyncProfiled(
         this.profiler,
         "plan-production",
-        () =>
-          this.planProductionCore(
-            bucket.productTypeId,
-            bucket.quantity,
-            bucket.stockpile,
-            bucket.destinationAccount,
-            bucket.requests[0].demandSource,
-            bucket.stack,
-          ),
+        () => this.planProductionCore(bucket),
       );
-      for (const job of aggregate.jobs) {
-        job.demandSources = bucket.requests.map((request) => request.demandSource);
-      }
       for (const request of bucket.requests) {
         request.aggregateSupply = aggregate;
       }
@@ -804,6 +864,7 @@ class IndustryDemandSimulation {
         this.reserveProductionInputs(item.typeId, quantityToBuild, stockpile, new Set());
       }
     }
+    this.flushReactionInputDemands();
   }
 
   private reserveLocalStockpileDemand(): void {
@@ -904,6 +965,17 @@ class IndustryDemandSimulation {
     const requiredRuns = Math.ceil(quantity / details.product.quantity);
     const nextStack = new Set(stack);
     nextStack.add(productTypeId);
+    if (production.activity === "reaction") {
+      const key = `${productTypeId}:${profile.locationId}`;
+      const bucket = this.pendingReactionInputDemands.get(key) ?? {
+        productTypeId,
+        profile,
+        shares: [],
+      };
+      bucket.shares.push({ stockpile, quantity, stack: nextStack });
+      this.pendingReactionInputDemands.set(key, bucket);
+      return;
+    }
     const maxRunsPerJob = (timeEfficiency: number) =>
       this.maxRunsPerIndustryJob(
         this.activityDurationPerRunSeconds(
@@ -913,22 +985,19 @@ class IndustryDemandSimulation {
           timeEfficiency,
         ),
       );
-    const allocations =
-      production.activity === "manufacturing"
-        ? this.allocator.previewManufacturingBlueprints(
-            production.blueprint._key,
-            requiredRuns,
-            profile.locationId,
-            maxRunsPerJob,
-          )
-        : [];
+    const allocations = this.allocator.previewManufacturingBlueprints(
+      production.blueprint._key,
+      requiredRuns,
+      profile.locationId,
+      maxRunsPerJob,
+    );
     const missingRuns =
       requiredRuns - allocations.reduce((total, allocation) => total + allocation.runs, 0);
     if (missingRuns > 0) {
       const fallback = this.fallbackBlueprint(
         production.blueprint._key,
         missingRuns,
-        production.activity === "reaction" ? "formula" : "fallback",
+        "fallback",
         productTypeId,
       );
       allocations.push(
@@ -958,14 +1027,12 @@ class IndustryDemandSimulation {
         );
       }
     }
-    if (production.activity === "manufacturing") {
-      this.reserveBlueprintScienceInputs(
-        production.blueprint._key,
-        missingRuns,
-        stockpile,
-        nextStack,
-      );
-    }
+    this.reserveBlueprintScienceInputs(
+      production.blueprint._key,
+      missingRuns,
+      stockpile,
+      nextStack,
+    );
   }
 
   private reserveActivityInput(
@@ -983,6 +1050,65 @@ class IndustryDemandSimulation {
     const quantityToBuild = quantity - coveredByExistingSupply;
     this.allocator.reserveActivityDemand(typeId, quantity, locationId);
     this.reserveProductionInputs(typeId, quantityToBuild, stockpile, stack);
+  }
+
+  /** Reserves pooled reaction recipes after every stockpile has contributed demand. */
+  private flushReactionInputDemands(): void {
+    while (this.pendingReactionInputDemands.size > 0) {
+      const entry = this.pendingReactionInputDemands.entries().next().value as [
+        string,
+        ReactionInputDemandBucket,
+      ];
+      const [key, bucket] = entry;
+      this.pendingReactionInputDemands.delete(key);
+      const production = this.context.blueprints.byBuildProductTypeId.get(bucket.productTypeId);
+      const details = production ? productionDetails(production, bucket.productTypeId) : undefined;
+      if (!production || !details) continue;
+      const totalQuantity = bucket.shares.reduce((total, share) => total + share.quantity, 0);
+      const requiredRuns = Math.ceil(totalQuantity / details.product.quantity);
+      const fallback = this.fallbackBlueprint(production.blueprint._key, requiredRuns, "formula");
+      const durationPerRunSeconds = this.activityDurationPerRunSeconds(
+        "reaction",
+        details.activity.time,
+        bucket.profile,
+        fallback.timeEfficiency,
+      );
+      const allocations = this.splitActivityBlueprintClaim(
+        fallback,
+        "reaction",
+        details.activity.time,
+        bucket.profile,
+      );
+      for (const allocation of allocations) {
+        for (const material of details.activity.materials ?? []) {
+          const requiredQuantity = requiredMaterialQuantityInBatches(
+            "reaction",
+            material.quantity,
+            allocation.runs,
+            { me: allocation.materialEfficiency },
+            bucket.profile.materialMultiplier,
+            this.maxRunsPerIndustryJob(durationPerRunSeconds),
+          );
+          const shares = distributeQuantityByWeight(
+            requiredQuantity,
+            bucket.shares.map((share) => ({
+              stockpile: share.stockpile,
+              stack: share.stack,
+              weight: share.quantity,
+            })),
+          );
+          for (const share of shares) {
+            this.reserveActivityInput(
+              material.typeID,
+              share.quantity,
+              share.stockpile,
+              bucket.profile.locationId,
+              share.stack,
+            );
+          }
+        }
+      }
+    }
   }
 
   private reserveBlueprintScienceInputs(
@@ -1129,17 +1255,13 @@ class IndustryDemandSimulation {
     };
   }
 
-  private planProductionCore(
-    productTypeId: number,
-    quantity: number,
-    stockpile: PlanStockpile,
-    destinationAccount: SimulationLedgerAccount,
-    demandSource: SimulationDemandSource,
-    stack: ReadonlySet<number>,
-  ): ProductionSupply {
+  private planProductionCore(bucket: ProductionDemandBucket): ProductionSupply {
+    const firstRequest = bucket.requests[0];
+    const { productTypeId, quantity } = bucket;
+    const { stockpile, demandSource, stack } = firstRequest;
     if (quantity <= 0) return this.emptyProductionSupply();
     if (stack.has(productTypeId)) {
-      this.recordUnmet(destinationAccount, quantity, demandSource);
+      this.recordProductionBucketUnmet(bucket);
       this.warnings.push({
         code: "cycle-detected",
         typeId: productTypeId,
@@ -1148,13 +1270,13 @@ class IndustryDemandSimulation {
       return this.emptyProductionSupply();
     }
     if (this.request.settings.buildBlacklist.includes(productTypeId)) {
-      this.recordUnmet(destinationAccount, quantity, demandSource);
+      this.recordProductionBucketUnmet(bucket);
       return this.emptyProductionSupply();
     }
     const production = this.context.blueprints.byBuildProductTypeId.get(productTypeId);
     const details = production ? productionDetails(production, productTypeId) : undefined;
     if (!production || !details) {
-      this.recordUnmet(destinationAccount, quantity, demandSource);
+      this.recordProductionBucketUnmet(bucket);
       if (this.request.settings.buyBlacklist.includes(productTypeId)) {
         this.warnings.push({
           code: "blocked-by-policy",
@@ -1287,7 +1409,23 @@ class IndustryDemandSimulation {
           ),
       );
       const outputQuantity = allocation.runs * details.product.quantity;
-      const reservedQuantity = Math.min(outputQuantity, Math.max(0, quantity - plannedOutput));
+      const contributions = this.productionDemandContributions(
+        bucket.requests,
+        plannedOutput,
+        outputQuantity,
+      );
+      const reservedQuantity = contributions.reduce(
+        (total, contribution) => total + contribution.quantity,
+        0,
+      );
+      job.demandContributions = contributions;
+      job.demandSources = bucket.requests
+        .filter((request) =>
+          contributions.some(
+            (contribution) => contribution.demandId === request.demandSource.demandId,
+          ),
+        )
+        .map((request) => request.demandSource);
       this.transactions.push({
         id: this.nextId("production"),
         kind: "production-commitment",
@@ -1299,13 +1437,18 @@ class IndustryDemandSimulation {
         activity: production.activity,
         producingJobId: jobId,
       });
-      this.commitPlannedOutputTransfer(
-        outputAccount,
-        destinationAccount,
-        reservedQuantity,
-        jobId,
-        production.activity,
-      );
+      for (const contribution of contributions) {
+        this.commitPlannedOutputTransfer(
+          outputAccount,
+          {
+            locationId: contribution.destinationLocationId,
+            typeId: productTypeId,
+          },
+          contribution.quantity,
+          jobId,
+          production.activity,
+        );
+      }
       if (production.activity === "manufacturing") this.manufacturingJobs.push(job);
       else this.reactionJobs.push(job);
       supply.jobs.push(job);
@@ -1343,6 +1486,37 @@ class IndustryDemandSimulation {
     supply.plannedQuantity = Math.min(quantity, plannedOutput);
     supply.readyQuantity = Math.min(quantity, readyOutput);
     return supply;
+  }
+
+  private recordProductionBucketUnmet(bucket: ProductionDemandBucket): void {
+    for (const request of bucket.requests) {
+      this.recordUnmet(request.destinationAccount, request.quantity, request.demandSource);
+    }
+  }
+
+  private productionDemandContributions(
+    requests: readonly ProductionDemandRequest[],
+    outputOffset: number,
+    outputQuantity: number,
+  ): SimulationIndustryJob["demandContributions"] {
+    const outputEnd = outputOffset + outputQuantity;
+    const contributions: SimulationIndustryJob["demandContributions"] = [];
+    for (const request of requests) {
+      const requestStart = request.allocationOffset;
+      const requestEnd = requestStart + request.quantity;
+      const quantity = Math.max(
+        0,
+        Math.min(outputEnd, requestEnd) - Math.max(outputOffset, requestStart),
+      );
+      if (quantity === 0) continue;
+      contributions.push({
+        demandId: request.demandSource.demandId,
+        stockpileId: request.stockpile.id,
+        destinationLocationId: request.destinationAccount.locationId,
+        quantity,
+      });
+    }
+    return contributions;
   }
 
   private planIndustryJob(
@@ -1519,7 +1693,6 @@ class IndustryDemandSimulation {
       jobId,
       depth: 1,
       activity,
-      stockpileId: stockpile.id,
       locationId: profile.locationId,
       productTypeId,
       productName: typeName(this.context, productTypeId, this.request.language),
@@ -1537,6 +1710,7 @@ class IndustryDemandSimulation {
       inputs,
       installs: [],
       demandSources: [parentDemandSource],
+      demandContributions: [],
     };
     for (const deferred of deferredInputs) deferred.job = job;
     this.deferredProductionSupplies.push(...deferredInputs);
@@ -2012,6 +2186,12 @@ class IndustryDemandSimulation {
         blueprint.timeEfficiency,
       ),
     );
+    if (activity === "reaction") {
+      return splitReactionRuns(blueprint.runs, maxRunsPerJob).map((runs) => ({
+        ...blueprint,
+        runs,
+      }));
+    }
     const allocations: BlueprintClaim[] = [];
     let remainingRuns = blueprint.runs;
     while (remainingRuns > 0) {

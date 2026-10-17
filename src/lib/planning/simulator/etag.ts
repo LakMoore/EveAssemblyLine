@@ -1,5 +1,5 @@
 /** Bump when simulator calculations change to invalidate client-cached results. */
-export const simulationCalculationVersion = 21;
+export const simulationCalculationVersion = 24;
 
 /** Creates the simulator validator for one request, SDE revision, and calculation version. */
 export function createSimulationEtag(

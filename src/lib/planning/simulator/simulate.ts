@@ -404,37 +404,33 @@ function reactionFormulaBalances(
   for (const job of reactionJobs) {
     const key = formulaKey(job.locationId, job.blueprint.blueprintTypeId);
     const existing = demandByLocationAndType.get(key);
-    const demandSource = {
-      jobId: job.jobId,
-      stockpileId: job.stockpileId,
-      productTypeId: job.productTypeId,
-      productName: job.productName,
-      runs: job.requiredRuns,
-    };
-    if (existing) {
-      existing.requiredRuns += job.requiredRuns;
-      existing.demandSources.push(demandSource);
-      continue;
-    }
     const formula = formulasByLocationAndType.get(
       formulaKey(job.locationId, job.blueprint.blueprintTypeId),
     );
-    demandByLocationAndType.set(
-      key,
-      {
-        typeId: job.blueprint.blueprintTypeId,
-        typeName:
-          formula?.typeName
-          ?? formulaNamesByType.get(job.blueprint.blueprintTypeId)
-          ?? `Type ${job.blueprint.blueprintTypeId}`,
-        locationId: job.locationId,
-        ownedQuantity: formula?.ownedQuantity ?? 0,
-        availableQuantity: formula?.availableQuantity ?? 0,
-        inUseQuantity: formula?.inUseQuantity ?? 0,
-        requiredRuns: job.requiredRuns,
-        demandSources: [demandSource],
-      },
-    );
+    const balance = existing ?? {
+      typeId: job.blueprint.blueprintTypeId,
+      typeName:
+        formula?.typeName
+        ?? formulaNamesByType.get(job.blueprint.blueprintTypeId)
+        ?? `Type ${job.blueprint.blueprintTypeId}`,
+      locationId: job.locationId,
+      ownedQuantity: formula?.ownedQuantity ?? 0,
+      availableQuantity: formula?.availableQuantity ?? 0,
+      inUseQuantity: formula?.inUseQuantity ?? 0,
+      requiredRuns: 0,
+      demandSources: [],
+    };
+    balance.requiredRuns += job.requiredRuns;
+    for (const contribution of job.demandContributions) {
+      balance.demandSources.push({
+        jobId: job.jobId,
+        stockpileId: contribution.stockpileId,
+        productTypeId: job.productTypeId,
+        productName: job.productName,
+        quantity: contribution.quantity,
+      });
+    }
+    demandByLocationAndType.set(key, balance);
   }
 
   const buckets = new Map<number, SimulationReactionFormulaBalance[]>();

@@ -2,13 +2,25 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadSimulationContext } from "./context";
 import { buildDependencyGraph } from "./dependencyGraph";
-import { simulateIndustryDemand } from "./industrySimulation";
+import { simulateIndustryDemand, splitReactionRuns } from "./industrySimulation";
 import { projectSimulationLedger } from "./ledger";
 import { scheduleSimulationJobs } from "./scheduler";
 import { parseSimulatorRequest } from "./schema";
 import { simulateIndustry } from "./simulate";
 import { normalizeSimulatorInventory } from "./sourceLots";
 import { inventionSuccessConfidence, minimumAttemptsForSuccesses } from "./binomial";
+
+void test("balances duration-limited reaction batches across the minimum job count", () => {
+  const runsPerJob = splitReactionRuns(617, 73);
+
+  assert.equal(runsPerJob.length, 9);
+  assert.deepEqual(runsPerJob, [69, 69, 69, 69, 69, 68, 68, 68, 68]);
+  assert.equal(
+    runsPerJob.reduce((total, runs) => total + runs, 0),
+    617,
+  );
+  assert.ok(runsPerJob.every((runs) => runs <= 73));
+});
 
 void test("declares an exact SDE-backed manufacturing job without inventing available stock", async () => {
   const request = parseSimulatorRequest({
@@ -531,7 +543,7 @@ void test("hauls available Charon components to A while protecting A-local deman
 });
 
 void test("rounds reaction inputs per simulated maximum-duration install", async () => {
-  const createResult = async (maxReactionJobDurationHours: number) =>
+  const createResult = async (maxReactionJobDurationHours: number, quantity = 15_400) =>
     simulateIndustry(
       parseSimulatorRequest({
         stockpiles: [
@@ -546,7 +558,7 @@ void test("rounds reaction inputs per simulated maximum-duration install", async
               copying: 50,
               invention: 60,
             },
-            items: [{ typeId: 16680, quantity: 15_400, me: 0, te: 0, fromCompression: false }],
+            items: [{ typeId: 16680, quantity, me: 0, te: 0, fromCompression: false }],
           },
         ],
         assets: [],
@@ -605,6 +617,93 @@ void test("rounds reaction inputs per simulated maximum-duration install", async
       .reduce((total, input) => total + input.requiredQuantity, 0);
   assert.equal(totalMaterialQuantity(oneHourJobs), 686);
   assert.equal(totalMaterialQuantity(oneDayJobs), 685);
+
+  const maxRunsPerJob = Math.floor((24 * 3600) / oneDayJobs[0].durationPerRunSeconds);
+  const totalRuns = maxRunsPerJob * 8 + Math.floor(maxRunsPerJob / 2);
+  const evenlySplitResult = await createResult(24, totalRuns * oneDayJobs[0].outputPerRun);
+  const evenlySplitJobs = evenlySplitResult.lists.reactionJobs.filter(
+    (job) => job.productTypeId === 16680,
+  );
+  const runsPerJob = evenlySplitJobs.map((job) => job.requiredRuns);
+  const lowerRunCount = Math.floor(totalRuns / 9);
+  const upperRunCount = Math.ceil(totalRuns / 9);
+
+  assert.equal(evenlySplitJobs.length, 9);
+  assert.equal(
+    runsPerJob.reduce((total, runs) => total + runs, 0),
+    totalRuns,
+  );
+  assert.ok(runsPerJob.every((runs) => runs === lowerRunCount || runs === upperRunCount));
+  assert.ok(evenlySplitJobs.every((job) => job.requiredRuns <= maxRunsPerJob));
+});
+
+void test("pools reaction demand across stockpiles before batch input rounding", async () => {
+  const stockpile = (id: string, stock: number, quantity: number) => ({
+    id,
+    name: id,
+    locations: {
+      stock,
+      manufacturing: 20,
+      reactions: 30,
+      reprocessing: 40,
+      copying: 50,
+      invention: 60,
+    },
+    items: [{ typeId: 16680, quantity, me: 0, te: 0, fromCompression: false }],
+  });
+  const result = await simulateIndustry(
+    parseSimulatorRequest({
+      stockpiles: [stockpile("first", 10, 6_600), stockpile("second", 11, 8_800)],
+      assets: [],
+      settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+      facilityProfiles: [
+        {
+          locationId: 30,
+          systemId: 30_000_142,
+          sizeId: 1,
+          buildTypeGroups: {
+            compositeReactions: {
+              manufacturingMaterialMultiplier: 1,
+              manufacturingMaterialPercentage: 0,
+              manufacturingTimeMultiplier: 1,
+              manufacturingTimePercentage: 0,
+              reactionMaterialMultiplier: 0.978,
+              reactionMaterialPercentage: -2.2,
+              reactionTimeMultiplier: 1,
+              reactionTimePercentage: 0,
+            },
+          },
+        },
+      ],
+      simulation: { version: 1, maxReactionJobDurationHours: 24 },
+    }),
+  );
+  const jobs = result.lists.reactionJobs.filter((job) => job.productTypeId === 16680);
+
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].requiredRuns, 7);
+  assert.equal(
+    jobs[0].inputs
+      .filter((input) => input.typeId === 16663)
+      .reduce((total, input) => total + input.requiredQuantity, 0),
+    685,
+  );
+  const contributions = jobs[0].demandContributions.map(
+    ({ stockpileId, destinationLocationId, quantity }): [string, number, number] => [
+      stockpileId,
+      destinationLocationId,
+      quantity,
+    ],
+  );
+  assert.deepEqual(
+    contributions.sort(([leftStockpileId], [rightStockpileId]) =>
+      leftStockpileId.localeCompare(rightStockpileId),
+    ),
+    [
+      ["first", 10, 6_600],
+      ["second", 11, 8_800],
+    ],
+  );
 });
 
 void test("keeps upstream demand separate from a multi-unit job output", async () => {
@@ -1650,7 +1749,11 @@ void test("reserves full local reaction inputs before competing stockpile demand
     const fuel = fuelTotalsByProduct.get(productTypeId);
     assert.ok(fuel);
     assert.ok(fuel.required > 0);
-    assert.equal(fuel.availableNow, fuel.required);
+    assert.equal(
+      fuel.availableNow,
+      fuel.required,
+      `Reaction ${productTypeId} input totals: ${JSON.stringify(fuel)}`,
+    );
   }
   const fuelBalance = result.ledgers
     .find((ledger) => ledger.locationId === 60)

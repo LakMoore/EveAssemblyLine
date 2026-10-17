@@ -23,7 +23,6 @@ function job(
     jobId,
     depth: 1,
     activity: "reaction",
-    stockpileId: "main",
     locationId: 20,
     productTypeId: 16672,
     productName: jobId,
@@ -56,6 +55,7 @@ function job(
     })),
     installs: [],
     demandSources: [],
+    demandContributions: [],
   };
 }
 
