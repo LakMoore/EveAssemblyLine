@@ -15,6 +15,7 @@ import { refreshTokenSet } from "@/lib/auth/eveSso";
 import { getCharacter, saveCharacterTokens } from "@/lib/auth/tokensStore";
 import { logEsiRequest } from "@/lib/esi/logger";
 import { z } from "zod";
+import { esiFittingSchema } from "@/lib/fittings/model";
 
 const esiBaseUrl = process.env.ESI_BASE_URL ?? "https://esi.evetech.net/latest";
 const refreshLocks = new Map<string, Promise<TokenSet>>();
@@ -1162,6 +1163,18 @@ export async function fetchCharacterIndustryJobs(
     headers: result.headers,
     notModified: result.notModified,
   };
+}
+
+/** Fetches personal fits through the shared token, validation and rate-limit client. */
+export async function fetchCharacterFittings(record: CharacterTokenRecord, etag?: string) {
+  const token = await getUsableToken(record);
+  return fetchEsiEndpoint(
+    `/characters/${record.characterId}/fittings/`,
+    z.array(esiFittingSchema),
+    token,
+    etag,
+    { paginated: false },
+  );
 }
 
 export async function fetchCharacterSkills(record: CharacterTokenRecord, etag?: string) {

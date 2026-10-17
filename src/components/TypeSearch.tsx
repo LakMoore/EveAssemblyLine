@@ -3,10 +3,13 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Combobox,
   ComboboxContent,
   ComboboxEmpty,
+  ComboboxGroup,
+  ComboboxLabel,
   ComboboxInput,
   ComboboxItem,
   ComboboxList,
@@ -20,6 +23,8 @@ type TypeSearchResult = {
   typeId: number;
   category?: "blueprint" | "bpo" | "bpc" | "reaction" | "item" | "reactionformula";
   assemblyLineGroup?: string;
+  shipName?: string;
+  fittingSource?: { id: string; scope: string; collectionId: string };
 };
 
 type TypeSearchProps = {
@@ -30,6 +35,7 @@ type TypeSearchProps = {
   inputId?: string;
   searchEndpoint?: string;
   disabled?: boolean;
+  additionalSearch?: (query: string, language: SdeLanguage) => Promise<TypeSearchResult[]>;
 };
 
 function resultVariation(category?: string) {
@@ -46,6 +52,7 @@ export default function TypeSearch({
   inputId,
   searchEndpoint = "/api/reference/types",
   disabled = false,
+  additionalSearch,
 }: TypeSearchProps) {
   const anchor = useComboboxAnchor();
   const [query, setQuery] = useState("");
@@ -55,34 +62,66 @@ export default function TypeSearch({
   const requestId = useRef(0);
 
   useEffect(() => {
+    if (!additionalSearch) return;
+    const clearPrivateResults = () => {
+      requestId.current += 1;
+      setQuery("");
+      setResults([]);
+      setSearchError("");
+      setIsOpen(false);
+    };
+    window.addEventListener("assembly-line-auth-changed", clearPrivateResults);
+    return () => {
+      window.removeEventListener("assembly-line-auth-changed", clearPrivateResults);
+    };
+  }, [additionalSearch]);
+
+  useEffect(() => {
     const trimmedQuery = query.trim();
     const currentRequestId = ++requestId.current;
     if (disabled || trimmedQuery.length < minimumQueryLength) return;
     const controller = new AbortController();
     const timeout = window.setTimeout(
       () => {
-        void (async () => {
-          try {
-            const response = await fetch(
-              `${searchEndpoint}?query=${encodeURIComponent(trimmedQuery)}&language=${language}`,
-              { signal: controller.signal },
-            );
-            const data = (await response.json()) as { error?: string; items?: TypeSearchResult[] };
-            if (!response.ok) throw new Error(data.error ?? "Search data is unavailable.");
-            if (currentRequestId === requestId.current) {
-              setResults(data.items ?? []);
-              setSearchError("");
+        setResults([]);
+        setSearchError("");
+        const typeSearch = fetch(
+          `${searchEndpoint}?query=${encodeURIComponent(trimmedQuery)}&language=${language}`,
+          { signal: controller.signal },
+        ).then(async (response) => {
+          const data = (await response.json()) as {
+            error?: string;
+            items?: TypeSearchResult[];
+          };
+          if (!response.ok) throw new Error(data.error ?? "Search data is unavailable.");
+          return data.items ?? [];
+        });
+        const searches = [
+          { label: "Type search", request: typeSearch },
+          ...(additionalSearch
+            ? [{ label: "Fitting search", request: additionalSearch(trimmedQuery, language) }]
+            : []),
+        ];
+        for (const search of searches) {
+          void search.request
+            .then((sourceResults) => {
+              if (currentRequestId !== requestId.current || controller.signal.aborted) return;
+              setResults((current) => {
+                const merged = [...current, ...sourceResults];
+                return [
+                  ...merged.filter((item) => !item.fittingSource),
+                  ...merged.filter((item) => item.fittingSource),
+                ];
+              });
               setIsOpen(true);
-            }
-          }
-          catch (error) {
-            if (error instanceof DOMException && error.name === "AbortError") return;
-            if (currentRequestId !== requestId.current) return;
-            setResults([]);
-            setSearchError(error instanceof Error ? error.message : "Search data is unavailable.");
-            setIsOpen(true);
-          }
-        })();
+            })
+            .catch((error: unknown) => {
+              if (currentRequestId !== requestId.current || controller.signal.aborted) return;
+              const message = `${search.label}: ${error instanceof Error ? error.message : "Search data is unavailable."}`;
+              setSearchError((current) => (current ? `${current} ${message}` : message));
+              setIsOpen(true);
+            });
+        }
       },
       180,
     );
@@ -90,7 +129,7 @@ export default function TypeSearch({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [disabled, language, query, searchEndpoint]);
+  }, [additionalSearch, disabled, language, query, searchEndpoint]);
 
   function choose(item: TypeSearchResult) {
     onSelect(item);
@@ -149,17 +188,37 @@ export default function TypeSearch({
           aria-label={ariaLabel}
         />
         <ComboboxContent anchor={anchor}>
+          {searchError && results.length > 0 && (
+            <Alert variant="destructive">
+              <AlertDescription>{searchError}</AlertDescription>
+            </Alert>
+          )}
           <ComboboxEmpty>{searchError || "No matching published items."}</ComboboxEmpty>
           <ComboboxList>
-            {results.map((item) => (
-              <ComboboxItem key={item.typeId} value={item}>
-                <TypeIdentity
-                  name={item.name}
-                  typeId={item.typeId}
-                  variation={resultVariation(item.category)}
-                />
-              </ComboboxItem>
-            ))}
+            {[
+              { label: "Types", items: results.filter((item) => !item.fittingSource) },
+              { label: "Fittings", items: results.filter((item) => item.fittingSource) },
+            ]
+              .filter((group) => group.items.length > 0)
+              .map((group) => (
+                <ComboboxGroup key={group.label}>
+                  {additionalSearch && <ComboboxLabel>{group.label}</ComboboxLabel>}
+                  {group.items.map((item) => (
+                    <ComboboxItem
+                      key={item.fittingSource ? `fitting:${item.fittingSource.id}` : item.typeId}
+                      value={item}
+                    >
+                      <TypeIdentity
+                        name={item.name}
+                        typeId={item.typeId}
+                        typeName={item.shipName}
+                        linkPath={item.fittingSource ? null : undefined}
+                        variation={resultVariation(item.category)}
+                      />
+                    </ComboboxItem>
+                  ))}
+                </ComboboxGroup>
+              ))}
           </ComboboxList>
         </ComboboxContent>
       </Combobox>

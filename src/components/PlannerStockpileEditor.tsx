@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Clipboard, Copy, ListRestart, Save, Trash2, WandSparkles, X } from "lucide-react";
 import type {
   ClientBuildItem,
@@ -44,10 +44,18 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
-import TypeSearch from "@/components/TypeSearch";
+import TypeSearch, { type TypeSearchResult } from "@/components/TypeSearch";
+import { fetchFitting, searchStockpileFittings } from "@/lib/client/fittings";
+import type { SavedFitting } from "@/lib/fittings/model";
+import {
+  addStockpileFitting,
+  expandStockpileItems,
+  reconcileStockpilePaste,
+} from "@/lib/planning/stockpileFittings";
+import { fetchTypeMetadata } from "@/lib/reference/types";
+import { Spinner } from "@/components/ui/spinner";
 import PasteListDialog from "@/components/PasteListDialog";
 import type { SdeLanguage } from "@/lib/reference/languages";
-import { reconcilePasteListItems } from "@/lib/reference/pasteListOperations";
 import { cn } from "@/lib/utils";
 import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import { Label } from "./ui/label";
@@ -244,7 +252,7 @@ function addItems(
   const next = current.map((item) => ({ ...item }));
   for (const imported of importedItems) {
     const existingIndex = next.findIndex(
-      (item) => item.typeId === imported.typeId && !item.fromCompression,
+      (item) => !item.fitting && item.typeId === imported.typeId && !item.fromCompression,
     );
     const item =
       existingIndex >= 0
@@ -481,14 +489,27 @@ function StockpileItemsContent({
   error,
   onError,
   onChange,
+  onAddFitting,
+  pending,
+  onPendingChange,
 }: {
   draft: ClientPlanStockpile;
   language: SdeLanguage;
   error: string;
   onError: (message: string) => void;
   onChange: (stockpile: ClientPlanStockpile) => void;
+  onAddFitting: (fitting: SavedFitting) => void;
+  pending: boolean;
+  onPendingChange: (pending: boolean) => void;
 }) {
   const [isPasteOpen, setIsPasteOpen] = useState(false);
+  const active = useRef(true);
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
 
   function updateItems(items: ClientBuildItem[]) {
     onChange({ ...draft, items });
@@ -496,8 +517,27 @@ function StockpileItemsContent({
 
   async function copyList() {
     try {
+      if (!draft.items.some((item) => item.fitting)) {
+        await navigator.clipboard.writeText(
+          draft.items.map((item) => `${item.name}\t${item.quantity}`).join("\n"),
+        );
+        return;
+      }
+      const expanded = expandStockpileItems(
+        draft.items.map((item) => ({ ...item, isIncluded: true })),
+      );
+      const metadata = await fetchTypeMetadata(
+        expanded.map((item) => item.typeId),
+        language,
+      );
+      const names = new Map(metadata.map((item) => [item.typeId, item.name]));
       await navigator.clipboard.writeText(
-        draft.items.map((item) => `${item.name}\t${item.quantity}`).join("\n"),
+        expanded
+          .map(
+            (item) =>
+              `${names.get(item.typeId) ?? draft.items.find((entry) => !entry.fitting && entry.typeId === item.typeId)?.name ?? `Type ${item.typeId}`}\t${item.quantity}`,
+          )
+          .join("\n"),
       );
     }
     catch {
@@ -509,8 +549,32 @@ function StockpileItemsContent({
     updateItems(draft.items.filter((item) => !item.fromCompression));
   }
 
-  function submitTypeSearch(item: { name: string; typeId: number; category?: string }) {
-    updateItems(addItems(draft.items, [item]));
+  async function submitTypeSearch(item: TypeSearchResult): Promise<void> {
+    if (!item.fittingSource) {
+      updateItems(addItems(draft.items, [item]));
+      return;
+    }
+    onError("");
+    onPendingChange(true);
+    try {
+      const result = await fetchFitting(
+        item.fittingSource.scope,
+        item.fittingSource.collectionId,
+        item.fittingSource.id,
+      );
+      if (result.stale) {
+        throw new Error("Could not verify this fitting. Retry when the server is available.");
+      }
+      if (active.current) onAddFitting(result.fitting);
+    }
+    catch (failure) {
+      if (active.current) {
+        onError(failure instanceof Error ? failure.message : "Could not add this fitting.");
+      }
+    }
+    finally {
+      if (active.current) onPendingChange(false);
+    }
   }
 
   return (
@@ -552,8 +616,11 @@ function StockpileItemsContent({
           language={language}
           placeholder="Search items by name or type ID"
           ariaLabel="Search stockpile items by name or type ID"
-          onSelect={submitTypeSearch}
+          additionalSearch={searchStockpileFittings}
+          disabled={pending}
+          onSelect={(item) => void submitTypeSearch(item)}
         />
+        {pending && <Spinner aria-label="Loading fitting contents" />}
         {draft.items.length === 0 ? (
           <Empty>
             <EmptyDescription>Search for an item above to start this stockpile.</EmptyDescription>
@@ -566,7 +633,11 @@ function StockpileItemsContent({
                   "grid min-w-0 grid-cols-[2.5rem_minmax(0,1fr)_8rem_2rem] items-center gap-2 transition-opacity",
                   item.isIncluded === false && "opacity-50",
                 )}
-                key={`${item.typeId}-${item.fromCompression}`}
+                key={
+                  item.fitting
+                    ? `fitting:${item.fitting.id}`
+                    : `${item.typeId}-${item.fromCompression}`
+                }
               >
                 <Tooltip>
                   <TooltipTrigger
@@ -590,6 +661,8 @@ function StockpileItemsContent({
                 <TypeIdentity
                   name={item.name}
                   typeId={item.typeId}
+                  subline={item.fitting ? "Fitting" : undefined}
+                  linkPath={item.fitting ? null : undefined}
                   variation={
                     item.iconCategory === "bpo"
                       ? "bp"
@@ -640,27 +713,12 @@ function StockpileItemsContent({
       {isPasteOpen && (
         <PasteListDialog
           language={language}
-          currentItems={draft.items}
+          currentItems={draft.items.filter((item) => !item.fitting)}
           onCancel={() => {
             setIsPasteOpen(false);
           }}
-          onImport={(items) => {
-            updateItems(
-              reconcilePasteListItems(
-                draft.items,
-                items,
-                (item) => ({
-                  name: item.name,
-                  categoryName: item.category ?? "Unknown",
-                  typeId: item.typeId,
-                  quantity: item.quantity ?? 1,
-                  me: 0,
-                  te: 0,
-                  fromCompression: false,
-                  isIncluded: true,
-                }),
-              ),
-            );
+          onImport={(items, mode) => {
+            updateItems(reconcileStockpilePaste(draft.items, items, mode));
             setIsPasteOpen(false);
           }}
         />
@@ -678,6 +736,7 @@ function PlannerStockpileDialogLayout({
   onAuto,
   onDefaultAll,
   onSave,
+  saveDisabled = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -687,6 +746,7 @@ function PlannerStockpileDialogLayout({
   onAuto?: () => void;
   onDefaultAll?: () => void;
   onSave: () => void;
+  saveDisabled?: boolean;
 }) {
   const [pendingAction, setPendingAction] = useState<"auto" | "defaultAll" | null>(null);
 
@@ -739,7 +799,7 @@ function PlannerStockpileDialogLayout({
         <X data-icon="inline-start" aria-hidden="true" />
         Cancel
       </Button>
-      <Button type="button" onClick={onSave}>
+      <Button type="button" disabled={saveDisabled} onClick={onSave}>
         <Save data-icon="inline-start" aria-hidden="true" />
         Save changes
       </Button>
@@ -872,6 +932,7 @@ export function PlannerStockpileItemsDialog({
 }: PlannerStockpileItemsDialogProps) {
   const [draft, setDraft] = useStockpileDraft(stockpile);
   const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
 
   if (!open || !draft) return null;
   const currentDraft = draft;
@@ -884,8 +945,12 @@ export function PlannerStockpileItemsDialog({
   return (
     <PlannerStockpileDialogLayout
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) setPending(false);
+        onOpenChange(nextOpen);
+      }}
       title="Edit stockpile items"
+      saveDisabled={pending}
       description="Set the items and quantities for this stockpile."
       content={
         <StockpileItemsContent
@@ -894,6 +959,15 @@ export function PlannerStockpileItemsDialog({
           error={error}
           onError={setError}
           onChange={setDraft}
+          onAddFitting={(fitting) => {
+            setDraft((current) =>
+              current
+                ? { ...current, items: addStockpileFitting(current.items, fitting) }
+                : current,
+            );
+          }}
+          pending={pending}
+          onPendingChange={setPending}
         />
       }
       onSave={saveDraft}

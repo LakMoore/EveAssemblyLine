@@ -8,6 +8,7 @@ import type { FacilityGroupBonus } from "@/lib/planning/facilityBonuses";
 import type { ProductionGroupKey } from "@/lib/planning/productionGroups";
 import type { KnownStructure, PlannerSettings } from "@/lib/planning/preferences";
 import type { SdeLanguage } from "@/lib/reference/languages";
+import { expandStockpileItems } from "@/lib/planning/stockpileFittings";
 import { facilitySettingsName } from "@/lib/planning/facilities";
 import type { SimulationAsset, SimulationIndustryOutputMarker } from "./types";
 import { filterSimulationAssetsByTakeAccess, prepareSimulationAssets } from "./requestAssets";
@@ -201,7 +202,7 @@ export function createPlannerSimulationRequest(
     .filter((stockpile) => stockpile.isActive !== false)
     .map((stockpile) => ({
       ...stockpile,
-      items: stockpile.items.filter((item) => item.isIncluded !== false),
+      items: expandStockpileItems(stockpile.items),
     }))
     .filter((stockpile) => stockpile.items.length > 0);
   if (populatedStockpiles.length === 0) return null;

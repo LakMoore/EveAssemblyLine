@@ -147,6 +147,9 @@ async function handleRefreshRequestInternal(
     try {
       const character = await getCharacter(ownerId);
       if (!character) return json({ error: "Character is unavailable." }, 404);
+      if (!session.collectionId || character.collectionId !== session.collectionId) {
+        return json({ error: "Character does not belong to the current collection." }, 403);
+      }
       authorizationCharacter = character;
     }
     catch {

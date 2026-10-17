@@ -12,6 +12,8 @@ import type {
   MarketOrderRecord,
   TokenSet,
 } from "@/lib/auth/model";
+import type { PersonalFitting } from "@/lib/fittings/model";
+import { getFittingStore } from "@/lib/fittings/store";
 import type {
   EsiCharacterClones,
   EsiCorporationDivision,
@@ -53,6 +55,7 @@ import {
   fetchCharacterMarketOrders,
   fetchCharacterClones,
   fetchCharacterSkills,
+  fetchCharacterFittings,
   fetchCharacterCorporationAuthorization,
   fetchCorporationMarketOrders,
   fetchCorporationStructures,
@@ -136,6 +139,7 @@ type OwnerCache = {
   marketOrderAssetDeductions: Map<string, number>;
   jobs?: EndpointCache<IndustryJobRecord[]>;
   skills?: EndpointCache<CharacterSkillRecord[]>;
+  fittings?: EndpointCache<PersonalFitting[]>;
   marketOrders?: EndpointCache<MarketOrderRecord[]>;
   structures?: EndpointCache<EsiCorporationStructure[]>;
   publicInfo?: EndpointCache<EsiCorporationPublicInfo | null>;
@@ -2153,6 +2157,39 @@ export function invalidateCorporationCache(corporationId: number, sessionId: str
   corporationCaches.delete(`${corporationId}`);
 }
 
+/** Refreshes personal fits and seeds the authorized collection without changing existing app fits. */
+async function refreshPersonalFittings(
+  cache: OwnerCache,
+  character: CharacterTokenRecord,
+): Promise<void> {
+  if (!character.collectionId) throw new Error("The character has no fitting collection.");
+  if (!character.personalAuth.scopes.includes("esi-fittings.read_fittings.v1")) {
+    cache.fittings = {
+      ...(cache.fittings ?? { lastBody: [] }),
+      status: "error",
+      reauthorizeRequired: true,
+      error: "Reconnect this character to grant personal fitting access.",
+    };
+    return;
+  }
+  if (!cache.fittings?.expires || Date.parse(cache.fittings.expires) <= Date.now()) {
+    const result = await fetchCharacterFittings(character, cache.fittings?.etag);
+    cache.fittings =
+      result.notModified && cache.fittings
+        ? setFresh(cache.fittings.lastBody, result.headers, cache.fittings, true)
+        : setFresh(result.data ?? [], result.headers, cache.fittings);
+  }
+  else {
+    cache.fittings.status = endpointDataStatus(cache.fittings.lastModified, cache.fittings.expires);
+  }
+  const store = await getFittingStore();
+  await store.importPersonal(
+    character.collectionId,
+    character.characterId,
+    cache.fittings.lastBody,
+  );
+}
+
 export async function refreshCharacterState(
   character: CharacterTokenRecord,
   sessionId: string,
@@ -2160,6 +2197,16 @@ export async function refreshCharacterState(
   materialContext?: JobMaterialCalculationContext,
 ): Promise<void> {
   const cache = getCache(characterCaches, character.characterId, sessionId);
+  profiler.start("fittings");
+  try {
+    await refreshPersonalFittings(cache, character);
+  }
+  catch (error) {
+    cache.fittings = { ...(cache.fittings ?? { lastBody: [] }), ...endpointStatus(error) };
+  }
+  finally {
+    profiler.end("fittings");
+  }
   let currentShipStateChanged = false;
   profiler.start("location");
   try {
@@ -3423,6 +3470,12 @@ export async function getStateStatus(
         status: "cached" as const,
         hasBody: false,
       },
+      fittings: toClientEndpointStatus(
+        getCache(characterCaches, characterId, sessionId).fittings,
+      ) ?? {
+        status: "cached" as const,
+        hasBody: false,
+      },
       blueprints: toClientEndpointStatus(
         getCache(characterCaches, characterId, sessionId).blueprintInstances,
       ) ?? {
@@ -3501,6 +3554,7 @@ export function getOwnerSnapshotEndpointStatuses(
     ...(owner.kind === "character"
       ? {
           clones: endpointStatusOrUnavailable(cache.clones),
+          fittings: endpointStatusOrUnavailable(cache.fittings),
           location: {
             ...endpointStatusOrUnavailable(cache.currentLocation),
             ...(cache.currentLocation?.lastBody?.solarSystemId !== undefined

@@ -133,6 +133,7 @@ export type ClientOwnerSnapshot = {
   jobs: ClientOwnerSnapshotSlice<ClientOwnerSnapshotJob[]>;
   marketOrders: ClientOwnerSnapshotSlice<ClientOwnerSnapshotMarketOrder[]>;
   clones?: ClientOwnerSnapshotEndpointStatus;
+  fittings?: ClientOwnerSnapshotEndpointStatus;
   location?: ClientOwnerSnapshotEndpointStatus;
   ships: ClientOwnerSnapshotSlice<ClientOwnerSnapshotShip[]>;
   skills: ClientOwnerSnapshotSlice<CharacterSkillRecord[]>;
@@ -154,6 +155,7 @@ export type ClientOwnerSnapshotResponse = {
   jobs: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["jobs"]["data"]>;
   marketOrders: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["marketOrders"]["data"]>;
   clones?: ClientOwnerSnapshotEndpointStatus;
+  fittings?: ClientOwnerSnapshotEndpointStatus;
   location?: ClientOwnerSnapshotEndpointStatus;
   ships: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["ships"]["data"]>;
   skills: ClientOwnerSnapshotResponseSlice<ClientOwnerSnapshot["skills"]["data"]>;
@@ -517,6 +519,7 @@ export function isCompleteClientOwnerSnapshot(value: unknown): value is ClientOw
         Array.isArray(data) && data.every((order) => isSnapshotMarketOrder(order)),
     )
     && isOptional(value.clones, isSnapshotEndpointStatus)
+    && isOptional(value.fittings, isSnapshotEndpointStatus)
     && isOptional(value.location, isSnapshotEndpointStatus)
     && isSnapshotSlice(
       ships,
@@ -599,6 +602,7 @@ export function isCompleteClientOwnerSnapshotResponse(
         Array.isArray(data) && data.every((order) => isSnapshotMarketOrder(order)),
     )
     && isOptional(value.clones, isSnapshotEndpointStatus)
+    && isOptional(value.fittings, isSnapshotEndpointStatus)
     && isOptional(value.location, isSnapshotEndpointStatus)
     && isSnapshotResponseSlice(
       value.ships,
@@ -668,6 +672,9 @@ export function mergeOwnerSnapshot(
     marketOrders: mergeSnapshotSlice(previous?.marketOrders ?? null, response.marketOrders),
     ...((response.clones ?? previous?.clones)
       ? { clones: response.clones ?? previous?.clones }
+      : {}),
+    ...((response.fittings ?? previous?.fittings)
+      ? { fittings: response.fittings ?? previous?.fittings }
       : {}),
     ...((response.location ?? previous?.location)
       ? { location: response.location ?? previous?.location }

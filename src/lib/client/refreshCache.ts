@@ -28,6 +28,7 @@ export const refreshDependentEndpoints = {
   assets: ["owner-assets"],
   jobs: ["owner-jobs"],
   ships: ["owner-ships"],
+  fittings: [],
   structures: ["owner-assets"],
   corpHangars: ["owner-assets"],
   data: [],
@@ -128,4 +129,19 @@ export async function endpointNeedsRefresh(key: string, refreshAt: string | null
   if (!refreshAt) return false;
   const record = await loadEndpointRecord(key);
   return !record || Date.parse(record.returnedAt) < Date.parse(refreshAt);
+}
+
+/** Removes an explicitly invalidated endpoint body from the shared browser cache. */
+export async function deleteEndpointRecord(key: string): Promise<void> {
+  const database = await getPlanningDatabase();
+  return new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(endpointCacheStoreName, "readwrite");
+    transaction.objectStore(endpointCacheStoreName).delete(`endpoint:${key}`);
+    transaction.oncomplete = () => {
+      resolve();
+    };
+    transaction.onerror = () => {
+      reject(transaction.error ?? new Error("Could not invalidate endpoint cache."));
+    };
+  });
 }

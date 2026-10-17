@@ -134,6 +134,41 @@ npm run migrate-corporation-settings -- --apply
 Malformed collection records and corporation settings are retained and reported by the migration;
 they are not silently discarded.
 
+## Fitting Library
+
+`/fittings` (Information > Fittings) maintains a ship-fitting library for the active character
+collection. Names are unique within a collection, ignoring case and Unicode compatibility variants.
+The import dialog accepts one EFT, native EVE XML, DNA, or ESI JSON fitting at a time. Type names and
+DNA module slots are resolved from the server's SDE; stored fittings use numeric type IDs.
+
+The list endpoint is `GET /api/fittings` (names, IDs, ship type IDs and revisions); details use
+`GET /api/fittings/{id}`. Create with `POST /api/fittings`; existing fittings are read-only and can
+be viewed or copied to the clipboard in EFT format. Manually added fittings may be deleted with
+`DELETE /api/fittings/{id}`, using the current `revision`. ESI-imported fittings cannot be deleted.
+Updates are rejected with HTTP 405.
+Every request is authorized against the session collection. Fitting bodies and the collection index
+are stored separately in Firestore; browser lists and opened fitting bodies are cached in the existing
+IndexedDB endpoint store, scoped to the authenticated session. Offline data is explicitly marked stale;
+writes require server confirmation. The library allows 1,000 saved fittings per collection.
+
+The planner's stockpile item search also matches collection fitting names. Selecting a fitting saves
+a by-value snapshot of its numeric hull and item contents in that stockpile, so deleting the library
+entry does not break existing plans. Repeated selections of the same fitting increase its existing
+row quantity; distinct fittings and ordinary hull rows remain separate. Before simulation, each
+included fitting expands to its hull and all modules, charges, drones and cargo, multiplied by the
+stockpile quantity. Snapshots survive browser storage and plan JSON export/import, and do not change
+when the library entry changes. Ordinary type selection and pasted type lists remain independent.
+
+Personal `GET /characters/{character_id}/fittings/` responses are fetched only during
+`/api/state/refresh`, using `esi-fittings.read_fittings.v1`. Reconnect characters without that scope.
+Each newly discovered personal fitting seeds the collection once; name clashes receive numeric
+suffixes. Refresh does not overwrite existing library entries. Endpoint freshness, errors and
+reauthorization requirements appear on the Data page.
+
+The additive `fittings:v1:` storage namespace is initialized on the first fitting creation or ESI
+import. No fitting migration or schema marker is required. Existing alpha fitting records remain
+compatible; Firestore credentials/ADC are required at runtime, not by a fitting build hook.
+
 ## Cache configuration
 
 The cache layer is available through `src/cache/cache.ts` and defaults to an in-memory provider:

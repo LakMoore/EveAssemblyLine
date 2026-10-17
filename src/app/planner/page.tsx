@@ -47,6 +47,7 @@ import type {
   PlannerFingerprintWorkerResult,
 } from "@/lib/planning/simulator/requestFingerprint.worker";
 import { loadBuildList } from "@/lib/planning/buildListStore";
+import { stockpileFittingSnapshotSchema } from "@/lib/planning/stockpileFittings";
 import EveAuthorizationWarning from "@/components/EveAuthorizationWarning";
 import {
   loadPlannerStockpiles,
@@ -467,6 +468,7 @@ async function localizeItems(
     );
     const metadataByTypeId = new Map(metadata.map((item) => [item.typeId, item]));
     return buildItems.map((item) => {
+      if (item.fitting) return item;
       const localizedItem = metadataByTypeId.get(item.typeId);
       return localizedItem
         ? {
@@ -534,6 +536,13 @@ function isImportedPlan(value: unknown): value is {
           && Number.isFinite(item.quantity)
           && item.quantity > 0
           && typeof item.name === "string"
+          && (
+            item.fitting === undefined
+            || (
+              stockpileFittingSnapshotSchema.safeParse(item.fitting).success
+              && item.fitting.shipTypeId === item.typeId
+            )
+          )
           && (item.isIncluded === undefined || typeof item.isIncluded === "boolean"),
       )
       && candidate.locations !== undefined

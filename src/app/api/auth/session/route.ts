@@ -72,6 +72,7 @@ export async function GET(request: Request) {
       .digest("hex");
     return NextResponse.json({
       authenticated: projectedCharacters.length > 0,
+      collectionId: session.collectionId,
       characters: projectedCharacters,
       snapshotScope,
     });

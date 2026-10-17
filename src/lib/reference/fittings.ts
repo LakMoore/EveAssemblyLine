@@ -1,4 +1,7 @@
 import type { SdeLanguage } from "./languages";
+import { XMLParser } from "fast-xml-parser";
+import { SyntaxValidator } from "fast-xml-validator";
+import { z } from "zod";
 
 export type EsiFittingItem = {
   flag: number;
@@ -51,8 +54,8 @@ export type FittingParser = {
   parse: (text: string) => ParsedFitting;
 };
 
-// ESI fitting responses use numeric inventory flags, while ESI asset responses
-// expose equivalent symbolic values such as "HiSlot0" and "ServiceSlot0".
+// Parsed fittings use numeric inventory flags; the fitting boundary also normalizes
+// modern ESI symbolic flags such as "HiSlot0" and "ServiceSlot0" to these values.
 const esiFittingFlagBases: Record<FittingSlot, number> = {
   [FittingSlot.High]: 27,
   [FittingSlot.Medium]: 19,
@@ -97,9 +100,6 @@ function parseEft(text: string): ParsedFitting {
   }
   while (sections.length > 0 && sections.at(-1)?.length === 0) sections.pop();
   const populatedSections = sections.filter((section) => section.length > 0);
-  if (populatedSections.length < 5) {
-    throw new Error("The fitting does not contain all EFT slot sections.");
-  }
 
   const slotFlags =
     populatedSections.length >= 8
@@ -146,7 +146,73 @@ function esiFittingFlag(item: ParsedFittingItem): number {
     : baseFlag + item.slotIndex;
 }
 
+/** Parses a single native EVE XML fitting using a structured, entity-safe XML parser. */
+function parseXml(text: string): ParsedFitting {
+  if (/<!DOCTYPE|<!ENTITY/i.test(text)) {
+    throw new Error("The fitting XML is invalid or contains unsupported entities.");
+  }
+  SyntaxValidator.validate(text);
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: "",
+    processEntities: false,
+    isArray: (name) => name === "fitting" || name === "hardware",
+  });
+  const schema = z.object({
+    fittings: z.object({
+      fitting: z
+        .array(
+          z.object({
+            name: z.string().min(1),
+            shipType: z.object({ value: z.string().min(1) }),
+            hardware: z
+              .array(
+                z.object({
+                  type: z.string().min(1),
+                  slot: z.string(),
+                  qty: z.coerce.number().int().positive().default(1),
+                }),
+              )
+              .default([]),
+          }),
+        )
+        .length(1),
+    }),
+  });
+  const document: unknown = parser.parse(text);
+  const parsed = schema.safeParse(document);
+  if (!parsed.success) throw new Error("Paste one complete EVE XML fitting at a time.");
+  const fitting = parsed.data.fittings.fitting[0];
+  const items = fitting.hardware.map((hardware): ParsedFittingItem => {
+    const slot = hardware.slot.match(/^(low|med|hi|rig|subsystem|service) slot (\d+)$/i);
+    const slots: Record<string, FittingSlot> = {
+      low: FittingSlot.Low,
+      med: FittingSlot.Medium,
+      hi: FittingSlot.High,
+      rig: FittingSlot.Rig,
+      subsystem: FittingSlot.Subsystem,
+      service: FittingSlot.Service,
+    };
+    const area = slot
+      ? slots[slot[1].toLowerCase()]
+      : /^(drone|fighter) bay$/i.test(hardware.slot)
+        ? FittingSlot.Drone
+        : /^cargo bay$/i.test(hardware.slot)
+          ? FittingSlot.Cargo
+          : undefined;
+    if (!area) throw new Error(`Unsupported fitting slot: ${hardware.slot}`);
+    return {
+      name: hardware.type,
+      quantity: hardware.qty,
+      slot: area,
+      slotIndex: slot ? Number(slot[2]) : 0,
+    };
+  });
+  return { format: "xml", name: fitting.name, shipTypeName: fitting.shipType.value, items };
+}
+
 const fittingParsers: FittingParser[] = [
+  { format: "xml", canParse: (text) => /^\s*</.test(text), parse: parseXml },
   {
     format: "eft",
     canParse: (text) => /^\s*\[[^,\]]+,\s*.+\]\s*$/m.test(text),

@@ -1,6 +1,7 @@
 import type { ClientBuildItem, ClientPlanStockpile, PlanStockpileLocations } from "./types";
 import { productionGroupDefinitions } from "./productionGroups";
 import { buildStoreName, getPlanningDatabase } from "./planningDatabase";
+import { stockpileFittingSnapshotSchema } from "./stockpileFittings";
 
 const stockpilesKey = "current-stockpiles";
 const legacyStockpilesKey = "current-buckets";
@@ -21,6 +22,8 @@ function isStockpileLocations(value: unknown): value is PlanStockpileLocations {
 function isClientBuildItem(value: unknown): value is ClientBuildItem {
   if (!value || typeof value !== "object") return false;
   const item = value as Record<string, unknown>;
+  const fitting =
+    item.fitting === undefined ? undefined : stockpileFittingSnapshotSchema.safeParse(item.fitting);
   return (
     typeof item.name === "string"
     && typeof item.categoryName === "string"
@@ -31,6 +34,7 @@ function isClientBuildItem(value: unknown): value is ClientBuildItem {
     && typeof item.te === "number"
     && typeof item.fromCompression === "boolean"
     && (item.isIncluded === undefined || typeof item.isIncluded === "boolean")
+    && (fitting === undefined || (fitting.success && fitting.data.shipTypeId === item.typeId))
   );
 }
 

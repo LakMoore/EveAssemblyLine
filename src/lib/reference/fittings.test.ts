@@ -2,6 +2,30 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { FittingSlot, parseFitting } from "./fittings";
 
+void test("parses native XML with explicit module slots and quantities", () => {
+  const fitting = parseFitting(`<?xml version="1.0"?><fittings><fitting name="Patrol">
+    <shipType value="Rifter"/><hardware type="200mm AutoCannon II" slot="hi slot 0"/>
+    <hardware type="EMP S" slot="cargo bay" qty="1200"/>
+    </fitting></fittings>`);
+  assert.equal(fitting.shipTypeName, "Rifter");
+  assert.equal(fitting.items[0].slot, FittingSlot.High);
+  assert.equal(fitting.items[1].quantity, 1200);
+  assert.throws(() => parseFitting("<!DOCTYPE fits><fittings/>"), /invalid|entities/);
+});
+
+void test("parses ship fittings without requiring structure service sections", () => {
+  const fitting = parseFitting(`[Rifter, Empty lower slots]
+[Empty Low slot]
+
+[Empty Med slot]
+
+200mm AutoCannon II
+
+[Empty Rig slot]`);
+  assert.equal(fitting.items[0]?.slot, FittingSlot.High);
+  assert.equal(fitting.items[0]?.name, "200mm AutoCannon II");
+});
+
 void test("parses EFT fittings into ESI slot flags and quantities", () => {
   const fitting = parseFitting(`[Sotiyo, A Sotiyo far far away]
 Standup Ballistic Control System II

@@ -38,7 +38,7 @@ type PasteListDialogProps = {
   allowSubtract?: boolean;
   currentItems: PasteListItem[];
   onCancel: () => void;
-  onImport: (items: PasteListItem[]) => void;
+  onImport: (items: PasteListItem[], mode: PasteListMode) => void;
 };
 
 /** Resolves an EVE multibuy list and returns its published type metadata. */
@@ -121,7 +121,7 @@ export default function PasteListDialog({
       setResults(resolvedItems);
       if (resolvedItems.length > 0 && resolvedItems.every((item) => !item.error && item.typeId)) {
         const importedItems = resolvedItems as PasteListItem[];
-        onImport(applyPasteListMode(currentItems, importedItems, mode));
+        onImport(applyPasteListMode(currentItems, importedItems, mode), mode);
       }
     }
     catch (resolveError) {

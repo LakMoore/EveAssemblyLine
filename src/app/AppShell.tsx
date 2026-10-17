@@ -95,6 +95,7 @@ type ActivePage =
   | "assets"
   | "jobs"
   | "ships"
+  | "fittings"
   | "structures"
   | "corpHangars"
   | "settings"
@@ -124,7 +125,15 @@ type EsiStockResponse = {
 };
 type StateEndpoint = keyof Pick<
   ClientCharacterStatus,
-  "assets" | "skills" | "location" | "ship" | "clones" | "blueprints" | "jobs" | "orders"
+  | "assets"
+  | "skills"
+  | "location"
+  | "ship"
+  | "clones"
+  | "fittings"
+  | "blueprints"
+  | "jobs"
+  | "orders"
 >;
 const stateEndpoints: StateEndpoint[] = [
   "assets",
@@ -132,6 +141,7 @@ const stateEndpoints: StateEndpoint[] = [
   "location",
   "ship",
   "clones",
+  "fittings",
   "blueprints",
   "jobs",
   "orders",
@@ -299,46 +309,48 @@ export default function AppShell({ children }: { children: ReactNode }) {
   const shownStateErrorsRef = useRef(new Set<string>());
   const language = localLanguage;
   const activePage: ActivePage =
-    pathname === "/" || pathname === "/welcome"
-      ? "welcome"
-      : pathname === "/planner"
-        ? "planner"
-        : pathname === "/compress"
-          ? "compress"
-          : pathname === "/invention"
-            ? "invention"
-            : pathname === "/appraise"
-              ? "appraise"
-              : pathname === "/ore-prices"
-                ? "orePrices"
-                : pathname === "/signals"
-                  ? "signals"
-                  : pathname === "/assets"
-                    ? "assets"
-                    : pathname === "/jobs"
-                      ? "jobs"
-                      : pathname === "/ships"
-                        ? "ships"
-                        : pathname === "/structures"
-                          ? "structures"
-                          : pathname === "/corp-hangars"
-                            ? "corpHangars"
-                            : pathname === "/settings"
-                              ? "settings"
-                              : pathname === "/imagechecker"
-                                ? "imagechecker"
-                                : pathname === "/data"
-                                  ? "data"
-                                  : [
-                                        "/guides",
-                                        "/about",
-                                        "/contact",
-                                        "/privacy",
-                                        "/terms",
-                                        "/cookies",
-                                      ].includes(pathname)
-                                    ? "public"
-                                    : "planner";
+    pathname === "/fittings"
+      ? "fittings"
+      : pathname === "/" || pathname === "/welcome"
+        ? "welcome"
+        : pathname === "/planner"
+          ? "planner"
+          : pathname === "/compress"
+            ? "compress"
+            : pathname === "/invention"
+              ? "invention"
+              : pathname === "/appraise"
+                ? "appraise"
+                : pathname === "/ore-prices"
+                  ? "orePrices"
+                  : pathname === "/signals"
+                    ? "signals"
+                    : pathname === "/assets"
+                      ? "assets"
+                      : pathname === "/jobs"
+                        ? "jobs"
+                        : pathname === "/ships"
+                          ? "ships"
+                          : pathname === "/structures"
+                            ? "structures"
+                            : pathname === "/corp-hangars"
+                              ? "corpHangars"
+                              : pathname === "/settings"
+                                ? "settings"
+                                : pathname === "/imagechecker"
+                                  ? "imagechecker"
+                                  : pathname === "/data"
+                                    ? "data"
+                                    : [
+                                          "/guides",
+                                          "/about",
+                                          "/contact",
+                                          "/privacy",
+                                          "/terms",
+                                          "/cookies",
+                                        ].includes(pathname)
+                                      ? "public"
+                                      : "planner";
   const isRefreshCurrent =
     authenticated
     && characters.length > 0
@@ -1090,6 +1102,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <span className={styles.navText}>Signals</span>
                 </NoPrefetchLink>
                 <div className={styles.sectionLabel}>INFORMATION</div>
+                <NoPrefetchLink
+                  prefetch={false}
+                  className={`${styles.navItem} ${activePage === "fittings" ? styles.navActive : ""}`}
+                  href="/fittings"
+                  onClick={closeSidebarOnNavigation}
+                  aria-current={activePage === "fittings" ? "page" : undefined}
+                >
+                  <span>
+                    <Rocket size={17} strokeWidth={1.8} aria-hidden="true" />
+                  </span>
+                  <span className={styles.navText}>Fittings</span>
+                </NoPrefetchLink>
                 <NoPrefetchLink
                   prefetch={false}
                   className={`${styles.navItem} ${activePage === "orePrices" ? styles.navActive : ""}`}

@@ -40,6 +40,7 @@ async function resolveTypeMetadata(typeIds: number[], language: SdeLanguage) {
         assembledVolume: item.volume ?? 0,
         packagedVolume: item.packagedVolume,
         isShip: shipTypeIds.has(item._key),
+        isAmmo: groupById.get(item.groupID)?.categoryID === 8,
         isCargoContainer: isCargoContainerType(item, groupById, marketGroupById),
         isAncientRelic: isAncientRelicType(item, groupById),
         ...categorizeType(item, language, marketGroupById, groupById),

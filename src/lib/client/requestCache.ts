@@ -17,6 +17,7 @@ import {
 
 export type ClientSession = {
   authenticated?: boolean;
+  collectionId?: string;
   snapshotScope?: string;
   characters?: Array<ClientCharacter & ClientCharacterStatus>;
 };
@@ -500,6 +501,7 @@ export type ClientCharacterStatus = {
   location?: ClientEndpointStatus;
   ship?: ClientEndpointStatus;
   clones?: ClientEndpointStatus;
+  fittings?: ClientEndpointStatus;
   blueprints?: ClientEndpointStatus;
   jobs?: ClientEndpointStatus;
   orders?: ClientEndpointStatus;
@@ -1077,6 +1079,7 @@ export function loadClientCharacterState(): Promise<ClientCharacterState> {
           assets: personalSnapshot?.assets.status,
           blueprints: personalSnapshot?.blueprintInstances.status,
           clones: personalSnapshot?.clones,
+          fittings: personalSnapshot?.fittings,
           jobs: personalSnapshot?.industryJobs.status,
           location: personalSnapshot?.location,
           orders: personalSnapshot?.marketOrders.status,

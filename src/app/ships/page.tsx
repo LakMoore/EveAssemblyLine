@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import TypeIdentity from "@/components/TypeIdentity/TypeIdentity";
+import FittingContents from "@/components/FittingContents";
+import { Button } from "@/components/ui/button";
 import { loadClientShips, type ClientShipsResponse } from "@/lib/client/requestCache";
 import { eveCharacterPortraitUrl } from "@/lib/eve/imageServer";
 import styles from "../page.module.css";
@@ -11,37 +13,10 @@ import ResponsiveDialogDrawer from "@/components/ResponsiveDialogDrawer";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 
-type ShipAsset = NonNullable<ClientShipsResponse["ships"]>[number]["items"][number];
 type ShipSummary = NonNullable<ClientShipsResponse["ships"]>[number];
 type TypeName = Map<number, string>;
 const shipItemIdParam = "shipItemId";
 const shipThumbnailSize = 54;
-
-const priorityFlagPattern = /^(HiSlot|MedSlot|LoSlot|RigSlot)(\d+)$/;
-const slotGroupDetails = new Map([
-  ["HiSlot", { label: "High Slots", order: 0 }],
-  ["MedSlot", { label: "Medium Slots", order: 1 }],
-  ["LoSlot", { label: "Low Slots", order: 2 }],
-  ["RigSlot", { label: "Rig Slots", order: 3 }],
-]);
-
-function formatAssetGroupLabel(flag: string) {
-  return flag.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
-}
-
-function getAssetGroup(flag: string) {
-  const match = flag.match(priorityFlagPattern);
-  if (match) {
-    const details = slotGroupDetails.get(match[1]);
-    return {
-      key: match[1],
-      label: details?.label ?? match[1],
-      order: details?.order ?? 99,
-      slot: Number(match[2]),
-    };
-  }
-  return { key: flag, label: formatAssetGroupLabel(flag), order: 4, slot: Number.MAX_SAFE_INTEGER };
-}
 
 export default function ShipsPage() {
   const [data, setData] = useState<ClientShipsResponse | null>(null);
@@ -313,7 +288,6 @@ function ShipContentsModal({
     };
   }, []);
 
-  const groups = new Map<string, { label: string; order: number; assets: ShipAsset[] }>();
   const itemsByItemId = new Map(ship.items.map((item) => [item.itemId, item]));
   const shipItemIds = new Set(shipsByItemId.keys());
   const containedAssets = ship.items.filter((asset) => {
@@ -329,43 +303,6 @@ function ShipContentsModal({
     }
     return false;
   });
-  const weaponBySlotFlag = new Map<string, ShipAsset>();
-  for (const asset of containedAssets) {
-    if (!asset.isAmmo && /^(HiSlot|MedSlot|LoSlot)\d+$/.test(asset.locationFlag)) {
-      weaponBySlotFlag.set(asset.locationFlag, asset);
-    }
-  }
-  const ammoByWeaponId = new Map<number, ShipAsset[]>();
-  const pairedAmmoIds = new Set<number>();
-  for (const asset of containedAssets) {
-    const weapon = asset.isAmmo ? weaponBySlotFlag.get(asset.locationFlag) : undefined;
-    if (!weapon) continue;
-    const ammo = ammoByWeaponId.get(weapon.itemId) ?? [];
-    ammo.push(asset);
-    ammoByWeaponId.set(weapon.itemId, ammo);
-    pairedAmmoIds.add(asset.itemId);
-  }
-  for (const asset of containedAssets) {
-    if (pairedAmmoIds.has(asset.itemId)) continue;
-    const details = getAssetGroup(asset.locationFlag);
-    const group = groups.get(details.key) ?? {
-      label: details.label,
-      order: details.order,
-      assets: [],
-    };
-    group.assets.push(asset);
-    groups.set(details.key, group);
-  }
-  const orderedGroups = [...groups.values()]
-    .map((group) => ({
-      ...group,
-      assets: [...group.assets].sort((left, right) => {
-        const leftSlot = getAssetGroup(left.locationFlag).slot;
-        const rightSlot = getAssetGroup(right.locationFlag).slot;
-        return leftSlot - rightSlot || left.itemId - right.itemId;
-      }),
-    }))
-    .sort((left, right) => left.order - right.order || left.label.localeCompare(right.label));
   const shipTypeName = typeNames.get(ship.typeId) ?? `Type ${ship.typeId}`;
   const shipDisplayName = ship.name ? `${ship.name} - ${shipTypeName}` : shipTypeName;
 
@@ -396,65 +333,26 @@ function ShipContentsModal({
         </div>
       }
     >
-      {orderedGroups.length === 0 ? (
-        <Empty className={styles.shipsEmpty}>
-          <EmptyDescription>No contained assets.</EmptyDescription>
-        </Empty>
-      ) : (
-        <div className={styles.shipAssetGroups}>
-          {orderedGroups.map((group) => (
-            <section key={group.label} className={styles.shipAssetGroup}>
-              <h3>{group.label}</h3>
-              {group.assets.map((asset) => (
-                <div className={styles.shipAssetRow} key={asset.itemId}>
-                  <div className={styles.shipAssetLoadout}>
-                    <div className={styles.shipAssetItem}>
-                      <TypeIdentity
-                        name={asset.name ?? typeNames.get(asset.typeId) ?? `Type ${asset.typeId}`}
-                        typeId={asset.typeId}
-                        imageSize={32}
-                      />
-                      {asset.quantity > 1 && (
-                        <span className={styles.shipAssetQuantity}>
-                          ×{asset.quantity.toLocaleString()}
-                        </span>
-                      )}
-                    </div>
-                    {(ammoByWeaponId.get(asset.itemId) ?? []).map((ammo) => (
-                      <div className={styles.shipAssetItem} key={ammo.itemId}>
-                        <TypeIdentity
-                          name={ammo.name ?? typeNames.get(ammo.typeId) ?? `Type ${ammo.typeId}`}
-                          typeId={ammo.typeId}
-                          imageSize={32}
-                        />
-                        {ammo.quantity > 1 && (
-                          <span className={styles.shipAssetQuantity}>
-                            ×{ammo.quantity.toLocaleString()}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                  {shipsByItemId.has(asset.itemId) && (
-                    <button
-                      type="button"
-                      className={`actionButton ${styles.importButton}`}
-                      title="View ship fitting"
-                      onClick={() => {
-                        const nestedShip = shipsByItemId.get(asset.itemId);
-                        if (nestedShip) onSelectShip(nestedShip);
-                      }}
-                    >
-                      <span>VIEW FITTING</span>
-                      <ArrowRight aria-hidden="true" />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </section>
-          ))}
-        </div>
-      )}
+      <FittingContents
+        items={containedAssets}
+        typeNames={typeNames}
+        renderItemAction={(asset) => {
+          const nestedShip = shipsByItemId.get(asset.itemId);
+          return nestedShip ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                onSelectShip(nestedShip);
+              }}
+            >
+              <ArrowRight data-icon="inline-start" />
+              View fitting
+            </Button>
+          ) : null;
+        }}
+      />
     </ResponsiveDialogDrawer>
   );
 }

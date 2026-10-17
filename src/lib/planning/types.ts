@@ -1,5 +1,6 @@
 import type { FacilityGroupBonus } from "./facilityBonuses";
 import type { ProductionGroupKey } from "./productionGroups";
+import type { StockpileFittingSnapshot } from "./stockpileFittings";
 
 // shape of build items passed between client and server
 export interface PlanBuildItem {
@@ -48,6 +49,7 @@ export interface BuildItem extends PlanBuildItem {
 export interface ClientBuildItem extends BuildItem {
   categoryName: string;
   isIncluded?: boolean;
+  fitting?: StockpileFittingSnapshot;
 }
 
 export interface ClientPlanStockpile extends Omit<PlanStockpile, "items"> {
