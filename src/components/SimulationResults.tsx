@@ -4619,6 +4619,26 @@ function SimulationBuyTab({
     }
   }
 
+  function sendMaterialsToCompress() {
+    try {
+      window.sessionStorage.setItem(
+        "assemblyline:compress:planner-import",
+        JSON.stringify(
+          materialEntries.map(({ purchase }) => ({
+            name: purchase.typeName,
+            typeId: purchase.typeId,
+            quantity: purchase.quantity,
+            category: "item",
+          })),
+        ),
+      );
+      window.location.assign("/compress");
+    }
+    catch {
+      toast.add({ description: "Could not send materials to Compress", type: "error" });
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4">
       {assemblyLineGroupError && (
@@ -4672,6 +4692,15 @@ function SimulationBuyTab({
             >
               <CopyIcon aria-hidden="true" />
               {copyStatus?.scope === "all materials" ? copyStatus.label : "Multibuy Materials"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={materialEntries.length === 0}
+              onClick={sendMaterialsToCompress}
+            >
+              <ArrowRight aria-hidden="true" />
+              Send to Compress
             </Button>
           </div>
         }

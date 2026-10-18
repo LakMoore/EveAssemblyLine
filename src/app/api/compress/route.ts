@@ -8,7 +8,7 @@ import {
   getTypeMaterials,
   getTypes,
 } from "@/cache/services/sdeCache";
-import { compressMaterials } from "@/lib/planning/compressEngine";
+import { compressMaterials, type CompressionResultItem } from "@/lib/planning/compressEngine";
 import {
   calculateReprocessingProfile,
   efficiencyForType,
@@ -16,7 +16,11 @@ import {
 } from "@/lib/planning/reprocessingEfficiency";
 import { reprocessingProfileSchema } from "@/lib/planning/reprocessingProfile";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
-import { getMarketSellOrders, getSevenDayAverageVolume } from "@/lib/esi/marketHistory";
+import {
+  getMarketSellOrders,
+  getRegionalAppraisalPrices,
+  getSevenDayAverageVolume,
+} from "@/lib/esi/marketHistory";
 import { marketHubs } from "@/lib/reference/marketHubs";
 import { specialReprocessableTypeIds } from "@/lib/planning/reprocessStock";
 import type { GroupsRecord, TypesRecord, TypeDogmaRecord } from "@/lib/sde/generated";
@@ -61,7 +65,32 @@ type OreGroupMaps = {
   typeDogma: Map<number, TypeDogmaRecord>;
   dogmaAttributes: Map<number, { _key: number; name: string; defaultValue: number }>;
 };
+type AppraisedCompressionItem = CompressionResultItem & {
+  sellPrice: number | null;
+  sellTotal: number | null;
+};
 let oreGroupCache: OreGroupCache | undefined;
+
+/** Adds the selected hub's lowest sell price and quantity total to result rows. */
+function addSellOrderAppraisals(
+  items: readonly CompressionResultItem[],
+  pricesByTypeId: ReadonlyMap<number, number | null>,
+): AppraisedCompressionItem[] {
+  return items.map((item) => {
+    const sellPrice = item.typeId === undefined ? null : (pricesByTypeId.get(item.typeId) ?? null);
+    return {
+      ...item,
+      sellPrice,
+      sellTotal: sellPrice === null ? null : sellPrice * item.quantity,
+    };
+  });
+}
+
+/** Returns a complete sell value only when every row has a current sell price. */
+function sumSellOrderValues(items: readonly AppraisedCompressionItem[]) {
+  if (items.some((item) => item.sellTotal === null)) return null;
+  return items.reduce((total, item) => total + (item.sellTotal ?? 0), 0);
+}
 
 function getOreGroupCache(maps: OreGroupMaps): OreGroupCache {
   if (oreGroupCache) return oreGroupCache;
@@ -301,6 +330,29 @@ export async function POST(request: Request) {
       efficiencyGroups.find((group) => /^ice processing$/i.test(englishSkillName(group)))
         ?.efficiency ?? calculatedEfficiency.ice;
     const compressionResult = compressMaterials(body.items, candidates, names);
+    const selectedMarket =
+      marketHubs.find((market) => market.regionId === marketId) ?? marketHubs[0];
+    const appraisalTypeIds = new Set(
+      [...compressionResult.plan, ...compressionResult.toBuy, ...compressionResult.surplus].flatMap(
+        (item) => (item.typeId === undefined ? [] : [item.typeId]),
+      ),
+    );
+    const pricesByTypeId = new Map(
+      await Promise.all(
+        [...appraisalTypeIds].map(
+          async (typeId) =>
+            [
+              typeId,
+              await getRegionalAppraisalPrices(marketId, typeId, selectedMarket.stationId)
+                .then((prices) => prices.minSellPrice)
+                .catch(() => null),
+            ] as const,
+        ),
+      ),
+    );
+    const appraisedPlan = addSellOrderAppraisals(compressionResult.plan, pricesByTypeId);
+    const appraisedToBuy = addSellOrderAppraisals(compressionResult.toBuy, pricesByTypeId);
+    const appraisedSurplus = addSellOrderAppraisals(compressionResult.surplus, pricesByTypeId);
     const addPackagedVolumes = (items: typeof compressionResult.plan) =>
       items.map((item) => ({
         ...item,
@@ -312,9 +364,15 @@ export async function POST(request: Request) {
           : {}),
       }));
     return NextResponse.json({
-      plan: addPackagedVolumes(compressionResult.plan),
-      toBuy: addPackagedVolumes(compressionResult.toBuy),
-      surplus: addPackagedVolumes(compressionResult.surplus),
+      marketName: selectedMarket.name,
+      plan: addPackagedVolumes(appraisedPlan),
+      toBuy: addPackagedVolumes(appraisedToBuy),
+      surplus: addPackagedVolumes(appraisedSurplus),
+      appraisal: {
+        planTotal: sumSellOrderValues(appraisedPlan),
+        toBuyTotal: sumSellOrderValues(appraisedToBuy),
+        surplusTotal: sumSellOrderValues(appraisedSurplus),
+      },
       efficiencies: {
         gas: calculatedEfficiency.gas,
         scrapMetal: calculatedEfficiency.scrapMetal,

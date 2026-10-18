@@ -27,7 +27,9 @@ const defaults: CompressSettings = {
   items: [],
 };
 
-export async function loadCompressSettings(): Promise<CompressSettings> {
+export async function loadCompressSettings({
+  fallbackOnError = true,
+}: { fallbackOnError?: boolean } = {}): Promise<CompressSettings> {
   try {
     const database = await getPlanningDatabase();
     return await new Promise((resolve, reject) => {
@@ -43,7 +45,8 @@ export async function loadCompressSettings(): Promise<CompressSettings> {
       };
     });
   }
-  catch {
+  catch (error) {
+    if (!fallbackOnError) throw error;
     return defaults;
   }
 }

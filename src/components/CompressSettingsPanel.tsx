@@ -102,6 +102,7 @@ export type CompressSettingsState = {
   implantOptions: ReprocessingImplantOption[];
   skillLevels: Record<string, number>;
   isLoading: boolean;
+  isSettingsLoaded: boolean;
   error: string;
   updateSettings: (next: SettingsUpdate) => void;
 };
@@ -160,12 +161,14 @@ function structureDisplayName(structure: KnownStructure) {
 export function useCompressSettings(language: SdeLanguage) {
   const [options, setOptions] = useState<ReprocessingOptions>(emptyOptions);
   const [settings, setSettings] = useState<CompressSettings>(defaultSettings);
+  const [loadedSettingsKey, setLoadedSettingsKey] = useState("");
   const [loadedOptionsKey, setLoadedOptionsKey] = useState("");
   const [error, setError] = useState("");
   const [optionsRefreshVersion, setOptionsRefreshVersion] = useState(0);
   const completedOptionsKeyRef = useRef("");
   const optionsLoadKey = `${language}:${optionsRefreshVersion}`;
-  const isLoading = loadedOptionsKey !== optionsLoadKey;
+  const isSettingsLoaded = loadedSettingsKey === optionsLoadKey;
+  const isLoading = loadedOptionsKey !== optionsLoadKey || !isSettingsLoaded;
 
   useEffect(() => {
     const requestedOptionsKey = `${language}:${optionsRefreshVersion}`;
@@ -174,9 +177,19 @@ export function useCompressSettings(language: SdeLanguage) {
     let isActive = true;
     setError("");
 
+    const settingsPromise = loadCompressSettings({ fallbackOnError: false }).then(
+      (loadedSettings) => {
+        if (isActive) {
+          setSettings(loadedSettings);
+          setLoadedSettingsKey(requestedOptionsKey);
+        }
+        return loadedSettings;
+      },
+    );
+
     Promise
       .all([
-        loadCompressSettings(),
+        settingsPromise,
         loadClientSession(),
         loadEndpointRecord<unknown>("compress/options"),
         loadClientAssets(language, isRefreshLoad).catch(() => null),
@@ -328,6 +341,7 @@ export function useCompressSettings(language: SdeLanguage) {
   }, []);
 
   const updateSettings = (next: SettingsUpdate) => {
+    if (loadedSettingsKey !== optionsLoadKey) return;
     setSettings((current) => {
       const updated = typeof next === "function" ? next(current) : { ...current, ...next };
       void saveCompressSettings(updated);
@@ -373,6 +387,7 @@ export function useCompressSettings(language: SdeLanguage) {
     implantOptions,
     skillLevels,
     isLoading,
+    isSettingsLoaded,
     error,
     updateSettings,
   } satisfies CompressSettingsState;

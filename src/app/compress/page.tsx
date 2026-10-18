@@ -53,6 +53,7 @@ import {
 import styles from "./compress.module.css";
 import { marketHubs } from "@/lib/reference/marketHubs";
 import { createReprocessingProfile } from "@/lib/planning/reprocessingProfile";
+import { z } from "zod";
 
 type CompressItem = CompressMaterial;
 type TypeResult = Pick<CompressItem, "name" | "typeId" | "category">;
@@ -62,6 +63,8 @@ type ResultItem = {
   typeId?: number;
   quantity: number;
   ignored: boolean;
+  sellPrice?: number | null;
+  sellTotal?: number | null;
   reprocessingEfficiency?: number;
   packagedVolume?: number;
   fromReprocessing?: number;
@@ -82,11 +85,31 @@ type EfficiencyResult = {
   groups: EfficiencyGroup[];
 };
 type CompressResult = {
+  marketName?: string;
   plan?: ResultItem[];
   toBuy?: ResultItem[];
   surplus?: ResultItem[];
   efficiencies?: EfficiencyResult;
 };
+
+function formatIsk(value?: number | null) {
+  return value === undefined || value === null
+    ? "Unavailable"
+    : `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value)} ISK`;
+}
+
+const plannerCompressImportKey = "assemblyline:compress:planner-import";
+const plannerCompressImportSchema = z.array(
+  z
+    .object({
+      name: z.string().min(1),
+      typeId: z.number().int().positive(),
+      quantity: z.number().positive(),
+      category: z.literal("item"),
+    })
+    .strict(),
+);
+
 function variation(
   category?: CompressItem["category"],
   imageVariation?: CompressItem["imageVariation"],
@@ -129,6 +152,7 @@ function CompressContent() {
   const isPasteOpen =
     pasteDialogLoadKey === compressionSettings.loadKey && !compressionSettings.isLoading;
   const importedRef = useRef("");
+  const plannerImportRef = useRef(false);
 
   useEffect(() => {
     if (!isPasteOpen) return;
@@ -140,18 +164,72 @@ function CompressContent() {
   }, [isPasteOpen]);
 
   function updateItems(nextItems: CompressItem[] | ((current: CompressItem[]) => CompressItem[])) {
+    if (isLoading) return;
     updateSettings((current) => ({
       ...current,
       items: mergeCompressItems(
         typeof nextItems === "function" ? nextItems(current.items) : nextItems,
       ),
     }));
+    setResult(null);
   }
   const updateItemsFromEffect = useEffectEvent(updateItems);
+  const applyPlannerImportFromEffect = useEffectEvent((nextItems: CompressItem[]) => {
+    if (isLoading) return;
+    updateSettings((current) => ({ ...current, items: nextItems }));
+    setResult(null);
+    setError("");
+  });
 
   useEffect(() => {
     if (
       compressionSettings.isLoading
+      || !compressionSettings.isSettingsLoaded
+      || isLoading
+      || plannerImportRef.current
+    ) return;
+    plannerImportRef.current = true;
+
+    let serializedItems: string | null;
+    try {
+      serializedItems = window.sessionStorage.getItem(plannerCompressImportKey);
+      if (serializedItems) window.sessionStorage.removeItem(plannerCompressImportKey);
+    }
+    catch {
+      queueMicrotask(() => {
+        setError("Could not load planner materials for compression.");
+      });
+      return;
+    }
+    if (!serializedItems) return;
+
+    let importedItems: unknown;
+    try {
+      importedItems = JSON.parse(serializedItems);
+    }
+    catch {
+      queueMicrotask(() => {
+        setError("Could not load planner materials for compression.");
+      });
+      return;
+    }
+    const parsedItems = plannerCompressImportSchema.safeParse(importedItems);
+    if (!parsedItems.success) {
+      queueMicrotask(() => {
+        setError("Could not load planner materials for compression.");
+      });
+      return;
+    }
+
+    queueMicrotask(() => {
+      applyPlannerImportFromEffect(parsedItems.data);
+    });
+  }, [compressionSettings.isLoading, compressionSettings.isSettingsLoaded, isLoading]);
+
+  useEffect(() => {
+    if (
+      compressionSettings.isLoading
+      || !compressionSettings.isSettingsLoaded
       || !importedMultibuy
       || importedRef.current === `${language}:${importedMultibuy}`
     ) return;
@@ -197,7 +275,12 @@ function CompressContent() {
       .catch((error: unknown) => {
         setError(error instanceof Error ? error.message : "Could not load the Buy list.");
       });
-  }, [compressionSettings.isLoading, importedMultibuy, language]);
+  }, [
+    compressionSettings.isLoading,
+    compressionSettings.isSettingsLoaded,
+    importedMultibuy,
+    language,
+  ]);
 
   function addItem(item: TypeResult) {
     updateItems((current) => {
@@ -222,6 +305,7 @@ function CompressContent() {
       || isLoading
     ) return;
     setIsLoading(true);
+    setResult(null);
     setError("");
     try {
       const reprocessingProfile = createReprocessingProfile(
@@ -290,7 +374,7 @@ function CompressContent() {
             <Button
               type="button"
               variant="outline"
-              disabled={compressionSettings.isLoading}
+              disabled={compressionSettings.isLoading || isLoading}
               onClick={() => {
                 setPasteDialogLoadKey(compressionSettings.loadKey);
               }}
@@ -304,7 +388,7 @@ function CompressContent() {
           </p>
           <TypeSearch
             language={language}
-            disabled={compressionSettings.isLoading}
+            disabled={compressionSettings.isLoading || isLoading}
             placeholder="Search material by name or type ID"
             ariaLabel="Search minerals"
             onSelect={(item) => {
@@ -314,7 +398,10 @@ function CompressContent() {
               });
             }}
           />
-          <CompressSettingsPanel state={compressionSettings} className={styles.compressOptions} />
+          <CompressSettingsPanel
+            state={isLoading ? { ...compressionSettings, isLoading: true } : compressionSettings}
+            className={styles.compressOptions}
+          />
           <div className={styles.listHeader}>
             <span>ITEM</span>
             <span>QUANTITY</span>
@@ -337,7 +424,7 @@ function CompressContent() {
                 <Input
                   className="text-right"
                   aria-label={`${item.name} quantity`}
-                  disabled={compressionSettings.isLoading}
+                  disabled={compressionSettings.isLoading || isLoading}
                   type="number"
                   min="1"
                   step="1"
@@ -357,7 +444,7 @@ function CompressContent() {
                   variant="destructive"
                   size="icon-sm"
                   aria-label={`Remove ${item.name}`}
-                  disabled={compressionSettings.isLoading}
+                  disabled={compressionSettings.isLoading || isLoading}
                   onClick={() => {
                     updateItems((current) => current.filter((_, itemIndex) => itemIndex !== index));
                   }}
@@ -394,9 +481,13 @@ function CompressContent() {
       {result && (
         <Results
           result={result}
+          inputItems={items}
           selectedLocation={selectedLocation}
           language={language}
-          isSettingsLoading={compressionSettings.isLoading}
+          isBusy={compressionSettings.isLoading || isLoading}
+          onRemoveIgnored={(typeIds) => {
+            updateItems((current) => current.filter((item) => !typeIds.has(item.typeId)));
+          }}
         />
       )}
       {isPasteOpen && (
@@ -414,6 +505,7 @@ Pyerite 60000`}
           onImport={(next) => {
             if (
               compressionSettings.isLoading
+              || isLoading
               || pasteDialogLoadKey !== compressionSettings.loadKey
             ) return;
             updateItems(
@@ -435,14 +527,18 @@ Pyerite 60000`}
 
 function Results({
   result,
+  inputItems,
   selectedLocation,
   language,
-  isSettingsLoading,
+  isBusy,
+  onRemoveIgnored,
 }: {
   result: CompressResult;
+  inputItems: readonly CompressItem[];
   selectedLocation: ReprocessingLocationOption | undefined;
   language: SdeLanguage;
-  isSettingsLoading: boolean;
+  isBusy: boolean;
+  onRemoveIgnored: (typeIds: ReadonlySet<number>) => void;
 }) {
   const router = useRouter();
   const [isAddingToPlan, setIsAddingToPlan] = useState(false);
@@ -474,6 +570,16 @@ function Results({
   ] as const;
   const [activeTab, setActiveTab] = useState<(typeof tabs)[number]["key"]>("efficiency");
   const active = tabs.find((tab) => tab.key === activeTab) ?? tabs[0];
+  const isBuyOrSurplusTab = active.key === "toBuy" || active.key === "surplus";
+  const isSurplusTab = active.key === "surplus";
+  const ignoredTypeIds = new Set(
+    [...(result.plan ?? []), ...(result.toBuy ?? []), ...(result.surplus ?? [])].flatMap((item) =>
+      item.ignored && item.typeId !== undefined ? [item.typeId] : [],
+    ),
+  );
+  const ignoredInputTypeIds = new Set(
+    inputItems.filter((item) => ignoredTypeIds.has(item.typeId)).map((item) => item.typeId),
+  );
   const efficiencyGroups = result.efficiencies?.groups ?? [];
   const items = active.key === "efficiency" ? [] : (result[active.key] ?? []);
   const itemCount = active.key === "efficiency" ? efficiencyGroups.length : items.length;
@@ -487,6 +593,11 @@ function Results({
   const totalSurplus = Math.ceil(
     items.reduce((total, item) => total + volumeOf(item.surplus ?? 0, item), 0),
   );
+  const totalSellValue = items.some(
+    (item) => item.sellTotal === undefined || item.sellTotal === null,
+  )
+    ? null
+    : items.reduce((total, item) => total + (item.sellTotal ?? 0), 0);
   async function copyToBuyList() {
     try {
       await navigator.clipboard.writeText(
@@ -579,7 +690,22 @@ function Results({
           <p className={styles.kicker}>02 / OUTPUT</p>
           <h2>Compression result</h2>
         </div>
-        <span className={styles.resultStamp}>SDE + ESI REPROCESSING</span>
+        <span className={styles.resultStamp}>
+          SDE + ESI REPROCESSING · {result.marketName ?? "Selected market"} SELL ORDERS
+        </span>
+      </div>
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="outline"
+          disabled={isBusy || ignoredInputTypeIds.size === 0}
+          onClick={() => {
+            onRemoveIgnored(ignoredInputTypeIds);
+          }}
+        >
+          <Trash2 aria-hidden="true" />
+          Remove Ignored
+        </Button>
       </div>
       <Tabs
         value={activeTab}
@@ -632,7 +758,11 @@ function Results({
             <div className={styles.resultPanelHeader}>
               <div>
                 <h3>{active.label}</h3>
-                <p>{active.note}</p>
+                <p>
+                  {active.note}
+                  {(active.key === "plan" || active.key === "toBuy" || active.key === "surplus")
+                    && ` Sell orders at ${result.marketName ?? "the selected market"}.`}
+                </p>
               </div>
               <div className={styles.resultPanelActions}>
                 {active.key === "toBuy" && items.length > 0 && (
@@ -646,7 +776,7 @@ function Results({
                     type="button"
                     variant="outline"
                     onClick={() => void addToPlan()}
-                    disabled={isSettingsLoading || isAddingToPlan}
+                    disabled={isBusy || isAddingToPlan}
                   >
                     <Upload aria-hidden="true" />
                     Add to Plan
@@ -665,12 +795,20 @@ function Results({
                     <span>Required</span>
                     <span>Reprocessed</span>
                     <span>Surplus</span>
+                    <span>Sell value</span>
+                  </div>
+                )}
+                {isBuyOrSurplusTab && (
+                  <div className={styles.toBuyTableHeader}>
+                    <span>Item</span>
+                    <span>Quantity</span>
+                    <span>Sell value</span>
                   </div>
                 )}
                 <div className={styles.resultList}>
                   {items.map((item) => (
                     <div
-                      className={`${styles.resultRow} ${active.key === "plan" ? styles.planResultRow : ""}`}
+                      className={`${styles.resultRow} ${active.key === "plan" ? styles.planResultRow : isBuyOrSurplusTab ? styles.toBuyResultRow : ""}`}
                       key={`${active.key}-${item.typeId ?? item.name}-${item.ignored ? "ignored" : "included"}`}
                     >
                       <span>
@@ -685,7 +823,9 @@ function Results({
                         )}
                         {item.ignored && <small className={styles.ignoredBadge}>ignored</small>}
                       </span>
-                      <strong data-label="Required">{item.quantity.toLocaleString()}</strong>
+                      <strong data-label={active.key === "plan" ? "Required" : "Quantity"}>
+                        {item.quantity.toLocaleString()}
+                      </strong>
                       {active.key === "plan" && (
                         <>
                           <strong data-label="Reprocessed">
@@ -694,7 +834,11 @@ function Results({
                           <strong data-label="Surplus">
                             {item.surplus?.toLocaleString() ?? "0"}
                           </strong>
+                          <strong data-label="Sell value">{formatIsk(item.sellTotal)}</strong>
                         </>
+                      )}
+                      {isBuyOrSurplusTab && (
+                        <strong data-label="Sell value">{formatIsk(item.sellTotal)}</strong>
                       )}
                     </div>
                   ))}
@@ -702,19 +846,24 @@ function Results({
                     <div
                       className={`${styles.resultRow} ${styles.planResultRow} ${styles.totalRow}`}
                     >
-                      <strong>
+                      <strong className={styles.totalLabel}>
                         Total volume (m<sup>3</sup>)
                       </strong>
                       <strong data-label="Required">{totalQuantity.toLocaleString()}</strong>
                       <strong data-label="Reprocessed">{totalReprocessed.toLocaleString()}</strong>
                       <strong data-label="Surplus">{totalSurplus.toLocaleString()}</strong>
+                      <strong data-label="Sell value">{formatIsk(totalSellValue)}</strong>
                     </div>
-                  ) : active.key === "toBuy" ? (
-                    <div className={styles.totalRow}>
-                      <strong>
-                        Total volume (m<sup>3</sup>)
+                  ) : isBuyOrSurplusTab ? (
+                    <div
+                      className={`${styles.resultRow} ${styles.toBuyResultRow} ${styles.totalRow}`}
+                    >
+                      <strong className={styles.totalLabel}>
+                        {isSurplusTab ? "Total surplus volume (m" : "Total volume (m"}
+                        <sup>3</sup>)
                       </strong>
-                      <strong>{totalQuantity.toLocaleString()}</strong>
+                      <strong data-label="Quantity">{totalQuantity.toLocaleString()}</strong>
+                      <strong data-label="Sell value">{formatIsk(totalSellValue)}</strong>
                     </div>
                   ) : null}
                 </div>
