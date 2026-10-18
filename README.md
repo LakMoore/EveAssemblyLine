@@ -29,6 +29,83 @@ The final `sde:prepare` step bulk uploads the SDE-backed cache entries when the 
 
 Without SDE data the application still builds, but SDE-backed routes should call `ensureSdeLoaded()` and report its setup error. This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Taxes tool
+
+`/taxes` compares placing sell/buy orders and immediately filling existing orders at Jita,
+Amarr, Hek, Dodixie, or Rens. `POST /api/taxes` validates `{ typeId, marketId }` against the
+SDE and supported hubs, then loads public ESI order-book pages through the shared cache.
+Sell prices are restricted to the selected hub station. Buy prices use the highest regional order
+whose range covers that station: Station orders must be at the hub; other same-system orders
+and region-wide orders qualify without routing. Higher-priced remote jump-range orders are checked
+in descending price order against ESI's public shortest stargate route. Lower or equal prices,
+remote Station/System orders, and inactive orders never require a route lookup; checking stops at
+the first qualifying candidate. Distances are shared across items and hubs, symmetric, cached for
+the server process lifetime without expiry, and deduplicated while in flight. Restart the server
+after an SDE/topology update to invalidate them. Disconnected systems are excluded; routing failures
+and rate limits fail the quote rather than silently substituting a lower buy price.
+PLEX (type `44992`) overrides any selected hub and uses the complete global market in
+[region `19000001` (GPMR-01)](https://esi.evetech.net/latest/universe/regions/19000001/), without
+station filtering. This override also applies to the shared appraisal, sell-order, and market-history
+helpers. Quotes expose source time, expiry, and cache status. Missing sides remain unavailable;
+ESI failures and rate limiting are reported rather than replaced with sample prices.
+
+Fees follow [CCP's NPC market rules](https://support.eveonline.com/hc/en-us/articles/203218962):
+7.5% sales tax reduced by 11% per Accounting level; 3% broker fee minus 0.3 percentage points
+per Broker Relations level, 0.03 points per unmodified faction standing, and 0.02 points per
+unmodified station-corporation standing. Broker fees have a 100 ISK minimum per order.
+Only sellers pay sales tax; only newly placed orders incur broker fees. Character skills use
+the existing session snapshot, with All zero/IV/V presets available without authentication.
+Selecting a character fills and disables both standing inputs using full-precision, unmodified
+[ESI standings](https://developers.eveonline.com/api-explorer#/operations/GetCharactersCharacterIdStandings)
+from the session-scoped server cache. Character refresh requests the standings endpoint alongside
+skills, respects ETags and expiry, and retains last-known values with a warning on failure or rate
+limiting. The safe session response exposes only standings, cache status, and a scope-availability
+flag, never tokens. Existing characters must reconnect to grant `esi-characters.read_standings.v1`
+and then refresh; enable this scope in the EVE developer application's permitted scopes too.
+Unavailable standings do not silently become zero. A successfully fetched response without an
+entry for the relevant corporation/faction means neutral standing. Skill presets keep editable
+manual standings, initially neutral, and preserve those inputs when switching to/from a character.
+
+The applicable standings are Caldari Navy/Caldari State at Jita, Emperor Family/Amarr Empire at
+Amarr, Boundless Creation/Minmatar Republic at Hek, Federation Navy/Gallente Federation at Dodixie,
+and Brutor Tribe/Minmatar Republic at Rens. Station owners were verified against public ESI and
+their faction IDs against CCP's local SDE; corporation/faction IDs are matched by standing type,
+never by localized names. A quote's global PLEX override does not change the retained hub's
+NPC fee assumptions. No standing or intermediate broker rate is rounded for fee calculations.
+
+The Taxes settings include **Create Buy Orders in Player Owned Structure**. When enabled, only
+the placed buy order itemizes the mandatory **0.5% SCC Surcharge** separately from the
+**structure owner's broker fee**, using the percentage in the settings box. The broker fee has
+a 100 ISK per-order minimum, including when its configured percentage is 0%; the SCC surcharge
+has no such minimum. Each charge is rounded independently to ISK cents before both are added
+to the order value. Broker Relations and NPC standings do not discount either charge. The owner
+percentage is an explicit manual input, initially 0%; actual structure rates can differ.
+Sell orders retain NPC fees and immediate trades remain unchanged. This changes
+fees only, not the source of the selected hub/global PLEX quote, and does not fetch structure data.
+These rules were checked on 2026-10-18 against
+[CCP's guide](https://support.eveonline.com/hc/en-us/articles/203218962-Broker-Fee-and-Sales-Tax)
+(marked updated seven months ago) and [EVE University Trading](https://wiki.eveuniversity.org/Trading)
+(last edited 2026-08-04), both within the preceding 18 months.
+
+Placed sell orders use the nearest valid price strictly below the lowest sell quote, and placed
+buy orders use the nearest valid price strictly above the highest buy quote, following CCP's
+[four-significant-figure market ticks](https://www.eveonline.com/news/view/broker-relations) with
+cent precision as the minimum tick. Magnitude boundaries use the adjacent valid price, for example
+a sell quote of 1,000,000 ISK is undercut at 999,900 ISK, while a buy quote of 999,900 ISK is outbid
+at 1,000,000 ISK. Order values and all associated fees use the adjusted unit price. Immediate trades
+keep the original quotes. A one-cent sell quote cannot be undercut, so that placed-sell scenario
+and the Using Orders split are unavailable rather than quoting zero or silently matching the order.
+
+Quantity, skill profile, standings, and buy-order fee settings recalculate entirely in the browser.
+Totals assume all units trade at the displayed scenario price and exclude market depth and relisting
+fees. Split before fees remains the original bid/ask midpoint, independent of competitive ticks.
+After fees averages the highest available selling receipt and lowest available buying cost.
+Using Orders averages the placed sell-order receipt and placed buy-order cost; Immediate averages
+the immediate sell receipt and immediate buy cost. These three post-fee splits use totals for the
+selected quantity, including competitive ticks, minimum broker fees, and SCC where applicable.
+Unavailable required scenarios leave the affected split unavailable. Wallet totals and post-fee
+splits are rounded to ISK cents; the before-fee unit reference preserves fractional cents.
+
 ## Industry simulator
 
 `POST /api/plan/simulate` is the application's only planning calculation endpoint. It accepts

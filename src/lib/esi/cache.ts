@@ -15,6 +15,7 @@ import type {
 import type { PersonalFitting } from "@/lib/fittings/model";
 import { getFittingStore } from "@/lib/fittings/store";
 import type {
+  CharacterStandingRecord,
   EsiCharacterClones,
   EsiCorporationDivision,
   EsiCorporationPublicInfo,
@@ -55,6 +56,7 @@ import {
   fetchCharacterMarketOrders,
   fetchCharacterClones,
   fetchCharacterSkills,
+  fetchCharacterStandings,
   fetchCharacterFittings,
   fetchCharacterCorporationAuthorization,
   fetchCorporationMarketOrders,
@@ -139,6 +141,7 @@ type OwnerCache = {
   marketOrderAssetDeductions: Map<string, number>;
   jobs?: EndpointCache<IndustryJobRecord[]>;
   skills?: EndpointCache<CharacterSkillRecord[]>;
+  standings?: EndpointCache<CharacterStandingRecord[] | null>;
   fittings?: EndpointCache<PersonalFitting[]>;
   marketOrders?: EndpointCache<MarketOrderRecord[]>;
   structures?: EndpointCache<EsiCorporationStructure[]>;
@@ -2190,6 +2193,63 @@ async function refreshPersonalFittings(
   );
 }
 
+/**
+ * Refreshes session-scoped standings without losing a last-known body on ESI failure.
+ * @param character Authorized character record owned by the refresh route.
+ * @param sessionId Session whose transient cache receives the standings.
+ * @returns Completion after cache data and status have been updated.
+ */
+export async function refreshCharacterStandings(
+  character: CharacterTokenRecord,
+  sessionId: string,
+): Promise<void> {
+  const cache = getCache(characterCaches, character.characterId, sessionId);
+  try {
+    if (
+      cache.standings?.lastBody !== null
+      && cache.standings?.lastBody !== undefined
+      && cache.standings.expires
+      && Date.parse(cache.standings.expires) > Date.now()
+    ) {
+      cache.standings.status = endpointDataStatus(
+        cache.standings.lastModified,
+        cache.standings.expires,
+      );
+      return;
+    }
+    const result = await fetchCharacterStandings(character, cache.standings?.etag);
+    if (result.notModified) {
+      if (!cache.standings?.lastBody) {
+        throw new Error("Standings returned 304 without cached data.");
+      }
+      cache.standings = setFresh(cache.standings.lastBody, result.headers, cache.standings, true);
+    }
+    else {
+      cache.standings = setFresh(result.data, result.headers, cache.standings);
+    }
+  }
+  catch (error) {
+    cache.standings = {
+      ...(cache.standings ?? { lastBody: null }),
+      ...endpointStatus(error),
+    };
+  }
+}
+
+/**
+ * Returns standings and safe cache metadata for an already authorized session character.
+ * @param characterId Attached character ID verified by the calling route.
+ * @param sessionId Current authenticated session ID.
+ * @returns Unrounded standings, or a null body until a successful refresh.
+ */
+export function getCharacterStandingsStatus(characterId: number, sessionId: string) {
+  const standings = getCache(characterCaches, characterId, sessionId).standings;
+  return {
+    ...(toClientEndpointStatus(standings) ?? unavailableSnapshotEndpointStatus),
+    body: standings?.lastBody ?? null,
+  };
+}
+
 export async function refreshCharacterState(
   character: CharacterTokenRecord,
   sessionId: string,
@@ -2275,6 +2335,13 @@ export async function refreshCharacterState(
   }
   finally {
     profiler.end("skills");
+  }
+  profiler.start("standings");
+  try {
+    await refreshCharacterStandings(character, sessionId);
+  }
+  finally {
+    profiler.end("standings");
   }
   profiler.start("blueprints");
   let assetsRebuilt = false;
@@ -3454,6 +3521,7 @@ export async function getStateStatus(
         ),
         body: getCache(characterCaches, characterId, sessionId).skills?.lastBody ?? null,
       },
+      standings: getCharacterStandingsStatus(characterId, sessionId),
       location: toClientEndpointStatus(
         getCache(characterCaches, characterId, sessionId).currentLocation,
       ) ?? {

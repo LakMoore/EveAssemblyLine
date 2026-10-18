@@ -1,5 +1,8 @@
 import { requestCachedEsi } from "./client";
 import { z } from "zod";
+import type { TaxPriceResponse } from "@/lib/market/taxes";
+import { globalPlexMarket } from "@/lib/reference/marketHubs";
+import { getSystemJumpDistance } from "./routes";
 
 type MarketHistoryEntry = { date: string; average: number; volume: number };
 const marketHistoryEntrySchema = z.looseObject({
@@ -36,7 +39,23 @@ export type RegionalMarketOrder = {
   volumeRemain: number;
   isBuyOrder: boolean;
   locationId?: number;
+  systemId?: number;
+  range?: z.infer<typeof marketOrderRangeSchema>;
 };
+const marketOrderRangeSchema = z.enum([
+  "station",
+  "solarsystem",
+  "region",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "10",
+  "20",
+  "30",
+  "40",
+]);
 const esiMarketOrderSchema = z.looseObject({
   order_id: z.number().int().positive(),
   type_id: z.number().int().positive(),
@@ -44,7 +63,12 @@ const esiMarketOrderSchema = z.looseObject({
   volume_remain: z.number().int().nonnegative(),
   is_buy_order: z.boolean(),
   location_id: z.number().int().positive(),
+  system_id: z.number().int().positive(),
+  range: marketOrderRangeSchema,
 });
+
+/** Station and solar-system identity of the hub where the item can be sold. */
+type MarketHubLocation = { stationId: number; systemId: number };
 
 /** Calculates recent market metrics across the latest seven UTC calendar days. */
 export function calculateSevenDayMarketMetrics(
@@ -144,6 +168,7 @@ export async function getSevenDayMarketMetrics(
   regionId: number,
   typeId: number,
 ): Promise<SevenDayMarketMetrics> {
+  if (typeId === globalPlexMarket.typeId) regionId = globalPlexMarket.regionId;
   const response = await requestCachedEsi(
     `/markets/${regionId}/history/?type_id=${typeId}`,
     z.array(marketHistoryEntrySchema),
@@ -171,25 +196,144 @@ async function getRegionalMarketOrders(
   regionId: number,
   typeId: number,
 ): Promise<RegionalMarketOrder[]> {
+  return (await getRegionalMarketOrderBook(regionId, typeId)).orders;
+}
+
+/** Loads every order-book page and retains the oldest source time and earliest expiry. */
+async function getRegionalMarketOrderBook(regionId: number, typeId: number) {
+  if (typeId === globalPlexMarket.typeId) regionId = globalPlexMarket.regionId;
   const first = await requestCachedEsi(
     `/markets/${regionId}/orders/?order_type=all&type_id=${typeId}&page=1`,
     z.array(esiMarketOrderSchema),
   );
   const pages = Number(first.headers.get("x-pages") ?? "1");
+  if (!Number.isSafeInteger(pages) || pages < 1 || pages > 1000) {
+    throw new Error("ESI returned an invalid order-book page count.");
+  }
+  const responses = [first];
   const orders = [...(first.data ?? [])];
   for (let page = 2; page <= pages; page += 1) {
     const response = await requestCachedEsi(
       `/markets/${regionId}/orders/?order_type=all&type_id=${typeId}&page=${page}`,
       z.array(esiMarketOrderSchema),
     );
+    responses.push(response);
     orders.push(...(response.data ?? []));
   }
-  return orders.map((order) => ({
-    price: order.price,
-    volumeRemain: order.volume_remain,
-    isBuyOrder: order.is_buy_order,
-    locationId: order.location_id,
-  }));
+  const now = Date.now();
+  return {
+    orders: orders.map((order) => ({
+      price: order.price,
+      volumeRemain: order.volume_remain,
+      isBuyOrder: order.is_buy_order,
+      locationId: order.location_id,
+      systemId: order.system_id,
+      range: order.range,
+    })),
+    fetchedAt: new Date(
+      Math.min(
+        ...responses.map((response) => Date.parse(response.headers.get("date") ?? "") || now),
+      ),
+    ).toISOString(),
+    expiresAt: new Date(
+      Math.min(
+        ...responses.map((response) => Date.parse(response.headers.get("expires") ?? "") || now),
+      ),
+    ).toISOString(),
+    status: responses.every((response) => response.fromCache)
+      ? ("cached" as const)
+      : ("fresh" as const),
+  };
+}
+
+/** Returns station-only prices as the baseline before considering ranged buy orders. */
+export function calculateStationOrderPrices(
+  orders: RegionalMarketOrder[],
+  stationId: number,
+): { lowestSell: number | null; highestBuy: number | null } {
+  const prices = calculateRegionalAppraisalPrices(
+    orders.filter((order) => order.locationId === stationId),
+  );
+  return { lowestSell: prices.minSellPrice, highestBuy: prices.maxBuyPrice };
+}
+
+/**
+ * Checks coverage that needs no route lookup; the order book already scopes orders to the region.
+ * @param order Active regional buy order.
+ * @param market Target hub station and system.
+ * @returns Whether location or range proves the order covers the hub.
+ */
+function buyOrderCoversHubWithoutRoute(
+  order: RegionalMarketOrder,
+  market: MarketHubLocation,
+): boolean {
+  return (
+    order.locationId === market.stationId
+    || order.range === "region"
+    || (
+      order.systemId === market.systemId
+      && order.range !== undefined
+      && order.range !== "station"
+    )
+  );
+}
+
+/**
+ * Prices station sells and regional buys that can actually be filled from the hub.
+ * @param orders Complete regional order book, including range and system metadata.
+ * @param market Target hub station and system.
+ * @returns Lowest station sell and highest buy covering the hub; absent sides remain null.
+ */
+export async function calculateHubOrderPrices(
+  orders: RegionalMarketOrder[],
+  market: MarketHubLocation,
+): Promise<{ lowestSell: number | null; highestBuy: number | null }> {
+  const prices = calculateStationOrderPrices(orders, market.stationId);
+  const buyOrders = orders.filter(
+    (order) =>
+      order.isBuyOrder && order.volumeRemain > 0 && Number.isFinite(order.price) && order.price > 0,
+  );
+  for (const order of buyOrders) {
+    if (buyOrderCoversHubWithoutRoute(order, market)) {
+      prices.highestBuy = Math.max(prices.highestBuy ?? 0, order.price);
+    }
+  }
+  // Prove the cheapest coverage first, then stop at the highest-priced reachable candidate.
+  const candidates = buyOrders
+    .filter(
+      (order) =>
+        order.price > (prices.highestBuy ?? 0)
+        && order.systemId !== market.systemId
+        && Number.isSafeInteger(Number(order.range))
+        && Number(order.range) > 0,
+    )
+    .sort((left, right) => right.price - left.price);
+  for (const order of candidates) {
+    if (order.systemId === undefined) continue;
+    const distance = await getSystemJumpDistance(market.systemId, order.systemId);
+    if (distance !== null && distance <= Number(order.range)) {
+      return { lowestSell: prices.lowestSell, highestBuy: order.price };
+    }
+  }
+  return prices;
+}
+
+/** Loads a cached hub-station quote, or the complete global order book for PLEX. */
+export async function getStationTaxPrices(
+  market: MarketHubLocation & { id: TaxPriceResponse["marketId"]; regionId: number },
+  typeId: number,
+): Promise<TaxPriceResponse> {
+  const { orders, ...metadata } = await getRegionalMarketOrderBook(market.regionId, typeId);
+  const prices =
+    typeId === globalPlexMarket.typeId ? calculateRegionalAppraisalPrices(orders) : null;
+  return {
+    typeId,
+    marketId: market.id,
+    ...(prices
+      ? { lowestSell: prices.minSellPrice, highestBuy: prices.maxBuyPrice }
+      : await calculateHubOrderPrices(orders, market)),
+    ...metadata,
+  };
 }
 
 /** Returns the five appraisal prices for one regional item order book. */
@@ -200,7 +344,7 @@ export async function getRegionalAppraisalPrices(
 ): Promise<RegionalAppraisalPrices> {
   return calculateRegionalAppraisalPrices(
     await getRegionalMarketOrders(regionId, typeId),
-    sellStationId,
+    typeId === globalPlexMarket.typeId ? undefined : sellStationId,
   );
 }
 
@@ -208,6 +352,7 @@ export async function getMarketSellOrders(
   regionId: number,
   typeId: number,
 ): Promise<MarketSellOrder[]> {
+  if (typeId === globalPlexMarket.typeId) regionId = globalPlexMarket.regionId;
   const first = await requestCachedEsi(
     `/markets/${regionId}/orders/?order_type=all&type_id=${typeId}&page=1`,
     z.array(esiMarketOrderSchema),

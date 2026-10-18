@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { after } from "node:test";
 import { getEsiTtlMs } from "@/cache/esiTtl";
 import {
   buildCurrentShipAsset,
@@ -7,6 +7,8 @@ import {
   getCorporationAssetSource,
   getCorporationIdsForCharacters,
   getStateStatus,
+  getCharacterStandingsStatus,
+  refreshCharacterStandings,
   getMarketOrderAssetDeductions,
   getJobAssetRootLocationId,
   getKnownNonStructureItemIds,
@@ -25,12 +27,128 @@ import {
 } from "./cache";
 import { getGroups, getMarketGroups, getTypesByIds } from "@/cache/services/sdeCache";
 import { normalizeCorporationSettings } from "@/lib/auth/tokensStore";
+import { clearEsiRequestLogTimer } from "./logger";
 import type { getCorporationHangarPermissions } from "./corporationAccess";
 import type {
   AssetRecord,
+  CharacterTokenRecord,
   CorporationCollectionSettings,
   IndustryJobRecord,
 } from "@/lib/auth/model";
+
+after(() => {
+  clearEsiRequestLogTimer();
+});
+
+void test("standings cache retains precision, revalidates with 304 and stays session-scoped", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const character: CharacterTokenRecord = {
+    characterId: 9201,
+    characterName: "Standings Cache Pilot",
+    personalAuth: {
+      accessToken: "test-standings-token",
+      refreshToken: "test-refresh-token",
+      accessTokenExpiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      scopes: ["esi-characters.read_standings.v1"],
+      lastUsedAt: 0,
+    },
+  };
+  const standings = [{ from_id: 1000035, from_type: "npc_corp", standing: 7.260038298328329 }];
+  let requests = 0;
+  globalThis.fetch = (_input, init) => {
+    requests += 1;
+    if (requests === 1) {
+      return Promise.resolve(
+        Response.json(
+          standings,
+          {
+            headers: { expires: new Date(0).toUTCString(), etag: "standings-cache-test" },
+          },
+        ),
+      );
+    }
+    assert.equal(new Headers(init?.headers).get("if-none-match"), "standings-cache-test");
+    return Promise.resolve(
+      new Response(
+        null,
+        {
+          status: 304,
+          headers: { expires: new Date(Date.now() + 3_600_000).toUTCString() },
+        },
+      ),
+    );
+  };
+  await refreshCharacterStandings(character, "standings-cache-test");
+  assert.deepEqual(getCharacterStandingsStatus(9201, "standings-cache-test").body, standings);
+  assert.equal(getCharacterStandingsStatus(9201, "other-session").hasBody, false);
+  await refreshCharacterStandings(character, "standings-cache-test");
+  await refreshCharacterStandings(character, "standings-cache-test");
+  assert.equal(requests, 2);
+  assert.deepEqual(getCharacterStandingsStatus(9201, "standings-cache-test").body, standings);
+  assert.equal(getCharacterStandingsStatus(9201, "standings-cache-test").hasBody, true);
+});
+
+void test("failed standings refresh keeps the last-known values and reports the error", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const character: CharacterTokenRecord = {
+    characterId: 9203,
+    characterName: "Stale Standings Pilot",
+    personalAuth: {
+      accessToken: "test-standings-token",
+      refreshToken: "test-refresh-token",
+      accessTokenExpiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      scopes: ["esi-characters.read_standings.v1"],
+      lastUsedAt: 0,
+    },
+  };
+  const standings = [{ from_id: 500001, from_type: "faction", standing: 3.1900255322188897 }];
+  globalThis.fetch = () =>
+    Promise.resolve(
+      Response.json(
+        standings,
+        {
+          headers: { expires: new Date(0).toUTCString() },
+        },
+      ),
+    );
+  await refreshCharacterStandings(character, "standings-failure-test");
+  globalThis.fetch = () =>
+    Promise.resolve(Response.json({ error: "Unavailable" }, { status: 503 }));
+  await refreshCharacterStandings(character, "standings-failure-test");
+  const status = getCharacterStandingsStatus(9203, "standings-failure-test");
+  assert.deepEqual(status.body, standings);
+  assert.equal(status.hasBody, true);
+  assert.equal(status.status, "error");
+  assert.ok(status.error);
+});
+
+void test("missing standings permission is unavailable, not a neutral standing", async () => {
+  await refreshCharacterStandings(
+    {
+      characterId: 9202,
+      characterName: "Missing Standings Permission Pilot",
+      personalAuth: {
+        accessToken: "test-standings-token",
+        refreshToken: "test-refresh-token",
+        accessTokenExpiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        scopes: [],
+        lastUsedAt: 0,
+      },
+    },
+    "standings-permission-test",
+  );
+  const status = getCharacterStandingsStatus(9202, "standings-permission-test");
+  assert.equal(status.body, null);
+  assert.equal(status.hasBody, false);
+  assert.equal(status.status, "error");
+  assert.equal(status.reauthorizeRequired, true);
+});
 
 const corporationPolicy: CorporationCollectionSettings = {
   corporationId: 900,

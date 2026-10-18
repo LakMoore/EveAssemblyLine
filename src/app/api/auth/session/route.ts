@@ -4,6 +4,7 @@ import { getSessionCharacterIds, getSessionFromRequest } from "@/lib/auth/sessio
 import { getCharacter, getCollectionCorporationSettings } from "@/lib/auth/tokensStore";
 import { isCorpRefreshOptInEnabled } from "@/lib/auth/corpRefreshOptIn";
 import { fetchUniverseNames } from "@/lib/esi/client";
+import { getCharacterStandingsStatus } from "@/lib/esi/cache";
 
 export async function GET(request: Request) {
   try {
@@ -40,9 +41,12 @@ export async function GET(request: Request) {
         allowCorpRefreshOptIn,
         hasAccountantRole,
         hasTraderRole,
+        personalAuth,
       }) => ({
         characterId,
         characterName,
+        standingsAuthorized: personalAuth.scopes.includes("esi-characters.read_standings.v1"),
+        standings: getCharacterStandingsStatus(characterId, session.sessionId),
         onDeployment: Boolean(onDeployment),
         corporationId,
         allianceId,

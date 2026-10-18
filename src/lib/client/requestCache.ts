@@ -1,5 +1,6 @@
 import type { PlanStockItem, StockItem } from "@/lib/planning/types";
 import type { Facility, FacilityResponse } from "@/lib/planning/facilities";
+import type { CharacterStandingRecord } from "@/lib/esi/client";
 import type { SdeLanguage } from "@/lib/reference/languages";
 import { formatLocationName, normalizeLocationName } from "@/lib/reference/locationName";
 import { fetchTypeMetadata } from "@/lib/reference/types";
@@ -479,6 +480,7 @@ export type ClientCharacter = {
   hasAccountantRole: boolean;
   hasTraderRole: boolean;
   corporationSupportEnabled?: boolean;
+  standingsAuthorized?: boolean;
 };
 
 export type ClientCorporationSettings = {
@@ -497,6 +499,9 @@ export type ClientCharacterStatus = {
   industrySlots?: ClientIndustrySlots;
   skills?: ClientEndpointStatus & {
     body?: Array<{ skillId: number; activeSkillLevel: number }> | null;
+  };
+  standings?: ClientEndpointStatus & {
+    body?: CharacterStandingRecord[] | null;
   };
   location?: ClientEndpointStatus;
   ship?: ClientEndpointStatus;

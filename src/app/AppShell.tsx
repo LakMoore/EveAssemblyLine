@@ -55,6 +55,7 @@ import {
   Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
+  Receipt,
   TrendingUp,
   Rocket,
   Settings2,
@@ -80,6 +81,7 @@ import { toast } from "@/components/ui/toast";
 import { Progress, ProgressLabel } from "@/components/ui/progress";
 import { buildRefreshUnits, runRefreshUnits } from "@/lib/esi/refreshOrchestration";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
 const languageStorageKey = "assembly-line-language";
 const sidebarStorageKey = "assembly-line-sidebar-collapsed";
@@ -91,6 +93,7 @@ type ActivePage =
   | "invention"
   | "appraise"
   | "orePrices"
+  | "taxes"
   | "signals"
   | "assets"
   | "jobs"
@@ -321,36 +324,38 @@ export default function AppShell({ children }: { children: ReactNode }) {
               ? "invention"
               : pathname === "/appraise"
                 ? "appraise"
-                : pathname === "/ore-prices"
-                  ? "orePrices"
-                  : pathname === "/signals"
-                    ? "signals"
-                    : pathname === "/assets"
-                      ? "assets"
-                      : pathname === "/jobs"
-                        ? "jobs"
-                        : pathname === "/ships"
-                          ? "ships"
-                          : pathname === "/structures"
-                            ? "structures"
-                            : pathname === "/corp-hangars"
-                              ? "corpHangars"
-                              : pathname === "/settings"
-                                ? "settings"
-                                : pathname === "/imagechecker"
-                                  ? "imagechecker"
-                                  : pathname === "/data"
-                                    ? "data"
-                                    : [
-                                          "/guides",
-                                          "/about",
-                                          "/contact",
-                                          "/privacy",
-                                          "/terms",
-                                          "/cookies",
-                                        ].includes(pathname)
-                                      ? "public"
-                                      : "planner";
+                : pathname === "/taxes"
+                  ? "taxes"
+                  : pathname === "/ore-prices"
+                    ? "orePrices"
+                    : pathname === "/signals"
+                      ? "signals"
+                      : pathname === "/assets"
+                        ? "assets"
+                        : pathname === "/jobs"
+                          ? "jobs"
+                          : pathname === "/ships"
+                            ? "ships"
+                            : pathname === "/structures"
+                              ? "structures"
+                              : pathname === "/corp-hangars"
+                                ? "corpHangars"
+                                : pathname === "/settings"
+                                  ? "settings"
+                                  : pathname === "/imagechecker"
+                                    ? "imagechecker"
+                                    : pathname === "/data"
+                                      ? "data"
+                                      : [
+                                            "/guides",
+                                            "/about",
+                                            "/contact",
+                                            "/privacy",
+                                            "/terms",
+                                            "/cookies",
+                                          ].includes(pathname)
+                                        ? "public"
+                                        : "planner";
   const isRefreshCurrent =
     authenticated
     && characters.length > 0
@@ -1100,6 +1105,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
                     <TrendingUp size={17} strokeWidth={1.8} aria-hidden="true" />
                   </span>
                   <span className={styles.navText}>Signals</span>
+                </NoPrefetchLink>
+                <NoPrefetchLink
+                  prefetch={false}
+                  className={cn(styles.navItem, activePage === "taxes" && styles.navActive)}
+                  href="/taxes"
+                  onClick={closeSidebarOnNavigation}
+                  aria-current={activePage === "taxes" ? "page" : undefined}
+                >
+                  <span>
+                    <Receipt size={17} strokeWidth={1.8} aria-hidden="true" />
+                  </span>
+                  <span className={styles.navText}>Taxes</span>
                 </NoPrefetchLink>
                 <div className={styles.sectionLabel}>INFORMATION</div>
                 <NoPrefetchLink

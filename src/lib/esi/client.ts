@@ -456,6 +456,17 @@ const esiCharacterSkillsResponseSchema = z.looseObject({
     .nullish()
     .transform((value) => value ?? undefined),
 });
+const esiCharacterStandingsSchema = z.array(
+  z.object({
+    from_id: z.number().int().positive(),
+    from_type: z.enum(["agent", "npc_corp", "faction"]),
+    standing: z.number().min(-10).max(10),
+  }),
+);
+
+/** An unmodified standing returned by ESI, retaining its full numeric precision. */
+export type CharacterStandingRecord = z.output<typeof esiCharacterStandingsSchema>[number];
+
 const esiCorporationDivisionsResponseSchema = z.looseObject({
   hangar: z
     .array(esiCorporationDivisionSchema)
@@ -1171,6 +1182,25 @@ export async function fetchCharacterFittings(record: CharacterTokenRecord, etag?
   return fetchEsiEndpoint(
     `/characters/${record.characterId}/fittings/`,
     z.array(esiFittingSchema),
+    token,
+    etag,
+    { paginated: false },
+  );
+}
+
+/**
+ * Fetches unmodified character standings through the shared authenticated ESI client.
+ * @param record Server-owned character authorization record.
+ * @param etag Previous response validator, when available.
+ * @returns Validated standings and ESI cache metadata without rounding.
+ * @see https://developers.eveonline.com/api-explorer#/operations/GetCharactersCharacterIdStandings
+ */
+export async function fetchCharacterStandings(record: CharacterTokenRecord, etag?: string) {
+  requireCharacterScope(record, "esi-characters.read_standings.v1");
+  const token = await getUsableToken(record);
+  return fetchEsiEndpoint(
+    `/characters/${record.characterId}/standings/`,
+    esiCharacterStandingsSchema,
     token,
     etag,
     { paginated: false },

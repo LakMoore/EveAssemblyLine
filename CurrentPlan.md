@@ -488,10 +488,17 @@ Maintain an in-memory map:
 const characterCaches = new Map<string, OwnerCache>();
 const corporationCaches = new Map<string, OwnerCache>();
 
-`OwnerCache` includes raw assets, resolved root locations, blueprints, jobs, skills, market orders, ship/rig indexes, and unresolved counts. Endpoint statuses include `fresh`, `cached`, `stale`, `rate_limited`, and `error`.
+`OwnerCache` includes raw assets, resolved root locations, blueprints, jobs, skills, unmodified character standings, market orders, ship/rig indexes, and unresolved counts. Endpoint statuses include `fresh`, `cached`, `stale`, `rate_limited`, and `error`.
 ```
 
 Cache persistence is optional and belongs behind the cache provider abstraction; durable application records belong in Firestore. The default in-memory provider is sufficient for development, while shared deployments may use Upstash Redis.
+
+The Taxes tool reads full-precision standings and cache status from the authorized session response.
+Standings refresh only through the character state-refresh flow and require
+`esi-characters.read_standings.v1`; existing character authorizations must be renewed to add it.
+The selected hub's NPC station owner and its faction determine the matching standings. Missing
+entries in a successful standings response are neutral, but missing responses remain unavailable.
+Character-selected standings are read-only; skill presets retain manual inputs.
 
 ### Refresh function
 

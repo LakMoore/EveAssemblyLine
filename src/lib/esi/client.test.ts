@@ -12,6 +12,7 @@ import {
   fetchCharacterMarketOrders,
   fetchCharacterRoles,
   fetchCharacterShip,
+  fetchCharacterStandings,
   fetchCorporationIndustryJobs,
   fetchCorporationMarketOrders,
   fetchCorporationStructures,
@@ -270,6 +271,77 @@ void test("sends the cached ETag for a non-paginated endpoint", async (t) => {
   assert.deepEqual(result.data, { skills: [] });
   assert.equal(result.notModified, false);
   assert.equal(result.headers.get("expires"), "Wed, 26 Aug 2026 17:00:00 GMT");
+});
+
+void test("character standings retain full precision and send cached validators", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const standings = [
+    { from_id: 500001, from_type: "faction", standing: 3.1900255322188897 },
+    { from_id: 1000035, from_type: "npc_corp", standing: 7.260038298328329 },
+    { from_id: 3010001, from_type: "agent", standing: -2.123456789 },
+  ];
+  globalThis.fetch = promiseFetchMock((input, init) => {
+    assert.equal(fetchInputUrl(input), "https://esi.evetech.net/latest/characters/9101/standings/");
+    assert.equal(new Headers(init?.headers).get("if-none-match"), "previous-standings");
+    return Response.json(standings, { headers: { etag: "current-standings" } });
+  });
+  const result = await fetchCharacterStandings(
+    {
+      ...character,
+      characterId: 9101,
+      personalAuth: { ...token, scopes: ["esi-characters.read_standings.v1"] },
+    },
+    "previous-standings",
+  );
+  assert.deepEqual(result.data, standings);
+  assert.equal(result.headers.get("etag"), "current-standings");
+  assert.equal(result.notModified, false);
+});
+
+void test("character standings distinguish an empty response from a 304", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const scopedCharacter = {
+    ...character,
+    characterId: 9102,
+    personalAuth: { ...token, scopes: ["esi-characters.read_standings.v1"] },
+  };
+  globalThis.fetch = promiseFetchMock(() => Response.json([]));
+  assert.deepEqual((await fetchCharacterStandings(scopedCharacter)).data, []);
+  globalThis.fetch = promiseFetchMock(() => new Response(null, { status: 304 }));
+  const unchanged = await fetchCharacterStandings(scopedCharacter, "standings-etag");
+  assert.equal(unchanged.notModified, true);
+  assert.equal(unchanged.data, null);
+});
+
+void test("character standings reject malformed records and missing scope", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  let requests = 0;
+  globalThis.fetch = promiseFetchMock(() => {
+    requests += 1;
+    return Response.json([{ from_id: 500001, from_type: "faction", standing: 10.01 }]);
+  });
+  await assert.rejects(
+    fetchCharacterStandings(character),
+    (error: unknown) => error instanceof Error && "reauthorizeRequired" in error,
+  );
+  assert.equal(requests, 0);
+  await assert.rejects(
+    fetchCharacterStandings({
+      ...character,
+      characterId: 9103,
+      personalAuth: { ...token, scopes: ["esi-characters.read_standings.v1"] },
+    }),
+  );
+  assert.equal(requests, 1);
 });
 
 void test("rejects ESI responses that do not match their schema", async (t) => {
