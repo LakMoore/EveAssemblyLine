@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { calculateRegionalAppraisalPrices } from "./marketHistory";
+import { selectRegionalAppraisalPrice } from "./marketHistory";
 
 void test("calculates five appraisal prices from weighted buy and sell books", () => {
   assert.deepEqual(
@@ -51,4 +52,15 @@ void test("limits sell prices to the selected trade hub station", () => {
       fivePercentBuyPrice: 3,
     },
   );
+});
+
+void test("selects buy, split, and sell appraisal prices", () => {
+  const prices = calculateRegionalAppraisalPrices([
+    { price: 100, volumeRemain: 100, isBuyOrder: false },
+    { price: 90, volumeRemain: 100, isBuyOrder: true },
+  ]);
+
+  assert.equal(selectRegionalAppraisalPrice(prices, "buy"), 90);
+  assert.equal(selectRegionalAppraisalPrice(prices, "split"), 95);
+  assert.equal(selectRegionalAppraisalPrice(prices, "sell"), 100);
 });

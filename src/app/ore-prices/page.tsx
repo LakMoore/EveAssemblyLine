@@ -22,6 +22,7 @@ import {
   createReprocessingProfile,
   type ReprocessingProfile,
 } from "@/lib/planning/reprocessingProfile";
+import type { RegionalAppraisalPriceType } from "@/lib/esi/marketHistory";
 import { marketHubs } from "@/lib/reference/marketHubs";
 import { useAppLanguage } from "../AppShell";
 import { cn } from "@/lib/utils";
@@ -57,13 +58,22 @@ type OrePriceItem = {
 
 /** Response returned by the ore-prices API route. */
 type OrePricesResponse = {
-  market: string;
+  markets: { buy: string; sell: string };
   generatedAt: string;
   items: OrePriceItem[];
   error?: string;
 };
 
-type SortKey = "name" | "oreVolume" | "difference";
+type MarketPriceGroupProps = {
+  name: "Buy" | "Sell";
+  marketId: string;
+  priceType: RegionalAppraisalPriceType;
+  disabled: boolean;
+  onMarketChange: (marketId: string) => void;
+  onPriceTypeChange: (priceType: RegionalAppraisalPriceType) => void;
+};
+
+type SortKey = "name" | "oreVolume" | "difference" | "differencePercent";
 type SortDirection = "asc" | "desc";
 
 const desktopGridColumns =
@@ -100,6 +110,18 @@ const sortOptions: {
     sortKey: "difference",
     direction: "desc",
   },
+  {
+    value: "difference-percent-asc",
+    label: "Difference (%) (low to high)",
+    sortKey: "differencePercent",
+    direction: "asc",
+  },
+  {
+    value: "difference-percent-desc",
+    label: "Difference (%) (high to low)",
+    sortKey: "differencePercent",
+    direction: "desc",
+  },
 ];
 
 /** Formats currency consistently with the appraisal page. */
@@ -124,7 +146,10 @@ function formatDifferencePercent(value: number | null) {
 /** Loads the current SDE-backed ore appraisal list for the selected language. */
 async function fetchOrePrices(
   language: string,
-  marketId: string,
+  buyMarketId: string,
+  buyPriceType: RegionalAppraisalPriceType,
+  sellMarketId: string,
+  sellPriceType: RegionalAppraisalPriceType,
   reprocessingProfile: ReprocessingProfile,
   signal: AbortSignal,
 ) {
@@ -134,7 +159,14 @@ async function fetchOrePrices(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal,
-      body: JSON.stringify({ language, marketId, reprocessingProfile }),
+      body: JSON.stringify({
+        language,
+        buyMarketId,
+        buyPriceType,
+        sellMarketId,
+        sellPriceType,
+        reprocessingProfile,
+      }),
     },
   );
   const result = (await response.json()) as OrePricesResponse;
@@ -142,7 +174,7 @@ async function fetchOrePrices(
   return result;
 }
 
-/** Sorts ore rows by localized name, input volume, or ISK difference. */
+/** Sorts ore rows by localized name, input volume, or either difference measure. */
 function sortOrePrices(
   items: OrePriceItem[],
   sortKey: SortKey,
@@ -156,6 +188,7 @@ function sortOrePrices(
     }
     const leftValue = left[sortKey];
     const rightValue = right[sortKey];
+    if (leftValue === null && rightValue === null) return 0;
     if (leftValue === null) return 1;
     if (rightValue === null) return -1;
     return (leftValue - rightValue) * multiplier;
@@ -202,6 +235,79 @@ function SortHeader({
   );
 }
 
+/** Renders one side's market and order-book price selection. */
+function MarketPriceGroup({
+  name,
+  marketId,
+  priceType,
+  disabled,
+  onMarketChange,
+  onPriceTypeChange,
+}: MarketPriceGroupProps) {
+  const prefix = name.toLocaleLowerCase();
+  return (
+    <fieldset className="grid min-w-0 grid-cols-1 gap-3 border p-3 sm:grid-cols-2">
+      <legend className="px-1 text-xs font-medium">{name}</legend>
+      <Field className="min-w-0 gap-1">
+        <FieldLabel htmlFor={`ore-${prefix}-market`}>Market</FieldLabel>
+        <Select
+          disabled={disabled}
+          value={marketId}
+          onValueChange={(value) => {
+            if (value) onMarketChange(value);
+          }}
+          items={marketHubs.map((market) => ({ value: market.id, label: market.name }))}
+        >
+          <SelectTrigger
+            id={`ore-${prefix}-market`}
+            className="w-full"
+            aria-label={`${name} market`}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {marketHubs.map((market) => (
+                <SelectItem value={market.id} key={market.id}>
+                  {market.name}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field className="min-w-0 gap-1">
+        <FieldLabel htmlFor={`ore-${prefix}-price`}>Price</FieldLabel>
+        <Select
+          disabled={disabled}
+          value={priceType}
+          onValueChange={(value) => {
+            if (value === "buy" || value === "split" || value === "sell") {
+              onPriceTypeChange(value);
+            }
+          }}
+          items={[
+            { value: "buy", label: "Buy" },
+            { value: "split", label: "Split" },
+            { value: "sell", label: "Sell" },
+          ]}
+        >
+          <SelectTrigger id={`ore-${prefix}-price`} className="w-full" aria-label={`${name} price`}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value="buy">Buy</SelectItem>
+              <SelectItem value="split">Split</SelectItem>
+              <SelectItem value="sell">Sell</SelectItem>
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </Field>
+    </fieldset>
+  );
+}
+
 /** Renders compressed ore reprocessing batches with live market appraisals. */
 export default function OrePricesPage() {
   const { language } = useAppLanguage();
@@ -229,9 +335,22 @@ export default function OrePricesPage() {
         reprocessingSettings.selectedImplant?.level ?? 0,
       )
     : null;
-  const marketId = reprocessingSettings.settings.marketId;
-  const market = marketHubs.find((hub) => hub.id === marketId)?.name ?? marketHubs[0].name;
-  const requestKey = JSON.stringify({ language, marketId, reprocessingProfile });
+  const {
+    orePricesBuyMarketId: buyMarketId,
+    orePricesBuyPriceType: buyPriceType,
+    orePricesSellMarketId: sellMarketId,
+    orePricesSellPriceType: sellPriceType,
+  } = reprocessingSettings.settings;
+  const buyMarket = marketHubs.find((hub) => hub.id === buyMarketId) ?? marketHubs[0];
+  const sellMarket = marketHubs.find((hub) => hub.id === sellMarketId) ?? marketHubs[0];
+  const requestKey = JSON.stringify({
+    language,
+    buyMarketId,
+    buyPriceType,
+    sellMarketId,
+    sellPriceType,
+    reprocessingProfile,
+  });
   const hasCurrentPrices = loadedRequestKey === requestKey;
   const isLoading = activeRequestKey === requestKey;
   const currentRequestError = errorRequestKey === requestKey ? error : "";
@@ -259,7 +378,10 @@ export default function OrePricesPage() {
     const selectedProfile = reprocessingProfile;
     if (!selectedProfile) return;
     const selectedLanguage = language;
-    const selectedMarketId = marketId;
+    const selectedBuyMarketId = buyMarketId;
+    const selectedBuyPriceType = buyPriceType;
+    const selectedSellMarketId = sellMarketId;
+    const selectedSellPriceType = sellPriceType;
     const selectedRequestKey = requestKey;
     activeRequestRef.current?.controller.abort();
     const requestId = ++requestIdRef.current;
@@ -277,7 +399,10 @@ export default function OrePricesPage() {
     try {
       const result = await fetchOrePrices(
         selectedLanguage,
-        selectedMarketId,
+        selectedBuyMarketId,
+        selectedBuyPriceType,
+        selectedSellMarketId,
+        selectedSellPriceType,
         selectedProfile,
         controller.signal,
       );
@@ -334,11 +459,13 @@ export default function OrePricesPage() {
           <span className="eyebrow">INFORMATION / MARKET</span>
           <h1 className="text-2xl font-semibold">Ore prices</h1>
           <p className="max-w-3xl text-sm text-muted-foreground">
-            {market} minimum sell prices · minimum reprocessing batch · yield calculated per ore
+            Buy: {buyMarket.name} · Sell: {sellMarket.name} · minimum reprocessing batch
           </p>
         </div>
         <div className="grid gap-1 text-right text-xs text-muted-foreground">
-          <span>Market: {market}</span>
+          <span>
+            Input ore: {buyPriceType} · Output materials: {sellPriceType}
+          </span>
           {hasCurrentPrices && generatedAt && (
             <time dateTime={generatedAt}>Updated {new Date(generatedAt).toLocaleString()}</time>
           )}
@@ -348,8 +475,35 @@ export default function OrePricesPage() {
       <CompressSettingsPanel
         state={reprocessingSettings}
         showOrderType={false}
-        className="grid grid-cols-1 gap-3 border-b pb-5 sm:grid-cols-2 xl:grid-cols-4"
+        showMarket={false}
+        className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
       />
+      <div className="grid grid-cols-1 gap-3 border-b pb-5 sm:grid-cols-2">
+        <MarketPriceGroup
+          name="Buy"
+          marketId={buyMarketId}
+          priceType={buyPriceType}
+          disabled={reprocessingSettings.isLoading}
+          onMarketChange={(value) => {
+            reprocessingSettings.updateSettings({ orePricesBuyMarketId: value });
+          }}
+          onPriceTypeChange={(value) => {
+            reprocessingSettings.updateSettings({ orePricesBuyPriceType: value });
+          }}
+        />
+        <MarketPriceGroup
+          name="Sell"
+          marketId={sellMarketId}
+          priceType={sellPriceType}
+          disabled={reprocessingSettings.isLoading}
+          onMarketChange={(value) => {
+            reprocessingSettings.updateSettings({ orePricesSellMarketId: value });
+          }}
+          onPriceTypeChange={(value) => {
+            reprocessingSettings.updateSettings({ orePricesSellPriceType: value });
+          }}
+        />
+      </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground" role="status">
@@ -358,7 +512,7 @@ export default function OrePricesPage() {
             : loadedRequestKey !== null && !hasCurrentPrices
               ? "Settings changed. Current results need an update."
               : hasCurrentPrices
-                ? `Showing ${market} prices for the selected reprocessing profile.`
+                ? `Showing ${buyMarket.name} input prices and ${sellMarket.name} output prices.`
                 : "No ore prices fetched yet."}
         </p>
         <Button
@@ -557,9 +711,22 @@ export default function OrePricesPage() {
                   </div>
                   <div
                     role="columnheader"
-                    className="px-2 text-right text-xs text-muted-foreground"
+                    aria-sort={
+                      sortKey === "differencePercent"
+                        ? sortDirection === "asc"
+                          ? "ascending"
+                          : "descending"
+                        : undefined
+                    }
+                    className="flex px-2"
                   >
-                    Diff %
+                    <SortHeader
+                      label="Diff %"
+                      sortKey="differencePercent"
+                      activeSort={sortKey}
+                      direction={sortDirection}
+                      onSort={changeSort}
+                    />
                   </div>
                 </div>
               </div>

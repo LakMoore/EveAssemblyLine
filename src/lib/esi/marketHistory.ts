@@ -30,6 +30,7 @@ export type RegionalAppraisalPrices = {
   maxBuyPrice: number | null;
   fivePercentBuyPrice: number | null;
 };
+export type RegionalAppraisalPriceType = "buy" | "split" | "sell";
 export type RegionalMarketOrder = {
   price: number;
   volumeRemain: number;
@@ -126,6 +127,16 @@ export function calculateRegionalAppraisalPrices(
     maxBuyPrice,
     fivePercentBuyPrice: priceAtVolumePercentile(buyOrders, 0.05, true),
   };
+}
+
+/** Selects the configured regional order-book side for an appraisal. */
+export function selectRegionalAppraisalPrice(
+  prices: RegionalAppraisalPrices,
+  priceType: RegionalAppraisalPriceType,
+) {
+  if (priceType === "buy") return prices.maxBuyPrice;
+  if (priceType === "sell") return prices.minSellPrice;
+  return prices.splitPrice;
 }
 
 /** Loads cached ESI history and calculates seven-day average price and daily volume. */

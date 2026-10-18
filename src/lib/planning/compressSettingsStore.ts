@@ -1,4 +1,5 @@
 import { compressSettingsStoreName, getPlanningDatabase } from "./planningDatabase";
+import type { RegionalAppraisalPriceType } from "@/lib/esi/marketHistory";
 
 export type CompressSettings = {
   locationId: string;
@@ -6,6 +7,10 @@ export type CompressSettings = {
   implantId: string;
   marketId: string;
   orderType: "buy-1-day" | "buy-5-day" | "sell";
+  orePricesBuyMarketId: string;
+  orePricesBuyPriceType: RegionalAppraisalPriceType;
+  orePricesSellMarketId: string;
+  orePricesSellPriceType: RegionalAppraisalPriceType;
   items: CompressMaterial[];
 };
 
@@ -24,6 +29,10 @@ const defaults: CompressSettings = {
   implantId: "none",
   marketId: "jita",
   orderType: "sell",
+  orePricesBuyMarketId: "jita",
+  orePricesBuyPriceType: "sell",
+  orePricesSellMarketId: "jita",
+  orePricesSellPriceType: "buy",
   items: [],
 };
 
@@ -38,7 +47,14 @@ export async function loadCompressSettings({
         .objectStore(compressSettingsStoreName)
         .get(settingsKey);
       request.onsuccess = () => {
-        resolve({ ...defaults, ...(request.result as Partial<CompressSettings> | undefined) });
+        const storedSettings = request.result as Partial<CompressSettings> | undefined;
+        const legacyMarketId = storedSettings?.marketId ?? defaults.marketId;
+        resolve({
+          ...defaults,
+          ...storedSettings,
+          orePricesBuyMarketId: storedSettings?.orePricesBuyMarketId ?? legacyMarketId,
+          orePricesSellMarketId: storedSettings?.orePricesSellMarketId ?? legacyMarketId,
+        });
       };
       request.onerror = () => {
         reject(request.error ?? new Error("Could not load compression settings."));

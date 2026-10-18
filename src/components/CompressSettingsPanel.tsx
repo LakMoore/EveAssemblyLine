@@ -113,8 +113,14 @@ const defaultSettings: CompressSettings = {
   implantId: "none",
   marketId: "jita",
   orderType: "sell",
+  orePricesBuyMarketId: "jita",
+  orePricesBuyPriceType: "sell",
+  orePricesSellMarketId: "jita",
+  orePricesSellPriceType: "buy",
   items: [],
 };
+
+const regionalAppraisalPriceTypeSchema = z.enum(["buy", "split", "sell"]);
 
 const emptyOptions: ReprocessingOptions = {
   optionsVersion: 4,
@@ -275,6 +281,9 @@ export function useCompressSettings(language: SdeLanguage) {
               right.rankBonus - left.rankBonus
               || (left.name ?? left.id).localeCompare(right.name ?? right.id),
           );
+        const legacyMarketId = marketHubs.some((market) => market.id === loadedSettings.marketId)
+          ? loadedSettings.marketId
+          : "jita";
         const normalizedSettings: CompressSettings = {
           ...loadedSettings,
           items: Array.isArray(loadedSettings.items)
@@ -283,9 +292,23 @@ export function useCompressSettings(language: SdeLanguage) {
           locationId: locationOptions.some((location) => location.id === loadedSettings.locationId)
             ? loadedSettings.locationId
             : (locationOptions[0]?.id ?? loadedSettings.locationId),
-          marketId: marketHubs.some((market) => market.id === loadedSettings.marketId)
-            ? loadedSettings.marketId
-            : "jita",
+          marketId: legacyMarketId,
+          orePricesBuyMarketId: marketHubs.some(
+            (market) => market.id === loadedSettings.orePricesBuyMarketId,
+          )
+            ? loadedSettings.orePricesBuyMarketId
+            : legacyMarketId,
+          orePricesSellMarketId: marketHubs.some(
+            (market) => market.id === loadedSettings.orePricesSellMarketId,
+          )
+            ? loadedSettings.orePricesSellMarketId
+            : legacyMarketId,
+          orePricesBuyPriceType:
+            regionalAppraisalPriceTypeSchema.safeParse(loadedSettings.orePricesBuyPriceType).data
+            ?? "sell",
+          orePricesSellPriceType:
+            regionalAppraisalPriceTypeSchema.safeParse(loadedSettings.orePricesSellPriceType).data
+            ?? "buy",
         };
         const characters = sessionCharacters.map((character) => ({
           id: `character:${character.characterId}`,
@@ -398,10 +421,12 @@ export function CompressSettingsPanel({
   state,
   className,
   showOrderType = true,
+  showMarket = true,
 }: {
   state: CompressSettingsState;
   className?: string;
   showOrderType?: boolean;
+  showMarket?: boolean;
 }) {
   const { settings, options, locationOptions, selectedLocation, selectedImplant, implantOptions } =
     state;
@@ -561,30 +586,32 @@ export function CompressSettingsPanel({
           </SelectContent>
         </Select>
       </Label>
-      <Label className="flex-col items-start gap-1.5">
-        <span className="text-xs text-muted-foreground">MARKET</span>
-        <Select
-          disabled={state.isLoading}
-          value={settings.marketId}
-          onValueChange={(value) => {
-            if (value) state.updateSettings({ marketId: value });
-          }}
-          items={marketHubs.map((market) => ({ value: market.id, label: market.name }))}
-        >
-          <SelectTrigger className="w-full" aria-label="Market hub">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              {marketHubs.map((market) => (
-                <SelectItem value={market.id} key={market.id}>
-                  {market.name}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-      </Label>
+      {showMarket && (
+        <Label className="flex-col items-start gap-1.5">
+          <span className="text-xs text-muted-foreground">MARKET</span>
+          <Select
+            disabled={state.isLoading}
+            value={settings.marketId}
+            onValueChange={(value) => {
+              if (value) state.updateSettings({ marketId: value });
+            }}
+            items={marketHubs.map((market) => ({ value: market.id, label: market.name }))}
+          >
+            <SelectTrigger className="w-full" aria-label="Market hub">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {marketHubs.map((market) => (
+                  <SelectItem value={market.id} key={market.id}>
+                    {market.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </Label>
+      )}
       {showOrderType && (
         <Label className="flex-col items-start gap-1.5">
           <span className="text-xs text-muted-foreground">ORDER TYPE</span>

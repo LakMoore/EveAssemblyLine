@@ -8,7 +8,11 @@ import {
   getTypeMaterials,
   getTypes,
 } from "@/cache/services/sdeCache";
-import { getRegionalAppraisalPrices, type RegionalAppraisalPrices } from "@/lib/esi/marketHistory";
+import {
+  getRegionalAppraisalPrices,
+  selectRegionalAppraisalPrice,
+  type RegionalAppraisalPrices,
+} from "@/lib/esi/marketHistory";
 import { calculateReprocessingProfile } from "@/lib/planning/reprocessingEfficiency";
 import { reprocessingProfileSchema } from "@/lib/planning/reprocessingProfile";
 import { specialReprocessableTypeIds } from "@/lib/planning/reprocessStock";
@@ -19,9 +23,14 @@ import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 const orePricesRequestSchema = z
   .object({
     language: z.string().optional(),
-    marketId: z
+    buyMarketId: z
       .enum(marketHubs.map((market) => market.id) as [string, ...string[]])
       .default("jita"),
+    buyPriceType: z.enum(["buy", "split", "sell"]).default("sell"),
+    sellMarketId: z
+      .enum(marketHubs.map((market) => market.id) as [string, ...string[]])
+      .default("jita"),
+    sellPriceType: z.enum(["buy", "split", "sell"]).default("buy"),
     reprocessingProfile: reprocessingProfileSchema,
   })
   .strict();
@@ -46,8 +55,10 @@ export async function POST(request: Request) {
 
   const requestedLanguage = parsed.data.language ?? null;
   const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
-  const market =
-    marketHubs.find((candidate) => candidate.id === parsed.data.marketId) ?? marketHubs[0];
+  const buyMarket =
+    marketHubs.find((candidate) => candidate.id === parsed.data.buyMarketId) ?? marketHubs[0];
+  const sellMarket =
+    marketHubs.find((candidate) => candidate.id === parsed.data.sellMarketId) ?? marketHubs[0];
   try {
     const [types, groups, typeDogma, dogmaAttributes, compressibleTypes, typeMaterials] =
       await Promise.all([
@@ -116,23 +127,33 @@ export async function POST(request: Request) {
       ...ores.map((ore) => ore.typeId),
       ...ores.flatMap((ore) => ore.yields.map((material) => material.typeId)),
     ]);
-    const appraisalEntries = await Promise.all(
-      [...typeIds].map(async (typeId) => {
-        const prices = await getRegionalAppraisalPrices(
-          market.regionId,
-          typeId,
-          market.stationId,
-        ).catch(() => emptyAppraisalPrices);
-        return [typeId, prices] as const;
+    const selectedMarkets = [buyMarket];
+    if (sellMarket.id !== buyMarket.id) selectedMarkets.push(sellMarket);
+    const pricesByMarket = new Map<string, Map<number, RegionalAppraisalPrices>>();
+    await Promise.all(
+      selectedMarkets.map(async (market) => {
+        const appraisalEntries = await Promise.all(
+          [...typeIds].map(async (typeId) => {
+            const prices = await getRegionalAppraisalPrices(
+              market.regionId,
+              typeId,
+              market.stationId,
+            ).catch(() => emptyAppraisalPrices);
+            return [typeId, prices] as const;
+          }),
+        );
+        pricesByMarket.set(market.id, new Map(appraisalEntries));
       }),
     );
-    const pricesByTypeId = new Map(appraisalEntries);
 
     const items = ores.map((ore) => {
-      const oreUnitPrice = pricesByTypeId.get(ore.typeId)?.minSellPrice ?? null;
+      const buyPrices = pricesByMarket.get(buyMarket.id)?.get(ore.typeId) ?? emptyAppraisalPrices;
+      const oreUnitPrice = selectRegionalAppraisalPrice(buyPrices, parsed.data.buyPriceType);
       const oreCost = oreUnitPrice === null ? null : oreUnitPrice * ore.quantity;
       const materials = ore.yields.map((material) => {
-        const unitPrice = pricesByTypeId.get(material.typeId)?.minSellPrice ?? null;
+        const sellPrices =
+          pricesByMarket.get(sellMarket.id)?.get(material.typeId) ?? emptyAppraisalPrices;
+        const unitPrice = selectRegionalAppraisalPrice(sellPrices, parsed.data.sellPriceType);
         return {
           ...material,
           volume: material.unitVolume * material.quantity,
@@ -165,7 +186,7 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({
-      market: market.name,
+      markets: { buy: buyMarket.name, sell: sellMarket.name },
       generatedAt: new Date().toISOString(),
       items,
     });
