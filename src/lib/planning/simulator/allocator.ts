@@ -55,15 +55,15 @@ function locationPairKey(firstLocationId: number, secondLocationId: number): str
     : `${secondLocationId}:${firstLocationId}`;
 }
 
-function stockpileRoutePolicy(
+/** Builds route restrictions from activity facilities, excluding stock-only destinations. */
+function stockpileActivityRoutePolicy(
   stockpiles: readonly Pick<PlanStockpile, "locations" | "groupAssignments">[],
 ) {
-  const stockpileLocationIds = new Set<number>();
+  const stockpileActivityLocationIds = new Set<number>();
   const sameStockpileLocationPairs = new Set<string>();
   for (const stockpile of stockpiles) {
-    const locationIds = [
+    const activityLocationIds = [
       ...new Set([
-        stockpile.locations.stock,
         stockpile.locations.manufacturing,
         stockpile.locations.reactions,
         stockpile.locations.reprocessing,
@@ -72,16 +72,20 @@ function stockpileRoutePolicy(
         ...Object.values(stockpile.groupAssignments ?? {}),
       ]),
     ];
-    for (const locationId of locationIds) stockpileLocationIds.add(locationId);
-    for (let firstIndex = 0; firstIndex < locationIds.length; firstIndex += 1) {
-      for (let secondIndex = firstIndex + 1; secondIndex < locationIds.length; secondIndex += 1) {
+    for (const locationId of activityLocationIds) stockpileActivityLocationIds.add(locationId);
+    for (let firstIndex = 0; firstIndex < activityLocationIds.length; firstIndex += 1) {
+      for (
+        let secondIndex = firstIndex + 1;
+        secondIndex < activityLocationIds.length;
+        secondIndex += 1
+      ) {
         sameStockpileLocationPairs.add(
-          locationPairKey(locationIds[firstIndex], locationIds[secondIndex]),
+          locationPairKey(activityLocationIds[firstIndex], activityLocationIds[secondIndex]),
         );
       }
     }
   }
-  return { stockpileLocationIds, sameStockpileLocationPairs };
+  return { stockpileActivityLocationIds, sameStockpileLocationPairs };
 }
 
 /** Deterministically allocates ordinary lots and blueprint runs without duplicating stock. */
@@ -94,7 +98,7 @@ export class SimulationAllocator {
   private readonly reservedBlueprintRunsByLotId = new Map<string, number>();
   private readonly blueprintDestinationByLotId = new Map<string, number>();
   private readonly previewBlueprintDestinationByLotId = new Map<string, number>();
-  private readonly stockpileLocationIds: ReadonlySet<number>;
+  private readonly stockpileActivityLocationIds: ReadonlySet<number>;
   private readonly sameStockpileLocationPairs: ReadonlySet<string>;
   private readonly blockInterStockpileHauling: boolean;
   private readonly systemIdByLocationId: ReadonlyMap<number, number>;
@@ -115,8 +119,8 @@ export class SimulationAllocator {
     blockInterStockpileHauling = false,
     facilityProfiles: readonly SimulationFacilityProfile[] = [],
   ) {
-    const routePolicy = stockpileRoutePolicy(stockpiles);
-    this.stockpileLocationIds = routePolicy.stockpileLocationIds;
+    const routePolicy = stockpileActivityRoutePolicy(stockpiles);
+    this.stockpileActivityLocationIds = routePolicy.stockpileActivityLocationIds;
     this.sameStockpileLocationPairs = routePolicy.sameStockpileLocationPairs;
     this.blockInterStockpileHauling = blockInterStockpileHauling;
     this.systemIdByLocationId = new Map(
@@ -1347,8 +1351,8 @@ export class SimulationAllocator {
     }
     return (
       this.blockInterStockpileHauling
-      && this.stockpileLocationIds.has(lot.locationId)
-      && this.stockpileLocationIds.has(destinationLocationId)
+      && this.stockpileActivityLocationIds.has(lot.locationId)
+      && this.stockpileActivityLocationIds.has(destinationLocationId)
       && !this.sameStockpileLocationPairs.has(
         locationPairKey(lot.locationId, destinationLocationId),
       )

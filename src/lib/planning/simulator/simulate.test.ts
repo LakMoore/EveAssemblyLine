@@ -475,14 +475,14 @@ void test("shows Guru Forge active Charon supply separately from both Jita trans
   assert.equal(result.metadata.invariantViolationCount, 0);
 });
 
-void test("excludes another stockpile's Charon before planning replacement production", async () => {
+void test("restricts another stockpile's activity stock but allows final-destination stock", async () => {
   const request = parseSimulatorRequest({
     stockpiles: [
       {
         id: "naboo",
         name: "Naboo",
         locations: {
-          stock: 10,
+          stock: 20,
           manufacturing: 20,
           reactions: 30,
           reprocessing: 40,
@@ -514,26 +514,94 @@ void test("excludes another stockpile's Charon before planning replacement produ
     simulation: { version: 1, blockInterStockpileHauling: true },
   });
 
-  for (const blockInterStockpileHauling of [true, false]) {
-    const result = await simulateIndustry({
-      ...request,
-      simulation: { ...request.simulation, blockInterStockpileHauling },
-    });
-    const charonHauls = result.lists.haulingTasks.filter((task) => task.typeId === 20185);
-    const charonJobs = result.lists.manufacturingJobs.filter((job) => job.productTypeId === 20185);
+  const fixtureAssets = request.assets;
+  assert.ok(Array.isArray(fixtureAssets));
+  for (const sourceLocationId of [70, 80]) {
+    for (const blockInterStockpileHauling of [true, false]) {
+      const blocked = blockInterStockpileHauling && sourceLocationId === 80;
+      const result = await simulateIndustry({
+        ...request,
+        assets: fixtureAssets.map((asset) =>
+          asset.typeId === 20185 && asset.locationId === 70
+            ? { ...asset, locationId: sourceLocationId }
+            : asset,
+        ),
+        simulation: { ...request.simulation, blockInterStockpileHauling },
+      });
+      const charonHauls = result.lists.haulingTasks.filter((task) => task.typeId === 20185);
+      const charonJobs = result.lists.manufacturingJobs.filter(
+        (job) => job.productTypeId === 20185,
+      );
 
-    assert.equal(
-      charonHauls.some((task) => task.fromLocationId === 70),
-      !blockInterStockpileHauling,
-    );
-    assert.equal(charonHauls.find((task) => task.fromLocationId === 20)?.quantity, 1);
-    assert.equal(
-      charonJobs.reduce((total, job) => total + job.requiredRuns, 0),
-      blockInterStockpileHauling ? 1 : 0,
-    );
-    assert.ok(charonJobs.every((job) => job.locationId === 20));
-    assert.equal(result.metadata.invariantViolationCount, 0);
+      assert.equal(
+        charonHauls.some((task) => task.fromLocationId === sourceLocationId),
+        !blocked,
+      );
+      assert.equal(
+        charonHauls.find((task) => task.fromLocationId === sourceLocationId)?.quantity,
+        blocked ? undefined : 1,
+      );
+      assert.equal(
+        charonJobs.reduce((total, job) => total + job.requiredRuns, 0),
+        blocked ? 1 : 0,
+      );
+      assert.ok(charonJobs.every((job) => job.locationId === 20));
+      assert.equal(result.metadata.invariantViolationCount, 0);
+    }
   }
+});
+
+void test("hauls Cadmium from another stockpile's final destination instead of buying", async () => {
+  const result = await simulateIndustry(
+    parseSimulatorRequest({
+      stockpiles: [
+        {
+          id: "reaction-stockpile",
+          name: "Reaction stockpile",
+          locations: {
+            stock: 30,
+            manufacturing: 20,
+            reactions: 30,
+            reprocessing: 40,
+            copying: 50,
+            invention: 60,
+          },
+          items: [{ typeId: 16643, quantity: 17507, me: 0, te: 0, fromCompression: false }],
+        },
+        {
+          id: "jita-sell",
+          name: "Jita Sell",
+          locations: {
+            stock: 70,
+            manufacturing: 80,
+            reactions: 80,
+            reprocessing: 80,
+            copying: 80,
+            invention: 80,
+          },
+          items: [],
+        },
+      ],
+      assets: [
+        { typeId: 16643, quantity: 15108, locationId: 30 },
+        { typeId: 16643, quantity: 60100, locationId: 70 },
+      ],
+      settings: { includeCorporationAssets: true, buildBlacklist: [], buyBlacklist: [] },
+      simulation: { version: 1, blockInterStockpileHauling: true },
+    }),
+  );
+
+  assert.deepEqual(
+    result.lists.haulingTasks
+      .filter((task) => task.typeId === 16643)
+      .map((task) => [task.fromLocationId, task.toLocationId, task.quantity]),
+    [[70, 30, 2399]],
+  );
+  assert.equal(
+    result.lists.materialsToBuy.some((purchase) => purchase.typeId === 16643),
+    false,
+  );
+  assert.equal(result.metadata.invariantViolationCount, 0);
 });
 
 void test("keeps fully stocked transfer-only sources on the Plan rather than Surplus", async () => {

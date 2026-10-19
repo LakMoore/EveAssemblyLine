@@ -56,9 +56,10 @@ This section is authoritative where the older design below differs from the runn
   future transfer moves them to a different demand location. Future supply is gross output at the
   source; outgoing commitments, including active-job output, are recorded separately as transferred
   out rather than netted out of future supply. Only existing assets appear on the
-  actionable hauling list. When inter-stockpile hauling is disabled, all stock destinations,
-  activity facilities, and group-assigned facilities participate in the restriction: transfers
-  between participating locations require a shared stockpile. Unassigned sources remain eligible.
+  actionable hauling list. When inter-stockpile hauling is disabled, only activity facilities and
+  group-assigned facilities participate in the restriction: transfers between participating
+  locations require a shared stockpile. Final stock destinations do not participate unless they
+  are also activity facilities. Unassigned sources remain eligible; explicit haul exclusions still apply.
   Undated prerequisites have no timed
   install. Its native response includes grouped display lists and invariant metadata; location/type
   diagnostic ledgers remain internal to the endpoint. The visible

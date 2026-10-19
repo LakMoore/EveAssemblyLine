@@ -258,7 +258,7 @@ void test("blocks a haul route for every owner", () => {
   assert.equal(allocator.haulingTasks.length, 0);
 });
 
-void test("blocks cross-stockpile hauls including stock destinations", () => {
+void test("restricts cross-stockpile hauls only between activity locations", () => {
   const stockpiles = [
     {
       locations: {
@@ -344,10 +344,12 @@ void test("blocks cross-stockpile hauls including stock destinations", () => {
     true,
   );
   assert.equal(
-    endDestinationSource.claimOrdinarySupply(34, 2, 10, { ...account, locationId: 10 }, "job")
+    endDestinationSource.claimOrdinarySupply(34, 2, 11, { ...account, locationId: 11 }, "job")
       .remote,
-    0,
+    2,
   );
+  assert.equal(endDestinationSource.haulingTasks[0].fromLocationId, 20);
+  assert.equal(endDestinationSource.haulingTasks[0].toLocationId, 11);
 
   const endDestinationTarget = new SimulationAllocator(
     {
@@ -358,7 +360,41 @@ void test("blocks cross-stockpile hauls including stock destinations", () => {
     stockpiles,
     true,
   );
-  assert.equal(endDestinationTarget.claimOrdinarySupply(34, 2, 20, account, "job").remote, 0);
+  assert.equal(endDestinationTarget.claimOrdinarySupply(34, 2, 20, account, "job").remote, 2);
+  assert.equal(endDestinationTarget.haulingTasks[0].fromLocationId, 11);
+  assert.equal(endDestinationTarget.haulingTasks[0].toLocationId, 20);
+
+  const excludedStockDestination = new SimulationAllocator(
+    remoteInventory,
+    [{ typeId: 34, fromLocationId: 21, toLocationId: 10 }],
+    stockpiles,
+    true,
+  );
+  assert.equal(
+    excludedStockDestination.claimOrdinarySupply(34, 2, 10, { ...account, locationId: 10 }, "job")
+      .remote,
+    0,
+  );
+
+  const destinationAlsoUsedForActivity = new SimulationAllocator(
+    {
+      ...inventory,
+      itemLots: [{ ...inventory.itemLots[1], locationId: 20 }],
+    },
+    [],
+    [stockpiles[0], { locations: { ...stockpiles[1].locations, reprocessing: 20 } }],
+    true,
+  );
+  assert.equal(
+    destinationAlsoUsedForActivity.claimOrdinarySupply(
+      34,
+      2,
+      11,
+      { ...account, locationId: 11 },
+      "job",
+    ).remote,
+    0,
+  );
 });
 void test("includes assigned facilities in inter-stockpile haul restrictions", () => {
   const stockpiles = [
