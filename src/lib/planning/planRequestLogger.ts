@@ -257,18 +257,28 @@ export async function getPlanRequestLogPage(
 ): Promise<PlanRequestLogPage> {
   const database = getFirestore(getFirebaseApp());
   const collection = database.collection(planRequestsCollection);
+  const scanBatchSize = 100;
+  const targetCount = page * pageSize;
+  const matchingDocuments: FirebaseFirestore.QueryDocumentSnapshot[] = [];
+  const countSnapshotPromise = collection.where("summary.endpoint", "==", "simulate").count().get();
+  let cursor: FirebaseFirestore.QueryDocumentSnapshot | undefined;
 
-  const [snapshot, countSnapshot] = await Promise.all([
-    collection
-      .where("summary.endpoint", "==", "simulate")
-      .orderBy("createdAt", "desc")
-      .offset((page - 1) * pageSize)
-      .limit(pageSize)
-      .get(),
-    collection.where("summary.endpoint", "==", "simulate").count().get(),
-  ]);
+  // Filter after ordering so this read only needs Firestore's automatic single-field indexes.
+  while (matchingDocuments.length < targetCount) {
+    let query = collection.orderBy("createdAt", "desc").limit(scanBatchSize);
+    if (cursor) query = query.startAfter(cursor);
+    const snapshot = await query.get();
+    if (snapshot.empty) break;
+
+    for (const document of snapshot.docs) {
+      if (document.get("summary.endpoint") === "simulate") matchingDocuments.push(document);
+    }
+    cursor = snapshot.docs[snapshot.docs.length - 1];
+    if (snapshot.size < scanBatchSize) break;
+  }
+  const countSnapshot = await countSnapshotPromise;
   const entries = new Map<string, PlanRequestLogMetadata>();
-  for (const document of snapshot.docs) {
+  for (const document of matchingDocuments.slice((page - 1) * pageSize, targetCount)) {
     const value = document.data() as {
       requestId?: string;
       storagePath?: string;

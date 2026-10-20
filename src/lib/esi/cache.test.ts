@@ -19,6 +19,8 @@ import {
   getStructureResolverCharacterId,
   isCorporationRecordAllowed,
   isCorporationRecordAccessible,
+  shouldIncludeCorporationSellOrder,
+  shouldIncludeCharacterMarketOrder,
   isCargoContainerType,
   isHaulableShipHoldAsset,
   resolveAssetLocationIds,
@@ -932,6 +934,34 @@ void test("deducts each newer sell order once using its original quantity", () =
 
   assert.equal(first.get("34:600000001"), 100);
   assert.deepEqual([...second], [...first]);
+});
+
+void test("includes an attached character's corporation orders without hangar TAKE access", () => {
+  const sellOrder = { isBuyOrder: undefined, volumeRemain: 110 };
+  const buyOrder = { isBuyOrder: true, volumeRemain: 110 };
+
+  assert.equal(shouldIncludeCorporationSellOrder(sellOrder, true, false), true);
+  assert.equal(shouldIncludeCorporationSellOrder(sellOrder, false, false), false);
+  assert.equal(shouldIncludeCorporationSellOrder(sellOrder, false, true), true);
+  assert.equal(shouldIncludeCorporationSellOrder(buyOrder, true, true), false);
+  assert.equal(
+    shouldIncludeCorporationSellOrder({ ...sellOrder, volumeRemain: 0 }, true, true),
+    false,
+  );
+});
+
+void test("selects character-feed sell orders using the actual market-order owner", () => {
+  const personalOrder = {
+    isBuyOrder: false,
+    isCorporation: false,
+    volumeRemain: 110,
+  };
+  const corporationOrder = { ...personalOrder, isCorporation: true };
+
+  assert.equal(shouldIncludeCharacterMarketOrder(personalOrder, true, false), true);
+  assert.equal(shouldIncludeCharacterMarketOrder(personalOrder, false, true), false);
+  assert.equal(shouldIncludeCharacterMarketOrder(corporationOrder, true, false), false);
+  assert.equal(shouldIncludeCharacterMarketOrder(corporationOrder, false, true), true);
 });
 
 void test("uses the resolved root location for installed-job asset deductions", () => {

@@ -1092,8 +1092,10 @@ function ViewItemsModal({
       ? isBlueprintStockItem(item)
       : (item.category ?? "item") === filter.value;
   });
+  const filteredTypeIds = new Set(filteredItems.map((item) => item.typeId));
   const displayItems = new Map<number, StockTypeBucket>();
-  for (const item of filteredItems) {
+  for (const item of location.items) {
+    if (!filteredTypeIds.has(item.typeId)) continue;
     const existing = displayItems.get(item.typeId);
     const isMarketOrder = item.source === "marketOrder";
     const isProduction = isActiveProductionItem(item);

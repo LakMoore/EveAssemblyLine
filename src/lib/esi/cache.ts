@@ -527,6 +527,30 @@ function isCorporationLocationAccessible(
   return false;
 }
 
+/** Includes own corporation orders independently of hangar TAKE access. */
+export function shouldIncludeCorporationSellOrder(
+  order: Pick<MarketOrderRecord, "isBuyOrder" | "volumeRemain">,
+  isMyCorporationOrder: boolean,
+  includeAllCorporationOrders: boolean,
+) {
+  // The corporation orders feed omits is_buy_order on sell orders.
+  return (
+    order.isBuyOrder !== true
+    && order.volumeRemain > 0
+    && (isMyCorporationOrder || includeAllCorporationOrders)
+  );
+}
+
+/** Selects sell orders from a character feed according to their actual owner scope. */
+export function shouldIncludeCharacterMarketOrder(
+  order: Pick<MarketOrderRecord, "isBuyOrder" | "isCorporation" | "volumeRemain">,
+  personalSellOrdersAsStock: boolean,
+  myCorporationSellOrdersAsStock: boolean,
+) {
+  if (order.isBuyOrder !== false || order.volumeRemain <= 0) return false;
+  return order.isCorporation === true ? myCorporationSellOrdersAsStock : personalSellOrdersAsStock;
+}
+
 function corporationSourceLabel(
   locationFlag: CorporationHangarFlag,
   divisions: readonly EsiCorporationDivision[] | null | undefined,
@@ -3293,8 +3317,17 @@ export async function getMarketOrderStock(
 ): Promise<PlanStockItem[] | null> {
   const stock: PlanStockItem[] = [];
   const typeIds = new Set<number>();
+  const seenOrderIds = new Set<number>();
   let hasUsableSource = false;
   let hasUnavailableSource = false;
+  const includeCorporationOrders =
+    options.allCorporationSellOrdersAsStock || options.myCorporationSellOrdersAsStock;
+  const projection = includeCorporationOrders
+    ? await getCorporationProjection(characterIds, true, sessionId, policies)
+    : undefined;
+  const charactersById = new Map(
+    projection?.characters.map((character) => [character.characterId, character]) ?? [],
+  );
   const resolveNames = async () => {
     if (typeIds.size === 0) return stock;
     const types = await getTypesByIds([...typeIds]);
@@ -3303,7 +3336,7 @@ export async function getMarketOrderStock(
       name: types.get(item.typeId)?.name.en ?? item.name,
     }));
   };
-  if (options.personalSellOrdersAsStock) {
+  if (options.personalSellOrdersAsStock || options.myCorporationSellOrdersAsStock) {
     for (const characterId of characterIds) {
       const cache = getCache(characterCaches, characterId, sessionId);
       if (!hasUsableMarketOrders(cache)) {
@@ -3313,16 +3346,27 @@ export async function getMarketOrderStock(
       hasUsableSource = true;
       const orders = cache.marketOrders?.lastBody ?? [];
       for (const order of orders) {
-        if (order.isBuyOrder !== false || order.isCorporation || order.volumeRemain <= 0) continue;
+        if (
+          !shouldIncludeCharacterMarketOrder(
+            order,
+            options.personalSellOrdersAsStock,
+            options.myCorporationSellOrdersAsStock,
+          )
+        ) continue;
+        const isCorporationOrder = order.isCorporation === true;
+        const character = charactersById.get(characterId);
+        const corporationId = character?.corporationId;
+        if (isCorporationOrder && corporationId === undefined) continue;
+        seenOrderIds.add(order.orderId);
         typeIds.add(order.typeId);
         stock.push({
           typeId: order.typeId,
           name: `Type ${order.typeId}`,
           quantity: order.volumeRemain,
           sourceLocationId: order.locationId,
-          ownerType: order.ownerType,
-          ownerId: order.ownerId,
-          marketOrderIssuerId: order.issuedBy,
+          ownerType: isCorporationOrder ? "corporation" : order.ownerType,
+          ownerId: isCorporationOrder ? corporationId : order.ownerId,
+          marketOrderIssuerId: order.issuedBy ?? characterId,
           category: "item",
           source: "marketOrder",
         });
@@ -3330,10 +3374,7 @@ export async function getMarketOrderStock(
     }
   }
 
-  if (!options.allCorporationSellOrdersAsStock && !options.myCorporationSellOrdersAsStock) {
-    return resolveNames();
-  }
-  const projection = await getCorporationProjection(characterIds, true, sessionId, policies);
+  if (!includeCorporationOrders || !projection) return resolveNames();
   for (const corporationId of projection.corporationIds) {
     const cache = getCache(corporationCaches, corporationId, sessionId);
     if (!hasUsableMarketOrders(cache)) {
@@ -3342,29 +3383,26 @@ export async function getMarketOrderStock(
     }
     hasUsableSource = true;
     const orders = cache.marketOrders?.lastBody ?? [];
-    const policy = projection.policiesByCorporationId.get(corporationId);
     const rawAssets = cache.allAssetsRaw?.lastBody ?? [];
     const rawAssetsByItemId = new Map(rawAssets.map((asset) => [asset.itemId, asset]));
     const structureIds = knownStructureIds(cache);
     for (const order of orders) {
-      if (order.isBuyOrder !== false || order.volumeRemain <= 0) continue;
-      if (
-        policy
-        && !isCorporationLocationAccessible(
-          order.locationId,
-          policy,
-          projection.characters,
-          rawAssetsByItemId,
-          structureIds,
-        )
-      ) continue;
+      if (seenOrderIds.has(order.orderId)) continue;
       const isMyCorporationOrder =
-        order.issuedBy !== undefined
+        options.myCorporationSellOrdersAsStock
+        && order.issuedBy !== undefined
         && projection.characters.some(
           (character) =>
             character.characterId === order.issuedBy && character.corporationId === corporationId,
         );
-      if (!options.allCorporationSellOrdersAsStock && !isMyCorporationOrder) continue;
+      if (
+        !shouldIncludeCorporationSellOrder(
+          order,
+          isMyCorporationOrder,
+          options.allCorporationSellOrdersAsStock,
+        )
+      ) continue;
+      seenOrderIds.add(order.orderId);
       typeIds.add(order.typeId);
       const corporationSource = getCorporationLocationSource(
         order.locationId,

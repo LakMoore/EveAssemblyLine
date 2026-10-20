@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { defaultSettings } from "@/lib/planning/preferences";
+import { createPlannerSimulationRequest } from "./plannerRequest";
 import { filterSimulationAssetsByTakeAccess, prepareSimulationAssets } from "./requestAssets";
 
 void test("filters corporation assets without TAKE access and preserves personal assets", () => {
@@ -213,6 +215,81 @@ void test("preserves packaged market orders", () => {
   assert.deepEqual(
     prepared.map((item) => item.typeId),
     [34],
+  );
+});
+
+void test("includes corporation sell orders in the simulator request assets", () => {
+  const request = createPlannerSimulationRequest({
+    stockpiles: [
+      {
+        id: "stockpile",
+        name: "Jita",
+        locations: {
+          stock: 60003760,
+          manufacturing: 60003760,
+          reactions: 60003760,
+          reprocessing: 60003760,
+          copying: 60003760,
+          invention: 60003760,
+        },
+        items: [
+          {
+            typeId: 34,
+            name: "Tritanium",
+            quantity: 1,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+            categoryName: "Minerals",
+          },
+        ],
+      },
+    ],
+    stock: [
+      {
+        typeId: 2117,
+        name: "Burst Jammer II",
+        quantity: 110,
+        sourceLocationId: 60003760,
+        ownerType: "corporation",
+        ownerId: 98686879,
+        marketOrderIssuerId: 2117405992,
+        marketOrderSide: "sell",
+        source: "marketOrder",
+      },
+    ],
+    requestReady: true,
+    settings: defaultSettings,
+    characterStatuses: [],
+    language: "en",
+    locationOptions: [],
+    cachedAssetLocations: [],
+    knownStructures: [],
+    haulExclusions: [],
+    jobs: null,
+    includeStock: true,
+    simulateSurplus: false,
+    allowInterStockpileHauling: false,
+    onlyIncludeTakeAccessAssets: true,
+  });
+
+  assert.deepEqual(
+    request?.assets.map(({ typeId, quantity, source, marketOrderSide, ownerType }) => ({
+      typeId,
+      quantity,
+      source,
+      marketOrderSide,
+      ownerType,
+    })),
+    [
+      {
+        typeId: 2117,
+        quantity: 110,
+        source: "marketOrder",
+        marketOrderSide: "sell",
+        ownerType: "corporation",
+      },
+    ],
   );
 });
 
