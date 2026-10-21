@@ -65,6 +65,7 @@ type ResultItem = {
   ignored: boolean;
   sellPrice?: number | null;
   sellTotal?: number | null;
+  reprocessable?: boolean;
   reprocessingEfficiency?: number;
   packagedVolume?: number;
   fromReprocessing?: number;
@@ -90,12 +91,25 @@ type CompressResult = {
   toBuy?: ResultItem[];
   surplus?: ResultItem[];
   efficiencies?: EfficiencyResult;
+  metrics?: {
+    originalVolume: number;
+    purchasedVolume: number;
+    volumeLimit: number;
+    originalCost: number;
+    purchaseCost: number;
+    surplusCredit: number;
+    estimatedSavings: number;
+  };
 };
 
 function formatIsk(value?: number | null) {
   return value === undefined || value === null
     ? "Unavailable"
     : `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value)} ISK`;
+}
+
+function formatVolume(value: number) {
+  return value.toLocaleString(undefined, { maximumFractionDigits: 0, roundingMode: "ceil" });
 }
 
 const plannerCompressImportKey = "assemblyline:compress:planner-import";
@@ -142,6 +156,7 @@ function CompressContent() {
   const importedMultibuy = searchParams.get("multibuy");
   const { language } = useAppLanguage();
   const [result, setResult] = useState<CompressResult | null>(null);
+  const [resultKey, setResultKey] = useState("");
   const [pasteDialogLoadKey, setPasteDialogLoadKey] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -149,6 +164,22 @@ function CompressContent() {
   const { settings, updateSettings, selectedLocation, selectedImplant, skillLevels } =
     compressionSettings;
   const items = settings.items;
+  const requestBody = selectedLocation
+    ? {
+        language,
+        items: items.map(({ typeId, name, quantity }) => ({ typeId, name, quantity })),
+        reprocessingProfile: createReprocessingProfile(
+          selectedLocation,
+          skillLevels,
+          selectedImplant?.level ?? 0,
+        ),
+        marketId:
+          marketHubs.find((market) => market.id === settings.marketId)?.regionId
+          ?? marketHubs[0].regionId,
+        orderType: settings.orderType,
+      }
+    : null;
+  const requestKey = JSON.stringify(requestBody);
   const isPasteOpen =
     pasteDialogLoadKey === compressionSettings.loadKey && !compressionSettings.isLoading;
   const importedRef = useRef("");
@@ -308,25 +339,12 @@ function CompressContent() {
     setResult(null);
     setError("");
     try {
-      const reprocessingProfile = createReprocessingProfile(
-        selectedLocation,
-        skillLevels,
-        selectedImplant?.level ?? 0,
-      );
       const response = await fetch(
         "/api/compress",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            language,
-            items: items.map(({ typeId, name, quantity }) => ({ typeId, name, quantity })),
-            reprocessingProfile,
-            marketId:
-              marketHubs.find((market) => market.id === settings.marketId)?.regionId
-              ?? marketHubs[0].regionId,
-            orderType: settings.orderType,
-          }),
+          body: requestKey,
         },
       );
       const contentType = response.headers.get("content-type") ?? "";
@@ -337,6 +355,7 @@ function CompressContent() {
         throw new Error(data?.error ?? "The compression service is not available yet.");
       }
       if (!data) throw new Error("The compression service returned an invalid response.");
+      setResultKey(requestKey);
       setResult(data);
       trackAnalyticsEvent("compress", { outcome: "success" });
     }
@@ -478,7 +497,7 @@ function CompressContent() {
         </section>
       </form>
 
-      {result && (
+      {result && resultKey === requestKey && (
         <Results
           result={result}
           inputItems={items}
@@ -582,10 +601,15 @@ function Results({
   );
   const efficiencyGroups = result.efficiencies?.groups ?? [];
   const items = active.key === "efficiency" ? [] : (result[active.key] ?? []);
+  const reprocessablePurchases = (result.toBuy ?? []).filter(
+    (item): item is ResultItem & { typeId: number } =>
+      item.typeId !== undefined && !item.ignored && item.reprocessable === true,
+  );
   const itemCount = active.key === "efficiency" ? efficiencyGroups.length : items.length;
   const volumeOf = (quantity: number, item: ResultItem) => quantity * (item.packagedVolume ?? 0);
-  const totalQuantity = Math.ceil(
-    items.reduce((total, item) => total + volumeOf(item.quantity, item), 0),
+  const totalQuantity = items.reduce(
+    (total, item) => total + (item.ignored ? 0 : volumeOf(item.quantity, item)),
+    0,
   );
   const totalReprocessed = Math.ceil(
     items.reduce((total, item) => total + volumeOf(item.fromReprocessing ?? 0, item), 0),
@@ -594,10 +618,10 @@ function Results({
     items.reduce((total, item) => total + volumeOf(item.surplus ?? 0, item), 0),
   );
   const totalSellValue = items.some(
-    (item) => item.sellTotal === undefined || item.sellTotal === null,
+    (item) => !item.ignored && (item.sellTotal === undefined || item.sellTotal === null),
   )
     ? null
-    : items.reduce((total, item) => total + (item.sellTotal ?? 0), 0);
+    : items.reduce((total, item) => total + (item.ignored ? 0 : (item.sellTotal ?? 0)), 0);
   async function copyToBuyList() {
     try {
       await navigator.clipboard.writeText(
@@ -610,13 +634,9 @@ function Results({
     }
   }
   async function addToPlan() {
-    if (isAddingToPlan) return;
+    if (isAddingToPlan || reprocessablePurchases.length === 0) return;
     setIsAddingToPlan(true);
     try {
-      const additions = items.filter(
-        (item): item is ResultItem & { typeId: number } =>
-          item.typeId !== undefined && !item.ignored,
-      );
       const locationId = Number(selectedLocation?.id);
       if (!Number.isSafeInteger(locationId) || locationId <= 0 || !selectedLocation) {
         throw new Error("Select a reprocessing location before adding the results to a plan.");
@@ -629,7 +649,7 @@ function Results({
           && stockpile.locations.stock === locationId
           && stockpile.locations.reprocessing === locationId,
       );
-      const compressedItems: ClientBuildItem[] = additions.map((item) => ({
+      const compressedItems: ClientBuildItem[] = reprocessablePurchases.map((item) => ({
         name: item.name,
         categoryName: "Unknown",
         typeId: item.typeId,
@@ -691,9 +711,56 @@ function Results({
           <h2>Compression result</h2>
         </div>
         <span className={styles.resultStamp}>
-          SDE + ESI REPROCESSING · {result.marketName ?? "Selected market"} SELL ORDERS
+          SDE + ESI REPROCESSING · {result.marketName ?? "Selected market"}
         </span>
       </div>
+      {result.metrics && result.metrics.originalVolume > 0 && (
+        <dl className="grid gap-3 border-y py-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div>
+            <dt className="text-sm text-muted-foreground">Original cargo</dt>
+            <dd className="tabular-nums">{formatVolume(result.metrics.originalVolume)} m³</dd>
+          </div>
+          <div>
+            <dt className="text-sm text-muted-foreground">
+              To buy (
+              {result.metrics.originalVolume - result.metrics.volumeLimit < 0.00001
+                ? `less than ${formatVolume(result.metrics.originalVolume)} m³`
+                : `max ${result.metrics.volumeLimit.toLocaleString(undefined, { maximumFractionDigits: 9, roundingMode: "floor" })} m³`}
+              )
+            </dt>
+            <dd className="tabular-nums">{formatVolume(result.metrics.purchasedVolume)} m³</dd>
+          </div>
+          <div>
+            <dt className="text-sm text-muted-foreground">Original purchase estimate</dt>
+            <dd className="tabular-nums">{formatIsk(result.metrics.originalCost)}</dd>
+          </div>
+          <div>
+            <dt className="text-sm text-muted-foreground">Purchase estimate</dt>
+            <dd className="tabular-nums">{formatIsk(result.metrics.purchaseCost)}</dd>
+          </div>
+          <div>
+            <dt className="text-sm text-muted-foreground">Purchase savings</dt>
+            <dd className="tabular-nums">{formatIsk(result.metrics.estimatedSavings)}</dd>
+          </div>
+          <div>
+            <dt className="text-sm text-muted-foreground">
+              Savings including surplus bids (estimate)
+            </dt>
+            <dd className="tabular-nums">
+              {formatIsk(result.metrics.estimatedSavings + result.metrics.surplusCredit)}
+            </dd>
+          </div>
+        </dl>
+      )}
+      {result.metrics && result.surplus?.some((item) => !item.ignored && item.quantity > 0) && (
+        <p className="text-sm text-muted-foreground">
+          Additional surplus bid estimate: {formatIsk(result.metrics.surplusCredit)}. Not included
+          in purchase savings;{" "}
+          {result.metrics.surplusCredit === 0
+            ? "no station bids cover this surplus."
+            : "actual sales and fees may differ."}
+        </p>
+      )}
       <div className="flex justify-end">
         <Button
           type="button"
@@ -760,8 +827,12 @@ function Results({
                 <h3>{active.label}</h3>
                 <p>
                   {active.note}
-                  {(active.key === "plan" || active.key === "toBuy" || active.key === "surplus")
+                  {active.key === "plan"
                     && ` Sell orders at ${result.marketName ?? "the selected market"}.`}
+                  {active.key === "toBuy"
+                    && ` Estimated purchase prices at ${result.marketName ?? "the selected market"}.`}
+                  {active.key === "surplus"
+                    && ` Indicative buy-order bids at ${result.marketName ?? "the selected market"}.`}
                 </p>
               </div>
               <div className={styles.resultPanelActions}>
@@ -771,7 +842,7 @@ function Results({
                     Copy multibuy
                   </Button>
                 )}
-                {active.key === "toBuy" && items.some((item) => !item.ignored) && (
+                {active.key === "toBuy" && reprocessablePurchases.length > 0 && (
                   <Button
                     type="button"
                     variant="outline"
@@ -779,7 +850,7 @@ function Results({
                     disabled={isBusy || isAddingToPlan}
                   >
                     <Upload aria-hidden="true" />
-                    Add to Plan
+                    Add Compressed to Plan
                   </Button>
                 )}
                 <strong>{itemCount}</strong>
@@ -802,7 +873,7 @@ function Results({
                   <div className={styles.toBuyTableHeader}>
                     <span>Item</span>
                     <span>Quantity</span>
-                    <span>Sell value</span>
+                    <span>{isSurplusTab ? "Bid estimate" : "Purchase estimate"}</span>
                   </div>
                 )}
                 <div className={styles.resultList}>
@@ -838,7 +909,9 @@ function Results({
                         </>
                       )}
                       {isBuyOrSurplusTab && (
-                        <strong data-label="Sell value">{formatIsk(item.sellTotal)}</strong>
+                        <strong data-label={isSurplusTab ? "Bid estimate" : "Purchase estimate"}>
+                          {formatIsk(item.sellTotal)}
+                        </strong>
                       )}
                     </div>
                   ))}
@@ -849,9 +922,15 @@ function Results({
                       <strong className={styles.totalLabel}>
                         Total volume (m<sup>3</sup>)
                       </strong>
-                      <strong data-label="Required">{totalQuantity.toLocaleString()}</strong>
-                      <strong data-label="Reprocessed">{totalReprocessed.toLocaleString()}</strong>
-                      <strong data-label="Surplus">{totalSurplus.toLocaleString()}</strong>
+                      <strong data-label="Required volume (m³)">
+                        {formatVolume(totalQuantity)}
+                      </strong>
+                      <strong data-label="Reprocessed volume (m³)">
+                        {totalReprocessed.toLocaleString()}
+                      </strong>
+                      <strong data-label="Surplus volume (m³)">
+                        {totalSurplus.toLocaleString()}
+                      </strong>
                       <strong data-label="Sell value">{formatIsk(totalSellValue)}</strong>
                     </div>
                   ) : isBuyOrSurplusTab ? (
@@ -862,8 +941,10 @@ function Results({
                         {isSurplusTab ? "Total surplus volume (m" : "Total volume (m"}
                         <sup>3</sup>)
                       </strong>
-                      <strong data-label="Quantity">{totalQuantity.toLocaleString()}</strong>
-                      <strong data-label="Sell value">{formatIsk(totalSellValue)}</strong>
+                      <strong data-label="Volume (m³)">{formatVolume(totalQuantity)}</strong>
+                      <strong data-label={isSurplusTab ? "Bid estimate" : "Purchase estimate"}>
+                        {formatIsk(totalSellValue)}
+                      </strong>
                     </div>
                   ) : null}
                 </div>

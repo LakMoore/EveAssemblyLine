@@ -8,7 +8,12 @@ import {
   getTypeMaterials,
   getTypes,
 } from "@/cache/services/sdeCache";
-import { compressMaterials, type CompressionResultItem } from "@/lib/planning/compressEngine";
+import {
+  compressMaterials,
+  CompressionSolveError,
+  maximumDemandRuns,
+  type CompressionResultItem,
+} from "@/lib/planning/compressEngine";
 import {
   calculateReprocessingProfile,
   efficiencyForType,
@@ -17,11 +22,11 @@ import {
 import { reprocessingProfileSchema } from "@/lib/planning/reprocessingProfile";
 import { isSdeLanguage, type SdeLanguage } from "@/lib/reference/languages";
 import {
-  getMarketSellOrders,
-  getRegionalAppraisalPrices,
+  calculateRegionalAppraisalPrices,
+  getRegionalMarketOrders,
   getSevenDayAverageVolume,
 } from "@/lib/esi/marketHistory";
-import { marketHubs } from "@/lib/reference/marketHubs";
+import { globalPlexMarket, marketHubs } from "@/lib/reference/marketHubs";
 import { specialReprocessableTypeIds } from "@/lib/planning/reprocessStock";
 import type { GroupsRecord, TypesRecord, TypeDogmaRecord } from "@/lib/sde/generated";
 
@@ -65,14 +70,69 @@ type OreGroupMaps = {
   typeDogma: Map<number, TypeDogmaRecord>;
   dogmaAttributes: Map<number, { _key: number; name: string; defaultValue: number }>;
 };
+type MarketCandidate = {
+  typeId: number;
+  price?: number;
+  unitsToReprocess: number;
+  efficiency: number;
+  yields: ReadonlyMap<number, number>;
+  packagedVolume?: number;
+  maxRuns?: number;
+};
 type AppraisedCompressionItem = CompressionResultItem & {
   sellPrice: number | null;
   sellTotal: number | null;
 };
 let oreGroupCache: OreGroupCache | undefined;
 
-/** Adds the selected hub's lowest sell price and quantity total to result rows. */
-function addSellOrderAppraisals(
+/** Combines same-price lots and drops tiers too expensive to be reached within the cargo cap. */
+function compactSellOrders<Candidate extends MarketCandidate>(
+  orders: Candidate[],
+  originalVolume: number,
+  required: ReadonlyMap<number, number>,
+): Candidate[] {
+  const byType = new Map<number, Candidate[]>();
+  for (const order of orders) {
+    const group = byType.get(order.typeId) ?? [];
+    group.push(order);
+    byType.set(order.typeId, group);
+  }
+  return [...byType.values()].flatMap((group) => {
+    const priced = group
+      .filter(
+        (candidate): candidate is Candidate & { price: number; maxRuns: number } =>
+          candidate.price !== undefined && candidate.maxRuns !== undefined && candidate.maxRuns > 0,
+      )
+      .sort((left, right) => left.price - right.price);
+    const volumePerRun = (group[0]?.packagedVolume ?? 0) * (group[0]?.unitsToReprocess ?? 0);
+    if (volumePerRun <= 0) return [];
+    const tiers = new Map<number, Candidate & { price: number; maxRuns: number }>();
+    for (const candidate of priced) {
+      const previous = tiers.get(candidate.price);
+      tiers.set(
+        candidate.price,
+        {
+          ...candidate,
+          maxRuns: (previous?.maxRuns ?? 0) + candidate.maxRuns,
+        },
+      );
+    }
+    // No plan can use more of one ore than fits in the uncompressed input cargo.
+    const maxUsefulRuns = Math.min(
+      Math.floor(originalVolume / volumePerRun),
+      maximumDemandRuns(group[0], required),
+    );
+    let capacity = 0;
+    return [...tiers.values()].filter((tier) => {
+      if (capacity >= maxUsefulRuns) return false;
+      capacity += tier.maxRuns;
+      return true;
+    });
+  });
+}
+
+/** Appraises rows with the acquisition price or realizable bid used by the solve. */
+function addAppraisals(
   items: readonly CompressionResultItem[],
   pricesByTypeId: ReadonlyMap<number, number | null>,
 ): AppraisedCompressionItem[] {
@@ -146,6 +206,8 @@ export async function POST(request: Request) {
     const body = validationResult.data;
     const marketId = body.marketId;
     const orderType = body.orderType;
+    const selectedMarket =
+      marketHubs.find((market) => market.regionId === marketId) ?? marketHubs[0];
 
     const requestedLanguage = body.language ?? null;
     const language: SdeLanguage = isSdeLanguage(requestedLanguage) ? requestedLanguage : "en";
@@ -207,93 +269,118 @@ export async function POST(request: Request) {
               ),
               unitsToReprocess: type.portionSize,
               efficiency: efficiencies[String(compressedTypeId)],
+              packagedVolume: type.packagedVolume ?? type.volume,
               skill,
               yields,
             },
           ]
         : [];
     });
-    const groupName = (name: string) => name.replace(/\s+(?:II|III|IV)-Grade$/, "");
-    const candidatesByGroup = new Map<string, typeof baseCandidates>();
-    for (const candidate of baseCandidates) {
-      const group = groupName(candidate.name);
-      candidatesByGroup.set(group, [...(candidatesByGroup.get(group) ?? []), candidate]);
+    const requestedTypeIds = new Set(body.items.map((item) => item.typeId));
+    const relevantCandidates = baseCandidates.filter(
+      (candidate) =>
+        !candidate.name.startsWith("Batch Compressed ")
+        && [...candidate.yields.keys()].some((typeId) => requestedTypeIds.has(typeId)),
+    );
+    const supportedTypeIds = new Set(
+      relevantCandidates.flatMap((candidate) => [...candidate.yields.keys()]),
+    );
+    const required = new Map<number, number>();
+    for (const item of body.items) {
+      if (supportedTypeIds.has(item.typeId)) {
+        required.set(item.typeId, (required.get(item.typeId) ?? 0) + item.quantity);
+      }
     }
-    const baselineYields = new Map<string, Map<number, number>>();
-    for (const [group, variants] of candidatesByGroup) {
-      const baseline = variants.find((candidate) => candidate.name === group) ?? variants[0];
-      baselineYields.set(group, baseline.yields);
-    }
+    const marketTypeIds = new Set([
+      ...requestedTypeIds,
+      ...relevantCandidates.map((candidate) => candidate.typeId),
+      ...relevantCandidates.flatMap((candidate) => [...candidate.yields.keys()]),
+    ]);
+    const [marketOrders, marketVolumes] = await Promise.all([
+      Promise
+        .all(
+          [...marketTypeIds].map(
+            async (typeId) =>
+              [typeId, await getRegionalMarketOrders(marketId, typeId).catch(() => null)] as const,
+          ),
+        )
+        .then((entries) => new Map(entries)),
+      Promise
+        .all(
+          orderType === "sell"
+            ? []
+            : relevantCandidates.map(
+                async (candidate) =>
+                  [
+                    candidate.typeId,
+                    await getSevenDayAverageVolume(marketId, candidate.typeId).catch(
+                      () => undefined,
+                    ),
+                  ] as const,
+              ),
+        )
+        .then((entries) => new Map(entries)),
+    ]);
+    const marketPrices = new Map(
+      [...marketOrders].map(
+        ([typeId, orders]) =>
+          [
+            typeId,
+            orders === null
+              ? null
+              : calculateRegionalAppraisalPrices(
+                  orders,
+                  typeId === globalPlexMarket.typeId ? undefined : selectedMarket.stationId,
+                ),
+          ] as const,
+      ),
+    );
     const candidates =
       orderType === "sell"
-        ? (
-            await Promise.all(
-              baseCandidates.map(async (candidate) => {
-                if (
-                  ![...candidate.yields.keys()].some((typeId) =>
-                    body.items.some((item) => item.typeId === typeId),
-                  )
-                ) return [];
-                const baseline = baselineYields.get(groupName(candidate.name));
-                const baselineMaterial = baseline
-                  ? [...baseline.entries()].find(([, quantity]) => quantity > 0)
-                  : undefined;
-                const candidateMaterial = baselineMaterial
-                  ? candidate.yields.get(baselineMaterial[0])
-                  : undefined;
-                const multiplier =
-                  baselineMaterial && candidateMaterial
-                    ? candidateMaterial / baselineMaterial[1]
-                    : 1;
-                const orders = await getMarketSellOrders(marketId, candidate.typeId).catch(
-                  () => [],
-                );
-                return orders.map((order) => {
-                  const yields = new Map(
-                    (baseline ?? candidate.yields)
-                      .entries()
-                      .map(([typeId, quantity]) => [typeId, quantity * multiplier] as const),
-                  );
-                  return {
-                    ...candidate,
-                    selectionId: order.orderId,
-                    maxRuns: Math.floor(order.volumeRemain / candidate.unitsToReprocess),
-                    price: order.price / multiplier,
-                    yields,
-                  };
-                });
-              }),
-            )
-          ).flat()
-        : await Promise.all(
-            baseCandidates.map(async (candidate) => {
-              if (
-                ![...candidate.yields.keys()].some((typeId) =>
-                  body.items.some((item) => item.typeId === typeId),
+        ? compactSellOrders(
+            relevantCandidates.flatMap((candidate) =>
+              (marketOrders.get(candidate.typeId) ?? [])
+                .filter(
+                  (order) =>
+                    !order.isBuyOrder
+                    && order.volumeRemain > 0
+                    && order.locationId === selectedMarket.stationId,
                 )
-              ) return candidate;
-              const averageVolume = await getSevenDayAverageVolume(
-                marketId,
-                candidate.typeId,
-              ).catch(() => undefined);
-              return averageVolume === undefined
-                ? candidate
-                : {
-                    ...candidate,
-                    maxRuns: Math.floor(
-                      (averageVolume * (orderType === "buy-5-day" ? 5 : 1))
-                        / candidate.unitsToReprocess,
-                    ),
-                  };
-            }),
-          );
+                .map((order) => ({
+                  ...candidate,
+                  selectionId: order.orderId,
+                  maxRuns: Math.floor(order.volumeRemain / candidate.unitsToReprocess),
+                  price: order.price,
+                })),
+            ),
+            [...required].reduce(
+              (total, [typeId, quantity]) => {
+                const type = types.get(typeId);
+                return total + quantity * (type?.packagedVolume ?? type?.volume ?? 0);
+              },
+              0,
+            ),
+            required,
+          )
+        : relevantCandidates.map((candidate) => {
+            const averageVolume = marketVolumes.get(candidate.typeId);
+            return averageVolume === undefined
+              ? candidate
+              : {
+                  ...candidate,
+                  maxRuns: Math.floor(
+                    (averageVolume * (orderType === "buy-5-day" ? 5 : 1))
+                      / candidate.unitsToReprocess,
+                  ),
+                };
+          });
     const efficiencyGroups = [...skillTypes].map(([key, entries]) => {
       const skillId = /^\d+$/.test(key) ? Number(key) : undefined;
       const skillName =
         skillId === undefined
           ? key
           : (types.get(skillId)?.name[language] ?? types.get(skillId)?.name.en ?? key);
-      const candidate = candidates.find(
+      const candidate = baseCandidates.find(
         (entry) => (entry.skill.id?.toString() ?? entry.skill.name) === key,
       );
       const representativeTypeId = entries[0]?.typeId;
@@ -329,30 +416,82 @@ export async function POST(request: Request) {
     const iceRate =
       efficiencyGroups.find((group) => /^ice processing$/i.test(englishSkillName(group)))
         ?.efficiency ?? calculatedEfficiency.ice;
-    const compressionResult = compressMaterials(body.items, candidates, names);
-    const selectedMarket =
-      marketHubs.find((market) => market.regionId === marketId) ?? marketHubs[0];
-    const appraisalTypeIds = new Set(
-      [...compressionResult.plan, ...compressionResult.toBuy, ...compressionResult.surplus].flatMap(
-        (item) => (item.typeId === undefined ? [] : [item.typeId]),
+    const pricedCandidates = candidates.map((candidate) => ({
+      ...candidate,
+      price:
+        orderType === "sell"
+          ? "price" in candidate && typeof candidate.price === "number"
+            ? candidate.price
+            : undefined
+          : (marketPrices.get(candidate.typeId)?.maxBuyPrice ?? undefined),
+    }));
+    const volumes = new Map(
+      [...types].flatMap(([typeId, type]) => {
+        const volume = type.packagedVolume ?? type.volume;
+        return volume === undefined ? [] : [[typeId, volume] as const];
+      }),
+    );
+    const surplusOrders = new Map(
+      [...new Set(pricedCandidates.flatMap((candidate) => [...candidate.yields.keys()]))].map(
+        (typeId) => {
+          const grouped = new Map<number, number>();
+          for (const order of marketOrders.get(typeId) ?? []) {
+            if (!order.isBuyOrder || order.locationId !== selectedMarket.stationId) continue;
+            if (order.volumeRemain <= 0 || order.price <= 0) continue;
+            grouped.set(order.price, (grouped.get(order.price) ?? 0) + order.volumeRemain);
+          }
+          return [
+            typeId,
+            [...grouped]
+              .map(([price, volumeRemain]) => ({ price, volumeRemain }))
+              .sort((left, right) => right.price - left.price),
+          ] as const;
+        },
       ),
     );
-    const pricesByTypeId = new Map(
-      await Promise.all(
-        [...appraisalTypeIds].map(
-          async (typeId) =>
-            [
-              typeId,
-              await getRegionalAppraisalPrices(marketId, typeId, selectedMarket.stationId)
-                .then((prices) => prices.minSellPrice)
-                .catch(() => null),
-            ] as const,
+    const compressionResult = await compressMaterials(
+      body.items,
+      pricedCandidates,
+      names,
+      {
+        volumes,
+        buyPrices: new Map(
+          [...marketPrices].flatMap(([typeId, prices]) =>
+            prices?.minSellPrice === null || !prices
+              ? []
+              : [[typeId, prices.minSellPrice] as const],
+          ),
+        ),
+        surplusOrders,
+      },
+      supportedTypeIds,
+    );
+    const appraisedPlan = addAppraisals(
+      compressionResult.plan,
+      new Map([...marketPrices].map(([typeId, prices]) => [typeId, prices?.minSellPrice ?? null])),
+    );
+    const toBuyPrices = new Map<number, number | null>(compressionResult.purchasePrices);
+    for (const item of compressionResult.toBuy) {
+      if (item.ignored && item.typeId !== undefined) {
+        toBuyPrices.set(item.typeId, marketPrices.get(item.typeId)?.minSellPrice ?? null);
+      }
+    }
+    const appraisedToBuy = addAppraisals(compressionResult.toBuy, toBuyPrices);
+    const appraisedSurplus = addAppraisals(
+      compressionResult.surplus,
+      new Map(
+        compressionResult.surplus.flatMap((item) =>
+          item.typeId === undefined
+            ? []
+            : [
+                [
+                  item.typeId,
+                  (compressionResult.surplusCredits.get(item.typeId) ?? 0) / item.quantity,
+                ] as const,
+              ],
         ),
       ),
     );
-    const appraisedPlan = addSellOrderAppraisals(compressionResult.plan, pricesByTypeId);
-    const appraisedToBuy = addSellOrderAppraisals(compressionResult.toBuy, pricesByTypeId);
-    const appraisedSurplus = addSellOrderAppraisals(compressionResult.surplus, pricesByTypeId);
     const addPackagedVolumes = (items: typeof compressionResult.plan) =>
       items.map((item) => ({
         ...item,
@@ -365,6 +504,7 @@ export async function POST(request: Request) {
       }));
     return NextResponse.json({
       marketName: selectedMarket.name,
+      metrics: compressionResult.metrics,
       plan: addPackagedVolumes(appraisedPlan),
       toBuy: addPackagedVolumes(appraisedToBuy),
       surplus: addPackagedVolumes(appraisedSurplus),
@@ -384,6 +524,9 @@ export async function POST(request: Request) {
     });
   }
   catch (error) {
+    if (error instanceof CompressionSolveError) {
+      return NextResponse.json({ error: error.message }, { status: 422 });
+    }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "SDE compression data is unavailable." },
       { status: 503 },

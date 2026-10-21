@@ -35,6 +35,7 @@ export type RegionalAppraisalPrices = {
 };
 export type RegionalAppraisalPriceType = "buy" | "split" | "sell";
 export type RegionalMarketOrder = {
+  orderId?: number;
   price: number;
   volumeRemain: number;
   isBuyOrder: boolean;
@@ -192,7 +193,7 @@ export async function getRegionalOrderPrices(
 }
 
 /** Loads active buy and sell orders for one regional item order book. */
-async function getRegionalMarketOrders(
+export async function getRegionalMarketOrders(
   regionId: number,
   typeId: number,
 ): Promise<RegionalMarketOrder[]> {
@@ -223,6 +224,7 @@ async function getRegionalMarketOrderBook(regionId: number, typeId: number) {
   const now = Date.now();
   return {
     orders: orders.map((order) => ({
+      orderId: order.order_id,
       price: order.price,
       volumeRemain: order.volume_remain,
       isBuyOrder: order.is_buy_order,
@@ -381,4 +383,23 @@ export async function getMarketSellOrders(
       volumeRemain: order.volume_remain,
       locationId: order.location_id,
     }));
+}
+
+/** Returns active buy orders placed at the selected station, with actual fillable quantities. */
+export async function getStationBuyOrders(
+  regionId: number,
+  typeId: number,
+  stationId: number,
+): Promise<Array<{ price: number; volumeRemain: number }>> {
+  const orders = await getRegionalMarketOrders(regionId, typeId);
+  return orders
+    .filter(
+      (order) =>
+        order.isBuyOrder
+        && order.locationId === stationId
+        && order.volumeRemain > 0
+        && Number.isFinite(order.price)
+        && order.price > 0,
+    )
+    .map((order) => ({ price: order.price, volumeRemain: order.volumeRemain }));
 }
