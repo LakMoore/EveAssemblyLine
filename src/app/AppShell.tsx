@@ -46,6 +46,7 @@ import {
   ArrowUp,
   BadgeDollarSign,
   Boxes,
+  FileBox,
   ClipboardList,
   Factory,
   FlaskConical,
@@ -96,6 +97,7 @@ type ActivePage =
   | "taxes"
   | "signals"
   | "assets"
+  | "blueprints"
   | "jobs"
   | "ships"
   | "fittings"
@@ -332,30 +334,32 @@ export default function AppShell({ children }: { children: ReactNode }) {
                       ? "signals"
                       : pathname === "/assets"
                         ? "assets"
-                        : pathname === "/jobs"
-                          ? "jobs"
-                          : pathname === "/ships"
-                            ? "ships"
-                            : pathname === "/structures"
-                              ? "structures"
-                              : pathname === "/corp-hangars"
-                                ? "corpHangars"
-                                : pathname === "/settings"
-                                  ? "settings"
-                                  : pathname === "/imagechecker"
-                                    ? "imagechecker"
-                                    : pathname === "/data"
-                                      ? "data"
-                                      : [
-                                            "/guides",
-                                            "/about",
-                                            "/contact",
-                                            "/privacy",
-                                            "/terms",
-                                            "/cookies",
-                                          ].includes(pathname)
-                                        ? "public"
-                                        : "planner";
+                        : pathname === "/blueprints"
+                          ? "blueprints"
+                          : pathname === "/jobs"
+                            ? "jobs"
+                            : pathname === "/ships"
+                              ? "ships"
+                              : pathname === "/structures"
+                                ? "structures"
+                                : pathname === "/corp-hangars"
+                                  ? "corpHangars"
+                                  : pathname === "/settings"
+                                    ? "settings"
+                                    : pathname === "/imagechecker"
+                                      ? "imagechecker"
+                                      : pathname === "/data"
+                                        ? "data"
+                                        : [
+                                              "/guides",
+                                              "/about",
+                                              "/contact",
+                                              "/privacy",
+                                              "/terms",
+                                              "/cookies",
+                                            ].includes(pathname)
+                                          ? "public"
+                                          : "planner";
   const isRefreshCurrent =
     authenticated
     && characters.length > 0
@@ -717,6 +721,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 rateLimitedUntil: null,
                 state: stateResponse,
                 assets: assetsResponse,
+                assetsLanguage: language,
                 assetLocations,
                 corporationSources,
                 ships: shipsResponse ?? null,
@@ -794,6 +799,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
                 detail: {
                   refreshedAt: new Date().toISOString(),
                   assets: loadedAssets,
+                  assetsLanguage: language,
                   corporationSources: loadedAssets.corporationSources,
                 },
               },
@@ -1119,6 +1125,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
                   <span className={styles.navText}>Taxes</span>
                 </NoPrefetchLink>
                 <div className={styles.sectionLabel}>INFORMATION</div>
+                <NoPrefetchLink
+                  prefetch={false}
+                  className={cn(styles.navItem, activePage === "blueprints" && styles.navActive)}
+                  href="/blueprints"
+                  onClick={closeSidebarOnNavigation}
+                  aria-current={activePage === "blueprints" ? "page" : undefined}
+                >
+                  <span>
+                    <FileBox size={17} strokeWidth={1.8} aria-hidden="true" />
+                  </span>
+                  <span className={styles.navText}>Blueprints</span>
+                </NoPrefetchLink>
                 <NoPrefetchLink
                   prefetch={false}
                   className={`${styles.navItem} ${activePage === "fittings" ? styles.navActive : ""}`}

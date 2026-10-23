@@ -27,6 +27,7 @@ export const refreshDependentEndpoints = {
   signals: ["owner-assets"],
   compress: ["owner-assets", "compress/options"],
   assets: ["owner-assets"],
+  blueprints: ["owner-assets"],
   jobs: ["owner-jobs"],
   ships: ["owner-ships"],
   fittings: [],

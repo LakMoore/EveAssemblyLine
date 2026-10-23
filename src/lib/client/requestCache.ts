@@ -29,6 +29,7 @@ export type ClientRefreshEventDetail = {
   refreshedAt: string;
   state?: ClientCharacterState;
   assets?: ClientAssetsResponse;
+  assetsLanguage?: SdeLanguage;
   jobs?: ClientJobsResponse;
   assetLocations?: Array<{
     locationId: number;
