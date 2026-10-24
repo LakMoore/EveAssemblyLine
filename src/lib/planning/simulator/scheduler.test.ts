@@ -723,6 +723,97 @@ void test("backfills a ready-now job before a future booking on the same slot", 
   assert.equal(scheduledReadyJob.installs[0].slotIndex, 0);
 });
 
+void test("prioritizes ready reactions over deeper future bookings", () => {
+  const [futureReaction, carbonFiber, thermosettingPolymer] = [
+    { jobId: "a-future-reaction", duration: 278_025 },
+    { jobId: "b-carbon-fiber", duration: 343_740 },
+    { jobId: "c-thermosetting-polymer", duration: 343_740 },
+  ].map(
+    ({ jobId, duration }, index): SimulationIndustryJob => ({
+      ...job(jobId, index + 1, duration),
+      activity: "reaction",
+      productTypeId: 1000 + index,
+      blueprint: {
+        blueprintTypeId: 2000 + index,
+        blueprintKind: "formula",
+        sourceLocationId: 20,
+        runs: 1,
+        materialEfficiency: 0,
+        timeEfficiency: 0,
+      },
+    }),
+  );
+  futureReaction.readyNowRuns = 0;
+  futureReaction.inputs = [
+    {
+      typeId: 34,
+      typeName: "Purchased input",
+      requiredQuantity: 1,
+      availableNow: 0,
+      availableFromHauling: 0,
+      availableAfterUpstream: 0,
+      unsatisfiedQuantity: 1,
+    },
+  ];
+  const consumer = {
+    ...job("consumer", 4, 60),
+    readyNowRuns: 0,
+    readyAfterHaulingRuns: 0,
+    inputs: [
+      {
+        typeId: futureReaction.productTypeId,
+        typeName: "Future reaction output",
+        requiredQuantity: 1,
+        availableNow: 0,
+        availableFromHauling: 0,
+        availableAfterUpstream: 1,
+        unsatisfiedQuantity: 0,
+        upstreamReservations: [
+          {
+            activity: "reaction" as const,
+            quantity: 1,
+            state: "planned" as const,
+            sourceJobId: futureReaction.jobId,
+          },
+        ],
+      },
+    ],
+  };
+  const result = scheduleSimulationJobs(
+    [consumer],
+    [futureReaction, carbonFiber, thermosettingPolymer],
+    [],
+    [],
+    [
+      {
+        characterId: 7,
+        systemId: 30_000_142,
+        freeSlots: { manufacturing: 1, reactions: 2, science: 0 },
+        timeMultipliers: { manufacturing: 1, reactions: 1, copying: 1, invention: 1 },
+        skillLevels: {},
+      },
+    ],
+    systemIdsByLocation,
+    undefined,
+    undefined,
+    96,
+  );
+  const [scheduledFuture, scheduledCarbon, scheduledPolymer] = result.reactionJobs;
+
+  assert.equal(scheduledFuture.depth, 2);
+  assert.equal(scheduledCarbon.depth, 1);
+  assert.equal(scheduledPolymer.depth, 1);
+  assert.equal(scheduledCarbon.installs[0].startOffsetSeconds, 0);
+  assert.equal(scheduledPolymer.installs[0].startOffsetSeconds, 0);
+  assert.notEqual(scheduledCarbon.installs[0].slotKey, scheduledPolymer.installs[0].slotKey);
+  assert.equal(scheduledFuture.installs[0].startOffsetSeconds, 345_600);
+  assert.ok(
+    result.manufacturingJobs[0].installs[0].startOffsetSeconds
+      >= scheduledFuture.installs[0].endOffsetSeconds,
+  );
+  assert.ok(result.reactionJobs.every((scheduledJob) => scheduledJob.unscheduledRuns === 0));
+});
+
 void test("prefers the earlier-open slot when shared blueprint timing equalizes starts", () => {
   const blueprintJob = job("blueprint-owner", 10, 10 * 60 * 60);
   const waitingJob = job("blueprint-waiter", 10, 60 * 60);

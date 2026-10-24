@@ -389,11 +389,19 @@ function scheduleIndustryActivities(
   const schedulableJobIds = new Set<string>();
   const jobsById = new Map(jobs.map((job) => [job.jobId, job]));
   const blueprintIntervalsByItemId = new Map<number, ScheduledInterval[]>();
+  const readyNowJobIds = new Set(
+    jobs
+      .filter(
+        (job) => earliestIndustryStart(job, completionOffsets, jobsById).startOffsetSeconds === 0,
+      )
+      .map((job) => job.jobId),
+  );
   const candidates = jobs
     .slice()
     .sort(
       (left, right) =>
-        (depths.get(right.jobId) ?? 1) - (depths.get(left.jobId) ?? 1)
+        Number(readyNowJobIds.has(right.jobId)) - Number(readyNowJobIds.has(left.jobId))
+        || (depths.get(right.jobId) ?? 1) - (depths.get(left.jobId) ?? 1)
         || right.durationPerRunSeconds * right.requiredRuns
           - left.durationPerRunSeconds * left.requiredRuns
         || left.jobId.localeCompare(right.jobId),
@@ -746,7 +754,7 @@ function scheduleScienceJobs(
   return { inventionJobs: scheduledInvention, copyJobs: scheduledCopying, warnings };
 }
 
-/** Assigns complete install rows to character slots in deterministic longest-job-first order. */
+/** Books ready-now industry work before future work, retaining dependency and duration priority. */
 export function scheduleSimulationJobs(
   manufacturingJobs: readonly SimulationIndustryJob[],
   reactionJobs: readonly SimulationIndustryJob[],
