@@ -9,6 +9,7 @@ import { parseSimulatorRequest } from "./schema";
 import { simulateIndustry } from "./simulate";
 import { normalizeSimulatorInventory } from "./sourceLots";
 import { inventionSuccessConfidence, minimumAttemptsForSuccesses } from "./binomial";
+import type { RequestProfiler } from "@/lib/server/profiling";
 
 void test("balances duration-limited reaction batches across the minimum job count", () => {
   const runsPerJob = splitReactionRuns(617, 73);
@@ -704,6 +705,96 @@ void test("pools reaction demand across stockpiles before batch input rounding",
       ["second", 11, 8_800],
     ],
   );
+});
+
+void test("reuses repeated reaction input splits without sharing weights between buckets", async () => {
+  const context = await loadSimulationContext();
+  const recipe = context.blueprints.byBuildProductTypeId.get(16680)?.blueprint.activities.reaction;
+  assert.ok(recipe?.materials);
+  const stockpile = (id: string, reactions: number, quantity: number) => ({
+    id,
+    name: id,
+    locations: {
+      stock: 10,
+      manufacturing: 20,
+      reactions,
+      reprocessing: 40,
+      copying: 50,
+      invention: 60,
+    },
+    items: [{ typeId: 16680, quantity, me: 0, te: 0, fromCompression: false }],
+  });
+  const sectionCounts = new Map<string, number>();
+  const profiler: RequestProfiler = {
+    start(section) {
+      sectionCounts.set(section, (sectionCounts.get(section) ?? 0) + 1);
+    },
+    end() {},
+    measureSync(_section, operation) {
+      return operation();
+    },
+    async measure(_section, operation) {
+      return operation();
+    },
+    finish() {
+      return undefined;
+    },
+  };
+  const result = await simulateIndustry(
+    parseSimulatorRequest({
+      stockpiles: [
+        stockpile("first-a", 30, 6_600),
+        stockpile("first-b", 30, 8_800),
+        stockpile("second-a", 31, 2_200),
+        stockpile("second-b", 31, 13_200),
+      ],
+      assets: [],
+      settings: {
+        includeCorporationAssets: true,
+        buildBlacklist: recipe.materials.map((material) => material.typeID),
+        buyBlacklist: [],
+      },
+      simulation: { version: 1, maxReactionJobDurationHours: 1 },
+    }),
+    profiler,
+  );
+  const jobs = result.lists.reactionJobs;
+  const distinctQuantitiesByLocation = new Map<number, Set<number>>();
+  const contributionsByStockpile = new Map<string, number>();
+  for (const job of jobs) {
+    assert.equal(job.productTypeId, 16680);
+    assert.equal(job.requiredRuns, 1);
+    const quantities = distinctQuantitiesByLocation.get(job.locationId) ?? new Set<number>();
+    for (const input of job.inputs) quantities.add(input.requiredQuantity);
+    distinctQuantitiesByLocation.set(job.locationId, quantities);
+    for (const contribution of job.demandContributions) {
+      contributionsByStockpile.set(
+        contribution.stockpileId,
+        (contributionsByStockpile.get(contribution.stockpileId) ?? 0) + contribution.quantity,
+      );
+    }
+  }
+
+  assert.equal(jobs.length, 14);
+  assert.equal(distinctQuantitiesByLocation.size, 2);
+  assert.equal(
+    sectionCounts.get("distribute-reaction-input-shares"),
+    [...distinctQuantitiesByLocation.values()].reduce(
+      (total, quantities) => total + quantities.size,
+      0,
+    ),
+  );
+  assert.equal(sectionCounts.get("reserve-reaction-input-shares"), 14 * recipe.materials.length);
+  assert.deepEqual(
+    [...contributionsByStockpile].sort(([left], [right]) => left.localeCompare(right)),
+    [
+      ["first-a", 6_600],
+      ["first-b", 8_800],
+      ["second-a", 2_200],
+      ["second-b", 13_200],
+    ],
+  );
+  assert.equal(result.metadata.invariantViolationCount, 0);
 });
 
 void test("keeps upstream demand separate from a multi-unit job output", async () => {

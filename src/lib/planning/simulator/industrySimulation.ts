@@ -864,7 +864,13 @@ class IndustryDemandSimulation {
         this.reserveProductionInputs(item.typeId, quantityToBuild, stockpile, new Set());
       }
     }
-    this.flushReactionInputDemands();
+    measureSyncProfiled(
+      this.profiler,
+      "flush-reaction-input-demands",
+      () => {
+        this.flushReactionInputDemands();
+      },
+    );
   }
 
   private reserveLocalStockpileDemand(): void {
@@ -985,11 +991,16 @@ class IndustryDemandSimulation {
           timeEfficiency,
         ),
       );
-    const allocations = this.allocator.previewManufacturingBlueprints(
-      production.blueprint._key,
-      requiredRuns,
-      profile.locationId,
-      maxRunsPerJob,
+    const allocations = measureSyncProfiled(
+      this.profiler,
+      "preview-manufacturing-blueprints",
+      () =>
+        this.allocator.previewManufacturingBlueprints(
+          production.blueprint._key,
+          requiredRuns,
+          profile.locationId,
+          maxRunsPerJob,
+        ),
     );
     const missingRuns =
       requiredRuns - allocations.reduce((total, allocation) => total + allocation.runs, 0);
@@ -1052,7 +1063,7 @@ class IndustryDemandSimulation {
     this.reserveProductionInputs(typeId, quantityToBuild, stockpile, stack);
   }
 
-  /** Reserves pooled reaction recipes after every stockpile has contributed demand. */
+  /** Reserves pooled recipes, reusing exact weighted input splits only within each bucket. */
   private flushReactionInputDemands(): void {
     while (this.pendingReactionInputDemands.size > 0) {
       const entry = this.pendingReactionInputDemands.entries().next().value as [
@@ -1079,6 +1090,15 @@ class IndustryDemandSimulation {
         details.activity.time,
         bucket.profile,
       );
+      const weightedShares = bucket.shares.map((share) => ({
+        stockpile: share.stockpile,
+        stack: share.stack,
+        weight: share.quantity,
+      }));
+      const inputSharesByQuantity = new Map<
+        number,
+        Array<(typeof weightedShares)[number] & { quantity: number }>
+      >();
       for (const allocation of allocations) {
         for (const material of details.activity.materials ?? []) {
           const requiredQuantity = requiredMaterialQuantityInBatches(
@@ -1089,23 +1109,30 @@ class IndustryDemandSimulation {
             bucket.profile.materialMultiplier,
             this.maxRunsPerIndustryJob(durationPerRunSeconds),
           );
-          const shares = distributeQuantityByWeight(
-            requiredQuantity,
-            bucket.shares.map((share) => ({
-              stockpile: share.stockpile,
-              stack: share.stack,
-              weight: share.quantity,
-            })),
-          );
-          for (const share of shares) {
-            this.reserveActivityInput(
-              material.typeID,
-              share.quantity,
-              share.stockpile,
-              bucket.profile.locationId,
-              share.stack,
+          let shares = inputSharesByQuantity.get(requiredQuantity);
+          if (!shares) {
+            shares = measureSyncProfiled(
+              this.profiler,
+              "distribute-reaction-input-shares",
+              () => distributeQuantityByWeight(requiredQuantity, weightedShares),
             );
+            inputSharesByQuantity.set(requiredQuantity, shares);
           }
+          measureSyncProfiled(
+            this.profiler,
+            "reserve-reaction-input-shares",
+            () => {
+              for (const share of shares) {
+                this.reserveActivityInput(
+                  material.typeID,
+                  share.quantity,
+                  share.stockpile,
+                  bucket.profile.locationId,
+                  share.stack,
+                );
+              }
+            },
+          );
         }
       }
     }
