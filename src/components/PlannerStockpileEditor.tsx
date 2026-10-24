@@ -503,6 +503,7 @@ function StockpileItemsContent({
   onPendingChange: (pending: boolean) => void;
 }) {
   const [isPasteOpen, setIsPasteOpen] = useState(false);
+  const [editingQuantityIndex, setEditingQuantityIndex] = useState<number | null>(null);
   const active = useRef(true);
   useEffect(() => {
     active.current = true;
@@ -674,11 +675,21 @@ function StockpileItemsContent({
                 />
                 <Input
                   className="text-right"
-                  type="number"
+                  type={editingQuantityIndex === index ? "number" : "text"}
                   min="1"
                   step="1"
-                  value={item.quantity}
+                  value={
+                    editingQuantityIndex === index
+                      ? item.quantity
+                      : item.quantity.toLocaleString(language)
+                  }
                   aria-label={`${item.name} quantity`}
+                  onFocus={() => {
+                    setEditingQuantityIndex(index);
+                  }}
+                  onBlur={() => {
+                    setEditingQuantityIndex(null);
+                  }}
                   onChange={(event) => {
                     const quantity = Math.max(1, Number(event.target.value) || 1);
                     updateItems(

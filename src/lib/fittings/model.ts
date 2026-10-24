@@ -60,6 +60,7 @@ const fittingFlagBases: Partial<Record<string, number>> = {
   ServiceSlot: 164,
 };
 const fittingBayFlags: Partial<Record<string, number>> = {
+  Invalid: 0,
   Cargo: 5,
   DroneBay: 87,
   FighterBay: 158,

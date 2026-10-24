@@ -64,11 +64,12 @@ void test("normalizes live symbolic ESI flags and accepts legacy numeric exports
       { type_id: 1, quantity: 3, flag: "DroneBay" },
       { type_id: 1, quantity: 1, flag: "RigSlot2" },
       { type_id: 1, quantity: 1, flag: 19 },
+      { type_id: 1, quantity: 1, flag: "Invalid" },
     ],
   });
   assert.deepEqual(
     parsed.items.map((item) => item.flag),
-    [27, 5, 87, 94, 19],
+    [27, 5, 87, 94, 19, 0],
   );
   assert.equal(
     esiFittingSchema.safeParse({
