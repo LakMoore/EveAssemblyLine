@@ -1,6 +1,12 @@
 import { z } from "zod";
-import { getDogmaEffects, getGroups, getTypeDogma, getTypes } from "@/cache/services/sdeCache";
-import { FittingSlot, parseFitting } from "@/lib/reference/fittings";
+import {
+  getDogmaAttributes,
+  getDogmaEffects,
+  getGroups,
+  getTypeDogma,
+  getTypes,
+} from "@/cache/services/sdeCache";
+import { FittingSlot, parseFitting, type ParsedFitting } from "@/lib/reference/fittings";
 import { esiFittingSchema, fittingInputSchema, type FittingInput } from "./model";
 import type { SdeLanguage } from "@/lib/reference/languages";
 
@@ -13,6 +19,7 @@ const slotBases: Record<FittingSlot, number> = {
   service: 164,
   cargo: 5,
   drone: 87,
+  fighter: 158,
 };
 const effectSlots: Partial<Record<string, FittingSlot>> = {
   loPower: FittingSlot.Low,
@@ -22,6 +29,47 @@ const effectSlots: Partial<Record<string, FittingSlot>> = {
   subSystem: FittingSlot.Subsystem,
   serviceSlot: FittingSlot.Service,
 };
+const strategicCruiserGroupId = 963;
+
+/** Builds EFT section order from hull-specific subsystem and service-slot support. */
+function getEftSlotOrder(
+  shipTypeId: number,
+  types: Awaited<ReturnType<typeof getTypes>>,
+  dogma: Awaited<ReturnType<typeof getTypeDogma>>,
+  attributes: Awaited<ReturnType<typeof getDogmaAttributes>>,
+): FittingSlot[] {
+  const ship = types.get(shipTypeId);
+  const isStrategicCruiser = ship?.groupID === strategicCruiserGroupId;
+  const hasServiceSlots = dogma
+    .get(shipTypeId)
+    ?.dogmaAttributes.some((attribute) => {
+      const name = attributes.get(attribute.attributeID)?.name;
+      return name === "serviceSlots" && attribute.value > 0;
+    });
+  const slotOrder = [FittingSlot.Low, FittingSlot.Medium, FittingSlot.High, FittingSlot.Rig];
+  if (isStrategicCruiser) slotOrder.push(FittingSlot.Subsystem);
+  if (hasServiceSlots) slotOrder.push(FittingSlot.Service);
+  slotOrder.push(FittingSlot.Drone, FittingSlot.Cargo);
+  return slotOrder;
+}
+
+/** Re-parses EFT once the hull is known, leaving other fitting formats unchanged. */
+function parseFittingForShip(
+  text: string,
+  parsed: ParsedFitting | null,
+  shipTypeId: number,
+  types: Awaited<ReturnType<typeof getTypes>>,
+  dogma: Awaited<ReturnType<typeof getTypeDogma>>,
+  attributes: Awaited<ReturnType<typeof getDogmaAttributes>>,
+): ParsedFitting | null {
+  if (!parsed || parsed.format !== "eft") return parsed;
+  return parseFitting(
+    text,
+    {
+      eftSlotOrder: getEftSlotOrder(shipTypeId, types, dogma, attributes),
+    },
+  );
+}
 
 /** Resolves pasted fitting formats using the authoritative SDE rather than EFT section guesses. */
 export async function resolveFittingText(
@@ -43,14 +91,15 @@ export async function resolveFittingText(
       items: fitting.data.items,
     };
   }
-  const [types, dogma, effects, groups] = await Promise.all([
+  const [types, dogma, effects, groups, attributes] = await Promise.all([
     getTypes(),
     getTypeDogma(),
     getDogmaEffects(),
     getGroups(),
+    getDogmaAttributes(),
   ]);
   const dna = /^\d+:(?:\d+;\d+:)*:$/.test(text.trim());
-  const parsed = dna ? null : parseFitting(text);
+  let parsed = dna ? null : parseFitting(text);
   const names = new Set(
     parsed
       ? [parsed.shipTypeName, ...parsed.items.map((item) => item.name)].map((name) =>
@@ -74,6 +123,7 @@ export async function resolveFittingText(
   if (!shipTypeId || !types.has(shipTypeId)) {
     throw new Error("The fitting ship type was not found in the SDE.");
   }
+  parsed = parseFittingForShip(text, parsed, shipTypeId, types, dogma, attributes);
   const inputs = parsed
     ? parsed.items.map((item) => {
         const typeId = byName.get(item.name.toLowerCase());
@@ -108,11 +158,20 @@ export async function resolveFittingText(
       ?? (groups.get(type?.groupID ?? 0)?.categoryID === 18
         ? FittingSlot.Drone
         : FittingSlot.Cargo);
-    const slot =
-      parsed?.format === "xml" || item.slot === FittingSlot.Cargo
-        ? (item.slot ?? inferred)
-        : inferred;
-    const isBay = slot === FittingSlot.Cargo || slot === FittingSlot.Drone;
+    const itemCategoryId = groups.get(type?.groupID ?? 0)?.categoryID;
+    const isBayRow =
+      item.slot === FittingSlot.Cargo
+      || item.slot === FittingSlot.Drone
+      || item.slot === FittingSlot.Fighter;
+    const baySlot =
+      itemCategoryId === 18
+        ? FittingSlot.Drone
+        : itemCategoryId === 87
+          ? FittingSlot.Fighter
+          : FittingSlot.Cargo;
+    const slot = parsed?.format === "xml" ? (item.slot ?? inferred) : isBayRow ? baySlot : inferred;
+    const isBay =
+      slot === FittingSlot.Cargo || slot === FittingSlot.Drone || slot === FittingSlot.Fighter;
     const count = dna && !isBay ? item.quantity : 1;
     if (count > 8) {
       throw new Error("A DNA fitting cannot have more than eight modules in one slot group.");

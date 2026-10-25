@@ -25,6 +25,7 @@ export enum FittingSlot {
   Service = "service",
   Cargo = "cargo",
   Drone = "drone",
+  Fighter = "fighter",
 }
 
 export type ParsedFittingItem = {
@@ -51,7 +52,11 @@ export type ResolvedFitting = {
 export type FittingParser = {
   format: FittingFormat;
   canParse: (text: string) => boolean;
-  parse: (text: string) => ParsedFitting;
+  parse: (text: string, options?: FittingParseOptions) => ParsedFitting;
+};
+
+export type FittingParseOptions = {
+  eftSlotOrder?: readonly FittingSlot[];
 };
 
 // Parsed fittings use numeric inventory flags; the fitting boundary also normalizes
@@ -65,6 +70,7 @@ const esiFittingFlagBases: Record<FittingSlot, number> = {
   [FittingSlot.Service]: 164,
   [FittingSlot.Cargo]: 5,
   [FittingSlot.Drone]: 87,
+  [FittingSlot.Fighter]: 158,
 };
 
 function parseEftItem(
@@ -84,7 +90,7 @@ function parseEftItem(
   };
 }
 
-function parseEft(text: string): ParsedFitting {
+function parseEft(text: string, options?: FittingParseOptions): ParsedFitting {
   const lines = text.trim().split(/\r?\n/);
   const header = lines.shift()?.match(/^\[([^,\]]+),\s*(.+)\]$/);
   if (!header) throw new Error("The fitting header must look like [Ship, Fitting name].");
@@ -102,7 +108,8 @@ function parseEft(text: string): ParsedFitting {
   const populatedSections = sections.filter((section) => section.length > 0);
 
   const slotFlags =
-    populatedSections.length >= 8
+    options?.eftSlotOrder
+    ?? (populatedSections.length >= 8
       ? [
           FittingSlot.Low,
           FittingSlot.Medium,
@@ -121,7 +128,7 @@ function parseEft(text: string): ParsedFitting {
           FittingSlot.Service,
           FittingSlot.Cargo,
           FittingSlot.Drone,
-        ];
+        ]);
   const items: ParsedFittingItem[] = [];
   for (const [index, section] of populatedSections.entries()) {
     const slot = slotFlags[index] ?? FittingSlot.Cargo;
@@ -141,7 +148,9 @@ function parseEft(text: string): ParsedFitting {
 
 function esiFittingFlag(item: ParsedFittingItem): number {
   const baseFlag = esiFittingFlagBases[item.slot];
-  return item.slot === FittingSlot.Cargo || item.slot === FittingSlot.Drone
+  return item.slot === FittingSlot.Cargo
+    || item.slot === FittingSlot.Drone
+    || item.slot === FittingSlot.Fighter
     ? baseFlag
     : baseFlag + item.slotIndex;
 }
@@ -193,13 +202,16 @@ function parseXml(text: string): ParsedFitting {
       subsystem: FittingSlot.Subsystem,
       service: FittingSlot.Service,
     };
+    const bayName = hardware.slot.toLowerCase();
     const area = slot
       ? slots[slot[1].toLowerCase()]
-      : /^(drone|fighter) bay$/i.test(hardware.slot)
+      : bayName === "drone bay"
         ? FittingSlot.Drone
-        : /^cargo bay$/i.test(hardware.slot)
-          ? FittingSlot.Cargo
-          : undefined;
+        : bayName === "fighter bay"
+          ? FittingSlot.Fighter
+          : bayName === "cargo bay"
+            ? FittingSlot.Cargo
+            : undefined;
     if (!area) throw new Error(`Unsupported fitting slot: ${hardware.slot}`);
     return {
       name: hardware.type,
@@ -233,10 +245,10 @@ export function registerFittingParser(parser: FittingParser) {
 }
 
 /** Parses a fitting with the first registered format that recognizes its text. */
-export function parseFitting(text: string): ParsedFitting {
+export function parseFitting(text: string, options?: FittingParseOptions): ParsedFitting {
   const parser = fittingParsers.find((candidate) => candidate.canParse(text));
   if (!parser) throw new Error("This fitting format is not supported yet.");
-  return parser.parse(text);
+  return parser.parse(text, options);
 }
 
 /** Resolves parsed fitting names to the ESI character fitting response shape. */

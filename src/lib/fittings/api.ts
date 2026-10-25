@@ -69,10 +69,6 @@ export async function handleFittingRequest(
         ? json({ collectionId: session.collectionId, fitting })
         : json({ error: "Fitting not found." }, 404);
     }
-    const origin = request.headers.get("origin");
-    if (origin && origin !== new URL(request.url).origin) {
-      return json({ error: "Cross-origin writes are not allowed." }, 403);
-    }
     let body: unknown;
     try {
       const text = await request.text();

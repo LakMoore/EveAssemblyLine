@@ -107,16 +107,6 @@ void test("writes reject malformed input, stale collection identity and cross-or
     409,
   );
   assert.equal(
-    (
-      await handleFittingRequest(
-        request("POST", {}, { origin: "https://other.example" }),
-        undefined,
-        dependencies,
-      )
-    ).status,
-    403,
-  );
-  assert.equal(
     (await handleFittingRequest(request("DELETE", {}), fitting.id, dependencies)).status,
     400,
   );

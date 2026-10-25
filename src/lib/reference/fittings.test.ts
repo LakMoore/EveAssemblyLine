@@ -6,10 +6,12 @@ void test("parses native XML with explicit module slots and quantities", () => {
   const fitting = parseFitting(`<?xml version="1.0"?><fittings><fitting name="Patrol">
     <shipType value="Rifter"/><hardware type="200mm AutoCannon II" slot="hi slot 0"/>
     <hardware type="EMP S" slot="cargo bay" qty="1200"/>
+    <hardware type="Standup Siren II" slot="fighter bay" qty="2"/>
     </fitting></fittings>`);
   assert.equal(fitting.shipTypeName, "Rifter");
   assert.equal(fitting.items[0].slot, FittingSlot.High);
   assert.equal(fitting.items[1].quantity, 1200);
+  assert.equal(fitting.items[2].slot, FittingSlot.Fighter);
   assert.throws(() => parseFitting("<!DOCTYPE fits><fittings/>"), /invalid|entities/);
 });
 
@@ -166,5 +168,93 @@ Standup Reprocessing Facility I`);
   assert.deepEqual(
     fitting.items.filter((item) => item.slot === FittingSlot.Service).map((item) => item.name),
     ["Standup Cloning Center I", "Standup Reprocessing Facility I"],
+  );
+});
+
+void test("uses the hull section order when subsystem ships omit the service section", () => {
+  const fitting = parseFitting(
+    `[Loki, Exploration]
+
+Low Module
+
+Medium Module
+
+High Module
+
+Rig Module
+
+Loki Core - Augmented Nuclear Reactor
+
+Acolyte II x5
+
+Covert Ops Cloaking Device II`,
+    {
+      eftSlotOrder: [
+        FittingSlot.Low,
+        FittingSlot.Medium,
+        FittingSlot.High,
+        FittingSlot.Rig,
+        FittingSlot.Subsystem,
+        FittingSlot.Drone,
+        FittingSlot.Cargo,
+      ],
+    },
+  );
+
+  assert.deepEqual(
+    fitting.items.map(({ name, slot }) => ({ name, slot })),
+    [
+      { name: "Low Module", slot: FittingSlot.Low },
+      { name: "Medium Module", slot: FittingSlot.Medium },
+      { name: "High Module", slot: FittingSlot.High },
+      { name: "Rig Module", slot: FittingSlot.Rig },
+      { name: "Loki Core - Augmented Nuclear Reactor", slot: FittingSlot.Subsystem },
+      { name: "Acolyte II", slot: FittingSlot.Drone },
+      { name: "Covert Ops Cloaking Device II", slot: FittingSlot.Cargo },
+    ],
+  );
+});
+
+void test("uses the hull section order when structures omit the subsystem section", () => {
+  const fitting = parseFitting(
+    `[Sotiyo, Industry]
+
+Low Module
+
+Medium Module
+
+High Module
+
+Rig Module
+
+Standup Manufacturing Plant I
+
+Standup Siren II x2
+
+Nanite Repair Paste x50`,
+    {
+      eftSlotOrder: [
+        FittingSlot.Low,
+        FittingSlot.Medium,
+        FittingSlot.High,
+        FittingSlot.Rig,
+        FittingSlot.Service,
+        FittingSlot.Drone,
+        FittingSlot.Cargo,
+      ],
+    },
+  );
+
+  assert.deepEqual(
+    fitting.items.map(({ name, slot }) => ({ name, slot })),
+    [
+      { name: "Low Module", slot: FittingSlot.Low },
+      { name: "Medium Module", slot: FittingSlot.Medium },
+      { name: "High Module", slot: FittingSlot.High },
+      { name: "Rig Module", slot: FittingSlot.Rig },
+      { name: "Standup Manufacturing Plant I", slot: FittingSlot.Service },
+      { name: "Standup Siren II", slot: FittingSlot.Drone },
+      { name: "Nanite Repair Paste", slot: FittingSlot.Cargo },
+    ],
   );
 });
