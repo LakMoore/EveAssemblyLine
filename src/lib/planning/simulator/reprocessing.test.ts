@@ -258,6 +258,85 @@ void test("groups reprocessing jobs by location and source type and sums horizon
   );
 });
 
+void test("scores current material demand separately after committed and owned yields", () => {
+  const ownedInventory: SimulatorInventory = {
+    ...inventory,
+    itemLots: [{ ...inventory.itemLots[0], quantity: 300 }],
+  };
+  const unmetDemands: IndustrySimulationResult["unmetDemands"] = [
+    { stockpileId: "main", typeId: 34, quantity: 150, purpose: "material" as const },
+    { stockpileId: "other", typeId: 34, quantity: 150, purpose: "material" as const },
+    { stockpileId: "main", typeId: 35, quantity: 75, purpose: "material" as const },
+    { stockpileId: "main", typeId: 100, quantity: 100, purpose: "reprocessing-input" as const },
+  ].map(({ stockpileId, typeId, quantity, purpose }) => ({
+    account: { ...materialAccount, typeId },
+    quantity,
+    source: {
+      demandId: `${stockpileId}:${typeId}`,
+      stockpileId,
+      materialTypeId: typeId,
+      productTypeId: typeId,
+      productQuantity: quantity,
+      plannedQuantity: quantity,
+      requiredNow: quantity,
+      reserved: 0,
+      destinationLocationId: materialAccount.locationId,
+      activity: "manufacturing",
+    },
+    blockedByBuyBlacklist: false,
+    purpose,
+  }));
+  const allocator = new SimulationAllocator(ownedInventory, []);
+  const industry: IndustrySimulationResult = {
+    transactions: [],
+    manufacturingJobs: [],
+    reactionJobs: [],
+    inventionJobs: [],
+    copyJobs: [],
+    unmetDemands,
+    blueprintPurchases: [],
+    skillsRequired: [],
+    jobSkillRequirements: [],
+    warnings: [],
+    allocator,
+  };
+  const settlement = settleReprocessing(
+    {
+      ...request,
+      stockpiles: [
+        ...request.stockpiles,
+        {
+          ...request.stockpiles[0],
+          id: "other",
+          locations: { ...request.stockpiles[0].locations, reprocessing: 50 },
+        },
+      ],
+    },
+    context,
+    ownedInventory,
+    industry,
+  );
+
+  assert.deepEqual(
+    settlement.jobs.map(({ stockpileId, state, portionCount, yields }) => ({
+      stockpileId,
+      state,
+      portionCount,
+      allocated: yields[0]?.allocatedQuantity,
+    })),
+    [
+      { stockpileId: "main", state: "after-purchase", portionCount: 1, allocated: 150 },
+      { stockpileId: "other", state: "after-hauling", portionCount: 1, allocated: 150 },
+    ],
+  );
+  assert.deepEqual(settlement.remainingDemands, [unmetDemands[2], unmetDemands[3]]);
+  assert.equal(allocator.remainingItemQuantity("ore"), 200);
+  assert.deepEqual(
+    unmetDemands.map(({ quantity }) => quantity),
+    [150, 150, 75, 100],
+  );
+});
+
 void test("does not use market-order lots for reprocessing", () => {
   const marketOrderInventory: SimulatorInventory = {
     ...inventory,

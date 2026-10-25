@@ -194,6 +194,55 @@ void test("indexes local protection candidates without caching mutable reservati
   assert.deepEqual(activityClaim, { local: 4, remote: 4, future: 0, futureReservations: [] });
 });
 
+void test("keeps repeated numeric demand indexes separate and reserves in sorted facility order", () => {
+  const lowerLocationId = 1_000_000_000_020;
+  const higherLocationId = 1_000_000_000_030;
+  const allocator = new SimulationAllocator(
+    {
+      ...inventory,
+      itemLots: [34, 35].map((typeId) => ({
+        ...inventory.itemLots[0],
+        typeId,
+        lotId: `remote:${typeId}`,
+        locationId: 40,
+        quantity: 5,
+      })),
+    },
+    [],
+  );
+
+  for (const typeId of [35, 34]) {
+    assert.equal(allocator.previewOrdinarySupply(typeId, 2, lowerLocationId), 2);
+    assert.equal(allocator.previewOrdinarySupply(typeId, 3, higherLocationId), 3);
+    assert.equal(allocator.previewOrdinarySupply(typeId, 1, lowerLocationId), 0);
+    for (let repeat = 0; repeat < 2; repeat += 1) {
+      allocator.reserveActivityDemand(typeId, 2, higherLocationId);
+      allocator.reserveActivityDemand(typeId, 2, lowerLocationId);
+    }
+  }
+  allocator.reserveRemoteActivityDemand();
+
+  for (const typeId of [34, 35]) {
+    for (const [locationId, expectedRemote] of [
+      [higherLocationId, 1],
+      [lowerLocationId, 4],
+    ]) {
+      const claim = allocator.claimOrdinarySupply(
+        typeId,
+        4,
+        locationId,
+        { typeId, locationId },
+        `job:${typeId}:${locationId}`,
+        undefined,
+        "manufacturing",
+        "activity-input",
+      );
+      assert.equal(claim.remote, expectedRemote);
+    }
+    assert.equal(allocator.remainingItemQuantity(`remote:${typeId}`), 0);
+  }
+});
+
 void test("protects reserved activity inputs from stockpile demand", () => {
   const allocator = new SimulationAllocator(inventory, []);
   allocator.reserveActivityDemand(34, 4, 20);

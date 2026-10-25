@@ -640,7 +640,7 @@ export async function simulateIndustry(
   const reprocessing = measureSyncProfiled(
     profiler,
     "settle-reprocessing",
-    () => settleReprocessing(request, context, inventory, industry, jobDepthsById),
+    () => settleReprocessing(request, context, inventory, industry, jobDepthsById, profiler),
   );
   const buying = measureSyncProfiled(
     profiler,

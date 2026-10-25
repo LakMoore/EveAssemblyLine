@@ -1,4 +1,5 @@
 import type { PlanStockpile } from "@/lib/planning/types";
+import type { RequestProfiler } from "@/lib/server/profiling";
 import type { SimulationContext } from "./context";
 import type { IndustrySimulationResult, SimulationUnmetDemand } from "./industrySimulation";
 import type { SimulationLedgerAccount, SimulationTransaction } from "./ledger";
@@ -22,6 +23,9 @@ export interface ReprocessingSettlementResult {
 interface MutableDemand extends SimulationUnmetDemand {
   quantity: number;
 }
+
+/** References to mutable material demands, indexed without caching changing quantity totals. */
+type MaterialDemandIndex = Map<string, Map<number, MutableDemand[]>>;
 
 interface ReprocessingCandidate {
   lot: SimulationItemLot;
@@ -157,23 +161,36 @@ function allocateYields(
   });
 }
 
+/** Groups demand references once while retaining their original summation order. */
+function indexMaterialDemands(demands: readonly MutableDemand[]): MaterialDemandIndex {
+  const indexed = new Map<string, Map<number, MutableDemand[]>>();
+  for (const demand of demands) {
+    if (demand.purpose !== "material") continue;
+    let byTypeId = indexed.get(demand.source.stockpileId);
+    if (!byTypeId) {
+      byTypeId = new Map();
+      indexed.set(demand.source.stockpileId, byTypeId);
+    }
+    const matchingDemands = byTypeId.get(demand.account.typeId) ?? [];
+    matchingDemands.push(demand);
+    byTypeId.set(demand.account.typeId, matchingDemands);
+  }
+  return indexed;
+}
+
 function candidateScore(
   candidate: ReprocessingCandidate,
   availableQuantity: number,
-  demands: readonly MutableDemand[],
+  demandsByTypeId: ReadonlyMap<number, readonly MutableDemand[]> | undefined,
 ): { portions: number; covered: number; surplus: number; haulVolume: number } | undefined {
   const availablePortions = Math.floor(availableQuantity / candidate.portionSize);
   if (availablePortions <= 0) return undefined;
   let usefulPortions = 0;
   for (const material of candidate.yieldsPerPortion) {
-    const requirement = demands
-      .filter(
-        (demand) =>
-          demand.purpose === "material"
-          && demand.source.stockpileId === candidate.stockpile.id
-          && demand.account.typeId === material.typeId,
-      )
-      .reduce((total, demand) => total + demand.quantity, 0);
+    const requirement = (demandsByTypeId?.get(material.typeId) ?? []).reduce(
+      (total, demand) => total + demand.quantity,
+      0,
+    );
     const perPortion = (material.quantity * candidate.efficiency) / 100;
     if (requirement > 0 && perPortion > 0) {
       usefulPortions = Math.max(usefulPortions, Math.ceil(requirement / perPortion));
@@ -185,14 +202,10 @@ function candidateScore(
   let covered = 0;
   let surplus = 0;
   for (const material of yields) {
-    const requirement = demands
-      .filter(
-        (demand) =>
-          demand.purpose === "material"
-          && demand.source.stockpileId === candidate.stockpile.id
-          && demand.account.typeId === material.typeId,
-      )
-      .reduce((total, demand) => total + demand.quantity, 0);
+    const requirement = (demandsByTypeId?.get(material.typeId) ?? []).reduce(
+      (total, demand) => total + demand.quantity,
+      0,
+    );
     covered += Math.min(requirement, material.quantity);
     surplus += Math.max(0, material.quantity - requirement);
   }
@@ -215,8 +228,10 @@ export function settleReprocessing(
   inventory: SimulatorInventory,
   industry: IndustrySimulationResult,
   jobDepthsById: ReadonlyMap<string, number> = new Map(),
+  profiler?: RequestProfiler,
 ): ReprocessingSettlementResult {
   const demands: MutableDemand[] = industry.unmetDemands.map((demand) => ({ ...demand }));
+  const demandsByStockpile = indexMaterialDemands(demands);
   const jobs: SimulationReprocessingJob[] = [];
   const transactions: SimulationTransaction[] = [];
   const warnings: SimulationWarning[] = [];
@@ -319,6 +334,7 @@ export function settleReprocessing(
     }
   };
 
+  profiler?.start("settle-committed-inputs");
   const committedByStockpileAndType = new Map<
     string,
     { stockpile: PlanStockpile; typeId: number; local: number; remote: number; purchase: number }
@@ -375,7 +391,9 @@ export function settleReprocessing(
       "after-purchase",
     );
   }
+  profiler?.end("settle-committed-inputs");
 
+  profiler?.start("build-owned-candidates");
   const candidates: ReprocessingCandidate[] = request.stockpiles.flatMap((stockpile) =>
     inventory.itemLots.flatMap((lot) => {
       const available = industry.allocator.remainingItemQuantity(lot.lotId);
@@ -400,12 +418,18 @@ export function settleReprocessing(
         : [];
     }),
   );
+  profiler?.end("build-owned-candidates");
 
   for (;;) {
+    profiler?.start("rank-owned-candidates");
     const ranked = candidates
       .flatMap((candidate) => {
         const available = industry.allocator.remainingItemQuantity(candidate.lot.lotId);
-        const score = candidateScore(candidate, available, demands);
+        const score = candidateScore(
+          candidate,
+          available,
+          demandsByStockpile.get(candidate.stockpile.id),
+        );
         return score === undefined ? [] : [{ candidate, score }];
       })
       .sort(
@@ -415,6 +439,7 @@ export function settleReprocessing(
           || right.score.covered - left.score.covered
           || left.candidate.lot.lotId.localeCompare(right.candidate.lot.lotId),
       );
+    profiler?.end("rank-owned-candidates");
     if (ranked.length === 0) break;
     const selected = ranked[0];
     const { candidate, score } = selected;

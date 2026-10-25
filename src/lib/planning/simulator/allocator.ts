@@ -101,7 +101,7 @@ export class SimulationAllocator {
   private readonly blueprintLotsByTypeId = new Map<number, SimulatorBlueprintLot[]>();
   private readonly remainingItemQuantityByLotId: Map<string, number>;
   private readonly previewItemQuantityByLotId: Map<string, number>;
-  private readonly previewItemCursors = new Map<string, ItemPreviewCursor>();
+  private readonly previewItemCursors = new Map<number, Map<number, ItemPreviewCursor>>();
   private readonly remainingBlueprintRunsByLotId: Map<string, number>;
   private readonly previewBlueprintRunsByLotId: Map<string, number>;
   private readonly reservedBlueprintRunsByLotId = new Map<string, number>();
@@ -113,8 +113,11 @@ export class SimulationAllocator {
   private readonly systemIdByLocationId: ReadonlyMap<number, number>;
   private readonly activityReservationsByLotId = new Map<string, Map<number, number>>();
   private readonly stockpileReservationsByLotId = new Map<string, Map<number, number>>();
-  private readonly pendingRemoteActivityDemands = new Map<string, PendingItemDemand>();
-  private readonly pendingRemoteStockpileDemands = new Map<string, PendingItemDemand>();
+  private readonly pendingRemoteActivityDemands = new Map<number, Map<number, PendingItemDemand>>();
+  private readonly pendingRemoteStockpileDemands = new Map<
+    number,
+    Map<number, PendingItemDemand>
+  >();
   private readonly transferredBlueprintLotIds = new Set<string>();
   private transactionSequence = 0;
   readonly transactions: SimulationTransaction[] = [];
@@ -189,8 +192,8 @@ export class SimulationAllocator {
 
   /** Caches immutable route eligibility; shared preview quantities only decrease during prepass. */
   private previewItemCursor(typeId: number, destinationLocationId: number): ItemPreviewCursor {
-    const key = `${typeId}:${destinationLocationId}`;
-    const existing = this.previewItemCursors.get(key);
+    let cursorsByLocation = this.previewItemCursors.get(typeId);
+    const existing = cursorsByLocation?.get(destinationLocationId);
     if (existing) return existing;
     const lots = (this.itemLotsByTypeId.get(typeId) ?? [])
       .filter(
@@ -210,7 +213,11 @@ export class SimulationAllocator {
           || left.lotId.localeCompare(right.lotId),
       );
     const cursor = { lots, nextIndex: 0 };
-    this.previewItemCursors.set(key, cursor);
+    if (!cursorsByLocation) {
+      cursorsByLocation = new Map();
+      this.previewItemCursors.set(typeId, cursorsByLocation);
+    }
+    cursorsByLocation.set(destinationLocationId, cursor);
     return cursor;
   }
 
@@ -1469,30 +1476,37 @@ export class SimulationAllocator {
     this.stockpileReservationsByLotId.set(lotId, reservations);
   }
 
+  /** Accumulates demand by numeric IDs without allocating a key or replacement on every share. */
   private addPendingDemand(
-    demands: Map<string, PendingItemDemand>,
+    demands: Map<number, Map<number, PendingItemDemand>>,
     typeId: number,
     destinationLocationId: number,
     quantity: number,
   ): void {
     if (quantity <= 0) return;
-    const key = `${typeId}:${destinationLocationId}`;
-    const demand = demands.get(key);
-    demands.set(
-      key,
-      {
-        typeId,
-        destinationLocationId,
-        quantity: (demand?.quantity ?? 0) + quantity,
-      },
-    );
+    let demandsByLocation = demands.get(typeId);
+    const demand = demandsByLocation?.get(destinationLocationId);
+    if (demand) {
+      demand.quantity += quantity;
+      return;
+    }
+    if (!demandsByLocation) {
+      demandsByLocation = new Map();
+      demands.set(typeId, demandsByLocation);
+    }
+    demandsByLocation.set(destinationLocationId, { typeId, destinationLocationId, quantity });
   }
 
-  private sortedPendingDemands(demands: Map<string, PendingItemDemand>): PendingItemDemand[] {
-    return [...demands.values()].sort(
-      (left, right) =>
-        left.typeId - right.typeId || left.destinationLocationId - right.destinationLocationId,
-    );
+  /** Retains the original type/location traversal order independently of index insertion order. */
+  private sortedPendingDemands(
+    demands: ReadonlyMap<number, ReadonlyMap<number, PendingItemDemand>>,
+  ): PendingItemDemand[] {
+    return [...demands.values()]
+      .flatMap((byLocation) => [...byLocation.values()])
+      .sort(
+        (left, right) =>
+          left.typeId - right.typeId || left.destinationLocationId - right.destinationLocationId,
+      );
   }
 
   private consumeStockpileReservationEntry(
