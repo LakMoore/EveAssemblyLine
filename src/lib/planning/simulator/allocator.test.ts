@@ -71,6 +71,129 @@ void test("previews each physical lot once before remote activity demand", () =>
   assert.deepEqual(allocator.transactions, []);
 });
 
+void test("shares depleted preview quantities across cached destination cursors", () => {
+  const allocator = new SimulationAllocator(inventory, []);
+
+  assert.equal(allocator.previewOrdinarySupply(34, 1, 20), 1);
+  assert.equal(allocator.previewOrdinarySupply(34, 4, 40), 4);
+  assert.equal(allocator.previewOrdinarySupply(34, 4, 20), 4);
+  assert.equal(allocator.previewOrdinarySupply(34, 3, 40), 3);
+  assert.equal(allocator.previewOrdinarySupply(34, 1, 20), 0);
+  assert.equal(allocator.previewOrdinarySupply(34, 1, 40), 0);
+  assert.equal(allocator.remainingItemQuantity("local"), 4);
+  assert.equal(allocator.remainingItemQuantity("remote"), 8);
+  assert.deepEqual(allocator.transactions, []);
+  assert.deepEqual(allocator.haulingTasks, []);
+});
+
+void test("keeps cached preview routes separate and excludes non-input supply", () => {
+  const allocator = new SimulationAllocator(
+    {
+      ...inventory,
+      itemLots: [
+        ...inventory.itemLots,
+        { ...inventory.itemLots[0], lotId: "sell-order", source: "market-order", quantity: 100 },
+        { ...inventory.itemLots[0], lotId: "unresolved", locationId: undefined, quantity: 100 },
+        {
+          ...inventory.itemLots[0],
+          lotId: "future-output",
+          horizon: "after-upstream",
+          source: "industry-output",
+          activity: "reaction",
+          quantity: 5,
+        },
+      ],
+    },
+    [{ typeId: 34, fromLocationId: 30, toLocationId: 20 }],
+  );
+
+  assert.equal(allocator.previewOrdinarySupply(34, 4, 20), 4);
+  assert.equal(allocator.previewOrdinarySupply(34, 10, 20), 5);
+  assert.equal(allocator.previewOrdinarySupply(34, 1, 20), 0);
+  assert.equal(allocator.previewOrdinarySupply(34, 8, 40), 8);
+  assert.equal(allocator.previewOrdinarySupply(34, 1, 40), 0);
+  assert.equal(allocator.remainingItemQuantity("remote"), 8);
+  assert.equal(allocator.remainingItemQuantity("future-output"), 5);
+  assert.deepEqual(allocator.transactions, []);
+});
+
+void test("reuses preview ordering without rereading exhausted lots", () => {
+  let lotIdReads = 0;
+  let orderingReads = 0;
+  const allocator = new SimulationAllocator(
+    {
+      ...inventory,
+      itemLots: Array.from(
+        { length: 100 },
+        (_, index) => ({
+          ...inventory.itemLots[0],
+          quantity: 1,
+          get lotId(): string {
+            lotIdReads += 1;
+            return `lot:${String(index).padStart(3, "0")}`;
+          },
+          get horizon(): "now" {
+            orderingReads += 1;
+            return "now";
+          },
+        }),
+      ),
+    },
+    [],
+  );
+  assert.equal(allocator.previewOrdinarySupply(34, 50, 20), 50);
+  lotIdReads = 0;
+  orderingReads = 0;
+  for (let index = 0; index < 50; index += 1) {
+    assert.equal(allocator.previewOrdinarySupply(34, 1, 20), 1);
+  }
+  assert.equal(orderingReads, 0);
+  assert.equal(lotIdReads, 100);
+  lotIdReads = 0;
+  assert.equal(allocator.previewOrdinarySupply(34, 1, 20), 0);
+  assert.equal(lotIdReads, 0);
+});
+
+void test("indexes local protection candidates without caching mutable reservation quantities", () => {
+  let eligibilityReads = 0;
+  const allocator = new SimulationAllocator(
+    {
+      ...inventory,
+      itemLots: inventory.itemLots.map((lot) => ({
+        ...lot,
+        get horizon(): "now" {
+          eligibilityReads += 1;
+          return "now";
+        },
+        get locationId(): number | undefined {
+          eligibilityReads += 1;
+          return lot.locationId;
+        },
+      })),
+    },
+    [],
+  );
+  eligibilityReads = 0;
+  for (let index = 0; index < 8; index += 1) {
+    allocator.reserveActivityDemand(34, 1, 20);
+  }
+  assert.equal(eligibilityReads, 0);
+  allocator.reserveRemoteActivityDemand();
+  const stockpileClaim = allocator.claimOrdinarySupply(34, 12, 20, account, "stock");
+  const activityClaim = allocator.claimOrdinarySupply(
+    34,
+    8,
+    20,
+    account,
+    "build",
+    undefined,
+    "manufacturing",
+    "activity-input",
+  );
+  assert.deepEqual(stockpileClaim, { local: 0, remote: 4, future: 0, futureReservations: [] });
+  assert.deepEqual(activityClaim, { local: 4, remote: 4, future: 0, futureReservations: [] });
+});
+
 void test("protects reserved activity inputs from stockpile demand", () => {
   const allocator = new SimulationAllocator(inventory, []);
   allocator.reserveActivityDemand(34, 4, 20);
@@ -783,6 +906,61 @@ void test("conserves finite BPC runs across allocations", () => {
     1,
   );
   assert.equal(allocator.remainingBlueprintRuns("bpc"), 0);
+});
+
+void test("indexes blueprint types once instead of scanning unrelated lots for each batch", () => {
+  let unrelatedTypeReads = 0;
+  const unrelatedLots = Array.from(
+    { length: 1_024 },
+    (_, index) => ({
+      ...inventory.blueprintLots[0],
+      lotId: `unrelated:${index}`,
+      get typeId(): number {
+        unrelatedTypeReads += 1;
+        return 1_000 + index;
+      },
+    }),
+  );
+  const allocator = new SimulationAllocator(
+    {
+      ...inventory,
+      blueprintLots: [
+        ...inventory.blueprintLots,
+        { ...inventory.blueprintLots[0], lotId: "original", typeId: 101, kind: "bpo" },
+        { ...inventory.blueprintLots[0], lotId: "formula", typeId: 102, kind: "formula" },
+        ...unrelatedLots,
+      ],
+    },
+    [],
+  );
+  unrelatedTypeReads = 0;
+
+  assert.equal(allocator.availableManufacturingBlueprintRuns(100, 20, 10), 5);
+  assert.equal(allocator.availableBlueprintCopyRuns(100, 20, 10), 5);
+  assert.equal(allocator.reserveBlueprintCopyRuns(100, 1, 20), 1);
+  assert.deepEqual(
+    allocator.previewManufacturingBlueprints(100, 5, 20, () => 2),
+    [
+      { runs: 2, materialEfficiency: 10 },
+      { runs: 2, materialEfficiency: 10 },
+    ],
+  );
+  assert.deepEqual(
+    allocator
+      .claimManufacturingBlueprints(100, 4, 20, account, "build", () => 2)
+      .map((claim) => claim.runs),
+    [2, 2],
+  );
+  assert.equal(allocator.claimBlueprintCopyRuns(100, 1, 20, account, "invent")[0]?.runs, 1);
+  assert.equal(allocator.remainingBlueprintRuns("bpc"), 0);
+  allocator.reserveReusableBlueprintOriginal(101, 20);
+  assert.equal(
+    allocator.claimReusableBlueprintOriginal(101, 20, account, "copy")?.lotId,
+    "original",
+  );
+  assert.equal(allocator.hasAvailableReactionFormula(102, 20), true);
+  assert.equal(allocator.claimReactionFormula(102, 20, account, "react")?.lotId, "formula");
+  assert.equal(unrelatedTypeReads, 0);
 });
 
 void test("does not split one physical BPC across different facilities", () => {

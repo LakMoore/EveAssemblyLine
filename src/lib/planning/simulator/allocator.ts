@@ -47,6 +47,12 @@ interface PendingItemDemand {
   quantity: number;
 }
 
+/** Stable eligible supply order and a monotone scan position for one preview destination. */
+interface ItemPreviewCursor {
+  lots: readonly SimulationItemLot[];
+  nextIndex: number;
+}
+
 type MaxRunsPerManufacturingJob = (timeEfficiency: number) => number;
 
 function locationPairKey(firstLocationId: number, secondLocationId: number): string {
@@ -91,8 +97,11 @@ function stockpileActivityRoutePolicy(
 /** Deterministically allocates ordinary lots and blueprint runs without duplicating stock. */
 export class SimulationAllocator {
   private readonly itemLotsByTypeId: Map<number, SimulationItemLot[]>;
+  private readonly localPhysicalLotsByTypeId = new Map<number, Map<number, SimulationItemLot[]>>();
+  private readonly blueprintLotsByTypeId = new Map<number, SimulatorBlueprintLot[]>();
   private readonly remainingItemQuantityByLotId: Map<string, number>;
   private readonly previewItemQuantityByLotId: Map<string, number>;
+  private readonly previewItemCursors = new Map<string, ItemPreviewCursor>();
   private readonly remainingBlueprintRunsByLotId: Map<string, number>;
   private readonly previewBlueprintRunsByLotId: Map<string, number>;
   private readonly reservedBlueprintRunsByLotId = new Map<string, number>();
@@ -132,8 +141,25 @@ export class SimulationAllocator {
       lots.push(lot);
       this.itemLotsByTypeId.set(lot.typeId, lots);
     }
-    for (const lots of this.itemLotsByTypeId.values()) {
+    for (const [typeId, lots] of this.itemLotsByTypeId) {
       lots.sort((left, right) => left.lotId.localeCompare(right.lotId));
+      const lotsByLocation = new Map<number, SimulationItemLot[]>();
+      for (const lot of lots) {
+        if (
+          lot.source === "market-order"
+          || lot.horizon !== "now"
+          || lot.locationId === undefined
+        ) continue;
+        const localLots = lotsByLocation.get(lot.locationId) ?? [];
+        localLots.push(lot);
+        lotsByLocation.set(lot.locationId, localLots);
+      }
+      this.localPhysicalLotsByTypeId.set(typeId, lotsByLocation);
+    }
+    for (const lot of inventory.blueprintLots) {
+      const lots = this.blueprintLotsByTypeId.get(lot.typeId) ?? [];
+      lots.push(lot);
+      this.blueprintLotsByTypeId.set(lot.typeId, lots);
     }
     this.remainingItemQuantityByLotId = new Map(
       inventory.itemLots.map((lot) => [lot.lotId, lot.quantity]),
@@ -147,27 +173,45 @@ export class SimulationAllocator {
 
   /** Attributes eligible stock to one prepass demand without mutating real claims or the journal. */
   previewOrdinarySupply(typeId: number, quantity: number, destinationLocationId: number): number {
+    if (quantity <= 0) return 0;
+    const cursor = this.previewItemCursor(typeId, destinationLocationId);
     let remaining = quantity;
-    const lots = [...(this.itemLotsByTypeId.get(typeId) ?? [])].sort(
-      (left, right) =>
-        Number(left.horizon !== "now") - Number(right.horizon !== "now")
-        || Number(left.locationId !== destinationLocationId)
-          - Number(right.locationId !== destinationLocationId)
-        || left.lotId.localeCompare(right.lotId),
-    );
-    for (const lot of lots) {
-      if (remaining <= 0) break;
-      if (
-        lot.source === "market-order"
-        || lot.locationId === undefined
-        || (lot.locationId !== destinationLocationId && this.isExcluded(lot, destinationLocationId))
-      ) continue;
+    while (remaining > 0 && cursor.nextIndex < cursor.lots.length) {
+      const lot = cursor.lots[cursor.nextIndex];
       const available = this.previewItemQuantityByLotId.get(lot.lotId) ?? 0;
       const claimed = Math.min(remaining, available);
-      this.previewItemQuantityByLotId.set(lot.lotId, available - claimed);
+      if (claimed > 0) this.previewItemQuantityByLotId.set(lot.lotId, available - claimed);
       remaining -= claimed;
+      if (claimed === available) cursor.nextIndex += 1;
     }
     return quantity - remaining;
+  }
+
+  /** Caches immutable route eligibility; shared preview quantities only decrease during prepass. */
+  private previewItemCursor(typeId: number, destinationLocationId: number): ItemPreviewCursor {
+    const key = `${typeId}:${destinationLocationId}`;
+    const existing = this.previewItemCursors.get(key);
+    if (existing) return existing;
+    const lots = (this.itemLotsByTypeId.get(typeId) ?? [])
+      .filter(
+        (lot) =>
+          lot.source !== "market-order"
+          && lot.locationId !== undefined
+          && (
+            lot.locationId === destinationLocationId
+            || !this.isExcluded(lot, destinationLocationId)
+          ),
+      )
+      .sort(
+        (left, right) =>
+          Number(left.horizon !== "now") - Number(right.horizon !== "now")
+          || Number(left.locationId !== destinationLocationId)
+            - Number(right.locationId !== destinationLocationId)
+          || left.lotId.localeCompare(right.lotId),
+      );
+    const cursor = { lots, nextIndex: 0 };
+    this.previewItemCursors.set(key, cursor);
+    return cursor;
   }
 
   /** Returns unclaimed ordinary supply for a type at each horizon. */
@@ -278,15 +322,7 @@ export class SimulationAllocator {
   /** Reserves local physical lots for activity inputs before remote allocation begins. */
   reserveActivityDemand(typeId: number, quantity: number, destinationLocationId: number): void {
     let remaining = quantity;
-    const candidates = (this.itemLotsByTypeId.get(typeId) ?? [])
-      .filter(
-        (lot) =>
-          lot.source !== "market-order"
-          && lot.horizon === "now"
-          && lot.locationId === destinationLocationId,
-      )
-      .slice()
-      .sort((left, right) => left.lotId.localeCompare(right.lotId));
+    const candidates = this.localPhysicalLotsByTypeId.get(typeId)?.get(destinationLocationId) ?? [];
     for (const lot of candidates) {
       if (remaining <= 0) break;
       const available = this.remainingItemQuantityByLotId.get(lot.lotId) ?? 0;
@@ -491,10 +527,9 @@ export class SimulationAllocator {
     maximumRuns: number,
   ): number {
     let availableRuns = 0;
-    for (const lot of this.inventory.blueprintLots) {
+    for (const lot of this.blueprintLotsByTypeId.get(blueprintTypeId) ?? []) {
       if (
-        lot.typeId !== blueprintTypeId
-        || lot.kind === "formula"
+        lot.kind === "formula"
         || lot.inUse
         || (
           this.blueprintDestinationByLotId.has(lot.lotId)
@@ -595,11 +630,10 @@ export class SimulationAllocator {
     destinationLocationId: number,
     destinations: ReadonlyMap<string, number> = this.blueprintDestinationByLotId,
   ): SimulatorBlueprintLot[] {
-    return this.inventory.blueprintLots
+    return (this.blueprintLotsByTypeId.get(blueprintTypeId) ?? [])
       .filter(
         (lot) =>
-          lot.typeId === blueprintTypeId
-          && lot.kind !== "formula"
+          lot.kind !== "formula"
           && !lot.inUse
           && (!destinations.has(lot.lotId) || destinations.get(lot.lotId) === destinationLocationId)
           && (
@@ -627,10 +661,9 @@ export class SimulationAllocator {
     maximumRuns: number,
   ): number {
     let availableRuns = 0;
-    for (const lot of this.inventory.blueprintLots) {
+    for (const lot of this.blueprintLotsByTypeId.get(blueprintTypeId) ?? []) {
       if (
-        lot.typeId !== blueprintTypeId
-        || lot.kind !== "bpc"
+        lot.kind !== "bpc"
         || lot.inUse
         || (
           this.blueprintDestinationByLotId.has(lot.lotId)
@@ -656,11 +689,10 @@ export class SimulationAllocator {
     destinationLocationId: number,
   ): number {
     let remainingRuns = runs;
-    const copies = this.inventory.blueprintLots
+    const copies = (this.blueprintLotsByTypeId.get(blueprintTypeId) ?? [])
       .filter(
         (lot) =>
-          lot.typeId === blueprintTypeId
-          && lot.kind === "bpc"
+          lot.kind === "bpc"
           && !lot.inUse
           && (
             !this.blueprintDestinationByLotId.has(lot.lotId)
@@ -965,11 +997,10 @@ export class SimulationAllocator {
     account: SimulationLedgerAccount,
     demandingJobId: string,
   ): BlueprintClaim | undefined {
-    const formula = this.inventory.blueprintLots
+    const formula = (this.blueprintLotsByTypeId.get(formulaTypeId) ?? [])
       .filter(
         (lot) =>
-          lot.typeId === formulaTypeId
-          && lot.kind === "formula"
+          lot.kind === "formula"
           && !lot.inUse
           && (
             lot.locationId === destinationLocationId
@@ -1008,10 +1039,9 @@ export class SimulationAllocator {
 
   /** Returns whether an unused formula can be claimed for the destination location. */
   hasAvailableReactionFormula(formulaTypeId: number, destinationLocationId: number): boolean {
-    return this.inventory.blueprintLots.some(
+    return (this.blueprintLotsByTypeId.get(formulaTypeId) ?? []).some(
       (lot) =>
-        lot.typeId === formulaTypeId
-        && lot.kind === "formula"
+        lot.kind === "formula"
         && !lot.inUse
         && (
           lot.locationId === destinationLocationId
@@ -1030,11 +1060,10 @@ export class SimulationAllocator {
   ): BlueprintClaim[] {
     let remainingRuns = runs;
     const claims: BlueprintClaim[] = [];
-    const copies = this.inventory.blueprintLots
+    const copies = (this.blueprintLotsByTypeId.get(blueprintTypeId) ?? [])
       .filter(
         (lot) =>
-          lot.typeId === blueprintTypeId
-          && lot.kind === "bpc"
+          lot.kind === "bpc"
           && !lot.inUse
           && (
             !this.blueprintDestinationByLotId.has(lot.lotId)
@@ -1136,11 +1165,10 @@ export class SimulationAllocator {
     blueprintTypeId: number,
     destinationLocationId: number,
   ): SimulatorBlueprintLot | undefined {
-    return this.inventory.blueprintLots
+    return (this.blueprintLotsByTypeId.get(blueprintTypeId) ?? [])
       .filter(
         (lot) =>
-          lot.typeId === blueprintTypeId
-          && lot.kind === "bpo"
+          lot.kind === "bpo"
           && !lot.inUse
           && (
             !this.blueprintDestinationByLotId.has(lot.lotId)

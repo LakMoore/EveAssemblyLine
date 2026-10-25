@@ -4,6 +4,47 @@ import { simulationCalculationVersion } from "./etag";
 import { parseSimulatorRequest } from "./schema";
 import { simulationRequestFingerprint } from "./requestFingerprint";
 import { aggregateHaulingTasks, simulationInputHash, simulateIndustry } from "./simulate";
+import { serializeStableSimulationRequest } from "./stableRequest";
+
+/** Retains the original comparator-based canonicalization as a byte-for-byte test oracle. */
+function referenceCanonicalRequest(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value
+      .map(referenceCanonicalRequest)
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  }
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object
+      .entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nestedValue]) => [key, referenceCanonicalRequest(nestedValue)]),
+  );
+}
+
+void test("cached canonical sort keys preserve the original request serialization", () => {
+  const request = {
+    assets: Array.from(
+      { length: 256 },
+      (_, index) => ({
+        quantity: index % 5,
+        typeId: 1_000 + (index % 17),
+        metadata: { ownerId: index % 3, omitted: undefined },
+        nested: [null, false, `label-${index % 7}`, index % 10],
+      }),
+    ),
+    arrays: [[3, 1, 2], [2, 3, 1], [], [undefined, 2, null, undefined, 1]],
+    strings: ["z", "A", "a", "10", "2", "\u00e9"],
+    flags: [false, true, null],
+    omitted: undefined,
+  };
+  const serialized = serializeStableSimulationRequest(request);
+  assert.equal(serialized, JSON.stringify(referenceCanonicalRequest(request)));
+  assert.equal(
+    serializeStableSimulationRequest({ ...request, assets: [...request.assets].reverse() }),
+    serialized,
+  );
+});
 
 void test("browser request fingerprint matches the simulator input hash", async () => {
   const request = {

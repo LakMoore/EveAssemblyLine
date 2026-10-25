@@ -23,6 +23,115 @@ void test("balances duration-limited reaction batches across the minimum job cou
   assert.ok(runsPerJob.every((runs) => runs <= 73));
 });
 
+void test("reserves shared scarce fuel for complete reaction run kits before blocked runs", async () => {
+  const context = await loadSimulationContext();
+  const productTypeId = 33362;
+  const fuelTypeId = 4051;
+  const bottleneckTypeId = 16654;
+  const production = context.blueprints.byBuildProductTypeId.get(productTypeId);
+  const recipe = production?.blueprint.activities.reaction;
+  assert.ok(recipe);
+  assert.ok(production);
+  const fuel = recipe.materials.find((material) => material.typeID === fuelTypeId);
+  const bottleneck = recipe.materials.find((material) => material.typeID === bottleneckTypeId);
+  assert.ok(fuel);
+  assert.ok(bottleneck);
+  const sibling = [...context.blueprints.byBuildProductTypeId.entries()].find(
+    ([typeId, candidate]) =>
+      typeId > productTypeId
+      && candidate.activity === "reaction"
+      && candidate.blueprint.activities.reaction?.materials.some(
+        (material) => material.typeID === fuelTypeId,
+      )
+      && candidate.blueprint.activities.reaction.materials.every(
+        (material) => material.typeID !== bottleneckTypeId && material.typeID !== productTypeId,
+      ),
+  );
+  assert.ok(sibling);
+  const [siblingTypeId, siblingProduction] = sibling;
+  const siblingRecipe = siblingProduction.blueprint.activities.reaction;
+  assert.ok(siblingRecipe);
+  const siblingFuel = siblingRecipe.materials.find((material) => material.typeID === fuelTypeId);
+  assert.ok(siblingFuel);
+  const product = recipe.products.find((candidate) => candidate.typeID === productTypeId);
+  const siblingProduct = siblingRecipe.products.find(
+    (candidate) => candidate.typeID === siblingTypeId,
+  );
+  assert.ok(product);
+  assert.ok(siblingProduct);
+  const quantities = new Map<number, number>();
+  for (const [materials, runs] of [
+    [recipe.materials, 10],
+    [siblingRecipe.materials, 3],
+  ] as const) {
+    for (const material of materials) {
+      if (material.typeID === fuelTypeId) continue;
+      const quantity = material.quantity * (material.typeID === bottleneckTypeId ? 7 : runs);
+      quantities.set(material.typeID, (quantities.get(material.typeID) ?? 0) + quantity);
+    }
+  }
+  quantities.set(fuelTypeId, fuel.quantity * 7 + siblingFuel.quantity * 3);
+  const request = parseSimulatorRequest({
+    stockpiles: [
+      {
+        id: "shared-fuel",
+        name: "Shared fuel",
+        locations: {
+          stock: 30,
+          manufacturing: 30,
+          reactions: 30,
+          reprocessing: 30,
+          copying: 30,
+          invention: 30,
+        },
+        items: [
+          {
+            typeId: productTypeId,
+            quantity: product.quantity * 10,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+          {
+            typeId: siblingTypeId,
+            quantity: siblingProduct.quantity * 3,
+            me: 0,
+            te: 0,
+            fromCompression: false,
+          },
+        ],
+      },
+    ],
+    assets: [
+      ...[...quantities].map(([typeId, quantity]) => ({ typeId, quantity, rootLocationId: 30 })),
+      { typeId: production.blueprint._key, quantity: 1, rootLocationId: 30 },
+      { typeId: siblingProduction.blueprint._key, quantity: 1, rootLocationId: 30 },
+    ],
+    settings: {
+      includeCorporationAssets: true,
+      buildBlacklist: [...quantities.keys()],
+      buyBlacklist: [],
+    },
+    simulation: { version: 1, maxReactionJobDurationHours: 8760 },
+  });
+  const result = await simulateIndustry(request);
+  const firstJob = result.lists.reactionJobs.find((job) => job.productTypeId === productTypeId);
+  const siblingJob = result.lists.reactionJobs.find((job) => job.productTypeId === siblingTypeId);
+  assert.ok(firstJob);
+  assert.ok(siblingJob);
+  assert.equal(firstJob.readyNowRuns, 7);
+  assert.equal(
+    firstJob.inputs.find((input) => input.typeId === fuelTypeId)?.availableNow,
+    fuel.quantity * 7,
+  );
+  assert.equal(siblingJob.readyNowRuns, 3);
+  assert.equal(
+    siblingJob.inputs.find((input) => input.typeId === fuelTypeId)?.availableNow,
+    siblingFuel.quantity * 3,
+  );
+  assert.equal(result.metadata.invariantViolationCount, 0);
+});
+
 void test("declares an exact SDE-backed manufacturing job without inventing available stock", async () => {
   const request = parseSimulatorRequest({
     stockpiles: [

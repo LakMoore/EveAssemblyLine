@@ -2,8 +2,16 @@
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value
-      .map(canonicalize)
-      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+      .map((nestedValue) => {
+        const canonicalValue = canonicalize(nestedValue);
+        return { value: canonicalValue, sortKey: JSON.stringify(canonicalValue) };
+      })
+      .sort((left, right) => {
+        if (left.value === undefined) return Number(right.value !== undefined);
+        if (right.value === undefined) return -1;
+        return left.sortKey.localeCompare(right.sortKey);
+      })
+      .map((entry) => entry.value);
   }
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(

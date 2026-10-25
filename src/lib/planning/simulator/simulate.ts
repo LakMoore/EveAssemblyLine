@@ -13,6 +13,7 @@ import {
 } from "./ledger";
 import { settleReprocessing } from "./reprocessing";
 import { scheduleSimulationJobs, type SimulationScheduleResult } from "./scheduler";
+import { allocateScheduledIndustryInputs } from "./scheduledAllocation";
 import { normalizeSimulatorInventory, type SimulatorInventory } from "./sourceLots";
 import { serializeStableSimulationRequest } from "./stableRequest";
 import type { RequestProfiler } from "@/lib/server/profiling";
@@ -596,6 +597,13 @@ export async function simulateIndustry(
     profiler,
     "simulate-industry-demand",
     () => simulateIndustryDemand(request, context, inventory, graph, profiler),
+  );
+  measureSyncProfiled(
+    profiler,
+    "allocate-scheduled-inputs",
+    () => {
+      allocateScheduledIndustryInputs(request, industry, inventory);
+    },
   );
   const schedules = measureSyncProfiled(
     profiler,

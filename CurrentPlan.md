@@ -52,7 +52,13 @@ This section is authoritative where the older design below differs from the runn
   timeline use those exact keys rather than reconstructing slot identities,
   makes no ESI calls, conserves physical lots and finite BPC runs, exposes four readiness horizons,
   schedules work with known dependencies, settles complete-portion reprocessing late, and creates
-  buying requirements last. Industry jobs whose complete inputs and blueprint permit a T+0 start
+  buying requirements last. Demand expansion first fixes recipes, production quantities, and
+  permitted supply routes. A schedule-preview allocation pass then pools industry input credits
+  by physical location and type, uses the submitted slot calendar to prioritize earlier work,
+  and assigns complete whole-run local kits before reserving inputs for blocked runs. Remaining
+  local, hauled, and upstream credits retain exact source quantities; demand readiness, future
+  dependencies, haul consumers, and purchase destinations follow the reassignment. The final
+  schedule is computed from these committed allocations. Industry jobs whose complete inputs and blueprint permit a T+0 start
   are booked before future-ready jobs. Each group retains dependency-depth, longest-duration,
   and stable job-ID priority; future work uses the remaining slot intervals without displacing
   ready-now work. Planned and active outputs remain at their producing facility until a
